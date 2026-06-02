@@ -3,7 +3,7 @@ import { ArrowRight, Download } from "lucide-react";
 import {
   captureDownloadInitiated,
   type DownloadInitiatedPayload,
-} from "@multica/core/analytics";
+} from "@wallts/core/analytics";
 import { useLocale } from "../../i18n";
 import type { DetectResult } from "../../utils/os-detect";
 import type { DownloadAssets } from "../../utils/parse-release-assets";

@@ -13,8 +13,8 @@ import {
   Plug,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@wallts/ui/components/ui/tabs";
+import { useCurrentWorkspace } from "@wallts/core/paths";
 import { useNavigation } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";

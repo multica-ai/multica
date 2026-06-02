@@ -9,7 +9,7 @@ import {
   Newspaper,
   Users,
 } from "lucide-react";
-import type { QuestionnaireAnswers, Source } from "@multica/core/onboarding";
+import type { QuestionnaireAnswers, Source } from "@wallts/core/onboarding";
 import {
   GoogleIcon,
   LinkedInIcon,
@@ -22,7 +22,7 @@ import { StepQuestion, type QuestionOption } from "./step-question";
 import { useT } from "../../i18n";
 
 /**
- * Step 1 — "How did you hear about Multica?" Pure attribution, does
+ * Step 1 — "How did you hear about Wallts?" Pure attribution, does
  * not influence the agent template recommendation.
  */
 export function StepSource({

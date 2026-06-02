@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { useInboxUnreadCount } from "@wallts/core/inbox/queries";
 
 type BadgeCapableAPI = {
   setUnreadBadge?: (count: number) => void;

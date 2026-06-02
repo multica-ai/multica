@@ -1,8 +1,8 @@
 import { forwardRef, useRef, useImperativeHandle } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { I18nProvider } from "@multica/core/i18n/react";
-import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { I18nProvider } from "@wallts/core/i18n/react";
+import type { UploadResult } from "@wallts/core/hooks/use-file-upload";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
 
@@ -89,7 +89,7 @@ vi.mock("../../editor", () => ({
 
 // Mock chat store with an in-memory implementation that supports both
 // (selector) calls and getState().
-vi.mock("@multica/core/chat", () => {
+vi.mock("@wallts/core/chat", () => {
   const state = {
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1",
@@ -119,7 +119,7 @@ function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}
     );
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <ChatInput onSend={onSend} onUploadFile={onUploadFile} agentName="Multica" {...props} />
+      <ChatInput onSend={onSend} onUploadFile={onUploadFile} agentName="Wallts" {...props} />
     </I18nProvider>,
   );
   return { onSend, onUploadFile };

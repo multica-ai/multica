@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { I18nProvider } from "@multica/core/i18n/react";
+import { I18nProvider } from "@wallts/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSkills from "../../locales/en/skills.json";
 
@@ -16,11 +16,11 @@ const mockResolveRuntimeLocalSkillImport = vi.hoisted(() => vi.fn());
 const mockRuntimeListOptions = vi.hoisted(() => vi.fn());
 const mockRuntimeLocalSkillsOptions = vi.hoisted(() => vi.fn());
 
-vi.mock("@multica/core/hooks", () => ({
+vi.mock("@wallts/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-vi.mock("@multica/core/auth", () => {
+vi.mock("@wallts/core/auth", () => {
   const stateUser = { id: "user-1", email: "u@example.com", name: "User" };
   const useAuthStore = (selector?: (s: { user: typeof stateUser }) => unknown) => {
     const state = { user: stateUser };
@@ -29,7 +29,7 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("@multica/core/runtimes", () => ({
+vi.mock("@wallts/core/runtimes", () => ({
   runtimeListOptions: (...args: unknown[]) => mockRuntimeListOptions(...args),
   runtimeLocalSkillsOptions: (...args: unknown[]) =>
     mockRuntimeLocalSkillsOptions(...args),

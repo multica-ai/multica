@@ -22,7 +22,7 @@ export const useSquadsViewStore = create<SquadsViewState>()(
       setScope: (scope) => set({ scope }),
     }),
     {
-      name: "multica_squads_view",
+      name: "wallts_squads_view",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
       partialize: (state) => ({ scope: state.scope }),
       // On rehydrate, if the new workspace has no persisted value, reset to

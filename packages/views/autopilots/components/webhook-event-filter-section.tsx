@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { X, Plus, Filter, ExternalLink } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
-import type { WebhookEventFilter } from "@multica/core/types";
+import { cn } from "@wallts/ui/lib/utils";
+import type { WebhookEventFilter } from "@wallts/core/types";
 import { useT } from "../../i18n";
 
 interface WebhookEventFilterSectionProps {
@@ -19,8 +19,8 @@ export function WebhookEventFilterSection({
   const [newEvent, setNewEvent] = useState("");
   const [newActions, setNewActions] = useState("");
   const docsHref = i18n.language?.startsWith("zh")
-    ? `https://multica.ai/docs/zh/autopilots#${encodeURIComponent("事件过滤")}`
-    : "https://multica.ai/docs/autopilots#event-filters";
+    ? `https://wallts.ai/docs/zh/autopilots#${encodeURIComponent("事件过滤")}`
+    : "https://wallts.ai/docs/autopilots#event-filters";
 
   const addFilter = () => {
     const event = newEvent.trim();

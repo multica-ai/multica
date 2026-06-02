@@ -14,10 +14,10 @@ import {
   type DetectResult,
 } from "@/features/landing/utils/os-detect";
 import type { LatestRelease } from "@/features/landing/utils/github-release";
-import { captureDownloadPageViewed } from "@multica/core/analytics";
+import { captureDownloadPageViewed } from "@wallts/core/analytics";
 
 const ALL_RELEASES_URL =
-  "https://github.com/multica-ai/multica/releases";
+  "https://github.com/dwickyfp/wallts/releases";
 
 export function DownloadClient({ release }: { release: LatestRelease }) {
   const [detected, setDetected] = useState<DetectResult | null>(null);
@@ -53,7 +53,7 @@ export function DownloadClient({ release }: { release: LatestRelease }) {
   return (
     <>
       {/* Positioning context for the dark-variant LandingHeader —
-          mirrors multica-landing.tsx. The header is `absolute top-0
+          mirrors wallts-landing.tsx. The header is `absolute top-0
           inset-x-0`, so it anchors to this `relative` wrapper and
           scrolls off together with the dark hero below. Without the
           wrapper, `absolute` would escape to the initial containing

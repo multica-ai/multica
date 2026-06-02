@@ -1,12 +1,12 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 import { ArrowUpRight } from "lucide-react";
 
-// Docs-local stateless Multica mark — matches @multica/ui's MulticaIcon
+// Docs-local stateless Wallts mark — matches @wallts/ui's WalltsIcon
 // visually (same 8-pointed-asterisk clip-path), but without useState/
 // useEffect so it's safe to render from Server Components such as
 // layout.config.tsx / layout.tsx. Keep in sync with
-// packages/ui/components/common/multica-icon.tsx if the mark changes.
-const MULTICA_CLIP = `polygon(
+// packages/ui/components/common/wallts-icon.tsx if the mark changes.
+const WALLTS_CLIP = `polygon(
   45% 62.1%, 45% 100%, 55% 100%, 55% 62.1%,
   81.8% 88.9%, 88.9% 81.8%, 62.1% 55%, 100% 55%,
   100% 45%, 62.1% 45%, 88.9% 18.2%, 81.8% 11.1%,
@@ -15,12 +15,12 @@ const MULTICA_CLIP = `polygon(
   0% 55%, 37.9% 55%, 11.1% 81.8%, 18.2% 88.9%
 )`;
 
-function MulticaMark() {
+function WalltsMark() {
   return (
     <span className="inline-block size-[1em]" aria-hidden="true">
       <span
         className="block size-full bg-current"
-        style={{ clipPath: MULTICA_CLIP }}
+        style={{ clipPath: WALLTS_CLIP }}
       />
     </span>
   );
@@ -43,7 +43,7 @@ function GitHubMark() {
 }
 
 // External links shown at the top of the sidebar (and in the top nav on
-// desktop). Leading icon = brand identity (GitHub mark / Multica asterisk);
+// desktop). Leading icon = brand identity (GitHub mark / Wallts asterisk);
 // trailing ArrowUpRight = "opens externally" glyph, same pattern as
 // `packages/views/layout/help-launcher.tsx` from PR #1560.
 const externalLinkText = (label: string) => (
@@ -56,20 +56,20 @@ const externalLinkText = (label: string) => (
 export const baseOptions: BaseLayoutProps = {
   nav: {
     title: (
-      <span className="font-semibold text-base">Multica Docs</span>
+      <span className="font-semibold text-base">Wallts Docs</span>
     ),
   },
   links: [
     {
       icon: <GitHubMark />,
       text: externalLinkText("GitHub"),
-      url: "https://github.com/multica-ai/multica",
+      url: "https://github.com/dwickyfp/wallts",
       external: true,
     },
     {
-      icon: <MulticaMark />,
-      text: externalLinkText("Multica"),
-      url: "https://multica.ai",
+      icon: <WalltsMark />,
+      text: externalLinkText("Wallts"),
+      url: "https://wallts.ai",
       external: true,
     },
   ],

@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // squadOperatingProtocol is the hard-coded system-level briefing prepended to
@@ -27,7 +27,7 @@ Your responsibilities, in order:
    criteria) and decide which squad member is best suited to do the work.
 2. **Delegate by @mention.** Post a single comment on this issue that
    @mentions the chosen member(s) and tells them what to do.
-   - **Be terse.** Every Multica agent already has full context of the
+   - **Be terse.** Every Wallts agent already has full context of the
      issue (title, description, all prior comments, attachments) and
      the surrounding workspace. Do NOT restate or summarise the
      issue body, prior discussion, or known facts in your delegation
@@ -40,7 +40,7 @@ Your responsibilities, in order:
      typing a plain "@name" will not trigger anyone.
 3. **Record your evaluation.** After every trigger — whether you delegated,
    decided no action is needed, or encountered an error — record it:
-   ` + "`" + `multica squad activity <issue-id> <outcome> --reason "<short reason>"` + "`" + `
+   ` + "`" + `wallts squad activity <issue-id> <outcome> --reason "<short reason>"` + "`" + `
    Outcome values: ` + "`" + `action` + "`" + ` (you delegated or acted),
    ` + "`" + `no_action` + "`" + ` (you evaluated and decided nothing is needed),
    ` + "`" + `failed` + "`" + ` (you hit an error).
@@ -78,7 +78,7 @@ Hard rules:
 - If the squad has no member capable of the task, post a comment
   explaining the gap (and @mention the issue's reporter if possible)
   rather than silently doing the work.
-- ALWAYS call ` + "`" + `multica squad activity` + "`" + ` before ending your turn —
+- ALWAYS call ` + "`" + `wallts squad activity` + "`" + ` before ending your turn —
   even when the outcome is no_action.
 - A child issue you create with ` + "`" + `--status todo` + "`" + ` and an agent assignee
   already fires that agent automatically — the assignment IS the trigger.

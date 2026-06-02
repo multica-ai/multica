@@ -38,7 +38,7 @@ func TestBuildOpenCodeMCPConfigContent_Remote(t *testing.T) {
 	raw := json.RawMessage(`{
 	  "mcpServers": {
 	    "mcpbase": {
-	      "url": "https://mcpbase.example/multica-ai/mcp",
+	      "url": "https://mcpbase.example/dwickyfp/mcp",
 	      "headers": {"Authorization": "Bearer test-token"}
 	    }
 	  }
@@ -53,7 +53,7 @@ func TestBuildOpenCodeMCPConfigContent_Remote(t *testing.T) {
 	if got := mcpbase["type"]; got != "remote" {
 		t.Fatalf("type = %v, want remote", got)
 	}
-	if got := mcpbase["url"]; got != "https://mcpbase.example/multica-ai/mcp" {
+	if got := mcpbase["url"]; got != "https://mcpbase.example/dwickyfp/mcp" {
 		t.Fatalf("url = %v", got)
 	}
 	if _, present := mcpbase["enabled"]; present {

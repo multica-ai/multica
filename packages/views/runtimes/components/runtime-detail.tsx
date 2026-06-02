@@ -10,23 +10,23 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
-import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
-import { deriveRuntimeHealth } from "@multica/core/runtimes";
+import type { AgentRuntime, Agent, MemberWithUser } from "@wallts/core/types";
+import { useAuthStore } from "@wallts/core/auth";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { memberListOptions, agentListOptions } from "@wallts/core/workspace/queries";
+import { useUpdateRuntime } from "@wallts/core/runtimes/mutations";
+import { deriveRuntimeHealth } from "@wallts/core/runtimes";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
-} from "@multica/core/agents";
-import { useWorkspacePaths } from "@multica/core/paths";
-import { Button } from "@multica/ui/components/ui/button";
+} from "@wallts/core/agents";
+import { useWorkspacePaths } from "@wallts/core/paths";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
+} from "@wallts/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
@@ -297,7 +297,7 @@ function HeroCard({
         </Fact>
       </dl>
 
-      {/* Diagnostic IDs — multica CLI git hash + truncated daemon UUID.
+      {/* Diagnostic IDs — wallts CLI git hash + truncated daemon UUID.
           Only useful when filing an issue or reading logs; folded by
           default so they don't compete with the user-visible facts above. */}
       {hasTechDetails && (

@@ -54,7 +54,7 @@ vi.mock("@/stores/tab-store", () => {
   return { useTabStore, useActiveGroup, resolveRouteIcon };
 });
 
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@wallts/core/paths", () => ({
   paths: {
     workspace: (slug: string) => ({
       issues: () => `/${slug}/issues`,

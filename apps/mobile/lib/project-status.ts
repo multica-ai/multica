@@ -13,7 +13,7 @@
  *   - Labels are the canonical English strings; i18n lands later when
  *     mobile picks an i18n lib (web uses i18next).
  */
-import type { ProjectPriority, ProjectStatus } from "@multica/core/types";
+import type { ProjectPriority, ProjectStatus } from "@wallts/core/types";
 
 export const PROJECT_STATUSES: ProjectStatus[] = [
   "planned",

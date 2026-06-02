@@ -1,4 +1,4 @@
-import type { SupportedLocale } from "@multica/core/i18n";
+import type { SupportedLocale } from "@wallts/core/i18n";
 
 export function docsHrefForLocale(locale: SupportedLocale): string {
   if (locale === "zh-Hans") return "/docs/zh";

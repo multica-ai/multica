@@ -29,11 +29,11 @@ import { Callout } from "fumadocs-ui/components/callout";
 - 回答你当前消息里提的问题
 - 使用自己配置的 [skill](/skills) 和 MCP
 - 在自己的工作目录里读写文件
-- 调用不需要 issue 上下文的 `multica` CLI 命令（比如查询工作区基本信息）
+- 调用不需要 issue 上下文的 `wallts` CLI 命令（比如查询工作区基本信息）
 
 **不能做的**：
 
-- **看到任何 issue**——智能体收到的提示里没有 issue ID，`multica issue list` 之类命令对它返回空
+- **看到任何 issue**——智能体收到的提示里没有 issue ID，`wallts issue list` 之类命令对它返回空
 - **改任何 issue**——没有 issue 上下文，API 调用会被权限 check 拦截
 - **看到别的对话**——对话之间完全隔离
 - **@ 任何人或智能体**——对话是私人空间，没有通知别人的路径
@@ -42,7 +42,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 对话用 **provider 会话恢复**机制维持多轮上下文——智能体第一次回复时建立一个 provider 会话（比如 Claude 的 session），session ID 被存起来；下一条消息派任务时把这个 ID 传回去，智能体**接着上次的状态继续**，不需要每次重新读历史。
 
-如果**某一轮失败**，Multica 会查找上一轮建立过 session ID 的任务（不论它当时成功还是失败）并尝试 resume——不会因为中间一次出错就丢掉整段对话的记忆。
+如果**某一轮失败**，Wallts 会查找上一轮建立过 session ID 的任务（不论它当时成功还是失败）并尝试 resume——不会因为中间一次出错就丢掉整段对话的记忆。
 
 注意：并非所有 provider 都真正实现了 session 恢复——支持情况见 [**Providers Matrix**](/providers)。
 

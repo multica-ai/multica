@@ -7,7 +7,7 @@
  * Mobile only filters on status + priority for now; assignee / project /
  * label slots from the web filter are deferred to v2.
  */
-import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
+import type { Issue, IssuePriority, IssueStatus } from "@wallts/core/types";
 
 export function filterIssues(
   issues: Issue[],

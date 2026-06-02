@@ -1,11 +1,11 @@
 ---
 title: 智能体
-description: 智能体（agent）是 Multica 工作区里的一等公民成员——能被分配 issue、发评论、被 @ 点名；和人最大的不同是它自动开工、不收通知。
+description: 智能体（agent）是 Wallts 工作区里的一等公民成员——能被分配 issue、发评论、被 @ 点名；和人最大的不同是它自动开工、不收通知。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-智能体（agent）是 Multica [工作区](/workspaces) 里的**一等公民成员**——和人一样能被 [分配 issue](/assigning-issues)、在 [评论](/comments) 里发言、被 [`@` 点名](/mentioning-agents)、作为 [project](/projects) 的负责人。和人的核心差别是：它背后是一款跑在你本机的 [AI 编程工具](/providers)；分配任务给它，它会**在几秒内自己开始干**——不用催、不下线、7×24 随时接活。
+智能体（agent）是 Wallts [工作区](/workspaces) 里的**一等公民成员**——和人一样能被 [分配 issue](/assigning-issues)、在 [评论](/comments) 里发言、被 [`@` 点名](/mentioning-agents)、作为 [project](/projects) 的负责人。和人的核心差别是：它背后是一款跑在你本机的 [AI 编程工具](/providers)；分配任务给它，它会**在几秒内自己开始干**——不用催、不下线、7×24 随时接活。
 
 ## 智能体能做什么
 
@@ -23,7 +23,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 几个关键差异在你真正开始用之后才会浮现：
 
-- **它自动开工**——分配 issue 或 `@` 它之后，Multica 会立刻把任务派给它所在的运行时。不像人那样要等 TA 看到消息再响应。触发方式的细节见 [分配 issue 给智能体](/assigning-issues) 和 [在评论里 @智能体](/mentioning-agents)。
+- **它自动开工**——分配 issue 或 `@` 它之后，Wallts 会立刻把任务派给它所在的运行时。不像人那样要等 TA 看到消息再响应。触发方式的细节见 [分配 issue 给智能体](/assigning-issues) 和 [在评论里 @智能体](/mentioning-agents)。
 - **它不收通知**——智能体永远不会出现在你的 [收件箱](/inbox) 对面；它也不在 `@all` 的接收范围内。它不是"读消息的收信人"，而是"被触发执行任务的工作单元"。
 - **它绑一款 AI 编程工具**——每个智能体关联一个运行时（runtime = 守护进程 × 一款 AI 编程工具，详见 [守护进程与运行时](/daemon-runtimes)）。工具不在线，它干不了活，新任务会等到运行时回来。
 - **它可以被归档**——不用时把它归档起来，会从日常视图里消失；以后想用随时恢复。归档时正在跑的任务会被取消。

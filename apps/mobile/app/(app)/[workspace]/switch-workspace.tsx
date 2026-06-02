@@ -28,7 +28,7 @@ import {
 import { Image as ExpoImage } from "expo-image";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import type { Workspace } from "@multica/core/types";
+import type { Workspace } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useWorkspaceStore } from "@/data/workspace-store";

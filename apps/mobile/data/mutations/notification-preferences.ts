@@ -13,7 +13,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
   NotificationPreferenceResponse,
   NotificationPreferences,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { api } from "@/data/api";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { notificationPreferenceKeys } from "@/data/queries/notification-preferences";

@@ -15,7 +15,7 @@ import (
 // state. The file lives in envRoot (daemon scratch), never in WorkDir,
 // so a local_directory run does not litter the user's repo with the
 // bookkeeping file used to undo the litter.
-const sidecarManifestFile = ".multica_sidecar_manifest.json"
+const sidecarManifestFile = ".wallts_sidecar_manifest.json"
 
 // errPathPreExists is the sentinel recordWriteFile returns when the
 // target path already exists. The manifest contract is that we never
@@ -28,10 +28,10 @@ const sidecarManifestFile = ".multica_sidecar_manifest.json"
 //
 //   - For per-skill directories the caller allocates a collision-free
 //     alternative slug (see allocateCollisionFreeSkillDir) and retries
-//     so the agent still discovers the Multica skill, just under a
+//     so the agent still discovers the Wallts skill, just under a
 //     different directory name.
-//   - For Multica-only namespaces (.agent_context/issue_context.md,
-//     .multica/project/resources.json) the caller swallows the error
+//   - For Wallts-only namespaces (.agent_context/issue_context.md,
+//     .wallts/project/resources.json) the caller swallows the error
 //     and proceeds — the agent's runtime brief already carries every
 //     fact that would have appeared in those files, so missing-from-
 //     disk is degraded behavior, not failure.
@@ -156,10 +156,10 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 
 // allocateCollisionFreeSkillDir picks a directory under skillsParent
 // whose path does NOT currently exist, so writeSkillFiles can lay
-// down a Multica skill without colliding with a user-installed skill
+// down a Wallts skill without colliding with a user-installed skill
 // of the same slug. The first attempt is always the natural baseSlug
 // — that's the path provider-native discovery already knows. On
-// collision we append `-multica`, then `-multica-2`, `-multica-3`,
+// collision we append `-wallts`, then `-wallts-2`, `-wallts-3`,
 // … until a free slot is found. The chosen slug is returned alongside
 // the absolute path so callers can use it in frontmatter and brief
 // listings.
@@ -181,9 +181,9 @@ func allocateCollisionFreeSkillDir(skillsParent, baseSlug string) (slug, dir str
 		case i == 0:
 			candidate = baseSlug
 		case i == 1:
-			candidate = baseSlug + "-multica"
+			candidate = baseSlug + "-wallts"
 		default:
-			candidate = fmt.Sprintf("%s-multica-%d", baseSlug, i)
+			candidate = fmt.Sprintf("%s-wallts-%d", baseSlug, i)
 		}
 		path := filepath.Join(skillsParent, candidate)
 		if _, statErr := os.Lstat(path); statErr != nil {
@@ -252,7 +252,7 @@ func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 // Pair this with CleanupRuntimeConfig on the local_directory cleanup
 // path: that function handles the runtime brief inside CLAUDE.md /
 // AGENTS.md / GEMINI.md, this one handles the sidecar tree
-// (.agent_context/, .multica/, .claude/skills/, .github/skills/,
+// (.agent_context/, .wallts/, .claude/skills/, .github/skills/,
 // .opencode/skills/, skills/, .pi/skills/, .cursor/skills/,
 // .kimi/skills/, .kiro/skills/, .agents/skills/, fallback
 // .agent_context/skills/). The two together restore the workdir to

@@ -21,7 +21,7 @@
  * the text body we fetched, never point iframe.src at the proxy URL.
  */
 
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 
 interface CodeBlockIframeProps {
   /** Document source for srcDoc. Empty string renders a blank frame. */

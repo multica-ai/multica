@@ -3,12 +3,12 @@
 @tailwind utilities;
 
 /*
- * Theme tokens — RNR template (verbatim) + Multica custom tokens appended.
+ * Theme tokens — RNR template (verbatim) + Wallts custom tokens appended.
  *
  * When changing any variable here, also update apps/mobile/lib/theme.ts —
  * they mirror each other. See apps/mobile/docs/rnr-migration.md §5.
  *
- * Dark-mode values for the Multica custom tokens currently mirror their
+ * Dark-mode values for the Wallts custom tokens currently mirror their
  * light values — they will be tuned when a screen using them actually
  * needs dark-mode treatment. Don't pre-author (per §3.1 "defaults first").
  */
@@ -46,7 +46,7 @@
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
 
-    /* Multica custom tokens */
+    /* Wallts custom tokens */
     --brand: 225 71% 58%;
     --brand-foreground: 0 0% 98%;
     --success: 142 71% 45%;
@@ -112,7 +112,7 @@
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
 
-    /* Multica custom tokens — dark mirrors light until a screen demands tuning */
+    /* Wallts custom tokens — dark mirrors light until a screen demands tuning */
     --brand: 225 71% 58%;
     --brand-foreground: 0 0% 98%;
     --success: 142 71% 45%;

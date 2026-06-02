@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { I18nProvider } from "@multica/core/i18n/react";
+import { I18nProvider } from "@wallts/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enWorkspace from "../locales/en/workspace.json";
 
@@ -18,14 +18,14 @@ vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: mockPush }),
 }));
 
-vi.mock("@multica/core/workspace/mutations", () => ({
+vi.mock("@wallts/core/workspace/mutations", () => ({
   useCreateWorkspace: () => ({
     mutate: mockCreateWorkspaceMutate,
     isPending: false,
   }),
 }));
 
-vi.mock("@multica/ui/components/ui/dialog", () => ({
+vi.mock("@wallts/ui/components/ui/dialog", () => ({
   Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: ReactNode }) => <h1>{children}</h1>,

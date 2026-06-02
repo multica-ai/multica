@@ -17,7 +17,7 @@
 --   * `dashboard`  (ea5a332f-06f9-480d-ab81-8f2324c92d80) — 王争,  2026-04-22
 --
 -- Decision on MUL-961: force-rename both via this migration (scheme 1), same
--- playbook as MUL-972 for admin/multica/new/www. Rename targets `home-1`
+-- playbook as MUL-972 for admin/wallts/new/www. Rename targets `home-1`
 -- and `dashboard-1` were verified unoccupied at audit time. The subsequent
 -- DO block is a generic fallback that picks `<slug>-N` for any other row
 -- that slips in between audit and deploy (defensive against a race with new

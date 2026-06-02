@@ -23,7 +23,7 @@ import type {
   Reaction,
   TimelineEntry,
   UpdateIssueRequest,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { api } from "@/data/api";
 import { issueKeys } from "@/data/queries/issues";
 import { inboxKeys } from "@/data/queries/inbox";

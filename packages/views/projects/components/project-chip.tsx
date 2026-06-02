@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { projectListOptions, projectDetailOptions } from "@multica/core/projects/queries";
-import { useWorkspaceId } from "@multica/core/hooks";
+import { projectListOptions, projectDetailOptions } from "@wallts/core/projects/queries";
+import { useWorkspaceId } from "@wallts/core/hooks";
 import { ProjectIcon } from "./project-icon";
 import { useT } from "../../i18n";
 

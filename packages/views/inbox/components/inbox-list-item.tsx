@@ -3,7 +3,7 @@
 import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Archive } from "lucide-react";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem } from "@wallts/core/types";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";

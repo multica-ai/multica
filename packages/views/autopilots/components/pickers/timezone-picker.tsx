@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, Globe } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 import {
   PropertyPicker,
   PickerEmpty,

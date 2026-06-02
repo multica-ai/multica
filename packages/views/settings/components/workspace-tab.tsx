@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Camera, Loader2, Save, LogOut } from "lucide-react";
-import { Input } from "@multica/ui/components/ui/input";
-import { Textarea } from "@multica/ui/components/ui/textarea";
-import { Label } from "@multica/ui/components/ui/label";
-import { Button } from "@multica/ui/components/ui/button";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Textarea } from "@wallts/ui/components/ui/textarea";
+import { Label } from "@wallts/ui/components/ui/label";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Card, CardContent } from "@wallts/ui/components/ui/card";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -16,28 +16,28 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@multica/ui/components/ui/alert-dialog";
+} from "@wallts/ui/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
-import { useLeaveWorkspace, useDeleteWorkspace } from "@multica/core/workspace/mutations";
-import { useWorkspaceId } from "@multica/core/hooks";
+import { useAuthStore } from "@wallts/core/auth";
+import { useLeaveWorkspace, useDeleteWorkspace } from "@wallts/core/workspace/mutations";
+import { useWorkspaceId } from "@wallts/core/hooks";
 import {
   memberListOptions,
   workspaceKeys,
   workspaceListOptions,
-} from "@multica/core/workspace/queries";
-import { issueKeys } from "@multica/core/issues/queries";
-import { api } from "@multica/core/api";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+} from "@wallts/core/workspace/queries";
+import { issueKeys } from "@wallts/core/issues/queries";
+import { api } from "@wallts/core/api";
+import { useFileUpload } from "@wallts/core/hooks/use-file-upload";
+import { resolvePublicFileUrl } from "@wallts/core/workspace/avatar-url";
 import {
   resolvePostAuthDestination,
   useCurrentWorkspace,
   useHasOnboarded,
-} from "@multica/core/paths";
-import { setCurrentWorkspace } from "@multica/core/platform";
-import type { Workspace } from "@multica/core/types";
+} from "@wallts/core/paths";
+import { setCurrentWorkspace } from "@wallts/core/platform";
+import type { Workspace } from "@wallts/core/types";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { useT } from "../../i18n";

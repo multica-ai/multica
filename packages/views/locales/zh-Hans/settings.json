@@ -80,7 +80,7 @@
     },
     "system": {
       "title": "系统通知",
-      "description": "控制 Multica 在后台时是否显示操作系统的原生通知横幅。",
+      "description": "控制 Wallts 在后台时是否显示操作系统的原生通知横幅。",
       "label": "显示系统通知",
       "hint": "App 未获得焦点时，新的收件箱条目通过操作系统弹出通知横幅。"
     }
@@ -180,7 +180,7 @@
     "manage_hint": "只有管理员和所有者可以管理集成。"
   },
   "github": {
-    "page_description": "连接 GitHub App、控制 Pull Request 如何出现在 Multica 中，并决定智能体在 commit 记录里留下哪些痕迹。",
+    "page_description": "连接 GitHub App、控制 Pull Request 如何出现在 Wallts 中，并决定智能体在 commit 记录里留下哪些痕迹。",
     "section_master": "启用 GitHub 功能",
     "master_description_on": "关闭后，所有 GitHub 入口都会被隐藏，也不再产生新的副作用。后台已有数据不会被删除。团队不使用 GitHub？在这里直接关掉即可。",
     "master_description_off": "GitHub 功能已关闭。PR 侧栏、Co-authored-by trailer 与自动关联都已暂停。后台数据未删除。",
@@ -197,7 +197,7 @@
     "disconnect": "断开",
     "disconnecting": "断开中…",
     "disconnect_confirm_title": "断开 GitHub App",
-    "disconnect_confirm_description": "Multica 将不再接收该安装的 webhook。已有的 PR 镜像与关联会保留，再次连接即可恢复同步。",
+    "disconnect_confirm_description": "Wallts 将不再接收该安装的 webhook。已有的 PR 镜像与关联会保留，再次连接即可恢复同步。",
     "disconnect_confirm_cancel": "取消",
     "disconnect_confirm_action": "断开",
     "not_configured": "当前部署没有配置 GitHub 集成。运维需要设置",

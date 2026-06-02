@@ -25,7 +25,7 @@
  * fewer rows because replies are folded into parents). That preserves the
  * "Counts must agree" parity rule against web.
  */
-import type { TimelineEntry } from "@multica/core/types";
+import type { TimelineEntry } from "@wallts/core/types";
 
 export interface TimelineRow {
   entry: TimelineEntry;

@@ -10,12 +10,12 @@ import {
   Settings2,
   User,
 } from "lucide-react";
-import type { QuestionnaireAnswers, UseCase } from "@multica/core/onboarding";
+import type { QuestionnaireAnswers, UseCase } from "@wallts/core/onboarding";
 import { StepQuestion, type QuestionOption } from "./step-question";
 import { useT } from "../../i18n";
 
 /**
- * Step 3 — "What do you want to use Multica for?" Tiebreaker for
+ * Step 3 — "What do you want to use Wallts for?" Tiebreaker for
  * the agent template recommendation when role alone is ambiguous.
  */
 export function StepUseCase({

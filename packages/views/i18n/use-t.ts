@@ -1,5 +1,5 @@
 // Side-effect import: pulls the i18next module augmentation into the
-// compilation graph. Without this, apps that consume @multica/views won't
+// compilation graph. Without this, apps that consume @wallts/views won't
 // see the resources types or the selector-API enablement, and their
 // typecheck would reject `t($ => $.foo.bar)` calls inside views.
 import "./resources-types";

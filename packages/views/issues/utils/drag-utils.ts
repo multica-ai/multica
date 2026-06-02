@@ -3,8 +3,8 @@ import {
   closestCenter,
   type CollisionDetection,
 } from "@dnd-kit/core";
-import type { Issue, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
-import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
+import type { Issue, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@wallts/core/types";
+import type { IssueGrouping } from "@wallts/core/issues/stores/view-store";
 import type { BoardColumnGroup } from "../components/board-column";
 
 export type DragMoveUpdates = Pick<

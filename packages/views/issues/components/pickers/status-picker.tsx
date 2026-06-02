@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { IssueStatus, UpdateIssueRequest } from "@multica/core/types";
-import { ALL_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
+import type { IssueStatus, UpdateIssueRequest } from "@wallts/core/types";
+import { ALL_STATUSES, STATUS_CONFIG } from "@wallts/core/issues/config";
 import { StatusIcon } from "../status-icon";
 import { PropertyPicker, PickerItem } from "./property-picker";
 import { useT } from "../../../i18n";

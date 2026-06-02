@@ -5,8 +5,8 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // revokeAndRemoveMember converges all server-side state that should follow a

@@ -2,15 +2,15 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   HoverCard,
   HoverCardTrigger,
   HoverCardContent,
-} from "@multica/ui/components/ui/hover-card";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask } from "@multica/core/types";
+} from "@wallts/ui/components/ui/hover-card";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { agentTaskSnapshotOptions } from "@wallts/core/agents";
+import type { AgentTask } from "@wallts/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
 import { useT } from "../../i18n";

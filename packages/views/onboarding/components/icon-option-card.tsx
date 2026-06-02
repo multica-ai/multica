@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 
 const OTHER_INPUT_MAX_LENGTH = 80;
 

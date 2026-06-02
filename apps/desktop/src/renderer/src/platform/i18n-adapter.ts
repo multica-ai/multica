@@ -1,6 +1,6 @@
-import type { LocaleAdapter, SupportedLocale } from "@multica/core/i18n";
+import type { LocaleAdapter, SupportedLocale } from "@wallts/core/i18n";
 
-const STORAGE_KEY = "multica-locale";
+const STORAGE_KEY = "wallts-locale";
 
 // Desktop adapter:
 //   - User choice: localStorage (set by Settings switcher).

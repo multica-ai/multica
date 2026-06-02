@@ -6,11 +6,11 @@ import {
   HoverCard,
   HoverCardTrigger,
   HoverCardContent,
-} from "@multica/ui/components/ui/hover-card";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask } from "@multica/core/types";
-import { cn } from "@multica/ui/lib/utils";
+} from "@wallts/ui/components/ui/hover-card";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { agentTaskSnapshotOptions } from "@wallts/core/agents";
+import type { AgentTask } from "@wallts/core/types";
+import { cn } from "@wallts/ui/lib/utils";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
 import { useT } from "../../i18n";

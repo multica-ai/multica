@@ -34,7 +34,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { Issue, PinnedItem, Project } from "@multica/core/types";
+import type { Issue, PinnedItem, Project } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { IssueRow } from "@/components/issue/issue-row";

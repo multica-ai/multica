@@ -21,7 +21,7 @@ import type {
   Project,
   ProjectResource,
   UpdateProjectRequest,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { api } from "@/data/api";
 import { projectKeys } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";

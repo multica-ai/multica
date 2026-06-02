@@ -10,9 +10,9 @@ describe("runtime config", () => {
   it("uses cloud defaults without a desktop.json file", () => {
     expect(DEFAULT_RUNTIME_CONFIG).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://api.multica.ai",
-      wsUrl: "wss://api.multica.ai/ws",
-      appUrl: "https://multica.ai",
+      apiUrl: "https://api.wallts.ai",
+      wsUrl: "wss://api.wallts.ai/ws",
+      appUrl: "https://wallts.ai",
     });
   });
 
@@ -35,13 +35,13 @@ describe("runtime config", () => {
   it("strips the leading api. label when deriving appUrl", () => {
     expect(
       parseRuntimeConfig(
-        JSON.stringify({ schemaVersion: 1, apiUrl: "https://api.multica.ai" }),
+        JSON.stringify({ schemaVersion: 1, apiUrl: "https://api.wallts.ai" }),
       ),
     ).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://api.multica.ai",
-      wsUrl: "wss://api.multica.ai/ws",
-      appUrl: "https://multica.ai",
+      apiUrl: "https://api.wallts.ai",
+      wsUrl: "wss://api.wallts.ai/ws",
+      appUrl: "https://wallts.ai",
     });
   });
 
@@ -79,7 +79,7 @@ describe("runtime config", () => {
 
   it("rejects non-http api schemes", () => {
     expect(() =>
-      parseRuntimeConfig(JSON.stringify({ schemaVersion: 1, apiUrl: "file:///tmp/multica" })),
+      parseRuntimeConfig(JSON.stringify({ schemaVersion: 1, apiUrl: "file:///tmp/wallts" })),
     ).toThrow(/apiUrl must use http or https/);
   });
 
@@ -122,30 +122,30 @@ describe("runtime config", () => {
   it("derives dev appUrl by stripping the leading api. label", () => {
     // When the dev renderer is pointed at a remote backend (e.g. a test
     // environment), copy-link / share URLs must reflect that environment's
-    // public web host, not the api host. Multica's convention exposes the
+    // public web host, not the api host. Wallts's convention exposes the
     // api at `api.<web-host>`, so stripping the leading label gives the
     // right web origin without a separate VITE_APP_URL.
     expect(
-      runtimeConfigFromDevEnv({ apiUrl: "https://api.test.multica.ai" }),
+      runtimeConfigFromDevEnv({ apiUrl: "https://api.test.wallts.ai" }),
     ).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://api.test.multica.ai",
-      wsUrl: "wss://api.test.multica.ai/ws",
-      appUrl: "https://test.multica.ai",
+      apiUrl: "https://api.test.wallts.ai",
+      wsUrl: "wss://api.test.wallts.ai/ws",
+      appUrl: "https://test.wallts.ai",
     });
   });
 
   it("dev VITE_APP_URL still wins over apiUrl-derived value", () => {
     expect(
       runtimeConfigFromDevEnv({
-        apiUrl: "https://api.test.multica.ai",
-        appUrl: "https://staging.multica.ai",
+        apiUrl: "https://api.test.wallts.ai",
+        appUrl: "https://staging.wallts.ai",
       }),
     ).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://api.test.multica.ai",
-      wsUrl: "wss://api.test.multica.ai/ws",
-      appUrl: "https://staging.multica.ai",
+      apiUrl: "https://api.test.wallts.ai",
+      wsUrl: "wss://api.test.wallts.ai/ws",
+      appUrl: "https://staging.wallts.ai",
     });
   });
 });

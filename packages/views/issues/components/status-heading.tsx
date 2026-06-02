@@ -1,4 +1,4 @@
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus } from "@wallts/core/types";
 import { StatusIcon } from "./status-icon";
 import { useT } from "../../i18n";
 

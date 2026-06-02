@@ -8,7 +8,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";

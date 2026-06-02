@@ -11,7 +11,7 @@
  * ok-plan-linked-taco.md.
  */
 import { Alert, Pressable, View } from "react-native";
-import type { AgentTask, TaskFailureReason } from "@multica/core/types";
+import type { AgentTask, TaskFailureReason } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { useCancelTask } from "@/data/mutations/issues";

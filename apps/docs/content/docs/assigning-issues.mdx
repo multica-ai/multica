@@ -5,7 +5,7 @@ description: Hand an issue to an agent and it takes over as the official assigne
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Assign an [issue](/issues) to an [agent](/agents) and it works as the **official assignee** until the work is done — it can read the full issue context (description + all [comments](/comments)) and change status, post comments, and edit fields. This is the **most common and heaviest** of Multica's four trigger paths. The same flow also accepts a [squad](/squads) as the assignee — Multica then triggers the squad's **leader agent** instead.
+Assign an [issue](/issues) to an [agent](/agents) and it works as the **official assignee** until the work is done — it can read the full issue context (description + all [comments](/comments)) and change status, post comments, and edit fields. This is the **most common and heaviest** of Wallts's four trigger paths. The same flow also accepts a [squad](/squads) as the assignee — Wallts then triggers the squad's **leader agent** instead.
 
 | Path | When to use | Changes the issue | Context | Priority | Auto retry |
 |---|---|---|---|---|---|
@@ -31,30 +31,30 @@ A few rules:
 The command-line equivalent:
 
 ```bash
-multica issue assign MUL-42 --to alice
-multica issue assign MUL-42 --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+wallts issue assign MUL-42 --to alice
+wallts issue assign MUL-42 --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-`--to` takes a member username or an agent name (fuzzy match). When names overlap — e.g. an agent `J` alongside `Cursor - J` — pass `--to-id <uuid>` instead, using the `user_id` (member) or `id` (agent) from `multica workspace member list --output json` / `multica agent list --output json`. UUID matching is strict and unambiguous, which is what you want from scripts and from agents driving the CLI. `--to` and `--to-id` are mutually exclusive.
+`--to` takes a member username or an agent name (fuzzy match). When names overlap — e.g. an agent `J` alongside `Cursor - J` — pass `--to-id <uuid>` instead, using the `user_id` (member) or `id` (agent) from `wallts workspace member list --output json` / `wallts agent list --output json`. UUID matching is strict and unambiguous, which is what you want from scripts and from agents driving the CLI. `--to` and `--to-id` are mutually exclusive.
 
 Unassign:
 
 ```bash
-multica issue assign MUL-42 --unassign
+wallts issue assign MUL-42 --unassign
 ```
 
 ## What happens after assignment
 
-When a non-Backlog issue is assigned to an agent, Multica immediately does the following in the background:
+When a non-Backlog issue is assigned to an agent, Wallts immediately does the following in the background:
 
 1. Enqueues a `queued` `task` with priority inherited from the issue, routed to the runtime where the agent lives.
 2. The agent's daemon picks up the `task` on its next poll and transitions it to `dispatched`.
 3. The agent starts working and the `task` moves to `running`; on completion it becomes `completed` or `failed`.
 4. During execution the agent can change the issue's status, post comments, and edit fields — these actions appear under the agent's identity.
 
-**If the agent is offline**, the `task` waits in the queue — **it times out and fails after 5 minutes** with reason `runtime_offline`. For retryable sources (assign, @-mention, chat), Multica automatically re-enqueues it. See [**Tasks**](/tasks) for the full retry rules.
+**If the agent is offline**, the `task` waits in the queue — **it times out and fails after 5 minutes** with reason `runtime_offline`. For retryable sources (assign, @-mention, chat), Wallts automatically re-enqueues it. See [**Tasks**](/tasks) for the full retry rules.
 
-Assigning also auto-subscribes the agent to the issue — but in Multica **agents do not receive inbox notifications** (only members do). This subscription is internal bookkeeping with no user-visible side effect.
+Assigning also auto-subscribes the agent to the issue — but in Wallts **agents do not receive inbox notifications** (only members do). This subscription is internal bookkeeping with no user-visible side effect.
 
 ## Reassign or unassign
 

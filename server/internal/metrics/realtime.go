@@ -3,7 +3,7 @@ package metrics
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/dwickyfp/wallts/server/internal/realtime"
 )
 
 type RealtimeCollector struct {
@@ -41,13 +41,13 @@ func NewRealtimeCollector(m *realtime.Metrics) *RealtimeCollector {
 		redisXReadTotal:     newRealtimeDesc("redis_xread_total", "Total Redis XREAD operations by the realtime relay."),
 		redisXReadErrors:    newRealtimeDesc("redis_xread_errors_total", "Total Redis XREAD errors by the realtime relay."),
 		redisAckTotal:       newRealtimeDesc("redis_ack_total", "Total Redis stream acknowledgements by the realtime relay."),
-		redisMirrorErrors:   prometheus.NewDesc("multica_realtime_redis_mirror_errors_total", "Total Redis mirror write errors by the realtime relay.", []string{"target"}, nil),
+		redisMirrorErrors:   prometheus.NewDesc("wallts_realtime_redis_mirror_errors_total", "Total Redis mirror write errors by the realtime relay.", []string{"target"}, nil),
 		redisMirrorDiverged: newRealtimeDesc("redis_mirror_divergence_total", "Total Redis mirror divergence events by the realtime relay."),
 	}
 }
 
 func newRealtimeDesc(name, help string) *prometheus.Desc {
-	return prometheus.NewDesc("multica_realtime_"+name, help, nil, nil)
+	return prometheus.NewDesc("wallts_realtime_"+name, help, nil, nil)
 }
 
 func (c *RealtimeCollector) Describe(ch chan<- *prometheus.Desc) {

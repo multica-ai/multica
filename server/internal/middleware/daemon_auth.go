@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/multica-ai/multica/server/internal/auth"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/auth"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // Daemon context keys.
@@ -71,7 +71,7 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 //     and a daemon converges on one DB round-trip per AuthCacheTTL window.
 //
 // cloudPAT is optional; when non-nil, tokens with the mcn_ prefix are
-// validated by calling the Multica Cloud Fleet service (X-User-ID gets the
+// validated by calling the Wallts Cloud Fleet service (X-User-ID gets the
 // returned owner_id). When nil, mcn_ tokens are rejected at the prefix
 // branch — same fail-closed contract as the regular Auth middleware.
 //
@@ -146,7 +146,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			}
 
 			// Cloud Node PAT: "mcn_" prefix. Mirrors the mcn_ branch
-			// in Auth — Multica Cloud Fleet is authoritative, we only
+			// in Auth — Wallts Cloud Fleet is authoritative, we only
 			// surface the resolved owner_id as X-User-ID for the
 			// downstream daemon handlers (which then check workspace
 			// membership the usual way). Same fail-closed semantics:

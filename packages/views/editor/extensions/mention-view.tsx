@@ -16,7 +16,7 @@
 
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@wallts/core/paths";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
 

@@ -19,40 +19,40 @@ import {
   X as XIcon,
   Zap,
 } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { Button } from "@multica/ui/components/ui/button";
+} from "@wallts/ui/components/ui/dialog";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@wallts/ui/components/ui/tooltip";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "@multica/ui/components/ui/select";
-import { TimeInput } from "@multica/ui/components/ui/time-input";
+} from "@wallts/ui/components/ui/select";
+import { TimeInput } from "@wallts/ui/components/ui/time-input";
 import { TimezonePicker } from "./pickers/timezone-picker";
-import { useCurrentWorkspace } from "@multica/core/paths";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { useCurrentWorkspace } from "@wallts/core/paths";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { agentListOptions, squadListOptions } from "@wallts/core/workspace/queries";
+import { projectListOptions } from "@wallts/core/projects/queries";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
   useUpdateAutopilot,
   useUpdateAutopilotTrigger,
-} from "@multica/core/autopilots/mutations";
-import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
-import { api } from "@multica/core/api";
+} from "@wallts/core/autopilots/mutations";
+import { buildAutopilotWebhookUrl } from "@wallts/core/autopilots";
+import { api } from "@wallts/core/api";
 import type {
   AutopilotAssigneeType,
   AutopilotExecutionMode,
   AutopilotTrigger,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -69,7 +69,7 @@ import {
 import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
-import type { WebhookEventFilter } from "@multica/core/types";
+import type { WebhookEventFilter } from "@wallts/core/types";
 
 // ---------------------------------------------------------------------------
 // Types

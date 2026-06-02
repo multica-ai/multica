@@ -3,18 +3,18 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
-import { workspaceKeys } from "@multica/core/workspace/queries";
-import { paths, resolvePostAuthDestination } from "@multica/core/paths";
-import { api } from "@multica/core/api";
+import { sanitizeNextUrl, useAuthStore } from "@wallts/core/auth";
+import { workspaceKeys } from "@wallts/core/workspace/queries";
+import { paths, resolvePostAuthDestination } from "@wallts/core/paths";
+import { api } from "@wallts/core/api";
 import {
   Card,
   CardHeader,
   CardTitle,
   CardDescription,
   CardContent,
-} from "@multica/ui/components/ui/card";
-import { Button } from "@multica/ui/components/ui/button";
+} from "@wallts/ui/components/ui/card";
+import { Button } from "@wallts/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
 
 function CallbackContent() {
@@ -54,7 +54,7 @@ function CallbackContent() {
         .googleLogin(code, redirectUri)
         .then(({ token }) => {
           setDesktopToken(token);
-          window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+          window.location.href = `wallts://auth/callback?token=${encodeURIComponent(token)}`;
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");
@@ -77,7 +77,7 @@ function CallbackContent() {
 
           // 2. Un-onboarded users may have pending invitations on their
           //    email even when no `next=` was carried (came from a fresh
-          //    login on app.multica.ai instead of clicking the email link,
+          //    login on app.wallts.ai instead of clicking the email link,
           //    or `state` was lost across the round-trip). Look them up by
           //    email and route to the batch /invitations page if any.
           //    Already-onboarded users skip this lookup — their new invites
@@ -114,9 +114,9 @@ function CallbackContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Opening Multica</CardTitle>
+            <CardTitle className="text-2xl">Opening Wallts</CardTitle>
             <CardDescription>
-              You should see a prompt to open the Multica desktop app. If
+              You should see a prompt to open the Wallts desktop app. If
               nothing happens, click the button below.
             </CardDescription>
           </CardHeader>
@@ -124,10 +124,10 @@ function CallbackContent() {
             <Button
               variant="outline"
               onClick={() => {
-                window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
+                window.location.href = `wallts://auth/callback?token=${encodeURIComponent(desktopToken)}`;
               }}
             >
-              Open Multica Desktop
+              Open Wallts Desktop
             </Button>
           </CardContent>
         </Card>

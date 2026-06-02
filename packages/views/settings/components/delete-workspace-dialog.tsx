@@ -8,11 +8,11 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@multica/ui/components/ui/dialog";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
-import { Button } from "@multica/ui/components/ui/button";
-import { isImeComposing } from "@multica/core/utils";
+} from "@wallts/ui/components/ui/dialog";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Label } from "@wallts/ui/components/ui/label";
+import { Button } from "@wallts/ui/components/ui/button";
+import { isImeComposing } from "@wallts/core/utils";
 import { useT } from "../../i18n";
 
 /**

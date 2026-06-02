@@ -12,7 +12,7 @@
 import { Alert, Pressable, ScrollView, View } from "react-native";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import type { ChatSession } from "@multica/core/types";
+import type { ChatSession } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { chatSessionsOptions } from "@/data/queries/chat";

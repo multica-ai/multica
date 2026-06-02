@@ -33,7 +33,7 @@ import type {
   Label,
   Reaction,
   TimelineEntry,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { issueKeys } from "@/data/queries/issue-keys";
 
 type TimelinePredicate = (entry: TimelineEntry) => boolean;

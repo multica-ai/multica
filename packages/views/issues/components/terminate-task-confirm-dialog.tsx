@@ -9,7 +9,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
+} from "@wallts/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
 
 // Reusable confirm step for the two issue-detail surfaces that terminate

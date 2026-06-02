@@ -35,8 +35,8 @@ func TestHTTPMiddlewareUsesRoutePatternLabels(t *testing.T) {
 	body := metricsRec.Body.String()
 
 	for _, want := range []string{
-		`multica_http_requests_total{method="GET",route="/api/issues/{id}",status="201"} 1`,
-		`multica_build_info{commit="abc123",version="v-test"} 1`,
+		`wallts_http_requests_total{method="GET",route="/api/issues/{id}",status="201"} 1`,
+		`wallts_build_info{commit="abc123",version="v-test"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q\n%s", want, body)
@@ -58,7 +58,7 @@ func TestMetricsHandlerOnlyServesMetricsPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/metrics status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if body, _ := io.ReadAll(rec.Body); !strings.Contains(string(body), "multica_build_info") {
+	if body, _ := io.ReadAll(rec.Body); !strings.Contains(string(body), "wallts_build_info") {
 		t.Fatalf("/metrics body missing build info: %s", body)
 	}
 

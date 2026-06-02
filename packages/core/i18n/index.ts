@@ -3,12 +3,12 @@
 // RSC / Edge / nodejs middleware.
 //
 // React-side helpers (I18nProvider, useLocaleAdapter, createI18n) live in
-// "@multica/core/i18n/react" — split because Next.js gives RSC a vendored
+// "@wallts/core/i18n/react" — split because Next.js gives RSC a vendored
 // React build that lacks createContext, and react-i18next's top-level
 // React.createContext() call would crash any non-client load of this file.
 //
 // Browser-only helpers (createBrowserCookieLocaleAdapter) live in
-// "@multica/core/i18n/browser" — they read document.cookie / navigator.languages
+// "@wallts/core/i18n/browser" — they read document.cookie / navigator.languages
 // at construction time and would crash in any non-DOM context.
 export type {
   LocaleAdapter,

@@ -16,43 +16,43 @@ import {
   MoreHorizontal,
   X as XIcon,
 } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "@wallts/core/types";
 import {
   DialogContent,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
+} from "@wallts/ui/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
-import { Button } from "@multica/ui/components/ui/button";
-import { Switch } from "@multica/ui/components/ui/switch";
+} from "@wallts/ui/components/ui/dropdown-menu";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@wallts/ui/components/ui/tooltip";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Switch } from "@wallts/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
-import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
-import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
-import { issueDetailOptions } from "@multica/core/issues/queries";
-import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useCurrentWorkspace, useWorkspacePaths } from "@wallts/core/paths";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { useIssueDraftStore } from "@wallts/core/issues/stores/draft-store";
+import { useCreateModeStore } from "@wallts/core/issues/stores/create-mode-store";
+import { useQuickCreateStore } from "@wallts/core/issues/stores/quick-create-store";
+import { issueDetailOptions } from "@wallts/core/issues/queries";
+import { useCreateIssue, useUpdateIssue } from "@wallts/core/issues/mutations";
+import { useFileUpload } from "@wallts/core/hooks/use-file-upload";
 import {
   api,
   ApiError,
   DuplicateIssueErrorBodySchema,
   type DuplicateIssueErrorBody,
   parseWithFallback,
-} from "@multica/core/api";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+} from "@wallts/core/api";
+import { FileUploadButton } from "@wallts/ui/components/common/file-upload-button";
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
@@ -251,7 +251,7 @@ export function ManualCreatePanel({
       clearDraft();
       const shouldShowBacklogHint =
         status === "backlog" && assigneeType === "agent" && assigneeId &&
-        localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true";
+        localStorage.getItem("wallts:backlog-agent-hint-dismissed") !== "true";
 
       if (shouldShowBacklogHint) {
         setBacklogHintIssueId(issue.id);
@@ -395,7 +395,7 @@ export function ManualCreatePanel({
               onClose();
             }}
             onDismissPermanently={() => {
-              localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
+              localStorage.setItem("wallts:backlog-agent-hint-dismissed", "true");
             }}
             onMoveToTodo={() => {
               updateIssueMutation.mutate(
@@ -747,7 +747,7 @@ export function manualDialogContentClass(
 // shell's shared Dialog, but a few legacy callers (and the test suite) still
 // import this module's modal version. Equivalent runtime behavior to the
 // pre-refactor component when used standalone.
-import { Dialog as DialogRoot } from "@multica/ui/components/ui/dialog";
+import { Dialog as DialogRoot } from "@wallts/ui/components/ui/dialog";
 export function CreateIssueModal(props: {
   onClose: () => void;
   data?: Record<string, unknown> | null;

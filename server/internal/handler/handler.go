@@ -15,17 +15,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/cloudruntime"
-	"github.com/multica-ai/multica/server/internal/daemonws"
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/storage"
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/analytics"
+	"github.com/dwickyfp/wallts/server/internal/auth"
+	"github.com/dwickyfp/wallts/server/internal/cloudruntime"
+	"github.com/dwickyfp/wallts/server/internal/daemonws"
+	"github.com/dwickyfp/wallts/server/internal/events"
+	"github.com/dwickyfp/wallts/server/internal/middleware"
+	"github.com/dwickyfp/wallts/server/internal/realtime"
+	"github.com/dwickyfp/wallts/server/internal/service"
+	"github.com/dwickyfp/wallts/server/internal/storage"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
@@ -58,7 +58,7 @@ type Config struct {
 	// the UI can hide every "Create workspace" affordance — see #3433.
 	DisableWorkspaceCreation bool
 	// PublicURL is the absolute base URL the API is reachable at from the
-	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
+	// public internet, with no trailing slash (e.g. "https://app.wallts.ai").
 	// Used only to build webhook_url responses for autopilot webhook triggers
 	// — never for auth, routing, or workspace resolution. Empty when unset,
 	// in which case clients fall back to webhook_path + their own origin.
@@ -70,7 +70,7 @@ type Config struct {
 	// TrustedProxies are CIDRs whose source IP we trust to set
 	// X-Forwarded-For / X-Real-IP. Empty means "trust nothing": the rate
 	// limiter uses r.RemoteAddr exclusively. Populated via the
-	// MULTICA_TRUSTED_PROXIES env var (comma-separated CIDRs, e.g.
+	// WALLTS_TRUSTED_PROXIES env var (comma-separated CIDRs, e.g.
 	// "10.0.0.0/8,127.0.0.1/32"). This is specifically to keep the per-IP
 	// webhook limiter from being bypassed by a spoofed XFF on deployments
 	// without a header-stripping reverse proxy in front.

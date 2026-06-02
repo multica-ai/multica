@@ -5,7 +5,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   NavigationProvider,
   type NavigationAdapter,
-} from "@multica/views/navigation";
+} from "@wallts/views/navigation";
 
 function NavigationProviderInner({
   children,

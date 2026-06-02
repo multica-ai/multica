@@ -32,7 +32,7 @@ export const useFeedbackDraftStore = create<FeedbackDraftStore>()(
       },
     }),
     {
-      name: "multica_feedback_draft",
+      name: "wallts_feedback_draft",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
     },
   ),

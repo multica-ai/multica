@@ -16,12 +16,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/logger"
-	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/pkg/agent"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/internal/analytics"
+	"github.com/dwickyfp/wallts/server/internal/logger"
+	"github.com/dwickyfp/wallts/server/internal/service"
+	"github.com/dwickyfp/wallts/server/pkg/agent"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // Mirrors AGENT_DESCRIPTION_MAX_LENGTH in packages/core/agents/constants.ts
@@ -207,7 +207,7 @@ type AgentTaskResponse struct {
 	NewCommentsSince        string                `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
-	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `wallts attachment download <id>` per entry
 	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
 	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
 	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
@@ -229,7 +229,7 @@ type AgentTaskResponse struct {
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
 	Kind                             string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
-	// MULTICA_TOKEN in the agent process environment. The server binds it to
+	// WALLTS_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
 	// authenticated with it as actor=agent, regardless of headers — so the
 	// agent process cannot use it to read another agent's secrets via the
@@ -241,7 +241,7 @@ type AgentTaskResponse struct {
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
 // claim responses for chat tasks. The agent uses these to run
-// `multica attachment download <id>` rather than guessing from the
+// `wallts attachment download <id>` rather than guessing from the
 // markdown URL (which is signed and 30-min expiring on private CDN).
 // The mirror struct on the daemon side lives in internal/daemon/types.go
 // and uses the same JSON field names.
@@ -908,7 +908,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// /api/agents/{id}/env` — that endpoint is owner/admin-only, denies
 	// agent actors, and writes a queryable audit row.
 	if _, ok := rawFields["custom_env"]; ok {
-		writeError(w, http.StatusBadRequest, "custom_env is no longer accepted on this endpoint; use PUT /api/agents/{id}/env (or `multica agent env set`)")
+		writeError(w, http.StatusBadRequest, "custom_env is no longer accepted on this endpoint; use PUT /api/agents/{id}/env (or `wallts agent env set`)")
 		return
 	}
 

@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   completeOnboarding,
   type OnboardingCompletionPath,
-} from "@multica/core/onboarding";
+} from "@wallts/core/onboarding";
 import { useT } from "../../i18n";
 
 /**

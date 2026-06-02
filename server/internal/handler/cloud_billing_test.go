@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/multica-ai/multica/server/internal/cloudruntime"
+	"github.com/dwickyfp/wallts/server/internal/cloudruntime"
 )
 
 // proxyExpectation captures the assertions every standard

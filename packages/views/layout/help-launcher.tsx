@@ -6,12 +6,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
-import { useModalStore } from "@multica/core/modals";
+} from "@wallts/ui/components/ui/dropdown-menu";
+import { useModalStore } from "@wallts/core/modals";
 import { useT } from "../i18n";
 
-const DOCS_URL = "https://multica.ai/docs";
-const CHANGELOG_URL = "https://multica.ai/changelog";
+const DOCS_URL = "https://wallts.ai/docs";
+const CHANGELOG_URL = "https://wallts.ai/changelog";
 
 export function HelpLauncher() {
   const { t } = useT("layout");

@@ -1,6 +1,6 @@
 /**
  * The 3 starter tasks the Runtime-path Welcome Modal offers a user after
- * Multica Helper is created. Each card maps to ONE issue being created
+ * Wallts Helper is created. Each card maps to ONE issue being created
  * via `api.createIssue` with:
  *   - title = STARTER_PROMPT.title[lang]
  *   - description = STARTER_PROMPT.prompt[lang]
@@ -24,14 +24,14 @@ interface StarterPrompt {
 export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
   intro: {
     title: {
-      en: "Introduce Multica to me",
-      zh: "简单介绍一下 Multica",
-      ko: "Multica를 간단히 소개해 주세요",
+      en: "Introduce Wallts to me",
+      zh: "简单介绍一下 Wallts",
+      ko: "Wallts를 간단히 소개해 주세요",
     },
     prompt: {
-      en: "Introduce Multica to me in 1–2 paragraphs. Cover what it is, the core concepts (workspace / issue / agent / runtime), and how it differs from tools like Linear or Jira.",
-      zh: "用 1-2 段话简单介绍 Multica 给我。讲清楚它是什么、核心概念有哪些(workspace / issue / agent / runtime)、和 Linear / Jira 之类的工具核心区别在哪。",
-      ko: "Multica를 1-2문단으로 간단히 소개해 주세요. 무엇인지, 핵심 개념(workspace / issue / agent / runtime)이 무엇인지, Linear나 Jira 같은 도구와 핵심적으로 어떻게 다른지 설명해 주세요.",
+      en: "Introduce Wallts to me in 1–2 paragraphs. Cover what it is, the core concepts (workspace / issue / agent / runtime), and how it differs from tools like Linear or Jira.",
+      zh: "用 1-2 段话简单介绍 Wallts 给我。讲清楚它是什么、核心概念有哪些(workspace / issue / agent / runtime)、和 Linear / Jira 之类的工具核心区别在哪。",
+      ko: "Wallts를 1-2문단으로 간단히 소개해 주세요. 무엇인지, 핵심 개념(workspace / issue / agent / runtime)이 무엇인지, Linear나 Jira 같은 도구와 핵심적으로 어떻게 다른지 설명해 주세요.",
     },
   },
   tour: {
@@ -41,26 +41,26 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
       ko: "핵심 기능을 안내해 주세요",
     },
     prompt: {
-      en: "Walk me through Multica's core features — issue, agent, squad, autopilot, chat. Pick one realistic scenario I might run into and explain how all these pieces fit together.",
-      zh: "陪我熟悉 Multica 的每个核心功能 —— issue、agent、squad、autopilot、chat。挑一个我可能用得上的真实场景,讲讲这几个东西是怎么配合的。",
-      ko: "Multica의 핵심 기능인 issue, agent, squad, autopilot, chat을 안내해 주세요. 제가 실제로 겪을 만한 상황 하나를 골라 이 요소들이 어떻게 함께 작동하는지 설명해 주세요.",
+      en: "Walk me through Wallts's core features — issue, agent, squad, autopilot, chat. Pick one realistic scenario I might run into and explain how all these pieces fit together.",
+      zh: "陪我熟悉 Wallts 的每个核心功能 —— issue、agent、squad、autopilot、chat。挑一个我可能用得上的真实场景,讲讲这几个东西是怎么配合的。",
+      ko: "Wallts의 핵심 기능인 issue, agent, squad, autopilot, chat을 안내해 주세요. 제가 실제로 겪을 만한 상황 하나를 골라 이 요소들이 어떻게 함께 작동하는지 설명해 주세요.",
     },
   },
   welcome_page: {
     title: {
-      en: "Show me what Multica can do for me — as slides",
-      zh: "用 slides 介绍 Multica 能为我做什么",
-      ko: "Multica가 저에게 무엇을 해줄 수 있는지 슬라이드로 보여 주세요",
+      en: "Show me what Wallts can do for me — as slides",
+      zh: "用 slides 介绍 Wallts 能为我做什么",
+      ko: "Wallts가 저에게 무엇을 해줄 수 있는지 슬라이드로 보여 주세요",
     },
     prompt: {
-      en: `Build me a single-file HTML slide deck that shows what Multica can do for me. Tailor it to my role and use case (see "About me" below). Paste the FULL HTML in a fenced \`\`\`html block in a comment on this issue so I can copy it straight out, save as \`multica-intro.html\`, and double-click to open it in a browser.
+      en: `Build me a single-file HTML slide deck that shows what Wallts can do for me. Tailor it to my role and use case (see "About me" below). Paste the FULL HTML in a fenced \`\`\`html block in a comment on this issue so I can copy it straight out, save as \`wallts-intro.html\`, and double-click to open it in a browser.
 
 **Format**
 - One self-contained .html, all CSS / JS inline. Zero dependencies, no build tools, no external images (use CSS-generated visuals — gradients, geometric shapes, SVG inline).
 - 5–8 slides total:
-  1. Title — "What Multica can do for [my role]"
+  1. Title — "What Wallts can do for [my role]"
   2. Four core concepts — workspace / issue / agent / runtime, one slide
-  3–6. 3–4 concrete scenarios tailored to my use case, each in the form "When you want X → here's how Multica handles it"
+  3–6. 3–4 concrete scenarios tailored to my use case, each in the form "When you want X → here's how Wallts handles it"
   7. Closing — one specific next-step action
 
 **Viewport rules (non-negotiable)**
@@ -79,14 +79,14 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
 - ArrowLeft / ArrowRight and Space to advance. Small page indicator in a corner.
 
 When done, also reply with a one-sentence summary of which scenarios you picked for me and why.`,
-      zh: `给我做一份单文件 HTML 演示稿,介绍 Multica 能为我做什么。根据我的角色和使用场景定制(见下面"关于我")。把完整 HTML 贴到这条 issue 的评论里的 \`\`\`html 代码块中,我直接复制下来存成 \`multica-intro.html\` 双击就能在浏览器里打开。
+      zh: `给我做一份单文件 HTML 演示稿,介绍 Wallts 能为我做什么。根据我的角色和使用场景定制(见下面"关于我")。把完整 HTML 贴到这条 issue 的评论里的 \`\`\`html 代码块中,我直接复制下来存成 \`wallts-intro.html\` 双击就能在浏览器里打开。
 
 **产出格式**
 - 一个自包含 .html,CSS / JS 全部 inline。零依赖、不用打包、不引外部图片(视觉用纯 CSS 生成 —— 渐变、几何形状、内联 SVG)。
 - 5-8 张 slide:
-  1. 标题页 —— "Multica 能为 [我的角色] 做什么"
+  1. 标题页 —— "Wallts 能为 [我的角色] 做什么"
   2. 四个核心概念 —— workspace / issue / agent / runtime,一张
-  3-6. 3-4 个针对我使用场景的具体例子,形如"当你想做 X → Multica 是这样处理的"
+  3-6. 3-4 个针对我使用场景的具体例子,形如"当你想做 X → Wallts 是这样处理的"
   7. 收尾页 —— 一个具体的下一步动作
 
 **视口约束(必须遵守)**
@@ -105,14 +105,14 @@ When done, also reply with a one-sentence summary of which scenarios you picked 
 - 左右方向键和空格切换,角落放一个小的页码指示。
 
 做完后再用一句话告诉我你为我挑了哪几个场景以及为什么。`,
-      ko: `Multica가 저에게 무엇을 해줄 수 있는지 보여주는 단일 파일 HTML 슬라이드 덱을 만들어 주세요. 제 역할과 사용 사례에 맞춰 주세요(아래 "내 정보" 참고). 전체 HTML을 이 issue의 댓글에 fenced \`\`\`html 코드 블록으로 붙여 주세요. 그대로 복사해 \`multica-intro.html\`로 저장하고 브라우저에서 더블클릭해 열 수 있어야 합니다.
+      ko: `Wallts가 저에게 무엇을 해줄 수 있는지 보여주는 단일 파일 HTML 슬라이드 덱을 만들어 주세요. 제 역할과 사용 사례에 맞춰 주세요(아래 "내 정보" 참고). 전체 HTML을 이 issue의 댓글에 fenced \`\`\`html 코드 블록으로 붙여 주세요. 그대로 복사해 \`wallts-intro.html\`로 저장하고 브라우저에서 더블클릭해 열 수 있어야 합니다.
 
 **출력 형식**
 - 하나의 self-contained .html 파일. CSS / JS는 모두 inline. 의존성, 빌드 도구, 외부 이미지는 쓰지 마세요(시각 요소는 CSS로 생성한 gradient, geometric shape, inline SVG를 사용).
 - 전체 5-8장:
-  1. 제목 — "[내 역할]에게 Multica가 해줄 수 있는 일"
+  1. 제목 — "[내 역할]에게 Wallts가 해줄 수 있는 일"
   2. 네 가지 핵심 개념 — workspace / issue / agent / runtime, 한 장
-  3-6. 제 사용 사례에 맞춘 구체적인 시나리오 3-4개. 각 시나리오는 "X를 하고 싶을 때 → Multica는 이렇게 처리합니다" 형식
+  3-6. 제 사용 사례에 맞춘 구체적인 시나리오 3-4개. 각 시나리오는 "X를 하고 싶을 때 → Wallts는 이렇게 처리합니다" 형식
   7. 마무리 — 구체적인 다음 액션 하나
 
 **Viewport 규칙(반드시 지킬 것)**

@@ -7,8 +7,8 @@ import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { FileText, Download } from 'lucide-react'
-import { cn } from '@multica/ui/lib/utils'
-import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
+import { cn } from '@wallts/ui/lib/utils'
+import { CODE_LIGATURE_CLASS } from '@wallts/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
@@ -57,7 +57,7 @@ export interface MarkdownProps {
    */
   renderMention?: (props: { type: string; id: string }) => React.ReactNode
   /**
-   * CDN hostname for file card detection (e.g. "multica-static.copilothub.ai").
+   * CDN hostname for file card detection (e.g. "wallts-static.copilothub.ai").
    * When provided, enables file card preprocessing and rendering.
    */
   cdnDomain?: string

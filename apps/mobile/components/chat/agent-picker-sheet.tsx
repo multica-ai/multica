@@ -14,7 +14,7 @@
  * centered cards already work well on iOS.
  */
 import { Modal, Pressable, ScrollView, View } from "react-native";
-import type { Agent } from "@multica/core/types";
+import type { Agent } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { cn } from "@/lib/utils";

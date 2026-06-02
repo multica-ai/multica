@@ -159,9 +159,9 @@ var allFileBasedProviders = []string{
 
 // TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir is the headline
 // invariant the issue (MUL-2784) calls out: a user repo that contained
-// nothing related to Multica before a task ran must contain nothing
-// related to Multica after the task finishes — no .agent_context/,
-// no .claude/skills/, no .multica/, no stub directories. The test
+// nothing related to Wallts before a task ran must contain nothing
+// related to Wallts after the task finishes — no .agent_context/,
+// no .claude/skills/, no .wallts/, no stub directories. The test
 // runs the full Prepare → Inject → Cleanup cycle for every file-based
 // provider against a fresh empty workdir and asserts the directory is
 // byte-exactly empty again.
@@ -208,7 +208,7 @@ func TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir(t *testing.T) {
 // hand-authored skill under the same parent directory we use, Cleanup
 // must leave it bit-for-bit intact. The user-skill payload is laid down
 // BEFORE Prepare runs and snapshotted; after Cleanup the user's skill
-// must still exist and the Multica-written sibling must be gone.
+// must still exist and the Wallts-written sibling must be gone.
 func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 	t.Parallel()
 	// One representative case per provider that writes into a
@@ -361,7 +361,7 @@ func TestPrepareThenCleanupSidecarsRepeatedCycles(t *testing.T) {
 }
 
 // TestPrepareThenCleanupSidecarsWithProjectResources extends the
-// round-trip to the .multica/project/resources.json branch — a separate
+// round-trip to the .wallts/project/resources.json branch — a separate
 // sidecar write that creates its own intermediate directory tree.
 func TestPrepareThenCleanupSidecarsWithProjectResources(t *testing.T) {
 	t.Parallel()
@@ -418,10 +418,10 @@ func TestCleanupSidecarsLeavesUserContentInTrackedDirIntact(t *testing.T) {
 	workDir := t.TempDir()
 	envRoot := t.TempDir()
 
-	// Imagine Prepare wrote .multica/sidecar.txt and created
-	// .multica/ + .multica/project/, then exited. Between Prepare
-	// and Cleanup the user dropped their own file under .multica/.
-	managedDir := filepath.Join(workDir, ".multica")
+	// Imagine Prepare wrote .wallts/sidecar.txt and created
+	// .wallts/ + .wallts/project/, then exited. Between Prepare
+	// and Cleanup the user dropped their own file under .wallts/.
+	managedDir := filepath.Join(workDir, ".wallts")
 	managedProject := filepath.Join(managedDir, "project")
 	managedFile := filepath.Join(managedProject, "resources.json")
 	if err := os.MkdirAll(managedProject, 0o755); err != nil {
@@ -453,7 +453,7 @@ func TestCleanupSidecarsLeavesUserContentInTrackedDirIntact(t *testing.T) {
 	if _, err := os.Stat(managedProject); !os.IsNotExist(err) {
 		t.Errorf("inner managed dir %s should be empty and removed, stat err=%v", managedProject, err)
 	}
-	// .multica still holds user-notes.txt, so rmdir must have been
+	// .wallts still holds user-notes.txt, so rmdir must have been
 	// skipped silently — the directory must survive.
 	got, err := os.ReadFile(userFile)
 	if err != nil {
@@ -604,7 +604,7 @@ func TestSidecarManifestRoundTripJSON(t *testing.T) {
 // matrix below replays the user-skill-already-present scenario per
 // provider and asserts byte-exact round-trip — including that the
 // user's SKILL.md bytes survive the task untouched and our
-// collision-free sibling (which lives under .../issue-review-multica/)
+// collision-free sibling (which lives under .../issue-review-wallts/)
 // is fully cleaned up.
 //
 // Codex skills live under codex-home (not workdir), so the per-skill
@@ -629,12 +629,12 @@ var sameSlugSkillProviderCases = []struct {
 
 // TestPrepareThenCleanupSidecarsSameSlugCollisionPerProvider is the
 // must-fix byte-exact matrix the PR #3444 review required: per
-// provider, seed a user skill at the exact slug Multica would use
+// provider, seed a user skill at the exact slug Wallts would use
 // (`.claude/skills/issue-review/SKILL.md` etc.), run the full
-// Prepare → Inject → Cleanup cycle with a Multica skill of the same
+// Prepare → Inject → Cleanup cycle with a Wallts skill of the same
 // name, and assert the workdir snapshot is byte-identical to the
-// seed. The user's SKILL.md must not be touched, and the Multica
-// sibling (which lives at `<slug>-multica`) must be fully removed by
+// seed. The user's SKILL.md must not be touched, and the Wallts
+// sibling (which lives at `<slug>-wallts`) must be fully removed by
 // CleanupSidecars.
 func TestPrepareThenCleanupSidecarsSameSlugCollisionPerProvider(t *testing.T) {
 	t.Parallel()
@@ -669,8 +669,8 @@ func TestPrepareThenCleanupSidecarsSameSlugCollisionPerProvider(t *testing.T) {
 				AgentSkills: []SkillContextForEnv{
 					{
 						Name:        "Issue Review",
-						Description: "Multica's version",
-						Content:     "---\nname: issue-review\n---\n\nMultica skill content.\n",
+						Description: "Wallts's version",
+						Content:     "---\nname: issue-review\n---\n\nWallts skill content.\n",
 						Files: []SkillFileContextForEnv{
 							{Path: "templates/checklist.md", Content: "- [ ] check"},
 						},
@@ -704,7 +704,7 @@ func TestPrepareThenCleanupSidecarsSameSlugCollisionPerProvider(t *testing.T) {
 
 // TestPrepareThenCleanupSidecarsIssueContextCollisionPerProvider is
 // the matching byte-exact matrix for `.agent_context/issue_context.md`
-// — a Multica-only namespace file. If the user already has a file at
+// — a Wallts-only namespace file. If the user already has a file at
 // that path, the writer must refuse to overwrite it (the runtime
 // brief carries the same facts anyway) and CleanupSidecars must
 // leave the user's file alone. This covers EVERY file-based provider
@@ -750,8 +750,8 @@ func TestPrepareThenCleanupSidecarsIssueContextCollisionPerProvider(t *testing.T
 }
 
 // TestPrepareThenCleanupSidecarsProjectResourcesCollisionPerProvider
-// is the matching byte-exact matrix for `.multica/project/
-// resources.json` — the other Multica-only namespace file. Same
+// is the matching byte-exact matrix for `.wallts/project/
+// resources.json` — the other Wallts-only namespace file. Same
 // invariant: pre-existing user content survives the round-trip
 // untouched even when the task ships project resources of its own.
 func TestPrepareThenCleanupSidecarsProjectResourcesCollisionPerProvider(t *testing.T) {
@@ -763,11 +763,11 @@ func TestPrepareThenCleanupSidecarsProjectResourcesCollisionPerProvider(t *testi
 			workDir := t.TempDir()
 			envRoot := t.TempDir()
 
-			if err := os.MkdirAll(filepath.Join(workDir, ".multica", "project"), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Join(workDir, ".wallts", "project"), 0o755); err != nil {
 				t.Fatalf("seed dir: %v", err)
 			}
 			userBody := `{"user":"owns this file"}`
-			userPath := filepath.Join(workDir, ".multica", "project", "resources.json")
+			userPath := filepath.Join(workDir, ".wallts", "project", "resources.json")
 			if err := os.WriteFile(userPath, []byte(userBody), 0o644); err != nil {
 				t.Fatalf("seed user file: %v", err)
 			}
@@ -803,8 +803,8 @@ func TestPrepareThenCleanupSidecarsProjectResourcesCollisionPerProvider(t *testi
 }
 
 // TestAllocateCollisionFreeSkillDir pins the slug-suffix policy:
-// first try the natural slug, then `-multica`, then `-multica-2`,
-// `-multica-3`, … The PR-review concern is "Multica skill must still
+// first try the natural slug, then `-wallts`, then `-wallts-2`,
+// `-wallts-3`, … The PR-review concern is "Wallts skill must still
 // be discoverable" — this test demonstrates that we pick a sibling
 // path under the same skillsParent rather than dropping the skill or
 // nesting it under the user's directory.
@@ -824,7 +824,7 @@ func TestAllocateCollisionFreeSkillDir(t *testing.T) {
 		t.Errorf("first allocation path = %q, want under parent", dir)
 	}
 
-	// 2) Pre-existing user dir at the base slug → bump to `-multica`.
+	// 2) Pre-existing user dir at the base slug → bump to `-wallts`.
 	if err := os.MkdirAll(filepath.Join(parent, "issue-review"), 0o755); err != nil {
 		t.Fatalf("seed user dir: %v", err)
 	}
@@ -832,25 +832,25 @@ func TestAllocateCollisionFreeSkillDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if slug != "issue-review-multica" {
-		t.Errorf("second allocation should bump to `-multica`; got %q", slug)
+	if slug != "issue-review-wallts" {
+		t.Errorf("second allocation should bump to `-wallts`; got %q", slug)
 	}
-	if dir != filepath.Join(parent, "issue-review-multica") {
+	if dir != filepath.Join(parent, "issue-review-wallts") {
 		t.Errorf("second allocation path = %q, want under parent", dir)
 	}
 
 	// 3) Pre-existing collision at the bumped slug too → bump again.
-	if err := os.MkdirAll(filepath.Join(parent, "issue-review-multica"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(parent, "issue-review-wallts"), 0o755); err != nil {
 		t.Fatalf("seed bumped dir: %v", err)
 	}
 	slug, dir, err = allocateCollisionFreeSkillDir(parent, "issue-review")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if slug != "issue-review-multica-2" {
-		t.Errorf("third allocation should be `-multica-2`; got %q", slug)
+	if slug != "issue-review-wallts-2" {
+		t.Errorf("third allocation should be `-wallts-2`; got %q", slug)
 	}
-	if dir != filepath.Join(parent, "issue-review-multica-2") {
+	if dir != filepath.Join(parent, "issue-review-wallts-2") {
 		t.Errorf("third allocation path = %q, want under parent", dir)
 	}
 }
@@ -858,9 +858,9 @@ func TestAllocateCollisionFreeSkillDir(t *testing.T) {
 // TestPrepareThenCleanupSidecarsMultiSkillCollisionFreeAllocation is
 // the end-to-end coverage for the collision-free sibling: a user has
 // `.claude/skills/issue-review/SKILL.md`, the task ships an
-// `Issue Review` skill, the Multica sibling must land at a different
+// `Issue Review` skill, the Wallts sibling must land at a different
 // slug (so the agent still sees it), AND Cleanup must remove the
-// Multica sibling entirely without touching the user's.
+// Wallts sibling entirely without touching the user's.
 func TestPrepareThenCleanupSidecarsMultiSkillCollisionFreeAllocation(t *testing.T) {
 	t.Parallel()
 	workDir := t.TempDir()
@@ -876,22 +876,22 @@ func TestPrepareThenCleanupSidecarsMultiSkillCollisionFreeAllocation(t *testing.
 		t.Fatalf("seed file: %v", err)
 	}
 
-	// Run only the inject side first — verify the Multica skill
+	// Run only the inject side first — verify the Wallts skill
 	// landed at a NEW path under the same parent, AND the user's
 	// path is untouched.
 	manifest := &sidecarManifest{}
 	if err := writeContextFiles(workDir, "claude", TaskContextForEnv{
 		IssueID: "11111111-2222-3333-4444-555555555555",
 		AgentSkills: []SkillContextForEnv{
-			{Name: "Issue Review", Content: "Multica's version\n"},
+			{Name: "Issue Review", Content: "Wallts's version\n"},
 		},
 	}, manifest); err != nil {
 		t.Fatalf("writeContextFiles: %v", err)
 	}
 
-	multicaDir := filepath.Join(workDir, ".claude", "skills", "issue-review-multica")
-	if _, err := os.Stat(filepath.Join(multicaDir, "SKILL.md")); err != nil {
-		t.Errorf("Multica sibling skill should exist at %s: %v", multicaDir, err)
+	walltsDir := filepath.Join(workDir, ".claude", "skills", "issue-review-wallts")
+	if _, err := os.Stat(filepath.Join(walltsDir, "SKILL.md")); err != nil {
+		t.Errorf("Wallts sibling skill should exist at %s: %v", walltsDir, err)
 	}
 	got, err := os.ReadFile(userFile)
 	if err != nil {
@@ -902,15 +902,15 @@ func TestPrepareThenCleanupSidecarsMultiSkillCollisionFreeAllocation(t *testing.
 	}
 
 	// Now persist manifest + run cleanup. After cleanup the
-	// Multica sibling is gone; user's path survives.
+	// Wallts sibling is gone; user's path survives.
 	if err := writeSidecarManifest(envRoot, manifest); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	if err := CleanupSidecars(envRoot); err != nil {
 		t.Fatalf("CleanupSidecars: %v", err)
 	}
-	if _, err := os.Stat(multicaDir); !os.IsNotExist(err) {
-		t.Errorf("Multica sibling should be removed by Cleanup; stat err=%v", err)
+	if _, err := os.Stat(walltsDir); !os.IsNotExist(err) {
+		t.Errorf("Wallts sibling should be removed by Cleanup; stat err=%v", err)
 	}
 	got, err = os.ReadFile(userFile)
 	if err != nil {

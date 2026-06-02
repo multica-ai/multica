@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/multica-ai/multica/server/internal/auth"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/auth"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // TestDaemonAuth_DaemonTokenCacheHit pins the daemon-token cache short-circuit:
@@ -165,7 +165,7 @@ func TestDaemonAuth_InvalidMDT_NilQueries(t *testing.T) {
 }
 
 // TestDaemonAuth_MCN_NoVerifierConfigured pins the fail-closed
-// behaviour when MULTICA_CLOUD_FLEET_URL is empty: an mcn_ token MUST
+// behaviour when WALLTS_CLOUD_FLEET_URL is empty: an mcn_ token MUST
 // be rejected at the prefix branch with 401, not silently fall
 // through to the mul_/JWT paths (an mcn_ string would never match a
 // valid PAT or JWT, but failing closed makes the contract explicit).

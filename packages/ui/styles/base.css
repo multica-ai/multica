@@ -1,5 +1,5 @@
 /* =============================================================================
- * Multica shared base styles — imported by all apps
+ * Wallts shared base styles — imported by all apps
  * ============================================================================= */
 
 /* Shiki dual themes: CSS-only light/dark switching via CSS variables */
@@ -14,7 +14,7 @@
   color: var(--shiki-dark) !important;
 }
 
-/* Multica icon: entrance spin animation */
+/* Wallts icon: entrance spin animation */
 @keyframes entrance-spin {
   0% { transform: rotate(0deg); opacity: 0; }
   50% { opacity: 1; }

@@ -3,22 +3,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Loader2 } from "lucide-react";
-import { api } from "@multica/core/api";
-import { useAuthStore } from "@multica/core/auth";
-import { useWelcomeStore } from "@multica/core/onboarding";
-import { paths, useCurrentWorkspace } from "@multica/core/paths";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { issueKeys } from "@multica/core/issues/queries";
-import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Agent, CreateIssueRequest, Issue } from "@multica/core/types";
+import { api } from "@wallts/core/api";
+import { useAuthStore } from "@wallts/core/auth";
+import { useWelcomeStore } from "@wallts/core/onboarding";
+import { paths, useCurrentWorkspace } from "@wallts/core/paths";
+import { resolvePublicFileUrl } from "@wallts/core/workspace/avatar-url";
+import { issueKeys } from "@wallts/core/issues/queries";
+import { workspaceKeys } from "@wallts/core/workspace/queries";
+import type { Agent, CreateIssueRequest, Issue } from "@wallts/core/types";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
-import { Button } from "@multica/ui/components/ui/button";
-import { cn } from "@multica/ui/lib/utils";
+} from "@wallts/ui/components/ui/dialog";
+import { Button } from "@wallts/ui/components/ui/button";
+import { cn } from "@wallts/ui/lib/utils";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import {
@@ -49,7 +49,7 @@ import {
  *
  *   "runtime":
  *     1. Full-screen loading veil ("Preparing your Helper…")
- *     2. Find-or-create a "Multica Helper" agent on the picked runtime
+ *     2. Find-or-create a "Wallts Helper" agent on the picked runtime
  *        — `listAgents` first to dedupe against re-entries, then
  *        `createAgent` with the localized instructions from
  *        `onboarding/templates/helper-instructions.ts`.
@@ -130,7 +130,7 @@ export function WelcomeAfterOnboarding() {
 // Runtime sub-template
 // ---------------------------------------------------------------------------
 
-const HELPER_AGENT_NAME = "Multica Helper";
+const HELPER_AGENT_NAME = "Wallts Helper";
 
 const HELPER_AVATAR_URL =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='t' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0%25' stop-color='%2323242C'/%3E%3Cstop offset='100%25' stop-color='%2313141A'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' rx='28' fill='url(%23t)'/%3E%3Cg stroke='%23FFFFFF' stroke-width='13' stroke-linecap='round'%3E%3Cline x1='64' y1='32' x2='64' y2='96'/%3E%3Cline x1='32' y1='64' x2='96' y2='64'/%3E%3Cline x1='41.4' y1='41.4' x2='86.6' y2='86.6'/%3E%3Cline x1='86.6' y1='41.4' x2='41.4' y2='86.6'/%3E%3C/g%3E%3C/svg%3E";
@@ -177,7 +177,7 @@ async function findOrCreateHelper(
       runtime_id: runtimeId,
       visibility: "workspace",
       max_concurrent_tasks: 6,
-      template: "multica_helper",
+      template: "wallts_helper",
     });
   })();
 

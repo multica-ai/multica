@@ -1,11 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
-import { Toaster } from "@multica/ui/components/ui/sonner";
-import { cn } from "@multica/ui/lib/utils";
+import { Toaster } from "@wallts/ui/components/ui/sonner";
+import { cn } from "@wallts/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
-import type { SupportedLocale } from "@multica/core/i18n";
-import { RESOURCES } from "@multica/views/locales";
+import type { SupportedLocale } from "@wallts/core/i18n";
+import { RESOURCES } from "@wallts/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
 import "./globals.css";
 
@@ -71,10 +71,10 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.multica.ai"),
+  metadataBase: new URL("https://www.wallts.ai"),
   title: {
-    default: "Multica — Project Management for Human + Agent Teams",
-    template: "%s | Multica",
+    default: "Wallts — Project Management for Human + Agent Teams",
+    template: "%s | Wallts",
   },
   description:
     "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
@@ -84,13 +84,13 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: "website",
-    siteName: "Multica",
+    siteName: "Wallts",
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    site: "@multica_hq",
-    creator: "@multica_hq",
+    site: "@wallts_hq",
+    creator: "@wallts_hq",
   },
   alternates: {
     canonical: "/",

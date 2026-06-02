@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { capturePageview } from "@multica/core/analytics";
+import { capturePageview } from "@wallts/core/analytics";
 
 /**
  * Fires a PostHog $pageview whenever the Next.js App Router path or query

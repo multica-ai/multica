@@ -1,6 +1,6 @@
 "use client";
 
-import type { Label } from "@multica/core/types";
+import type { Label } from "@wallts/core/types";
 import { X } from "lucide-react";
 import { useT } from "../i18n";
 

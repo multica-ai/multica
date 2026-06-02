@@ -25,10 +25,10 @@ import (
 // across API replicas — POST, heartbeat and poll can each land on a different
 // node, and they all need to see the same request lifecycle. The single-node
 // in-memory implementation is fine for self-hosted dev; multi-node deploys
-// (Multica Cloud) MUST use the Redis-backed implementation, otherwise the
+// (Wallts Cloud) MUST use the Redis-backed implementation, otherwise the
 // pending request is invisible to whichever replica receives the next call
 // and the picker shows "No models available" (regression: see issue
-// review on multica-ai/multica#2009).
+// review on dwickyfp/wallts#2009).
 
 // ModelListStatus represents the lifecycle of a model list request.
 type ModelListStatus string

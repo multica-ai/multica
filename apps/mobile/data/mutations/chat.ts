@@ -10,7 +10,7 @@
  * of data/mutations/inbox.ts and web's packages/core/chat/mutations.ts.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { ChatSession } from "@multica/core/types";
+import type { ChatSession } from "@wallts/core/types";
 import { api } from "@/data/api";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { chatKeys } from "@/data/queries/chat";

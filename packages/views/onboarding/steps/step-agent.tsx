@@ -3,21 +3,21 @@
 import { useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@multica/ui/components/ui/button";
-import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { cn } from "@multica/ui/lib/utils";
-import { api } from "@multica/core/api";
+import { Button } from "@wallts/ui/components/ui/button";
+import { useScrollFade } from "@wallts/ui/hooks/use-scroll-fade";
+import { cn } from "@wallts/ui/lib/utils";
+import { api } from "@wallts/core/api";
 import {
   recommendTemplate,
   type AgentTemplateId,
   type QuestionnaireAnswers,
-} from "@multica/core/onboarding";
+} from "@wallts/core/onboarding";
 import type {
   Agent,
   AgentRuntime,
   CreateAgentRequest,
-} from "@multica/core/types";
-import { DragStrip } from "@multica/views/platform";
+} from "@wallts/core/types";
+import { DragStrip } from "@wallts/views/platform";
 import { StepHeader } from "../components/step-header";
 import { useT } from "../../i18n";
 
@@ -311,7 +311,7 @@ function AboutAgentsSide() {
       </p>
 
       <a
-        href="https://multica.ai/docs/agents-create"
+        href="https://wallts.ai/docs/agents-create"
         target="_blank"
         rel="noopener noreferrer"
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"

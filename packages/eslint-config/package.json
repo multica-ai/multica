@@ -1,5 +1,5 @@
 {
-  "name": "@multica/eslint-config",
+  "name": "@wallts/eslint-config",
   "version": "0.0.0",
   "private": true,
   "type": "module",

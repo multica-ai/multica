@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { AgentDetailPage } from "@multica/views/agents";
+import { AgentDetailPage } from "@wallts/views/agents";
 
 export default function AgentDetailRoute({
   params,

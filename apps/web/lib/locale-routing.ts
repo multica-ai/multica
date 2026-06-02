@@ -2,9 +2,9 @@ import {
   matchLocale,
   SUPPORTED_LOCALES,
   type SupportedLocale,
-} from "@multica/core/i18n";
+} from "@wallts/core/i18n";
 
-export const MULTICA_LOCALE_HEADER = "x-multica-locale";
+export const WALLTS_LOCALE_HEADER = "x-wallts-locale";
 
 export function isSupportedLocale(
   value: string | null,

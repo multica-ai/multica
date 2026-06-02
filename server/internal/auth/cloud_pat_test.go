@@ -69,7 +69,7 @@ func newFleetServer(t *testing.T, opts fleetServerOpts) *httptest.Server {
 }
 
 // TestCloudPATVerifier_NilSafe pins the nil-receiver contract: a server
-// without MULTICA_CLOUD_FLEET_URL configured constructs nil here, and
+// without WALLTS_CLOUD_FLEET_URL configured constructs nil here, and
 // the middleware nil-checks before calling. Verify must still return a
 // classifiable error so the middleware emits a deterministic 401 instead
 // of a nil-deref panic.

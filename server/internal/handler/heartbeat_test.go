@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // fakeLivenessStore lets tests drive every Available / Touch / IsAliveBatch

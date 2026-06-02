@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 func TestSubscriberAPI(t *testing.T) {

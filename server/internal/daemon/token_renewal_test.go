@@ -128,8 +128,8 @@ func TestTryRenewToken_SurfacesReloginWarningOn401(t *testing.T) {
 	if !strings.Contains(out, "level=WARN") {
 		t.Fatalf("401 must surface as WARN, got: %s", out)
 	}
-	if !strings.Contains(out, "multica login") {
-		t.Fatalf("401 warning must tell the user to run 'multica login', got: %s", out)
+	if !strings.Contains(out, "wallts login") {
+		t.Fatalf("401 warning must tell the user to run 'wallts login', got: %s", out)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestTryRenewToken_TransientErrorIsDebugNotWarn(t *testing.T) {
 // must-fix from MUL-2744 review: when the daemon starts with an already-
 // revoked or expired PAT, the renewal call has to happen BEFORE the first
 // workspace sync, because the workspace sync's 401 would short-circuit Run
-// and the operator would never see a "run multica login" hint.
+// and the operator would never see a "run wallts login" hint.
 func TestPreflightAuth_RenewsBeforeWorkspaceSyncOnExpiredToken(t *testing.T) {
 	var mu sync.Mutex
 	var seen []string
@@ -219,8 +219,8 @@ func TestPreflightAuth_RenewsBeforeWorkspaceSyncOnExpiredToken(t *testing.T) {
 	if !strings.Contains(out, "level=WARN") {
 		t.Fatalf("expected re-login WARN, got: %s", out)
 	}
-	if !strings.Contains(out, "multica login") {
-		t.Fatalf("expected the actionable 'run multica login' hint in the WARN, got: %s", out)
+	if !strings.Contains(out, "wallts login") {
+		t.Fatalf("expected the actionable 'run wallts login' hint in the WARN, got: %s", out)
 	}
 }
 

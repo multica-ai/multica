@@ -2,8 +2,8 @@ import type {
   AgentRuntime,
   RuntimeUsage,
   RuntimeUsageByAgent,
-} from "@multica/core/types";
-import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
+} from "@wallts/core/types";
+import { getCustomPricing } from "@wallts/core/runtimes/custom-pricing-store";
 
 // A live local daemon re-registers itself within seconds of a server-side
 // delete (daemon self-heal, #2404), so deleting an online local runtime from

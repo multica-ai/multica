@@ -45,7 +45,7 @@ func setupInvolvesFixture(t *testing.T) *involvesFixture {
 	var otherUserID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
-	`, "Involves Other User", fmt.Sprintf("involves-other-%d@multica.ai", suffix)).Scan(&otherUserID); err != nil {
+	`, "Involves Other User", fmt.Sprintf("involves-other-%d@wallts.ai", suffix)).Scan(&otherUserID); err != nil {
 		t.Fatalf("create other user: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, otherUserID) })

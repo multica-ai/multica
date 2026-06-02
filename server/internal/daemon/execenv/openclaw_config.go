@@ -473,7 +473,7 @@ func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, e
 // `{}` / `{"mcpServers":{}}` — and `false` when the field is null/absent so
 // the user's global config flows through unmodified.
 //
-// Input shape mirrors the rest of Multica: Claude-style
+// Input shape mirrors the rest of Wallts: Claude-style
 // `{"mcpServers": {"<name>": {...}}}`. The server-entry fields pass through
 // verbatim. OpenClaw's stdio schema uses the same camelCase keys (`command`,
 // `args`, `env`) as Claude; HTTP/SSE entries should set OpenClaw's

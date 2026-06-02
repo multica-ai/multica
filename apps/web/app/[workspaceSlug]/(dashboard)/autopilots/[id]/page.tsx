@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { AutopilotDetailPage } from "@multica/views/autopilots/components";
+import { AutopilotDetailPage } from "@wallts/views/autopilots/components";
 
 export default function Page({
   params,

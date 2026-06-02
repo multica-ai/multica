@@ -1,4 +1,4 @@
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
 
 // Rendered by Next.js as the Suspense fallback during route transitions
 // inside the (dashboard) segment. Scoped to this segment only — auth /

@@ -49,7 +49,7 @@ describe("useProjectViewStore", () => {
     await flush();
     useProjectViewStore.getState().setViewMode("comfortable");
 
-    const raw = localStorage.getItem("multica_projects_view:acme");
+    const raw = localStorage.getItem("wallts_projects_view:acme");
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string);
     expect(parsed.state).toEqual({ viewMode: "comfortable" });
@@ -57,11 +57,11 @@ describe("useProjectViewStore", () => {
 
   it("rehydrates a different saved viewMode on workspace switch", async () => {
     localStorage.setItem(
-      "multica_projects_view:acme",
+      "wallts_projects_view:acme",
       JSON.stringify({ state: { viewMode: "comfortable" }, version: 0 }),
     );
     localStorage.setItem(
-      "multica_projects_view:beta",
+      "wallts_projects_view:beta",
       JSON.stringify({ state: { viewMode: "compact" }, version: 0 }),
     );
 
@@ -78,7 +78,7 @@ describe("useProjectViewStore", () => {
 
   it("resets to 'compact' when switching to a workspace with no persisted value", async () => {
     localStorage.setItem(
-      "multica_projects_view:acme",
+      "wallts_projects_view:acme",
       JSON.stringify({ state: { viewMode: "comfortable" }, version: 0 }),
     );
 
@@ -91,6 +91,6 @@ describe("useProjectViewStore", () => {
     await flush();
     await flush();
     expect(useProjectViewStore.getState().viewMode).toBe("compact");
-    expect(localStorage.getItem("multica_projects_view:acme")).not.toBeNull();
+    expect(localStorage.getItem("wallts_projects_view:acme")).not.toBeNull();
   });
 });

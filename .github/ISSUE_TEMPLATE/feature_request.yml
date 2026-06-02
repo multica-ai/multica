@@ -7,7 +7,7 @@ body:
     id: deployment
     attributes:
       label: Deployment type
-      description: Are you using the Official App (multica.ai) or a self-hosted instance?
+      description: Are you using the Official App (wallts.ai) or a self-hosted instance?
       options:
         - Official App
         - self-host

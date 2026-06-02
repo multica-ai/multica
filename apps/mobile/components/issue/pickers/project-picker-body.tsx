@@ -11,7 +11,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
-import type { Project } from "@multica/core/types";
+import type { Project } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ProjectIcon } from "@/components/ui/project-icon";
 import { MOBILE_PLACEHOLDER_COLOR } from "@/components/ui/input-tokens";

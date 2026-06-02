@@ -176,10 +176,10 @@ func TestEnsureCodexMemoryConfigEmptyFile(t *testing.T) {
 		"features.memories = false",
 		"memories.generate_memories = false",
 		"memories.use_memories = false",
-		multicaMemoryFeatureBeginMarker,
-		multicaMemoryFeatureEndMarker,
-		multicaMemoryConfigBeginMarker,
-		multicaMemoryConfigEndMarker,
+		walltsMemoryFeatureBeginMarker,
+		walltsMemoryFeatureEndMarker,
+		walltsMemoryConfigBeginMarker,
+		walltsMemoryConfigEndMarker,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in output, got:\n%s", want, got)
@@ -469,7 +469,7 @@ features.memories = true
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	t.Setenv(MulticaCodexMemoryEnv, "1")
+	t.Setenv(WalltsCodexMemoryEnv, "1")
 
 	if err := ensureCodexMemoryConfig(configPath, nil); err != nil {
 		t.Fatalf("ensureCodexMemoryConfig failed: %v", err)
@@ -485,7 +485,7 @@ features.memories = true
 func TestCodexMemoryEnabledTruthy(t *testing.T) {
 	for _, v := range []string{"1", "true", "TRUE", "yes", "On"} {
 		t.Run(v, func(t *testing.T) {
-			t.Setenv(MulticaCodexMemoryEnv, v)
+			t.Setenv(WalltsCodexMemoryEnv, v)
 			if !codexMemoryEnabled() {
 				t.Errorf("expected %q to be truthy", v)
 			}
@@ -496,7 +496,7 @@ func TestCodexMemoryEnabledTruthy(t *testing.T) {
 func TestCodexMemoryEnabledFalsy(t *testing.T) {
 	for _, v := range []string{"", "0", "false", "no", "off", "anything else"} {
 		t.Run(v, func(t *testing.T) {
-			t.Setenv(MulticaCodexMemoryEnv, v)
+			t.Setenv(WalltsCodexMemoryEnv, v)
 			if codexMemoryEnabled() {
 				t.Errorf("expected %q to be falsy", v)
 			}
@@ -531,10 +531,10 @@ features.multi_agent = true
 	data, _ := os.ReadFile(configPath)
 	got := string(data)
 	for _, marker := range []string{
-		multicaManagedBeginMarker,
-		multicaMultiAgentBeginMarker,
-		multicaMemoryFeatureBeginMarker,
-		multicaMemoryConfigBeginMarker,
+		walltsManagedBeginMarker,
+		walltsMultiAgentBeginMarker,
+		walltsMemoryFeatureBeginMarker,
+		walltsMemoryConfigBeginMarker,
 	} {
 		if !strings.Contains(got, marker) {
 			t.Errorf("expected marker %q in combined output, got:\n%s", marker, got)

@@ -5,7 +5,7 @@ description: Group related issues and track them as one unit — with priority, 
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **project** in Multica is a container for related [issues](/issues). Use it when a body of work is bigger than one issue but smaller than a full workspace — a launch, a migration, a feature with multiple parts, an investigation that branches into several threads.
+A **project** in Wallts is a container for related [issues](/issues). Use it when a body of work is bigger than one issue but smaller than a full workspace — a launch, a migration, a feature with multiple parts, an investigation that branches into several threads.
 
 Each project has a name, an icon, a description, a **lead** (a member or an [agent](/agents)), a **status** (`planned` / `in_progress` / `paused` / `completed` / `cancelled`), a **priority** (`urgent` / `high` / `medium` / `low` / `none`), and a **progress** percentage that's auto-derived from the status of its linked issues.
 
@@ -23,7 +23,7 @@ The sidebar **Workspace → Projects** link always shows every project in the wo
 
 ## Attaching resources
 
-Each project has a **Resources** section where you attach GitHub repositories. Once attached, any [agent](/agents) assigned to issues in this project can read and write to those repos when executing tasks — Multica passes the repo URLs as context to the [daemon](/daemon-runtimes).
+Each project has a **Resources** section where you attach GitHub repositories. Once attached, any [agent](/agents) assigned to issues in this project can read and write to those repos when executing tasks — Wallts passes the repo URLs as context to the [daemon](/daemon-runtimes).
 
 Resources are per-project; if multiple projects share a repo, attach it to each one.
 
@@ -46,4 +46,4 @@ The lead is the person — or agent — accountable for the project. It's a soft
 
 - [Issues](/issues) — the unit of work that lives inside projects
 - [Agents as project lead](/agents) — when an agent is the right owner
-- [How Multica works](/how-multica-works) — the broader picture
+- [How Wallts works](/how-wallts-works) — the broader picture

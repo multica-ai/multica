@@ -1373,7 +1373,7 @@ func TestHermesBackendAttributesUsageToACPDefaultModel(t *testing.T) {
 }
 
 // fakeHermesACPRateLimitScript impersonates hermes for the GitHub
-// multica#1952 scenario: the upstream LLM returns HTTP 429 (rate
+// wallts#1952 scenario: the upstream LLM returns HTTP 429 (rate
 // limited / no credit), hermes retries internally and ultimately
 // emits both a sniffable stderr error block AND a synthetic agent
 // text turn ("API call failed after 3 retries..."), then completes
@@ -1463,7 +1463,7 @@ func TestHermesProviderErrorSnifferTerminalNonRetryable(t *testing.T) {
 }
 
 // TestHermesBackendPromotesProviderErrorWithNonEmptyOutput pins the
-// fix for GitHub multica#1952: a hermes run that hits a 429 (or any
+// fix for GitHub wallts#1952: a hermes run that hits a 429 (or any
 // upstream provider error) must surface as Status=failed even though
 // hermes' synthetic "API call failed..." agent turn means the output
 // buffer is non-empty. Before the fix the sniffer-promotion was
@@ -1544,7 +1544,7 @@ done
 }
 
 // TestHermesBackendDoesNotPromoteOnTransientRetry pins the
-// regression GPT-Boy flagged on the multica#1952 fix: a per-attempt
+// regression GPT-Boy flagged on the wallts#1952 fix: a per-attempt
 // ⚠️ warning on stderr that does NOT include any terminal marker
 // ("after N retries", Non-retryable, ❌, [ERROR], BadRequest /
 // Authentication errors) and is followed by a successful agent

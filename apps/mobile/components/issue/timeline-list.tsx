@@ -87,7 +87,7 @@ import {
 } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
-import type { Issue, TimelineEntry } from "@multica/core/types";
+import type { Issue, TimelineEntry } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { IssueHeaderCard } from "./issue-header-card";
 import { IssueDescription } from "./issue-description";

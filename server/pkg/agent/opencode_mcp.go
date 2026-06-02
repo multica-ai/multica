@@ -65,7 +65,7 @@ type opencodeMCPOAuth struct {
 // mechanism — it accepts any subset of OpenCode's schema (model, agent,
 // mode, plugin, mcp, …), not just MCP. This function is scoped to MCP
 // because that's the agent.mcp_config field this PR plumbs through; if a
-// future Multica field needs to project into the same env var (e.g. an
+// future Wallts field needs to project into the same env var (e.g. an
 // agent-level model override), the assemble-and-inject step would move
 // up a layer and merge multiple slices into one OPENCODE_CONFIG_CONTENT
 // value. For now, MCP is the only consumer.

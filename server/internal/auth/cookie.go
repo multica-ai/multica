@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	AuthCookieName      = "multica_auth"
-	CSRFCookieName      = "multica_csrf"
+	AuthCookieName      = "wallts_auth"
+	CSRFCookieName      = "wallts_csrf"
 	defaultAuthTokenTTL = 30 * 24 * time.Hour // 30 days
 )
 

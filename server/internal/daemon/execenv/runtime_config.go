@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// runtimeMarkerBegin and runtimeMarkerEnd delimit the Multica-managed brief
+// runtimeMarkerBegin and runtimeMarkerEnd delimit the Wallts-managed brief
 // inside the runtime config file (CLAUDE.md / AGENTS.md / GEMINI.md). The
 // markers exist so writeRuntimeConfigFile can:
 //
@@ -27,8 +27,8 @@ import (
 // text is a breaking change for any file that already carries the previous
 // markers — bump deliberately.
 const (
-	runtimeMarkerBegin = "<!-- BEGIN MULTICA-RUNTIME (auto-managed; do not edit) -->"
-	runtimeMarkerEnd   = "<!-- END MULTICA-RUNTIME -->"
+	runtimeMarkerBegin = "<!-- BEGIN WALLTS-RUNTIME (auto-managed; do not edit) -->"
+	runtimeMarkerEnd   = "<!-- END WALLTS-RUNTIME -->"
 
 	// runtimeManagedSeparator is the fixed separator inserted between any
 	// pre-existing user content and the marker block whenever Inject
@@ -167,7 +167,7 @@ func runtimeConfigPath(workDir, provider string) string {
 	}
 }
 
-// writeRuntimeConfigFile writes the Multica runtime brief to path without
+// writeRuntimeConfigFile writes the Wallts runtime brief to path without
 // clobbering any user-authored content already present. Behaviour by file
 // state:
 //
@@ -219,7 +219,7 @@ func writeRuntimeConfigFile(path, brief string) error {
 	return os.WriteFile(path, []byte(existingStr+runtimeManagedSeparator+block), 0o644)
 }
 
-// locateMarkerBlock finds the [start, end) byte range of the Multica marker
+// locateMarkerBlock finds the [start, end) byte range of the Wallts marker
 // block inside content. The returned `end` is one past the block's trailing
 // newline (if any) so callers can splice the block out without leaving an
 // orphan blank line behind.
@@ -228,7 +228,7 @@ func writeRuntimeConfigFile(path, brief string) error {
 // matters for two malformed cases that the previous naive `strings.Index`
 // pair would mishandle:
 //
-//   - User content carries a stray `<!-- END MULTICA-RUNTIME -->` (e.g. a
+//   - User content carries a stray `<!-- END WALLTS-RUNTIME -->` (e.g. a
 //     documentation snippet showing what the wire format looks like) before
 //     any begin marker. The naive parser would find that end and reject the
 //     block (`endIdx > startIdx` false), then append a fresh block — and
@@ -259,12 +259,12 @@ func locateMarkerBlock(content string) (start, end int, found bool) {
 	return start, end, true
 }
 
-// CleanupRuntimeConfig excises the Multica marker block from the runtime
+// CleanupRuntimeConfig excises the Wallts marker block from the runtime
 // config file for the given provider and restores the file to its exact
 // pre-injection state, byte for byte. The cleanup is the second half of
 // the contract `writeRuntimeConfigFile` establishes: together they must
 // round-trip a user's local repository config across an arbitrary number
-// of Multica runs without ever touching a single non-managed byte.
+// of Wallts runs without ever touching a single non-managed byte.
 //
 // Behaviour, mirroring the three Inject states:
 //
@@ -283,7 +283,7 @@ func locateMarkerBlock(content string) (start, end int, found bool) {
 //
 // Required for the local_directory flow (WorkDir is the user's own repo):
 // without this pass, a manual `claude` / `codex` / `gemini` run started by
-// the user inside the same directory after a Multica task would pick up
+// the user inside the same directory after a Wallts task would pick up
 // the stale brief and act on the previous task's issue id, trigger
 // comment id, and reply rules. Cloud workspace runs never trigger this
 // pollution because their workdir is daemon scratch that the GC loop
@@ -339,12 +339,12 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 }
 
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
-// about the Multica runtime environment and available CLI tools.
+// about the Wallts runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
-	b.WriteString("# Multica Agent Runtime\n\n")
-	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	b.WriteString("# Wallts Agent Runtime\n\n")
+	b.WriteString("You are a coding agent in the Wallts platform. Use the `wallts` CLI to interact with the platform.\n\n")
 
 	// Always emit agent identity so the agent knows who it is, even when
 	// dispatched via @mention on an issue assigned to a different agent.
@@ -424,15 +424,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
-	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
+	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `wallts --help`, `wallts <command> --help`, or `wallts <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
 	b.WriteString("### Core\n")
-	b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
-	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread` (with or without `--tail`) or `--recent`.\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
-	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
-	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
-	// Available Commands lists `multica issue comment add` neutrally —
+	b.WriteString("- `wallts issue get <id> --output json` — Get full issue details.\n")
+	b.WriteString("- `wallts issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread` (with or without `--tail`) or `--recent`.\n")
+	b.WriteString("- `wallts issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
+	b.WriteString("- `wallts issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
+	b.WriteString("- `wallts repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
+	b.WriteString("- `wallts issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
+	// Available Commands lists `wallts issue comment add` neutrally —
 	// three input modes, pick what fits.
 	// The previous "MUST pipe via stdin" mandate (#1795 / #1851) was
 	// originally a Codex-specific fix for codex emitting literal `\n`
@@ -448,17 +448,17 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// escaping correctly and can pick whichever flag suits their
 	// content. The `--content-file` line in the menu doubles as a
 	// pointer at the Windows-safe path.
-	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. Pick the input mode that preserves your content; run `multica issue comment add --help` for details.\n")
-	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
-	b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
-	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
+	b.WriteString("- `wallts issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. Pick the input mode that preserves your content; run `wallts issue comment add --help` for details.\n")
+	b.WriteString("- `wallts issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
+	b.WriteString("- `wallts issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
+	b.WriteString("- `wallts issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
 	b.WriteString("### Squad maintenance\n")
-	b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
+	b.WriteString("- `wallts squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
 		if runtimeGOOS == "windows" {
-			b.WriteString("Codex often follows the per-turn reply command literally. On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
+			b.WriteString("Codex often follows the per-turn reply command literally. On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `wallts.exe`. Never use inline `--content` for agent-authored comments. ")
 			b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
 			b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 		} else {
@@ -472,7 +472,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
-		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
+		b.WriteString("Use `wallts repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
 		for _, repo := range ctx.Repos {
 			if repo.Description != "" {
 				fmt.Fprintf(&b, "- %s — %s\n", repo.URL, repo.Description)
@@ -484,7 +484,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	// Inject project-scoped context (resources attached to the issue's project).
-	// The full structured payload is also available at .multica/project/resources.json
+	// The full structured payload is also available at .wallts/project/resources.json
 	// so skills can consume it programmatically.
 	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
 		b.WriteString("## Project Context\n\n")
@@ -492,12 +492,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
 		}
 		if len(ctx.ProjectResources) > 0 {
-			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
+			b.WriteString("Project resources (also written to `.wallts/project/resources.json`):\n\n")
 			for _, r := range ctx.ProjectResources {
 				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
 			}
 			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
-			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
+			b.WriteString("For `github_repo` resources, use `wallts repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
 		} else {
 			b.WriteString("This project has no resources attached yet.\n\n")
 		}
@@ -513,7 +513,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("Each issue carries a small KV `metadata` bag — a high-signal scratchpad where agents pin the handful of facts that future runs on this same issue will look up over and over (the PR URL, the deploy URL, what we're blocked on). It is NOT a place to record every fact you discover — that's what comments and the description are for. Most runs write **zero** new keys; that's the expected case, not a failure.\n\n")
 		b.WriteString("- **The bar for writing is high.** Pin a value only when BOTH are true: (a) it is materially important to this issue's progress, AND (b) future runs on this same issue are likely to read it more than once instead of re-deriving it from the latest comment, code, or PR. If you cannot name a concrete future read for the key, do not pin it. When in doubt, **do not write**.\n")
 		b.WriteString("- **Read on entry.** Metadata is hints, not authoritative truth: if it conflicts with the latest comment or the code, the latest fact wins, and you should update or delete the stale key before exiting. Empty `{}` and CLI failures are normal — do not stop or ask the user.\n")
-		b.WriteString("- **Write on exit.** Sparingly. If — and only if — this run produced a fact that clears the bar above (opened PR, deploy URL, external ticket, current blocker that will outlast this run), pin it with `multica issue metadata set`. If a key you saw on entry is now stale (e.g. `pipeline_status=waiting_review` but the PR has merged), overwrite it with the new value or `multica issue metadata delete` it. Don't let metadata rot — that recreates the comment-archaeology problem this feature is meant to solve. Stale-key cleanup is still expected even when you add nothing new.\n")
+		b.WriteString("- **Write on exit.** Sparingly. If — and only if — this run produced a fact that clears the bar above (opened PR, deploy URL, external ticket, current blocker that will outlast this run), pin it with `wallts issue metadata set`. If a key you saw on entry is now stale (e.g. `pipeline_status=waiting_review` but the PR has merged), overwrite it with the new value or `wallts issue metadata delete` it. Don't let metadata rot — that recreates the comment-archaeology problem this feature is meant to solve. Stale-key cleanup is still expected even when you add nothing new.\n")
 		b.WriteString("- **What NOT to pin.** No secrets, tokens, or API keys. No logs, long quotes, or description / comment summaries — that's what description and comments are for. No runtime bookkeeping (`attempts`, run timestamps, agent ids) — metadata is the agent's editorial notebook, not a run log. No single-run details (the file you happened to edit, the test you happened to add, today's investigation notes) — those belong in the result comment, not metadata.\n")
 		b.WriteString("- **Recommended keys** (reuse these names so queries stay consistent across the workspace; coin a new key only when none fits): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`. Use snake_case ASCII. The list is short on purpose — most issues only need 1-2 of these pinned, not the full set.\n\n")
 	}
@@ -524,11 +524,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// Chat task: interactive assistant mode
 		b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
 		b.WriteString("- Respond conversationally and helpfully to the user's message\n")
-		b.WriteString("- You have full access to the `multica` CLI to look up issues, workspace info, members, agents, etc.\n")
-		b.WriteString("- If asked about issues, use `multica issue list --output json` or `multica issue get <id> --output json`\n")
-		b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
+		b.WriteString("- You have full access to the `wallts` CLI to look up issues, workspace info, members, agents, etc.\n")
+		b.WriteString("- If asked about issues, use `wallts issue list --output json` or `wallts issue get <id> --output json`\n")
+		b.WriteString("- If asked about the workspace, use `wallts workspace get --output json`\n")
 		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
-		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
+		b.WriteString("- If the task requires code changes, use `wallts repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
 		b.WriteString("- Keep responses concise and direct\n\n")
 	} else if ctx.QuickCreatePrompt != "" {
 		// Quick-create task: detailed field / output rules live in the
@@ -539,15 +539,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// that doesn't propagate the user message into its working context
 		// (or a resumed session) still avoids the assignment-task workflow
 		// pointing at an empty issue id.
-		b.WriteString("**This task was triggered by quick-create.** There is NO existing Multica issue. Follow the field and output rules in the user message you just received; ignore the default assignment-task workflow.\n\n")
+		b.WriteString("**This task was triggered by quick-create.** There is NO existing Wallts issue. Follow the field and output rules in the user message you just received; ignore the default assignment-task workflow.\n\n")
 		b.WriteString("Hard guardrails (apply even if the user message is missing):\n")
-		b.WriteString("- Run exactly one `multica issue create` invocation, then exit.\n")
-		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
+		b.WriteString("- Run exactly one `wallts issue create` invocation, then exit.\n")
+		b.WriteString("- Do NOT call `wallts issue get`, `wallts issue status`, or `wallts issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `wallts issue create` succeeded.\n")
 		b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
 	} else if ctx.AutopilotRunID != "" {
 		// Autopilot run_only task: no issue exists, so the agent must not
 		// follow the assignment/comment workflow.
-		b.WriteString("**This task was triggered by an Autopilot in run-only mode.** There is no assigned Multica issue for this run.\n\n")
+		b.WriteString("**This task was triggered by an Autopilot in run-only mode.** There is no assigned Wallts issue for this run.\n\n")
 		fmt.Fprintf(&b, "- Autopilot run ID: `%s`\n", ctx.AutopilotRunID)
 		if ctx.AutopilotID != "" {
 			fmt.Fprintf(&b, "- Autopilot ID: `%s`\n", ctx.AutopilotID)
@@ -567,15 +567,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("\n\n")
 		}
 		if ctx.AutopilotID != "" {
-			fmt.Fprintf(&b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
+			fmt.Fprintf(&b, "- Run `wallts autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
 		}
 		b.WriteString("- Complete the autopilot instructions directly\n")
-		b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
+		b.WriteString("- Do not run `wallts issue get`, `wallts issue comment add`, or `wallts issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "1. Run `wallts issue get %s --output json` to understand the issue context\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `wallts issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
 		if hint := BuildNewCommentsHint(ctx.IssueID, ctx.TriggerCommentID, ctx.NewCommentsSince, ctx.NewCommentCount); hint != "" {
 			b.WriteString("3. " + hint)
 		} else if ctx.PriorSessionResumed {
@@ -583,36 +583,36 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		} else if cold := BuildColdCommentsHint(ctx.IssueID, ctx.TriggerCommentID); cold != "" {
 			b.WriteString("3. " + cold)
 		} else {
-			fmt.Fprintf(&b, "3. Catch up on comments — read with `multica issue comment list %s --output json` (long issue? `--recent 20`).\n", ctx.IssueID)
+			fmt.Fprintf(&b, "3. Catch up on comments — read with `wallts issue comment list %s --output json` (long issue? `--recent 20`).\n", ctx.IssueID)
 		}
 		fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
 		if ctx.IsSquadLeader {
 			b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
-			fmt.Fprintf(&b, "   - **Squad leader rule:** If your evaluation outcome is `no_action`, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
+			fmt.Fprintf(&b, "   - **Squad leader rule:** If your evaluation outcome is `no_action`, call `wallts squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
 		} else {
 			b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
 		}
 		b.WriteString("6. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
 		b.WriteString("7. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
 		b.WriteString(BuildCommentReplyInstructions(provider, ctx.IssueID, ctx.TriggerCommentID))
-		b.WriteString("8. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
+		b.WriteString("8. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `wallts issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
 		b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "3. Run `multica issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions. When the flat dump is too large to ingest in one shot, treat `--recent 20 --output json` plus the `--before` / `--before-id` cursor (from the stderr `Next thread cursor:` line) as a paging strategy: keep walking older threads until you have read enough history to satisfy this mandatory step. `--recent` is a way to read the full history page-by-page, not a shortcut that replaces it.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "4. Run `multica issue status %s in_progress`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "1. Run `wallts issue get %s --output json` to understand your task\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `wallts issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "3. Run `wallts issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions. When the flat dump is too large to ingest in one shot, treat `--recent 20 --output json` plus the `--before` / `--before-id` cursor (from the stderr `Next thread cursor:` line) as a paging strategy: keep walking older threads until you have read enough history to satisfy this mandatory step. `--recent` is a way to read the full history page-by-page, not a shortcut that replaces it.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "4. Run `wallts issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
 		if ctx.IsSquadLeader {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `wallts squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): `wallts issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
 		} else {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: `wallts issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		}
-		b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
-		fmt.Fprintf(&b, "8. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "9. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+		b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `wallts issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
+		fmt.Fprintf(&b, "8. When done, run `wallts issue status %s in_review`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "9. If blocked, run `wallts issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
 
 	// Sub-issue creation semantics — the only piece of the old Parent /
@@ -624,7 +624,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// runs (no parent/child semantics there).
 	if ctx.IssueID != "" && ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" {
 		b.WriteString("## Sub-issue Creation\n\n")
-		b.WriteString("**Choosing `--status` when creating sub-issues.** `--status todo` = **start now** (the default — an agent assignee fires immediately). `--status backlog` = **wait** (assignee is set but no trigger fires; promote later with `multica issue status <child-id> todo`). Parallel children: all `--status todo`. Strict serial Step 1→2→3: only Step 1 is `todo`; Steps 2/3 are `--status backlog` from the start, promoted in turn.\n\n")
+		b.WriteString("**Choosing `--status` when creating sub-issues.** `--status todo` = **start now** (the default — an agent assignee fires immediately). `--status backlog` = **wait** (assignee is set but no trigger fires; promote later with `wallts issue status <child-id> todo`). Parallel children: all `--status todo`. Strict serial Step 1→2→3: only Step 1 is `todo`; Steps 2/3 are `--status backlog` from the start, promoted in turn.\n\n")
 	}
 
 	if len(ctx.AgentSkills) > 0 {
@@ -674,13 +674,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Attachments\n\n")
 	b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
-	b.WriteString("When a task includes attachment IDs and you need the files, inspect `multica attachment --help` and use the authenticated CLI path. Do not open Multica resource URLs directly.\n\n")
+	b.WriteString("When a task includes attachment IDs and you need the files, inspect `wallts attachment --help` and use the authenticated CLI path. Do not open Wallts resource URLs directly.\n\n")
 
-	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
-	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")
-	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Multica URLs or APIs directly. ")
-	b.WriteString("Multica resource URLs require authenticated access that only the `multica` CLI can provide.\n\n")
-	b.WriteString("If you need to perform an operation that is not covered by any existing `multica` command, ")
+	b.WriteString("## Important: Always Use the `wallts` CLI\n\n")
+	b.WriteString("All interactions with Wallts platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `wallts` CLI. ")
+	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Wallts URLs or APIs directly. ")
+	b.WriteString("Wallts resource URLs require authenticated access that only the `wallts` CLI can provide.\n\n")
+	b.WriteString("If you need to perform an operation that is not covered by any existing `wallts` command, ")
 	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
 
 	b.WriteString("## Output\n\n")
@@ -688,15 +688,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	case ctx.AutopilotRunID != "":
 		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n")
 	case ctx.QuickCreatePrompt != "":
-		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `multica issue create` succeeded.\n\n")
-		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
-		b.WriteString("- Print exactly one final line: `Created <identifier-or-id>: <title>` after a successful `multica issue create`. Use the created issue's `identifier` from JSON output when available; otherwise use its `id`. Do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")
+		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `wallts issue create` succeeded.\n\n")
+		b.WriteString("- Do NOT call `wallts issue comment add` — the issue you just created has no conversation context for this run.\n")
+		b.WriteString("- Print exactly one final line: `Created <identifier-or-id>: <title>` after a successful `wallts issue create`. Use the created issue's `identifier` from JSON output when available; otherwise use its `id`. Do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")
 		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
 	default:
 		if ctx.IsSquadLeader {
-			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")
+			b.WriteString("⚠️ **Final results MUST be delivered via `wallts issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `wallts squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")
 		} else {
-			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+			b.WriteString("⚠️ **Final results MUST be delivered via `wallts issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
 		}
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
 		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")

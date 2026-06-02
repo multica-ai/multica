@@ -10,7 +10,7 @@
  * must be updated to keep the "Counts and visibility must agree" rule
  * (apps/mobile/CLAUDE.md) intact.
  */
-import type { IssuePriority, IssueStatus } from "@multica/core/types";
+import type { IssuePriority, IssueStatus } from "@wallts/core/types";
 
 /** Statuses surfaced in list/board views (matches web — `cancelled` excluded). */
 export const BOARD_STATUSES: IssueStatus[] = [

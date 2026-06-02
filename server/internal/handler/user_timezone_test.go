@@ -25,7 +25,7 @@ func newTimezoneTestUser(t *testing.T, email string) string {
 }
 
 func TestUpdateMeAcceptsTimezone(t *testing.T) {
-	userID := newTimezoneTestUser(t, "tz-set@multica.ai")
+	userID := newTimezoneTestUser(t, "tz-set@wallts.ai")
 
 	w := httptest.NewRecorder()
 	req := newPatchMeRequest(userID, `{"timezone":"Asia/Shanghai"}`)
@@ -55,7 +55,7 @@ func TestUpdateMeAcceptsTimezone(t *testing.T) {
 }
 
 func TestUpdateMeRejectsInvalidTimezone(t *testing.T) {
-	userID := newTimezoneTestUser(t, "tz-reject@multica.ai")
+	userID := newTimezoneTestUser(t, "tz-reject@wallts.ai")
 
 	w := httptest.NewRecorder()
 	req := newPatchMeRequest(userID, `{"timezone":"Not/A/Real/Zone"}`)
@@ -78,7 +78,7 @@ func TestUpdateMeRejectsInvalidTimezone(t *testing.T) {
 
 // COALESCE semantics — omitting timezone must NOT clear an existing value.
 func TestUpdateMePreservesTimezoneWhenNotProvided(t *testing.T) {
-	userID := newTimezoneTestUser(t, "tz-preserve@multica.ai")
+	userID := newTimezoneTestUser(t, "tz-preserve@wallts.ai")
 
 	if _, err := testPool.Exec(context.Background(),
 		`UPDATE "user" SET timezone = 'America/Los_Angeles' WHERE id = $1`, userID,
@@ -110,7 +110,7 @@ func TestUpdateMePreservesTimezoneWhenNotProvided(t *testing.T) {
 // the UPDATE query this would either be a no-op (COALESCE) or a validation
 // error.
 func TestUpdateMeClearsTimezoneOnEmptyString(t *testing.T) {
-	userID := newTimezoneTestUser(t, "tz-clear@multica.ai")
+	userID := newTimezoneTestUser(t, "tz-clear@wallts.ai")
 
 	if _, err := testPool.Exec(context.Background(),
 		`UPDATE "user" SET timezone = 'Asia/Shanghai' WHERE id = $1`, userID,

@@ -22,12 +22,12 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       headlineLine1: "다음에 합류할 10명은",
       headlineLine2: "사람이 아닐지도 모릅니다.",
       subheading:
-        "Multica는 코딩 AI 에이전트를 진짜 팀원으로 만들어 주는 오픈소스 플랫폼입니다. 이슈를 맡기고, 진행 상황을 따라가고, 반복되는 노하우를 스킬로 쌓아 두세요. 사람과 AI 에이전트로 이루어진 팀을 한곳에서 관리할 수 있습니다.",
+        "Wallts는 코딩 AI 에이전트를 진짜 팀원으로 만들어 주는 오픈소스 플랫폼입니다. 이슈를 맡기고, 진행 상황을 따라가고, 반복되는 노하우를 스킬로 쌓아 두세요. 사람과 AI 에이전트로 이루어진 팀을 한곳에서 관리할 수 있습니다.",
       cta: "무료로 시작하기",
       downloadDesktop: "데스크톱 다운로드",
       talkToSales: "영업팀에 문의",
       worksWith: "지원 도구",
-      imageAlt: "사람과 AI 에이전트가 함께 이슈를 관리하는 Multica 보드 화면",
+      imageAlt: "사람과 AI 에이전트가 함께 이슈를 관리하는 Wallts 보드 화면",
     },
     features: {
       teammates: {
@@ -57,7 +57,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         label: "자율 실행",
         title: "맡겨 두기만 하세요 — 에이전트가 알아서 끝까지 해냅니다",
         description:
-          "한 번 답하고 끝나는 프롬프트 도구가 아닙니다. 작업을 대기열에 넣고, 가져오고, 실행하고, 완료 또는 실패까지 보고하는 흐름 전체를 Multica가 관리합니다. 막힌 부분은 에이전트가 먼저 알려 주고, 진행 상황은 실시간으로 올라옵니다.",
+          "한 번 답하고 끝나는 프롬프트 도구가 아닙니다. 작업을 대기열에 넣고, 가져오고, 실행하고, 완료 또는 실패까지 보고하는 흐름 전체를 Wallts가 관리합니다. 막힌 부분은 에이전트가 먼저 알려 주고, 진행 상황은 실시간으로 올라옵니다.",
         cards: [
           {
             title: "처음부터 끝까지 추적",
@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Wallts는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -139,7 +139,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           title: "CLI 설치하고 내 컴퓨터 연결하기",
           description:
-            "`multica setup`을 실행하면 로그인, 데몬 실행, 지원 코딩 도구 스캔까지 차례대로 안내합니다. 이미 설치된 도구는 자동으로 런타임에 등록됩니다.",
+            "`wallts setup`을 실행하면 로그인, 데몬 실행, 지원 코딩 도구 스캔까지 차례대로 안내합니다. 이미 설치된 도구는 자동으로 런타임에 등록됩니다.",
         },
         {
           title: "첫 에이전트 만들기",
@@ -161,13 +161,13 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       headlineLine1: "모두를 위한",
       headlineLine2: "오픈소스.",
       description:
-        "Multica는 완전한 오픈소스입니다. 코드를 직접 들여다보고, 원하는 환경에 셀프 호스팅하고, 사람과 AI 에이전트가 함께 일하는 방식을 같이 만들어 갈 수 있습니다.",
+        "Wallts는 완전한 오픈소스입니다. 코드를 직접 들여다보고, 원하는 환경에 셀프 호스팅하고, 사람과 AI 에이전트가 함께 일하는 방식을 같이 만들어 갈 수 있습니다.",
       cta: "GitHub에서 스타 누르기",
       highlights: [
         {
           title: "어디서든 셀프 호스팅",
           description:
-            "자체 인프라에서 Multica를 직접 운영하세요. Docker Compose, 단일 바이너리, Kubernetes를 지원하며, 데이터는 여러분의 네트워크 안에 그대로 남습니다.",
+            "자체 인프라에서 Wallts를 직접 운영하세요. Docker Compose, 단일 바이너리, Kubernetes를 지원하며, 데이터는 여러분의 네트워크 안에 그대로 남습니다.",
         },
         {
           title: "벤더 종속 없음",
@@ -191,29 +191,29 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       headline: "자주 묻는 질문.",
       items: [
         {
-          question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
+          question: "Wallts는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 11개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Wallts는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 11개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
           answer:
-            "둘 다 가능합니다. Docker Compose나 Kubernetes로 자체 인프라에 직접 호스팅할 수도 있고, Multica가 운영하는 클라우드 버전을 그대로 쓸 수도 있습니다. 데이터를 어디에 둘지는 직접 선택할 수 있습니다.",
+            "둘 다 가능합니다. Docker Compose나 Kubernetes로 자체 인프라에 직접 호스팅할 수도 있고, Wallts가 운영하는 클라우드 버전을 그대로 쓸 수도 있습니다. 데이터를 어디에 둘지는 직접 선택할 수 있습니다.",
         },
         {
           question: "코딩 에이전트를 직접 쓰는 것과 무엇이 다른가요?",
           answer:
-            "코딩 에이전트는 실행에 강합니다. Multica는 그 위에 작업 대기열, 팀 협업, 스킬 재사용, 런타임 모니터링, 에이전트별 작업 현황을 한눈에 보는 통합 화면을 얹습니다. 에이전트를 팀 안에서 운영하기 위한 관리 계층이라고 보시면 됩니다.",
+            "코딩 에이전트는 실행에 강합니다. Wallts는 그 위에 작업 대기열, 팀 협업, 스킬 재사용, 런타임 모니터링, 에이전트별 작업 현황을 한눈에 보는 통합 화면을 얹습니다. 에이전트를 팀 안에서 운영하기 위한 관리 계층이라고 보시면 됩니다.",
         },
         {
           question: "에이전트가 긴 작업도 자율적으로 처리할 수 있나요?",
           answer:
-            "네. Multica는 대기열 등록, 수락, 실행, 완료 또는 실패까지 작업 흐름 전체를 관리합니다. 에이전트는 막힌 부분을 먼저 알려 주고, 진행 상황은 실시간으로 기록됩니다.",
+            "네. Wallts는 대기열 등록, 수락, 실행, 완료 또는 실패까지 작업 흐름 전체를 관리합니다. 에이전트는 막힌 부분을 먼저 알려 주고, 진행 상황은 실시간으로 기록됩니다.",
         },
         {
           question: "코드는 안전한가요? 에이전트는 어디서 실행되나요?",
           answer:
-            "에이전트 실행은 사용자의 컴퓨터에 있는 로컬 데몬, 또는 직접 운영하는 클라우드 인프라에서 이뤄집니다. 코드는 Multica 서버를 거치지 않습니다. Multica는 작업 상태를 조율하고 이벤트를 전달하는 역할만 합니다.",
+            "에이전트 실행은 사용자의 컴퓨터에 있는 로컬 데몬, 또는 직접 운영하는 클라우드 인프라에서 이뤄집니다. 코드는 Wallts 서버를 거치지 않습니다. Wallts는 작업 상태를 조율하고 이벤트를 전달하는 역할만 합니다.",
         },
         {
           question: "에이전트는 몇 개까지 실행할 수 있나요?",
@@ -242,7 +242,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           links: [
             { label: "문서", href: "/docs/ko" },
             { label: "API", href: githubUrl },
-            { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
+            { label: "X (Twitter)", href: "https://x.com/WalltsAI" },
           ],
         },
         company: {
@@ -255,11 +255,11 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           ],
         },
       },
-      copyright: "© {year} Multica. All rights reserved.",
+      copyright: "© {year} Wallts. All rights reserved.",
     },
     changelog: {
       title: "변경 로그",
-      subtitle: "Multica의 새로운 업데이트와 개선 사항입니다.",
+      subtitle: "Wallts의 새로운 업데이트와 개선 사항입니다.",
       toc: "모든 릴리스",
       categories: {
         features: "새 기능",
@@ -299,7 +299,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           changes: [],
           features: [
             "에이전트가 이슈 댓글에서 작업을 이어갈 때 새 세션을 만들지 않고 이전 세션을 재개해, 작업 맥락을 그대로 이어갑니다.",
-            "Multica가 앱, 웹사이트, 문서에서 한국어를 지원하며, 전체 한국어 문서와 한국어 날짜 표시를 제공합니다.",
+            "Wallts가 앱, 웹사이트, 문서에서 한국어를 지원하며, 전체 한국어 문서와 한국어 날짜 표시를 제공합니다.",
             "이슈 화면에서 작업 중인 에이전트를 제목 가까이에 고정해 보여 주고, 여러 에이전트가 동시에 일할 때도 더 쉽게 확인할 수 있습니다.",
             "에이전트가 이슈 대화를 읽을 때 스레드 미리보기, 답글 수, 최근 활동 시간을 먼저 확인해 필요한 맥락을 더 빨리 찾을 수 있습니다.",
             "OpenClaw 런타임은 에이전트에 저장된 MCP 설정을 사용할 수 있고, Claude Opus 4.8도 모델 선택과 사용량 추정에 반영됩니다.",
@@ -355,7 +355,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           title: "iOS, Helm 셀프 호스팅, 더 매끄러운 협업",
           changes: [],
           features: [
-            "처음으로 실제 사용 가능한 모바일 클라이언트인 Multica for iOS가 출시되어, 로그인·워크스페이스·인박스·이슈·프로젝트·채팅·댓글·실시간 업데이트를 모두 지원합니다.",
+            "처음으로 실제 사용 가능한 모바일 클라이언트인 Wallts for iOS가 출시되어, 로그인·워크스페이스·인박스·이슈·프로젝트·채팅·댓글·실시간 업데이트를 모두 지원합니다.",
             "셀프 호스팅 팀은 이제 Helm 차트로 Kubernetes에 배포할 수 있고, Docker 설치 시 포트와 URL 설정도 한층 명확해졌습니다.",
             "프로젝트 리소스 선택기에 저장소 검색이 추가되었고, 런타임 사용량은 주요 모델 비용을 더 정확히 집계합니다.",
           ],
@@ -372,7 +372,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           title: "더 똑똑한 환영 흐름과 실시간 작업 신호",
           changes: [],
           features: [
-            "신규 사용자는 Multica Helper가 워크스페이스 소개, 둘러보기, 환영 페이지 만들기까지 함께 진행해 주는 새 온보딩 흐름을 경험하게 됩니다.",
+            "신규 사용자는 Wallts Helper가 워크스페이스 소개, 둘러보기, 환영 페이지 만들기까지 함께 진행해 주는 새 온보딩 흐름을 경험하게 됩니다.",
             "이슈 목록에서 어떤 에이전트가 작업 중인지 표시되며, 세부 정보 보기와 \"작업 중\" 필터도 함께 제공됩니다.",
             "하위 이슈가 완료되면 상위 이슈에도 플랫폼 업데이트가 남고, 알맞은 담당자에게도 알림이 갑니다.",
           ],
@@ -507,7 +507,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           title: "GitHub 연동과 안전한 이슈 탐색",
           changes: [],
           features: [
-            "GitHub를 연결해 연결된 Pull request를 Multica 이슈에 표시하고 상태를 동기화하며 PR 종료 시 이슈를 자동으로 닫을 수 있습니다.",
+            "GitHub를 연결해 연결된 Pull request를 Wallts 이슈에 표시하고 상태를 동기화하며 PR 종료 시 이슈를 자동으로 닫을 수 있습니다.",
             "채팅 메시지 첨부 파일과 이미지 미리보기를 지원하고, 에이전트와 런타임 공개 범위를 설정할 수 있습니다.",
             "단일 에이전트 작업 중지 전에 확인을 요청하고 GitHub 연동 문서를 제공합니다.",
           ],
@@ -558,7 +558,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           title: "데몬 디스크 사용량 CLI와 타임라인 개선",
           changes: [],
           features: [
-            "`multica daemon disk-usage`가 작업별, 워크스페이스별 디스크 사용량을 보여줍니다.",
+            "`wallts daemon disk-usage`가 작업별, 워크스페이스별 디스크 사용량을 보여줍니다.",
             "에이전트 설정의 스킬 picker에 검색 상자가 추가되고 데몬 GC 범위가 채팅, 오토파일럿, quick-create 작업까지 확장되었습니다.",
             "이슈 상세 breadcrumb에 빠른 참조용 식별자가 표시됩니다.",
           ],
@@ -607,15 +607,15 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           title: "Repo checkout --ref와 Hermes 재생 수정",
           changes: [],
           features: [
-            "`multica repo checkout --ref`가 브랜치, 태그, 특정 커밋을 대상으로 저장소를 가져올 수 있습니다.",
-            "`multica agent avatar`가 CLI에서 에이전트 아바타를 직접 업로드합니다.",
+            "`wallts repo checkout --ref`가 브랜치, 태그, 특정 커밋을 대상으로 저장소를 가져올 수 있습니다.",
+            "`wallts agent avatar`가 CLI에서 에이전트 아바타를 직접 업로드합니다.",
             "인박스 Done 작업에 보관 버튼이 추가되고 중복 mark-as-done hover 버튼은 제거되었습니다.",
           ],
           improvements: [
             "긴 타임라인 이슈 열기, multi-replica 모델 picker, 데몬 empty-claim cache TTL이 개선되었습니다.",
           ],
           fixes: [
-            "새 에이전트 즉시 표시, Hermes 이전 답변 재생, Codex GPT-5.5 모델 표시, `multica login --token`, CLI 업데이트 상태, session resume, Kanban 설정, 오토파일럿 반응형 등을 수정했습니다.",
+            "새 에이전트 즉시 표시, Hermes 이전 답변 재생, Codex GPT-5.5 모델 표시, `wallts login --token`, CLI 업데이트 상태, session resume, Kanban 설정, 오토파일럿 반응형 등을 수정했습니다.",
           ],
         },
         {
@@ -629,7 +629,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
             "프로젝트별 저장소 바인딩과 권한 인식 UI가 추가되었습니다.",
           ],
           improvements: [
-            "데몬 claim polling의 Redis fast-path와 Multica Agent 커밋의 Co-authored-by trailer, 데스크톱 reload 차단이 개선되었습니다.",
+            "데몬 claim polling의 Redis fast-path와 Wallts Agent 커밋의 Co-authored-by trailer, 데스크톱 reload 차단이 개선되었습니다.",
           ],
           fixes: [
             "Quick Create 요구사항 생성, 인박스 댓글 이동과 자동 보관, 작업 재실행 session, 초대 후 워크스페이스 이동을 수정했습니다.",
@@ -691,7 +691,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           title: "사용자 지정 에이전트 환경 변수와 더 나은 실패 메시지",
           changes: [],
           features: [
-            "`multica agent create/update --custom-env KEY=VALUE`가 에이전트 실행에 사용자 지정 환경 변수를 주입합니다.",
+            "`wallts agent create/update --custom-env KEY=VALUE`가 에이전트 실행에 사용자 지정 환경 변수를 주입합니다.",
             "에이전트 실패 메시지에 런타임 CLI stderr tail이 포함되어 디버깅이 쉬워졌습니다.",
             "CLI 업데이트 다운로드 timeout을 설정할 수 있습니다.",
           ],
@@ -968,7 +968,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           date: "2026-03-06",
           title: "핵심 플랫폼",
           changes: [
-            "Multica 핵심 플랫폼 기능을 추가했습니다.",
+            "Wallts 핵심 플랫폼 기능을 추가했습니다.",
           ],
         },
         {
@@ -976,15 +976,15 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           date: "2026-03-05",
           title: "기반 구축",
           changes: [
-            "Multica의 초기 기반을 공개했습니다.",
+            "Wallts의 초기 기반을 공개했습니다.",
           ],
         },
       ],
     },
     about: {
-      title: "Multica 소개",
+      title: "Wallts 소개",
       nameLine: {
-        prefix: "Multica — ",
+        prefix: "Wallts — ",
         mul: "Mul",
         tiplexed: "tiplexed ",
         i: "I",
@@ -995,41 +995,41 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         gent: "gent.",
       },
       paragraphs: [
-        "Multica라는 이름은 1960년대의 선구적인 운영체제 Multics에서 따왔습니다. Multics는 여러 사용자가 하나의 컴퓨터를 공유하면서도 각자 자기 컴퓨터를 쓰는 것처럼 느끼게 해 주는 시분할이라는 개념을 처음 널리 퍼뜨렸습니다. Unix는 Multics를 의도적으로 단순화하며 태어났습니다. 한 사용자, 한 작업, 하나의 우아한 철학에 집중한 결과였습니다.",
-        "지금 비슷한 전환점이 다시 오고 있다고 봅니다. 지난 수십 년 동안 소프트웨어 팀은 사실상 단일 스레드로 일해 왔습니다. 엔지니어 한 명이 한 작업을 맡고, 한 번에 하나의 맥락만 다루는 식이었습니다. AI 에이전트는 이 공식을 바꿉니다. Multica는 시분할의 발상을 다시 꺼내 오되, 이번에는 시스템을 함께 쓰는 \"사용자\"가 사람과 자율 에이전트 양쪽을 의미하는 시대에 맞게 다시 풀어냅니다.",
-        "Multica에서 에이전트는 정식 팀원입니다. 사람 동료와 똑같이 이슈를 할당받고, 진행 상황을 보고하고, 막힌 부분을 알리고, 코드를 배포합니다. 담당자 선택, 활동 타임라인, 작업 생명주기, 런타임 인프라는 모두 이 전제를 중심으로 처음부터 설계되었습니다.",
+        "Wallts라는 이름은 1960년대의 선구적인 운영체제 Multics에서 따왔습니다. Multics는 여러 사용자가 하나의 컴퓨터를 공유하면서도 각자 자기 컴퓨터를 쓰는 것처럼 느끼게 해 주는 시분할이라는 개념을 처음 널리 퍼뜨렸습니다. Unix는 Multics를 의도적으로 단순화하며 태어났습니다. 한 사용자, 한 작업, 하나의 우아한 철학에 집중한 결과였습니다.",
+        "지금 비슷한 전환점이 다시 오고 있다고 봅니다. 지난 수십 년 동안 소프트웨어 팀은 사실상 단일 스레드로 일해 왔습니다. 엔지니어 한 명이 한 작업을 맡고, 한 번에 하나의 맥락만 다루는 식이었습니다. AI 에이전트는 이 공식을 바꿉니다. Wallts는 시분할의 발상을 다시 꺼내 오되, 이번에는 시스템을 함께 쓰는 \"사용자\"가 사람과 자율 에이전트 양쪽을 의미하는 시대에 맞게 다시 풀어냅니다.",
+        "Wallts에서 에이전트는 정식 팀원입니다. 사람 동료와 똑같이 이슈를 할당받고, 진행 상황을 보고하고, 막힌 부분을 알리고, 코드를 배포합니다. 담당자 선택, 활동 타임라인, 작업 생명주기, 런타임 인프라는 모두 이 전제를 중심으로 처음부터 설계되었습니다.",
         "Multics가 그랬듯, 핵심은 multiplexing입니다. 작은 팀이라고 작게 움직일 필요는 없습니다. 올바른 시스템이 있다면 엔지니어 두 명과 에이전트 한 무리가 스무 명짜리 팀처럼 움직일 수 있습니다.",
-        "Multica는 완전한 오픈소스이며 셀프 호스팅할 수 있습니다. 데이터는 여러분의 인프라 안에 그대로 남습니다. 모든 코드를 들여다보고, API를 확장하고, 원하는 LLM 제공자를 연결하고, 커뮤니티에 기여할 수 있습니다.",
+        "Wallts는 완전한 오픈소스이며 셀프 호스팅할 수 있습니다. 데이터는 여러분의 인프라 안에 그대로 남습니다. 모든 코드를 들여다보고, API를 확장하고, 원하는 LLM 제공자를 연결하고, 커뮤니티에 기여할 수 있습니다.",
       ],
       cta: "GitHub에서 보기",
     },
     download: {
       hero: {
         macArm64: {
-          title: "macOS용 Multica",
+          title: "macOS용 Wallts",
           sub: "Apple Silicon · 데몬 포함, 별도 설정 없음",
           primary: "다운로드(.dmg)",
           altZip: "또는 .zip 다운로드",
         },
         macIntel: {
-          title: "macOS용 Multica",
+          title: "macOS용 Wallts",
           sub: "Apple Silicon이 필요합니다. Intel Mac은 아직 지원하지 않습니다.",
           disabledCta: "Apple Silicon 필요",
           intelHint:
             "Intel Mac을 사용 중인가요? 아래 CLI를 사용하세요. 같은 데몬이 실행됩니다.",
         },
         winX64: {
-          title: "Windows용 Multica",
+          title: "Windows용 Wallts",
           sub: "데몬 포함, 별도 설정 없음",
           primary: "다운로드(.exe)",
         },
         winArm64: {
-          title: "Windows용 Multica",
+          title: "Windows용 Wallts",
           sub: "ARM · 데몬 포함, 별도 설정 없음",
           primary: "다운로드(.exe)",
         },
         linux: {
-          title: "Linux용 Multica",
+          title: "Linux용 Wallts",
           sub: "데몬 포함, 별도 설정 없음",
           primary: "AppImage 다운로드",
           altFormats: "또는 .deb / .rpm",
@@ -1069,7 +1069,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       cloud: {
         title: "클라우드 런타임 (대기자 명단)",
-        sub: "Multica가 런타임을 직접 호스팅해 드립니다. 아직 정식 출시 전입니다. 이메일을 남겨 주시면 준비되는 대로 알려드릴게요.",
+        sub: "Wallts가 런타임을 직접 호스팅해 드립니다. 아직 정식 출시 전입니다. 이메일을 남겨 주시면 준비되는 대로 알려드릴게요.",
       },
       footer: {
         releaseNotes: "{version}의 새로운 내용",
@@ -1081,7 +1081,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
     contactSales: {
       pageTitle: "영업팀 문의",
       pageDescription:
-        "회사에 사람과 에이전트가 함께 일하는 워크플로를 도입하는 방법을 Multica 팀과 함께 이야기해 보세요.",
+        "회사에 사람과 에이전트가 함께 일하는 워크플로를 도입하는 방법을 Wallts 팀과 함께 이야기해 보세요.",
       eyebrow: "영업팀 문의",
       title: "어떤 도움이 필요하신지 알려 주세요",
       subtitle: "가장 알맞은 방안을 미리 준비해 드릴 수 있도록, 몇 가지만 적어 주세요.",
@@ -1098,10 +1098,10 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         companyName: "회사명",
         companySize: "회사 규모",
         countryRegion: "국가 / 지역",
-        useCase: "Multica를 어떻게 사용하거나 어디에 활용하실 계획인가요?",
+        useCase: "Wallts를 어떻게 사용하거나 어디에 활용하실 계획인가요?",
         goals: "목표 또는 현재 겪고 있는 과제",
         goalsHint:
-          "Multica로 이루고 싶은 일이나 지금 겪고 있는 문제를 알려 주세요. 자세히 적어 주실수록 더 알맞게 도와드릴 수 있습니다.",
+          "Wallts로 이루고 싶은 일이나 지금 겪고 있는 문제를 알려 주세요. 자세히 적어 주실수록 더 알맞게 도와드릴 수 있습니다.",
         selectPlaceholder: "선택하세요",
         submit: "제출",
         submitting: "제출 중...",
@@ -1116,9 +1116,9 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       ],
       useCases: [
         { value: "evaluate", label: "팀 도입을 검토 중" },
-        { value: "adopt_team", label: "팀 또는 회사에 Multica 도입" },
+        { value: "adopt_team", label: "팀 또는 회사에 Wallts 도입" },
         { value: "self_host", label: "자체 인프라에 셀프 호스팅" },
-        { value: "integrate", label: "기존 도구와 Multica 연동" },
+        { value: "integrate", label: "기존 도구와 Wallts 연동" },
         { value: "partner", label: "파트너십 또는 리셀러 문의" },
         { value: "other", label: "기타" },
       ],
@@ -1166,22 +1166,22 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       ],
       consent: {
         intro:
-          "Multica, Inc.는 여러분의 개인정보를 소중히 다룹니다. 제공해 주신 개인정보는 계정 관리와 요청하신 제품·서비스 제공에만 사용합니다. 가끔씩 제품 업데이트, 활용 팁, 도움이 될 만한 인사이트도 함께 전해 드리고 싶습니다. 소식을 받고 싶으시다면 아래에서 선택해 주세요.",
+          "Wallts, Inc.는 여러분의 개인정보를 소중히 다룹니다. 제공해 주신 개인정보는 계정 관리와 요청하신 제품·서비스 제공에만 사용합니다. 가끔씩 제품 업데이트, 활용 팁, 도움이 될 만한 인사이트도 함께 전해 드리고 싶습니다. 소식을 받고 싶으시다면 아래에서 선택해 주세요.",
         outreach:
-          "서비스 업데이트, 지원 문의, 비즈니스 관련 후속 연락 등 Multica, Inc.로부터 개별 연락을 받겠습니다.",
+          "서비스 업데이트, 지원 문의, 비즈니스 관련 후속 연락 등 Wallts, Inc.로부터 개별 연락을 받겠습니다.",
         updates:
-          "Multica의 제품 업데이트, 인사이트, 이벤트 초대 소식을 받겠습니다.",
+          "Wallts의 제품 업데이트, 인사이트, 이벤트 초대 소식을 받겠습니다.",
         unsubscribe:
           "언제든 수신을 거부할 수 있습니다. 개인정보와 데이터 권리를 어떻게 다루는지는 다음 문서에서 자세히 확인하실 수 있습니다:",
         submitConsent:
-          "\"제출\"을 클릭하시면 요청하신 콘텐츠를 보내 드리기 위해 Multica, Inc.가 정보를 저장하고 처리하는 것에 동의하게 됩니다.",
+          "\"제출\"을 클릭하시면 요청하신 콘텐츠를 보내 드리기 위해 Wallts, Inc.가 정보를 저장하고 처리하는 것에 동의하게 됩니다.",
         privacyLinkLabel: "개인정보 처리방침.",
         privacyLinkHref: "/about",
       },
       success: {
         title: "감사합니다. 요청을 잘 받았습니다.",
         message:
-          "Multica 팀원이 영업일 기준 3일 이내에 답변드릴 예정입니다. 그동안 문서를 둘러보시거나 GitHub에서 스타를 눌러 주세요.",
+          "Wallts 팀원이 영업일 기준 3일 이내에 답변드릴 예정입니다. 그동안 문서를 둘러보시거나 GitHub에서 스타를 눌러 주세요.",
         cta: "홈으로 돌아가기",
       },
       errors: {

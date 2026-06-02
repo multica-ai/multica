@@ -1,11 +1,11 @@
 ---
 title: 자체 호스팅 빠른 시작
-description: Docker로 자체 서버나 기기에서 Multica를 실행합니다(Kubernetes에서는 Helm 사용 가능). 약 10분 소요됩니다.
+description: Docker로 자체 서버나 기기에서 Wallts를 실행합니다(Kubernetes에서는 Helm 사용 가능). 약 10분 소요됩니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-이 페이지는 Docker로 Multica **서버**(백엔드 + 프런트엔드 + PostgreSQL)를 자체 기기나 서버에서 실행하는 과정을 안내합니다. 완료하면 [워크스페이스](/workspaces), [이슈](/issues), [댓글](/comments), [에이전트](/agents) 구성을 비롯한 데이터가 완전히 본인의 통제하에 놓입니다.
+이 페이지는 Docker로 Wallts **서버**(백엔드 + 프런트엔드 + PostgreSQL)를 자체 기기나 서버에서 실행하는 과정을 안내합니다. 완료하면 [워크스페이스](/workspaces), [이슈](/issues), [댓글](/comments), [에이전트](/agents) 구성을 비롯한 데이터가 완전히 본인의 통제하에 놓입니다.
 
 에이전트 **실행**은 여전히 로컬에서 실행하는 [데몬](/daemon-runtimes)과 그 기기에 설치된 [AI 코딩 도구](/providers)에 의존합니다 — Cloud와 완전히 동일합니다. 자체 호스팅은 서버 계층을 교체할 뿐, 실행 계층을 교체하지는 않습니다.
 
@@ -23,15 +23,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 </Callout>
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
-cd multica
+git clone https://github.com/wallts-ai/wallts.git
+cd wallts
 make selfhost
 ```
 
 `make selfhost`는 다음을 수행합니다.
 
 1. `.env`가 없으면 `.env.example`로부터 생성하며 **무작위 JWT_SECRET**을 함께 만듭니다
-2. 공식 Docker 이미지(PostgreSQL, Multica backend, Multica frontend)를 받아옵니다
+2. 공식 Docker 이미지(PostgreSQL, Wallts backend, Wallts frontend)를 받아옵니다
 3. `docker-compose.selfhost.yml`을 사용해 모든 서비스를 시작합니다
 4. 백엔드의 `/health` 엔드포인트가 준비될 때까지 기다립니다
 
@@ -55,11 +55,11 @@ make selfhost
 ## 2. 중요: 프로덕션 안전 설정 유지하기
 
 <Callout type="warning">
-**`docker-compose.selfhost.yml`은 기본적으로 `APP_ENV`를 `production`으로 설정하고** `MULTICA_DEV_VERIFICATION_CODE`를 비워 두므로, 공개 인스턴스에는 고정 코드가 없습니다.
+**`docker-compose.selfhost.yml`은 기본적으로 `APP_ENV`를 `production`으로 설정하고** `WALLTS_DEV_VERIFICATION_CODE`를 비워 두므로, 공개 인스턴스에는 고정 코드가 없습니다.
 
-`MULTICA_DEV_VERIFICATION_CODE`는 로컬 또는 비공개 테스트 자동화에서만 설정하세요. `APP_ENV`가 non-production일 때 고정 코드가 활성화되어 있으면, 코드를 요청할 수 있는 누구나 그 고정 값으로 로그인할 수 있습니다. [인증 설정 → 고정 로컬 테스트 코드](/auth-setup#fixed-local-testing-codes)를 참고하세요.
+`WALLTS_DEV_VERIFICATION_CODE`는 로컬 또는 비공개 테스트 자동화에서만 설정하세요. `APP_ENV`가 non-production일 때 고정 코드가 활성화되어 있으면, 코드를 요청할 수 있는 누구나 그 고정 값으로 로그인할 수 있습니다. [인증 설정 → 고정 로컬 테스트 코드](/auth-setup#fixed-local-testing-codes)를 참고하세요.
 
-공개 배포 전에는 `.env`에 `APP_ENV=production`이 설정되어 있고 `MULTICA_DEV_VERIFICATION_CODE`가 비어 있는지 반드시 확인하세요.
+공개 배포 전에는 `.env`에 `APP_ENV=production`이 설정되어 있고 `WALLTS_DEV_VERIFICATION_CODE`가 비어 있는지 반드시 확인하세요.
 </Callout>
 
 ## 3. 이메일 서비스 구성하기(선택 사항이지만 권장)
@@ -99,7 +99,7 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com  # From: 헤더로도 재사용됨
 ```bash
 SMTP_HOST=smtp.internal.example.com
 SMTP_PORT=587
-SMTP_USERNAME=multica
+SMTP_USERNAME=wallts
 SMTP_PASSWORD=...
 SMTP_TLS_INSECURE=false        # 비공개 CA / 자체 서명 인증서일 때만 true로 설정
 RESEND_FROM_EMAIL=noreply@yourdomain.com
@@ -115,19 +115,19 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com
 
 - 이메일을 입력합니다
 - 구성한 이메일 백엔드(Resend 또는 SMTP relay)에서 인증 코드를 받습니다. 둘 다 구성하지 않았다면 서버 컨테이너 stdout에서 복사하세요 — `[DEV] Verification code` 줄을 찾으면 됩니다
-- non-production 비공개 인스턴스에서 `MULTICA_DEV_VERIFICATION_CODE=888888`을 명시적으로 설정한 경우가 아니라면 `888888`을 사용하지 마세요
+- non-production 비공개 인스턴스에서 `WALLTS_DEV_VERIFICATION_CODE=888888`을 명시적으로 설정한 경우가 아니라면 `888888`을 사용하지 마세요
 - 로그인하고 첫 워크스페이스를 생성합니다
 
 ## 5. CLI를 자체 서버로 연결하기
 
-CLI 설치는 [Cloud 빠른 시작 → 2. CLI 설치](/cloud-quickstart#2-install-the-multica-cli)와 동일합니다 — Homebrew / 스크립트 / PowerShell 중 하나를 고르세요.
+CLI 설치는 [Cloud 빠른 시작 → 2. CLI 설치](/cloud-quickstart#2-install-the-wallts-cli)와 동일합니다 — Homebrew / 스크립트 / PowerShell 중 하나를 고르세요.
 
 ### 5a. 같은 기기
 
 CLI와 서버가 같은 호스트에서 실행된다면 기본값으로 이미 동작합니다.
 
 ```bash
-multica setup self-host
+wallts setup self-host
 ```
 
 이렇게 하면 CLI가 `http://localhost:8080`(백엔드)과 `http://localhost:3000`(프런트엔드)을 가리키고, 브라우저 로그인을 안내하며, PAT를 로컬에 저장하고, **데몬을 자동으로 시작합니다**.
@@ -137,7 +137,7 @@ multica setup self-host
 compose 스택은 `127.0.0.1`에서만 수신하므로, 다른 기기에 있는 데몬은 `http://<server-ip>:8080`에 직접 연결할 수 없습니다 — 그리고 그렇게 되기를 원해서도 안 됩니다. 그렇지 않으면 기본 `JWT_SECRET`이 공개 인터넷에서 접근 가능해지기 때문입니다. 서버에 TLS를 종료하고 `127.0.0.1:8080`(백엔드)과 `127.0.0.1:3000`(프런트엔드)으로 전달하는 리버스 프록시를 두고, CLI를 공개 HTTPS URL로 연결하세요.
 
 ```bash
-multica setup self-host \
+wallts setup self-host \
   --server-url https://<your-domain> \
   --app-url https://<your-domain>
 ```
@@ -145,7 +145,7 @@ multica setup self-host \
 단일 호스트네임에서 프런트엔드와 백엔드를 모두 앞단에 두는(데몬과 웹 앱 모두에 필요한 WebSocket 지원 포함) 최소 Caddyfile은 다음과 같습니다.
 
 ```nginx
-multica.example.com {
+wallts.example.com {
     # WebSocket route — must come before the catch-all
     @ws path /ws /ws/*
     handle @ws {
@@ -164,7 +164,7 @@ multica.example.com {
 }
 ```
 
-프록시를 올린 후에는 서버의 `.env`에 `FRONTEND_ORIGIN=https://multica.example.com`을 설정하고 백엔드를 재시작하세요 — 그렇지 않으면 WebSocket origin 검사가 브라우저를 거부합니다([문제 해결 → WebSocket이 연결되지 않음](/troubleshooting#websocket-cant-connect)).
+프록시를 올린 후에는 서버의 `.env`에 `FRONTEND_ORIGIN=https://wallts.example.com`을 설정하고 백엔드를 재시작하세요 — 그렇지 않으면 WebSocket origin 검사가 브라우저를 거부합니다([문제 해결 → WebSocket이 연결되지 않음](/troubleshooting#websocket-cant-connect)).
 
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)도 견고한 선택지입니다 — 호스트에 어떤 포트도 노출하지 않고도 TLS와 공개 호스트네임을 제공합니다. Nginx로 동등하게 구성하는 방법(`app.` / `api.`을 별도 호스트네임으로 분리, WebSocket용 `proxy_set_header Upgrade`)도 똑같이 잘 동작합니다. 핵심 요구 사항은 TLS 종료와 `/ws`에서의 `Upgrade` 헤더 전달입니다.
 
@@ -183,9 +183,9 @@ Cloud와 동일한 흐름입니다 — [Cloud 빠른 시작 → 5-6단계](/clou
 **옵션 A — 외부 cron / systemd-timer(가장 간단함).** 임의의 외부 스케줄러에서 5분마다 롤업을 실행합니다. 멱등하고 워터마크 기반이므로, 놓친 틱은 따라잡습니다.
 
 ```bash
-# /etc/cron.d/multica-rollup — every 5 minutes
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
+# /etc/cron.d/wallts-rollup — every 5 minutes
+*/5 * * * * root docker compose -f /path/to/wallts/docker-compose.selfhost.yml \
+  exec -T postgres psql -U wallts -d wallts \
   -c "SELECT rollup_task_usage_hourly();" >/dev/null
 ```
 
@@ -209,54 +209,54 @@ docker compose -f docker-compose.selfhost.yml exec backend \
 
 `--sleep-between-slices=2s`는 바쁜 DB에서 읽기 부하를 조절합니다. 완료된 후 백엔드 컨테이너를 재시작하면(시작 시 migration이 실행됨) 업그레이드가 완료됩니다.
 
-전체 레퍼런스 — Kubernetes `CronJob` 템플릿과 업그레이드 순서 포함 — 는 저장소의 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)에 있습니다.
+전체 레퍼런스 — Kubernetes `CronJob` 템플릿과 업그레이드 순서 포함 — 는 저장소의 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)에 있습니다.
 
 ## Kubernetes 배포(대체 방안)
 
-이미 Kubernetes 클러스터를 운영 중이라면, 저장소에는 `deploy/helm/multica/`에 Helm 차트도 포함되어 있습니다. k8s용 `make selfhost`에 해당합니다 — 동일한 백엔드 이미지, 프런트엔드 이미지, `pgvector/pgvector:pg17` Postgres를 Deployment / Service / Ingress로 패키징하고, `values.yaml`로 렌더링한 하나의 `ConfigMap`을 함께 제공합니다. k3s + Traefik + `local-path`를 기준으로 작성되었으며, Ingress 컨트롤러와 기본 `ReadWriteOnce` StorageClass가 있는 모든 클러스터에서 동작합니다.
+이미 Kubernetes 클러스터를 운영 중이라면, 저장소에는 `deploy/helm/wallts/`에 Helm 차트도 포함되어 있습니다. k8s용 `make selfhost`에 해당합니다 — 동일한 백엔드 이미지, 프런트엔드 이미지, `pgvector/pgvector:pg17` Postgres를 Deployment / Service / Ingress로 패키징하고, `values.yaml`로 렌더링한 하나의 `ConfigMap`을 함께 제공합니다. k3s + Traefik + `local-path`를 기준으로 작성되었으며, Ingress 컨트롤러와 기본 `ReadWriteOnce` StorageClass가 있는 모든 클러스터에서 동작합니다.
 
-이 차트는 **시크릿 값을 템플릿화하지 않습니다**. `multica-secrets`라는 이름의 Secret을 이름으로 참조하므로, 실제 JWT / DB / Resend / Google 키가 git이나 `values.yaml`에 들어갈 필요가 전혀 없습니다. 네임스페이스와 Secret을 kubectl로 한 번 생성하세요.
+이 차트는 **시크릿 값을 템플릿화하지 않습니다**. `wallts-secrets`라는 이름의 Secret을 이름으로 참조하므로, 실제 JWT / DB / Resend / Google 키가 git이나 `values.yaml`에 들어갈 필요가 전혀 없습니다. 네임스페이스와 Secret을 kubectl로 한 번 생성하세요.
 
 ```bash
-kubectl create namespace multica
+kubectl create namespace wallts
 
-kubectl -n multica create secret generic multica-secrets \
+kubectl -n wallts create secret generic wallts-secrets \
   --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
   --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
   --from-literal=RESEND_API_KEY="" \
   --from-literal=GOOGLE_CLIENT_SECRET="" \
   --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+  --from-literal=WALLTS_DEV_VERIFICATION_CODE=""
 ```
 
 그런 다음 차트를 설치합니다.
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
-cd multica
-helm install multica deploy/helm/multica -n multica
+git clone https://github.com/wallts-ai/wallts.git
+cd wallts
+helm install wallts deploy/helm/wallts -n wallts
 ```
 
-기본값은 호스트네임 `multica.dev.lan`(web)과 `api.multica.dev.lan`(백엔드)을 가정합니다. 이것들을 `/etc/hosts`(또는 로컬 DNS)에 추가해, Ingress에 도달 가능한 임의의 노드 IP를 가리키도록 하세요. 다른 호스트네임을 사용하려면 `deploy/helm/multica/values.yaml`을 복사한 뒤 `ingress.frontend.host` / `ingress.backend.host`와 그에 대응하는 `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri`를 편집하고, `-f my-values.yaml`로 설치하세요.
+기본값은 호스트네임 `wallts.dev.lan`(web)과 `api.wallts.dev.lan`(백엔드)을 가정합니다. 이것들을 `/etc/hosts`(또는 로컬 DNS)에 추가해, Ingress에 도달 가능한 임의의 노드 IP를 가리키도록 하세요. 다른 호스트네임을 사용하려면 `deploy/helm/wallts/values.yaml`을 복사한 뒤 `ingress.frontend.host` / `ingress.backend.host`와 그에 대응하는 `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri`를 편집하고, `-f my-values.yaml`로 설치하세요.
 
 콜드 클러스터에서는 백엔드가 Postgres를 기다리고 migration을 실행하는 동안 몇 분간 `Running` 상태이지만 `Ready`는 아닐 수 있습니다 — startupProbe가 이를 흡수하므로 파드는 재시작되지 않습니다. `Ready`가 되면:
 
 ```bash
-curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+curl -H "Host: api.wallts.dev.lan" http://<ingress-ip>/healthz
 # {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
 ```
 
-그런 다음 `http://multica.dev.lan`을 열고 위의 [4단계 — 첫 로그인](#4-first-login--create-a-workspace)에서 이어서 진행하세요. CLI를 Ingress 호스트네임으로 연결합니다.
+그런 다음 `http://wallts.dev.lan`을 열고 위의 [4단계 — 첫 로그인](#4-first-login--create-a-workspace)에서 이어서 진행하세요. CLI를 Ingress 호스트네임으로 연결합니다.
 
 ```bash
-multica setup self-host \
-  --server-url http://api.multica.dev.lan \
-  --app-url http://multica.dev.lan
+wallts setup self-host \
+  --server-url http://api.wallts.dev.lan \
+  --app-url http://wallts.dev.lan
 ```
 
-차트를 변경하지 않고 최신 이미지만 받아오려면 `kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`를 실행하세요. 특정 Multica 릴리스를 고정하려면 values 파일에서 `images.backend.tag` / `images.frontend.tag`를 설정하고 `helm upgrade`를 실행하세요. `helm -n multica uninstall multica`는 워크로드를 제거하지만 PVC와 Secret은 유지합니다. `kubectl delete namespace multica`는 모든 것을 삭제합니다.
+차트를 변경하지 않고 최신 이미지만 받아오려면 `kubectl -n wallts rollout restart deploy/wallts-backend deploy/wallts-frontend`를 실행하세요. 특정 Wallts 릴리스를 고정하려면 values 파일에서 `images.backend.tag` / `images.frontend.tag`를 설정하고 `helm upgrade`를 실행하세요. `helm -n wallts uninstall wallts`는 워크로드를 제거하지만 PVC와 Secret은 유지합니다. `kubectl delete namespace wallts`는 모든 것을 삭제합니다.
 
-전체 레퍼런스 — 세 가지 로그인 모드, web 이미지에 빌드 타임에 굳혀진 `REMOTE_API_URL`에 대한 `backend` ExternalName 우회책, 리소스 제한, TLS — 는 저장소의 [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)에 있습니다.
+전체 레퍼런스 — 세 가지 로그인 모드, web 이미지에 빌드 타임에 굳혀진 `REMOTE_API_URL`에 대한 `backend` ExternalName 우회책, 리소스 제한, TLS — 는 저장소의 [`SELF_HOSTING.md`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)에 있습니다.
 
 ## 자주 발생하는 문제
 
@@ -272,4 +272,4 @@ multica setup self-host \
 - [인증 설정](/auth-setup) — Resend / OAuth / 가입 허용 목록 상세
 - [GitHub 연동](/github-integration) — GitHub App을 연결해 PR이 이슈에 자동 연결되고 머지 시 이슈가 닫히도록 설정
 - [문제 해결](/troubleshooting) — 문제가 생기면 여기서 시작하세요
-- [데스크톱 앱](/desktop-app) — `~/.multica/desktop.json`을 통한 선택적 데스크톱 설정. 웹 프런트엔드 + CLI가 여전히 가장 빠른 자체 호스팅 경로입니다
+- [데스크톱 앱](/desktop-app) — `~/.wallts/desktop.json`을 통한 선택적 데스크톱 설정. 웹 프런트엔드 + CLI가 여전히 가장 빠른 자체 호스팅 경로입니다

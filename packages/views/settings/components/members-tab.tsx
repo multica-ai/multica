@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Users, Clock, X, Mail } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { MemberWithUser, MemberRole, Invitation } from "@multica/core/types";
-import { Input } from "@multica/ui/components/ui/input";
-import { Button } from "@multica/ui/components/ui/button";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
-import { Badge } from "@multica/ui/components/ui/badge";
+import type { MemberWithUser, MemberRole, Invitation } from "@wallts/core/types";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Card, CardContent } from "@wallts/ui/components/ui/card";
+import { Badge } from "@wallts/ui/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -17,14 +17,14 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@multica/ui/components/ui/alert-dialog";
+} from "@wallts/ui/components/ui/alert-dialog";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "@multica/ui/components/ui/select";
+} from "@wallts/ui/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -34,14 +34,14 @@ import {
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
-} from "@multica/ui/components/ui/dropdown-menu";
+} from "@wallts/ui/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
-import { memberListOptions, invitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
-import { api } from "@multica/core/api";
+import { useAuthStore } from "@wallts/core/auth";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { useCurrentWorkspace } from "@wallts/core/paths";
+import { memberListOptions, invitationListOptions, workspaceKeys } from "@wallts/core/workspace/queries";
+import { api } from "@wallts/core/api";
 import { useT } from "../../i18n";
 
 const ROLE_ICONS: Record<MemberRole, typeof Crown> = {

@@ -37,7 +37,7 @@ Step 3 [开始探索]
 workspace layout gate: onboarded_at != NULL ✓ 放行
 <WelcomeAfterOnboarding /> consumes welcome-store:
   phase 1: full-screen loading "Preparing your Helper…"
-           api.listAgents → 查重名 Multica Helper(workspace 可见的)
+           api.listAgents → 查重名 Wallts Helper(workspace 可见的)
            → 找到 → 复用
            → 没找到 → api.createAgent({name, instructions: HELPER_INSTRUCTIONS[lang], runtime_id, ...})
   phase 2: blocking Modal(无关闭按钮 / Escape no-op / outside-click no-op)
@@ -58,7 +58,7 @@ workspace layout gate ✓ 放行
   Modal 打开(可关闭)
   后台并发 api.createIssue × 2:
     - Connect a runtime to start using agents
-    - Create your first Multica Agent
+    - Create your first Wallts Agent
   渲染 2 张 issue 卡;点卡 → navigate;关 Modal → 留在 /issues 列表
 ```
 

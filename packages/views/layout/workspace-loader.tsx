@@ -1,6 +1,6 @@
 "use client";
 
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { WalltsIcon } from "@wallts/ui/components/common/wallts-icon";
 import { useT } from "../i18n";
 
 /**
@@ -22,7 +22,7 @@ export function WorkspaceLoader({ name }: { name?: string | null }) {
       role="status"
     >
       <div className="flex flex-col items-center gap-4">
-        <MulticaIcon className="size-8 animate-pulse" />
+        <WalltsIcon className="size-8 animate-pulse" />
         {name ? (
           <p className="text-sm text-muted-foreground">
             {t(($) => $.workspace_loader.loading_named_prefix)}{" "}

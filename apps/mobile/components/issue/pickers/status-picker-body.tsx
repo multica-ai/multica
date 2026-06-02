@@ -11,7 +11,7 @@
 import { Pressable, ScrollView, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { BOARD_STATUSES, STATUS_LABEL } from "@/lib/issue-status";

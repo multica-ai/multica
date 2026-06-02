@@ -51,7 +51,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/dwickyfp/wallts/server/internal/logger"
 )
 
 func main() {
@@ -73,7 +73,7 @@ func run() error {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		dbURL = "postgres://wallts:wallts@localhost:5432/wallts?sslmode=disable"
 	}
 
 	// SIGINT/SIGTERM cancels ctx so an in-flight slice stops cleanly —

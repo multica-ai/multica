@@ -98,7 +98,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// Drop `[[skills.config]]` entries inherited from the user's
 	// ~/.codex/config.toml. Codex Desktop writes plugin-backed skills with a
 	// `name` and no `path`, which the CLI's stricter TOML parser rejects with
-	// `missing field path` and bails out of `thread/start`. Multica writes the
+	// `missing field path` and bails out of `thread/start`. Wallts writes the
 	// agent's active skills directly to `codex-home/skills/`, so the
 	// user-level registry is redundant here. See codex_skill_strip.go.
 	if err := sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml")); err != nil {
@@ -126,7 +126,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	}
 
 	// Disable Codex native auto-memory inside daemon-managed task sessions
-	// so cross-task and cross-workspace context leaks (multica#3130) cannot
+	// so cross-task and cross-workspace context leaks (wallts#3130) cannot
 	// happen via `codex-home/memories/` or `~/.codex/memories/`. See
 	// codex_memory.go for the full rationale and escape hatch.
 	if err := ensureCodexMemoryConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {

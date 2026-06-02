@@ -1,19 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { I18nProvider } from "@multica/core/i18n/react";
-import { configStore } from "@multica/core/config";
+import { I18nProvider } from "@wallts/core/i18n/react";
+import { configStore } from "@wallts/core/config";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 
 const TEST_RESOURCES = { en: { common: enCommon, runtimes: enRuntimes } };
 
-vi.mock("@multica/core/hooks", () => ({
+vi.mock("@wallts/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@wallts/core/paths", () => ({
   paths: {
     workspace: () => ({
       agents: () => "/agents",
@@ -23,7 +23,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspaceSlug: () => "workspace-test",
 }));
 
-vi.mock("@multica/core/realtime", () => ({
+vi.mock("@wallts/core/realtime", () => ({
   useWSEvent: vi.fn(),
 }));
 
@@ -69,13 +69,13 @@ describe("ConnectRemoteDialog", () => {
   it("uses cloud setup commands by default", () => {
     const { baseElement } = renderDialog();
 
-    expect(baseElement).toHaveTextContent("multica setup");
-    expect(baseElement).not.toHaveTextContent("multica setup self-host");
+    expect(baseElement).toHaveTextContent("wallts setup");
+    expect(baseElement).not.toHaveTextContent("wallts setup self-host");
     expect(baseElement).toHaveTextContent(
-      "multica config set server_url https://api.multica.ai",
+      "wallts config set server_url https://api.wallts.ai",
     );
     expect(baseElement).toHaveTextContent(
-      "multica config set app_url https://multica.ai",
+      "wallts config set app_url https://wallts.ai",
     );
   });
 
@@ -86,13 +86,13 @@ describe("ConnectRemoteDialog", () => {
     });
 
     expect(baseElement).toHaveTextContent(
-      "multica setup self-host --server-url https://api.example.com --app-url https://app.example.com",
+      "wallts setup self-host --server-url https://api.example.com --app-url https://app.example.com",
     );
     expect(baseElement).toHaveTextContent(
-      "multica config set server_url https://api.example.com",
+      "wallts config set server_url https://api.example.com",
     );
     expect(baseElement).toHaveTextContent(
-      "multica config set app_url https://app.example.com",
+      "wallts config set app_url https://app.example.com",
     );
   });
 
@@ -100,7 +100,7 @@ describe("ConnectRemoteDialog", () => {
     const { baseElement } = renderDialog();
 
     const setupCode = Array.from(baseElement.querySelectorAll("code")).find((node) =>
-      node.textContent?.includes("multica setup"),
+      node.textContent?.includes("wallts setup"),
     );
 
     expect(setupCode).toHaveClass(...ligatureClasses);
@@ -110,7 +110,7 @@ describe("ConnectRemoteDialog", () => {
     const { baseElement } = renderDialog();
 
     const tokenCode = Array.from(baseElement.querySelectorAll("code")).find((node) =>
-      node.textContent?.includes("multica login --token <YOUR_TOKEN>"),
+      node.textContent?.includes("wallts login --token <YOUR_TOKEN>"),
     );
 
     expect(tokenCode).toHaveClass(...ligatureClasses);

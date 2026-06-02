@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/dwickyfp/wallts/server/internal/analytics"
 )
 
 type AppConfig struct {
@@ -23,8 +23,8 @@ type AppConfig struct {
 	// previous shape for the common managed-cloud case (#3433).
 	WorkspaceCreationDisabled bool `json:"workspace_creation_disabled,omitempty"`
 	// Public daemon setup config consumed by the web app at runtime so
-	// self-hosted instances can show `multica setup self-host` commands
-	// with the operator's own domains instead of Multica Cloud defaults.
+	// self-hosted instances can show `wallts setup self-host` commands
+	// with the operator's own domains instead of Wallts Cloud defaults.
 	DaemonServerURL string `json:"daemon_server_url,omitempty"`
 	DaemonAppURL    string `json:"daemon_app_url,omitempty"`
 
@@ -68,8 +68,8 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func daemonSetupURLsFromEnv() (string, string) {
-	serverURL := normalizePublicURL(os.Getenv("MULTICA_PUBLIC_URL"))
-	appURL := normalizePublicURL(os.Getenv("MULTICA_APP_URL"))
+	serverURL := normalizePublicURL(os.Getenv("WALLTS_PUBLIC_URL"))
+	appURL := normalizePublicURL(os.Getenv("WALLTS_APP_URL"))
 	if appURL == "" {
 		appURL = normalizePublicURL(os.Getenv("FRONTEND_ORIGIN"))
 	}
@@ -91,10 +91,10 @@ func normalizePublicURL(raw string) string {
 }
 
 func isOfficialCloudDaemonConfig(serverURL, appURL string) bool {
-	if !urlHostEquals(serverURL, "api.multica.ai") {
+	if !urlHostEquals(serverURL, "api.wallts.ai") {
 		return false
 	}
-	return urlHostEquals(appURL, "multica.ai") || urlHostEquals(appURL, "app.multica.ai")
+	return urlHostEquals(appURL, "wallts.ai") || urlHostEquals(appURL, "app.wallts.ai")
 }
 
 func urlHostEquals(raw, want string) bool {

@@ -21,9 +21,9 @@ import {
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
 } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
-import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
+import { cn } from "@wallts/ui/lib/utils";
+import { Dialog, DialogContent, DialogTitle } from "@wallts/ui/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@wallts/ui/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -31,11 +31,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
-} from "@multica/ui/components/ui/dropdown-menu";
+} from "@wallts/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
-import { api } from "@multica/core/api";
-import { useTranscriptViewStore, type TranscriptSortDirection } from "@multica/core/agents/stores";
-import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
+import { api } from "@wallts/core/api";
+import { useTranscriptViewStore, type TranscriptSortDirection } from "@wallts/core/agents/stores";
+import type { AgentTask, Agent, AgentRuntime } from "@wallts/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
 import { useT } from "../../i18n";

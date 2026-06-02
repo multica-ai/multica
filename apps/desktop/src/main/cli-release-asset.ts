@@ -1,4 +1,4 @@
-const RELEASE_ARCHIVE_PREFIX = "multica-cli-";
+const RELEASE_ARCHIVE_PREFIX = "wallts-cli-";
 
 function platformArchiveDescriptor(
   platform: NodeJS.Platform = process.platform,
@@ -35,8 +35,8 @@ export function selectPlatformReleaseAssetName(
   );
   const names = [...assetNames];
 
-  // Prefer the versioned `multica-cli-<v>-<os>-<arch>.<ext>` name; fall
-  // back to the legacy `multica_<os>_<arch>.<ext>` so older releases that
+  // Prefer the versioned `wallts-cli-<v>-<os>-<arch>.<ext>` name; fall
+  // back to the legacy `wallts_<os>_<arch>.<ext>` so older releases that
   // only ship the legacy archive keep working.
   const suffix = `-${os}-${mappedArch}.${ext}`;
   const matches = names.filter(
@@ -53,7 +53,7 @@ export function selectPlatformReleaseAssetName(
     );
   }
 
-  const legacyName = `multica_${os}_${mappedArch}.${ext}`;
+  const legacyName = `wallts_${os}_${mappedArch}.${ext}`;
   if (names.includes(legacyName)) {
     return legacyName;
   }

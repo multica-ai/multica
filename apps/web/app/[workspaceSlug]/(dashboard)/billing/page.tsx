@@ -1,4 +1,4 @@
-import { BillingTestPage } from "@multica/views/billing";
+import { BillingTestPage } from "@wallts/views/billing";
 
 // Account-level test page for the cloud-billing API surface. Despite
 // living under [workspaceSlug] — that's where the dashboard layout

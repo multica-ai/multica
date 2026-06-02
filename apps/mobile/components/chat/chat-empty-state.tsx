@@ -61,7 +61,7 @@ export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) 
   }
 
   // Returning user: starter prompts are the fastest path back to action.
-  const title = agentName ? `Hi, I'm ${agentName}` : "Welcome back to Multica";
+  const title = agentName ? `Hi, I'm ${agentName}` : "Welcome back to Wallts";
   return (
     <View className="flex-1 items-center justify-center px-6 py-8 gap-5">
       <View className="items-center gap-1">

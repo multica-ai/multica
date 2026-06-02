@@ -6,7 +6,7 @@
  *      mention link `[@Label](mention://member/id)`. Old DB rows from before
  *      the April 2026 migration use the shortcode form; the modern form is
  *      what marked.js can naturally tokenize as a markdown link. Calls into
- *      `@multica/core/markdown` (single source of truth — same regex web/
+ *      `@wallts/core/markdown` (single source of truth — same regex web/
  *      desktop run).
  *
  *   2. File card lines `!file[name](url)` → standard link `[📎 name](url)`.
@@ -21,7 +21,7 @@
  * the cdnDomain config. Old comments using the legacy form render as plain
  * hyperlinks — same tap behavior, just no 📎 prefix. Acceptable degradation.
  */
-import { preprocessMentionShortcodes } from "@multica/core/markdown";
+import { preprocessMentionShortcodes } from "@wallts/core/markdown";
 
 const FILE_LINE_RE = /^!file\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/;
 

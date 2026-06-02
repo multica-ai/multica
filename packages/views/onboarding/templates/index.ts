@@ -1,7 +1,7 @@
 import {
   matchLocale,
   type SupportedLocale,
-} from "@multica/core/i18n";
+} from "@wallts/core/i18n";
 
 export {
   HELPER_INSTRUCTIONS,

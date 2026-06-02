@@ -1099,7 +1099,7 @@ func TestOpenclawProcessOutputExtractsModelFromAgentMeta(t *testing.T) {
 		Meta: openclawMeta{
 			DurationMs: 9501,
 			AgentMeta: map[string]any{
-				"sessionId": "multica-1776752018613706000",
+				"sessionId": "wallts-1776752018613706000",
 				"provider":  "deepseek",
 				"model":     "deepseek-chat",
 				"usage": map[string]any{
@@ -1118,7 +1118,7 @@ func TestOpenclawProcessOutputExtractsModelFromAgentMeta(t *testing.T) {
 	if res.model != "deepseek-chat" {
 		t.Errorf("model: got %q, want %q", res.model, "deepseek-chat")
 	}
-	if res.sessionID != "multica-1776752018613706000" {
+	if res.sessionID != "wallts-1776752018613706000" {
 		t.Errorf("sessionID: got %q", res.sessionID)
 	}
 	if res.usage.InputTokens != 414 {

@@ -40,7 +40,7 @@ func TestMetricsServerCanBindLoopback(t *testing.T) {
 		t.Fatalf("/metrics status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "multica_build_info") {
+	if !strings.Contains(string(body), "wallts_build_info") {
 		t.Fatalf("/metrics body missing build info: %s", body)
 	}
 }

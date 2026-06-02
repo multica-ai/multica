@@ -21,24 +21,24 @@ import type {
   Skill,
   SkillFile,
   UpdateSkillRequest,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
+import { api } from "@wallts/core/api";
 import { useTimeAgo } from "../../i18n";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { useWorkspacePaths } from "@wallts/core/paths";
 import {
   agentListOptions,
   memberListOptions,
   selectSkillAssignments,
   skillDetailOptions,
   workspaceKeys,
-} from "@multica/core/workspace/queries";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { runtimeListOptions } from "@multica/core/runtimes";
-import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
-import { Button, buttonVariants } from "@multica/ui/components/ui/button";
+} from "@wallts/core/workspace/queries";
+import { resolvePublicFileUrl } from "@wallts/core/workspace/avatar-url";
+import { runtimeListOptions } from "@wallts/core/runtimes";
+import { ActorAvatar } from "@wallts/ui/components/common/actor-avatar";
+import { Button, buttonVariants } from "@wallts/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -46,21 +46,21 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Textarea } from "@multica/ui/components/ui/textarea";
+} from "@wallts/ui/components/ui/dialog";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Label } from "@wallts/ui/components/ui/label";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { Textarea } from "@wallts/ui/components/ui/textarea";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
+} from "@wallts/ui/components/ui/tooltip";
 import { AppLink, useNavigation } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
-import { useSkillPermissions } from "@multica/core/permissions";
-import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
+import { useSkillPermissions } from "@wallts/core/permissions";
+import { CapabilityBanner } from "@wallts/ui/components/common/capability-banner";
 import { readOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";

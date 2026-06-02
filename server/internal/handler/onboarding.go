@@ -9,9 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/logger"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/analytics"
+	"github.com/dwickyfp/wallts/server/internal/logger"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // Upper bound on free-text fields. `cloudWaitlistReasonMaxLen` is a

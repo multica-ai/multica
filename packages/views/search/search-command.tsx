@@ -30,34 +30,34 @@ import type {
   MemberWithUser,
   SearchIssueResult,
   SearchProjectResult,
-} from "@multica/core/types";
-import { api } from "@multica/core/api";
+} from "@wallts/core/types";
+import { api } from "@wallts/core/api";
 import {
   openCreateIssueWithPreference,
   selectRecentIssues,
   useRecentIssuesStore,
-} from "@multica/core/issues/stores";
-import { issueDetailOptions } from "@multica/core/issues/queries";
-import { useWorkspaceId } from "@multica/core";
-import { useWorkspacePaths } from "@multica/core/paths";
-import type { WorkspacePaths } from "@multica/core/paths";
-import { useModalStore } from "@multica/core/modals";
-import { memberListOptions } from "@multica/core/workspace/queries";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+} from "@wallts/core/issues/stores";
+import { issueDetailOptions } from "@wallts/core/issues/queries";
+import { useWorkspaceId } from "@wallts/core";
+import { useWorkspacePaths } from "@wallts/core/paths";
+import type { WorkspacePaths } from "@wallts/core/paths";
+import { useModalStore } from "@wallts/core/modals";
+import { memberListOptions } from "@wallts/core/workspace/queries";
+import { resolvePublicFileUrl } from "@wallts/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
-import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
-import type { ProjectStatus } from "@multica/core/types";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { STATUS_CONFIG } from "@wallts/core/issues/config";
+import { PROJECT_STATUS_CONFIG } from "@wallts/core/projects/config";
+import type { ProjectStatus } from "@wallts/core/types";
+import { ActorAvatar as ActorAvatarBase } from "@wallts/ui/components/common/actor-avatar";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from "@multica/ui/components/ui/dialog";
-import { useTheme } from "@multica/ui/components/common/theme-provider";
+} from "@wallts/ui/components/ui/dialog";
+import { useTheme } from "@wallts/ui/components/common/theme-provider";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";

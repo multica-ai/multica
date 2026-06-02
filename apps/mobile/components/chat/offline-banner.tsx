@@ -14,7 +14,7 @@
  */
 import { Ionicons } from "@expo/vector-icons";
 import { View } from "react-native";
-import type { AgentAvailability } from "@multica/core/agents";
+import type { AgentAvailability } from "@wallts/core/agents";
 import { Text } from "@/components/ui/text";
 
 interface Props {

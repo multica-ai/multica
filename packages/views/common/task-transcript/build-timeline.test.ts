@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TaskMessagePayload } from "@multica/core/types/events";
+import type { TaskMessagePayload } from "@wallts/core/types/events";
 import { appendTimelineItem, buildTimeline, coalesceTimelineItems, type TimelineItem } from "./build-timeline";
 
 function message(seq: number, type: TaskMessagePayload["type"], content?: string): TaskMessagePayload {

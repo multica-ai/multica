@@ -22,7 +22,7 @@
 -- silently shadowing the workspace behind a system route.
 --
 -- Slugs INTENTIONALLY OMITTED from this audit despite being in the reserved
--- list: 'admin', 'multica', 'new', 'setup', 'www'. These already have one
+-- list: 'admin', 'wallts', 'new', 'setup', 'www'. These already have one
 -- conflicting workspace each in production. They will be handled in a
 -- follow-up PR (rename via owner outreach + targeted migration), not blocked
 -- on this deploy.

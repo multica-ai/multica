@@ -1,13 +1,13 @@
 ---
 title: Contributing
-description: Local development workflow for contributors working on the Multica codebase.
+description: Local development workflow for contributors working on the Wallts codebase.
 ---
 
 ## Development Model
 
 Local development uses one shared PostgreSQL container and one database per checkout.
 
-- The main checkout usually uses `.env` and `POSTGRES_DB=multica`
+- The main checkout usually uses `.env` and `POSTGRES_DB=wallts`
 - Each Git worktree uses its own `.env.worktree`
 - Every checkout connects to the same PostgreSQL host: `localhost:5432`
 - Isolation happens at the database level, not by starting a separate Docker Compose project
@@ -70,8 +70,8 @@ make check-main
 ### Feature Worktree
 
 ```bash
-git worktree add ../multica-feature -b feat/my-change main
-cd ../multica-feature
+git worktree add ../wallts-feature -b feat/my-change main
+cd ../wallts-feature
 make worktree-env
 make setup-worktree
 make start-worktree
@@ -91,7 +91,7 @@ This is a first-class workflow. Both checkouts use the same PostgreSQL container
 
 | | Main | Worktree |
 |---|---|---|
-| Database | `multica` | `multica_my_feature_702` |
+| Database | `wallts` | `wallts_my_feature_702` |
 | Backend port | `8080` | generated (e.g. `18782`) |
 | Frontend port | `3000` | generated (e.g. `13702`) |
 
@@ -157,7 +157,7 @@ Look for `POSTGRES_DB`, `DATABASE_URL`, `PORT`, `FRONTEND_PORT`.
 ### List All Local Databases
 
 ```bash
-docker compose exec -T postgres psql -U multica -d postgres \
+docker compose exec -T postgres psql -U wallts -d postgres \
   -At -c "select datname from pg_database order by datname;"
 ```
 

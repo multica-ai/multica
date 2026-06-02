@@ -44,7 +44,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	logFile, err := os.CreateTemp("", "multica-agy-log-*.log")
+	logFile, err := os.CreateTemp("", "wallts-agy-log-*.log")
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("create agy log file: %w", err)

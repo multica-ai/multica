@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import { ArrowRight, Download, Loader2 } from "lucide-react";
-import { Button, buttonVariants } from "@multica/ui/components/ui/button";
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
-import { captureDownloadIntent } from "@multica/core/analytics";
-import { cn } from "@multica/ui/lib/utils";
-import { DragStrip } from "@multica/views/platform";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
-import type { IssueStatus } from "@multica/core/types";
+import { Button, buttonVariants } from "@wallts/ui/components/ui/button";
+import { WalltsIcon } from "@wallts/ui/components/common/wallts-icon";
+import { captureDownloadIntent } from "@wallts/core/analytics";
+import { cn } from "@wallts/ui/lib/utils";
+import { DragStrip } from "@wallts/views/platform";
+import { STATUS_CONFIG } from "@wallts/core/issues/config";
+import type { IssueStatus } from "@wallts/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { useT } from "../../i18n";
@@ -79,7 +79,7 @@ export function StepWelcome({
         <div className="flex flex-1 flex-col justify-center px-6 pb-12 sm:px-10 md:px-20 lg:px-20 xl:px-24">
           <div className="flex w-full max-w-[540px] flex-col gap-8">
             <div className="flex items-center gap-2.5">
-              <MulticaIcon className="size-5 text-foreground" noSpin />
+              <WalltsIcon className="size-5 text-foreground" noSpin />
               <span className="font-serif text-xl font-medium tracking-tight">
                 {t(($) => $.welcome.wordmark)}
               </span>

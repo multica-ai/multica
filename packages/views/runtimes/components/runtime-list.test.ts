@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, AgentTask } from "@multica/core/types";
+import type { Agent, AgentTask } from "@wallts/core/types";
 import { buildWorkloadIndex } from "./runtime-list";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {

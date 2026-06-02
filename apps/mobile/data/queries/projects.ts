@@ -14,7 +14,7 @@
  * See `projectIssuesOptions` below for the binding helper.
  */
 import { queryOptions } from "@tanstack/react-query";
-import type { Project } from "@multica/core/types";
+import type { Project } from "@wallts/core/types";
 import { api } from "@/data/api";
 import { issueKeys } from "@/data/queries/issue-keys";
 

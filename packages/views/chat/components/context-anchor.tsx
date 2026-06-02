@@ -2,22 +2,22 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Focus } from "lucide-react";
-import type { ContextAnchor } from "@multica/core/chat";
-import { useChatStore } from "@multica/core/chat";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { issueDetailOptions } from "@multica/core/issues/queries";
-import { projectDetailOptions } from "@multica/core/projects/queries";
-import { inboxListOptions } from "@multica/core/inbox/queries";
-import { Button } from "@multica/ui/components/ui/button";
+import type { ContextAnchor } from "@wallts/core/chat";
+import { useChatStore } from "@wallts/core/chat";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { issueDetailOptions } from "@wallts/core/issues/queries";
+import { projectDetailOptions } from "@wallts/core/projects/queries";
+import { inboxListOptions } from "@wallts/core/inbox/queries";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-} from "@multica/ui/components/ui/tooltip";
+} from "@wallts/ui/components/ui/tooltip";
 import { IssueChip } from "../../issues/components/issue-chip";
 import { ProjectChip } from "../../projects/components/project-chip";
 import { AppLink, useNavigation } from "../../navigation";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@wallts/core/paths";
 import { useT } from "../../i18n";
 
 /**

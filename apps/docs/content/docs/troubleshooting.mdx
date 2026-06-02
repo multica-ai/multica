@@ -1,40 +1,40 @@
 ---
 title: Troubleshooting
-description: Common issues when self-hosting Multica — symptoms, causes, how to diagnose, how to fix.
+description: Common issues when self-hosting Wallts — symptoms, causes, how to diagnose, how to fix.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Look up issues by symptom. Each entry gives you **symptom / likely causes / how to diagnose / how to fix**. If your situation isn't listed, open an issue on [GitHub](https://github.com/multica-ai/multica/issues).
+Look up issues by symptom. Each entry gives you **symptom / likely causes / how to diagnose / how to fix**. If your situation isn't listed, open an issue on [GitHub](https://github.com/wallts-ai/wallts/issues).
 
 ## Daemon can't connect to the server
 
-**Symptom**: [`multica daemon`](/cli)'s `status` command shows `offline` or `connection refused`; the server logs show no `/api/daemon/register` or `/api/daemon/heartbeat` requests. For how the daemon mechanism works, see [Daemon and runtimes](/daemon-runtimes).
+**Symptom**: [`wallts daemon`](/cli)'s `status` command shows `offline` or `connection refused`; the server logs show no `/api/daemon/register` or `/api/daemon/heartbeat` requests. For how the daemon mechanism works, see [Daemon and runtimes](/daemon-runtimes).
 
 **Likely causes**:
 
-1. **`MULTICA_SERVER_URL` points at the wrong address** — default is `ws://localhost:8080/ws`; self-host must change it to your server address
+1. **`WALLTS_SERVER_URL` points at the wrong address** — default is `ws://localhost:8080/ws`; self-host must change it to your server address
 2. **Network / firewall blocking** — the daemon and server aren't on the same network, or outbound traffic is blocked
-3. **Token expired or invalid** — you never ran `multica login`, or the PAT was revoked
+3. **Token expired or invalid** — you never ran `wallts login`, or the PAT was revoked
 4. **Server rejected registration** — the account you signed in with isn't in the target workspace (register returns 403)
 5. **DNS resolution failure** — the hostname doesn't resolve on the daemon machine
 
 **How to diagnose**:
 
 ```bash
-multica daemon logs --lines 100    # look for daemon-side errors
-echo $MULTICA_SERVER_URL          # confirm the address is set
+wallts daemon logs --lines 100    # look for daemon-side errors
+echo $WALLTS_SERVER_URL          # confirm the address is set
 curl -i http://<server-host>:8080/health   # hit the server directly
 curl -i http://<server-host>:8080/readyz  # include DB + migration readiness
-cat ~/.multica/config.json        # verify api_token exists
-multica workspace list            # confirm you're a member of the target workspace
+cat ~/.wallts/config.json        # verify api_token exists
+wallts workspace list            # confirm you're a member of the target workspace
 ```
 
-**How to fix**: address each cause above. The two most common fixes are **changing `MULTICA_SERVER_URL` and restarting the daemon** (`multica daemon restart`) and **signing in again** (`multica logout && multica login`).
+**How to fix**: address each cause above. The two most common fixes are **changing `WALLTS_SERVER_URL` and restarting the daemon** (`wallts daemon restart`) and **signing in again** (`wallts logout && wallts login`).
 
 ## Tasks stuck in `queued`
 
-**Symptom**: after assigning an issue to an agent, the issue status flips to `in_progress` immediately, but a long time passes with no sign of agent execution on the page; `multica daemon status` shows the daemon `online`.
+**Symptom**: after assigning an issue to an agent, the issue status flips to `in_progress` immediately, but a long time passes with no sign of agent execution on the page; `wallts daemon status` shows the daemon `online`.
 
 **Likely causes** (ordered by frequency):
 
@@ -47,19 +47,19 @@ multica workspace list            # confirm you're a member of the target worksp
 **How to diagnose**:
 
 ```bash
-multica daemon status --output json       # runtime list + last_seen_at
-multica agent list                         # check agent archived state
-multica issue show <issue-id>             # inspect task history
+wallts daemon status --output json       # runtime list + last_seen_at
+wallts agent list                         # check agent archived state
+wallts issue show <issue-id>             # inspect task history
 ```
 
 On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see the claim outcome.
 
 **How to fix**:
 
-- Concurrency full → wait for running tasks to finish, or `multica agent update <id> --max-concurrent-tasks 10` to raise the ceiling
+- Concurrency full → wait for running tasks to finish, or `wallts agent update <id> --max-concurrent-tasks 10` to raise the ceiling
 - Same-issue serialization → wait for the previous task to finish, or reassign to a different agent
-- Agent archived → `multica agent restore <id>`
-- Runtime not registered → `multica daemon restart`, and the daemon will re-register
+- Agent archived → `wallts agent restore <id>`
+- Runtime not registered → `wallts daemon restart`, and the daemon will re-register
 
 ## WebSocket can't connect
 
@@ -80,7 +80,7 @@ On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see t
 
 **How to fix**:
 
-- Wrong origin → set `FRONTEND_ORIGIN=https://multica.yourdomain.com` in the server's `.env` (or comma-separated `CORS_ALLOWED_ORIGINS`) and restart the server
+- Wrong origin → set `FRONTEND_ORIGIN=https://wallts.yourdomain.com` in the server's `.env` (or comma-separated `CORS_ALLOWED_ORIGINS`) and restart the server
 - Protocol mismatch → make sure `FRONTEND_ORIGIN`'s protocol matches the frontend's
 - Reverse proxy → in Nginx, add `proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`
 - Cookie expired → refresh the page and sign in again
@@ -128,11 +128,11 @@ The SMTP path wraps every failure with the stage it failed at, so the server log
 
 | Logged error | What it means | How to fix |
 |---|---|---|
-| `smtp dial <host>:<port>: dial tcp …: connect: connection refused` / `i/o timeout` | The backend container can't reach the relay — wrong host, wrong port, firewall, or the relay isn't listening | Verify `SMTP_HOST` / `SMTP_PORT` resolve from inside the container (`docker compose -f docker-compose.selfhost.yml exec backend nslookup <host>` and `nc -vz <host> <port>`); open the firewall from the host running Multica to the relay |
+| `smtp dial <host>:<port>: dial tcp …: connect: connection refused` / `i/o timeout` | The backend container can't reach the relay — wrong host, wrong port, firewall, or the relay isn't listening | Verify `SMTP_HOST` / `SMTP_PORT` resolve from inside the container (`docker compose -f docker-compose.selfhost.yml exec backend nslookup <host>` and `nc -vz <host> <port>`); open the firewall from the host running Wallts to the relay |
 | `smtp starttls: x509: certificate signed by unknown authority` (or `certificate is not valid for any names`) | The relay uses a private CA / self-signed cert and the container's trust store rejects it | Either install the CA into the container, or set `SMTP_TLS_INSECURE=true` only after confirming the relay is reachable on a trusted segment |
 | `smtp auth: 535 5.7.8 Authentication credentials invalid` (or `534`/`530`) | `SMTP_USERNAME` / `SMTP_PASSWORD` are wrong, or the relay requires a different auth mechanism than `PLAIN` | Re-confirm the service-account credentials with your mail admin; for Exchange anonymous internal relay leave both empty (`SMTP_USERNAME=`, `SMTP_PASSWORD=`) |
 | `smtp MAIL FROM: 550 5.7.1 Client does not have permissions to send as this sender` | The relay won't accept `RESEND_FROM_EMAIL` as the envelope sender — typical Exchange "anonymous users not allowed" or DMARC alignment issue | Set `RESEND_FROM_EMAIL` to a domain the relay accepts; on Exchange, grant the source IP `ms-Exch-SMTP-Accept-Any-Sender` on the receive connector |
-| `smtp RCPT TO <addr>: 550 5.7.1 Unable to relay` | The relay's receive connector doesn't allow your subnet to relay to external recipients (most common for anonymous internal relays talking to outside domains) | Either restrict invites to internal recipients, or add the Multica host's subnet to the Exchange "Anonymous Users → Relay" permission list |
+| `smtp RCPT TO <addr>: 550 5.7.1 Unable to relay` | The relay's receive connector doesn't allow your subnet to relay to external recipients (most common for anonymous internal relays talking to outside domains) | Either restrict invites to internal recipients, or add the Wallts host's subnet to the Exchange "Anonymous Users → Relay" permission list |
 | `smtp DATA` / `smtp write body` / `smtp end data` | Session was accepted but the relay dropped the body — usually message-size limits, content filtering, or a connection reset mid-stream | Check the relay's logs for the same `Message-ID` (logged as `<unixnano>@<host>`); raise the message size limit if needed |
 
 `MAIL FROM`, `RCPT TO`, and `DATA` errors are always logged with the relay's response code so you can match them against Exchange / Postfix logs on the other side. Verification codes and invite tokens are **never** included in the wrapped error.
@@ -148,7 +148,7 @@ The SMTP path wraps every failure with the stage it failed at, so the server log
 - Wrong host / port → adjust `SMTP_HOST` / `SMTP_PORT` and restart the backend; for the supported relay modes see [Auth setup → Option B: SMTP relay](/auth-setup)
 - Cert mismatch → install the relay's CA into the container, or temporarily `SMTP_TLS_INSECURE=true` on a trusted segment
 - Auth failure → re-check credentials; for anonymous internal relay leave `SMTP_USERNAME` and `SMTP_PASSWORD` empty
-- `Unable to relay` → either restrict to internal recipients or grant the Multica host's IP relay permission on the Exchange receive connector
+- `Unable to relay` → either restrict to internal recipients or grant the Wallts host's IP relay permission on the Exchange receive connector
 
 ## Fixed local test code doesn't work
 
@@ -156,23 +156,23 @@ The SMTP path wraps every failure with the stage it failed at, so the server log
 
 **Likely causes** (mutually exclusive):
 
-1. **`MULTICA_DEV_VERIFICATION_CODE` is empty** — fixed codes are disabled by default
+1. **`WALLTS_DEV_VERIFICATION_CODE` is empty** — fixed codes are disabled by default
 2. **`APP_ENV=production`** — this is the **correct** production configuration; fixed local test codes are ignored in production
 3. **The configured code is not 6 digits** — the shortcut only accepts a 6-digit value
 
 **How to diagnose**:
 
 ```bash
-cat .env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
-docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+cat .env | grep -E 'APP_ENV|WALLTS_DEV_VERIFICATION_CODE'
+docker exec <container> env | grep -E 'APP_ENV|WALLTS_DEV_VERIFICATION_CODE'
 ```
 
 Check your inbox (including spam) for the real verification code.
 
 **How to fix**:
 
-- In production, leave `MULTICA_DEV_VERIFICATION_CODE` empty — configure Resend and use real codes
-- For local development or internal testing, either copy the generated code from server logs or set `APP_ENV=development` plus `MULTICA_DEV_VERIFICATION_CODE=888888` — never enable a fixed code on a public instance (see [Sign-in and signup configuration → Fixed local testing codes](/auth-setup#fixed-local-testing-codes))
+- In production, leave `WALLTS_DEV_VERIFICATION_CODE` empty — configure Resend and use real codes
+- For local development or internal testing, either copy the generated code from server logs or set `APP_ENV=development` plus `WALLTS_DEV_VERIFICATION_CODE=888888` — never enable a fixed code on a public instance (see [Sign-in and signup configuration → Fixed local testing codes](/auth-setup#fixed-local-testing-codes))
 
 ## Usage dashboard stays at zero
 
@@ -181,7 +181,7 @@ Check your inbox (including spam) for the real verification code.
 **Likely causes**:
 
 1. **`rollup_task_usage_hourly()` is never scheduled** — the Usage / Runtime dashboards read from the derived `task_usage_hourly` table, which is populated by that function. The bundled `pgvector/pgvector:pg17` image does not include `pg_cron`, and the backend does not run the rollup in-process either. On a fresh self-host install with no external scheduler, this is the default state.
-2. **`pg_cron` is installed but pointing at the wrong database** — `pg_cron.database_name` defaults to `postgres`; if your Multica database has a different name, the scheduled job never sees `rollup_task_usage_hourly()`.
+2. **`pg_cron` is installed but pointing at the wrong database** — `pg_cron.database_name` defaults to `postgres`; if your Wallts database has a different name, the scheduled job never sees `rollup_task_usage_hourly()`.
 3. **The scheduler is running but the rollup is silently erroring** — e.g. wrong DB role / search_path inside the cron entry.
 
 **How to diagnose**:
@@ -234,7 +234,7 @@ ERROR: refusing to drop legacy daily rollups:
      ./backfill_task_usage_hourly --sleep-between-slices=2s
 
    # Kubernetes
-   kubectl -n multica exec deploy/multica-backend -- \
+   kubectl -n wallts exec deploy/wallts-backend -- \
      ./backfill_task_usage_hourly --sleep-between-slices=2s
    ```
 
@@ -245,7 +245,7 @@ ERROR: refusing to drop legacy daily rollups:
 
 ## Port conflicts
 
-**Symptom**: `multica server` or `multica daemon start` fails with `address already in use`.
+**Symptom**: `wallts server` or `wallts daemon start` fails with `address already in use`.
 
 **Likely causes**:
 
@@ -270,10 +270,10 @@ netstat -ano | findstr :8080    # Windows
 
 | Component | Location | Command |
 |---|---|---|
-| **Daemon** | `~/.multica/daemon.log` (background mode) or foreground stdout | `multica daemon logs -f --lines 100` |
+| **Daemon** | `~/.wallts/daemon.log` (background mode) or foreground stdout | `wallts daemon logs -f --lines 100` |
 | **Server (Docker)** | Container stdout | `docker logs -f <container>` |
-| **Server (systemd)** | journal | `journalctl -u multica-server -f` |
+| **Server (systemd)** | journal | `journalctl -u wallts-server -f` |
 | **Frontend (dev)** | Terminal running `pnpm dev` | Read directly |
 | **Frontend (browser)** | DevTools → Console | Press `F12` |
 
-For more detailed daemon logs, move it from background to foreground: `multica daemon stop && multica daemon start --foreground`.
+For more detailed daemon logs, move it from background to foreground: `wallts daemon stop && wallts daemon start --foreground`.

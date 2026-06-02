@@ -1,4 +1,4 @@
-import type { TaskFailureReason } from "@multica/core/types";
+import type { TaskFailureReason } from "@wallts/core/types";
 
 // Human-readable copy for the back-end task failure reason enum. Surfaced
 // in the agent detail Recent Work tab when a task ended in failure — the

@@ -5,7 +5,7 @@ import "i18next";
 // declares everything else; this file contributes only the `ui` entry via
 // declaration merging on the global `I18nResources` interface so
 // packages/ui can typecheck the selector form standalone without depending
-// on @multica/views.
+// on @wallts/views.
 //
 // When both files are loaded together (in a consumer's typecheck program),
 // the two augmentations compose: views contributes common/auth/... and ui

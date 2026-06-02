@@ -48,7 +48,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       }
 
       // Token mode: read from localStorage (Electron / legacy).
-      const token = storage.getItem("multica_token");
+      const token = storage.getItem("wallts_token");
       if (!token) {
         set({ isLoading: false });
         return;
@@ -82,7 +82,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       const { token, user } = await api.verifyCode(email, code);
       if (!cookieAuth) {
         // Token mode: persist for Electron / legacy.
-        storage.setItem("multica_token", token);
+        storage.setItem("wallts_token", token);
         api.setToken(token);
       }
       onLogin?.();
@@ -94,7 +94,7 @@ export function createAuthStore(options: AuthStoreOptions) {
     loginWithGoogle: async (code: string, redirectUri: string) => {
       const { token, user } = await api.googleLogin(code, redirectUri);
       if (!cookieAuth) {
-        storage.setItem("multica_token", token);
+        storage.setItem("wallts_token", token);
         api.setToken(token);
       }
       onLogin?.();
@@ -104,7 +104,7 @@ export function createAuthStore(options: AuthStoreOptions) {
     },
 
     loginWithToken: async (token: string) => {
-      storage.setItem("multica_token", token);
+      storage.setItem("wallts_token", token);
       api.setToken(token);
       const user = await api.getMe();
       onLogin?.();
@@ -118,7 +118,7 @@ export function createAuthStore(options: AuthStoreOptions) {
         // Clear server-side HttpOnly cookie.
         api.logout().catch(() => {});
       }
-      storage.removeItem("multica_token");
+      storage.removeItem("wallts_token");
       api.setToken(null);
       setCurrentWorkspace(null, null);
       resetAnalytics();

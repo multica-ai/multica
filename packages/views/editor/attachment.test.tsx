@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Attachment as AttachmentRecord } from "@multica/core/types";
+import type { Attachment as AttachmentRecord } from "@wallts/core/types";
 
 const {
   getAttachmentTextContentMock,
@@ -16,7 +16,7 @@ const {
   openByUrlMock: vi.fn(),
 }));
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("@wallts/core/api", () => ({
   api: { getAttachmentTextContent: getAttachmentTextContentMock },
   PreviewTooLargeError: class extends Error {},
   PreviewUnsupportedError: class extends Error {},
@@ -68,8 +68,8 @@ vi.mock("../navigation", () => ({
   }),
 }));
 
-vi.mock("@multica/core/paths", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+vi.mock("@wallts/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@wallts/core/paths")>();
   return {
     ...actual,
     useWorkspaceSlug: () => "acme",

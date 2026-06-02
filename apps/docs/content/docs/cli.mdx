@@ -1,24 +1,24 @@
 ---
 title: CLI command reference
-description: One-page overview of every top-level Multica CLI command. For full usage, run `multica <command> --help`.
+description: One-page overview of every top-level Wallts CLI command. For full usage, run `wallts <command> --help`.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-The Multica CLI mirrors almost everything the Web UI can do (create [issues](/issues), assign [agents](/agents), start the [daemon](/daemon-runtimes), and more). This page lists every top-level command with a one-line description. For the full set of flags and examples, run `multica <command> --help`.
+The Wallts CLI mirrors almost everything the Web UI can do (create [issues](/issues), assign [agents](/agents), start the [daemon](/daemon-runtimes), and more). This page lists every top-level command with a one-line description. For the full set of flags and examples, run `wallts <command> --help`.
 
 ## Getting authenticated
 
 Run this the first time you use the CLI to obtain a **personal access token (PAT)**:
 
 ```bash
-multica login
+wallts login
 ```
 
-Your browser opens automatically. After you approve in the web app, the CLI saves the PAT (prefixed with `mul_`) to `~/.multica/config.json`. Every subsequent command authenticates with that PAT.
+Your browser opens automatically. After you approve in the web app, the CLI saves the PAT (prefixed with `mul_`) to `~/.wallts/config.json`. Every subsequent command authenticates with that PAT.
 
 <Callout type="tip">
-For CI or headless environments, skip the browser flow: create a PAT in the web app under **Settings → Personal Access Tokens**, then run `multica login --token <mul_...>` to supply it directly.
+For CI or headless environments, skip the browser flow: create a PAT in the web app under **Settings → Personal Access Tokens**, then run `wallts login --token <mul_...>` to supply it directly.
 </Callout>
 
 For the difference between token types, see [Authentication and tokens](/auth-tokens).
@@ -27,69 +27,69 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 
 | Command | Purpose |
 |---|---|
-| `multica login` | Log in and save a PAT |
-| `multica auth status` | Show current login status, user, and workspace |
-| `multica auth logout` | Clear the local PAT |
-| `multica setup cloud` | One-shot setup for Multica Cloud (login + install daemon) |
-| `multica setup self-host` | One-shot setup for a self-hosted backend |
+| `wallts login` | Log in and save a PAT |
+| `wallts auth status` | Show current login status, user, and workspace |
+| `wallts auth logout` | Clear the local PAT |
+| `wallts setup cloud` | One-shot setup for Wallts Cloud (login + install daemon) |
+| `wallts setup self-host` | One-shot setup for a self-hosted backend |
 
 ## Workspaces and members
 
 | Command | Purpose |
 |---|---|
-| `multica workspace list` | List every workspace you can access |
-| `multica workspace get <slug>` | Show details for one workspace |
-| `multica workspace member list` | List members of the current workspace |
-| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | Update workspace metadata (admin/owner). Long fields accept `--description-stdin` / `--context-stdin`. |
+| `wallts workspace list` | List every workspace you can access |
+| `wallts workspace get <slug>` | Show details for one workspace |
+| `wallts workspace member list` | List members of the current workspace |
+| `wallts workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | Update workspace metadata (admin/owner). Long fields accept `--description-stdin` / `--context-stdin`. |
 
 ## Issues and projects
 
 <Callout type="info">
-`list` commands (`multica issue list`, `autopilot list`, `project list`, etc.) print short, copy-paste-ready IDs by default — issue keys like `MUL-123` for issues, short UUID prefixes for the rest. The `<id>` argument on the follow-up commands below accepts either the short ID or the full UUID, so the typical flow is `multica issue list` → copy the key → `multica issue get MUL-123`. Pass `--full-id` to a list command when you need the canonical UUID.
+`list` commands (`wallts issue list`, `autopilot list`, `project list`, etc.) print short, copy-paste-ready IDs by default — issue keys like `MUL-123` for issues, short UUID prefixes for the rest. The `<id>` argument on the follow-up commands below accepts either the short ID or the full UUID, so the typical flow is `wallts issue list` → copy the key → `wallts issue get MUL-123`. Pass `--full-id` to a list command when you need the canonical UUID.
 </Callout>
 
 | Command | Purpose |
 |---|---|
-| `multica issue list` | List issues (prints copy-paste-ready issue keys) |
-| `multica issue get <id>` | Show a single issue (accepts an issue key or a UUID) |
-| `multica issue create --title "..."` | Create a new issue |
-| `multica issue update <id> ...` | Update an issue (status, priority, assignee, etc.) |
-| `multica issue assign <id> --agent <slug>` | Assign to an agent (triggers a task immediately) |
-| `multica issue status <id> --set <status>` | Shortcut to change status |
-| `multica issue search <query>` | Keyword search |
-| `multica issue runs <id>` | Show agent runs on an issue |
-| `multica issue rerun <id>` | Re-enqueue a fresh task for the issue's current agent assignee |
-| `multica issue comment <id> ...` | Nested: view / post comments |
-| `multica issue subscriber <id> ...` | Nested: subscribe / unsubscribe |
-| `multica project list/get/create/update/delete/status` | Project CRUD |
+| `wallts issue list` | List issues (prints copy-paste-ready issue keys) |
+| `wallts issue get <id>` | Show a single issue (accepts an issue key or a UUID) |
+| `wallts issue create --title "..."` | Create a new issue |
+| `wallts issue update <id> ...` | Update an issue (status, priority, assignee, etc.) |
+| `wallts issue assign <id> --agent <slug>` | Assign to an agent (triggers a task immediately) |
+| `wallts issue status <id> --set <status>` | Shortcut to change status |
+| `wallts issue search <query>` | Keyword search |
+| `wallts issue runs <id>` | Show agent runs on an issue |
+| `wallts issue rerun <id>` | Re-enqueue a fresh task for the issue's current agent assignee |
+| `wallts issue comment <id> ...` | Nested: view / post comments |
+| `wallts issue subscriber <id> ...` | Nested: subscribe / unsubscribe |
+| `wallts project list/get/create/update/delete/status` | Project CRUD |
 
 ## Agents and skills
 
 | Command | Purpose |
 |---|---|
-| `multica agent list` | List the workspace's agents |
-| `multica agent get <slug>` | Show an agent's configuration |
-| `multica agent create ...` | Create an agent |
-| `multica agent update <slug> ...` | Update an agent |
-| `multica agent archive <slug>` | Archive |
-| `multica agent restore <slug>` | Restore an archived agent |
-| `multica agent tasks <slug>` | Show an agent's task history |
-| `multica agent skills ...` | Nested: attach / detach skills |
-| `multica skill list/get/create/update/delete` | Skill CRUD |
-| `multica skill import ...` | Import a skill from GitHub, ClawHub, or the local machine |
-| `multica skill files ...` | Nested: manage a skill's files |
+| `wallts agent list` | List the workspace's agents |
+| `wallts agent get <slug>` | Show an agent's configuration |
+| `wallts agent create ...` | Create an agent |
+| `wallts agent update <slug> ...` | Update an agent |
+| `wallts agent archive <slug>` | Archive |
+| `wallts agent restore <slug>` | Restore an archived agent |
+| `wallts agent tasks <slug>` | Show an agent's task history |
+| `wallts agent skills ...` | Nested: attach / detach skills |
+| `wallts skill list/get/create/update/delete` | Skill CRUD |
+| `wallts skill import ...` | Import a skill from GitHub, ClawHub, or the local machine |
+| `wallts skill files ...` | Nested: manage a skill's files |
 
 ## Squads
 
 | Command | Purpose |
 |---|---|
-| `multica squad list` | List squads in the workspace |
-| `multica squad get <id>` | Show a single squad |
-| `multica squad create --name "..." --leader <agent>` | Create a squad (owner / admin) |
-| `multica squad update <id> ...` | Update name, description, instructions, leader, or avatar |
-| `multica squad delete <id>` | Archive (soft-delete) — transfers assigned issues to the leader |
-| `multica squad member list/add/remove/set-role <squad-id>` | Manage squad members and update roles in place |
-| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Used by squad leader agents to record an evaluation per turn |
+| `wallts squad list` | List squads in the workspace |
+| `wallts squad get <id>` | Show a single squad |
+| `wallts squad create --name "..." --leader <agent>` | Create a squad (owner / admin) |
+| `wallts squad update <id> ...` | Update name, description, instructions, leader, or avatar |
+| `wallts squad delete <id>` | Archive (soft-delete) — transfers assigned issues to the leader |
+| `wallts squad member list/add/remove/set-role <squad-id>` | Manage squad members and update roles in place |
+| `wallts squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Used by squad leader agents to record an evaluation per turn |
 
 See [Squads](/squads) for the full model.
 
@@ -97,45 +97,45 @@ See [Squads](/squads) for the full model.
 
 | Command | Purpose |
 |---|---|
-| `multica autopilot list` | List every autopilot in the workspace |
-| `multica autopilot get <id>` | Show a single autopilot |
-| `multica autopilot create ...` | Create an autopilot |
-| `multica autopilot update <id> ...` | Update |
-| `multica autopilot delete <id>` | Delete |
-| `multica autopilot runs <id>` | Show run history |
-| `multica autopilot trigger <id>` | Trigger a run manually |
+| `wallts autopilot list` | List every autopilot in the workspace |
+| `wallts autopilot get <id>` | Show a single autopilot |
+| `wallts autopilot create ...` | Create an autopilot |
+| `wallts autopilot update <id> ...` | Update |
+| `wallts autopilot delete <id>` | Delete |
+| `wallts autopilot runs <id>` | Show run history |
+| `wallts autopilot trigger <id>` | Trigger a run manually |
 
 ## Daemon and runtimes
 
 | Command | Purpose |
 |---|---|
-| `multica daemon start` | Start the daemon (background by default; add `--foreground` to run in the foreground) |
-| `multica daemon stop` | Stop the daemon |
-| `multica daemon restart` | Restart the daemon |
-| `multica daemon status` | Check whether the daemon is online and its concurrency |
-| `multica daemon logs` | View daemon logs |
-| `multica runtime list` | List runtimes in the current workspace |
-| `multica runtime usage` | Show resource usage |
-| `multica runtime activity` | Recent activity log |
-| `multica runtime update <id> ...` | Update a runtime's configuration |
+| `wallts daemon start` | Start the daemon (background by default; add `--foreground` to run in the foreground) |
+| `wallts daemon stop` | Stop the daemon |
+| `wallts daemon restart` | Restart the daemon |
+| `wallts daemon status` | Check whether the daemon is online and its concurrency |
+| `wallts daemon logs` | View daemon logs |
+| `wallts runtime list` | List runtimes in the current workspace |
+| `wallts runtime usage` | Show resource usage |
+| `wallts runtime activity` | Recent activity log |
+| `wallts runtime update <id> ...` | Update a runtime's configuration |
 
 ## Miscellaneous
 
 | Command | Purpose |
 |---|---|
-| `multica repo checkout <url>` | Clone a repo locally for agents to use |
-| `multica config` | View or edit local CLI configuration |
-| `multica version` | Print the CLI version |
-| `multica update` | Upgrade the CLI to the latest release |
-| `multica attachment download <id>` | Download an attachment from an issue or comment |
+| `wallts repo checkout <url>` | Clone a repo locally for agents to use |
+| `wallts config` | View or edit local CLI configuration |
+| `wallts version` | Print the CLI version |
+| `wallts update` | Upgrade the CLI to the latest release |
+| `wallts attachment download <id>` | Download an attachment from an issue or comment |
 
 ## Getting full flags
 
 Every command supports `--help`:
 
 ```bash
-multica issue create --help
-multica agent update --help
+wallts issue create --help
+wallts agent update --help
 ```
 
 v2 will ship a dedicated detailed reference page for each command.
@@ -144,4 +144,4 @@ v2 will ship a dedicated detailed reference page for each command.
 
 - [Authentication and tokens](/auth-tokens) — PAT vs. JWT vs. daemon token
 - [Daemon and runtimes](/daemon-runtimes) — how the `daemon` commands work under the hood
-- [Creating and configuring agents](/agents-create) — all options for `multica agent create`
+- [Creating and configuring agents](/agents-create) — all options for `wallts agent create`

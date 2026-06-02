@@ -11,7 +11,7 @@
  *   - Secondary line uses the type-aware `InboxDetailLabel`, not raw body.
  */
 import { Pressable, View } from "react-native";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";

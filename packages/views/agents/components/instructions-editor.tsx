@@ -3,8 +3,8 @@
 import { useRef, useState } from "react";
 import { ChevronDown, FileText, X } from "lucide-react";
 import { ContentEditor, type ContentEditorRef } from "../../editor";
-import { Button } from "@multica/ui/components/ui/button";
-import { cn } from "@multica/ui/lib/utils";
+import { Button } from "@wallts/ui/components/ui/button";
+import { cn } from "@wallts/ui/lib/utils";
 import { useT } from "../../i18n";
 
 interface InstructionsEditorProps {

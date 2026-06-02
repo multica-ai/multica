@@ -1,5 +1,5 @@
 {
-  "name": "@multica/web",
+  "name": "@wallts/web",
   "version": "0.2.0",
   "private": true,
   "type": "module",
@@ -19,9 +19,9 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@emoji-mart/data": "^1.2.1",
     "@floating-ui/dom": "^1.7.6",
-    "@multica/core": "workspace:*",
-    "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*",
+    "@wallts/core": "workspace:*",
+    "@wallts/ui": "workspace:*",
+    "@wallts/views": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "@tanstack/react-query-devtools": "^5.96.2",
     "@tiptap/extension-code-block-lowlight": "^3.22.1",
@@ -73,7 +73,7 @@
     "zustand": "catalog:"
   },
   "devDependencies": {
-    "@multica/eslint-config": "workspace:*",
+    "@wallts/eslint-config": "workspace:*",
     "@tailwindcss/postcss": "catalog:",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",

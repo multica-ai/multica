@@ -15,7 +15,7 @@
  * AsyncStorage persistence if cross-restart filter survival is desired.
  */
 import { create } from "zustand";
-import type { IssuePriority, IssueStatus } from "@multica/core/types";
+import type { IssuePriority, IssueStatus } from "@wallts/core/types";
 import type { MyIssuesScope } from "@/data/queries/issue-keys";
 
 interface MyIssuesViewState {

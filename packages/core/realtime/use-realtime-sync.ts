@@ -441,7 +441,7 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) onInboxNew(qc, wsId, item);
       // Fire a native OS notification only when the app isn't focused. When
-      // the user is already looking at Multica, the inbox sidebar's unread
+      // the user is already looking at Wallts, the inbox sidebar's unread
       // styling is enough — no need to interrupt with a banner. `desktopAPI`
       // is injected by the preload script; its absence (web app) skips silently.
       if (typeof document !== "undefined" && document.hasFocus()) return;

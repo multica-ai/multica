@@ -14,7 +14,7 @@ import type {
   IssuePriority,
   IssueStatus,
   TimelineEntry,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 
 const STATUS_LABEL: Record<IssueStatus, string> = {
   backlog: "Backlog",

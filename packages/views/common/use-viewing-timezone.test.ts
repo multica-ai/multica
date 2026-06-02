@@ -5,7 +5,7 @@ const userRef = vi.hoisted(
   () => ({ current: null as { timezone?: string | null } | null }),
 );
 
-vi.mock("@multica/core/auth", () => {
+vi.mock("@wallts/core/auth", () => {
   type AuthState = { user: typeof userRef.current };
   const useAuthStore = Object.assign(
     (sel: (s: AuthState) => unknown) => sel({ user: userRef.current }),

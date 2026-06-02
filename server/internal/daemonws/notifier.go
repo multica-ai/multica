@@ -5,7 +5,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/dwickyfp/wallts/server/internal/realtime"
 )
 
 // RelayNotifier sends task wakeups to the local daemon hub and, when Redis is

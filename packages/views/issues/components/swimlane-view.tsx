@@ -25,28 +25,28 @@ import type {
   IssueStatus,
   Project,
   UpdateIssueRequest,
-} from "@multica/core/types";
-import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
-import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
-import { useWorkspacePaths } from "@multica/core/paths";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { projectListOptions } from "@multica/core/projects/queries";
-import { useActorName } from "@multica/core/workspace/hooks";
-import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import { childrenByParentsOptions, issueKeys, type IssueSortParam, type MyIssuesFilter } from "@multica/core/issues/queries";
+} from "@wallts/core/types";
+import { useViewStore, useViewStoreApi } from "@wallts/core/issues/stores/view-store-context";
+import type { SwimlaneGrouping } from "@wallts/core/issues/stores/view-store";
+import { useWorkspacePaths } from "@wallts/core/paths";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { projectListOptions } from "@wallts/core/projects/queries";
+import { useActorName } from "@wallts/core/workspace/hooks";
+import { useLoadMoreByStatus } from "@wallts/core/issues/mutations";
+import { childrenByParentsOptions, issueKeys, type IssueSortParam, type MyIssuesFilter } from "@wallts/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-} from "@multica/ui/components/ui/dropdown-menu";
+} from "@wallts/ui/components/ui/dropdown-menu";
 import { sortIssues } from "../utils/sort";
-import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
-import { useModalStore } from "@multica/core/modals";
+import { BOARD_STATUSES, STATUS_CONFIG } from "@wallts/core/issues/config";
+import { useModalStore } from "@wallts/core/modals";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@wallts/ui/components/ui/tooltip";
+import { Button } from "@wallts/ui/components/ui/button";
 import { StatusHeading } from "./status-heading";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";

@@ -10,24 +10,24 @@ import {
 import { toast } from "sonner";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useQuery } from "@tanstack/react-query";
-import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
-import { deriveWorkload } from "@multica/core/agents";
+import type { AgentRuntime, MemberWithUser } from "@wallts/core/types";
+import { deriveWorkload } from "@wallts/core/agents";
 import {
   deriveRuntimeHealth,
   runtimeUsageOptions,
-} from "@multica/core/runtimes";
-import { Button } from "@multica/ui/components/ui/button";
+} from "@wallts/core/runtimes";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
+} from "@wallts/ui/components/ui/dropdown-menu";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
+} from "@wallts/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { workloadConfig } from "../../agents/presence";

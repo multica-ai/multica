@@ -1,4 +1,4 @@
-import type { SupportedLocale } from "@multica/core/i18n";
+import type { SupportedLocale } from "@wallts/core/i18n";
 export { docsHrefForLocale } from "@/lib/docs-href";
 
 export type Locale = SupportedLocale;

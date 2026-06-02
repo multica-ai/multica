@@ -1,11 +1,11 @@
 ---
 title: Self-Host 快速上手
-description: 在自己的服务器或本机用 Docker 把 Multica 跑起来（也可以在 Kubernetes 上用 Helm）。约 10 分钟。
+description: 在自己的服务器或本机用 Docker 把 Wallts 跑起来（也可以在 Kubernetes 上用 Helm）。约 10 分钟。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-这一页带你用 Docker 把 Multica 的**服务器**（后端 + 前端 + PostgreSQL）跑在自己的机器或服务器上。走完这一篇你的数据就完全在自己手里——包括 [工作区](/workspaces)、[issue](/issues)、[评论](/comments)、[智能体](/agents) 配置。
+这一页带你用 Docker 把 Wallts 的**服务器**（后端 + 前端 + PostgreSQL）跑在自己的机器或服务器上。走完这一篇你的数据就完全在自己手里——包括 [工作区](/workspaces)、[issue](/issues)、[评论](/comments)、[智能体](/agents) 配置。
 
 智能体**执行**还是靠你本地跑的 [守护进程](/daemon-runtimes) + 本地装好的 [AI 编程工具](/providers)——这点和 Cloud 完全一样。Self-host 换掉的是服务器那一层，不是执行那一层。
 
@@ -23,15 +23,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 </Callout>
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
-cd multica
+git clone https://github.com/wallts-ai/wallts.git
+cd wallts
 make selfhost
 ```
 
 `make selfhost` 会：
 
 1. 如果没有 `.env` 文件，从 `.env.example` 自动生成一份并**生成随机 JWT_SECRET**
-2. 拉取官方 Docker 镜像（PostgreSQL、Multica backend、Multica frontend）
+2. 拉取官方 Docker 镜像（PostgreSQL、Wallts backend、Wallts frontend）
 3. 用 `docker-compose.selfhost.yml` 启动全部服务
 4. 等后端 `/health` 端点准备就绪
 
@@ -55,11 +55,11 @@ make selfhost
 ## 2. 重要：保持生产安全配置
 
 <Callout type="warning">
-**`docker-compose.selfhost.yml` 默认把 `APP_ENV` 设成 `production`**，并让 `MULTICA_DEV_VERIFICATION_CODE` 为空，所以公网实例默认没有固定验证码。
+**`docker-compose.selfhost.yml` 默认把 `APP_ENV` 设成 `production`**，并让 `WALLTS_DEV_VERIFICATION_CODE` 为空，所以公网实例默认没有固定验证码。
 
-只在本地或私有测试自动化里设置 `MULTICA_DEV_VERIFICATION_CODE`。如果在 `APP_ENV` 非 production 时启用了固定验证码，任何能请求验证码的人都能用这个固定值登录。详见 [登录与注册配置 → 固定本地测试验证码](/auth-setup#固定本地测试验证码)。
+只在本地或私有测试自动化里设置 `WALLTS_DEV_VERIFICATION_CODE`。如果在 `APP_ENV` 非 production 时启用了固定验证码，任何能请求验证码的人都能用这个固定值登录。详见 [登录与注册配置 → 固定本地测试验证码](/auth-setup#固定本地测试验证码)。
 
-公网部署前一定检查 `.env` 里 `APP_ENV=production`，且 `MULTICA_DEV_VERIFICATION_CODE` 为空。
+公网部署前一定检查 `.env` 里 `APP_ENV=production`，且 `WALLTS_DEV_VERIFICATION_CODE` 为空。
 </Callout>
 
 ## 3. 配置邮件服务（可选但推荐）
@@ -99,7 +99,7 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com  # 同时作为 SMTP From: 头
 ```bash
 SMTP_HOST=smtp.internal.example.com
 SMTP_PORT=587
-SMTP_USERNAME=multica
+SMTP_USERNAME=wallts
 SMTP_PASSWORD=...
 SMTP_TLS_INSECURE=false        # 仅在私有 CA / 自签证书时改成 true
 RESEND_FROM_EMAIL=noreply@yourdomain.com
@@ -110,7 +110,7 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```bash
 SMTP_HOST=smtp.qiye.aliyun.com
 SMTP_PORT=465
-SMTP_USERNAME=multica@yourdomain.com
+SMTP_USERNAME=wallts@yourdomain.com
 SMTP_PASSWORD=...
 SMTP_TLS=implicit              # 465 上可省略；非标准 SMTPS 端口上必填
 RESEND_FROM_EMAIL=noreply@yourdomain.com
@@ -126,19 +126,19 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com
 
 - 输入你的邮箱
 - 从你配置的邮件后端（Resend 或 SMTP relay）收到的邮件里拿验证码；两者都没配的话，从 server 容器的 stdout 里抄 `[DEV] Verification code` 这行
-- 不要直接使用 `888888`；只有在非 production 私有实例上显式设置 `MULTICA_DEV_VERIFICATION_CODE=888888` 后它才会生效
+- 不要直接使用 `888888`；只有在非 production 私有实例上显式设置 `WALLTS_DEV_VERIFICATION_CODE=888888` 后它才会生效
 - 登录后创建第一个工作区
 
 ## 5. 连接命令行工具到你自己的 server
 
-命令行装法和 [Cloud 快速上手 → 2. 装命令行工具](/cloud-quickstart#2-装-multica-命令行工具) 一样——Homebrew / 脚本 / PowerShell 任选。
+命令行装法和 [Cloud 快速上手 → 2. 装命令行工具](/cloud-quickstart#2-装-wallts-命令行工具) 一样——Homebrew / 脚本 / PowerShell 任选。
 
 ### 5a. 同一台机器
 
 CLI 和 server 在同一台机器上时，默认参数就够用：
 
 ```bash
-multica setup self-host
+wallts setup self-host
 ```
 
 会自动连 `http://localhost:8080`（backend）+ `http://localhost:3000`（frontend），引导你在浏览器里登录、把 PAT 存到本地、**自动启动守护进程**。
@@ -148,7 +148,7 @@ multica setup self-host
 因为 compose 默认只监听 `127.0.0.1`，从别的机器跑的 daemon 是连不上 `http://<server-ip>:8080` 的——这也是有意为之，否则默认 `JWT_SECRET` 等于直接暴露在公网。正确做法是在 server 上跑一个反向代理（Caddy / nginx / Cloudflare Tunnel），由它终结 TLS，再反代到 `127.0.0.1:8080`（backend）和 `127.0.0.1:3000`（frontend）。然后把 CLI 指到公开的 HTTPS 域名：
 
 ```bash
-multica setup self-host \
+wallts setup self-host \
   --server-url https://<你的域名> \
   --app-url https://<你的域名>
 ```
@@ -156,7 +156,7 @@ multica setup self-host \
 最小可用的 Caddyfile，单域名同时挂前后端（带 WebSocket 转发，daemon 和网页端都依赖）：
 
 ```nginx
-multica.example.com {
+wallts.example.com {
     # WebSocket 路由——必须在 catch-all 之前
     @ws path /ws /ws/*
     handle @ws {
@@ -175,7 +175,7 @@ multica.example.com {
 }
 ```
 
-代理起好之后，记得在 server 的 `.env` 里把 `FRONTEND_ORIGIN` 设成 `https://multica.example.com` 并重启后端，否则 WebSocket 的 origin 校验会把浏览器拒掉（见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)）。
+代理起好之后，记得在 server 的 `.env` 里把 `FRONTEND_ORIGIN` 设成 `https://wallts.example.com` 并重启后端，否则 WebSocket 的 origin 校验会把浏览器拒掉（见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)）。
 
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 也是不错的选择——它直接给一个公开域名 + TLS，host 上不用对外暴露任何端口。Nginx 也能做（分 `app.` / `api.` 两个域名 + `proxy_set_header Upgrade` 转 WebSocket），关键就是终结 TLS、并在 `/ws` 上转发 `Upgrade` 头。
 
@@ -194,9 +194,9 @@ Usage / Runtime 看板读的是派生表 `task_usage_hourly`，需要 `rollup_ta
 **Option A —— 外部 cron / systemd-timer（最简单）。** 在任意外部调度器上每 5 分钟跑一次 rollup。函数是幂等的、按 watermark 推进，丢一两个 tick 下次能补上：
 
 ```bash
-# /etc/cron.d/multica-rollup —— 每 5 分钟跑一次
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
+# /etc/cron.d/wallts-rollup —— 每 5 分钟跑一次
+*/5 * * * * root docker compose -f /path/to/wallts/docker-compose.selfhost.yml \
+  exec -T postgres psql -U wallts -d wallts \
   -c "SELECT rollup_task_usage_hourly();" >/dev/null
 ```
 
@@ -220,54 +220,54 @@ docker compose -f docker-compose.selfhost.yml exec backend \
 
 `--sleep-between-slices=2s` 用来在繁忙的数据库上限制读压力。回填跑完后重启后端容器（migration 在启动时自动跑），升级就能继续。
 
-完整参考（含 Kubernetes `CronJob` 模板和升级顺序）见仓库的 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)。
+完整参考（含 Kubernetes `CronJob` 模板和升级顺序）见仓库的 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)。
 
 ## Kubernetes 部署（替代方案）
 
-如果你已经在跑 Kubernetes 集群，仓库里也带了一个 Helm chart，路径 `deploy/helm/multica/`。它就是 k8s 版的 `make selfhost`——一样的 backend 镜像、frontend 镜像、`pgvector/pgvector:pg17` Postgres，封装成 Deployment / Service / Ingress，再加上一个由 `values.yaml` 渲染出来的 `ConfigMap`。这套 chart 是按照 k3s + Traefik + `local-path` 写的，集群里只要有 Ingress controller 和默认的 `ReadWriteOnce` StorageClass 就能跑，其他类型的集群稍微改一改也能用。
+如果你已经在跑 Kubernetes 集群，仓库里也带了一个 Helm chart，路径 `deploy/helm/wallts/`。它就是 k8s 版的 `make selfhost`——一样的 backend 镜像、frontend 镜像、`pgvector/pgvector:pg17` Postgres，封装成 Deployment / Service / Ingress，再加上一个由 `values.yaml` 渲染出来的 `ConfigMap`。这套 chart 是按照 k3s + Traefik + `local-path` 写的，集群里只要有 Ingress controller 和默认的 `ReadWriteOnce` StorageClass 就能跑，其他类型的集群稍微改一改也能用。
 
-这个 chart **不会模板化任何敏感值**。它通过 name 引用一个叫 `multica-secrets` 的 Secret，所以真实的 JWT / DB / Resend / Google 密钥永远不用进 git，也不用进 `values.yaml`。先用 kubectl 一次性把命名空间和 Secret 建好：
+这个 chart **不会模板化任何敏感值**。它通过 name 引用一个叫 `wallts-secrets` 的 Secret，所以真实的 JWT / DB / Resend / Google 密钥永远不用进 git，也不用进 `values.yaml`。先用 kubectl 一次性把命名空间和 Secret 建好：
 
 ```bash
-kubectl create namespace multica
+kubectl create namespace wallts
 
-kubectl -n multica create secret generic multica-secrets \
+kubectl -n wallts create secret generic wallts-secrets \
   --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
   --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
   --from-literal=RESEND_API_KEY="" \
   --from-literal=GOOGLE_CLIENT_SECRET="" \
   --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+  --from-literal=WALLTS_DEV_VERIFICATION_CODE=""
 ```
 
 再装 chart：
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
-cd multica
-helm install multica deploy/helm/multica -n multica
+git clone https://github.com/wallts-ai/wallts.git
+cd wallts
+helm install wallts deploy/helm/wallts -n wallts
 ```
 
-默认主机名是 `multica.dev.lan`（web）和 `api.multica.dev.lan`（backend）。把它们加进 `/etc/hosts`（或者本地 DNS），指向任意一个 Ingress 可达的节点 IP 就行。要换主机名，就把 `deploy/helm/multica/values.yaml` 复制一份，改掉 `ingress.frontend.host` / `ingress.backend.host`，再把 `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri` 改成相应的地址，然后 `helm install ... -f my-values.yaml`。
+默认主机名是 `wallts.dev.lan`（web）和 `api.wallts.dev.lan`（backend）。把它们加进 `/etc/hosts`（或者本地 DNS），指向任意一个 Ingress 可达的节点 IP 就行。要换主机名，就把 `deploy/helm/wallts/values.yaml` 复制一份，改掉 `ingress.frontend.host` / `ingress.backend.host`，再把 `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri` 改成相应的地址，然后 `helm install ... -f my-values.yaml`。
 
 冷集群上 backend 可能会 `Running` 但 `Not Ready` 持续几分钟，等 Postgres 起来并跑完 migration——startupProbe 会兜住这一段，pod 不会被 liveness 重启。等它 `Ready` 之后：
 
 ```bash
-curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+curl -H "Host: api.wallts.dev.lan" http://<ingress-ip>/healthz
 # {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
 ```
 
-然后浏览器打开 `http://multica.dev.lan`，回到上面的 [第 4 步——首次登录](#4-首次登录--创建工作区) 继续。命令行连到你的 Ingress 主机：
+然后浏览器打开 `http://wallts.dev.lan`，回到上面的 [第 4 步——首次登录](#4-首次登录--创建工作区) 继续。命令行连到你的 Ingress 主机：
 
 ```bash
-multica setup self-host \
-  --server-url http://api.multica.dev.lan \
-  --app-url http://multica.dev.lan
+wallts setup self-host \
+  --server-url http://api.wallts.dev.lan \
+  --app-url http://wallts.dev.lan
 ```
 
-只想拉最新镜像、不动 chart：`kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`。要锁到某个 Multica 版本，就在 values 文件里设 `images.backend.tag` / `images.frontend.tag`，再 `helm upgrade`。`helm -n multica uninstall multica` 只删工作负载，PVC 和 Secret 都保留；`kubectl delete namespace multica` 才会全清。
+只想拉最新镜像、不动 chart：`kubectl -n wallts rollout restart deploy/wallts-backend deploy/wallts-frontend`。要锁到某个 Wallts 版本，就在 values 文件里设 `images.backend.tag` / `images.frontend.tag`，再 `helm upgrade`。`helm -n wallts uninstall wallts` 只删工作负载，PVC 和 Secret 都保留；`kubectl delete namespace wallts` 才会全清。
 
-完整参考——三种登录方式、为了绕过 web 镜像 build-time 写死的 `REMOTE_API_URL` 而加的 `backend` ExternalName 别名、资源限制、TLS——都在仓库的 [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)。
+完整参考——三种登录方式、为了绕过 web 镜像 build-time 写死的 `REMOTE_API_URL` 而加的 `backend` ExternalName 别名、资源限制、TLS——都在仓库的 [`SELF_HOSTING.md`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)。
 
 ## 常见问题
 
@@ -283,4 +283,4 @@ multica setup self-host \
 - [登录与注册配置](/auth-setup) —— Resend / OAuth / 注册白名单详细配置
 - [GitHub 集成](/github-integration) —— 连一个 GitHub App，让 PR 自动关联 issue、merge 时自动转 Done
 - [故障排查](/troubleshooting) —— 遇到问题先来这里
-- [桌面应用](/desktop-app) —— 可以通过 `~/.multica/desktop.json` 连接 Desktop；Web 前端 + CLI 仍然是最快的自部署路径
+- [桌面应用](/desktop-app) —— 可以通过 `~/.wallts/desktop.json` 连接 Desktop；Web 前端 + CLI 仍然是最快的自部署路径

@@ -3,8 +3,8 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import type { AgentRuntime } from "@multica/core/types";
-import { I18nProvider } from "@multica/core/i18n/react";
+import type { AgentRuntime } from "@wallts/core/types";
+import { I18nProvider } from "@wallts/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
 
@@ -26,23 +26,23 @@ vi.mock("../../common/use-viewing-timezone", () => ({
   useViewingTimezone: () => VIEWER_TZ,
 }));
 
-vi.mock("@multica/core/runtimes/queries", () => ({
+vi.mock("@wallts/core/runtimes/queries", () => ({
   runtimeUsageOptions,
   runtimeUsageByAgentOptions,
 }));
 
-vi.mock("@multica/core/workspace/queries", () => ({
+vi.mock("@wallts/core/workspace/queries", () => ({
   agentListOptions: () => ({ kind: "agents" as const }),
 }));
 
-vi.mock("@multica/core/hooks", () => ({
+vi.mock("@wallts/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
 // custom-pricing-store is consumed two ways: usage-section reads the store
 // hook, and runtimes/utils reads getCustomPricing(). The hook must be both
 // callable and expose getState(), mirroring a real Zustand store.
-vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
+vi.mock("@wallts/core/runtimes/custom-pricing-store", () => {
   const state = { pricings: {} as Record<string, unknown> };
   const useCustomPricingStore = Object.assign(
     (sel?: (s: typeof state) => unknown) => (sel ? sel(state) : state),

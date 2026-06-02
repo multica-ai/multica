@@ -6,7 +6,7 @@ import * as Haptics from "expo-haptics";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { Button } from "@/components/ui/button";
-import { MulticaLogo } from "@/components/brand/multica-logo";
+import { WalltsLogo } from "@/components/brand/wallts-logo";
 import { useAuthStore } from "@/data/auth-store";
 import { mapAuthError } from "@/lib/auth-error";
 
@@ -41,10 +41,10 @@ export default function Login() {
       >
         <View className="flex-1 justify-center px-6 gap-6">
           <View className="items-center gap-3">
-            <MulticaLogo size={32} />
+            <WalltsLogo size={32} />
             <View className="gap-1 items-center">
               <Text className="text-2xl font-semibold text-foreground">
-                Sign in to Multica
+                Sign in to Wallts
               </Text>
               <Text className="text-sm text-muted-foreground text-center">
                 Enter your email and we&apos;ll send you a verification code.

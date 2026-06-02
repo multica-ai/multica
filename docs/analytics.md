@@ -1,10 +1,10 @@
 # Product Analytics
 
-This document is the source of truth for the analytics events Multica ships
+This document is the source of truth for the analytics events Wallts ships
 to PostHog. Events feed the acquisition → activation → expansion funnel that
 drives our weekly Active Workspaces (WAW) north-star metric.
 
-See [MUL-1122](https://github.com/multica-ai/multica) for the design context.
+See [MUL-1122](https://github.com/dwickyfp/wallts) for the design context.
 
 ## Configuration
 
@@ -22,7 +22,7 @@ events leave the process unless the operator explicitly opts in**.
 
 ### Self-hosted instances
 
-Self-hosters should **never inherit a Multica-issued `POSTHOG_API_KEY`** —
+Self-hosters should **never inherit a Wallts-issued `POSTHOG_API_KEY`** —
 that would route their users' behavior to our analytics project. The
 defaults guarantee this:
 
@@ -79,7 +79,7 @@ handler → analytics.Client.Capture(Event)   ← non-blocking, returns immediat
   (role, use_case, team_size, platform_preference) that a user can
   legitimately change during onboarding. `Event.Set` on the backend
   maps to `$set`; the frontend helper is
-  `setPersonProperties()` in `@multica/core/analytics`. Use
+  `setPersonProperties()` in `@wallts/core/analytics`. Use
   `$set_once` only for values that must never be overwritten (email,
   initial attribution, first-completion timestamp).
 
@@ -137,7 +137,7 @@ OAuth entry points (`findOrCreateUser` is the single emission site).
 | Property | Type | Description |
 |---|---|---|
 | `email_domain` | string | Lower-cased domain portion of the user's email. |
-| `signup_source` | string | Opaque attribution bundle from the frontend cookie `multica_signup_source` (UTM + referrer). Empty when the cookie is absent. |
+| `signup_source` | string | Opaque attribution bundle from the frontend cookie `wallts_signup_source` (UTM + referrer). Empty when the cookie is absent. |
 | `auth_method` | string | Optional. `"google"` for Google OAuth signups. Absent for verification-code signups. |
 
 Person properties set with `$set_once`:
@@ -177,7 +177,7 @@ extra query, no race.
 | `runtime_mode` | string | Currently `local`; reserved for cloud runtimes. |
 | `provider` | string | e.g. `"codex"`, `"claude"`. |
 | `runtime_version` | string | Version of the agent runtime binary. |
-| `cli_version` | string | Version of the `multica` CLI that registered it. |
+| `cli_version` | string | Version of the `wallts` CLI that registered it. |
 
 `distinct_id` is the authenticated owner's user id when the daemon was
 registered via a member's JWT/PAT; daemon-token registrations fall back to
@@ -594,7 +594,7 @@ sent from a pre-workspace surface.
     workspace. Omitted on pre-workspace surfaces.
 
 - Attribution is NOT a separate event; UTM + referrer origin are written
-  to the `multica_signup_source` cookie on the first anonymous pageview
+  to the `wallts_signup_source` cookie on the first anonymous pageview
   and read by the backend's `signup` emission. The cookie carries a JSON
   payload URL-encoded at write time (`encodeURIComponent`) and
   URL-decoded at read time (`url.QueryUnescape`) — the JSON is never

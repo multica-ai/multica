@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/dwickyfp/wallts/server/internal/cli"
 )
 
 // Indirections over the real release / version helpers so tests can run the
@@ -31,9 +31,9 @@ var autoUpdateInitialDelay = 2 * time.Minute
 // graceful restart into the new binary.
 //
 // Disabled when:
-//   - the operator opted out via --no-auto-update / MULTICA_DAEMON_AUTO_UPDATE=false;
+//   - the operator opted out via --no-auto-update / WALLTS_DAEMON_AUTO_UPDATE=false;
 //   - the daemon points at a self-hosted server (default-off — set
-//     MULTICA_DAEMON_AUTO_UPDATE=true to opt back in);
+//     WALLTS_DAEMON_AUTO_UPDATE=true to opt back in);
 //   - the daemon was spawned by Desktop (the Electron app owns the binary);
 //   - the running version doesn't look like a tagged release (dev builds).
 //

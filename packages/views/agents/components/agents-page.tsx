@@ -11,36 +11,36 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import type { Agent, AgentRuntime, CreateAgentRequest } from "@multica/core/types";
+import type { Agent, AgentRuntime, CreateAgentRequest } from "@wallts/core/types";
 import {
   type AgentAvailability,
   agentRunCounts30dOptions,
   summarizeActivityWindow,
   useWorkspaceActivityMap,
   useWorkspacePresenceMap,
-} from "@multica/core/agents";
-import { useAgentsViewStore } from "@multica/core/agents/stores";
-import { api } from "@multica/core/api";
-import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
-import { useWorkspacePaths } from "@multica/core/paths";
+} from "@wallts/core/agents";
+import { useAgentsViewStore } from "@wallts/core/agents/stores";
+import { api } from "@wallts/core/api";
+import { useAuthStore } from "@wallts/core/auth";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { canAssignAgentToIssue } from "@wallts/core/permissions";
+import { useWorkspacePaths } from "@wallts/core/paths";
 import {
   agentListOptions,
   memberListOptions,
   workspaceKeys,
-} from "@multica/core/workspace/queries";
-import { runtimeListOptions } from "@multica/core/runtimes";
-import { Button } from "@multica/ui/components/ui/button";
+} from "@wallts/core/workspace/queries";
+import { runtimeListOptions } from "@wallts/core/runtimes";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
-import { Input } from "@multica/ui/components/ui/input";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { DataTable } from "@multica/ui/components/ui/data-table";
+} from "@wallts/ui/components/ui/dropdown-menu";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { DataTable } from "@wallts/ui/components/ui/data-table";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig, availabilityOrder } from "../presence";
@@ -655,7 +655,7 @@ function PageHeaderBar({
         <p className="ml-2 hidden text-xs text-muted-foreground md:block">
           {t(($) => $.page.tagline)}{" "}
           <a
-            href="https://multica.ai/docs/agents"
+            href="https://wallts.ai/docs/agents"
             target="_blank"
             rel="noopener noreferrer"
             className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"

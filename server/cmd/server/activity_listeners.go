@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/handler"
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/internal/events"
+	"github.com/dwickyfp/wallts/server/internal/handler"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // registerActivityListeners wires up event bus listeners that record activity

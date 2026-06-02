@@ -1,1 +1,1 @@
-export { InboxPage as default } from "@multica/views/inbox";
+export { InboxPage as default } from "@wallts/views/inbox";

@@ -2,20 +2,20 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
-import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { useAuthStore } from "@multica/core/auth";
-import { useSquadsViewStore } from "@multica/core/squads/stores";
+import { useCurrentWorkspace, useWorkspacePaths } from "@wallts/core/paths";
+import { agentListOptions, memberListOptions, squadListOptions } from "@wallts/core/workspace/queries";
+import { resolvePublicFileUrl } from "@wallts/core/workspace/avatar-url";
+import { useAuthStore } from "@wallts/core/auth";
+import { useSquadsViewStore } from "@wallts/core/squads/stores";
 import { AppLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { Users, Plus, Search, Bot, User } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
-import { useModalStore } from "@multica/core/modals";
-import type { Agent, Squad } from "@multica/core/types";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { ActorAvatar as ActorAvatarBase } from "@wallts/ui/components/common/actor-avatar";
+import { useModalStore } from "@wallts/core/modals";
+import type { Agent, Squad } from "@wallts/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 

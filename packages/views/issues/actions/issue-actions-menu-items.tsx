@@ -17,14 +17,14 @@ import {
   Trash2,
   UserMinus,
 } from "lucide-react";
-import type { AgentTask, Issue } from "@multica/core/types";
-import { api } from "@multica/core/api";
+import type { AgentTask, Issue } from "@wallts/core/types";
+import { api } from "@wallts/core/api";
 import {
   ALL_STATUSES,
   PRIORITY_ORDER,
   PRIORITY_CONFIG,
-} from "@multica/core/issues/config";
-import { issueKeys } from "@multica/core/issues/queries";
+} from "@wallts/core/issues/config";
+import { issueKeys } from "@wallts/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 import {
@@ -33,14 +33,14 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
   DropdownMenuSeparator,
-} from "@multica/ui/components/ui/dropdown-menu";
+} from "@wallts/ui/components/ui/dropdown-menu";
 import {
   ContextMenuItem,
   ContextMenuSub,
   ContextMenuSubTrigger,
   ContextMenuSubContent,
   ContextMenuSeparator,
-} from "@multica/ui/components/ui/context-menu";
+} from "@wallts/ui/components/ui/context-menu";
 import type { UseIssueActionsResult } from "./use-issue-actions";
 import { useT } from "../../i18n";
 

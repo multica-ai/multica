@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/dwickyfp/wallts/server/pkg/agent"
 )
 
 func TestClassifyPoisonedOutput(t *testing.T) {

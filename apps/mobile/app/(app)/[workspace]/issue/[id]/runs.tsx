@@ -15,7 +15,7 @@ import { useMemo } from "react";
 import { ScrollView, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import type { AgentTask } from "@multica/core/types";
+import type { AgentTask } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { RunRow } from "@/components/issue/run-row";
 import {

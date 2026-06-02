@@ -5,7 +5,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 // outside-of-scope vars, but vi.hoisted runs before the import graph.
 const getAttachmentMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("@wallts/core/api", () => ({
   api: { getAttachment: getAttachmentMock },
 }));
 

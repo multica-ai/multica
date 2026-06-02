@@ -13,7 +13,7 @@
  */
 import * as React from "react";
 import Svg, { Circle, G, Line, Path } from "react-native-svg";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus } from "@wallts/core/types";
 
 const CX = 7;
 const CY = 7;

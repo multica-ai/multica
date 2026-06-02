@@ -16,7 +16,7 @@
 import { useMemo } from "react";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 import "./styles/code.css";
 
 const lowlight = createLowlight(common);

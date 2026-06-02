@@ -15,13 +15,13 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
-import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@wallts/ui/lib/utils";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
+} from "@wallts/ui/components/ui/dialog";
 import { toast } from "sonner";
 import type { DaemonStatus } from "../../../shared/daemon-types";
 import {

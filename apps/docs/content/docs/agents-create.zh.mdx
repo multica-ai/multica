@@ -14,14 +14,14 @@ import { Callout } from "fumadocs-ui/components/callout";
 满足之后，在工作区的**智能体**页点 **+ 新建**，或者用命令行：
 
 ```bash
-multica agent create
+wallts agent create
 ```
 
 表单里只有两项必填：**名字**（工作区内唯一）和 **运行时**（= 选一款 AI 编程工具）。其他字段下面一节一节讲。
 
 ## 选一款 AI 编程工具
 
-运行时背后是一款具体的 AI 编程工具。Multica 支持 12 款，最常用的几款：
+运行时背后是一款具体的 AI 编程工具。Wallts 支持 12 款，最常用的几款：
 
 | 工具 | 适合 |
 |---|---|
@@ -61,10 +61,10 @@ ANTHROPIC_API_KEY = sk-...
 ANTHROPIC_BASE_URL = https://my-proxy.example.com
 ```
 
-系统关键变量不能被覆盖：`PATH`、`HOME`、`USER`、`SHELL`、`TERM`、`CODEX_HOME`，以及任何 `MULTICA_*` 开头的 key 都会被守护进程静默忽略（日志里有 warn，不会报错）。
+系统关键变量不能被覆盖：`PATH`、`HOME`、`USER`、`SHELL`、`TERM`、`CODEX_HOME`，以及任何 `WALLTS_*` 开头的 key 都会被守护进程静默忽略（日志里有 warn，不会报错）。
 
 <Callout type="warning">
-**`custom_env` 的值在 Multica 服务器的数据库里是明文存储的。** agent list/get 接口不再返回任何 env 值——只返回键的数量。读取真实值需要 workspace owner / admin 调用专用且会审计的 `GET /api/agents/{id}/env`（CLI: `multica agent env get <id>`）。正在执行任务的智能体即便宿主是 owner，也无法借此读取其它智能体的 env——这个接口拒绝 agent-actor 会话。数据库备份、DB 审计里仍然能看到真实值。
+**`custom_env` 的值在 Wallts 服务器的数据库里是明文存储的。** agent list/get 接口不再返回任何 env 值——只返回键的数量。读取真实值需要 workspace owner / admin 调用专用且会审计的 `GET /api/agents/{id}/env`（CLI: `wallts agent env get <id>`）。正在执行任务的智能体即便宿主是 owner，也无法借此读取其它智能体的 env——这个接口拒绝 agent-actor 会话。数据库备份、DB 审计里仍然能看到真实值。
 
 **不要把高价值 secret 放进 `custom_env`**（生产数据库密码、root 级 token 等）。给智能体用**独立的、有限权限的凭证**（只读 API key、单 scope 的 PAT），定期轮换。
 </Callout>

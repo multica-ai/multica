@@ -5,15 +5,15 @@ import type { FormEvent, HTMLAttributes } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Cloud, Loader2, RefreshCw, Rocket, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import type { CloudRuntimeNode } from "@multica/core/runtimes";
+import type { CloudRuntimeNode } from "@wallts/core/runtimes";
 import {
   cloudRuntimeNodeListOptions,
   useCreateCloudRuntimeNode,
   useDeleteCloudRuntimeNode,
-} from "@multica/core/runtimes";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { Badge } from "@multica/ui/components/ui/badge";
-import { Button } from "@multica/ui/components/ui/button";
+} from "@wallts/core/runtimes";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { Badge } from "@wallts/ui/components/ui/badge";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -21,17 +21,17 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
+} from "@wallts/ui/components/ui/dialog";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Label } from "@wallts/ui/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@multica/ui/components/ui/select";
-import { cn } from "@multica/ui/lib/utils";
+} from "@wallts/ui/components/ui/select";
+import { cn } from "@wallts/ui/lib/utils";
 import { useT } from "../../i18n";
 
 const CLOUD_RUNTIME_INSTANCE_TYPES = ["t4g.medium", "t4g.large"] as const;

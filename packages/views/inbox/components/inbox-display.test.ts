@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem } from "@wallts/core/types";
 import {
   getInboxDisplayTitle,
   getQuickCreateFailureDetail,

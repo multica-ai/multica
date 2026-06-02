@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/events"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/events"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // mockRow implements pgx.Row, returning either a scanned task or pgx.ErrNoRows.

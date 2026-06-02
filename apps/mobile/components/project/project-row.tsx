@@ -9,7 +9,7 @@
  *              [● in progress] [▍▍ high]   2d ago
  */
 import { Pressable, View } from "react-native";
-import type { Project } from "@multica/core/types";
+import type { Project } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ProjectIcon } from "@/components/ui/project-icon";
 import { ProjectStatusIcon } from "@/components/ui/project-status-icon";

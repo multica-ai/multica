@@ -7,8 +7,8 @@ import {
   Webhook, Copy, Check, RotateCw,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@wallts/core/autopilots/queries";
+import { projectDetailOptions } from "@wallts/core/projects/queries";
 import {
   useUpdateAutopilot,
   useDeleteAutopilot,
@@ -16,25 +16,25 @@ import {
   useCreateAutopilotTrigger,
   useDeleteAutopilotTrigger,
   useRotateAutopilotTriggerWebhookToken,
-} from "@multica/core/autopilots/mutations";
-import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
-import { api } from "@multica/core/api";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
-import { useActorName } from "@multica/core/workspace/hooks";
+} from "@wallts/core/autopilots/mutations";
+import { buildAutopilotWebhookUrl } from "@wallts/core/autopilots";
+import { api } from "@wallts/core/api";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { useWorkspacePaths } from "@wallts/core/paths";
+import { useActorName } from "@wallts/core/workspace/hooks";
 import { useNavigation, AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Button } from "@multica/ui/components/ui/button";
-import { Switch } from "@multica/ui/components/ui/switch";
-import { cn } from "@multica/ui/lib/utils";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Switch } from "@wallts/ui/components/ui/switch";
+import { cn } from "@wallts/ui/lib/utils";
 import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
+} from "@wallts/ui/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,15 +44,15 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
+} from "@wallts/ui/components/ui/alert-dialog";
 import {
   TriggerConfigSection,
   getDefaultTriggerConfig,
   toCronExpression,
 } from "./trigger-config";
 import type { TriggerConfig } from "./trigger-config";
-import type { AutopilotExecutionMode, AutopilotRun, AutopilotTrigger } from "@multica/core/types";
-import type { AgentTask } from "@multica/core/types/agent";
+import type { AutopilotExecutionMode, AutopilotRun, AutopilotTrigger } from "@wallts/core/types";
+import type { AgentTask } from "@wallts/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";

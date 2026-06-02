@@ -1662,9 +1662,9 @@ func TestEnsureCodexMcpConfigEmptyClearsBlock(t *testing.T) {
 	// `[mcp_servers.user]`) is left untouched.
 	tmp := filepath.Join(t.TempDir(), "config.toml")
 	initial := "sandbox_mode = \"workspace-write\"\n\n" +
-		multicaCodexMcpBeginMarker + "\n" +
+		walltsCodexMcpBeginMarker + "\n" +
 		"[mcp_servers.fetch]\ncommand = \"uvx\"\n" +
-		multicaCodexMcpEndMarker + "\n\n" +
+		walltsCodexMcpEndMarker + "\n\n" +
 		"[mcp_servers.user_global]\ncommand = \"keep\"\n"
 	if err := os.WriteFile(tmp, []byte(initial), 0o600); err != nil {
 		t.Fatalf("seed config: %v", err)
@@ -1678,7 +1678,7 @@ func TestEnsureCodexMcpConfigEmptyClearsBlock(t *testing.T) {
 		t.Fatalf("read after: %v", err)
 	}
 	got := string(data)
-	if strings.Contains(got, multicaCodexMcpBeginMarker) {
+	if strings.Contains(got, walltsCodexMcpBeginMarker) {
 		t.Fatalf("managed block should be cleared, got:\n%s", got)
 	}
 	if !strings.Contains(got, "[mcp_servers.user_global]") {
@@ -1710,7 +1710,7 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 	}
 	got := string(data)
 
-	if !strings.Contains(got, multicaCodexMcpBeginMarker) || !strings.Contains(got, multicaCodexMcpEndMarker) {
+	if !strings.Contains(got, walltsCodexMcpBeginMarker) || !strings.Contains(got, walltsCodexMcpEndMarker) {
 		t.Fatalf("expected managed block markers, got:\n%s", got)
 	}
 	alphaIdx := strings.Index(got, "[mcp_servers.alpha]")
@@ -1879,7 +1879,7 @@ func TestEnsureCodexMcpConfigAbsentLeavesUserTablesAlone(t *testing.T) {
 		if !strings.Contains(got, "[mcp_servers.user_global]") {
 			t.Fatalf("absent mcp_config (%q) must leave user MCP tables alone, got:\n%s", string(raw), got)
 		}
-		if strings.Contains(got, multicaCodexMcpBeginMarker) {
+		if strings.Contains(got, walltsCodexMcpBeginMarker) {
 			t.Fatalf("absent mcp_config (%q) must not write managed markers, got:\n%s", string(raw), got)
 		}
 	}
@@ -1912,7 +1912,7 @@ func TestEnsureCodexMcpConfigEmptyManagedSetStripsUserMcp(t *testing.T) {
 		if strings.Contains(got, "user_global") {
 			t.Fatalf("managed empty set (%q) must strip user MCP tables, got:\n%s", string(raw), got)
 		}
-		if !strings.Contains(got, multicaCodexMcpBeginMarker) || !strings.Contains(got, multicaCodexMcpEndMarker) {
+		if !strings.Contains(got, walltsCodexMcpBeginMarker) || !strings.Contains(got, walltsCodexMcpEndMarker) {
 			t.Fatalf("managed empty set (%q) must still write markers so future runs find them, got:\n%s", string(raw), got)
 		}
 		if !strings.Contains(got, `sandbox_mode = "workspace-write"`) {

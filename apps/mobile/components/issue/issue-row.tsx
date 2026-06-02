@@ -25,7 +25,7 @@
  *     squad assignees instead.
  */
 import { Pressable, View } from "react-native";
-import type { Issue } from "@multica/core/types";
+import type { Issue } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { PriorityIcon } from "@/components/ui/priority-icon";

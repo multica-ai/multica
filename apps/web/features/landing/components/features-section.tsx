@@ -18,14 +18,14 @@ import {
   Sparkles,
   UserMinus,
 } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 import { ImageIcon } from "./shared";
 import { useLocale } from "../i18n";
 import type { LandingDict } from "../i18n";
-import { StatusIcon, PriorityIcon } from "@multica/views/issues/components";
-import { STATUS_CONFIG } from "@multica/core/issues/config/status";
-import { PRIORITY_CONFIG } from "@multica/core/issues/config/priority";
-import type { IssueStatus, IssuePriority } from "@multica/core/types";
+import { StatusIcon, PriorityIcon } from "@wallts/views/issues/components";
+import { STATUS_CONFIG } from "@wallts/core/issues/config/status";
+import { PRIORITY_CONFIG } from "@wallts/core/issues/config/priority";
+import type { IssueStatus, IssuePriority } from "@wallts/core/types";
 
 /* ------------------------------------------------------------------ */
 /*  Mock ActorAvatar — mirrors the real ActorAvatar styling exactly     */
@@ -163,7 +163,7 @@ function TeammatesVisual() {
       {/* Header bar */}
       <div className="flex h-10 shrink-0 items-center border-b bg-background px-4 text-sm">
         <div className="flex items-center gap-1.5 min-w-0 text-xs">
-          <span className="text-muted-foreground">Multica Demo</span>
+          <span className="text-muted-foreground">Wallts Demo</span>
           <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
           <span className="text-muted-foreground">MUL-18</span>
           <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
@@ -405,7 +405,7 @@ const mockToolCalls = [
   { type: "tool_use" as const, tool: "Read", summary: "server/internal/handler/comment.go" },
   { type: "tool_result" as const, preview: "func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) { …" },
   { type: "tool_use" as const, tool: "Bash", summary: "go test ./internal/handler/ -run TestErrorResponses" },
-  { type: "tool_result" as const, preview: "ok  \tgithub.com/multica/server/internal/handler\t0.847s" },
+  { type: "tool_result" as const, preview: "ok  \tgithub.com/wallts/server/internal/handler\t0.847s" },
 ];
 
 const mockTaskHistory = [
@@ -422,7 +422,7 @@ function AutonomousVisual() {
       {/* Header bar */}
       <div className="flex h-10 shrink-0 items-center border-b bg-background px-4 text-sm">
         <div className="flex items-center gap-1.5 min-w-0 text-xs">
-          <span className="text-muted-foreground">Multica Demo</span>
+          <span className="text-muted-foreground">Wallts Demo</span>
           <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
           <span className="text-muted-foreground">MUL-18</span>
           <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />

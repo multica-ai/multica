@@ -3,7 +3,7 @@ package handler
 import (
 	"testing"
 
-	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/dwickyfp/wallts/server/internal/daemon/execenv"
 )
 
 // TestRelativeWorkDir covers the privacy-safe display derivation that
@@ -41,14 +41,14 @@ func TestRelativeWorkDir(t *testing.T) {
 		},
 		{
 			name:     "standard envRoot path strips workspaces root",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			workDir:  "/Users/alice/wallts_workspaces/" + wsID + "/5c57b65b/workdir",
 			wsID:     wsID,
 			taskID:   taskID,
 			expected: wsID + "/5c57b65b/workdir",
 		},
 		{
 			name:     "standard envRoot path without trailing workdir",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b",
+			workDir:  "/Users/alice/wallts_workspaces/" + wsID + "/5c57b65b",
 			wsID:     wsID,
 			taskID:   taskID,
 			expected: wsID + "/5c57b65b",
@@ -62,10 +62,10 @@ func TestRelativeWorkDir(t *testing.T) {
 		},
 		{
 			name:     "local_directory deep path under home keeps full remainder",
-			workDir:  "/Users/df007df/code/work/projects/multica/foo",
+			workDir:  "/Users/df007df/code/work/projects/wallts/foo",
 			wsID:     wsID,
 			taskID:   taskID,
-			expected: "code/work/projects/multica/foo",
+			expected: "code/work/projects/wallts/foo",
 		},
 		{
 			name:     "shallow /Users home path strips username segment",
@@ -132,28 +132,28 @@ func TestRelativeWorkDir(t *testing.T) {
 		},
 		{
 			name:     "Windows backslash separators are normalized",
-			workDir:  `C:\Users\alice\multica_workspaces\` + wsID + `\5c57b65b\workdir`,
+			workDir:  `C:\Users\alice\wallts_workspaces\` + wsID + `\5c57b65b\workdir`,
 			wsID:     wsID,
 			taskID:   taskID,
 			expected: wsID + "/5c57b65b/workdir",
 		},
 		{
 			name:     "missing workspace_id under home strips home prefix instead of envRoot",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			workDir:  "/Users/alice/wallts_workspaces/" + wsID + "/5c57b65b/workdir",
 			wsID:     "",
 			taskID:   taskID,
-			expected: "multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			expected: "wallts_workspaces/" + wsID + "/5c57b65b/workdir",
 		},
 		{
 			name:     "missing task_id under home strips home prefix instead of envRoot",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			workDir:  "/Users/alice/wallts_workspaces/" + wsID + "/5c57b65b/workdir",
 			wsID:     wsID,
 			taskID:   "",
-			expected: "multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			expected: "wallts_workspaces/" + wsID + "/5c57b65b/workdir",
 		},
 		{
 			name:     "trailing slash on envRoot path is preserved in returned suffix",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir/",
+			workDir:  "/Users/alice/wallts_workspaces/" + wsID + "/5c57b65b/workdir/",
 			wsID:     wsID,
 			taskID:   taskID,
 			expected: wsID + "/5c57b65b/workdir/",

@@ -2,16 +2,16 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { cn } from "@multica/ui/lib/utils";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@wallts/ui/components/ui/tooltip";
+import { cn } from "@wallts/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { SubmitButton } from "@multica/ui/components/common/submit-button";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
-import type { Attachment } from "@multica/core/types";
-import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
-import { useCommentDraftStore } from "@multica/core/issues/stores";
+import { FileUploadButton } from "@wallts/ui/components/common/file-upload-button";
+import { SubmitButton } from "@wallts/ui/components/common/submit-button";
+import { useFileUpload } from "@wallts/core/hooks/use-file-upload";
+import { api } from "@wallts/core/api";
+import type { Attachment } from "@wallts/core/types";
+import { enterKey, formatShortcut, modKey } from "@wallts/core/platform";
+import { useCommentDraftStore } from "@wallts/core/issues/stores";
 import { useT } from "../../i18n";
 
 interface CommentInputProps {

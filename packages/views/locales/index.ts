@@ -1,4 +1,4 @@
-import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
+import type { LocaleResources, SupportedLocale } from "@wallts/core/i18n";
 import enCommon from "./en/common.json";
 import enAuth from "./en/auth.json";
 import enSettings from "./en/settings.json";

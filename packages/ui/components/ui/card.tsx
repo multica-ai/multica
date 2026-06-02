@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { cn } from "@multica/ui/lib/utils"
+import { cn } from "@wallts/ui/lib/utils"
 
 function Card({
   className,

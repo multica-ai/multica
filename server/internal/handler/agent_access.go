@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // canAccessPrivateAgent gates the four protected surfaces for private

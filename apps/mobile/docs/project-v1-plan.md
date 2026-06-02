@@ -131,13 +131,13 @@ Optimal order to keep typecheck green at each step:
 8. **View mode switcher in `project-related-issues.tsx`** — Board view + status-grouped List, replacing Open/Done buckets
 9. **Hex / SVG sweep** in `project-properties-section.tsx`, `project-resources-section.tsx`, `more/projects.tsx`
 10. **`new.tsx` draft integration**: wire `useNewProjectDraftStore` into the create form
-11. **Typecheck** (`pnpm --filter @multica/mobile exec tsc --noEmit`) — must exit 0
+11. **Typecheck** (`pnpm --filter @wallts/mobile exec tsc --noEmit`) — must exit 0
 
 ## Verification
 
 ### Required before PR open
 
-1. `pnpm --filter @multica/mobile exec tsc --noEmit` → exit 0
+1. `pnpm --filter @wallts/mobile exec tsc --noEmit` → exit 0
 2. Manual on simulator (cold start app, login, pick workspace):
    - **Tier B picker**: open a project → tap status chip → native iOS pageSheet drags down → pick new status → reflects in chip. Same for priority. Compare gesture to lead picker (already migrated) — should be identical.
    - **Progress bar**: detail screen shows horizontal bar + "X / Y" matching the project's actual `done_count` / `issue_count`. Bar fills proportionally; 0 issues shows empty bar (no divide-by-zero crash).

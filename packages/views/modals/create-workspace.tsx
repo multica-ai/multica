@@ -3,15 +3,15 @@
 import { useNavigation } from "../navigation";
 import { DragStrip } from "../platform";
 import { ArrowLeft } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
   DialogDescription,
-} from "@multica/ui/components/ui/dialog";
-import { paths } from "@multica/core/paths";
-import { useConfigStore } from "@multica/core/config";
+} from "@wallts/ui/components/ui/dialog";
+import { paths } from "@wallts/core/paths";
+import { useConfigStore } from "@wallts/core/config";
 import { CreateWorkspaceForm } from "../workspace/create-workspace-form";
 import { useT } from "../i18n";
 

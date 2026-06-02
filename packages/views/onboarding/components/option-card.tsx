@@ -1,7 +1,7 @@
 "use client";
 
-import { Input } from "@multica/ui/components/ui/input";
-import { cn } from "@multica/ui/lib/utils";
+import { Input } from "@wallts/ui/components/ui/input";
+import { cn } from "@wallts/ui/lib/utils";
 import { useT } from "../../i18n";
 
 const OTHER_INPUT_MAX_LENGTH = 80;

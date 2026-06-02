@@ -26,11 +26,11 @@ export const INSTALL_RUNTIME_ISSUE_TITLE = {
   ko: "1단계 — agent를 사용하려면 runtime 연결하기",
 } as const;
 
-const en = `Welcome to Multica.
+const en = `Welcome to Wallts.
 
-Agents need a runtime before they can execute work. You can still use Multica as a lightweight project-management workspace while you install one.
+Agents need a runtime before they can execute work. You can still use Wallts as a lightweight project-management workspace while you install one.
 
-## Try Multica first
+## Try Wallts first
 
 Before the runtime is ready, you can:
 
@@ -43,7 +43,7 @@ That gives you the project-management layer first. Once a runtime is connected, 
 
 ## Install your first agent runtime
 
-Full guide: https://multica.ai/docs/install-agent-runtime
+Full guide: https://wallts.ai/docs/install-agent-runtime
 
 For English users, the fastest first path is Codex:
 
@@ -55,19 +55,19 @@ For English users, the fastest first path is Codex:
 4. Confirm your terminal can find it:
    which codex
    codex --version
-5. Restart the Multica daemon:
-   multica daemon restart
+5. Restart the Wallts daemon:
+   wallts daemon restart
    If you use the desktop app, restarting the app is enough.
 6. Return to Runtimes and refresh. You should see a Codex runtime online.
 7. Create your first agent from that runtime, then assign an issue to the agent and set status to todo.
 
 Codex reference: https://developers.openai.com/codex/cli
 
-When the runtime is connected, you can create Multica Helper for a guided first run.`;
+When the runtime is connected, you can create Wallts Helper for a guided first run.`;
 
-const zh = `欢迎来到 Multica。
+const zh = `欢迎来到 Wallts。
 
-智能体需要先连上运行时才能执行工作。运行时还没准备好时,你也可以先把 Multica 当作轻量项目管理工具体验起来。
+智能体需要先连上运行时才能执行工作。运行时还没准备好时,你也可以先把 Wallts 当作轻量项目管理工具体验起来。
 
 ## 先体验项目管理功能
 
@@ -82,7 +82,7 @@ const zh = `欢迎来到 Multica。
 
 ## 安装第一个 Agent 运行时
 
-完整文档:https://multica.ai/docs/install-agent-runtime
+完整文档:https://wallts.ai/docs/install-agent-runtime
 
 中文用户建议先装 Kimi CLI:
 
@@ -95,21 +95,21 @@ const zh = `欢迎来到 Multica。
 3. 在你想让 Kimi 工作的项目目录里启动一次:
    kimi
 4. 首次启动后输入 /login,按提示完成 Kimi Code 或 API key 配置。
-5. 重启 Multica 守护进程:
-   multica daemon restart
+5. 重启 Wallts 守护进程:
+   wallts daemon restart
    如果你用桌面端,重启 app 即可。
 6. 回到 Runtimes 页面刷新。你应该能看到一个在线的 Kimi 运行时。
 7. 用这个运行时创建第一个智能体,再把一个 issue 分配给它,并把状态切到 todo。
 
 Kimi CLI 官方文档:https://moonshotai.github.io/kimi-cli/zh/guides/getting-started.html
 
-运行时连上后,你就可以创建 Multica Helper,开始一次有智能体参与的上手引导。`;
+运行时连上后,你就可以创建 Wallts Helper,开始一次有智能体参与的上手引导。`;
 
-const ko = `Multica에 오신 것을 환영합니다.
+const ko = `Wallts에 오신 것을 환영합니다.
 
-agent가 작업을 실행하려면 먼저 runtime이 필요합니다. runtime을 설치하는 동안에도 Multica를 가벼운 프로젝트 관리 워크스페이스로 먼저 사용할 수 있습니다.
+agent가 작업을 실행하려면 먼저 runtime이 필요합니다. runtime을 설치하는 동안에도 Wallts를 가벼운 프로젝트 관리 워크스페이스로 먼저 사용할 수 있습니다.
 
-## 먼저 Multica를 사용해 보기
+## 먼저 Wallts를 사용해 보기
 
 runtime이 준비되기 전에는 다음을 해볼 수 있습니다:
 
@@ -122,7 +122,7 @@ runtime이 준비되기 전에는 다음을 해볼 수 있습니다:
 
 ## 첫 agent runtime 설치하기
 
-전체 가이드: https://multica.ai/docs/install-agent-runtime
+전체 가이드: https://wallts.ai/docs/install-agent-runtime
 
 한국어 사용자는 Codex로 시작하는 것이 가장 빠릅니다:
 
@@ -134,15 +134,15 @@ runtime이 준비되기 전에는 다음을 해볼 수 있습니다:
 4. 터미널에서 찾을 수 있는지 확인합니다:
    which codex
    codex --version
-5. Multica daemon을 재시작합니다:
-   multica daemon restart
+5. Wallts daemon을 재시작합니다:
+   wallts daemon restart
    데스크톱 앱을 사용한다면 앱을 재시작해도 됩니다.
 6. Runtimes로 돌아가 새로고침합니다. Codex runtime이 online으로 보여야 합니다.
 7. 해당 runtime으로 첫 agent를 만든 뒤 issue를 agent에게 배정하고 status를 todo로 바꿉니다.
 
 Codex 참고 문서: https://developers.openai.com/codex/cli
 
-runtime이 연결되면 Multica Helper를 만들어 안내를 받으며 첫 실행을 시작할 수 있습니다.`;
+runtime이 연결되면 Wallts Helper를 만들어 안내를 받으며 첫 실행을 시작할 수 있습니다.`;
 
 export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, ko } as const;
 

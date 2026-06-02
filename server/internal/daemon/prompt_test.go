@@ -24,7 +24,7 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		"verbal routing wrappers about creating the issue",
 		"pure conversational fillers",
 		// cc routing must survive: mention link stays in description so the
-		// auto-subscribe path fires (multica issue create has no --subscriber flag)
+		// auto-subscribe path fires (wallts issue create has no --subscriber flag)
 		"CC exception",
 		"auto-subscribes members",
 		// context section is conditional and must not be an apology log
@@ -34,7 +34,7 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// use custom issue prefixes, so a successful issue creation should
 		// not look failed merely because the identifier does not match one
 		// fixed prefix.
-		"multica issue create --output json",
+		"wallts issue create --output json",
 		"JSON response",
 		"identifier",
 		"Do not scrape human output",
@@ -59,7 +59,7 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 func TestBuildQuickCreatePromptAssigneeIncludesSquads(t *testing.T) {
 	out := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
 	mustContain := []string{
-		"multica squad list",
+		"wallts squad list",
 		"Squads are first-class assignees",
 		"Treat bare @-routing as an assignee directive",
 		"让 @独立团 review 这个 PR",
@@ -326,14 +326,14 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 		t.Errorf("hint must discourage blindly reading every new comment, got:\n%s", out)
 	}
 	// Parent thread first: the --thread <trigger> read is the prioritized action.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --since "+since+" --output json") {
+	if !strings.Contains(out, "wallts issue comment list "+issueID+" --thread trigger-1 --since "+since+" --output json") {
 		t.Errorf("hint must point at the triggering (parent) thread --since read first, got:\n%s", out)
 	}
 	if !strings.Contains(out, "--tail 30") {
 		t.Errorf("hint must offer the full-thread (--tail 30) option, got:\n%s", out)
 	}
 	// Issue-wide catch-up is demoted to an only-if-needed fallback.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
+	if !strings.Contains(out, "wallts issue comment list "+issueID+" --since "+since+" --output json") {
 		t.Errorf("hint must keep the issue-wide --since catch-up as a fallback, got:\n%s", out)
 	}
 	// The old cursor-heavy paragraph must be gone.
@@ -360,7 +360,7 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	if strings.Contains(out, "new comment(s) since your last run") {
 		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
 	}
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {
+	if !strings.Contains(out, "wallts issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
 	}
 }
@@ -388,7 +388,7 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 		"triggering comment ID / thread anchor",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
-		"multica issue comment list " + issueID + " --thread trigger-1 --tail 30 --output json",
+		"wallts issue comment list " + issueID + " --thread trigger-1 --tail 30 --output json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("resumed/no-delta prompt missing %q\n--- output ---\n%s", want, out)

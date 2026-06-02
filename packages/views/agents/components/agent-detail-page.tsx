@@ -10,24 +10,24 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Agent, UpdateAgentRequest } from "@multica/core/types";
+import type { Agent, UpdateAgentRequest } from "@wallts/core/types";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
-} from "@multica/core/agents";
-import { api, ApiError } from "@multica/core/api";
-import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+} from "@wallts/core/agents";
+import { api, ApiError } from "@wallts/core/api";
+import { useAuthStore } from "@wallts/core/auth";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { useWorkspacePaths } from "@wallts/core/paths";
 import {
   agentListOptions,
   memberListOptions,
   workspaceKeys,
-} from "@multica/core/workspace/queries";
-import { runtimeListOptions } from "@multica/core/runtimes";
-import { useAgentPermissions } from "@multica/core/permissions";
-import { Button } from "@multica/ui/components/ui/button";
-import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
+} from "@wallts/core/workspace/queries";
+import { runtimeListOptions } from "@wallts/core/runtimes";
+import { useAgentPermissions } from "@wallts/core/permissions";
+import { Button } from "@wallts/ui/components/ui/button";
+import { CapabilityBanner } from "@wallts/ui/components/common/capability-banner";
 import {
   Dialog,
   DialogContent,
@@ -35,14 +35,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
+} from "@wallts/ui/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
+} from "@wallts/ui/components/ui/dropdown-menu";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
 import { AppLink, useNavigation } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";

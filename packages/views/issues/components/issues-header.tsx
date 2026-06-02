@@ -22,7 +22,7 @@ import {
   UserPen,
   Waves,
 } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -37,23 +37,23 @@ import {
   DropdownMenuSub,
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
-} from "@multica/ui/components/ui/dropdown-menu";
+} from "@wallts/ui/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
-} from "@multica/ui/components/ui/popover";
-import { Switch } from "@multica/ui/components/ui/switch";
+} from "@wallts/ui/components/ui/popover";
+import { Switch } from "@wallts/ui/components/ui/switch";
 import {
   ALL_STATUSES,
   PRIORITY_ORDER,
-} from "@multica/core/issues/config";
+} from "@wallts/core/issues/config";
 import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
-import { labelListOptions } from "@multica/core/labels/queries";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { memberListOptions, agentListOptions, squadListOptions } from "@wallts/core/workspace/queries";
+import { projectListOptions } from "@wallts/core/projects/queries";
+import { labelListOptions } from "@wallts/core/labels/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
@@ -63,18 +63,18 @@ import {
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
   type ActorFilterValue,
-} from "@multica/core/issues/stores/view-store";
-import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
-import type { SortField, IssueGrouping, SwimlaneGrouping, ViewMode } from "@multica/core/issues/stores/view-store";
+} from "@wallts/core/issues/stores/view-store";
+import { useViewStore, useViewStoreApi } from "@wallts/core/issues/stores/view-store-context";
+import type { SortField, IssueGrouping, SwimlaneGrouping, ViewMode } from "@wallts/core/issues/stores/view-store";
 import {
   useIssuesScopeStore,
   type IssuesScope,
-} from "@multica/core/issues/stores/issues-scope-store";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type { Issue } from "@multica/core/types";
+} from "@wallts/core/issues/stores/issues-scope-store";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@wallts/ui/components/ui/tooltip";
+import type { Issue } from "@wallts/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
-import { useIssueViewStore } from "@multica/core/issues/stores/view-store";
+import { useIssueViewStore } from "@wallts/core/issues/stores/view-store";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
 
 // ---------------------------------------------------------------------------

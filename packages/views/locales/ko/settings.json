@@ -80,7 +80,7 @@
     },
     "system": {
       "title": "시스템 알림",
-      "description": "Multica가 백그라운드에 있을 때 표시되는 운영체제 알림 배너를 제어합니다.",
+      "description": "Wallts가 백그라운드에 있을 때 표시되는 운영체제 알림 배너를 제어합니다.",
       "label": "시스템 알림 표시",
       "hint": "앱에 포커스가 없을 때 새 인박스 항목에 대해 운영체제 배너를 표시합니다."
     }
@@ -180,7 +180,7 @@
     "manage_hint": "관리자와 소유자만 연동을 관리할 수 있습니다."
   },
   "github": {
-    "page_description": "GitHub App을 연결하고, Pull request가 Multica 안에서 표시되는 방식을 제어하며, 에이전트가 커밋 기록에 남기는 정보를 설정합니다.",
+    "page_description": "GitHub App을 연결하고, Pull request가 Wallts 안에서 표시되는 방식을 제어하며, 에이전트가 커밋 기록에 남기는 정보를 설정합니다.",
     "section_master": "GitHub 기능 사용",
     "master_description_on": "끄면 모든 GitHub UI가 숨겨지고 새로운 부수 효과가 기록되지 않습니다. 기존 데이터는 백엔드에 유지됩니다. 개발팀이 아니라면 여기서 끄면 됩니다.",
     "master_description_off": "GitHub 기능이 꺼져 있습니다. PR 사이드바, Co-authored-by 트레일러, 자동 연결이 일시 중지됩니다. 백엔드 데이터는 삭제되지 않습니다.",
@@ -197,7 +197,7 @@
     "disconnect": "연결 해제",
     "disconnecting": "연결 해제 중...",
     "disconnect_confirm_title": "GitHub App 연결 해제",
-    "disconnect_confirm_description": "Multica가 이 설치의 Webhook 수신을 중단합니다. 기존 PR 미러와 연결은 유지되며, 언제든 다시 연결해 업데이트를 재개할 수 있습니다.",
+    "disconnect_confirm_description": "Wallts가 이 설치의 Webhook 수신을 중단합니다. 기존 PR 미러와 연결은 유지되며, 언제든 다시 연결해 업데이트를 재개할 수 있습니다.",
     "disconnect_confirm_cancel": "취소",
     "disconnect_confirm_action": "연결 해제",
     "not_configured": "이 배포에는 GitHub 연동이 설정되어 있지 않습니다. 운영자가 다음 값을 설정해야 합니다:",

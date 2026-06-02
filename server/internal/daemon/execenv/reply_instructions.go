@@ -33,10 +33,10 @@ func BuildNewCommentsHint(issueID, triggerCommentID, newCommentsSince string, ne
 		return fmt.Sprintf(
 			"%d new comment(s) on this issue since your last run — don't read them all blindly. "+
 				"Start with the thread your triggering comment is in: "+
-				"`multica issue comment list %s --thread %s --since %s --output json` "+
+				"`wallts issue comment list %s --thread %s --since %s --output json` "+
 				"(swap `--since` for `--tail 30` if you need the full thread, not just the delta). "+
 				"Only if you need context from the other threads, catch up issue-wide: "+
-				"`multica issue comment list %s --since %s --output json`.\n\n",
+				"`wallts issue comment list %s --since %s --output json`.\n\n",
 			newCommentCount, issueID, triggerCommentID, newCommentsSince, issueID, newCommentsSince,
 		)
 	}
@@ -45,7 +45,7 @@ func BuildNewCommentsHint(issueID, triggerCommentID, newCommentsSince string, ne
 	// issue-wide catch-up.
 	return fmt.Sprintf(
 		"%d new comment(s) on this issue since your last run. Catch up: "+
-			"`multica issue comment list %s --since %s --output json`.\n\n",
+			"`wallts issue comment list %s --since %s --output json`.\n\n",
 		newCommentCount, issueID, newCommentsSince,
 	)
 }
@@ -68,7 +68,7 @@ func BuildResumedCommentsHint(issueID, triggerCommentID string) string {
 			"Use the triggering comment ID / thread anchor: `%s`. "+
 			"If your reply depends on thread context, do not rely only on resumed session memory — "+
 			"first pull the triggering conversation with: "+
-			"`multica issue comment list %s --thread %s --tail 30 --output json`.\n\n",
+			"`wallts issue comment list %s --thread %s --tail 30 --output json`.\n\n",
 		triggerCommentID, issueID, triggerCommentID,
 	)
 }
@@ -92,9 +92,9 @@ func BuildColdCommentsHint(issueID, triggerCommentID string) string {
 	}
 	return fmt.Sprintf(
 		"Read the triggering conversation first: "+
-			"`multica issue comment list %s --thread %s --tail 30 --output json` "+
+			"`wallts issue comment list %s --thread %s --tail 30 --output json` "+
 			"(that thread's root + its 30 newest replies). "+
-			"Need cross-thread background? `multica issue comment list %s --recent 20 --output json`.\n\n",
+			"Need cross-thread background? `wallts issue comment list %s --recent 20 --output json`.\n\n",
 		issueID, triggerCommentID, issueID,
 	)
 }
@@ -135,12 +135,12 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 			"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
 				"do NOT reuse --parent values from previous turns in this session.\n\n"+
 				"On Windows, write the reply body to a UTF-8 file with your file-write tool, then post it with `--content-file`. "+
-				"Do NOT pipe via `--content-stdin` — Windows PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to native commands and silently drops non-ASCII (Chinese, Japanese, Cyrillic, accents, emoji) as `?` before the bytes reach `multica.exe`. "+
+				"Do NOT pipe via `--content-stdin` — Windows PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to native commands and silently drops non-ASCII (Chinese, Japanese, Cyrillic, accents, emoji) as `?` before the bytes reach `wallts.exe`. "+
 				"Do NOT use inline `--content`; it is easy to lose formatting or accidentally compress a structured reply into one line.\n\n"+
 				"Use this form, preserving the same issue ID and --parent value:\n\n"+
 				"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
 				"    # 2. Then run:\n"+
-				"    multica issue comment add %s --parent %s --content-file ./reply.md\n\n"+
+				"    wallts issue comment add %s --parent %s --content-file ./reply.md\n\n"+
 				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
 			issueID, triggerCommentID,
 		)
@@ -152,7 +152,7 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 				"Always use `--content-stdin` with a HEREDOC for agent-authored issue comments, even when the reply is a single line. "+
 				"Do NOT use inline `--content`; it is easy to lose formatting or accidentally compress a structured reply into one line.\n\n"+
 				"Use this form, preserving the same issue ID and --parent value:\n\n"+
-				"    cat <<'COMMENT' | multica issue comment add %s --parent %s --content-stdin\n"+
+				"    cat <<'COMMENT' | wallts issue comment add %s --parent %s --content-stdin\n"+
 				"    First paragraph.\n"+
 				"\n"+
 				"    Second paragraph.\n"+
@@ -173,7 +173,7 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 		"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
 			"do NOT reuse --parent values from previous turns in this session.\n\n"+
 			"Use this form, preserving the same issue ID and --parent value:\n\n"+
-			"    multica issue comment add %s --parent %s --content \"...\"\n\n"+
+			"    wallts issue comment add %s --parent %s --content \"...\"\n\n"+
 			"For multi-line bodies, code blocks, or content with quotes/backticks, prefer `--content-stdin` "+
 			"(pipe a HEREDOC) or `--content-file <path>` (read a UTF-8 file). See Available Commands above for the full menu.\n",
 		issueID, triggerCommentID,

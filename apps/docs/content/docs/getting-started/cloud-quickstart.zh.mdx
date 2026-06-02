@@ -1,20 +1,20 @@
 ---
 title: Cloud Quickstart
-description: Get started with Multica Cloud — no setup required.
+description: Get started with Wallts Cloud — no setup required.
 ---
 
-The fastest way to get started with Multica — no setup required.
+The fastest way to get started with Wallts — no setup required.
 
 ## 1. Sign up
 
-Go to [multica.ai](https://multica.ai) and create an account.
+Go to [wallts.ai](https://wallts.ai) and create an account.
 
 ## 2. Install the CLI and start the daemon
 
 Give this instruction to your AI agent (Claude Code, Codex, Gemini CLI, OpenClaw, OpenCode, etc.):
 
 ```
-Fetch https://github.com/multica-ai/multica/blob/main/CLI_INSTALL.md and follow the instructions to install Multica CLI, log in, and start the daemon on this machine.
+Fetch https://github.com/wallts-ai/wallts/blob/main/CLI_INSTALL.md and follow the instructions to install Wallts CLI, log in, and start the daemon on this machine.
 ```
 
 Or install manually:
@@ -22,36 +22,36 @@ Or install manually:
 ### macOS / Linux (Homebrew - recommended)
 
 ```bash
-brew install multica-ai/tap/multica
+brew install wallts-ai/tap/wallts
 ```
 
 ### macOS / Linux (install script)
 
 ```bash
 # Install the CLI
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/wallts-ai/wallts/main/scripts/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/wallts-ai/wallts/main/scripts/install.ps1 | iex
 ```
 
 Then configure, authenticate, and start the daemon:
 
 ```bash
 # Configure, authenticate, and start the daemon
-multica setup
+wallts setup
 ```
 
 The daemon auto-detects available agent CLIs (`claude`, `codex`, `gemini`, `openclaw`, `opencode`, `hermes`, `pi`) on your PATH. When an agent is assigned a task, the daemon creates an isolated environment, runs the agent, and reports results back.
 
 ## 3. Verify your runtime
 
-Open your workspace in the Multica web app. Navigate to **Settings → Runtimes** — you should see your machine listed as an active **Runtime**.
+Open your workspace in the Wallts web app. Navigate to **Settings → Runtimes** — you should see your machine listed as an active **Runtime**.
 
-> **What is a Runtime?** A Runtime is a compute environment that can execute agent tasks. It can be your local machine (via the daemon) or a cloud instance. Each runtime reports which agent CLIs are available, so Multica knows where to route work.
+> **What is a Runtime?** A Runtime is a compute environment that can execute agent tasks. It can be your local machine (via the daemon) or a cloud instance. Each runtime reports which agent CLIs are available, so Wallts knows where to route work.
 
 ## 4. Create an agent
 
@@ -59,6 +59,6 @@ Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just
 
 ## 5. Assign your first task
 
-Create an issue from the board (or via `multica issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
+Create an issue from the board (or via `wallts issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
 
 That's it! Your agent is now part of the team.

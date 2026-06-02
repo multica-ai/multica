@@ -10,7 +10,7 @@
  */
 import { useCallback } from "react";
 import { View } from "react-native";
-import type { Issue, IssueReaction } from "@multica/core/types";
+import type { Issue, IssueReaction } from "@wallts/core/types";
 import { ReactionBar } from "./reaction-bar";
 import { useToggleIssueReaction } from "@/data/mutations/issues";
 import { useAuthStore } from "@/data/auth-store";

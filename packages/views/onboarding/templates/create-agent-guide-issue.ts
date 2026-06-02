@@ -1,9 +1,9 @@
 import { HELPER_DESCRIPTION, HELPER_INSTRUCTIONS } from "./helper-instructions";
 
-const HELPER_AGENT_NAME = "Multica Helper";
+const HELPER_AGENT_NAME = "Wallts Helper";
 
 /**
- * Skip path, issue 2/2: "Create your first Multica Agent".
+ * Skip path, issue 2/2: "Create your first Wallts Agent".
  *
  * Companion to install-runtime-issue.ts. The body is a FUNCTION (not a
  * static const) because it needs to embed:
@@ -20,9 +20,9 @@ const HELPER_AGENT_NAME = "Multica Helper";
  * Step 2 of the skip-path bundle. Localized title for supported locales.
  */
 export const CREATE_AGENT_GUIDE_ISSUE_TITLE = {
-  en: "Step 2 — Create your first Multica Agent",
-  zh: "第 2 步 —— 创建你的第一个 Multica Agent",
-  ko: "2단계 — 첫 Multica Agent 만들기",
+  en: "Step 2 — Create your first Wallts Agent",
+  zh: "第 2 步 —— 创建你的第一个 Wallts Agent",
+  ko: "2단계 — 첫 Wallts Agent 만들기",
 } as const;
 
 interface BodyOpts {
@@ -43,7 +43,7 @@ export function getCreateAgentGuideBody(opts: BodyOpts): string {
 }
 
 function enBody(installRuntimeMention: string): string {
-  return `Once your runtime is online (see ${installRuntimeMention}), build your first agent — Multica Helper. The prompt below is pre-written; just copy.
+  return `Once your runtime is online (see ${installRuntimeMention}), build your first agent — Wallts Helper. The prompt below is pre-written; just copy.
 
 ## 1. Open the new-agent screen
 
@@ -74,18 +74,18 @@ ${HELPER_INSTRUCTIONS.en}
 
 Hit **Create**. The new agent shows up in the workspace agent list.
 
-Now create an issue (or reassign an existing one) → set assignee = Multica Helper → set status to **todo**. The runtime picks the task up within a few seconds and starts working. Watch progress in the issue's task panel.
+Now create an issue (or reassign an existing one) → set assignee = Wallts Helper → set status to **todo**. The runtime picks the task up within a few seconds and starts working. Watch progress in the issue's task panel.
 
 ## Where to go next
 
 - **Skills** — reusable instruction packs you can attach to any agent.
 - **Squads** — groups of agents that can be assigned together.
 - **Autopilots** — scheduled or webhook-triggered runs.
-- **Docs** — https://multica.ai/docs.`;
+- **Docs** — https://wallts.ai/docs.`;
 }
 
 function zhBody(installRuntimeMention: string): string {
-  return `等运行时上线（见 ${installRuntimeMention}）之后，把第一个 agent —— Multica Helper —— 建出来。下面的提示词已经写好，直接复制即可。
+  return `等运行时上线（见 ${installRuntimeMention}）之后，把第一个 agent —— Wallts Helper —— 建出来。下面的提示词已经写好，直接复制即可。
 
 ## 1. 打开新建 agent 页
 
@@ -116,18 +116,18 @@ ${HELPER_INSTRUCTIONS.zh}
 
 点 **Create**。新 agent 会出现在 workspace 的 agent 列表里。
 
-接着创建一个 issue（或把已有 issue 重新分派）→ 把 assignee 设成 Multica Helper → 状态切到 **todo**。运行时会在几秒内接走任务并开始工作。在 issue 的任务面板里看进度。
+接着创建一个 issue（或把已有 issue 重新分派）→ 把 assignee 设成 Wallts Helper → 状态切到 **todo**。运行时会在几秒内接走任务并开始工作。在 issue 的任务面板里看进度。
 
 ## 接下来去哪
 
 - **Skills** —— 可复用的指令包，可挂到任何 agent 上。
 - **Squads** —— 可一起被分派的一组 agent。
 - **Autopilots** —— 定时或 webhook 触发的运行。
-- **文档** —— https://multica.ai/docs。`;
+- **文档** —— https://wallts.ai/docs。`;
 }
 
 function koBody(installRuntimeMention: string): string {
-  return `runtime이 online 상태가 되면(${installRuntimeMention} 참고), 첫 agent인 Multica Helper를 만드세요. 아래 prompt는 미리 작성되어 있으니 그대로 복사하면 됩니다.
+  return `runtime이 online 상태가 되면(${installRuntimeMention} 참고), 첫 agent인 Wallts Helper를 만드세요. 아래 prompt는 미리 작성되어 있으니 그대로 복사하면 됩니다.
 
 ## 1. 새 agent 화면 열기
 
@@ -158,12 +158,12 @@ ${HELPER_INSTRUCTIONS.ko}
 
 **Create**를 누릅니다. 새 agent가 워크스페이스 agent 목록에 표시됩니다.
 
-이제 issue를 만들거나 기존 issue를 다시 배정한 뒤 assignee를 Multica Helper로 설정하고 status를 **todo**로 바꾸세요. runtime이 몇 초 안에 작업을 가져가 실행을 시작합니다. 진행 상황은 issue의 task panel에서 볼 수 있습니다.
+이제 issue를 만들거나 기존 issue를 다시 배정한 뒤 assignee를 Wallts Helper로 설정하고 status를 **todo**로 바꾸세요. runtime이 몇 초 안에 작업을 가져가 실행을 시작합니다. 진행 상황은 issue의 task panel에서 볼 수 있습니다.
 
 ## 다음에 볼 곳
 
 - **Skills** — 어떤 agent에도 붙일 수 있는 재사용 instruction pack입니다.
 - **Squads** — 함께 배정할 수 있는 agent 그룹입니다.
 - **Autopilots** — 예약 또는 webhook으로 실행되는 작업입니다.
-- **Docs** — https://multica.ai/docs.`;
+- **Docs** — https://wallts.ai/docs.`;
 }

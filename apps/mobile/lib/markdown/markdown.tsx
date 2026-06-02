@@ -41,7 +41,7 @@ import { useCallback, useMemo } from "react";
 import { Linking, View } from "react-native";
 import { router } from "expo-router";
 import { EnrichedMarkdownText } from "react-native-enriched-markdown";
-import type { Attachment } from "@multica/core/types";
+import type { Attachment } from "@wallts/core/types";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { preprocessMobileMarkdown } from "./preprocess";
 import { useMarkdownStyle } from "./markdown-style";

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
-// Mock @multica/core/issues/mutations to mimic TanStack Query v5's contract:
+// Mock @wallts/core/issues/mutations to mimic TanStack Query v5's contract:
 // useMutation returns a fresh result wrapper on every render, but the
 // `mutate` / `mutateAsync` functions inside it are stable across renders.
 // This is exactly the shape that previously fooled the original deps lists
@@ -19,7 +19,7 @@ const stableHandles = vi.hoisted(() => ({
 // server pushes by invoking them directly.
 const wsHandlers = vi.hoisted(() => new Map<string, (payload: unknown) => void>());
 
-vi.mock("@multica/core/issues/mutations", () => ({
+vi.mock("@wallts/core/issues/mutations", () => ({
   useCreateComment: () => ({
     mutateAsync: stableHandles.createMutateAsync,
     mutate: vi.fn(),
@@ -47,7 +47,7 @@ vi.mock("@multica/core/issues/mutations", () => ({
   }),
 }));
 
-vi.mock("@multica/core/issues/queries", () => ({
+vi.mock("@wallts/core/issues/queries", () => ({
   issueTimelineOptions: (id: string) => ({
     queryKey: ["issues", "timeline", id],
     queryFn: () => Promise.resolve([]),
@@ -94,7 +94,7 @@ vi.mock("@tanstack/react-query", async () => {
   };
 });
 
-vi.mock("@multica/core/realtime", () => ({
+vi.mock("@wallts/core/realtime", () => ({
   useWSEvent: (event: string, handler: (payload: unknown) => void) => {
     wsHandlers.set(event, handler);
   },
@@ -116,7 +116,7 @@ describe("useIssueTimeline", () => {
   });
 
   // CommentCard is wrapped in React.memo (perf fix for long timelines, see
-  // multica#1968). The memo only pays off if the callbacks passed down keep
+  // wallts#1968). The memo only pays off if the callbacks passed down keep
   // the same identity across unrelated parent re-renders. TanStack Query v5
   // returns a *new* mutation result wrapper on every render, so a useCallback
   // listing the whole mutation object as a dep flips its identity every time

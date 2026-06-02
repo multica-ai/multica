@@ -29,11 +29,11 @@ Agents run in a **fully sandboxed** mode inside a conversation.
 - Answer the questions in your current message
 - Use its configured [skills](/skills) and MCP
 - Read and write files in its own working directory
-- Call `multica` CLI commands that do not need issue context (for example, querying basic workspace info)
+- Call `wallts` CLI commands that do not need issue context (for example, querying basic workspace info)
 
 **Cannot do:**
 
-- **See any issue** — the prompt the agent receives has no issue IDs, and commands like `multica issue list` return empty
+- **See any issue** — the prompt the agent receives has no issue IDs, and commands like `wallts issue list` return empty
 - **Change any issue** — without issue context, API calls are blocked by permission checks
 - **See other conversations** — conversations are fully isolated
 - **@-mention anyone or any agent** — chat is a private space with no path to notify others
@@ -42,7 +42,7 @@ Agents run in a **fully sandboxed** mode inside a conversation.
 
 Chat maintains multi-turn context via **provider session resumption** — the agent establishes a provider session on its first reply (for example, a Claude session), and the session ID is stored. On the next message, the task dispatch passes that ID back so the agent **resumes from where it left off** without re-reading history every time.
 
-If **one turn fails**, Multica looks up the previous task that had established a session ID (whether that task succeeded or failed) and tries to resume — a single failure in the middle does not drop the memory of the whole conversation.
+If **one turn fails**, Wallts looks up the previous task that had established a session ID (whether that task succeeded or failed) and tries to resume — a single failure in the middle does not drop the memory of the whole conversation.
 
 Note: not every provider actually implements session resumption — see the [**Providers Matrix**](/providers) for support status.
 

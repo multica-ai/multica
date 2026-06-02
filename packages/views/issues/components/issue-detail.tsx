@@ -23,28 +23,28 @@ import {
   Users,
 } from "lucide-react";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Button } from "@multica/ui/components/ui/button";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
-import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { Button } from "@wallts/ui/components/ui/button";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@wallts/ui/components/ui/resizable";
+import { Sheet, SheetContent } from "@wallts/ui/components/ui/sheet";
+import { useIsMobile } from "@wallts/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { FileUploadButton } from "@wallts/ui/components/common/file-upload-button";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-} from "@multica/ui/components/ui/tooltip";
-import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
-import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
+} from "@wallts/ui/components/ui/tooltip";
+import { Popover, PopoverTrigger, PopoverContent } from "@wallts/ui/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@wallts/ui/components/ui/dialog";
+import { Checkbox } from "@wallts/ui/components/ui/checkbox";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@wallts/ui/components/ui/command";
+import { AvatarGroup, AvatarGroupCount } from "@wallts/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
-import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
-import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
+import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@wallts/core/types";
+import { STATUS_CONFIG, PRIORITY_CONFIG } from "@wallts/core/issues/config";
+import { useUpdateIssue } from "@wallts/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
@@ -57,28 +57,28 @@ import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
-import { useGitHubSettings } from "@multica/core/github";
+import { useGitHubSettings } from "@wallts/core/github";
 import { useQuery } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
-import { useWorkspacePaths } from "@multica/core/paths";
-import { useActorName } from "@multica/core/workspace/hooks";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { useAuthStore } from "@wallts/core/auth";
+import { useWorkspacePaths } from "@wallts/core/paths";
+import { useActorName } from "@wallts/core/workspace/hooks";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@wallts/core/issues/queries";
+import { projectDetailOptions } from "@wallts/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
-import { issueLabelsOptions } from "@multica/core/labels";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
-import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { issueLabelsOptions } from "@wallts/core/labels";
+import { memberListOptions, agentListOptions } from "@wallts/core/workspace/queries";
+import { useRecentIssuesStore } from "@wallts/core/issues/stores";
+import { useIssueSelectionStore } from "@wallts/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
-import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
+import { ReactionBar } from "@wallts/ui/components/common/reaction-bar";
+import { useFileUpload } from "@wallts/core/hooks/use-file-upload";
+import { api } from "@wallts/core/api";
 import { useTimeAgo } from "../../i18n";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -655,7 +655,7 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "wallts_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const id = issueId;
@@ -1106,7 +1106,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Real fix is in-app search (separate PR); this is the toast stopgap.
   useEffect(() => {
     if (items.length <= 30) return;
-    const flagKey = `multica_cmdF_warned:${id}`;
+    const flagKey = `wallts_cmdF_warned:${id}`;
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "f" || !(e.metaKey || e.ctrlKey)) return;
       if (sessionStorage.getItem(flagKey)) return;

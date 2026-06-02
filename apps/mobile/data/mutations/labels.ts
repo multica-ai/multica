@@ -5,7 +5,7 @@
  * `useWorkspaceId` from `packages/core/hooks` which mobile does not share.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { CreateLabelRequest, Label } from "@multica/core/types";
+import type { CreateLabelRequest, Label } from "@wallts/core/types";
 import { api } from "@/data/api";
 import { labelKeys } from "@/data/queries/labels";
 import { useWorkspaceStore } from "@/data/workspace-store";

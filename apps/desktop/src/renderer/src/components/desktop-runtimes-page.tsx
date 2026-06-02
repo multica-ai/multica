@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RuntimesPage } from "@multica/views/runtimes";
+import { RuntimesPage } from "@wallts/views/runtimes";
 import { DaemonRuntimeActions } from "./daemon-runtime-card";
 import type { DaemonStatus } from "../../../shared/daemon-types";
 
@@ -8,7 +8,7 @@ import type { DaemonStatus } from "../../../shared/daemon-types";
  * `daemonAPI` (main-process daemon state) into the page so its empty
  * state can distinguish "no runtime registered" from "runtime is on its
  * way" — without the bundled daemon's status, the page shows a
- * misleading "Run multica daemon start" hint during the few seconds
+ * misleading "Run wallts daemon start" hint during the few seconds
  * between page load and the daemon's first registration.
  *
  * `bootstrapping` is true while the daemon is installing, starting, or

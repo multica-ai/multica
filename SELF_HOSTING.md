@@ -1,6 +1,6 @@
 # Self-Hosting Guide
 
-Deploy Multica on your own infrastructure in minutes.
+Deploy Wallts on your own infrastructure in minutes.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ Deploy Multica on your own infrastructure in minutes.
 | **Frontend** | Web application | Next.js 16 |
 | **Database** | Primary data store | PostgreSQL 17 with pgvector |
 
-Each user who runs AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
+Each user who runs AI agents locally also installs the **`wallts` CLI** and runs the **agent daemon** on their own machine.
 
 ## Quick Install (Recommended)
 
@@ -18,13 +18,13 @@ Two commands to set up everything — server, CLI, and configuration:
 
 ```bash
 # 1. Install CLI + provision the self-host server
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+curl -fsSL https://raw.githubusercontent.com/dwickyfp/wallts/main/scripts/install.sh | bash -s -- --with-server
 
 # 2. Configure CLI, authenticate, and start the daemon
-multica setup self-host
+wallts setup self-host
 ```
 
-This installs the `multica` CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, and configures everything for localhost.
+This installs the `wallts` CLI, checks out the latest self-host assets, pulls the official Wallts images from GHCR, and configures everything for localhost.
 
 Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for email-based codes (recommended), or leave Resend unset and copy the generated code from the backend logs. See [Step 2 — Log In](#step-2--log-in) for details.
 
@@ -33,7 +33,7 @@ Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for 
 > **CLI only?** If the self-host server is already running and you only need the CLI on a macOS/Linux machine, install it with Homebrew:
 >
 > ```bash
-> brew install multica-ai/tap/multica
+> brew install dwickyfp/tap/wallts
 > ```
 
 ---
@@ -47,8 +47,8 @@ If you prefer to run each step manually:
 **Prerequisites:** Docker and Docker Compose.
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
-cd multica
+git clone https://github.com/dwickyfp/wallts.git
+cd wallts
 make selfhost
 ```
 
@@ -56,7 +56,7 @@ make selfhost
 
 By default it pulls the latest stable release images from GHCR. To build the backend/web from your current checkout instead, run `make selfhost-build`.
 If the selected GHCR tag has not been published yet, `make selfhost` now tells you to fall back to `make selfhost-build`.
-`make selfhost-build` uses local `multica-backend:dev` / `multica-web:dev` tags, so it does not overwrite the pulled `:latest` images.
+`make selfhost-build` uses local `wallts-backend:dev` / `wallts-web:dev` tags, so it does not overwrite the pulled `:latest` images.
 
 Once ready:
 
@@ -71,11 +71,11 @@ Open http://localhost:3000 in your browser. The Docker self-host stack defaults 
 
 - **Recommended (production):** configure `RESEND_API_KEY` in `.env`, then restart the backend. Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
 - **Without email configured:** the verification code is generated server-side and printed to the backend container logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing on a single machine.
-- **Deterministic local/private testing:** set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env`, then restart the backend. This fixed code is ignored when `APP_ENV=production`.
+- **Deterministic local/private testing:** set `APP_ENV=development` and `WALLTS_DEV_VERIFICATION_CODE=888888` in `.env`, then restart the backend. This fixed code is ignored when `APP_ENV=production`.
 
 Changes to `ALLOW_SIGNUP`, `DISABLE_WORKSPACE_CREATION`, and `GOOGLE_CLIENT_ID` also take effect after restarting the backend / compose stack. The web UI reads all three from `/api/config` at runtime, so no web rebuild is needed. See [Advanced Configuration → Signup Controls](SELF_HOSTING_ADVANCED.md#signup-controls-optional) for the recommended sequence to lock down workspace creation.
 
-> **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
+> **Warning:** do **not** set `WALLTS_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
 
 ### Step 3 — Install CLI & Start Daemon
 
@@ -86,7 +86,7 @@ Each team member who wants to run AI agents locally needs to:
 ### a) Install the CLI and an AI agent
 
 ```bash
-brew install multica-ai/tap/multica
+brew install dwickyfp/tap/wallts
 ```
 
 You also need at least one AI agent CLI installed:
@@ -105,7 +105,7 @@ You also need at least one AI agent CLI installed:
 ### b) One-command setup
 
 ```bash
-multica setup self-host
+wallts setup self-host
 ```
 
 This automatically:
@@ -117,13 +117,13 @@ This automatically:
 For on-premise deployments with custom domains:
 
 ```bash
-multica setup self-host --server-url https://api.example.com --app-url https://app.example.com
+wallts setup self-host --server-url https://api.example.com --app-url https://app.example.com
 ```
 
 To verify the daemon is running:
 
 ```bash
-multica daemon status
+wallts daemon status
 ```
 
 > **Alternative:** If you prefer manual steps, see [Manual CLI Configuration](#manual-cli-configuration) below.
@@ -139,30 +139,30 @@ multica daemon status
 
 ## Kubernetes Deployment (Alternative)
 
-If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
+If you already run a Kubernetes cluster, you can deploy Wallts there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/dwickyfp/charts/wallts` or the source chart at [`deploy/helm/wallts/`](deploy/helm/wallts/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
 
 The chart creates the following resources in the target namespace:
 
-- `multica-postgres` — `pgvector/pgvector:pg17` backed by a 10Gi PVC
-- `multica-backend` — Go API/WS server backed by a 5Gi uploads PVC
-- `multica-frontend` — Next.js standalone server
+- `wallts-postgres` — `pgvector/pgvector:pg17` backed by a 10Gi PVC
+- `wallts-backend` — Go API/WS server backed by a 5Gi uploads PVC
+- `wallts-frontend` — Next.js standalone server
 - Two `Ingress` resources: one for the web host, one for the backend host
-- `multica-config` ConfigMap (rendered from `values.yaml`)
+- `wallts-config` ConfigMap (rendered from `values.yaml`)
 
-The `multica-secrets` Secret is **not** managed by the chart — you create it once with `kubectl` so real values never need to land in git.
+The `wallts-secrets` Secret is **not** managed by the chart — you create it once with `kubectl` so real values never need to land in git.
 
-> **One release per namespace:** the prebuilt `multica-web` image bakes `REMOTE_API_URL=http://backend:8080` at build time, so the chart ships an ExternalName Service literally named `backend`. Because that name is unprefixed, you can run only one Multica release per namespace, and `helm install` will fail if a `Service/backend` already exists there (pass `--take-ownership`, or use a dedicated namespace). If you build a web image with a patched `REMOTE_API_URL`, set `frontend.compatibility.backendAlias: false` to drop the alias.
+> **One release per namespace:** the prebuilt `wallts-web` image bakes `REMOTE_API_URL=http://backend:8080` at build time, so the chart ships an ExternalName Service literally named `backend`. Because that name is unprefixed, you can run only one Wallts release per namespace, and `helm install` will fail if a `Service/backend` already exists there (pass `--take-ownership`, or use a dedicated namespace). If you build a web image with a patched `REMOTE_API_URL`, set `frontend.compatibility.backendAlias: false` to drop the alias.
 
 > **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, an Ingress controller (Traefik / NGINX), and a default StorageClass.
 
 ### Step 1 — Point hostnames at the cluster
 
-The chart defaults to `multica.dev.lan` (web) and `api.multica.dev.lan` (backend). Pick one of:
+The chart defaults to `wallts.dev.lan` (web) and `api.wallts.dev.lan` (backend). Pick one of:
 
 - **`/etc/hosts`** on every machine that needs access (developer laptops + the machine running the daemon):
 
   ```text
-  192.168.1.206  multica.dev.lan api.multica.dev.lan
+  192.168.1.206  wallts.dev.lan api.wallts.dev.lan
   ```
 
   Replace `192.168.1.206` with any node IP where your Ingress controller's Service is reachable.
@@ -174,21 +174,21 @@ To use different hostnames, override the matching values at install time (see [S
 ### Step 2 — Create the namespace
 
 ```bash
-kubectl create namespace multica
+kubectl create namespace wallts
 ```
 
-### Step 3 — Create the `multica-secrets` Secret
+### Step 3 — Create the `wallts-secrets` Secret
 
 The chart references this Secret by name. Create it once with random values:
 
 ```bash
-kubectl -n multica create secret generic multica-secrets \
+kubectl -n wallts create secret generic wallts-secrets \
   --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
   --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
   --from-literal=RESEND_API_KEY="" \
   --from-literal=GOOGLE_CLIENT_SECRET="" \
   --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+  --from-literal=WALLTS_DEV_VERIFICATION_CODE=""
 ```
 
 Leave optional values empty for now — you can fill them in later (see [Step 5 — Log In](#step-5--log-in)).
@@ -196,9 +196,9 @@ Leave optional values empty for now — you can fill them in later (see [Step 5 
 ### Step 4 — Install the chart
 
 ```bash
-helm install multica oci://ghcr.io/multica-ai/charts/multica \
+helm install wallts oci://ghcr.io/dwickyfp/charts/wallts \
   --version <chart-version> \
-  -n multica
+  -n wallts
 ```
 
 Released chart versions strip the leading `v` from the Git tag. For example, release tag `v0.3.5` publishes chart version `0.3.5`; the chart defaults the backend and frontend image tags to `v0.3.5`.
@@ -206,35 +206,35 @@ Released chart versions strip the leading `v` from the Git tag. For example, rel
 To override defaults, export the chart values, edit them, and pass them with `-f`:
 
 ```bash
-helm show values oci://ghcr.io/multica-ai/charts/multica \
+helm show values oci://ghcr.io/dwickyfp/charts/wallts \
   --version <chart-version> > my-values.yaml
 # edit my-values.yaml — e.g. change ingress hosts, image tags, resource limits
-helm install multica oci://ghcr.io/multica-ai/charts/multica \
+helm install wallts oci://ghcr.io/dwickyfp/charts/wallts \
   --version <chart-version> \
-  -n multica \
+  -n wallts \
   -f my-values.yaml
 ```
 
 When developing from a checkout, use the local chart path instead:
 
 ```bash
-helm install multica deploy/helm/multica -n multica
+helm install wallts deploy/helm/wallts -n wallts
 ```
 
 Watch the pods come up:
 
 ```bash
-kubectl -n multica get pods -w
+kubectl -n wallts get pods -w
 ```
 
 On a cold cluster the backend can sit `Running` but not `Ready` for a few minutes while it waits on PostgreSQL and runs migrations — a startupProbe absorbs this, so the pod should not restart. Once the backend reports `Ready`, migrations have completed and `/healthz` returns OK:
 
 ```bash
-curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+curl -H "Host: api.wallts.dev.lan" http://<ingress-ip>/healthz
 # {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
 ```
 
-Then open http://multica.dev.lan in your browser.
+Then open http://wallts.dev.lan in your browser.
 
 ### Step 5 — Log In
 
@@ -243,9 +243,9 @@ The chart defaults to `APP_ENV=production` (set in `values.yaml` under `backend.
 - **Recommended (production):** patch the Secret with a real Resend key, then restart the backend:
 
   ```bash
-  kubectl -n multica patch secret multica-secrets --type=merge \
+  kubectl -n wallts patch secret wallts-secrets --type=merge \
     -p '{"stringData":{"RESEND_API_KEY":"re_xxx"}}'
-  kubectl -n multica rollout restart deploy/multica-backend
+  kubectl -n wallts rollout restart deploy/wallts-backend
   ```
 
   Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
@@ -253,33 +253,33 @@ The chart defaults to `APP_ENV=production` (set in `values.yaml` under `backend.
 - **Without email configured:** the verification code is generated server-side and printed to the backend pod logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing.
 
   ```bash
-  kubectl -n multica logs -f deploy/multica-backend | grep "Verification code"
+  kubectl -n wallts logs -f deploy/wallts-backend | grep "Verification code"
   ```
 
-- **Deterministic local/private testing:** set `backend.config.appEnv: development` in your values file and `MULTICA_DEV_VERIFICATION_CODE=888888` in the Secret, then `helm upgrade` and restart. This fixed code is ignored when `APP_ENV=production`.
+- **Deterministic local/private testing:** set `backend.config.appEnv: development` in your values file and `WALLTS_DEV_VERIFICATION_CODE=888888` in the Secret, then `helm upgrade` and restart. This fixed code is ignored when `APP_ENV=production`.
 
   ```bash
-  helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  helm upgrade wallts oci://ghcr.io/dwickyfp/charts/wallts \
     --version <chart-version> \
-    -n multica \
+    -n wallts \
     -f my-values.yaml --set backend.config.appEnv=development
-  kubectl -n multica patch secret multica-secrets --type=merge \
-    -p '{"stringData":{"MULTICA_DEV_VERIFICATION_CODE":"888888"}}'
-  kubectl -n multica rollout restart deploy/multica-backend
+  kubectl -n wallts patch secret wallts-secrets --type=merge \
+    -p '{"stringData":{"WALLTS_DEV_VERIFICATION_CODE":"888888"}}'
+  kubectl -n wallts rollout restart deploy/wallts-backend
   ```
 
 `ALLOW_SIGNUP`, `DISABLE_WORKSPACE_CREATION`, and `GOOGLE_CLIENT_ID` likewise live under `backend.config.*` in `values.yaml` (as `allowSignup`, `disableWorkspaceCreation`, and `googleClientId`). After `helm upgrade`, the backend pod will roll automatically because the ConfigMap hash changes; the web UI reads all three from `/api/config` at runtime, so no web rebuild is needed.
 
-> **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
+> **Warning:** do **not** set `WALLTS_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
 
 ### Step 6 — Install CLI & Start Daemon
 
 The daemon runs on your local machine, not in the cluster. Install the CLI and an AI agent as in [Step 3](#step-3--install-cli--start-daemon) above, then point the CLI at your Ingress hostnames:
 
 ```bash
-multica setup self-host \
-  --server-url http://api.multica.dev.lan \
-  --app-url http://multica.dev.lan
+wallts setup self-host \
+  --server-url http://api.wallts.dev.lan \
+  --app-url http://wallts.dev.lan
 ```
 
 Make sure the machine running the daemon has the same `/etc/hosts` (or DNS) entries from [Step 1](#step-1--point-hostnames-at-the-cluster).
@@ -289,15 +289,15 @@ Make sure the machine running the daemon has the same `/etc/hosts` (or DNS) entr
 To pull the latest images without changing the chart version when your values still use the mutable `latest` image tag:
 
 ```bash
-kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend
+kubectl -n wallts rollout restart deploy/wallts-backend deploy/wallts-frontend
 ```
 
-To upgrade to a specific Multica release, upgrade to the matching chart version. The released chart defaults its app images to the matching Git tag:
+To upgrade to a specific Wallts release, upgrade to the matching chart version. The released chart defaults its app images to the matching Git tag:
 
 ```bash
-helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+helm upgrade wallts oci://ghcr.io/dwickyfp/charts/wallts \
   --version <chart-version> \
-  -n multica \
+  -n wallts \
   -f my-values.yaml
 ```
 
@@ -314,28 +314,28 @@ images:
 Then run the same upgrade command with `-f my-values.yaml`:
 
 ```bash
-helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+helm upgrade wallts oci://ghcr.io/dwickyfp/charts/wallts \
   --version <chart-version> \
-  -n multica \
+  -n wallts \
   -f my-values.yaml
 ```
 
 To roll back if an upgrade goes sideways:
 
 ```bash
-helm -n multica rollback multica
+helm -n wallts rollback wallts
 ```
 
-> **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** Same migration guard as the Docker path — see [Usage Dashboard Rollup → Option C](#option-c--backfill-history-first-then-schedule). Run the backfill against the same database the chart is using (`kubectl -n multica exec deploy/multica-backend -- ./backfill_task_usage_hourly --sleep-between-slices=2s`), then restart the backend deployment to re-apply migrations.
+> **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** Same migration guard as the Docker path — see [Usage Dashboard Rollup → Option C](#option-c--backfill-history-first-then-schedule). Run the backfill against the same database the chart is using (`kubectl -n wallts exec deploy/wallts-backend -- ./backfill_task_usage_hourly --sleep-between-slices=2s`), then restart the backend deployment to re-apply migrations.
 
 ### Tearing down
 
 ```bash
 # Remove the workloads but keep the PVCs and the Secret
-helm -n multica uninstall multica
+helm -n wallts uninstall wallts
 
 # Wipe everything, including PostgreSQL data and uploads
-kubectl delete namespace multica
+kubectl delete namespace wallts
 ```
 
 ---
@@ -353,9 +353,9 @@ Starting with `v0.3.5`, the Usage / Runtime dashboards read from a derived `task
 Schedule a 5-minute job that calls `rollup_task_usage_hourly()`. It is idempotent and watermark-driven, so a missed tick catches up on the next run.
 
 ```bash
-# /etc/cron.d/multica-rollup — every 5 minutes
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
+# /etc/cron.d/wallts-rollup — every 5 minutes
+*/5 * * * * root docker compose -f /path/to/wallts/docker-compose.selfhost.yml \
+  exec -T postgres psql -U wallts -d wallts \
   -c "SELECT rollup_task_usage_hourly();" >/dev/null
 ```
 
@@ -396,7 +396,7 @@ After upgrading, re-run `migrate up` (or restart the backend container — migra
 If you installed via the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --stop
+curl -fsSL https://raw.githubusercontent.com/dwickyfp/wallts/main/scripts/install.sh | bash -s -- --stop
 ```
 
 If you cloned the repo manually:
@@ -406,18 +406,18 @@ If you cloned the repo manually:
 make selfhost-stop
 
 # Stop the local daemon
-multica daemon stop
+wallts daemon stop
 ```
 
-## Switching to Multica Cloud
+## Switching to Wallts Cloud
 
-If you've been self-hosting and want to switch your CLI to [Multica Cloud](https://multica.ai):
+If you've been self-hosting and want to switch your CLI to [Wallts Cloud](https://wallts.ai):
 
 ```bash
-multica setup
+wallts setup
 ```
 
-This reconfigures the CLI for multica.ai, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
+This reconfigures the CLI for wallts.ai, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
 
 > Your local Docker services are unaffected. Stop them separately if you no longer need them.
 
@@ -428,7 +428,7 @@ docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
+Pin `WALLTS_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
 If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. Run `backfill_task_usage_hourly` first, then re-run the upgrade. Full instructions in [Usage Dashboard Rollup → Option C](#option-c--backfill-history-first-then-schedule).
@@ -440,8 +440,8 @@ If the selected GHCR tag has not been published yet, fall back to `make selfhost
 If you prefer running Docker Compose steps manually instead of `make selfhost`:
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
-cd multica
+git clone https://github.com/dwickyfp/wallts.git
+cd wallts
 cp .env.example .env
 ```
 
@@ -460,27 +460,27 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 ## Manual CLI Configuration
 
-If you prefer configuring the CLI step by step instead of `multica setup`:
+If you prefer configuring the CLI step by step instead of `wallts setup`:
 
 ```bash
 # Point CLI to your local server
-multica config set server_url http://localhost:8080
-multica config set app_url http://localhost:3000
+wallts config set server_url http://localhost:8080
+wallts config set app_url http://localhost:3000
 
 # Login (opens browser)
-multica login
+wallts login
 
 # Start the daemon
-multica daemon start
+wallts daemon start
 ```
 
 For production deployments with TLS:
 
 ```bash
-multica config set app_url https://app.example.com
-multica config set server_url https://api.example.com
-multica login
-multica daemon start
+wallts config set app_url https://app.example.com
+wallts config set server_url https://api.example.com
+wallts login
+wallts daemon start
 ```
 
 ## Advanced Configuration

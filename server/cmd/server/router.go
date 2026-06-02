@@ -16,18 +16,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/daemonws"
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/handler"
-	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
-	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/storage"
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/analytics"
+	"github.com/dwickyfp/wallts/server/internal/auth"
+	"github.com/dwickyfp/wallts/server/internal/daemonws"
+	"github.com/dwickyfp/wallts/server/internal/events"
+	"github.com/dwickyfp/wallts/server/internal/handler"
+	obsmetrics "github.com/dwickyfp/wallts/server/internal/metrics"
+	"github.com/dwickyfp/wallts/server/internal/middleware"
+	"github.com/dwickyfp/wallts/server/internal/realtime"
+	"github.com/dwickyfp/wallts/server/internal/service"
+	"github.com/dwickyfp/wallts/server/internal/storage"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 var defaultOrigins = []string{
@@ -60,7 +60,7 @@ func allowedOrigins() []string {
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
-// MULTICA_TRUSTED_PROXIES env var. Invalid entries are dropped with a single
+// WALLTS_TRUSTED_PROXIES env var. Invalid entries are dropped with a single
 // warn-line per entry rather than crashing the server — a typo in one CIDR
 // shouldn't take the whole API down. Returns nil for empty input, which the
 // rate limiter treats as "trust no proxy headers, use RemoteAddr only".
@@ -77,7 +77,7 @@ func parseTrustedProxies(raw string) []netip.Prefix {
 		}
 		p, err := netip.ParsePrefix(s)
 		if err != nil {
-			slog.Warn("MULTICA_TRUSTED_PROXIES: ignoring invalid CIDR",
+			slog.Warn("WALLTS_TRUSTED_PROXIES: ignoring invalid CIDR",
 				"value", s, "error", err)
 			continue
 		}
@@ -135,10 +135,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
-		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
-		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("WALLTS_PUBLIC_URL")), "/"),
+		TrustedProxies:           parseTrustedProxies(os.Getenv("WALLTS_TRUSTED_PROXIES")),
 		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
-		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
+		CloudRuntimeFleetTimeout: envDuration("WALLTS_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -167,11 +167,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.DaemonTokenCache = daemonTokenCache
 	h.MembershipCache = auth.NewMembershipCache(rdb)
 
-	// Cloud PAT verifier: validates mcn_ tokens against Multica Cloud
+	// Cloud PAT verifier: validates mcn_ tokens against Wallts Cloud
 	// Fleet. Returns nil when no Fleet URL is configured — the Auth /
 	// DaemonAuth middlewares treat nil as "mcn_ not supported" and
 	// reject with 401, instead of falling through to mul_/JWT paths.
-	// Reuses MULTICA_CLOUD_FLEET_URL (the same URL the cloud-runtime
+	// Reuses WALLTS_CLOUD_FLEET_URL (the same URL the cloud-runtime
 	// proxy uses) so a deployment doesn't need a second config knob.
 	cloudPATVerifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{
 		FleetBaseURL: signupConfig.CloudRuntimeFleetURL,
@@ -272,12 +272,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// purpose: the bearer token in the URL path IS the credential. Workspace
 	// context is derived from the trigger row, never from request headers.
 	r.Post("/api/webhooks/autopilots/{token}", h.HandleAutopilotWebhook)
-	// GitHub App webhook (no Multica auth — requests are authenticated via
+	// GitHub App webhook (no Wallts auth — requests are authenticated via
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
-	// Stripe webhook (no Multica auth — Stripe signs the raw body
-	// with a shared secret, the multica-cloud upstream verifies. We
+	// Stripe webhook (no Wallts auth — Stripe signs the raw body
+	// with a shared secret, the wallts-cloud upstream verifies. We
 	// only forward the bytes + the Stripe-Signature header; see
 	// HandleCloudBillingStripeWebhook for the rationale).
 	r.Post("/api/webhooks/stripe", h.HandleCloudBillingStripeWebhook)
@@ -398,7 +398,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		})
 
 		// Cloud Billing proxy. Same upstream service / port as
-		// cloud-runtime — multica-cloud's Fleet and Billing share
+		// cloud-runtime — wallts-cloud's Fleet and Billing share
 		// :8080 and the same chi router. All routes here forward
 		// to /api/v1/billing/* with X-User-ID stamped from the
 		// authenticated context.
@@ -819,8 +819,8 @@ func splitAndTrim(s string) []string {
 }
 
 func cloudRuntimeFleetURLFromEnv() string {
-	if url := strings.TrimSpace(os.Getenv("MULTICA_CLOUD_FLEET_URL")); url != "" {
+	if url := strings.TrimSpace(os.Getenv("WALLTS_CLOUD_FLEET_URL")); url != "" {
 		return url
 	}
-	return strings.TrimSpace(os.Getenv("MULTICA_FLEET_URL"))
+	return strings.TrimSpace(os.Getenv("WALLTS_FLEET_URL"))
 }

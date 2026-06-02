@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { RuntimeModel } from "@multica/core/types";
-import { runtimeModelsOptions } from "@multica/core/runtimes";
+import type { RuntimeModel } from "@wallts/core/types";
+import { runtimeModelsOptions } from "@wallts/core/runtimes";
 import { PropRow } from "../../../common/prop-row";
 import { useT } from "../../../i18n";
 import { ThinkingPicker } from "./thinking-picker";

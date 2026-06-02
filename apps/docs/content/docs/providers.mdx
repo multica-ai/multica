@@ -1,11 +1,11 @@
 ---
 title: AI coding tools matrix
-description: Multica supports 12 AI coding tools; they implement the same interface, but the capability details diverge significantly.
+description: Wallts supports 12 AI coding tools; they implement the same interface, but the capability details diverge significantly.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica ships with built-in support for **12 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+Wallts ships with built-in support for **12 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Wallts board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
 
 For guidance on picking a tool when creating an agent, see [Creating and configuring agents](/agents-create).
 
@@ -30,7 +30,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 
 ### Antigravity
 
-From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service and ships with a Gemini-backed default model. **Session resumption works** via `--conversation <id>`; the daemon captures the conversation UUID from the CLI's log file because stdout is plain text rather than a structured event stream. There is no `--model` flag — model selection lives inside the Antigravity CLI settings, so Multica disables the per-agent model picker for this provider. Skills land in `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity migration docs](https://antigravity.google/docs/gcli-migration)).
+From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service and ships with a Gemini-backed default model. **Session resumption works** via `--conversation <id>`; the daemon captures the conversation UUID from the CLI's log file because stdout is plain text rather than a structured event stream. There is no `--model` flag — model selection lives inside the Antigravity CLI settings, so Wallts disables the per-agent model picker for this provider. Skills land in `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity migration docs](https://antigravity.google/docs/gcli-migration)).
 
 ### Claude Code
 
@@ -66,11 +66,11 @@ From Amazon. Uses ACP over stdio via `kiro-cli acp`. Session resumption works th
 
 ### OpenCode
 
-From SST, open source. Dynamically discovers available models (scans the CLI's configuration file). Session resumption works, and it consumes the agent's `mcp_config` field — Multica injects it inline through the `OPENCODE_CONFIG_CONTENT` environment variable, so the agent's MCP servers reach OpenCode without writing anything into the task workdir's `opencode.json` (the agent or the user keep ownership of that file). **Suitable for tinkerers who want to customize their model catalog.**
+From SST, open source. Dynamically discovers available models (scans the CLI's configuration file). Session resumption works, and it consumes the agent's `mcp_config` field — Wallts injects it inline through the `OPENCODE_CONFIG_CONTENT` environment variable, so the agent's MCP servers reach OpenCode without writing anything into the task workdir's `opencode.json` (the agent or the user keep ownership of that file). **Suitable for tinkerers who want to customize their model catalog.**
 
 ### OpenClaw
 
-Open-source project, a CLI agent orchestrator. MCP config is materialized through Multica's per-task OpenClaw config wrapper. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task. Configuration is strictly controlled: users can't pass `--model` or `--system-prompt`; the agent-registration config decides.
+Open-source project, a CLI agent orchestrator. MCP config is materialized through Wallts's per-task OpenClaw config wrapper. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task. Configuration is strictly controlled: users can't pass `--model` or `--system-prompt`; the agent-registration config decides.
 
 ### Pi
 
@@ -92,7 +92,7 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 
 **Of the 12 tools, seven consume `mcp_config`: Claude Code, Codex, Hermes, Kimi, Kiro CLI, OpenCode, and OpenClaw**. The other five accept the field but **ignore it** — no error, no warning, the config just has no effect.
 
-The runtime paths are provider-specific: Claude Code receives it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Hermes, Kimi, and Kiro CLI receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
+The runtime paths are provider-specific: Claude Code receives it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Hermes, Kimi, and Kiro CLI receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Wallts's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
 
 <Callout type="warning">
 If you set `mcp_config` in an agent configuration but pick a tool not marked ✅ in the MCP column, your MCP servers have **no effect** on that agent. MCP integration is provider-specific.
@@ -100,7 +100,7 @@ If you set `mcp_config` in an agent configuration but pick a tool not marked ✅
 
 ## Where skill files go
 
-Each tool uses **its own** skill discovery path. Before a task runs, the Multica daemon copies the workspace's skill files into the corresponding path:
+Each tool uses **its own** skill discovery path. Before a task runs, the Wallts daemon copies the workspace's skill files into the corresponding path:
 
 | Tool | Path | Native discovery? |
 |---|---|---|
@@ -125,5 +125,5 @@ For creating and using skills, see [Skills](/skills).
 
 - [Creating and configuring agents](/agents-create) — pick a tool for your agent
 - [Tasks](/tasks) — task lifecycle and session-resumption mechanics
-- [Daemon and runtimes](/daemon-runtimes) — where the tools run and how they connect to Multica
+- [Daemon and runtimes](/daemon-runtimes) — where the tools run and how they connect to Wallts
 - [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 12 supported tools

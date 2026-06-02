@@ -12,7 +12,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
+import { api } from "@wallts/core/api";
 
 export function useAttachmentHtmlText(attachmentId: string | null | undefined) {
   return useQuery({

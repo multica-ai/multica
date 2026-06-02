@@ -3,7 +3,7 @@
     "step_of": "{{total}}단계 중 {{current}}단계"
   },
   "welcome": {
-    "wordmark": "Multica에 오신 것을 환영합니다",
+    "wordmark": "Wallts에 오신 것을 환영합니다",
     "headline_line1": "AI 팀원과",
     "headline_line2": "하나의",
     "headline_emphasis": "워크스페이스에서.",
@@ -45,7 +45,7 @@
   "questions": {
     "eyebrow_about_you": "내 정보",
     "source": {
-      "question": "Multica를 어디서 알게 되셨나요?",
+      "question": "Wallts를 어디서 알게 되셨나요?",
       "friends_colleagues": "친구 또는 동료",
       "search": "Google / 검색",
       "social_x": "X / Twitter",
@@ -76,7 +76,7 @@
       "other_placeholder": "예: 교사, 지원팀 리드"
     },
     "use_case": {
-      "question": "Multica를 무엇에 쓰고 싶으신가요?",
+      "question": "Wallts를 무엇에 쓰고 싶으신가요?",
       "ship_code": "AI 에이전트와 코드 배포",
       "manage_team": "팀 작업 관리",
       "personal_tasks": "개인 작업 정리",
@@ -111,7 +111,7 @@
   "cli_install": {
     "copy_aria": "복사",
     "intro": "이 컴퓨터에서 에이전트를 실행하려면 에이전트 런타임(Claude Code, Codex, Cursor 등)이 필요합니다. 서버와 원격 개발 환경에서도 사용할 수 있습니다.",
-    "step1_label": "Multica CLI 설치",
+    "step1_label": "Wallts CLI 설치",
     "step2_label": "데몬 시작"
   },
   "cloud_waitlist": {
@@ -189,18 +189,18 @@
     "error_close": "닫기",
     "user_context_heading": "내 정보",
     "user_context_role_label": "역할",
-    "user_context_use_case_label": "Multica로 하고 싶은 일",
+    "user_context_use_case_label": "Wallts로 하고 싶은 일",
     "runtime": {
-      "greeting": "안녕하세요, Multica에 오신 것을 환영합니다",
+      "greeting": "안녕하세요, Wallts에 오신 것을 환영합니다",
       "subtitle": "저는 첫 에이전트 어시스턴트입니다.",
-      "capabilities": "Multica 사용법은 무엇이든 물어보세요. 워크스페이스에서 이슈를 만들고, cron 작업을 설정하고, 새 에이전트를 만드는 일도 맡길 수 있습니다.",
+      "capabilities": "Wallts 사용법은 무엇이든 물어보세요. 워크스페이스에서 이슈를 만들고, cron 작업을 설정하고, 새 에이전트를 만드는 일도 맡길 수 있습니다.",
       "section_label": "시작할 작업을 하나 이상 선택하세요:",
       "assign_empty": "하나 이상 선택",
       "assign_count": "작업 {{count}}개를 나에게 할당 →",
       "assign_count_plural": "작업 {{count}}개를 나에게 할당 →",
       "cards": {
         "intro": {
-          "subtitle": "Multica가 무엇이고 무엇을 할 수 있는지 1-2문단으로 설명하겠습니다."
+          "subtitle": "Wallts가 무엇이고 무엇을 할 수 있는지 1-2문단으로 설명하겠습니다."
         },
         "tour": {
           "subtitle": "이슈, 에이전트, 스쿼드, 오토파일럿이 어떻게 맞물리는지 안내하겠습니다."
@@ -219,7 +219,7 @@
     },
     "skip": {
       "loading": "워크스페이스 설정 중...",
-      "title": "Multica에 오신 것을 환영합니다!",
+      "title": "Wallts에 오신 것을 환영합니다!",
       "subtitle": "다음 단계를 돕기 위해 작업 두 개를 추가했습니다.",
       "got_it": "알겠습니다",
       "status_in_progress": "진행 중",
@@ -231,7 +231,7 @@
         },
         "create_agent": {
           "title": "첫 에이전트 만들기",
-          "subtitle": "런타임이 온라인이 되면 첫 Multica 에이전트를 만드세요."
+          "subtitle": "런타임이 온라인이 되면 첫 Wallts 에이전트를 만드세요."
         }
       }
     }
@@ -278,7 +278,7 @@
     "perk_invite": "팀원 초대 — 이 워크스페이스만 보입니다",
     "perk_switch": "왼쪽 위에서 언제든 다른 워크스페이스로 전환",
     "next_runtime": "에이전트를 실행할 컴퓨터 연결",
-    "next_agent": "연결된 런타임에서 Multica Helper 만들기",
+    "next_agent": "연결된 런타임에서 Wallts Helper 만들기",
     "next_starter": "다음 단계를 위한 온보딩 이슈 열기",
     "preview": {
       "inbox_label": "인박스",
@@ -300,7 +300,7 @@
     },
     "creation_disabled_eyebrow": "워크스페이스 생성이 비활성화되었습니다",
     "creation_disabled_headline": "관리자에게 초대를 요청하세요.",
-    "creation_disabled_lede": "이 Multica instance에서는 새 워크스페이스를 만들 수 없습니다. 관리자가 기존 워크스페이스로 초대하면 초대를 수락한 뒤 새로고침해 계속하세요.",
+    "creation_disabled_lede": "이 Wallts instance에서는 새 워크스페이스를 만들 수 없습니다. 관리자가 기존 워크스페이스로 초대하면 초대를 수락한 뒤 새로고침해 계속하세요.",
     "creation_disabled_logout": "로그아웃",
     "creation_disabled_eyebrow_resume": "내 워크스페이스",
     "creation_disabled_headline_resume": "{{name}}에서 계속하세요.",
@@ -340,7 +340,7 @@
   "step_platform": {
     "eyebrow": "컴퓨터 연결",
     "headline": "에이전트를 실행할 컴퓨터를 연결하세요.",
-    "lede": "에이전트는 Multica에 연결한 실제 컴퓨터에서 실행됩니다. 연결 방법을 선택하세요.",
+    "lede": "에이전트는 Wallts에 연결한 실제 컴퓨터에서 실행됩니다. 연결 방법을 선택하세요.",
     "hint_default": "연결 방법을 선택하세요. 건너뛰고 나중에 연결할 수도 있습니다.",
     "hint_downloaded": "다운로드 페이지에서 설정을 마친 뒤 이 탭으로 돌아오세요.",
     "download_title": "이 컴퓨터 사용",
