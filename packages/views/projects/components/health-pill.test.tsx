@@ -16,4 +16,9 @@ describe("HealthPill", () => {
     render(<HealthPill health={null} />);
     expect(screen.getByText(/no update/i)).toBeInTheDocument();
   });
+  it("dotOnly hides the text label but keeps an accessible name", () => {
+    render(<HealthPill health="on_track" dotOnly />);
+    expect(screen.queryByText(/on track/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /on track/i })).toBeInTheDocument();
+  });
 });

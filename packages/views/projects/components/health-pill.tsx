@@ -3,6 +3,8 @@ import { cn } from "@multica/ui/lib/utils";
 
 interface HealthPillProps {
   health: ProjectHealth | null | undefined;
+  /** Render only the colored dot (with the health as an accessible label/tooltip). */
+  dotOnly?: boolean;
   className?: string;
 }
 
@@ -12,20 +14,32 @@ const CONFIG: Record<ProjectHealth, { label: string; dot: string; text: string }
   off_track: { label: "Off track", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
 };
 
-export function HealthPill({ health, className }: HealthPillProps) {
+export function HealthPill({ health, dotOnly, className }: HealthPillProps) {
   const cfg = health ? CONFIG[health as ProjectHealth] : undefined;
-  if (!cfg) {
+  const label = cfg?.label ?? "No update";
+  const dotClass = cfg?.dot ?? "bg-muted-foreground/40";
+
+  if (dotOnly) {
     return (
-      <span className={cn("inline-flex items-center gap-1.5 text-xs text-muted-foreground", className)}>
-        <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
-        No update
-      </span>
+      <span
+        role="img"
+        aria-label={label}
+        title={label}
+        className={cn("inline-block h-2 w-2 shrink-0 rounded-full", dotClass, className)}
+      />
     );
   }
+
   return (
-    <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", cfg.text, className)}>
-      <span className={cn("h-2 w-2 rounded-full", cfg.dot)} />
-      {cfg.label}
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 text-xs font-medium",
+        cfg ? cfg.text : "text-muted-foreground",
+        className,
+      )}
+    >
+      <span className={cn("h-2 w-2 rounded-full", dotClass)} />
+      {label}
     </span>
   );
 }

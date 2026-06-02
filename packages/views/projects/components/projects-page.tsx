@@ -149,7 +149,7 @@ function ProjectCardCompact({ project }: { project: Project }) {
 
       <div className="flex items-center justify-start gap-1.5">
         <ProjectStatusBadge project={project} handleUpdate={handleUpdate} align="start" />
-        {project.health && <HealthPill health={project.health} />}
+        {project.health && <HealthPill health={project.health} dotOnly />}
       </div>
 
       <span className="flex items-center justify-start gap-1.5 text-xs text-muted-foreground tabular-nums">
