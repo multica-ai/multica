@@ -86,7 +86,14 @@ type FeishuProjectSyncService struct {
 	Tx          FeishuProjectTxStarter
 	Client      *FeishuProjectClient
 	Storage     FeishuProjectStorage
-	TaskService *TaskService
+	TaskService FeishuProjectTaskService
+}
+
+// FeishuProjectTaskService is the subset of *TaskService the sync path uses.
+// It is an interface so task reconciliation can be tested without a database.
+type FeishuProjectTaskService interface {
+	CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error
+	EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error)
 }
 
 type FeishuProjectStorage interface {
@@ -557,7 +564,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			if err != nil {
 				return "skipped", 0, err
 			}
-			s.reconcileSyncedIssueTasks(ctx, issue, issue)
+			s.reconcileSyncedIssueTasks(ctx, issue)
 			// Advance the binding watermark so the next sync's short-circuit fires.
 			phaseStarted = time.Now()
 			_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
@@ -592,7 +599,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		if _, err := s.syncIssueLabels(ctx, cfg, item, issue.ID); err != nil {
 			return "skipped", 0, err
 		}
-		s.reconcileSyncedIssueTasks(ctx, issue, updatedIssue)
+		s.reconcileSyncedIssueTasks(ctx, updatedIssue)
 		return "updated", 0, nil
 	}
 
@@ -666,7 +673,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	if _, err := s.syncIssueLabels(ctx, cfg, item, issue.ID); err != nil {
 		return "created", 0, err
 	}
-	s.reconcileSyncedIssueTasks(ctx, issue, issue)
+	s.reconcileSyncedIssueTasks(ctx, issue)
 	return "created", 0, nil
 }
 
@@ -810,7 +817,11 @@ func (s *FeishuProjectSyncService) detachManagedLabel(ctx context.Context, works
 	})
 }
 
-func (s *FeishuProjectSyncService) reconcileSyncedIssueTasks(ctx context.Context, prevIssue, issue db.Issue) {
+// reconcileSyncedIssueTasks cancels in-progress agent tasks only when the synced
+// issue has reached a terminal status (done / cancelled). Non-terminal changes —
+// including assignee changes — must NOT cancel running tasks; they only enqueue a
+// task for the current assignee when one is missing.
+func (s *FeishuProjectSyncService) reconcileSyncedIssueTasks(ctx context.Context, issue db.Issue) {
 	if s.TaskService == nil {
 		return
 	}
@@ -819,12 +830,6 @@ func (s *FeishuProjectSyncService) reconcileSyncedIssueTasks(ctx context.Context
 			slog.Warn("Feishu Project sync task cancel failed", "issue_id", UUIDString(issue.ID), "status", issue.Status, "error", err)
 		}
 		return
-	}
-	if !sameNullableText(prevIssue.AssigneeType, issue.AssigneeType) || !sameNullableUUID(prevIssue.AssigneeID, issue.AssigneeID) {
-		if err := s.TaskService.CancelTasksForIssue(ctx, issue.ID); err != nil {
-			slog.Warn("Feishu Project sync previous assignee task cancel failed", "issue_id", UUIDString(issue.ID), "error", err)
-			return
-		}
 	}
 	s.enqueueSyncedIssueIfNeeded(ctx, issue)
 }
