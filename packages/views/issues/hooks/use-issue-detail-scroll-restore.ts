@@ -8,6 +8,7 @@ type UseIssueDetailScrollRestoreArgs = {
 };
 
 const scrollPositions = new Map<string, number>();
+const SCROLL_POSITION_CACHE_MAX_SIZE = 100;
 
 export function useIssueDetailScrollRestore({
   restoreKey,
@@ -16,16 +17,18 @@ export function useIssueDetailScrollRestore({
   disabled = false,
 }: UseIssueDetailScrollRestoreArgs) {
   const restoredKeyRef = useRef<string | null>(null);
+  const wasDisabledForKeyRef = useRef(false);
 
   useLayoutEffect(() => {
     restoredKeyRef.current = null;
+    wasDisabledForKeyRef.current = false;
   }, [restoreKey]);
 
   useLayoutEffect(() => {
     if (!scrollContainerEl || disabled || !ready) return;
 
     const save = () => {
-      scrollPositions.set(restoreKey, scrollContainerEl.scrollTop);
+      saveScrollPosition(restoreKey, scrollContainerEl.scrollTop);
     };
 
     scrollContainerEl.addEventListener("scroll", save, { passive: true });
@@ -37,14 +40,32 @@ export function useIssueDetailScrollRestore({
   }, [scrollContainerEl, restoreKey, ready, disabled]);
 
   useLayoutEffect(() => {
-    if (!scrollContainerEl || disabled || !ready) return;
+    if (!scrollContainerEl || !ready) return;
+    if (disabled) {
+      wasDisabledForKeyRef.current = true;
+      return;
+    }
     if (restoredKeyRef.current === restoreKey) return;
 
     restoredKeyRef.current = restoreKey;
 
-    const target = scrollPositions.get(restoreKey) ?? 0;
+    const savedScrollTop = scrollPositions.get(restoreKey);
+    if (savedScrollTop === undefined && wasDisabledForKeyRef.current) return;
+
+    const target = savedScrollTop ?? 0;
     return restoreScrollTopWithRetry(scrollContainerEl, target);
   }, [scrollContainerEl, restoreKey, ready, disabled]);
+}
+
+function saveScrollPosition(restoreKey: string, scrollTop: number) {
+  if (scrollPositions.has(restoreKey)) {
+    scrollPositions.delete(restoreKey);
+  } else if (scrollPositions.size >= SCROLL_POSITION_CACHE_MAX_SIZE) {
+    const oldestKey = scrollPositions.keys().next().value;
+    if (oldestKey !== undefined) scrollPositions.delete(oldestKey);
+  }
+
+  scrollPositions.set(restoreKey, scrollTop);
 }
 
 function restoreScrollTopWithRetry(el: HTMLElement, target: number) {
@@ -58,7 +79,7 @@ function restoreScrollTopWithRetry(el: HTMLElement, target: number) {
   let frameId: number;
 
   const tick = () => {
-    if (cancelled) return;
+    if (cancelled || !el.isConnected) return;
 
     el.scrollTop = target;
     attempts += 1;

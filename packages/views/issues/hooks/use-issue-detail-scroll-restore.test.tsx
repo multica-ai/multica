@@ -243,4 +243,21 @@ describe("useIssueDetailScrollRestore", () => {
     flushNextAnimationFrame();
     expect(scroller.scrollTop).toBe(720);
   });
+
+  it("does not yank scroll to top when a same-issue comment highlight clears", () => {
+    const issueA = nextKey("issue-a");
+
+    const { getByTestId, rerender } = render(
+      <Harness restoreKey={issueA} disabled />,
+    );
+    const scroller = getByTestId("scroller") as HTMLElement;
+    flushNextAnimationFrame();
+
+    scroller.scrollTop = 500;
+
+    rerender(<Harness restoreKey={issueA} />);
+    flushNextAnimationFrame();
+
+    expect(scroller.scrollTop).toBe(500);
+  });
 });
