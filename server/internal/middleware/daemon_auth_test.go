@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wallts-ai/wallts/server/internal/auth"
+	"github.com/dwickyfp/wallts/server/internal/auth"
 )
 
 // TestDaemonAuth_DaemonTokenCacheHit pins the daemon-token cache short-circuit:

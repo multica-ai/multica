@@ -23,7 +23,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 </Callout>
 
 ```bash
-git clone https://github.com/wallts-ai/wallts.git
+git clone https://github.com/dwickyfp/wallts.git
 cd wallts
 make selfhost
 ```
@@ -209,7 +209,7 @@ docker compose -f docker-compose.selfhost.yml exec backend \
 
 `--sleep-between-slices=2s`는 바쁜 DB에서 읽기 부하를 조절합니다. 완료된 후 백엔드 컨테이너를 재시작하면(시작 시 migration이 실행됨) 업그레이드가 완료됩니다.
 
-전체 레퍼런스 — Kubernetes `CronJob` 템플릿과 업그레이드 순서 포함 — 는 저장소의 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)에 있습니다.
+전체 레퍼런스 — Kubernetes `CronJob` 템플릿과 업그레이드 순서 포함 — 는 저장소의 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/dwickyfp/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)에 있습니다.
 
 ## Kubernetes 배포(대체 방안)
 
@@ -232,7 +232,7 @@ kubectl -n wallts create secret generic wallts-secrets \
 그런 다음 차트를 설치합니다.
 
 ```bash
-git clone https://github.com/wallts-ai/wallts.git
+git clone https://github.com/dwickyfp/wallts.git
 cd wallts
 helm install wallts deploy/helm/wallts -n wallts
 ```
@@ -256,7 +256,7 @@ wallts setup self-host \
 
 차트를 변경하지 않고 최신 이미지만 받아오려면 `kubectl -n wallts rollout restart deploy/wallts-backend deploy/wallts-frontend`를 실행하세요. 특정 Wallts 릴리스를 고정하려면 values 파일에서 `images.backend.tag` / `images.frontend.tag`를 설정하고 `helm upgrade`를 실행하세요. `helm -n wallts uninstall wallts`는 워크로드를 제거하지만 PVC와 Secret은 유지합니다. `kubectl delete namespace wallts`는 모든 것을 삭제합니다.
 
-전체 레퍼런스 — 세 가지 로그인 모드, web 이미지에 빌드 타임에 굳혀진 `REMOTE_API_URL`에 대한 `backend` ExternalName 우회책, 리소스 제한, TLS — 는 저장소의 [`SELF_HOSTING.md`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)에 있습니다.
+전체 레퍼런스 — 세 가지 로그인 모드, web 이미지에 빌드 타임에 굳혀진 `REMOTE_API_URL`에 대한 `backend` ExternalName 우회책, 리소스 제한, TLS — 는 저장소의 [`SELF_HOSTING.md`](https://github.com/dwickyfp/wallts/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)에 있습니다.
 
 ## 자주 발생하는 문제
 

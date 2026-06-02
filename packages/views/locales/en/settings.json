@@ -86,7 +86,7 @@
     },
     "push": {
       "title": "Browser Push Notifications",
-      "description": "Receive native browser alerts even when Multica is in the background. Requires your browser to allow push notifications.",
+      "description": "Receive native browser alerts even when Wallts is in the background. Requires your browser to allow push notifications.",
       "label": "Enable Browser Push",
       "hint": "Notifications are sent for mentions, assignments, agent runs, and CI failures.",
       "device_count": "Active on {{count}} device(s).",

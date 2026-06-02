@@ -163,7 +163,7 @@ wallts project resource update <project-id> <resource-id> \
 # "项目建好了但资源只挂了一半"的状态。
 wallts project create \
   --title "Agent UX 2026" \
-  --repo https://github.com/wallts-ai/wallts
+  --repo https://github.com/dwickyfp/wallts
 
 # 后续管理资源
 wallts project resource list <project-id>
@@ -196,7 +196,7 @@ API 响应的结构化透传，写进智能体的工作目录里：
       "id": "…",
       "resource_type": "github_repo",
       "resource_ref": {
-        "url": "https://github.com/wallts-ai/wallts",
+        "url": "https://github.com/dwickyfp/wallts",
         "default_branch_hint": "main"
       }
     }
@@ -217,7 +217,7 @@ This issue belongs to **Agent UX 2026**.
 
 Project resources (also written to `.wallts/project/resources.json`):
 
-- **GitHub repo**: https://github.com/wallts-ai/wallts (default branch: `main`)
+- **GitHub repo**: https://github.com/dwickyfp/wallts (default branch: `main`)
 
 Resources are pointers — open them only when relevant to the task. For
 `github_repo` resources, use `wallts repo checkout <url>` to fetch the code.

@@ -18,9 +18,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/wallts-ai/wallts/server/internal/auth"
-	"github.com/wallts-ai/wallts/server/internal/logger"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/auth"
+	"github.com/dwickyfp/wallts/server/internal/logger"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // SignupError represents signup restriction errors

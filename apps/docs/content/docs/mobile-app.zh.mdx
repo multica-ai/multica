@@ -5,10 +5,10 @@ description: 在自己的 iPhone 上自助 build 开源版 Wallts iOS app ——
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Wallts iOS 客户端开源,跟 web、desktop、后端一起放在[主仓库](https://github.com/wallts-ai/wallts)里。目前没上 App Store —— 在那之前,想用的人自己从源码 build 一份。首次 build 约 10–20 分钟,之后每次约 2 分钟,连接的是 [wallts.ai](https://wallts.ai) 同一个后端,所以你现有账号直接能登。
+Wallts iOS 客户端开源,跟 web、desktop、后端一起放在[主仓库](https://github.com/dwickyfp/wallts)里。目前没上 App Store —— 在那之前,想用的人自己从源码 build 一份。首次 build 约 10–20 分钟,之后每次约 2 分钟,连接的是 [wallts.ai](https://wallts.ai) 同一个后端,所以你现有账号直接能登。
 
 <Callout type="info">
-本页是给**个人使用者**看的。如果你是要开发这个 app,请看仓库里的 [`apps/mobile/README.md`](https://github.com/wallts-ai/wallts/blob/main/apps/mobile/README.md) —— 那里覆盖 dev / staging 变体和完整脚本表。
+本页是给**个人使用者**看的。如果你是要开发这个 app,请看仓库里的 [`apps/mobile/README.md`](https://github.com/dwickyfp/wallts/blob/main/apps/mobile/README.md) —— 那里覆盖 dev / staging 变体和完整脚本表。
 </Callout>
 
 ## 你需要
@@ -19,7 +19,7 @@ Wallts iOS 客户端开源,跟 web、desktop、后端一起放在[主仓库](htt
 - Wallts 源码已 clone:
 
   ```bash
-  git clone https://github.com/wallts-ai/wallts.git
+  git clone https://github.com/dwickyfp/wallts.git
   cd wallts
   pnpm install
   ```
@@ -62,7 +62,7 @@ pnpm ios:mobile:device:prod:release
 
 iOS app 还在快速迭代 —— 团队目前更倾向于"先发再改",而不是 App Store 审核周期。下一步比较可能是 TestFlight 内测,然后才是正式上架。在那之前,上面的自助 build 是 iOS 上用 Wallts 的唯一方式。
 
-想第一时间知道 TestFlight 开放的话,watch 一下 [GitHub 仓库](https://github.com/wallts-ai/wallts)。
+想第一时间知道 TestFlight 开放的话,watch 一下 [GitHub 仓库](https://github.com/dwickyfp/wallts)。
 
 ## 排错
 

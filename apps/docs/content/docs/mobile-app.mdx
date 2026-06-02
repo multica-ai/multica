@@ -5,10 +5,10 @@ description: How to build the open-source Wallts iOS app on your own iPhone — 
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Wallts's iOS client is open-source and lives in the [main repo](https://github.com/wallts-ai/wallts) alongside web, desktop, and backend. It isn't on the App Store yet — until that changes, anyone who wants it on their iPhone builds from source. The build takes about 10–20 minutes the first time and ~2 minutes after that, and it talks to the same backend as [wallts.ai](https://wallts.ai) so your existing account just works.
+Wallts's iOS client is open-source and lives in the [main repo](https://github.com/dwickyfp/wallts) alongside web, desktop, and backend. It isn't on the App Store yet — until that changes, anyone who wants it on their iPhone builds from source. The build takes about 10–20 minutes the first time and ~2 minutes after that, and it talks to the same backend as [wallts.ai](https://wallts.ai) so your existing account just works.
 
 <Callout type="info">
-This page is for **personal use**. App developers should read [`apps/mobile/README.md`](https://github.com/wallts-ai/wallts/blob/main/apps/mobile/README.md) in the repo — it covers the dev / staging variants and the full script matrix.
+This page is for **personal use**. App developers should read [`apps/mobile/README.md`](https://github.com/dwickyfp/wallts/blob/main/apps/mobile/README.md) in the repo — it covers the dev / staging variants and the full script matrix.
 </Callout>
 
 ## What you need
@@ -19,7 +19,7 @@ This page is for **personal use**. App developers should read [`apps/mobile/READ
 - The Wallts source code checked out:
 
   ```bash
-  git clone https://github.com/wallts-ai/wallts.git
+  git clone https://github.com/dwickyfp/wallts.git
   cd wallts
   pnpm install
   ```
@@ -62,7 +62,7 @@ Subsequent builds are fast because Xcode caches the native compile.
 
 The iOS app is still moving fast — the team prefers ship-and-iterate over App Store review cycles right now. A TestFlight beta is the most likely next step before a full App Store release. Until then, the self-build path above is the only way to use Wallts on iOS.
 
-If you'd like to be notified when TestFlight opens, watch the [GitHub repo](https://github.com/wallts-ai/wallts).
+If you'd like to be notified when TestFlight opens, watch the [GitHub repo](https://github.com/dwickyfp/wallts).
 
 ## Troubleshooting
 

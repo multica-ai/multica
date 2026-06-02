@@ -8,13 +8,13 @@ description: Install the Wallts CLI and start the agent daemon.
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install wallts-ai/tap/wallts
+brew install dwickyfp/tap/wallts
 ```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/wallts-ai/wallts.git
+git clone https://github.com/dwickyfp/wallts.git
 cd wallts
 make build
 cp server/bin/wallts /usr/local/bin/wallts
@@ -34,11 +34,11 @@ if [ "$ARCH" = "x86_64" ]; then
 fi
 
 # Get the latest release tag from GitHub
-LATEST=$(curl -sI https://github.com/wallts-ai/wallts/releases/latest \
+LATEST=$(curl -sI https://github.com/dwickyfp/wallts/releases/latest \
   | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n')
 
 # Download and extract
-curl -sL "https://github.com/wallts-ai/wallts/releases/download/${LATEST}/wallts_${OS}_${ARCH}.tar.gz" \
+curl -sL "https://github.com/dwickyfp/wallts/releases/download/${LATEST}/wallts_${OS}_${ARCH}.tar.gz" \
   -o /tmp/wallts.tar.gz
 tar -xzf /tmp/wallts.tar.gz -C /tmp wallts
 sudo mv /tmp/wallts /usr/local/bin/wallts
@@ -48,7 +48,7 @@ rm /tmp/wallts.tar.gz
 ### Update
 
 ```bash
-brew upgrade wallts-ai/tap/wallts
+brew upgrade dwickyfp/tap/wallts
 ```
 
 For install script or manual installs, use:

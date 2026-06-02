@@ -16,7 +16,7 @@ import {
 import type { LatestRelease } from "@/features/landing/utils/github-release";
 
 const ALL_RELEASES_URL =
-  "https://github.com/wallts-ai/wallts/releases";
+  "https://github.com/dwickyfp/wallts/releases";
 
 export function DownloadClient({ release }: { release: LatestRelease }) {
   const [detected, setDetected] = useState<DetectResult | null>(null);

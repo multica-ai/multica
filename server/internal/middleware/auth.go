@@ -9,9 +9,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/wallts-ai/wallts/server/internal/auth"
-	"github.com/wallts-ai/wallts/server/internal/util"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/auth"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }

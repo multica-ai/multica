@@ -1,5 +1,5 @@
 /**
- * Multica Service Worker
+ * Wallts Service Worker
  *
  * Handles Web Push events delivered by the browser push service
  * (Chrome/Firefox/Edge/Safari) and renders native OS notifications.
@@ -36,12 +36,12 @@ self.addEventListener("push", (event) => {
     payload = event.data.json();
   } catch {
     // Treat unparseable pushes as a plain body-only notification.
-    payload = { title: "Multica", body: event.data.text() };
+    payload = { title: "Wallts", body: event.data.text() };
   }
 
   const { title, body, icon, data } = payload;
 
-  const notificationTitle = title || "Multica";
+  const notificationTitle = title || "Wallts";
 
   /** @type {NotificationOptions} */
   const notificationOptions = {

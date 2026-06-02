@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wallts-ai/wallts/server/internal/events"
-	"github.com/wallts-ai/wallts/server/internal/realtime"
+	"github.com/dwickyfp/wallts/server/internal/events"
+	"github.com/dwickyfp/wallts/server/internal/realtime"
 )
 
 func TestMainRouterDoesNotExposePrometheusMetrics(t *testing.T) {

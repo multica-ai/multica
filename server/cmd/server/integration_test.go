@@ -17,9 +17,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/wallts-ai/wallts/server/internal/auth"
-	"github.com/wallts-ai/wallts/server/internal/events"
-	"github.com/wallts-ai/wallts/server/internal/realtime"
+	"github.com/dwickyfp/wallts/server/internal/auth"
+	"github.com/dwickyfp/wallts/server/internal/events"
+	"github.com/dwickyfp/wallts/server/internal/realtime"
 )
 
 var (

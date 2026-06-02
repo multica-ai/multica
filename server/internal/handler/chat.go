@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
-	"github.com/wallts-ai/wallts/server/pkg/protocol"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // chatSessionTitleMaxLen caps the rename input. Long enough to fit a

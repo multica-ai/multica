@@ -16,13 +16,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/wallts-ai/wallts/server/internal/issueguard"
-	"github.com/wallts-ai/wallts/server/internal/issueposition"
-	"github.com/wallts-ai/wallts/server/internal/logger"
-	"github.com/wallts-ai/wallts/server/internal/util"
-	"github.com/wallts-ai/wallts/server/pkg/agent"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
-	"github.com/wallts-ai/wallts/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/internal/issueguard"
+	"github.com/dwickyfp/wallts/server/internal/issueposition"
+	"github.com/dwickyfp/wallts/server/internal/logger"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	"github.com/dwickyfp/wallts/server/pkg/agent"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // IssueResponse is the JSON response for an issue.
@@ -2773,7 +2773,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// real-world cases that hit this path are caller mistakes (status placed
 	// at the top level, "update" misspelled as singular). Telling the truth
 	// here — `{"updated": 0}` — keeps the wire shape stable while making the
-	// count match reality. See wallts-ai/wallts#1660.
+	// count match reality. See dwickyfp/wallts#1660.
 	hasMutation := req.Updates.Title != nil ||
 		req.Updates.Description != nil ||
 		req.Updates.Status != nil ||
