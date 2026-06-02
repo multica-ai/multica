@@ -42,6 +42,21 @@
       "cancel": "キャンセル",
       "confirm": "削除",
       "confirming": "削除中..."
+    },
+    "row_stop_aria": "現在の実行を停止",
+    "stop_action": "停止",
+    "row_subtitle": {
+      "working": "作業中",
+      "completed": "完了",
+      "new_reply": "新しい返信"
+    },
+    "stop_dialog": {
+      "title": "この実行を停止しますか？",
+      "description_with_title": "\"{{title}}\" の現在のエージェントタスクをキャンセルします。生成済みの内容はチャットに残ります。",
+      "description_default": "現在のエージェントタスクをキャンセルします。生成済みの内容はチャットに残ります。",
+      "cancel": "実行を続ける",
+      "confirm": "実行を停止",
+      "confirming": "停止中..."
     }
   },
   "window": {
@@ -58,8 +73,7 @@
     "my_agents": "マイエージェント",
     "others": "その他",
     "no_agents": "エージェントなし",
-    "active_group": "アクティブ",
-    "archived_group_other": "アーカイブ済みのチャット {{count}}件"
+    "history_group": "チャット履歴"
   },
   "empty_state": {
     "first_time_title": "エージェントとチャット",

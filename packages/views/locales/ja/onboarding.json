@@ -58,7 +58,8 @@
       "event_conference": "カンファレンス / ミートアップ",
       "dont_remember": "覚えていない",
       "other": "その他",
-      "other_placeholder": "例: よく聴くポッドキャスト"
+      "other_placeholder": "例: よく聴くポッドキャスト",
+      "social_github": "GitHub"
     },
     "role": {
       "question": "あなたに最も近いのはどれですか?",

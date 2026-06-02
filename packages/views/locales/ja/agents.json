@@ -25,7 +25,8 @@
     "all": "すべて",
     "online": "オンライン",
     "unstable": "不安定",
-    "offline": "オフライン"
+    "offline": "オフライン",
+    "archived": "アーカイブ済み"
   },
   "workload": {
     "working": "作業中",
@@ -46,7 +47,9 @@
     "no_archived": "まだアーカイブ済みのエージェントはありません。",
     "search_active": "\"{{query}}\" に一致するエージェントがありません。",
     "search_active_filtered": "このフィルターで \"{{query}}\" に一致するエージェントがありません。",
-    "no_filter_match": "このフィルターに一致するエージェントがありません。"
+    "no_filter_match": "このフィルターに一致するエージェントがありません。",
+    "search_runtime_filtered": "\"{{machine}}\" 上に \"{{query}}\" に一致するエージェントがありません。",
+    "runtime_filtered": "\"{{machine}}\" 上にエージェントがありません。"
   },
   "columns": {
     "agent": "エージェント",
@@ -415,5 +418,13 @@
     "runtime_offline": "デーモンがオフライン",
     "runtime_recovery": "デーモンが再起動しました",
     "manual": "ユーザーがキャンセルしました"
+  },
+  "runtime_filter": {
+    "all": "すべてのランタイム",
+    "section_local": "ローカル",
+    "section_remote": "リモート",
+    "section_cloud": "クラウド",
+    "agent_count_other": "エージェント {{count}} 件",
+    "empty": "まだマシンがありません"
   }
 }

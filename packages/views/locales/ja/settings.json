@@ -154,7 +154,11 @@
     "deleting": "削除中...",
     "toast_delete_failed": "ワークスペースを削除できませんでした",
     "confirm_cancel": "キャンセル",
-    "confirm_action": "確認"
+    "confirm_action": "確認",
+    "change_logo_aria": "ワークスペースのロゴを変更",
+    "click_logo_hint": "ロゴをクリックして新しい画像をアップロード",
+    "toast_logo_updated": "ワークスペースのロゴを更新しました",
+    "toast_logo_failed": "ワークスペースのロゴをアップロードできませんでした"
   },
   "delete_workspace_dialog": {
     "title": "ワークスペースを削除",

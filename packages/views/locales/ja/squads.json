@@ -54,7 +54,8 @@
     "status_unstable": "不安定",
     "issue_status_blocked": "ブロック中",
     "active_issue_more": "他 {{count}}件",
-    "last_active_label": "最終アクティブ {{time}}"
+    "last_active_label": "最終アクティブ {{time}}",
+    "status_archived": "アーカイブ済み"
   },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",
