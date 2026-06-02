@@ -851,3 +851,22 @@ export function useToggleIssueSubscriber(issueId: string) {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Session reset
+// ---------------------------------------------------------------------------
+
+/**
+ * Reset an agent session — deactivates the current session so the next
+ * run starts fresh. Invalidates both the sessions list and session detail
+ * queries for the owning issue.
+ */
+export function useResetSession(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => api.resetSession(sessionId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.sessions(issueId) });
+    },
+  });
+}

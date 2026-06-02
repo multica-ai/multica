@@ -43,6 +43,8 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  AgentSession,
+  AgentSessionDetail,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -174,6 +176,10 @@ import {
   EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+  AgentSessionListSchema,
+  AgentSessionDetailSchema,
+  EMPTY_AGENT_SESSION_LIST,
+  EMPTY_AGENT_SESSION_DETAIL,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1263,6 +1269,25 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(taskId ? { task_id: taskId } : {}),
     });
+  }
+
+  // Agent sessions
+  async listSessionsByIssue(issueId: string): Promise<AgentSession[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/sessions`);
+    return parseWithFallback<AgentSession[]>(raw, AgentSessionListSchema, EMPTY_AGENT_SESSION_LIST, {
+      endpoint: "GET /api/issues/:id/sessions",
+    });
+  }
+
+  async getSessionDetail(sessionId: string): Promise<AgentSessionDetail> {
+    const raw = await this.fetch<unknown>(`/api/sessions/${sessionId}`);
+    return parseWithFallback<AgentSessionDetail>(raw, AgentSessionDetailSchema, EMPTY_AGENT_SESSION_DETAIL, {
+      endpoint: "GET /api/sessions/:id",
+    });
+  }
+
+  async resetSession(sessionId: string): Promise<void> {
+    await this.fetch(`/api/sessions/${sessionId}/reset`, { method: "POST" });
   }
 
   // Inbox
