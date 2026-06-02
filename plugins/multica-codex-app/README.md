@@ -71,6 +71,27 @@ multica-codex-app@multica-local
 The installer supports both Codex CLI variants that expose plugin install as
 `codex plugin add` or `codex plugin a`.
 
+## Packaging
+
+Build a user-distributable package with the same layout expected by the
+installer:
+
+```bash
+make build
+scripts/package_multica_codex_app.sh ~/Downloads/multica --force
+```
+
+The output directory contains the directly runnable install layout and also
+versioned `.tar.gz` and `.zip` archives:
+
+```text
+~/Downloads/multica/
+~/Downloads/multica/multica-codex-app-<version>.tar.gz
+~/Downloads/multica/multica-codex-app-<version>.zip
+```
+
+Set `MULTICA_SOURCE_BIN=/path/to/multica` to package a specific CLI binary.
+
 ## Helper Commands
 
 Inspect the helper contract:
