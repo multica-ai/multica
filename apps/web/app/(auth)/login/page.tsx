@@ -6,13 +6,15 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { needsSourceBackfill } from "@multica/core/onboarding";
 import {
   paths,
   resolvePostAuthDestination,
   useHasOnboarded,
 } from "@multica/core/paths";
 import { api } from "@multica/core/api";
-import type { Workspace } from "@multica/core/types";
+import type { User, Workspace } from "@multica/core/types";
+import { readSourceBackfillDismissCount } from "@multica/views/onboarding";
 import {
   Card,
   CardHeader,
@@ -52,6 +54,27 @@ async function resolveLoggedInDestination(
     }
   }
   return resolvePostAuthDestination(workspaces, hasOnboarded);
+}
+
+/**
+ * Wrap a resolved post-auth destination with the source-backfill detour.
+ * Onboarded users whose questionnaire never recorded a source see the
+ * prompt once before continuing to `dest`. Predicate consults the same
+ * per-user localStorage bucket the prompt writes to, so a user who hit
+ * the close-X cap on this browser flows straight through.
+ *
+ * Symmetric with the OAuth `/auth/callback` post-success path so both
+ * login flows reach the prompt — otherwise magic-code users would
+ * bypass it entirely.
+ */
+function maybeSourceBackfillDetour(
+  user: User | null | undefined,
+  dest: string,
+): string {
+  if (!user) return dest;
+  const dismissCount = readSourceBackfillDismissCount(user.id);
+  if (!needsSourceBackfill(user, dismissCount)) return dest;
+  return paths.sourceBackfill(dest);
 }
 
 function LoginPageContent() {
@@ -108,7 +131,7 @@ function LoginPageContent() {
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
     void resolveLoggedInDestination(qc, hasOnboarded, list).then((dest) =>
-      router.replace(dest),
+      router.replace(maybeSourceBackfillDetour(user, dest)),
     );
   }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
 
@@ -123,7 +146,7 @@ function LoginPageContent() {
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
     const dest = await resolveLoggedInDestination(qc, onboarded, list);
-    router.push(dest);
+    router.push(maybeSourceBackfillDetour(currentUser, dest));
   };
 
   // Build Google OAuth state: encode platform + next URL so the callback
