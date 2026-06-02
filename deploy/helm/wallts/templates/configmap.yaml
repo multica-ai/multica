@@ -24,12 +24,7 @@ data:
   CLOUDFRONT_DOMAIN: {{ .Values.backend.config.cloudfrontDomain | quote }}
   CLOUDFRONT_KEY_PAIR_ID: {{ .Values.backend.config.cloudfrontKeyPairId | quote }}
   LOCAL_UPLOAD_BASE_URL: {{ .Values.backend.config.localUploadBaseUrl | quote }}
-  {{- /* When the bundled postgres runs, expose DB name + user in env so the
-         backend's DATABASE_URL template can reference them via $(POSTGRES_*).
-         When the bundled postgres is disabled, the user supplies DATABASE_URL
-         (directly or via external.databaseUrl) and these env vars are unused
-         by the backend. */ -}}
-  {{- if .Values.postgresql.enabled }}
-  POSTGRES_DB: {{ .Values.postgresql.database | quote }}
-  POSTGRES_USER: {{ .Values.postgresql.user | quote }}
-  {{- end }}
+
+  # --- PostgreSQL (also consumed by the backend to build DATABASE_URL) ---
+  POSTGRES_DB: {{ .Values.postgres.database | quote }}
+  POSTGRES_USER: {{ .Values.postgres.user | quote }}

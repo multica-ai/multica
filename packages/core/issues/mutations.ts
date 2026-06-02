@@ -8,7 +8,6 @@ import {
   type IssueSortParam,
   type MyIssuesFilter,
 } from "./queries";
-import { projectKeys } from "../projects/queries";
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -202,7 +201,6 @@ export function useCreateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
-      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
 }
@@ -285,12 +283,6 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
-      if (
-        vars.status !== undefined ||
-        Object.prototype.hasOwnProperty.call(vars, "project_id")
-      ) {
-        qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-      }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this
@@ -388,7 +380,6 @@ export function useDeleteIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
-      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
   });
@@ -453,12 +444,6 @@ export function useBatchUpdateIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
-      if (
-        _vars.updates.status !== undefined ||
-        Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")
-      ) {
-        qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-      }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {
           qc.invalidateQueries({
@@ -570,7 +555,6 @@ export function useBatchDeleteIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
-      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {
           parentIssueIds: Array.from(ctx.parentIssueIds),
@@ -848,25 +832,6 @@ export function useToggleIssueSubscriber(issueId: string) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
-    },
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Session reset
-// ---------------------------------------------------------------------------
-
-/**
- * Reset an agent session — deactivates the current session so the next
- * run starts fresh. Invalidates both the sessions list and session detail
- * queries for the owning issue.
- */
-export function useResetSession(issueId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (sessionId: string) => api.resetSession(sessionId),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.sessions(issueId) });
     },
   });
 }

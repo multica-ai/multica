@@ -11,8 +11,6 @@ import type {
   BillingTopupsPage,
   BillingTransactionsPage,
   CreateAgentFromTemplateResponse,
-  AgentSession,
-  AgentSessionDetail,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
@@ -834,79 +832,4 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
-};
-
-// ---------------------------------------------------------------------------
-// Agent session schemas — `/api/issues/:id/sessions` and
-// `/api/sessions/:id`. Same leniency rules: strings default to "",
-// numbers to 0, arrays to [], `.loose()` passes unknown fields.
-// ---------------------------------------------------------------------------
-
-const AgentSessionRunSchema = z.object({
-  task_id: z.string().default(""),
-  run_number: z.number().default(0),
-  status: z.string().default(""),
-  started_at: z.string().default(""),
-  completed_at: z.string().nullable().default(null),
-  summary: z.string().default(""),
-}).loose();
-
-const AgentSessionStateSchema = z.object({
-  messages: z.array(z.unknown()).default([]),
-  tool_results: z.array(z.unknown()).default([]),
-  working_directory: z.string().default(""),
-  branch: z.string().default(""),
-  files_modified: z.array(z.string()).default([]),
-  compressed: z.boolean().optional(),
-}).loose();
-
-export const AgentSessionSchema = z.object({
-  id: z.string(),
-  issue_id: z.string(),
-  agent_id: z.string(),
-  agent_name: z.string().optional(),
-  run_number: z.number().default(0),
-  status: z.string().default(""),
-  reason: z.string().nullable().default(null),
-  summary: z.string().default(""),
-  branch: z.string().default(""),
-  working_directory: z.string().default(""),
-  files_modified_count: z.number().default(0),
-  created_at: z.string().default(""),
-  last_active: z.string().default(""),
-  version: z.string().default(""),
-}).loose();
-
-export const AgentSessionListSchema = z.array(AgentSessionSchema);
-
-export const EMPTY_AGENT_SESSION_LIST: AgentSession[] = [];
-
-export const AgentSessionDetailSchema = AgentSessionSchema.extend({
-  state: AgentSessionStateSchema,
-  runs: z.array(AgentSessionRunSchema).default([]),
-}).loose();
-
-export const EMPTY_AGENT_SESSION_DETAIL: AgentSessionDetail = {
-  id: "",
-  issue_id: "",
-  agent_id: "",
-  agent_name: "",
-  run_number: 0,
-  status: "active" as AgentSession["status"],
-  reason: null,
-  summary: "",
-  branch: "",
-  working_directory: "",
-  files_modified_count: 0,
-  created_at: "",
-  last_active: "",
-  version: "",
-  state: {
-    messages: [],
-    tool_results: [],
-    working_directory: "",
-    branch: "",
-    files_modified: [],
-  },
-  runs: [],
 };

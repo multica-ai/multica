@@ -82,9 +82,7 @@ export function AgentPresenceIndicator({
           All three workload states render here for symmetry: idle gets
           its own "Idle" label so the difference between "no presence
           data" (no chip at all) and "agent is idle" (explicit Idle chip)
-          is visible. Archived agents skip the workload chip entirely —
-          "Archived" already says everything; "Archived · Idle" is noise. */}
-      {detail.availability !== "archived" && (
+          is visible. */}
       <span className="inline-flex items-center gap-1">
         <span className="text-xs text-muted-foreground">·</span>
         <span
@@ -113,7 +111,6 @@ export function AgentPresenceIndicator({
           </span>
         )}
       </span>
-      )}
     </span>
   );
 }

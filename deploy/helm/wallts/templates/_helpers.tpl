@@ -25,18 +25,11 @@ under the kustomize layout when installed as `helm install wallts ...`.
 {{- end -}}
 
 {{/*
-DATABASE_URL for the backend container.
-
-When postgresql.external.databaseUrl is set, it takes priority (external DB).
-Otherwise the URL is assembled from the bundled postgres Service + Secret env
-vars. The $(VAR) syntax is resolved by the kubelet from the container's env,
-so POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB must also be loaded into
-env on the same container (see envFrom on the backend Deployment).
+DATABASE_URL pieced together from the postgres service + Secret values.
+The $(VAR) syntax is resolved by the kubelet from the container's env, so
+POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB must also be loaded into env
+on the same container (see envFrom on the backend Deployment).
 */}}
 {{- define "wallts.databaseUrl" -}}
-{{- if .Values.postgresql.external.databaseUrl -}}
-{{ .Values.postgresql.external.databaseUrl }}
-{{- else -}}
-postgres://$(POSTGRES_USER):***@{{ include "wallts.postgres.fullname" . }}:5432/$(POSTGRES_DB)?sslmode=disable
-{{- end -}}
+postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "wallts.postgres.fullname" . }}:5432/$(POSTGRES_DB)?sslmode=disable
 {{- end -}}

@@ -97,4 +97,27 @@ describe("parseFrontmatter", () => {
       enabled: "true",
     });
   });
+
+  // A structured value where a scalar belongs (authoring mistake) must keep the
+  // sibling name and JSON-encode the value. This mirrors the Go
+  // ParseSkillFrontmatter behaviour in server/internal/skill so both sides agree.
+  it("keeps sibling name and JSON-encodes a sequence value", () => {
+    const { frontmatter } = parseFrontmatter(
+      "---\nname: my-skill\ndescription:\n  - first feature\n  - second feature\n---\nbody",
+    );
+    expect(frontmatter).toEqual({
+      name: "my-skill",
+      description: '["first feature","second feature"]',
+    });
+  });
+
+  it("keeps sibling name and JSON-encodes a mapping value", () => {
+    const { frontmatter } = parseFrontmatter(
+      "---\nname: my-skill\ndescription:\n  a: 1\n  b: 2\n---\nbody",
+    );
+    expect(frontmatter).toEqual({
+      name: "my-skill",
+      description: '{"a":1,"b":2}',
+    });
+  });
 });

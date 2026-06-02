@@ -81,10 +81,6 @@ export const issueKeys = {
    *  the global WS task: prefix path so any task lifecycle event refreshes
    *  every per-issue list, regardless of which issue is currently mounted. */
   tasksAll: () => ["issues", "tasks"] as const,
-  sessions: (issueId: string) =>
-    ["issues", "sessions", issueId] as const,
-  sessionDetail: (sessionId: string) =>
-    ["sessions", "detail", sessionId] as const,
 };
 
 export type MyIssuesFilter = Pick<

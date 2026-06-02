@@ -117,7 +117,6 @@ export function AuthInitializer({
         storage.removeItem("wallts_token");
         onAuthFailure();
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <>{children}</>;
