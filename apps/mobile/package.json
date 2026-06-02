@@ -35,6 +35,7 @@
     "@rn-primitives/slot": "^1.4.0",
     "@rn-primitives/switch": "^1.4.0",
     "@rn-primitives/tabs": "^1.4.0",
+    "@sentry/react-native": "^8.13.0",
     "@shikijs/core": "^4.0.2",
     "@shikijs/langs": "^4.0.2",
     "@shikijs/themes": "^4.0.2",
