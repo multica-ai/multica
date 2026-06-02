@@ -129,6 +129,7 @@ export type {
   RemoveSquadMemberRequest,
   UpdateSquadMemberRoleRequest,
   CreateSquadActivityLogRequest,
+  SquadAwaitBarrier,
   SquadMemberStatusValue,
   SquadActiveIssueBrief,
   SquadMemberStatus,
