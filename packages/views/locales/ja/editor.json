@@ -17,7 +17,8 @@
     },
     "list_dropdown": {
       "bullet_list": "箇条書きリスト",
-      "ordered_list": "番号付きリスト"
+      "ordered_list": "番号付きリスト",
+      "task_list": "タスクリスト"
     },
     "sub_issue": {
       "tooltip": "選択範囲からサブイシューを作成",

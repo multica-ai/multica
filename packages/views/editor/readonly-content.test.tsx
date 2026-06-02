@@ -126,6 +126,24 @@ describe("ReadonlyContent line breaks", () => {
   });
 });
 
+describe("ReadonlyContent task lists", () => {
+  it("renders `- [ ]` / `- [x]` as checkboxes and preserves the checked state", () => {
+    const { container } = render(
+      <ReadonlyContent content={"- [ ] todo\n- [x] done"} />,
+    );
+
+    const boxes = container.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    expect(boxes).toHaveLength(2);
+    // The completed item must render checked, not just present.
+    expect(boxes[0]!.checked).toBe(false);
+    expect(boxes[1]!.checked).toBe(true);
+    // Checkboxes are display-only in readonly mode.
+    expect(boxes[1]!.disabled).toBe(true);
+  });
+});
+
 describe("ReadonlyContent issue mention Markdown", () => {
   it("renders an issue mention inside a task list as an issue mention card", () => {
     const { container, getByTestId } = render(

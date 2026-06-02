@@ -149,6 +149,66 @@
   list-style-type: lower-roman;
 }
 
+/*
+ * Task lists (checkboxes) — `- [ ]` / `- [x]`.
+ *
+ * Two DOM shapes are styled together so the editable and readonly views match:
+ *   - Editor (Tiptap):   ul[data-type="taskList"] > li[data-type="taskItem"]
+ *                        > label(contenteditable) > input + span, + div(content)
+ *   - Readonly (remark-gfm): ul.contains-task-list > li.task-list-item
+ *                        > input[disabled] + text
+ */
+.rich-text-editor ul[data-type="taskList"],
+.rich-text-editor ul.contains-task-list {
+  list-style: none;
+  padding-inline: 0;
+  margin: 0.5rem 0;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li,
+.rich-text-editor li.task-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0;
+}
+
+/* Checkbox column — the flex child that holds the checkbox. The editor nests
+   the input inside a non-editable <label>; readonly emits a bare <input>. The
+   top margin nudges the box onto the first text line (line-height 1.625).
+   Child combinators keep these rules off nested plain bullet/ordered lists. */
+.rich-text-editor ul[data-type="taskList"] > li > label,
+.rich-text-editor li.task-list-item > input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0.28rem 0 0;
+  user-select: none;
+}
+
+.rich-text-editor input[type="checkbox"] {
+  width: 0.95rem;
+  height: 0.95rem;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+/* Content column fills the remaining width and may wrap/scroll. */
+.rich-text-editor ul[data-type="taskList"] > li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > div > p {
+  margin: 0;
+}
+
+/* Completed items: subtle muted text (no strikethrough), matching Linear.
+   The editor's checkbox NodeView keeps `data-checked` on the <li> (but not
+   data-type); readonly is matched via :has(input:checked). */
+.rich-text-editor ul[data-type="taskList"] > li[data-checked="true"] > div,
+.rich-text-editor li.task-list-item:has(> input:checked) {
+  color: var(--muted-foreground);
+}
+
 /* Tables */
 .rich-text-editor .tableWrapper {
   overflow-x: auto;
