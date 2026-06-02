@@ -3,13 +3,13 @@
 # -----------------------------------------------------------------------------
 images:
   backend:
-    repository: ghcr.io/multica-ai/multica-backend
+    repository: ghcr.io/dwickyfp/wallts-backend
     # Empty defaults to Chart.appVersion. Released OCI charts set appVersion to
     # the Git tag (for example v0.3.5), so installs use matching app images.
     tag: ""
     pullPolicy: IfNotPresent
   frontend:
-    repository: ghcr.io/multica-ai/multica-web
+    repository: ghcr.io/dwickyfp/wallts-web
     # Empty defaults to Chart.appVersion. Set explicitly to override.
     tag: ""
     pullPolicy: IfNotPresent
@@ -21,7 +21,7 @@ images:
 # -----------------------------------------------------------------------------
 # Pre-created Secret with sensitive values. Create it before `helm install`:
 #
-#   kubectl -n <namespace> create secret generic multica-secrets \
+#   kubectl -n <namespace> create secret generic wallts-secrets \
 #     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
 #     --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
 #     --from-literal=RESEND_API_KEY="" \
@@ -32,7 +32,7 @@ images:
 # The chart references this Secret by name; it does not template it, so real
 # values never need to land in git.
 # -----------------------------------------------------------------------------
-existingSecret: multica-secrets
+existingSecret: wallts-secrets
 
 # -----------------------------------------------------------------------------
 # PostgreSQL (pgvector)
@@ -94,13 +94,13 @@ backend:
 # -----------------------------------------------------------------------------
 # Frontend (Next.js standalone)
 #
-# The multica-web image bakes REMOTE_API_URL=http://backend:8080 at build time;
+# The wallts-web image bakes REMOTE_API_URL=http://backend:8080 at build time;
 # the chart ships an ExternalName Service named "backend" so that bare host
 # resolves to the in-cluster backend Service.
 # -----------------------------------------------------------------------------
 frontend:
   replicas: 1
-  # Compatibility shim for the prebuilt multica-web image.
+  # Compatibility shim for the prebuilt wallts-web image.
   compatibility:
     # When true (default) the chart creates an ExternalName Service literally
     # named "backend" so the REMOTE_API_URL=http://backend:8080 baked into the

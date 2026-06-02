@@ -1,8 +1,8 @@
 {{/*
 Common labels for all resources.
 */}}
-{{- define "multica.labels" -}}
-app.kubernetes.io/name: multica
+{{- define "wallts.labels" -}}
+app.kubernetes.io/name: wallts
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
@@ -10,17 +10,17 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 
 {{/*
 Per-component resource names. Using Release.Name keeps the same name we used
-under the kustomize layout when installed as `helm install multica ...`.
+under the kustomize layout when installed as `helm install wallts ...`.
 */}}
-{{- define "multica.backend.fullname" -}}
+{{- define "wallts.backend.fullname" -}}
 {{ .Release.Name }}-backend
 {{- end -}}
 
-{{- define "multica.frontend.fullname" -}}
+{{- define "wallts.frontend.fullname" -}}
 {{ .Release.Name }}-frontend
 {{- end -}}
 
-{{- define "multica.postgres.fullname" -}}
+{{- define "wallts.postgres.fullname" -}}
 {{ .Release.Name }}-postgres
 {{- end -}}
 
@@ -30,6 +30,6 @@ The $(VAR) syntax is resolved by the kubelet from the container's env, so
 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB must also be loaded into env
 on the same container (see envFrom on the backend Deployment).
 */}}
-{{- define "multica.databaseUrl" -}}
-postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "multica.postgres.fullname" . }}:5432/$(POSTGRES_DB)?sslmode=disable
+{{- define "wallts.databaseUrl" -}}
+postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "wallts.postgres.fullname" . }}:5432/$(POSTGRES_DB)?sslmode=disable
 {{- end -}}

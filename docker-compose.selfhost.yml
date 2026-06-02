@@ -16,7 +16,7 @@
 # Frontend: http://localhost:${FRONTEND_PORT:-3000}
 # Backend:  http://localhost:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}
 
-name: multica
+name: wallts
 
 services:
   postgres:
@@ -35,7 +35,7 @@ services:
       retries: 5
 
   backend:
-    image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
+    image: ${WALLTS_BACKEND_IMAGE:-ghcr.io/dwickyfp/wallts-backend}:${WALLTS_IMAGE_TAG:-latest}
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,7 +92,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
+    image: ${WALLTS_WEB_IMAGE:-ghcr.io/dwickyfp/wallts-web}:${WALLTS_IMAGE_TAG:-latest}
     depends_on:
       - backend
     ports:

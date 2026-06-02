@@ -46,7 +46,7 @@ ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 ENV STANDALONE=true
 
 # Build the web app (standalone output for minimal runtime)
-RUN pnpm --filter @multica/web build
+RUN pnpm --filter @wallts/web build
 
 # --- Runtime ---
 FROM node:22-alpine AS runner
