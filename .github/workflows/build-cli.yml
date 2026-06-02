@@ -1,0 +1,195 @@
+name: Build CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag, branch, or commit SHA to build from"
+        required: true
+        default: "main"
+        type: string
+      upload_to_release:
+        description: "Upload artifacts to GitHub Release if ref is a tag"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  verify-ref:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+      is_tag: ${{ steps.resolve.outputs.is_tag }}
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve ref
+        id: resolve
+        shell: bash
+        run: |
+          input_ref="${{ inputs.ref }}"
+          git fetch --tags --force origin "$input_ref" 2>/dev/null || true
+
+          # Try to resolve to a commit
+          if git rev-parse --verify "refs/tags/$input_ref" >/dev/null 2>&1; then
+            echo "Resolved $input_ref as tag"
+            echo "ref=refs/tags/$input_ref" >> "$GITHUB_OUTPUT"
+            echo "is_tag=true" >> "$GITHUB_OUTPUT"
+            echo "tag_name=$input_ref" >> "$GITHUB_OUTPUT"
+            echo "version=${input_ref#v}" >> "$GITHUB_OUTPUT"
+          elif git rev-parse --verify "refs/remotes/origin/$input_ref" >/dev/null 2>&1; then
+            echo "Resolved $input_ref as branch"
+            echo "ref=refs/remotes/origin/$input_ref" >> "$GITHUB_OUTPUT"
+            echo "is_tag=false" >> "$GITHUB_OUTPUT"
+            echo "tag_name=" >> "$GITHUB_OUTPUT"
+            echo "version=$input_ref" >> "$GITHUB_OUTPUT"
+          elif git rev-parse --verify "$input_ref" >/dev/null 2>&1; then
+            echo "Resolved $input_ref as commit"
+            echo "ref=$input_ref" >> "$GITHUB_OUTPUT"
+            echo "is_tag=false" >> "$GITHUB_OUTPUT"
+            echo "tag_name=" >> "$GITHUB_OUTPUT"
+            echo "version=${input_ref:0:7}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Cannot resolve ref: $input_ref"
+            exit 1
+          fi
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Run tests
+        run: cd server && go test ./...
+
+  build:
+    needs: verify-ref
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+            runner: macos-latest
+          - goos: darwin
+            goarch: arm64
+            runner: macos-latest
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-24.04-arm
+          - goos: windows
+            goarch: amd64
+            runner: windows-latest
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-ref.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Build binary
+        working-directory: server
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+          VERSION: ${{ needs.verify-ref.outputs.version }}
+        shell: bash
+        run: |
+          commit=$(git rev-parse --short HEAD)
+          date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          output="multica"
+          if [ "$GOOS" = "windows" ]; then
+            output="multica.exe"
+          fi
+
+          go build \
+            -ldflags "-s -w -X main.version=$VERSION -X main.commit=$commit -X main.date=$date" \
+            -o "bin/$output" \
+            ./cmd/multica
+
+          echo "Built: server/bin/$output"
+          ./bin/$output version || true
+
+      - name: Package archive
+        working-directory: server/bin
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.verify-ref.outputs.version }}
+        run: |
+          if [ "$GOOS" = "windows" ]; then
+            archive_name="multica-cli-${VERSION}-${GOOS}-${GOARCH}.zip"
+            zip "$archive_name" multica.exe
+          else
+            archive_name="multica-cli-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
+            tar czf "$archive_name" multica
+          fi
+
+          echo "archive_name=$archive_name" >> "$GITHUB_ENV"
+          echo "Created archive: $archive_name"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: multica-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: server/bin/${{ env.archive_name }}
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: [verify-ref, build]
+    runs-on: ubuntu-latest
+    if: needs.verify-ref.outputs.is_tag == 'true' && inputs.upload_to_release == true
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: multica-cli-*
+          merge-multiple: true
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ needs.verify-ref.outputs.tag_name }}"
+
+          # Ensure release exists (create draft if not)
+          if ! gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Creating release for $tag"
+            gh release create "$tag" \
+              --repo "${{ github.repository }}" \
+              --title "$tag" \
+              --generate-notes \
+              --draft
+          fi
+
+          echo "Uploading artifacts to release $tag"
+          gh release upload "$tag" dist/* \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+          echo "Artifacts uploaded to https://github.com/${{ github.repository }}/releases/tag/$tag"
