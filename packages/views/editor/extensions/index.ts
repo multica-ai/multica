@@ -58,7 +58,7 @@ const LinkExtension = Link.extend({ inclusive: false }).configure({
   defaultProtocol: "https",
 });
 
-const ImageExtension = Image.extend({
+export const ImageExtension = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
