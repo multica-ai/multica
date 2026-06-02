@@ -1348,6 +1348,13 @@ type GetAgentTaskInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// Loads a task only when its owning agent lives in the given workspace.
+// agent_id is NOT NULL on every task row (and ON DELETE CASCADE, so the agent
+// always exists), which makes this the universal tenant guard for
+// user-initiated cancellation — independent of which optional source FK
+// (issue / chat_session / autopilot_run) happens to be set. It is what lets
+// run_only autopilot tasks and quick_create tasks (whose issue does not exist
+// yet) be cancelled at all, instead of 404-ing on a missing source FK.
 func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskInWorkspaceParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, getAgentTaskInWorkspace, arg.ID, arg.WorkspaceID)
 	var i AgentTaskQueue
@@ -1559,6 +1566,58 @@ func (q *Queries) GetWorkspaceAgentActivity30d(ctx context.Context, workspaceID 
 	return items, nil
 }
 
+const getWorkspaceAgentConcurrencyDetail = `-- name: GetWorkspaceAgentConcurrencyDetail :many
+SELECT
+    a.id AS agent_id,
+    a.name AS agent_name,
+    a.max_concurrent_tasks,
+    COUNT(*) FILTER (WHERE atq.status IN ('running', 'dispatched', 'waiting_local_directory'))::int AS running_count,
+    COUNT(*) FILTER (WHERE atq.status = 'queued')::int AS queued_count
+FROM agent a
+LEFT JOIN agent_task_queue atq ON atq.agent_id = a.id
+    AND atq.status IN ('running', 'dispatched', 'waiting_local_directory', 'queued')
+WHERE a.workspace_id = $1 AND a.archived_at IS NULL
+GROUP BY a.id, a.name, a.max_concurrent_tasks
+ORDER BY a.name
+`
+
+type GetWorkspaceAgentConcurrencyDetailRow struct {
+	AgentID            pgtype.UUID `json:"agent_id"`
+	AgentName          string      `json:"agent_name"`
+	MaxConcurrentTasks int32       `json:"max_concurrent_tasks"`
+	RunningCount       int32       `json:"running_count"`
+	QueuedCount        int32       `json:"queued_count"`
+}
+
+// Returns per-agent concurrency utilization for a workspace: each agent's
+// max_concurrent_tasks, current running count, and queued count. Used by
+// the monitoring endpoint to show which agents are at capacity.
+func (q *Queries) GetWorkspaceAgentConcurrencyDetail(ctx context.Context, workspaceID pgtype.UUID) ([]GetWorkspaceAgentConcurrencyDetailRow, error) {
+	rows, err := q.db.Query(ctx, getWorkspaceAgentConcurrencyDetail, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetWorkspaceAgentConcurrencyDetailRow{}
+	for rows.Next() {
+		var i GetWorkspaceAgentConcurrencyDetailRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.AgentName,
+			&i.MaxConcurrentTasks,
+			&i.RunningCount,
+			&i.QueuedCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getWorkspaceAgentRunCounts = `-- name: GetWorkspaceAgentRunCounts :many
 SELECT
     atq.agent_id,
@@ -1597,6 +1656,41 @@ func (q *Queries) GetWorkspaceAgentRunCounts(ctx context.Context, workspaceID pg
 		return nil, err
 	}
 	return items, nil
+}
+
+const getWorkspaceConcurrencyStats = `-- name: GetWorkspaceConcurrencyStats :one
+SELECT
+    COUNT(*) FILTER (WHERE atq.status IN ('running', 'dispatched', 'waiting_local_directory'))::int AS active_count,
+    COUNT(*) FILTER (WHERE atq.status = 'queued')::int AS queued_count,
+    COUNT(*) FILTER (WHERE atq.status = 'completed' AND atq.completed_at > now() - INTERVAL '1 hour')::int AS completed_last_hour,
+    COUNT(*) FILTER (WHERE atq.status = 'failed' AND atq.completed_at > now() - INTERVAL '1 hour')::int AS failed_last_hour
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND (atq.status IN ('running', 'dispatched', 'waiting_local_directory', 'queued')
+       OR (atq.status IN ('completed', 'failed') AND atq.completed_at > now() - INTERVAL '1 hour'))
+`
+
+type GetWorkspaceConcurrencyStatsRow struct {
+	ActiveCount       int32 `json:"active_count"`
+	QueuedCount       int32 `json:"queued_count"`
+	CompletedLastHour int32 `json:"completed_last_hour"`
+	FailedLastHour    int32 `json:"failed_last_hour"`
+}
+
+// Returns real-time concurrency metrics for a workspace: active (running +
+// dispatched + waiting), queued, and completed/failed counts over the last
+// hour. Used by the /api/workspaces/{id}/concurrency monitoring endpoint.
+func (q *Queries) GetWorkspaceConcurrencyStats(ctx context.Context, workspaceID pgtype.UUID) (GetWorkspaceConcurrencyStatsRow, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceConcurrencyStats, workspaceID)
+	var i GetWorkspaceConcurrencyStatsRow
+	err := row.Scan(
+		&i.ActiveCount,
+		&i.QueuedCount,
+		&i.CompletedLastHour,
+		&i.FailedLastHour,
+	)
+	return i, err
 }
 
 const hasActiveTaskForIssue = `-- name: HasActiveTaskForIssue :one

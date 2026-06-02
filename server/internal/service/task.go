@@ -726,6 +726,17 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 			outcome = "error_claim"
 			return nil, err
 		}
+		if task == nil {
+			// ClaimTask returned nil despite queued candidates existing.
+			// This happens when the per-(issue, agent) serialization in
+			// ClaimAgentTask blocks the claim — another task for the same
+			// issue AND agent is already dispatched/running. Log at Debug
+			// so ops can diagnose serialization bottlenecks without noise.
+			slog.Debug("task claim serialized by per-(issue,agent) constraint",
+				"agent_id", agentKey,
+				"runtime_id", runtimeKey,
+			)
+		}
 		if task != nil && task.RuntimeID == runtimeID {
 			claimed = task
 			break
