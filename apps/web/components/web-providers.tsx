@@ -7,11 +7,11 @@ import type { LocaleResources, SupportedLocale } from "@wallts/core/i18n";
 import { useWelcomeStore } from "@wallts/core/onboarding";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
+import { PushNotificationRegistrar } from "./push-notification-registrar";
 import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
-import { PageviewTracker } from "./pageview-tracker";
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -85,8 +85,8 @@ export function WebProviders({
       {/* Suspense boundary is required by Next.js for useSearchParams in
           a client component mounted this high in the tree. */}
       <Suspense fallback={null}>
-        <PageviewTracker />
       </Suspense>
+      <PushNotificationRegistrar />
       <WebNavigationProvider>{children}</WebNavigationProvider>
     </CoreProvider>
   );

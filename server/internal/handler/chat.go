@@ -10,9 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/dwickyfp/wallts/server/internal/analytics"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
-	"github.com/dwickyfp/wallts/server/pkg/protocol"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/pkg/protocol"
 )
 
 // chatSessionTitleMaxLen caps the rename input. Long enough to fit a
@@ -471,16 +470,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if err := h.Queries.TouchChatSession(r.Context(), session.ID); err != nil {
 		slog.Warn("failed to touch chat session", "session_id", sessionID, "error", err)
 	}
-	taskContext := h.TaskService.AnalyticsContextForTask(r.Context(), task)
-	h.Analytics.Capture(analytics.ChatMessageSent(
-		userID,
-		workspaceID,
-		uuidToString(session.ID),
-		uuidToString(task.ID),
-		uuidToString(session.AgentID),
-		taskContext.RuntimeMode,
-		taskContext.Provider,
-	))
 
 	// Broadcast the user message.
 	resolvedSessionID := uuidToString(session.ID)

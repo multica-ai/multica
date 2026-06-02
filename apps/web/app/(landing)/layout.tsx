@@ -21,7 +21,7 @@ const jsonLd = {
       "@type": "Organization",
       name: "Wallts",
       url: "https://www.wallts.ai",
-      sameAs: ["https://github.com/dwickyfp/wallts"],
+      sameAs: ["https://github.com/wallts-ai/wallts"],
     },
     {
       "@type": "SoftwareApplication",

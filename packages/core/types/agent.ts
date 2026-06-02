@@ -242,7 +242,7 @@ export interface CreateAgentRequest {
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
   thinking_level?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
-   *  as the `template` property on the `agent_created` PostHog event. */
+   *  as the `template` property on the `agent_created` analytics event. */
   template?: string;
 }
 
@@ -666,4 +666,50 @@ export interface RuntimeLocalSkillsResult {
 
 export interface RuntimeLocalSkillImportResult {
   skill: Skill;
+}
+
+// ---------------------------------------------------------------------------
+// Agent session persistence
+// ---------------------------------------------------------------------------
+
+export type AgentSessionStatus = "active" | "expired" | "reset";
+
+export interface AgentSessionState {
+  messages: unknown[];
+  tool_results: unknown[];
+  working_directory: string;
+  branch: string;
+  files_modified: string[];
+  compressed?: boolean;
+}
+
+export interface AgentSessionRun {
+  task_id: string;
+  run_number: number;
+  status: "completed" | "failed" | "cancelled" | "running";
+  started_at: string;
+  completed_at: string | null;
+  summary: string;
+}
+
+export interface AgentSession {
+  id: string;
+  issue_id: string;
+  agent_id: string;
+  agent_name?: string;
+  run_number: number;
+  status: AgentSessionStatus;
+  reason: string | null;
+  summary: string;
+  branch: string;
+  working_directory: string;
+  files_modified_count: number;
+  created_at: string;
+  last_active: string;
+  version: string;
+}
+
+export interface AgentSessionDetail extends AgentSession {
+  state: AgentSessionState;
+  runs: AgentSessionRun[];
 }

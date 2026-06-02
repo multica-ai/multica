@@ -48,7 +48,7 @@ import (
 // Errors are logged at warn level and swallowed: this is a best-effort
 // notification on the side of a successful status update; failing it must
 // not roll back the user's status change.
-func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue) {
+func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue, actorType, actorID string) {
 	if !issue.ParentIssueID.Valid {
 		return
 	}
@@ -122,7 +122,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// author_type='system'); this keeps smuggled mentions from the child
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
-	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment)
+	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment, actorType, actorID)
 }
 
 // sanitizeChildTitleForSystemComment removes mention-style markdown from a
@@ -243,7 +243,7 @@ func sanitizeMentionLabel(name string) string {
 //     for the same parent (e.g. two children finishing back-to-back).
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
-func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, child db.Issue, systemComment db.Comment) {
+func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, child db.Issue, systemComment db.Comment, actorType, actorID string) {
 	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
 		return
 	}
@@ -252,7 +252,7 @@ func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, chi
 	case "agent":
 		h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
 	case "squad":
-		h.triggerChildDoneSquad(ctx, parent, child, systemComment.ID)
+		h.triggerChildDoneSquad(ctx, parent, child, systemComment.ID, actorType, actorID)
 	}
 }
 
@@ -301,12 +301,17 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 //   - same effective leader on both sides — child agent == leader, or
 //     child squad's leader == this squad's leader (the cross-squad shared
 //     leader loop).
-func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID) {
+func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID, actorType, actorID string) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
 	if err != nil {
+		return
+	}
+
+	// Private-leader gate: deny if the actor cannot access the leader.
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, actorType, actorID, uuidToString(parent.WorkspaceID)) {
 		return
 	}
 

@@ -15,12 +15,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/dwickyfp/wallts/server/internal/analytics"
-	"github.com/dwickyfp/wallts/server/internal/events"
-	"github.com/dwickyfp/wallts/server/internal/realtime"
-	"github.com/dwickyfp/wallts/server/internal/service"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
-	"github.com/dwickyfp/wallts/server/pkg/protocol"
+	"github.com/wallts-ai/wallts/server/internal/events"
+	"github.com/wallts-ai/wallts/server/internal/realtime"
+	"github.com/wallts-ai/wallts/server/internal/service"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/pkg/protocol"
 )
 
 var testHandler *Handler
@@ -58,7 +57,7 @@ func TestMain(m *testing.M) {
 	go hub.Run()
 	bus := events.New()
 	emailSvc := service.NewEmailService()
-	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
+	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, Config{AllowSignup: true})
 	// httptest.NewRequest defaults RemoteAddr to 192.0.2.1, so every webhook
 	// test in the suite shares one IP bucket. With the production default
 	// (30/min) the budget runs out partway through the suite and unrelated
@@ -1882,7 +1881,7 @@ func TestAgentCRUD(t *testing.T) {
 }
 
 func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Preserve", []byte(`{"preset":"keep"}`))
+	agentID := createHandlerTestAgent(t, "Handler Mcp Preserve", []byte(`{"mcpServers":{"keep":{"command":"keep-cmd"}}}`))
 
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
@@ -1898,12 +1897,12 @@ func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 		t.Fatalf("UpdateAgent: decode response: %v", err)
 	}
-	assertJSONEqual(t, updated.McpConfig, `{"preset":"keep"}`)
-	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"keep"}`)
+	assertJSONEqual(t, updated.McpConfig, `{"mcpServers":{"keep":{"command":"keep-cmd"}}}`)
+	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"mcpServers":{"keep":{"command":"keep-cmd"}}}`)
 }
 
 func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Clear", []byte(`{"preset":"clear"}`))
+	agentID := createHandlerTestAgent(t, "Handler Mcp Clear", []byte(`{"mcpServers":{"clear":{"command":"clear-cmd"}}}`))
 
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
@@ -1926,11 +1925,11 @@ func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
 }
 
 func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Update", []byte(`{"preset":"old"}`))
+	agentID := createHandlerTestAgent(t, "Handler Mcp Update", []byte(`{"mcpServers":{"old":{"command":"old-cmd"}}}`))
 
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"mcp_config": map[string]any{"preset": "new"},
+		"mcp_config": map[string]any{"mcpServers": map[string]any{"new": map[string]any{"command": "new-cmd"}}},
 	})
 	req = withURLParam(req, "id", agentID)
 	testHandler.UpdateAgent(w, req)
@@ -1942,8 +1941,8 @@ func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 		t.Fatalf("UpdateAgent: decode response: %v", err)
 	}
-	assertJSONEqual(t, updated.McpConfig, `{"preset":"new"}`)
-	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
+	assertJSONEqual(t, updated.McpConfig, `{"mcpServers":{"new":{"command":"new-cmd"}}}`)
+	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"mcpServers":{"new":{"command":"new-cmd"}}}`)
 }
 
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {

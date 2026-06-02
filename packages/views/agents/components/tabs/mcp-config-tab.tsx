@@ -1,22 +1,53 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Eraser, Loader2, Lock, Save } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Braces, Eraser, Loader2, Lock, Save, Shapes } from "lucide-react";
 import type { Agent } from "@wallts/core/types";
+import type { McpServers } from "@wallts/core/agents/mcp-validate";
+import { validateMcpConfig } from "@wallts/core/agents/mcp-validate";
 import { Button } from "@wallts/ui/components/ui/button";
 import { Textarea } from "@wallts/ui/components/ui/textarea";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+import { McpServerEditor } from "../mcp-server-editor";
 
-// `null` and the empty string are the two ways the user can mean "no
-// config" — the server stores either as a NULL column and the daemon
-// falls back to the runtime CLI default at launch. We normalise to
-// the empty string in the editor so the dirty check has one canonical
-// form to compare against.
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Convert a config value to editor text (pretty-printed JSON). */
 function configToText(value: unknown): string {
   if (value === null || value === undefined) return "";
   return JSON.stringify(value, null, 2);
 }
+
+/** Parse the mcpServers sub-object from the full config or null. */
+function extractServers(value: unknown): McpServers | null {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  )
+    return null;
+
+  const root = value as Record<string, unknown>;
+  const servers = root.mcpServers;
+  if (
+    typeof servers !== "object" ||
+    servers === null ||
+    Array.isArray(servers)
+  )
+    return null;
+
+  return servers as McpServers;
+}
+
+/** Wrap servers into the full config shape: { mcpServers: { … } }. */
+function wrapServers(servers: McpServers | null): unknown | null {
+  if (!servers || Object.keys(servers).length === 0) return null;
+  return { mcpServers: servers };
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 export function McpConfigTab({
   agent,
@@ -34,15 +65,23 @@ export function McpConfigTab({
   const [text, setText] = useState(original);
   const [saving, setSaving] = useState(false);
 
+  // "visual" or "json" — user can toggle.
+  const [mode, setMode] = useState<"visual" | "json">("visual");
+
+  // The parsed mcpServers for the visual editor.
+  const servers = useMemo(() => {
+    try {
+      return extractServers(JSON.parse(text || "null"));
+    } catch {
+      return null;
+    }
+  }, [text]);
+
   // Sync local draft when the agent prop changes (e.g. after a successful
   // save invalidates the cache and a fresh agent arrives). We only sync
   // when the user has no in-flight edits — comparing the current draft
   // against the *previous* original (not the new one) is what tells us
-  // "they haven't touched this since the last sync". Comparing against
-  // the new original would skip the sync whenever the server-side value
-  // changes underneath an untouched draft, leaving the editor showing a
-  // stale value that a later Save would write back, clobbering another
-  // admin's edit.
+  // "they haven't touched this since the last sync".
   const previousOriginalRef = useRef(original);
   useEffect(() => {
     setText((current) =>
@@ -50,6 +89,18 @@ export function McpConfigTab({
     );
     previousOriginalRef.current = original;
   }, [original]);
+
+  // ── Visual editor callbacks ──────────────────────────────────────────────
+
+  const handleVisualChange = useCallback(
+    (newServers: McpServers | null) => {
+      const wrapped = wrapServers(newServers);
+      setText(wrapped ? JSON.stringify(wrapped, null, 2) : "");
+    },
+    [],
+  );
+
+  // ── Raw editor callbacks ─────────────────────────────────────────────────
 
   const trimmed = text.trim();
   const parseResult = useMemo<
@@ -59,14 +110,10 @@ export function McpConfigTab({
     if (trimmed === "") return { ok: true, value: null };
     try {
       const value = JSON.parse(trimmed);
-      // The MCP CLI accepts an object (`{"mcpServers": …}`); a top-level
-      // array or primitive is almost certainly a user mistake, so reject
-      // here rather than surprise them with a server-side error later.
-      if (value === null || typeof value !== "object" || Array.isArray(value)) {
-        return {
-          ok: false,
-          error: "mcp_config_not_object",
-        };
+      // Client-side schema validation (mirrors server-side mcpvalidate).
+      const schemaResult = validateMcpConfig(value);
+      if (!schemaResult.ok) {
+        return { ok: false, error: schemaResult.error };
       }
       return { ok: true, value };
     } catch (err) {
@@ -83,6 +130,8 @@ export function McpConfigTab({
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
+  // ── Redacted view ────────────────────────────────────────────────────────
+
   if (redacted) {
     return (
       <div className="space-y-3">
@@ -97,14 +146,15 @@ export function McpConfigTab({
     );
   }
 
+  // ── Save / Clear ─────────────────────────────────────────────────────────
+
   const handleSave = async () => {
     if (!parseResult.ok) return;
     setSaving(true);
     try {
       await onSave({ mcp_config: parseResult.value });
       // Normalise the editor to the pretty-printed canonical form so the
-      // dirty check stops firing after a successful save (the user's
-      // raw input may differ from what configToText would emit).
+      // dirty check stops firing after a successful save.
       setText(configToText(parseResult.value));
       toast.success(t(($) => $.tab_body.mcp_config.saved_toast));
     } catch (err) {
@@ -122,15 +172,20 @@ export function McpConfigTab({
     setText("");
   };
 
+  // ── Error messages ───────────────────────────────────────────────────────
+
   const showInvalid = trimmed !== "" && !parseResult.ok;
-  const invalidMessage = !parseResult.ok && parseResult.error === "mcp_config_not_object"
-    ? t(($) => $.tab_body.mcp_config.invalid_not_object)
-    : !parseResult.ok
-      ? t(($) => $.tab_body.mcp_config.invalid_json, { error: parseResult.error })
-      : "";
+  const invalidMessage = !parseResult.ok
+    ? parseResult.error.startsWith("mcp_config must") || parseResult.error.startsWith('"mcpServers"')
+      ? t(($) => $.tab_body.mcp_config.invalid_not_object)
+      : t(($) => $.tab_body.mcp_config.invalid_json, { error: parseResult.error })
+    : "";
+
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="flex h-full flex-col space-y-3">
+      {/* Intro + clear */}
       <div className="flex items-start justify-between gap-3">
         <p className="text-xs text-muted-foreground">
           {t(($) => $.tab_body.mcp_config.intro)}
@@ -149,20 +204,60 @@ export function McpConfigTab({
         )}
       </div>
 
-      <Textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={t(($) => $.tab_body.mcp_config.placeholder)}
-        aria-invalid={showInvalid || undefined}
-        aria-label={t(($) => $.tab_body.mcp_config.editor_aria)}
-        spellCheck={false}
-        className="min-h-[240px] flex-1 font-mono text-xs"
-      />
+      {/* Mode toggle */}
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          variant={mode === "visual" ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => setMode("visual")}
+          className="h-7 gap-1 text-xs"
+        >
+          <Shapes className="h-3 w-3" />
+          {t(($) => $.tab_body.mcp_config.mode_visual)}
+        </Button>
+        <Button
+          type="button"
+          variant={mode === "json" ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => setMode("json")}
+          className="h-7 gap-1 text-xs"
+        >
+          <Braces className="h-3 w-3" />
+          {t(($) => $.tab_body.mcp_config.mode_json)}
+        </Button>
+      </div>
 
-      {showInvalid && (
-        <p className="text-xs text-destructive">{invalidMessage}</p>
+      {/* Visual editor */}
+      {mode === "visual" && (
+        <div className="min-h-[200px] flex-1 overflow-auto">
+          <McpServerEditor
+            value={servers}
+            onChange={handleVisualChange}
+          />
+        </div>
       )}
 
+      {/* Raw JSON editor */}
+      {mode === "json" && (
+        <>
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={t(($) => $.tab_body.mcp_config.placeholder)}
+            aria-invalid={showInvalid || undefined}
+            aria-label={t(($) => $.tab_body.mcp_config.editor_aria)}
+            spellCheck={false}
+            className="min-h-[240px] flex-1 font-mono text-xs"
+          />
+
+          {showInvalid && (
+            <p className="text-xs text-destructive">{invalidMessage}</p>
+          )}
+        </>
+      )}
+
+      {/* Save footer */}
       <div className="flex items-center justify-end gap-3">
         {dirty && (
           <span className="text-xs text-muted-foreground">

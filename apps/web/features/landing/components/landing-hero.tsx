@@ -4,7 +4,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@wallts/core/auth";
-import { captureDownloadIntent } from "@wallts/core/analytics";
 import { useLocale } from "../i18n";
 import {
   ClaudeCodeLogo,
@@ -46,7 +45,6 @@ export function LandingHero() {
               <Link
                 href="/download"
                 className={heroButtonClassName("ghost")}
-                onClick={() => captureDownloadIntent("landing_hero")}
               >
                 <Download className="size-4" aria-hidden />
                 {t.hero.downloadDesktop}

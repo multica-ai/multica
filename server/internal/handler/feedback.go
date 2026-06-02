@@ -8,10 +8,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/dwickyfp/wallts/server/internal/analytics"
-	"github.com/dwickyfp/wallts/server/internal/logger"
-	"github.com/dwickyfp/wallts/server/internal/middleware"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/internal/logger"
+	"github.com/wallts-ai/wallts/server/internal/middleware"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
 )
 
 // feedbackImageRegex is a coarse check for markdown image syntax ![alt](url).
@@ -117,14 +116,6 @@ func (h *Handler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("feedback submitted", append(logger.RequestAttrs(r), "feedback_id", uuidToString(fb.ID))...)
 
-	h.Analytics.Capture(analytics.FeedbackSubmitted(
-		userID,
-		uuidToString(fb.WorkspaceID),
-		len(message),
-		feedbackImageRegex.MatchString(message),
-		platform,
-		version,
-	))
 
 	writeJSON(w, http.StatusCreated, FeedbackResponse{
 		ID:        uuidToString(fb.ID),

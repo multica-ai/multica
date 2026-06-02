@@ -16,14 +16,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/dwickyfp/wallts/server/internal/analytics"
-	"github.com/dwickyfp/wallts/server/internal/issueguard"
-	"github.com/dwickyfp/wallts/server/internal/issueposition"
-	"github.com/dwickyfp/wallts/server/internal/logger"
-	"github.com/dwickyfp/wallts/server/internal/util"
-	"github.com/dwickyfp/wallts/server/pkg/agent"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
-	"github.com/dwickyfp/wallts/server/pkg/protocol"
+	"github.com/wallts-ai/wallts/server/internal/issueguard"
+	"github.com/wallts-ai/wallts/server/internal/issueposition"
+	"github.com/wallts-ai/wallts/server/internal/logger"
+	"github.com/wallts-ai/wallts/server/internal/util"
+	"github.com/wallts-ai/wallts/server/pkg/agent"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/pkg/protocol"
 )
 
 // IssueResponse is the JSON response for an issue.
@@ -2216,45 +2215,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
-	analyticsActorID := actualCreatorID
-	analyticsAgentID := ""
-	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" {
-		analyticsAgentID = uuidToString(issue.AssigneeID)
-	}
-	if creatorType == "agent" {
-		analyticsActorID = "agent:" + actualCreatorID
-		if analyticsAgentID == "" {
-			analyticsAgentID = actualCreatorID
-		}
-	}
-	analyticsSource := analytics.SourceManual
-	analyticsTaskID := ""
-	analyticsAutopilotRunID := ""
-	if originType.Valid {
-		switch originType.String {
-		case "quick_create":
-			analyticsSource = analytics.SourceManual
-			analyticsTaskID = uuidToString(originID)
-		case "autopilot":
-			analyticsSource = analytics.SourceAutopilot
-			analyticsAutopilotRunID = uuidToString(originID)
-		default:
-			slog.Warn("analytics: unknown issue origin type",
-				"origin_type", originType.String,
-				"issue_id", uuidToString(issue.ID),
-			)
-		}
-	}
-	h.Analytics.Capture(analytics.IssueCreated(
-		analyticsActorID,
-		workspaceID,
-		uuidToString(issue.ID),
-		analyticsAgentID,
-		analyticsTaskID,
-		analyticsAutopilotRunID,
-		analyticsSource,
-	))
-
 	// Enqueue agent task when an agent-assigned issue is created.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
@@ -2554,7 +2514,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// loops in PR #2918). The helper guards on transition + parent state and
 	// fails best-effort.
 	if statusChanged {
-		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2622,6 +2582,10 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		leader, err := h.Queries.GetAgent(ctx, squad.LeaderID)
 		if err != nil || leader.ArchivedAt.Valid {
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
+		}
+		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+		if !h.canAccessPrivateAgent(ctx, leader, actorType, actorID, workspaceID) {
+			return http.StatusForbidden, "cannot assign to squad with private leader"
 		}
 		return 0, ""
 	default:
@@ -2809,7 +2773,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// real-world cases that hit this path are caller mistakes (status placed
 	// at the top level, "update" misspelled as singular). Telling the truth
 	// here — `{"updated": 0}` — keeps the wire shape stable while making the
-	// count match reality. See dwickyfp/wallts#1660.
+	// count match reality. See wallts-ai/wallts#1660.
 	hasMutation := req.Updates.Title != nil ||
 		req.Updates.Description != nil ||
 		req.Updates.Status != nil ||
@@ -3029,7 +2993,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Platform-driven parent notification, mirrored from UpdateIssue
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
-			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 		}
 
 		updated++

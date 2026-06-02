@@ -3,8 +3,9 @@ package handler
 import (
 	"context"
 
-	"github.com/dwickyfp/wallts/server/internal/util"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/wallts-ai/wallts/server/internal/util"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
 )
 
 // canAccessPrivateAgent gates the four protected surfaces for private
@@ -73,3 +74,18 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 	return allowed, true
 }
 
+
+// canEnqueueSquadLeader returns true when the given actor is allowed to
+// trigger the squad's private leader. It loads the leader agent and delegates
+// to canAccessPrivateAgent. Non-private leaders always pass. System-initiated
+// triggers (e.g. github webhooks) pass by treating "system" like "agent".
+func (h *Handler) canEnqueueSquadLeader(ctx context.Context, leaderID pgtype.UUID, actorType, actorID, workspaceID string) bool {
+	agent, err := h.Queries.GetAgent(ctx, leaderID)
+	if err != nil {
+		return false
+	}
+	if actorType == "system" {
+		actorType = "agent"
+	}
+	return h.canAccessPrivateAgent(ctx, agent, actorType, actorID, workspaceID)
+}

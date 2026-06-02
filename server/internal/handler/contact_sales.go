@@ -10,9 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dwickyfp/wallts/server/internal/analytics"
-	"github.com/dwickyfp/wallts/server/internal/logger"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/internal/logger"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
 )
 
 // Public, unauthenticated endpoint for the landing-page "Contact Sales"
@@ -219,13 +218,6 @@ func (h *Handler) CreateContactSales(w http.ResponseWriter, r *http.Request) {
 			"use_case", useCase,
 		)...)
 
-	h.Analytics.Capture(analytics.ContactSalesSubmitted(
-		inquiryID,
-		companySize,
-		countryRegion,
-		useCase,
-		goals != "",
-	))
 
 	writeJSON(w, http.StatusCreated, ContactSalesResponse{
 		ID:        inquiryID,

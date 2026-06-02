@@ -20,7 +20,7 @@ export interface AuthState {
   initialize: () => Promise<void>;
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
-  loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
+  loginWithName: (name: string) => Promise<User>;
   loginWithToken: (token: string) => Promise<User>;
   logout: () => void;
   setUser: (user: User) => void;
@@ -91,8 +91,8 @@ export function createAuthStore(options: AuthStoreOptions) {
       return user;
     },
 
-    loginWithGoogle: async (code: string, redirectUri: string) => {
-      const { token, user } = await api.googleLogin(code, redirectUri);
+    loginWithName: async (name: string) => {
+      const { token, user } = await api.nameLogin(name);
       if (!cookieAuth) {
         storage.setItem("wallts_token", token);
         api.setToken(token);

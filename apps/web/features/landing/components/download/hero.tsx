@@ -1,9 +1,5 @@
 import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
-import {
-  captureDownloadInitiated,
-  type DownloadInitiatedPayload,
-} from "@wallts/core/analytics";
 import { useLocale } from "../../i18n";
 import type { DetectResult } from "../../utils/os-detect";
 import type { DownloadAssets } from "../../utils/parse-release-assets";
@@ -36,19 +32,9 @@ export function DownloadHero({
 
   const content = resolveContent(detected, assets, versionUnavailable, d);
 
-  // Fires download_initiated on primary CTA click. `primary_cta: true`
-  // identifies the hero-recommended path; `matched_detect: true` is
-  // always true here by construction (the primary is computed from
-  // the detect result). All Platforms rows below emit with
-  // matched_detect=false when the user overrides.
-  const onPrimaryClick = (tracking: HeroTracking | undefined) => {
-    if (!tracking || !version) return;
-    captureDownloadInitiated({
-      ...tracking,
-      version,
-      primary_cta: true,
-      matched_detect: true,
-    });
+  // Analytics removed — no-op handler
+  const onPrimaryClick = (_tracking: HeroTracking | undefined) => {
+    // no-op
   };
 
   return (
@@ -107,10 +93,11 @@ export function DownloadHero({
 // Content resolver — maps (detect, assets) → CTA props
 // ------------------------------------------------------------
 
-type HeroTracking = Pick<
-  DownloadInitiatedPayload,
-  "platform" | "arch" | "format"
->;
+type HeroTracking = {
+  platform: "mac" | "windows" | "linux";
+  arch: "arm64" | "x64";
+  format: string;
+};
 
 interface HeroContent {
   title: string;

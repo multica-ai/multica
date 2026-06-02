@@ -11,6 +11,8 @@ import type {
   BillingTopupsPage,
   BillingTransactionsPage,
   CreateAgentFromTemplateResponse,
+  AgentSession,
+  AgentSessionDetail,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
@@ -21,15 +23,10 @@ import type {
   User,
   WebhookDelivery,
 } from "../types";
-import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
 export interface AppConfigResponse {
   cdn_domain: string;
   allow_signup: boolean;
-  google_client_id?: string;
-  posthog_key?: string;
-  posthog_host?: string;
-  analytics_environment?: string;
   daemon_server_url?: string;
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
@@ -155,10 +152,6 @@ const BooleanWithDefaultSchema = (fallback: boolean) =>
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
   allow_signup: BooleanWithDefaultSchema(true),
-  google_client_id: OptionalStringSchema,
-  posthog_key: OptionalStringSchema,
-  posthog_host: OptionalStringSchema,
-  analytics_environment: OptionalStringSchema,
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
@@ -167,7 +160,6 @@ export const AppConfigSchema = z.object({
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
   allow_signup: true,
-  google_client_id: "",
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
@@ -259,41 +251,7 @@ export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
 
-export const CloudRuntimeNodeSchema = z.object({
-  id: z.string(),
-  owner_id: z.string(),
-  instance_id: z.string(),
-  region: z.string(),
-  instance_type: z.string(),
-  image_id: z.string(),
-  subnet_id: z.string(),
-  name: z.string(),
-  status: z.string(),
-  tags: z.record(z.string(), z.string()).default({}),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  created_at: z.string(),
-  updated_at: z.string(),
-}).loose();
 
-export const CloudRuntimeNodeListSchema = z.array(CloudRuntimeNodeSchema);
-
-export const EMPTY_CLOUD_RUNTIME_NODE_LIST: CloudRuntimeNode[] = [];
-
-export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
-  id: "",
-  owner_id: "",
-  instance_id: "",
-  region: "",
-  instance_type: "",
-  image_id: "",
-  subnet_id: "",
-  name: "",
-  status: "",
-  tags: {},
-  metadata: {},
-  created_at: "",
-  updated_at: "",
-};
 
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
@@ -876,4 +834,79 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
+};
+
+// ---------------------------------------------------------------------------
+// Agent session schemas — `/api/issues/:id/sessions` and
+// `/api/sessions/:id`. Same leniency rules: strings default to "",
+// numbers to 0, arrays to [], `.loose()` passes unknown fields.
+// ---------------------------------------------------------------------------
+
+const AgentSessionRunSchema = z.object({
+  task_id: z.string().default(""),
+  run_number: z.number().default(0),
+  status: z.string().default(""),
+  started_at: z.string().default(""),
+  completed_at: z.string().nullable().default(null),
+  summary: z.string().default(""),
+}).loose();
+
+const AgentSessionStateSchema = z.object({
+  messages: z.array(z.unknown()).default([]),
+  tool_results: z.array(z.unknown()).default([]),
+  working_directory: z.string().default(""),
+  branch: z.string().default(""),
+  files_modified: z.array(z.string()).default([]),
+  compressed: z.boolean().optional(),
+}).loose();
+
+export const AgentSessionSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  agent_id: z.string(),
+  agent_name: z.string().optional(),
+  run_number: z.number().default(0),
+  status: z.string().default(""),
+  reason: z.string().nullable().default(null),
+  summary: z.string().default(""),
+  branch: z.string().default(""),
+  working_directory: z.string().default(""),
+  files_modified_count: z.number().default(0),
+  created_at: z.string().default(""),
+  last_active: z.string().default(""),
+  version: z.string().default(""),
+}).loose();
+
+export const AgentSessionListSchema = z.array(AgentSessionSchema);
+
+export const EMPTY_AGENT_SESSION_LIST: AgentSession[] = [];
+
+export const AgentSessionDetailSchema = AgentSessionSchema.extend({
+  state: AgentSessionStateSchema,
+  runs: z.array(AgentSessionRunSchema).default([]),
+}).loose();
+
+export const EMPTY_AGENT_SESSION_DETAIL: AgentSessionDetail = {
+  id: "",
+  issue_id: "",
+  agent_id: "",
+  agent_name: "",
+  run_number: 0,
+  status: "active" as AgentSession["status"],
+  reason: null,
+  summary: "",
+  branch: "",
+  working_directory: "",
+  files_modified_count: 0,
+  created_at: "",
+  last_active: "",
+  version: "",
+  state: {
+    messages: [],
+    tool_results: [],
+    working_directory: "",
+    branch: "",
+    files_modified: [],
+  },
+  runs: [],
 };

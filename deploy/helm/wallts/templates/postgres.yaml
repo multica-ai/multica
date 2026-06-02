@@ -1,3 +1,4 @@
+{{- if .Values.postgresql.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -9,8 +10,8 @@ spec:
   accessModes: [ReadWriteOnce]
   resources:
     requests:
-      storage: {{ .Values.postgres.persistence.size | quote }}
-  {{- with .Values.postgres.persistence.storageClass }}
+      storage: {{ .Values.postgresql.persistence.size | quote }}
+  {{- with .Values.postgresql.persistence.storageClass }}
   storageClassName: {{ . | quote }}
   {{- end }}
 ---
@@ -75,7 +76,7 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
           resources:
-            {{- toYaml .Values.postgres.resources | nindent 12 }}
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -97,3 +98,4 @@ spec:
   ports:
     - port: 5432
       targetPort: 5432
+{{- end }}

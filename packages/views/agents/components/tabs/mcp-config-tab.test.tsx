@@ -219,4 +219,54 @@ describe("McpConfigTab", () => {
     expect(editor.value).toBe(draft);
   });
 
+
+  it("rejects config missing mcpServers key", () => {
+    renderTab({ mcp_config: null });
+
+    const editor = screen.getByLabelText(/MCP config JSON editor/i);
+    fireEvent.change(editor, { target: { value: '{"other": "key"}' } });
+
+    expect(screen.getByText(/must contain.*mcpServers/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+  });
+
+  it("rejects server entry missing command and type", () => {
+    renderTab({ mcp_config: null });
+
+    const editor = screen.getByLabelText(/MCP config JSON editor/i);
+    fireEvent.change(editor, {
+      target: {
+        value: '{"mcpServers": {"fs": {"args": ["-y", "server"]}}}',
+      },
+    });
+
+    expect(screen.getByText(/must have/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+  });
+
+  it("accepts a valid stdio config", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderTab({ mcp_config: null });
+
+    const editor = screen.getByLabelText(/MCP config JSON editor/i);
+    const valid = JSON.stringify({
+      mcpServers: {
+        fetch: { command: "uvx", args: ["mcp-server-fetch"] },
+      },
+    });
+    fireEvent.change(editor, { target: { value: valid } });
+
+    const save = screen.getByRole("button", { name: /save/i });
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    expect(onSave).toHaveBeenCalledWith({
+      mcp_config: {
+        mcpServers: {
+          fetch: { command: "uvx", args: ["mcp-server-fetch"] },
+        },
+      },
+    });
+  });
+
 });

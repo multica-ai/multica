@@ -36,9 +36,6 @@ type EmailService struct {
 func NewEmailService() *EmailService {
 	apiKey := os.Getenv("RESEND_API_KEY")
 	from := strings.TrimSpace(os.Getenv("RESEND_FROM_EMAIL"))
-	if from == "" {
-		from = "noreply@wallts.ai"
-	}
 
 	smtpHost := strings.TrimSpace(os.Getenv("SMTP_HOST"))
 	smtpPort := strings.TrimSpace(os.Getenv("SMTP_PORT"))
@@ -229,7 +226,7 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invitationID string) error {
 	appURL := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
 	if appURL == "" {
-		appURL = "https://app.wallts.ai"
+		appURL = strings.TrimSpace(os.Getenv("APP_URL"))
 	}
 	inviteURL := fmt.Sprintf("%s/invite/%s", appURL, invitationID)
 

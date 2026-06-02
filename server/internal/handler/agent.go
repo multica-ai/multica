@@ -16,12 +16,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/dwickyfp/wallts/server/internal/analytics"
-	"github.com/dwickyfp/wallts/server/internal/logger"
-	"github.com/dwickyfp/wallts/server/internal/service"
-	"github.com/dwickyfp/wallts/server/pkg/agent"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
-	"github.com/dwickyfp/wallts/server/pkg/protocol"
+	"github.com/wallts-ai/wallts/server/internal/logger"
+	"github.com/wallts-ai/wallts/server/internal/mcpvalidate"
+	"github.com/wallts-ai/wallts/server/internal/service"
+	"github.com/wallts-ai/wallts/server/pkg/agent"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/pkg/protocol"
 )
 
 // Mirrors AGENT_DESCRIPTION_MAX_LENGTH in packages/core/agents/constants.ts
@@ -675,16 +675,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Probe workspace agent count BEFORE the insert so the funnel has a
-	// clean "first agent ever in this workspace" signal — Step 4 of
-	// onboarding always lands in this branch. A non-fatal read: if the
-	// list fails we fall through with isFirstAgent=false rather than
-	// blocking creation, since the primary DB operation is the insert.
-	isFirstAgent := false
-	if existing, listErr := h.Queries.ListAgents(r.Context(), wsUUID); listErr == nil {
-		isFirstAgent = len(existing) == 0
-	}
-
 	rc, _ := json.Marshal(req.RuntimeConfig)
 	if req.RuntimeConfig == nil {
 		rc = []byte("{}")
@@ -702,6 +692,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	var mc []byte
 	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
+		if err := mcpvalidate.Validate(json.RawMessage(rawMcpConfig)); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid mcp_config: %s", err))
+			return
+		}
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
@@ -746,15 +740,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
-	h.Analytics.Capture(analytics.AgentCreated(
-		ownerID,
-		workspaceID,
-		uuidToString(created.ID),
-		runtime.Provider,
-		runtime.RuntimeMode,
-		req.Template,
-		isFirstAgent,
-	))
 
 	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusCreated, resp)
@@ -942,6 +927,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	rawMcpConfig, hasMcpConfig := rawFields["mcp_config"]
 	shouldClearMcpConfig := hasMcpConfig && bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null"))
 	if hasMcpConfig && !shouldClearMcpConfig {
+		if err := mcpvalidate.Validate(json.RawMessage(rawMcpConfig)); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid mcp_config: %s", err))
+			return
+		}
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 

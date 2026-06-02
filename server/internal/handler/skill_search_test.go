@@ -86,8 +86,8 @@ func TestSearchSkillsReturnsNormalizedClawHubCandidates(t *testing.T) {
 	if first["url"] != "https://clawhub.ai/ivangdavila/react" {
 		t.Fatalf("expected importable ClawHub URL, got %#v", first["url"])
 	}
-	if first["source"] != "clawhub.ai" {
-		t.Fatalf("expected source clawhub.ai, got %#v", first["source"])
+	if first["source"] != "clawhub.wallts.local" {
+		t.Fatalf("expected source clawhub.wallts.local, got %#v", first["source"])
 	}
 	if first["repo"] != nil {
 		t.Fatalf("repo should be null when ClawHub has no GitHub repo field, got %#v", first["repo"])

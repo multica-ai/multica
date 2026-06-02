@@ -13,13 +13,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dwickyfp/wallts/server/internal/cli"
+	"github.com/wallts-ai/wallts/server/internal/cli"
 )
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Configure the CLI, authenticate, and start the daemon",
-	Long: `Configures the CLI to connect to Wallts Cloud (wallts.ai), then
+	Long: `Configures the CLI to connect to Wallts (wallts.ai), then
 authenticates via browser and starts the agent daemon.
 
 If a configuration already exists, you will be prompted before overwriting.

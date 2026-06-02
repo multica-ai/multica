@@ -374,7 +374,7 @@ function DetailHeader({
       leaf={
         <>
           <h1 className="min-w-0 truncate text-sm font-medium text-foreground">{agent.name}</h1>
-          {!isArchived && av && presence && (
+          {av && presence && (
             <span
               className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${av.textClass}`}
             >

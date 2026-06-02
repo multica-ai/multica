@@ -25,7 +25,7 @@ import { useT } from "../../i18n";
 type Step = "instructions" | "success";
 
 const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/dwickyfp/wallts/main/scripts/install.sh | bash";
+  "curl -fsSL https://raw.githubusercontent.com/wallts-ai/wallts/main/scripts/install.sh | bash";
 const CLOUD_SERVER_URL = "https://api.wallts.ai";
 const CLOUD_APP_URL = "https://wallts.ai";
 

@@ -6,13 +6,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/dwickyfp/wallts/server/internal/analytics"
-	"github.com/dwickyfp/wallts/server/internal/events"
-	"github.com/dwickyfp/wallts/server/internal/handler"
-	"github.com/dwickyfp/wallts/server/internal/service"
-	"github.com/dwickyfp/wallts/server/internal/util"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
-	"github.com/dwickyfp/wallts/server/pkg/protocol"
+	"github.com/wallts-ai/wallts/server/internal/events"
+	"github.com/wallts-ai/wallts/server/internal/handler"
+	"github.com/wallts-ai/wallts/server/internal/service"
+	"github.com/wallts-ai/wallts/server/internal/util"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/pkg/protocol"
 )
 
 const (
@@ -115,17 +114,6 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 		// All filtered candidates raced into a non-online state between the
 		// SELECT and the UPDATE. Nothing to broadcast.
 		return
-	}
-	if taskSvc != nil && taskSvc.Analytics != nil {
-		for _, row := range staleRows {
-			taskSvc.Analytics.Capture(analytics.RuntimeOffline(
-				util.UUIDToString(row.OwnerID),
-				util.UUIDToString(row.WorkspaceID),
-				util.UUIDToString(row.ID),
-				row.DaemonID.String,
-				row.Provider,
-			))
-		}
 	}
 
 	// Collect unique workspace IDs to notify.

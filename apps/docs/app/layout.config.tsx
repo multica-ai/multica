@@ -63,7 +63,7 @@ export const baseOptions: BaseLayoutProps = {
     {
       icon: <GitHubMark />,
       text: externalLinkText("GitHub"),
-      url: "https://github.com/dwickyfp/wallts",
+      url: "https://github.com/wallts-ai/wallts",
       external: true,
     },
     {

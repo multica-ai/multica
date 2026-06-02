@@ -35,9 +35,17 @@ images:
 existingSecret: wallts-secrets
 
 # -----------------------------------------------------------------------------
-# PostgreSQL (pgvector)
+# PostgreSQL
+#
+# By default the chart deploys a bundled pgvector instance. Set
+#   --set postgresql.enabled=false
+# to disable it and point at an external database instead.
+#
+# When using an external database, supply the full connection string via
+# postgresql.external.databaseUrl (or set DATABASE_URL in the existingSecret).
 # -----------------------------------------------------------------------------
-postgres:
+postgresql:
+  enabled: true
   database: wallts
   user: wallts
   persistence:
@@ -51,6 +59,11 @@ postgres:
     limits:
       cpu: 1000m
       memory: 1Gi
+  # External database settings (only used when postgresql.enabled=false).
+  external:
+    # Full PostgreSQL connection URL. Examples:
+    #   postgres://user:pass@host:5432/dbname?sslmode=require
+    databaseUrl: ""
 
 # -----------------------------------------------------------------------------
 # Backend (Go API + WS server)

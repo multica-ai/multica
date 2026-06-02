@@ -3,6 +3,7 @@ name: wallts
 description: |
   AI-native task management — like Linear, but with AI agents as first-class citizens.
   Self-host the backend, frontend, and PostgreSQL (pgvector) on a Kubernetes cluster.
+  Supports external PostgreSQL via postgresql.enabled=false.
 type: application
 version: 0.1.0
 appVersion: "latest"

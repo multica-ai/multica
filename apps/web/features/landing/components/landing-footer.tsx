@@ -4,7 +4,6 @@ import Link from "next/link";
 import { WalltsIcon } from "@wallts/ui/components/common/wallts-icon";
 import { cn } from "@wallts/ui/lib/utils";
 import { useAuthStore } from "@wallts/core/auth";
-import { captureDownloadIntent } from "@wallts/core/analytics";
 import { XMark, GitHubMark, githubUrl, twitterUrl } from "./shared";
 import { useLocale, locales, localeLabels } from "../i18n";
 
@@ -72,11 +71,6 @@ export function LandingFooter() {
                         {...(link.href.startsWith("http")
                           ? { target: "_blank", rel: "noreferrer" }
                           : {})}
-                        onClick={
-                          link.href === "/download"
-                            ? () => captureDownloadIntent("landing_footer")
-                            : undefined
-                        }
                         className="text-[14px] text-white/50 transition-colors hover:text-white"
                       >
                         {link.label}

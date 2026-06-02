@@ -11,15 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dwickyfp/wallts/server/internal/analytics"
-	"github.com/dwickyfp/wallts/server/internal/daemonws"
-	"github.com/dwickyfp/wallts/server/internal/events"
-	"github.com/dwickyfp/wallts/server/internal/handler"
-	"github.com/dwickyfp/wallts/server/internal/logger"
-	obsmetrics "github.com/dwickyfp/wallts/server/internal/metrics"
-	"github.com/dwickyfp/wallts/server/internal/realtime"
-	"github.com/dwickyfp/wallts/server/internal/service"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/internal/daemonws"
+	"github.com/wallts-ai/wallts/server/internal/events"
+	"github.com/wallts-ai/wallts/server/internal/handler"
+	"github.com/wallts-ai/wallts/server/internal/logger"
+	obsmetrics "github.com/wallts-ai/wallts/server/internal/metrics"
+	"github.com/wallts-ai/wallts/server/internal/realtime"
+	"github.com/wallts-ai/wallts/server/internal/service"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -244,8 +243,6 @@ func main() {
 	}
 	registerListeners(bus, broadcaster)
 
-	analyticsClient := analytics.NewFromEnv()
-	defer analyticsClient.Close()
 
 	queries := db.New(pool)
 	hub.SetAuthorizer(newScopeAuthorizer(queries))
@@ -283,7 +280,7 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
-	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
+	r := NewRouterWithOptions(pool, hub, bus, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
@@ -299,7 +296,6 @@ func main() {
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
-	taskSvc.Analytics = analyticsClient
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 

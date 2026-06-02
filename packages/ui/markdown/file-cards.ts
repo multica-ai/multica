@@ -35,7 +35,7 @@ export function isAllowedFileCardHref(href: string): boolean {
 
 /** New syntax: !file[name](url) — unambiguous, no hostname matching needed. */
 const NEW_FILE_CARD_RE = new RegExp(
-  `^!file\\[([^\\]]*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
+  `^!file\\[((?:\\\\.|[^\\]])*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
 )
 
 /** Legacy syntax: [name](cdnUrl) on its own line — matched by CDN hostname. */
@@ -94,7 +94,8 @@ export function preprocessFileCards(markdown: string, cdnDomain: string): string
       // New syntax: !file[name](url) — always a file card, no hostname check needed.
       const newMatch = trimmed.match(NEW_FILE_CARD_RE)
       if (newMatch) {
-        return toFileCardHtml(newMatch[1]!, newMatch[2]!)
+        const filename = newMatch[1]!.replace(/\\([[\]\\()])/g, '$1')
+        return toFileCardHtml(filename, newMatch[2]!)
       }
 
       // Legacy: [name](cdnUrl) on its own line — CDN hostname matching.

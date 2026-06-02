@@ -4,7 +4,6 @@ import { useState } from "react";
 import { ArrowRight, Download, Loader2 } from "lucide-react";
 import { Button, buttonVariants } from "@wallts/ui/components/ui/button";
 import { WalltsIcon } from "@wallts/ui/components/common/wallts-icon";
-import { captureDownloadIntent } from "@wallts/core/analytics";
 import { cn } from "@wallts/ui/lib/utils";
 import { DragStrip } from "@wallts/views/platform";
 import { STATUS_CONFIG } from "@wallts/core/issues/config";
@@ -117,7 +116,6 @@ export function StepWelcome({
                     href="/download"
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={() => captureDownloadIntent("welcome")}
                     className={buttonVariants({ size: "lg" })}
                   >
                     <Download className="h-4 w-4" />

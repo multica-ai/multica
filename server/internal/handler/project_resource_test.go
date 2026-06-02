@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -566,8 +567,31 @@ func TestProjectResourceCountBreadcrumb(t *testing.T) {
 		t.Fatalf("project %s not found in ListProjects response", project.ID)
 	}
 
+	var number int
+	if err := testPool.QueryRow(context.Background(), `
+		UPDATE workspace
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+		WHERE id = $1 RETURNING issue_counter
+	`, testWorkspaceID).Scan(&number); err != nil {
+		t.Fatalf("next issue number: %v", err)
+	}
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (
+			workspace_id, creator_type, creator_id, title, status, priority,
+			project_id, number, position
+		)
+		VALUES ($1, 'member', $2, 'Project update stats breadcrumb', 'done', 'none', $3, $4, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID, project.ID, number).Scan(&issueID); err != nil {
+		t.Fatalf("create project issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
 	// UpdateProject must preserve the breadcrumb. A title-only PUT used to
-	// reset resource_count to 0 because UpdateProject didn't reload the count.
+	// reset derived counts to 0 because UpdateProject didn't reload them.
 	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/projects/"+project.ID, map[string]any{
 		"title": "Resource count breadcrumb (updated)",
@@ -583,6 +607,9 @@ func TestProjectResourceCountBreadcrumb(t *testing.T) {
 	}
 	if updated.ResourceCount != 1 {
 		t.Errorf("UpdateProject ResourceCount = %d, want 1", updated.ResourceCount)
+	}
+	if updated.IssueCount != 1 || updated.DoneCount != 1 {
+		t.Errorf("UpdateProject issue stats = %d/%d, want 1/1", updated.DoneCount, updated.IssueCount)
 	}
 }
 

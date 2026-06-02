@@ -605,7 +605,7 @@ func isLikelyBinaryFilePath(path string) bool {
 
 // --- ClawHub types ---
 
-var clawHubAPIBase = "https://clawhub.ai/api/v1"
+var clawHubAPIBase = "http://localhost:3001/api/v1"
 
 const clawHubSearchStatsLimit = 10
 
@@ -734,7 +734,7 @@ func detectImportSource(raw string) (importSource, string, error) {
 	switch {
 	case host == "skills.sh" || host == "www.skills.sh":
 		return sourceSkillsSh, normalized, nil
-	case host == "clawhub.ai" || host == "www.clawhub.ai":
+	case host == "clawhub.wallts.local" || host == "www.clawhub.wallts.local":
 		return sourceClawHub, normalized, nil
 	case host == "github.com" || host == "www.github.com":
 		return sourceGitHub, normalized, nil
@@ -794,7 +794,7 @@ func searchClawHubSkills(httpClient *http.Client, query string) ([]SkillSearchCa
 		candidate := SkillSearchCandidateResponse{
 			Name:        result.DisplayName,
 			URL:         buildClawHubSkillURL(result.OwnerHandle, result.Slug),
-			Source:      "clawhub.ai",
+			Source:      "clawhub.wallts.local",
 			Description: result.Summary,
 		}
 		if candidate.Name == "" {

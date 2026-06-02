@@ -17,16 +17,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dwickyfp/wallts/server/internal/auth"
-	"github.com/dwickyfp/wallts/server/internal/cli"
+	"github.com/wallts-ai/wallts/server/internal/cli"
 )
 
 // loginTokenPrefixes are the token prefixes `wallts login --token` accepts.
-// The CLI used to hardcode `mul_` only, which made it impossible to log in
-// with a Wallts Cloud Node PAT (`mcn_`) even though the server happily
-// authenticates both kinds. Keep this list in sync with the prefix branches
-// in server/internal/middleware/auth.go.
-var loginTokenPrefixes = []string{"mul_", auth.CloudPATPrefix}
+// Keep this list in sync with the prefix branches in
+// server/internal/middleware/auth.go.
+var loginTokenPrefixes = []string{"mul_"}
 
 // validateLoginTokenPrefix returns nil if token starts with one of the
 // CLI-recognised PAT prefixes, or an error describing the accepted set.
@@ -57,7 +54,7 @@ var authLogoutCmd = &cobra.Command{
 	RunE:  runAuthLogout,
 }
 
-// callbackHostFlag lets users override the host/IP that goes into the OAuth
+// callbackHostFlag lets users override the host/IP that goes into the auth
 // cli_callback URL. Useful when the CLI sits behind a reverse proxy or the
 // auto-detected LAN IP isn't the one the browser can reach.
 const callbackHostFlag = "callback-host"

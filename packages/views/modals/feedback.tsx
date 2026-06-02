@@ -20,13 +20,33 @@ import { useCreateFeedback, useFeedbackDraftStore } from "@wallts/core/feedback"
 import { useCurrentWorkspace } from "@wallts/core/paths";
 import { useFileUpload } from "@wallts/core/hooks/use-file-upload";
 import { api } from "@wallts/core/api";
-import { captureFeedbackOpened } from "@wallts/core/analytics";
 import { useT } from "../i18n";
 import { formatShortcut, modKey, enterKey } from "@wallts/core/platform";
 
 const MAX_MESSAGE_LEN = 10000;
 
-export function FeedbackModal({ onClose }: { onClose: () => void }) {
+function composeFeedbackInitialMessage(draftMessage: string, incomingInitialMessage: string) {
+  const draft = draftMessage.trim();
+  const incoming = incomingInitialMessage.trim();
+  if (!incoming) return draftMessage;
+  if (!draft) return incomingInitialMessage;
+  if (draft.includes(incoming)) return draftMessage;
+  return `${draftMessage}
+
+---
+
+${incomingInitialMessage}`;
+}
+
+export function FeedbackModal({
+  onClose,
+  data,
+  initialMessage,
+}: {
+  onClose: () => void;
+  data?: Record<string, unknown> | null;
+  initialMessage?: string;
+}) {
   const { t } = useT("modals");
   const workspace = useCurrentWorkspace();
   const draft = useFeedbackDraftStore((s) => s.draft);
@@ -34,21 +54,15 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
   const clearDraft = useFeedbackDraftStore((s) => s.clearDraft);
 
   const editorRef = useRef<ContentEditorRef>(null);
-  const [message, setMessage] = useState(draft.message);
+  const incomingInitialMessage =
+    initialMessage ?? (typeof data?.initialMessage === "string" ? data.initialMessage : "");
+  const seededMessage = composeFeedbackInitialMessage(draft.message, incomingInitialMessage);
+  const [message, setMessage] = useState(seededMessage);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
   const { uploadWithToast } = useFileUpload(api);
   const mutation = useCreateFeedback();
-
-  // Fire the "modal opened" analytics event once per mount. Pairs with
-  // the backend's `feedback_submitted` to give a funnel completion rate.
-  // Workspace id is captured from the closure at mount time — the modal
-  // is short-lived, so there's no meaningful workspace switch to track.
-  useEffect(() => {
-    captureFeedbackOpened("help_menu", workspace?.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const canSubmit =
     message.trim().length > 0 &&
@@ -96,7 +110,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
           <p className="mt-1 text-xs text-muted-foreground">
             {t(($) => $.feedback.github_hint_prefix)}
             <a
-              href="https://github.com/dwickyfp/wallts/issues"
+              href="https://github.com/wallts-ai/wallts/issues"
               target="_blank"
               rel="noopener noreferrer"
               className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
@@ -113,7 +127,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
           >
             <ContentEditor
               ref={editorRef}
-              defaultValue={draft.message}
+              defaultValue={seededMessage}
               placeholder={t(($) => $.feedback.placeholder)}
               onUpdate={(md) => { setMessage(md); setDraft({ message: md }); }}
               onUploadFile={uploadWithToast}

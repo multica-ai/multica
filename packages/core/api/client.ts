@@ -43,6 +43,8 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  AgentSession,
+  AgentSessionDetail,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -96,6 +98,9 @@ import type {
   WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  CreatePushSubscriptionRequest,
+  ListPushSubscriptionsResponse,
+  VapidPublicKeyResponse,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
@@ -113,11 +118,6 @@ import type {
   CreateBillingPortalSessionResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
-import type {
-  CloudRuntimeNode,
-  CreateCloudRuntimeNodeRequest,
-  ListCloudRuntimeNodesParams,
-} from "../runtimes/cloud-runtime";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -128,8 +128,6 @@ import {
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
-  CloudRuntimeNodeListSchema,
-  CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
@@ -139,8 +137,6 @@ import {
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
-  EMPTY_CLOUD_RUNTIME_NODE,
-  EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -183,6 +179,10 @@ import {
   EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+  AgentSessionListSchema,
+  AgentSessionDetailSchema,
+  EMPTY_AGENT_SESSION_LIST,
+  EMPTY_AGENT_SESSION_DETAIL,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -389,10 +389,10 @@ export class ApiClient {
     });
   }
 
-  async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
-    return this.fetch("/auth/google", {
+  async nameLogin(name: string): Promise<LoginResponse> {
+    return this.fetch("/auth/name", {
       method: "POST",
-      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+      body: JSON.stringify({ name }),
     });
   }
 
@@ -849,48 +849,6 @@ export class ApiClient {
     return this.fetch(`/api/runtimes?${search}`);
   }
 
-  async listCloudRuntimeNodes(
-    params?: ListCloudRuntimeNodesParams,
-  ): Promise<CloudRuntimeNode[]> {
-    const search = new URLSearchParams();
-    if (params?.limit !== undefined) search.set("limit", String(params.limit));
-    if (params?.offset !== undefined) search.set("offset", String(params.offset));
-    const query = search.toString();
-    const raw = await this.fetch<unknown>(
-      `/api/cloud-runtime/nodes${query ? `?${query}` : ""}`,
-    );
-    return parseWithFallback(
-      raw,
-      CloudRuntimeNodeListSchema,
-      EMPTY_CLOUD_RUNTIME_NODE_LIST,
-      { endpoint: "GET /api/cloud-runtime/nodes" },
-    );
-  }
-
-  async createCloudRuntimeNode(
-    data: CreateCloudRuntimeNodeRequest,
-  ): Promise<CloudRuntimeNode> {
-    const res = await this.fetchRaw("/api/cloud-runtime/nodes", {
-      method: "POST",
-      body: JSON.stringify(data),
-      extraHeaders: { "Content-Type": "application/json" },
-    });
-    const raw = await res.json() as unknown;
-    return parseWithFallback(
-      raw,
-      CloudRuntimeNodeSchema,
-      EMPTY_CLOUD_RUNTIME_NODE,
-      { endpoint: "POST /api/cloud-runtime/nodes" },
-    );
-  }
-
-  async deleteCloudRuntimeNode(instanceId: string): Promise<void> {
-    await this.fetchRaw("/api/cloud-runtime/nodes", {
-      method: "DELETE",
-      body: JSON.stringify({ instance_id: instanceId }),
-      extraHeaders: { "Content-Type": "application/json" },
-    });
-  }
 
   // ---------------------------------------------------------------------
   // Cloud Billing — proxies to wallts-cloud /api/v1/billing/*. The
@@ -1316,6 +1274,25 @@ export class ApiClient {
     });
   }
 
+  // Agent sessions
+  async listSessionsByIssue(issueId: string): Promise<AgentSession[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/sessions`);
+    return parseWithFallback<AgentSession[]>(raw, AgentSessionListSchema, EMPTY_AGENT_SESSION_LIST, {
+      endpoint: "GET /api/issues/:id/sessions",
+    });
+  }
+
+  async getSessionDetail(sessionId: string): Promise<AgentSessionDetail> {
+    const raw = await this.fetch<unknown>(`/api/sessions/${sessionId}`);
+    return parseWithFallback<AgentSessionDetail>(raw, AgentSessionDetailSchema, EMPTY_AGENT_SESSION_DETAIL, {
+      endpoint: "GET /api/sessions/:id",
+    });
+  }
+
+  async resetSession(sessionId: string): Promise<void> {
+    await this.fetch(`/api/sessions/${sessionId}/reset`, { method: "POST" });
+  }
+
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     return this.fetch("/api/inbox");
@@ -1358,6 +1335,29 @@ export class ApiClient {
     return this.fetch("/api/notification-preferences", {
       method: "PUT",
       body: JSON.stringify({ preferences }),
+    });
+  }
+
+  // Push Notifications
+  async getVapidPublicKey(): Promise<VapidPublicKeyResponse> {
+    return this.fetch("/api/push/vapid-key");
+  }
+
+  async getPushSubscriptions(): Promise<ListPushSubscriptionsResponse> {
+    return this.fetch("/api/push/subscriptions");
+  }
+
+  async subscribePush(request: CreatePushSubscriptionRequest): Promise<{ id: string }> {
+    return this.fetch("/api/push/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+  }
+
+  async unsubscribePush(endpoint: string): Promise<void> {
+    return this.fetch("/api/push/subscriptions", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
     });
   }
 

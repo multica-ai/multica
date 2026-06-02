@@ -14,12 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/dwickyfp/wallts/server/internal/agenttmpl"
-	"github.com/dwickyfp/wallts/server/internal/analytics"
-	"github.com/dwickyfp/wallts/server/internal/logger"
-	"github.com/dwickyfp/wallts/server/internal/util"
-	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
-	"github.com/dwickyfp/wallts/server/pkg/protocol"
+	"github.com/wallts-ai/wallts/server/internal/agenttmpl"
+	"github.com/wallts-ai/wallts/server/internal/logger"
+	"github.com/wallts-ai/wallts/server/internal/util"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/pkg/protocol"
 )
 
 // agentTemplates is the in-memory catalog loaded once at package init. We
@@ -287,10 +286,6 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	}
 
 	creatorUUID := parseUUID(ownerID)
-	isFirstAgent := false
-	if existing, listErr := h.Queries.ListAgents(r.Context(), wsUUID); listErr == nil {
-		isFirstAgent = len(existing) == 0
-	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -553,15 +548,6 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
 
-	h.Analytics.Capture(analytics.AgentCreated(
-		ownerID,
-		workspaceID,
-		uuidToString(agent.ID),
-		runtime.Provider,
-		runtime.RuntimeMode,
-		tmpl.Slug, // template slug doubles as the analytics template field
-		isFirstAgent,
-	))
 
 	slog.Info("agent created from template",
 		append(logger.RequestAttrs(r),
