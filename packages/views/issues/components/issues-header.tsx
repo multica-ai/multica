@@ -74,7 +74,6 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import type { Issue } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
-import { useIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
 
 // ---------------------------------------------------------------------------
@@ -509,11 +508,12 @@ export function IssuesHeader({
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
-  // Bind the workspace agents-working chip to the global /issues view
-  // store. Subscribing here keeps the chip presentational and lets
-  // /my-issues bind its own store via a sibling header.
-  const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
-  const toggleAgentRunningFilter = useIssueViewStore(
+  // Bind the workspace agents-working chip to the active view store so
+  // shared IssuesHeader consumers (/issues and project detail) toggle the
+  // same filter state as the rest of the display controls. /my-issues keeps
+  // its own sibling header and passes chip state explicitly.
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const toggleAgentRunningFilter = useViewStore(
     (s) => s.toggleAgentRunningFilter,
   );
   // Scope the chip to whatever issues this page is currently showing.

@@ -1881,7 +1881,7 @@ func TestAgentCRUD(t *testing.T) {
 }
 
 func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Preserve", []byte(`{"preset":"keep"}`))
+	agentID := createHandlerTestAgent(t, "Handler Mcp Preserve", []byte(`{"mcpServers":{"keep":{"command":"keep-cmd"}}}`))
 
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
@@ -1897,12 +1897,12 @@ func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 		t.Fatalf("UpdateAgent: decode response: %v", err)
 	}
-	assertJSONEqual(t, updated.McpConfig, `{"preset":"keep"}`)
-	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"keep"}`)
+	assertJSONEqual(t, updated.McpConfig, `{"mcpServers":{"keep":{"command":"keep-cmd"}}}`)
+	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"mcpServers":{"keep":{"command":"keep-cmd"}}}`)
 }
 
 func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Clear", []byte(`{"preset":"clear"}`))
+	agentID := createHandlerTestAgent(t, "Handler Mcp Clear", []byte(`{"mcpServers":{"clear":{"command":"clear-cmd"}}}`))
 
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
@@ -1925,11 +1925,11 @@ func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
 }
 
 func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Update", []byte(`{"preset":"old"}`))
+	agentID := createHandlerTestAgent(t, "Handler Mcp Update", []byte(`{"mcpServers":{"old":{"command":"old-cmd"}}}`))
 
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"mcp_config": map[string]any{"preset": "new"},
+		"mcp_config": map[string]any{"mcpServers": map[string]any{"new": map[string]any{"command": "new-cmd"}}},
 	})
 	req = withURLParam(req, "id", agentID)
 	testHandler.UpdateAgent(w, req)
@@ -1941,8 +1941,8 @@ func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 		t.Fatalf("UpdateAgent: decode response: %v", err)
 	}
-	assertJSONEqual(t, updated.McpConfig, `{"preset":"new"}`)
-	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
+	assertJSONEqual(t, updated.McpConfig, `{"mcpServers":{"new":{"command":"new-cmd"}}}`)
+	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"mcpServers":{"new":{"command":"new-cmd"}}}`)
 }
 
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {

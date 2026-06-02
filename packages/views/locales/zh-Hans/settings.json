@@ -83,6 +83,20 @@
       "description": "控制 Multica 在后台时是否显示操作系统的原生通知横幅。",
       "label": "显示系统通知",
       "hint": "App 未获得焦点时，新的收件箱条目通过操作系统弹出通知横幅。"
+    },
+    "push": {
+      "title": "浏览器推送通知",
+      "description": "即使 Multica 在后台，也能接收原生浏览器提醒。需要浏览器允许推送通知。",
+      "label": "启用浏览器推送",
+      "hint": "提及、分配、Agent 运行和 CI 失败时会收到通知。",
+      "device_count": "已在 {{count}} 台设备上启用。",
+      "browser_blocked_hint": "浏览器已阻止推送通知，请在浏览器站点设置中启用。",
+      "permission_denied": "通知权限被拒绝，请在浏览器设置中启用。",
+      "vapid_not_configured": "此服务器尚未配置推送通知。",
+      "subscribe_failed": "启用浏览器推送失败，请重试。",
+      "unsubscribe_failed": "禁用浏览器推送失败，请重试。",
+      "enabled": "浏览器推送通知已启用",
+      "disabled": "浏览器推送通知已禁用"
     }
   },
   "tokens": {

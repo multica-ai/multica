@@ -2610,7 +2610,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// into the user's repo. Without this pass the user's tree
 			// accumulates one directory layer per task — see MUL-2784.
 			// CleanupRuntimeConfig handles the runtime brief inside
-			// CLAUDE.md / AGENTS.md / GEMINI.md; CleanupSidecars handles
+			// CLAUDE.md / AGENTS.md / multica.md / GEMINI.md; CleanupSidecars handles
 			// every other file Prepare placed under WorkDir. Together
 			// they round-trip the workdir to its exact pre-task bytes.
 			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {

@@ -30,7 +30,7 @@ export function ModalRegistry() {
     case "create-squad":
       return <CreateSquadModal onClose={close} />;
     case "feedback":
-      return <FeedbackModal onClose={close} />;
+      return <FeedbackModal onClose={close} data={data} />;
     case "issue-set-parent":
       return <SetParentIssueModal onClose={close} data={data} />;
     case "issue-add-child":

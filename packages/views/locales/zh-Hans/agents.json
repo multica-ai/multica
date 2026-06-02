@@ -25,7 +25,8 @@
     "all": "全部",
     "online": "在线",
     "unstable": "不稳定",
-    "offline": "离线"
+    "offline": "离线",
+    "archived": "已归档"
   },
   "workload": {
     "working": "处理中",
@@ -309,7 +310,22 @@
       "saved_toast": "已保存 MCP 配置",
       "save_failed_toast": "保存 MCP 配置失败",
       "redacted_title": "已配置 —— 当前账号无权查看",
-      "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。"
+      "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。",
+      "mode_visual": "可视化",
+      "mode_json": "JSON",
+      "add_stdio_server": "添加 stdio 服务器",
+      "add_http_server": "添加 HTTP/SSE 服务器",
+      "no_servers": "未配置 MCP 服务器。请在下方添加。",
+      "server_name_placeholder": "服务器名称",
+      "server_name_aria": "MCP 服务器名称",
+      "transport_label": "传输",
+      "command_label": "命令",
+      "args_label": "参数",
+      "env_label": "环境变量",
+      "headers_label": "请求头",
+      "http_type_label": "类型",
+      "url_label": "URL",
+      "env_key_placeholder": "KEY"
     },
     "skills": {
       "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",

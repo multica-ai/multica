@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/mcpvalidate"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -691,6 +692,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	var mc []byte
 	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
+		if err := mcpvalidate.Validate(json.RawMessage(rawMcpConfig)); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid mcp_config: %s", err))
+			return
+		}
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
@@ -922,6 +927,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	rawMcpConfig, hasMcpConfig := rawFields["mcp_config"]
 	shouldClearMcpConfig := hasMcpConfig && bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null"))
 	if hasMcpConfig && !shouldClearMcpConfig {
+		if err := mcpvalidate.Validate(json.RawMessage(rawMcpConfig)); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid mcp_config: %s", err))
+			return
+		}
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 
