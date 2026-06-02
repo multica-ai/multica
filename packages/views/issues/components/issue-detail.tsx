@@ -1176,6 +1176,15 @@ export function IssueDetail({
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!issue) return;
+    const parts = [issue.identifier, issue.title].filter(Boolean);
+    document.title = parts.length > 0 ? `${parts.join(" ")} | Multica` : "Multica";
+    return () => {
+      document.title = "Multica";
+    };
+  }, [issue?.identifier, issue?.title]);
+
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
   // be notified directly — instead, the detail page observes its own cache
