@@ -9,3 +9,10 @@ export {
   useUpdateProjectResource,
   useDeleteProjectResource,
 } from "./resource-queries";
+export {
+  projectUpdateKeys,
+  projectUpdatesOptions,
+  useCreateProjectUpdate,
+  useUpdateProjectUpdate,
+  useDeleteProjectUpdate,
+} from "./update-queries";
