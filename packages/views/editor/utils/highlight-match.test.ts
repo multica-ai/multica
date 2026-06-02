@@ -48,6 +48,14 @@ describe("matchHighlightAt", () => {
     expect(inner("==a\nb==")).toBe("a\nb");
   });
 
+  it("does not cross a CRLF blank line", () => {
+    expect(inner("==a\r\n\r\nb==")).toBeNull();
+  });
+
+  it("allows a CRLF soft line break inside a block", () => {
+    expect(inner("==a\r\nb==")).toBe("a\r\nb");
+  });
+
   it("matches the nearest valid closing fence", () => {
     // first valid close wins; trailing == is left over
     expect(matchHighlightAt("==a==b==", 0)).toEqual({ end: 5, inner: "a" });

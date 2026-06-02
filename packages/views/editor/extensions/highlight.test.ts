@@ -81,4 +81,14 @@ describe("HighlightExtension — markdown serialization (cross-process protocol)
     expect(e.getHTML()).not.toContain("<mark");
     expect(e.getMarkdown().trim()).toBe("==a\n\nb==");
   });
+
+  it("does not highlight across a CRLF blank line", () => {
+    const e = makeEditor("==a\r\n\r\nb==");
+    expect(e.getHTML()).not.toContain("<mark");
+  });
+
+  it("still highlights across a CRLF soft line break", () => {
+    const e = makeEditor("==a\r\nb==");
+    expect(e.getHTML()).toContain("<mark");
+  });
 });

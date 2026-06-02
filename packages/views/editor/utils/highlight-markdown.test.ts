@@ -75,4 +75,12 @@ describe("highlightToHtml", () => {
   it("still highlights across a soft line break within a block", () => {
     expect(highlightToHtml("==a\nb==")).toBe("<mark>a\nb</mark>");
   });
+
+  it("does not highlight across a CRLF blank line", () => {
+    expect(highlightToHtml("==a\r\n\r\nb==")).toBe("==a\r\n\r\nb==");
+  });
+
+  it("still highlights across a CRLF soft line break", () => {
+    expect(highlightToHtml("==a\r\nb==")).toBe("<mark>a\r\nb</mark>");
+  });
 });

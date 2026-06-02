@@ -20,8 +20,12 @@ export interface Range {
   end: number;
 }
 
-/** A blank line: a newline, optional spaces/tabs, then another newline. */
-const BLANK_LINE_RE = /\n[ \t]*\n/;
+/**
+ * A blank line: a line break, optional spaces/tabs, then another line break.
+ * Handles both LF and CRLF (Windows / pasted) line endings so the boundary
+ * rule holds regardless of how the content was stored.
+ */
+const BLANK_LINE_RE = /\r?\n[ \t]*\r?\n/;
 
 /**
  * Spans where `==` must NOT be interpreted as highlight syntax: fenced code,
