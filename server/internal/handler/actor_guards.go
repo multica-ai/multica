@@ -5,8 +5,8 @@ import (
 )
 
 // RequireHumanActor is a chi-style middleware that rejects requests
-// authenticated via a machine credential — currently mat_ task tokens
-// and mcn_ cloud-node PATs. It exists for endpoints whose
+// authenticated via a machine credential — currently mat_ task tokens.
+// It exists for endpoints whose
 // authorization model is "the human owner authorized this", not
 // "anyone holding the owner's credentials authorized this".
 //
@@ -23,21 +23,12 @@ import (
 //                              plus X-Agent-ID, X-Task-ID, and the
 //                              authoritative server-set header
 //                              `X-Actor-Source: task_token`.
-//   - mcn_ cloud-node PAT    → X-User-ID = the OWNING human's user id,
-//                              plus `X-Actor-Source: cloud_pat`.
-//                              The token authenticates a cloud-runtime
-//                              EC2 node operating on the owner's
-//                              behalf — same conceptual category as
-//                              mat_ (machine running owner-scoped
-//                              code) for authorization purposes.
 //
-// The mat_ and mcn_ designs (MUL-2600 and the cloud-node PAT story
-// respectively) were both deliberately built this way: every request
-// the agent / node makes is treated as the owner's, so they can
-// post comments, claim issues, register runtimes, etc., as if the
-// owner had done it. That is correct for issue / comment / chat
-// scopes — those are bounded by workspace membership and by the
-// task or runtime binding.
+// The mat_ design (MUL-2600) was deliberately built this way: every
+// request the agent makes is treated as the owner's, so it can post
+// comments, claim issues, register runtimes, etc., as if the owner
+// had done it. That is correct for issue / comment / chat scopes —
+// those are bounded by workspace membership and by the task binding.
 //
 // It is NOT correct for account-level scopes:
 //
@@ -55,7 +46,7 @@ import (
 //
 // `X-Actor-Source` is server-set only. The Auth middleware deletes any
 // client-supplied value first (see auth.go: `r.Header.Del("X-Actor-Source")`),
-// then re-sets it ONLY on the mat_ and mcn_ branches. So checking
+// then re-sets it ONLY on the mat_ branch. So checking
 // this header is the safe, fast, single-source-of-truth way to know
 // "is the request from a machine credential?" — without re-querying
 // the token table.
@@ -72,12 +63,6 @@ import (
 //   - resolveActor takes a workspaceID parameter; billing routes have
 //     no workspace context, so threading one through just to call it
 //     would be misleading.
-//   - resolveActor doesn't currently classify mcn_ cloud-node PATs
-//     because cloud nodes don't act on workspace-scoped resources
-//     where author attribution matters. Bolting that classification
-//     into resolveActor solely to reuse it here would be the wrong
-//     coupling.
-//
 // Apply via `r.Use(handler.RequireHumanActor)` on a chi route group.
 // The middleware is intentionally NOT wired in via the router's main
 // Auth chain — the default contract elsewhere (issues, chat, etc.) is
@@ -99,7 +84,7 @@ func RequireHumanActor(next http.Handler) http.Handler {
 		// strips any client-supplied value before stamping its own,
 		// so a non-empty value here is authoritative.
 		switch r.Header.Get("X-Actor-Source") {
-		case "task_token", "cloud_pat":
+		case "task_token":
 			writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
 			return
 		}

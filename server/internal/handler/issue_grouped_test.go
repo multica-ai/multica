@@ -19,7 +19,7 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 		INSERT INTO "user" (name, email)
 		VALUES ($1, $2)
 		RETURNING id
-	`, "Grouped Issues Test User", fmt.Sprintf("grouped-%d@multica.ai", suffix)).Scan(&assigneeID); err != nil {
+	`, "Grouped Issues Test User", fmt.Sprintf("grouped-%d@wallts.ai", suffix)).Scan(&assigneeID); err != nil {
 		t.Fatalf("create assignee user: %v", err)
 	}
 	t.Cleanup(func() {

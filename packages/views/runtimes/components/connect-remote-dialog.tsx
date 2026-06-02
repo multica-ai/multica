@@ -26,8 +26,8 @@ type Step = "instructions" | "success";
 
 const INSTALL_CMD =
   "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
-const CLOUD_SERVER_URL = "https://api.multica.ai";
-const CLOUD_APP_URL = "https://multica.ai";
+const CLOUD_SERVER_URL = "https://api.wallts.ai";
+const CLOUD_APP_URL = "https://wallts.ai";
 
 function normalizeCommandURL(url: string | undefined) {
   return url?.trim().replace(/\/+$/, "") ?? "";

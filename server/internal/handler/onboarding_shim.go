@@ -30,7 +30,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -75,7 +74,7 @@ const onboardingAssistantInstructions = `You are Multica Helper, the built-in AI
 
 Multica is an open-source, AI-native team workspace (source: https://github.com/multica-ai/multica). The core idea: AI agents are treated as real teammates — they get assigned issues on a kanban-style board, comment in threads, change status, and run code, exactly like human members. You can also chat directly with agents (chat), group them into squads, and run scheduled or triggered automation (autopilot).
 
-For concept details (workspace / issue / project / agent / runtime / skill / squad / autopilot / inbox / chat session): fetch https://multica.ai/docs via WebFetch — that's authoritative. For the "why" or implementation, fetch the GitHub repo above. Never paraphrase concepts from memory.
+For concept details (workspace / issue / project / agent / runtime / skill / squad / autopilot / inbox / chat session): fetch https://wallts.ai/docs via WebFetch — that's authoritative. For the "why" or implementation, fetch the GitHub repo above. Never paraphrase concepts from memory.
 
 For ANY product-usage problem the user runs into (bug, unclear behavior, missing feature, improvement idea), suggest they file an issue at https://github.com/multica-ai/multica/issues — that's the official feedback channel.
 
@@ -200,8 +199,6 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
 		return
 	}
-	isFirstAgent := len(agents) == 0
-
 	var assistant db.Agent
 	assistantCreated := false
 	for _, existing := range agents {
@@ -286,8 +283,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to load user")
 		return
 	}
-	firstCompletion := !before.OnboardedAt.Valid
-	updatedUser, err := qtx.MarkUserOnboarded(r.Context(), parseUUID(userID))
+	_, err = qtx.MarkUserOnboarded(r.Context(), parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark onboarded")
 		return
@@ -308,34 +304,15 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	if assistantCreated {
 		resp := agentToResponse(assistant)
 		h.publish(protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
-		h.Analytics.Capture(analytics.AgentCreated(
-			userID, req.WorkspaceID, uuidToString(assistant.ID),
-			runtime.Provider, runtime.RuntimeMode, onboardingAgentTemplate, isFirstAgent,
-		))
 	}
 	if issueCreated {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
-		h.Analytics.Capture(analytics.IssueCreated(
-			userID, req.WorkspaceID, uuidToString(issue.ID),
-			uuidToString(assistant.ID), "", "", analytics.SourceOnboarding,
-		))
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
 	}
-	if firstCompletion {
-		onboardedAt := ""
-		if updatedUser.OnboardedAt.Valid {
-			onboardedAt = updatedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
-		}
-		h.Analytics.Capture(analytics.OnboardingCompleted(
-			userID, req.WorkspaceID, analytics.OnboardingPathFull,
-			onboardedAt, updatedUser.CloudWaitlistEmail.Valid,
-		))
-	}
-
 	writeJSON(w, http.StatusOK, bootstrapOnboardingRuntimeResponse{
 		WorkspaceID: req.WorkspaceID,
 		AgentID:     uuidToString(assistant.ID),
@@ -435,8 +412,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		issueCreated = true
 	}
 
-	firstCompletion := !userBefore.OnboardedAt.Valid
-	updatedUser, err := qtx.MarkUserOnboarded(r.Context(), parseUUID(userID))
+	_, err = qtx.MarkUserOnboarded(r.Context(), parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark onboarded")
 		return
@@ -455,22 +431,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
-		h.Analytics.Capture(analytics.IssueCreated(
-			userID, req.WorkspaceID, uuidToString(issue.ID),
-			"", "", "", analytics.SourceOnboarding,
-		))
 	}
-	if firstCompletion {
-		onboardedAt := ""
-		if updatedUser.OnboardedAt.Valid {
-			onboardedAt = updatedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
-		}
-		h.Analytics.Capture(analytics.OnboardingCompleted(
-			userID, req.WorkspaceID, analytics.OnboardingPathRuntimeSkipped,
-			onboardedAt, updatedUser.CloudWaitlistEmail.Valid,
-		))
-	}
-
 	writeJSON(w, http.StatusOK, bootstrapOnboardingNoRuntimeResponse{
 		WorkspaceID: req.WorkspaceID,
 		IssueID:     uuidToString(issue.ID),
@@ -506,7 +467,7 @@ func enNoRuntimeIssueDescription() string {
 		"",
 		"## Install your first agent runtime",
 		"",
-		"Full guide: https://multica.ai/docs/install-agent-runtime",
+		"Full guide: https://wallts.ai/docs/install-agent-runtime",
 		"",
 		"For English users, the fastest first path is Codex:",
 		"",
@@ -549,7 +510,7 @@ func zhNoRuntimeIssueDescription() string {
 		"",
 		"## 安装第一个 Agent 运行时",
 		"",
-		"完整文档：https://multica.ai/docs/install-agent-runtime",
+		"完整文档：https://wallts.ai/docs/install-agent-runtime",
 		"",
 		"中文用户建议先装 Kimi CLI：",
 		"",

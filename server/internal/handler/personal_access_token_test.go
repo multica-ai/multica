@@ -329,7 +329,7 @@ func TestRenewPAT_RejectsTokenBelongingToDifferentUser(t *testing.T) {
 		INSERT INTO "user" (name, email)
 		VALUES ($1, $2)
 		RETURNING id
-	`, "Other User", "other-renew@multica.ai").Scan(&otherUserID); err != nil {
+	`, "Other User", "other-renew@wallts.ai").Scan(&otherUserID); err != nil {
 		t.Fatalf("create other user: %v", err)
 	}
 	t.Cleanup(func() {

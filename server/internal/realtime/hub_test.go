@@ -356,7 +356,7 @@ func TestCheckOrigin(t *testing.T) {
 	prev := allowedWSOrigins.Load().([]string)
 	SetAllowedOrigins([]string{
 		"http://localhost:3000",
-		"https://multica.ai",
+		"https://wallts.ai",
 	})
 	t.Cleanup(func() { SetAllowedOrigins(prev) })
 
@@ -366,13 +366,13 @@ func TestCheckOrigin(t *testing.T) {
 		origin string
 		want   bool
 	}{
-		{"empty origin allowed", "api.multica.ai", "", true},
+		{"empty origin allowed", "api.wallts.ai", "", true},
 		{"same-origin allowed (native client default)", "localhost:8080", "http://localhost:8080", true},
-		{"same-origin allowed (https)", "api.multica.ai", "https://api.multica.ai", true},
-		{"same-origin allowed (case-insensitive host, RFC 7230)", "API.Multica.AI", "https://api.multica.ai", true},
+		{"same-origin allowed (https)", "api.wallts.ai", "https://api.wallts.ai", true},
+		{"same-origin allowed (case-insensitive host, RFC 7230)", "API.Multica.AI", "https://api.wallts.ai", true},
 		{"whitelisted origin allowed (web cross-origin)", "localhost:8080", "http://localhost:3000", true},
-		{"whitelisted origin allowed (prod web)", "api.multica.ai", "https://multica.ai", true},
-		{"unknown origin rejected (CSWSH defense)", "api.multica.ai", "https://evil.com", false},
+		{"whitelisted origin allowed (prod web)", "api.wallts.ai", "https://wallts.ai", true},
+		{"unknown origin rejected (CSWSH defense)", "api.wallts.ai", "https://evil.com", false},
 		{"different port rejected", "localhost:8080", "http://localhost:9999", false},
 	}
 

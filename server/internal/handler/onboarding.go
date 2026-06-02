@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -44,11 +43,11 @@ type completeOnboardingRequest struct {
 }
 
 var validCompletionPaths = map[string]struct{}{
-	analytics.OnboardingPathFull:           {},
-	analytics.OnboardingPathRuntimeSkipped: {},
-	analytics.OnboardingPathCloudWaitlist:  {},
-	analytics.OnboardingPathSkipExisting:   {},
-	analytics.OnboardingPathInviteAccept:   {},
+	"full":           {},
+	"runtime_skipped": {},
+	"cloud_waitlist":  {},
+	"skip_existing":   {},
+	"invite_accept":   {},
 }
 
 // CompleteOnboarding marks the authenticated user as having completed
@@ -81,7 +80,7 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 
 	// Validate workspace_id if supplied; we don't write with it, but a
 	// malformed value should fail fast rather than silently land in
-	// PostHog as a junk dimension.
+	// analytics as a junk dimension.
 	if req.WorkspaceID != "" {
 		wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
 		if !ok {
@@ -90,36 +89,11 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 		req.WorkspaceID = uuidToString(wsUUID)
 	}
 
-	before, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to complete onboarding")
-		return
-	}
-	firstCompletion := !before.OnboardedAt.Valid
-
 	user, err := h.Queries.MarkUserOnboarded(r.Context(), parseUUID(userID))
 	if err != nil {
 		slog.Warn("complete onboarding: mark user onboarded failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to complete onboarding")
 		return
-	}
-
-	if firstCompletion {
-		path := req.CompletionPath
-		if _, ok := validCompletionPaths[path]; !ok {
-			path = analytics.OnboardingPathUnknown
-		}
-		onboardedAt := ""
-		if user.OnboardedAt.Valid {
-			onboardedAt = user.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
-		}
-		h.Analytics.Capture(analytics.OnboardingCompleted(
-			userID,
-			req.WorkspaceID,
-			path,
-			onboardedAt,
-			user.CloudWaitlistEmail.Valid,
-		))
 	}
 
 	writeJSON(w, http.StatusOK, userToResponse(user))
@@ -246,18 +220,6 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 	var after questionnaireAnswers
 	_ = json.Unmarshal(user.OnboardingQuestionnaire, &after)
 	if after.complete() && !before.complete() {
-		h.Analytics.Capture(analytics.OnboardingQuestionnaireSubmitted(
-			userID,
-			[]string(after.Source),
-			after.Role,
-			[]string(after.UseCase),
-			after.SourceSkipped,
-			after.RoleSkipped,
-			after.UseCaseSkipped,
-			after.SourceOther != "",
-			after.RoleOther != "",
-			after.UseCaseOther != "",
-		))
 	}
 
 	writeJSON(w, http.StatusOK, userToResponse(user))
@@ -320,7 +282,6 @@ func (h *Handler) JoinCloudWaitlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.Analytics.Capture(analytics.CloudWaitlistJoined(userID, reason != ""))
 
 	writeJSON(w, http.StatusOK, userToResponse(user))
 }

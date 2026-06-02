@@ -57,8 +57,8 @@ func TestResolveCallbackBinding(t *testing.T) {
 	}{
 		{
 			name:         "public app URL stays on loopback",
-			appURL:       "https://multica.ai",
-			serverURL:    "https://api.multica.ai",
+			appURL:       "https://wallts.ai",
+			serverURL:    "https://api.wallts.ai",
 			detect:       failing,
 			wantCallback: "localhost",
 			wantBind:     "127.0.0.1",
@@ -98,8 +98,8 @@ func TestResolveCallbackBinding(t *testing.T) {
 		{
 			name:         "--callback-host flag overrides everything",
 			flagHost:     "cli.internal.example",
-			appURL:       "https://multica.ai",
-			serverURL:    "https://api.multica.ai",
+			appURL:       "https://wallts.ai",
+			serverURL:    "https://api.wallts.ai",
 			detect:       fixed("10.0.0.5"),
 			wantCallback: "cli.internal.example",
 			wantBind:     "0.0.0.0",
@@ -247,11 +247,8 @@ func TestNormalizeAPIBaseURL(t *testing.T) {
 }
 
 // TestValidateLoginTokenPrefix pins the accepted PAT prefix set for
-// `multica login --token`. The original implementation hardcoded `mul_`
-// only, which rejected legitimate Multica Cloud Node PATs (`mcn_`) at
-// the CLI even though the server's middleware would have accepted them.
-// If a future change drops `mcn_` from the list (or accidentally
-// broadens the set to anything-goes), this test fails.
+// `multica login --token`. If a future change accidentally broadens
+// the set to anything-goes, this test fails.
 func TestValidateLoginTokenPrefix(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -259,7 +256,6 @@ func TestValidateLoginTokenPrefix(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "mul_ PAT", token: "mul_abc123", wantErr: false},
-		{name: "mcn_ Cloud Node PAT", token: "mcn_abc123", wantErr: false},
 		{name: "empty token", token: "", wantErr: true},
 		{name: "no prefix", token: "abc123", wantErr: true},
 		{name: "wrong prefix mdt_", token: "mdt_abc123", wantErr: true},
@@ -280,17 +276,13 @@ func TestValidateLoginTokenPrefix(t *testing.T) {
 		})
 	}
 
-	// The error string is user-facing; make sure it lists every accepted
-	// prefix so users hitting it can self-serve. Hardcoding the exact
-	// prefixes here is deliberate — if someone adds a new prefix to
-	// loginTokenPrefixes they should also update the docs / this test.
+	// The error string is user-facing; make sure it lists the accepted
+	// prefix so users hitting it can self-serve.
 	err := validateLoginTokenPrefix("nope_xxx")
 	if err == nil {
 		t.Fatal("expected error for unknown prefix")
 	}
-	for _, p := range []string{"mul_", "mcn_"} {
-		if !strings.Contains(err.Error(), p) {
-			t.Errorf("error %q does not mention prefix %q", err.Error(), p)
-		}
+	if !strings.Contains(err.Error(), "mul_") {
+		t.Errorf("error %q does not mention prefix %q", err.Error(), "mul_")
 	}
 }

@@ -17,7 +17,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -35,7 +34,7 @@ var (
 // the JWT_SECRET env var (set in .env) and stays in sync with the server.
 
 const (
-	integrationTestEmail         = "integration-test@multica.ai"
+	integrationTestEmail         = "integration-test@wallts.ai"
 	integrationTestName          = "Integration Tester"
 	integrationTestWorkspaceSlug = "integration-tests"
 )
@@ -71,7 +70,7 @@ func TestMain(m *testing.M) {
 
 	bus := events.New()
 	registerListeners(bus, hub)
-	router := NewRouter(pool, hub, bus, analytics.NoopClient{}, nil)
+	router := NewRouter(pool, hub, bus, nil)
 	testServer = httptest.NewServer(router)
 
 	// Generate a JWT token directly for the test user
@@ -275,7 +274,7 @@ func TestConfigRouteIsPublic(t *testing.T) {
 // ---- Auth ----
 
 func TestSendCodeAndVerify(t *testing.T) {
-	const email = "integration-sendcode@multica.ai"
+	const email = "integration-sendcode@wallts.ai"
 	ctx := context.Background()
 
 	t.Cleanup(func() {
@@ -358,7 +357,7 @@ func TestSendCodeAndVerify(t *testing.T) {
 }
 
 func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
-	const email = "new-integration-verify@multica.ai"
+	const email = "new-integration-verify@wallts.ai"
 	ctx := context.Background()
 
 	t.Cleanup(func() {

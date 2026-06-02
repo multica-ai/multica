@@ -21,14 +21,10 @@ import type {
   User,
   WebhookDelivery,
 } from "../types";
-import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
 export interface AppConfigResponse {
   cdn_domain: string;
   allow_signup: boolean;
-  posthog_key?: string;
-  posthog_host?: string;
-  analytics_environment?: string;
   daemon_server_url?: string;
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
@@ -154,9 +150,6 @@ const BooleanWithDefaultSchema = (fallback: boolean) =>
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
   allow_signup: BooleanWithDefaultSchema(true),
-  posthog_key: OptionalStringSchema,
-  posthog_host: OptionalStringSchema,
-  analytics_environment: OptionalStringSchema,
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
@@ -256,41 +249,7 @@ export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
 
-export const CloudRuntimeNodeSchema = z.object({
-  id: z.string(),
-  owner_id: z.string(),
-  instance_id: z.string(),
-  region: z.string(),
-  instance_type: z.string(),
-  image_id: z.string(),
-  subnet_id: z.string(),
-  name: z.string(),
-  status: z.string(),
-  tags: z.record(z.string(), z.string()).default({}),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  created_at: z.string(),
-  updated_at: z.string(),
-}).loose();
 
-export const CloudRuntimeNodeListSchema = z.array(CloudRuntimeNodeSchema);
-
-export const EMPTY_CLOUD_RUNTIME_NODE_LIST: CloudRuntimeNode[] = [];
-
-export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
-  id: "",
-  owner_id: "",
-  instance_id: "",
-  region: "",
-  instance_type: "",
-  image_id: "",
-  subnet_id: "",
-  name: "",
-  status: "",
-  tags: {},
-  metadata: {},
-  created_at: "",
-  updated_at: "",
-};
 
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas

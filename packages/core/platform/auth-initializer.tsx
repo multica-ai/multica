@@ -4,12 +4,7 @@ import { useEffect, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getApi } from "../api";
 import { useAuthStore } from "../auth";
-import {
-  captureSignupSource,
-  identify as identifyAnalytics,
-  initAnalytics,
-  resetAnalytics,
-} from "../analytics";
+// Analytics removed — platform runs fully isolated
 import { configStore } from "../config";
 import { workspaceKeys } from "../workspace/queries";
 import { createLogger } from "../logger";
@@ -43,9 +38,9 @@ export function AuthInitializer({
 
     // Stamp attribution before anything else — the signup event (server-side)
     // reads this cookie, so it has to be present before the user hits submit.
-    captureSignupSource();
+    // captureSignupSource removed
 
-    // Fetch app config (CDN domain, PostHog key, …) in the background — non-blocking.
+    // Fetch app config (CDN domain, …) in the background — non-blocking.
     api
       .getConfig()
       .then((cfg) => {
@@ -60,14 +55,7 @@ export function AuthInitializer({
           daemonServerUrl: cfg.daemon_server_url,
           daemonAppUrl: cfg.daemon_app_url,
         });
-        if (cfg.posthog_key) {
-          initAnalytics({
-            key: cfg.posthog_key,
-            host: cfg.posthog_host || "",
-            appVersion: identity?.version,
-            environment: cfg.analytics_environment,
-          });
-        }
+
       })
       .catch(() => {
         /* config is optional — legacy file card matching degrades gracefully */
@@ -76,12 +64,12 @@ export function AuthInitializer({
     const onAuthSuccess = (user: User) => {
       onLogin?.();
       useAuthStore.setState({ user, isLoading: false });
-      identifyAnalytics(user.id, { email: user.email, name: user.name });
+      // analytics removed
     };
 
     const onAuthFailure = () => {
       onLogout?.();
-      resetAnalytics();
+      // resetAnalytics removed
       useAuthStore.setState({ user: null, isLoading: false });
     };
 

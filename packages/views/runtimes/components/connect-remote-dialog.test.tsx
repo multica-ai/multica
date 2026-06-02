@@ -71,10 +71,10 @@ describe("ConnectRemoteDialog", () => {
     expect(baseElement).toHaveTextContent("multica setup");
     expect(baseElement).not.toHaveTextContent("multica setup self-host");
     expect(baseElement).toHaveTextContent(
-      "multica config set server_url https://api.multica.ai",
+      "multica config set server_url https://api.wallts.ai",
     );
     expect(baseElement).toHaveTextContent(
-      "multica config set app_url https://multica.ai",
+      "multica config set app_url https://wallts.ai",
     );
   });
 

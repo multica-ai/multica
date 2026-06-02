@@ -83,7 +83,7 @@ func TestNotification_IssueCreated_AssigneeNotified(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	assigneeEmail := "notif-assignee-created@multica.ai"
+	assigneeEmail := "notif-assignee-created@wallts.ai"
 	assigneeID := createTestUser(t, assigneeEmail)
 	t.Cleanup(func() { cleanupTestUser(t, assigneeEmail) })
 
@@ -243,11 +243,11 @@ func TestNotification_StatusChanged(t *testing.T) {
 	bus := newNotificationBus(t, queries)
 
 	// Create two extra users as subscribers
-	sub1Email := "notif-sub1-status@multica.ai"
+	sub1Email := "notif-sub1-status@wallts.ai"
 	sub1ID := createTestUser(t, sub1Email)
 	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
 
-	sub2Email := "notif-sub2-status@multica.ai"
+	sub2Email := "notif-sub2-status@wallts.ai"
 	sub2ID := createTestUser(t, sub2Email)
 	t.Cleanup(func() { cleanupTestUser(t, sub2Email) })
 
@@ -322,11 +322,11 @@ func TestNotification_CommentCreated(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	commenterEmail := "notif-commenter@multica.ai"
+	commenterEmail := "notif-commenter@wallts.ai"
 	commenterID := createTestUser(t, commenterEmail)
 	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
 
-	sub1Email := "notif-sub1-comment@multica.ai"
+	sub1Email := "notif-sub1-comment@wallts.ai"
 	sub1ID := createTestUser(t, sub1Email)
 	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
 
@@ -402,13 +402,13 @@ func TestNotification_SystemCommentSkipsInboxAndMentions(t *testing.T) {
 	bus := newNotificationBus(t, queries)
 
 	// Subscriber on the issue who would normally receive new_comment.
-	subEmail := "notif-system-comment-sub@multica.ai"
+	subEmail := "notif-system-comment-sub@wallts.ai"
 	subID := createTestUser(t, subEmail)
 	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
 
 	// A second member whose UUID we will smuggle into the system-comment
 	// body as a fake mention to prove the listener does not parse it.
-	targetEmail := "notif-system-comment-target@multica.ai"
+	targetEmail := "notif-system-comment-target@wallts.ai"
 	targetID := createTestUser(t, targetEmail)
 	t.Cleanup(func() { cleanupTestUser(t, targetEmail) })
 
@@ -496,15 +496,15 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	oldAssigneeEmail := "notif-old-assignee@multica.ai"
+	oldAssigneeEmail := "notif-old-assignee@wallts.ai"
 	oldAssigneeID := createTestUser(t, oldAssigneeEmail)
 	t.Cleanup(func() { cleanupTestUser(t, oldAssigneeEmail) })
 
-	newAssigneeEmail := "notif-new-assignee@multica.ai"
+	newAssigneeEmail := "notif-new-assignee@wallts.ai"
 	newAssigneeID := createTestUser(t, newAssigneeEmail)
 	t.Cleanup(func() { cleanupTestUser(t, newAssigneeEmail) })
 
-	bystanderEmail := "notif-bystander@multica.ai"
+	bystanderEmail := "notif-bystander@wallts.ai"
 	bystanderID := createTestUser(t, bystanderEmail)
 	t.Cleanup(func() { cleanupTestUser(t, bystanderEmail) })
 
@@ -675,7 +675,7 @@ func TestNotification_PriorityChanged(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	sub1Email := "notif-sub1-priority@multica.ai"
+	sub1Email := "notif-sub1-priority@wallts.ai"
 	sub1ID := createTestUser(t, sub1Email)
 	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
 
@@ -740,7 +740,7 @@ func TestNotification_DueDateChanged(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	sub1Email := "notif-sub1-duedate@multica.ai"
+	sub1Email := "notif-sub1-duedate@wallts.ai"
 	sub1ID := createTestUser(t, sub1Email)
 	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
 
@@ -801,7 +801,7 @@ func TestNotification_StartDateChanged(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	sub1Email := "notif-sub1-startdate@multica.ai"
+	sub1Email := "notif-sub1-startdate@wallts.ai"
 	sub1ID := createTestUser(t, sub1Email)
 	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
 
@@ -861,7 +861,7 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	parentSubEmail := "notif-parent-sub-status@multica.ai"
+	parentSubEmail := "notif-parent-sub-status@wallts.ai"
 	parentSubID := createTestUser(t, parentSubEmail)
 	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
 
@@ -923,11 +923,11 @@ func TestNotification_ParentBubble_NewCommentSuppressed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	commenterEmail := "notif-parent-bubble-commenter@multica.ai"
+	commenterEmail := "notif-parent-bubble-commenter@wallts.ai"
 	commenterID := createTestUser(t, commenterEmail)
 	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
 
-	parentSubEmail := "notif-parent-sub-comment@multica.ai"
+	parentSubEmail := "notif-parent-sub-comment@wallts.ai"
 	parentSubID := createTestUser(t, parentSubEmail)
 	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
 
@@ -975,7 +975,7 @@ func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	parentSubEmail := "notif-parent-sub-priority@multica.ai"
+	parentSubEmail := "notif-parent-sub-priority@wallts.ai"
 	parentSubID := createTestUser(t, parentSubEmail)
 	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
 
@@ -1081,7 +1081,7 @@ func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	subEmail := "notif-archive-task-failed-sub@multica.ai"
+	subEmail := "notif-archive-task-failed-sub@wallts.ai"
 	subID := createTestUser(t, subEmail)
 	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
 

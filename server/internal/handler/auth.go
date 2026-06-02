@@ -18,7 +18,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -182,7 +181,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 // sets on the first pageview (UTM + referrer bundle). The frontend writes
 // a JSON string URL-encoded into the cookie value — Go does not
 // auto-decode Cookie.Value, so we have to unescape here before the string
-// lands in PostHog. Missing cookie / decode failures collapse to the
+// lands in analytics. Missing cookie / decode failures collapse to the
 // empty string; that simply omits signup_source from the event rather
 // than sending percent-encoded garbage. Never fall back to r.Referer() —
 // the frontend has already sanitised attribution and a raw referer can
@@ -365,7 +364,6 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isNew {
-		h.Analytics.Capture(analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
 	}
 
 	tokenString, err := h.issueJWT(user)
@@ -481,9 +479,6 @@ func (h *Handler) NameLogin(w http.ResponseWriter, r *http.Request) {
 		if updateErr == nil {
 			user = updated
 		}
-		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
-		evt.Properties["auth_method"] = "name"
-		h.Analytics.Capture(evt)
 	}
 
 	tokenString, err := h.issueJWT(user)
