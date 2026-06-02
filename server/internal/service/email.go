@@ -31,6 +31,7 @@ type EmailService struct {
 	smtpPassword    string
 	smtpTLSInsecure bool
 	smtpTLSImplicit bool
+	smtpEHLOName    string
 }
 
 func NewEmailService() *EmailService {
@@ -48,6 +49,14 @@ func NewEmailService() *EmailService {
 	smtpUsername := os.Getenv("SMTP_USERNAME")
 	smtpPassword := os.Getenv("SMTP_PASSWORD")
 	smtpTLSInsecure := os.Getenv("SMTP_TLS_INSECURE") == "true"
+
+	// EHLO/HELO name. net/smtp defaults to "localhost", which strict relays
+	// (e.g. smtp-relay.gmail.com) reject from a public source. Fall back to the
+	// machine hostname when SMTP_EHLO_NAME is unset.
+	smtpEHLOName := strings.TrimSpace(os.Getenv("SMTP_EHLO_NAME"))
+	if smtpEHLOName == "" {
+		smtpEHLOName, _ = os.Hostname()
+	}
 
 	// SMTP_TLS=implicit forces an immediate TLS handshake on connect (SMTPS).
 	// Required by providers like Aliyun enterprise mail that only offer port 465
@@ -89,6 +98,7 @@ func NewEmailService() *EmailService {
 		smtpPassword:    smtpPassword,
 		smtpTLSInsecure: smtpTLSInsecure,
 		smtpTLSImplicit: smtpTLSImplicit,
+		smtpEHLOName:    smtpEHLOName,
 	}
 }
 
@@ -128,6 +138,15 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 		return fmt.Errorf("smtp client: %w", err)
 	}
 	defer c.Close()
+
+	// Greet with a real hostname before any other command, else net/smtp lazily
+	// EHLOs "localhost" — which strict relays drop, surfacing as an opaque EOF on
+	// a later command rather than at the EHLO itself.
+	if s.smtpEHLOName != "" {
+		if err = c.Hello(s.smtpEHLOName); err != nil {
+			return fmt.Errorf("smtp EHLO %s: %w", s.smtpEHLOName, err)
+		}
+	}
 
 	// STARTTLS upgrade only makes sense when the underlying connection is still
 	// plaintext. Skip when we already dialed with implicit TLS.
