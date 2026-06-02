@@ -54,10 +54,10 @@ func BuildNewCommentsHint(issueID, triggerCommentID, newCommentsSince string, ne
 // no-delta path: the daemon is resuming a prior provider session and the
 // triggering comment body has already been injected into the per-turn prompt.
 // newCommentCount == 0 here means no new comments arrived issue-wide since the
-// last run (beyond the injected trigger and the agent's own replies), so
-// re-reading comment history is duplicate work by default. Keep the bounded
-// triggering-thread read as an explicit fallback for missing context instead of
-// making it the first action.
+// last run (beyond the injected trigger and the agent's own replies). Keep the
+// read bounded and conditional, but make it explicit that context-dependent
+// replies should refresh the triggering conversation rather than trusting
+// resumed memory alone.
 func BuildResumedCommentsHint(issueID, triggerCommentID string) string {
 	if issueID == "" || triggerCommentID == "" {
 		return ""
@@ -65,10 +65,11 @@ func BuildResumedCommentsHint(issueID, triggerCommentID string) string {
 	return fmt.Sprintf(
 		"You're resuming the prior session, and the triggering comment is already included above. "+
 			"No other new comments on this issue since your last run. "+
-			"Do not re-read comment history by default. "+
-			"Only if the resumed session is missing thread context, pull the triggering conversation: "+
+			"Use the triggering comment ID / thread anchor: `%s`. "+
+			"If your reply depends on thread context, do not rely only on resumed session memory — "+
+			"first pull the triggering conversation with: "+
 			"`multica issue comment list %s --thread %s --tail 30 --output json`.\n\n",
-		issueID, triggerCommentID,
+		triggerCommentID, issueID, triggerCommentID,
 	)
 }
 

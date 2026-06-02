@@ -650,6 +650,10 @@ function PresenceBadge({
   presence: AgentPresenceDetail | null | undefined;
 }) {
   const { t } = useT("agents");
+  // Archived is carried by the unified presence (deriveAgentPresenceDetail
+  // sets availability="archived" before any runtime/task scan), so the
+  // normal path below renders the gray "Archived" badge with no special
+  // case here — same single source of truth as every other status surface.
   if (!presence) {
     return (
       <span className="inline-flex h-5 w-20 animate-pulse rounded-md bg-muted" />

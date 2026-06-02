@@ -1376,13 +1376,11 @@ func TestCountNewCommentsSince_IssueWideExcludesAgentOwnAndTrigger(t *testing.T)
 	}
 }
 
-// TestCreateCommentNormalizesParentToThreadRoot pins the write-boundary
-// invariant: a reply created through CreateComment is always stored with its
-// parent_id pointing at the THREAD ROOT, never at an interior reply. This keeps
-// the comment tree at depth 1 (the 2-level model the product/UI assume), so
-// readers can treat a reply's parent_id AS its thread root. We post a reply to a
-// reply and assert the stored parent collapses to the root, not the middle row.
-func TestCreateCommentNormalizesParentToThreadRoot(t *testing.T) {
+// TestCreateCommentPreservesDirectParent pins the write-boundary invariant:
+// parent_id stores the exact comment being replied to. Thread readers discover
+// the root separately via recursive queries, so storing a reply-to-reply must
+// not destroy the direct-parent signal that trigger logic needs.
+func TestCreateCommentPreservesDirectParent(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("requires DB")
 	}
@@ -1393,7 +1391,7 @@ func TestCreateCommentNormalizesParentToThreadRoot(t *testing.T) {
 		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
 		VALUES ($1, 'member', $2, $3)
 		RETURNING id
-	`, testWorkspaceID, testUserID, "parent normalization fixture").Scan(&issueID); err != nil {
+	`, testWorkspaceID, testUserID, "direct parent fixture").Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() {
@@ -1431,10 +1429,11 @@ func TestCreateCommentNormalizesParentToThreadRoot(t *testing.T) {
 		t.Fatalf("direct reply parent_id: want root %s, got %v", root.ID, reply.ParentID)
 	}
 
-	// A reply whose parent is itself a reply must collapse to the thread root,
-	// NOT stay pointed at the interior reply — this is the write-boundary fix.
+	// A reply whose parent is itself a reply must keep that direct parent. The
+	// thread root is recoverable through recursive thread reads; the direct
+	// parent is not recoverable once overwritten.
 	nested := create(reply.ID, "nested")
-	if nested.ParentID == nil || *nested.ParentID != root.ID {
-		t.Fatalf("reply-to-reply parent_id: want collapsed to root %s, got %v (must not be the interior reply %s)", root.ID, nested.ParentID, reply.ID)
+	if nested.ParentID == nil || *nested.ParentID != reply.ID {
+		t.Fatalf("reply-to-reply parent_id: want direct parent %s, got %v (root was %s)", reply.ID, nested.ParentID, root.ID)
 	}
 }

@@ -613,6 +613,7 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"multica issue status <id> <status>",
 		"multica issue comment add <issue-id>",
 		"multica issue comment add --help",
+		"multica squad member set-role <squad-id>",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing core command/help text %q\n---\n%s", want, s)
@@ -3442,8 +3443,9 @@ func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"Do not re-read comment history by default",
-		"Only if the resumed session is missing thread context",
+		"triggering comment ID / thread anchor",
+		"If your reply depends on thread context",
+		"do not rely only on resumed session memory",
 		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
 	} {
 		if !strings.Contains(s, want) {

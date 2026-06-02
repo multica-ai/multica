@@ -7,6 +7,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import { useConfigStore } from "@multica/core/config";
 import {
   Dialog,
   DialogContent,
@@ -25,11 +26,34 @@ type Step = "instructions" | "success";
 
 const INSTALL_CMD =
   "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
-const SETUP_CMD = "multica setup";
-const TOKEN_CMD = `multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai
+const CLOUD_SERVER_URL = "https://api.multica.ai";
+const CLOUD_APP_URL = "https://multica.ai";
+
+function normalizeCommandURL(url: string | undefined) {
+  return url?.trim().replace(/\/+$/, "") ?? "";
+}
+
+function daemonCommands(serverUrl: string | undefined, appUrl: string | undefined) {
+  const normalizedServerUrl = normalizeCommandURL(serverUrl);
+  const normalizedAppUrl = normalizeCommandURL(appUrl);
+  if (normalizedServerUrl && normalizedAppUrl) {
+    return {
+      setupCmd: `multica setup self-host --server-url ${normalizedServerUrl} --app-url ${normalizedAppUrl}`,
+      tokenCmd: `multica config set server_url ${normalizedServerUrl}
+multica config set app_url ${normalizedAppUrl}
 multica login --token <YOUR_TOKEN>
-multica daemon start`;
+multica daemon start`,
+    };
+  }
+
+  return {
+    setupCmd: "multica setup",
+    tokenCmd: `multica config set server_url ${CLOUD_SERVER_URL}
+multica config set app_url ${CLOUD_APP_URL}
+multica login --token <YOUR_TOKEN>
+multica daemon start`,
+  };
+}
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>("instructions");
@@ -164,6 +188,9 @@ function CommandStep({
 
 function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
+  const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
+  const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
+  const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
@@ -188,7 +215,7 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
             <CommandStep
               n={2}
               label={t(($) => $.connect.step2_label)}
-              cmd={SETUP_CMD}
+              cmd={setupCmd}
               copyAria={t(($) => $.connect.copy_aria)}
             />
             <p className="mt-1.5 text-[11px] leading-[1.55] text-muted-foreground">
@@ -198,7 +225,7 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
 
           <LiveListening />
 
-          <TroubleshootingDetails />
+          <TroubleshootingDetails tokenCmd={tokenCmd} />
         </div>
       </div>
 
@@ -211,7 +238,7 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
   );
 }
 
-function TroubleshootingDetails() {
+function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
   const { t } = useT("runtimes");
   return (
     <details className="group rounded-lg border border-dashed">
@@ -227,7 +254,7 @@ function TroubleshootingDetails() {
         <CommandStep
           n={2}
           label={t(($) => $.connect.step2_label)}
-          cmd={TOKEN_CMD}
+          cmd={tokenCmd}
           copyAria={t(($) => $.connect.copy_aria)}
         />
         <p>

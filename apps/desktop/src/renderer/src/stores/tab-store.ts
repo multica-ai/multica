@@ -557,6 +557,24 @@ export const useTabStore = create<TabStore>()(
           changed = true;
         }
 
+        if (!nextActive) {
+          nextActive = Object.keys(nextByWorkspace)[0] ?? null;
+          if (nextActive) changed = true;
+        }
+
+        if (!nextActive) {
+          const fallbackSlug = validSlugs.values().next().value;
+          if (fallbackSlug) {
+            const fresh = defaultTabFor(fallbackSlug);
+            nextByWorkspace[fallbackSlug] = {
+              tabs: [fresh],
+              activeTabId: fresh.id,
+            };
+            nextActive = fallbackSlug;
+            changed = true;
+          }
+        }
+
         if (!changed) return;
         set({ byWorkspace: nextByWorkspace, activeWorkspaceSlug: nextActive });
       },

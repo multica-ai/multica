@@ -3210,6 +3210,196 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 	}
 }
 
+// TestNestedMemberReplyUsesDirectParentForMentionInheritance is the regression
+// for parent-root write normalization leaking root mentions into plain nested
+// replies. Stored parent_id keeps the direct parent, and trigger logic evaluates
+// that direct parent rather than the thread root.
+func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	assigneeAgent := createHandlerTestAgent(t, "Nested Mention Assignee", nil)
+	mentionedAgent := createHandlerTestAgent(t, "Nested Mention Target", nil)
+
+	var number int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+		WHERE id = $1 RETURNING issue_counter
+	`, testWorkspaceID).Scan(&number); err != nil {
+		t.Fatalf("next issue number: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
+		VALUES ($1, 'member', $2, $3, 'agent', $4, $5)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "nested mention inheritance regression", assigneeAgent, number).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	countQueued := func(agentID string) int {
+		t.Helper()
+		var n int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		`, issueID, agentID).Scan(&n); err != nil {
+			t.Fatalf("count queued tasks: %v", err)
+		}
+		return n
+	}
+	postMemberComment := func(body map[string]any) CommentResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r = withURLParam(r, "id", issueID)
+		testHandler.CreateComment(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode comment response: %v", err)
+		}
+		return resp
+	}
+
+	root := postMemberComment(map[string]any{
+		"content": fmt.Sprintf("[@Mentioned](mention://agent/%s) please look", mentionedAgent),
+	})
+	if got := countQueued(mentionedAgent); got != 1 {
+		t.Fatalf("expected root mention to queue mentioned agent once, got %d", got)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1`, issueID); err != nil {
+		t.Fatalf("cancel root mention task: %v", err)
+	}
+
+	var directParentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, parent_id)
+		VALUES ($1, $2, 'agent', $3, $4, $5)
+		RETURNING id
+	`, testWorkspaceID, issueID, mentionedAgent, "looks like redirect config", root.ID).Scan(&directParentID); err != nil {
+		t.Fatalf("insert direct parent reply: %v", err)
+	}
+
+	nested := postMemberComment(map[string]any{
+		"content":   "can you also check session expiry?",
+		"parent_id": directParentID,
+	})
+	if nested.ParentID == nil || *nested.ParentID != directParentID {
+		t.Fatalf("stored nested reply parent_id should keep direct parent %s, got %v", directParentID, nested.ParentID)
+	}
+	if got := countQueued(mentionedAgent); got != 0 {
+		t.Fatalf("plain nested reply must not inherit root mention from non-direct parent; got %d queued tasks", got)
+	}
+}
+
+// TestNestedMemberReplyUsesDirectParentForAssigneeParticipation is the
+// regression for treating any prior agent reply in the root thread as direct
+// participation in a nested human sub-thread.
+func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	assigneeAgent := createHandlerTestAgent(t, "Nested Participation Assignee", nil)
+
+	var number int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+		WHERE id = $1 RETURNING issue_counter
+	`, testWorkspaceID).Scan(&number); err != nil {
+		t.Fatalf("next issue number: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
+		VALUES ($1, 'member', $2, $3, 'agent', $4, $5)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "nested participation regression", assigneeAgent, number).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	countAssigneeQueued := func() int {
+		t.Helper()
+		var n int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		`, issueID, assigneeAgent).Scan(&n); err != nil {
+			t.Fatalf("count queued tasks: %v", err)
+		}
+		return n
+	}
+	postMemberComment := func(body map[string]any) CommentResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r = withURLParam(r, "id", issueID)
+		testHandler.CreateComment(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode comment response: %v", err)
+		}
+		return resp
+	}
+
+	var rootID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, 'this cache question is for humans')
+		RETURNING id
+	`, testWorkspaceID, issueID, testUserID).Scan(&rootID); err != nil {
+		t.Fatalf("insert root comment: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, parent_id)
+		VALUES ($1, $2, 'agent', $3, 'expiration policy is the issue', $4)
+	`, testWorkspaceID, issueID, assigneeAgent, rootID); err != nil {
+		t.Fatalf("insert assignee reply: %v", err)
+	}
+	var humanParentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, parent_id)
+		VALUES ($1, $2, 'member', $3, 'I have seen this too', $4)
+		RETURNING id
+	`, testWorkspaceID, issueID, testUserID, rootID).Scan(&humanParentID); err != nil {
+		t.Fatalf("insert human direct parent: %v", err)
+	}
+
+	nested := postMemberComment(map[string]any{
+		"content":   "what should the expiration be?",
+		"parent_id": humanParentID,
+	})
+	if nested.ParentID == nil || *nested.ParentID != humanParentID {
+		t.Fatalf("stored nested reply parent_id should keep direct parent %s, got %v", humanParentID, nested.ParentID)
+	}
+	if got := countAssigneeQueued(); got != 0 {
+		t.Fatalf("plain nested human reply must not wake assignee just because assignee replied elsewhere under root; got %d queued tasks", got)
+	}
+}
+
 // TestAgentExplicitMentionStillTriggers documents the boundary the structural
 // fix preserves: suppressing implicit parent-mention inheritance for agent
 // authors does NOT block deliberate handoffs. An agent that explicitly
