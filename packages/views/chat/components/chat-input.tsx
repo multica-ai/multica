@@ -13,7 +13,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
-import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
+import { enterKey, formatShortcut } from "@multica/core/platform";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useT } from "../../i18n";
 
@@ -233,10 +233,10 @@ export function ChatInput({
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Mod+Enter submits. Bare Enter falls through to Tiptap's
-            // default, which continues lists/quotes and breaks paragraphs.
-            // Without this, Enter-as-send would steal the only key that
-            // continues a bullet list, leaving users stuck after one item.
+            // Chat-standard keymap: Enter sends, Shift+Enter keeps editing
+            // with a newline. The editor shortcut still leaves IME/code-block
+            // Enter behavior alone.
+            submitOnEnter
           />
         </div>
         {leftAdornment && (
@@ -257,7 +257,7 @@ export function ChatInput({
             disabled={isEmpty || !!disabled || !!noAgent || pendingUploads > 0}
             running={isRunning}
             onStop={onStop}
-            tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+            tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(enterKey)}`}
             stopTooltip={t(($) => $.input.stop_tooltip)}
           />
         </div>

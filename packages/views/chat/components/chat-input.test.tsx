@@ -43,11 +43,15 @@ vi.mock("../../editor", () => ({
       onUpdate,
       placeholder,
       onUploadFile,
+      onSubmit,
+      submitOnEnter,
     }: {
       defaultValue?: string;
       onUpdate?: (md: string) => void;
       placeholder?: string;
       onUploadFile?: (file: File) => Promise<UploadResult | null>;
+      onSubmit?: () => void;
+      submitOnEnter?: boolean;
     },
     ref: React.Ref<unknown>,
   ) {
@@ -81,6 +85,16 @@ vi.mock("../../editor", () => ({
         onChange={(e) => {
           valueRef.current = e.target.value;
           onUpdate?.(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          if (submitOnEnter && !e.shiftKey) {
+            e.preventDefault();
+            onSubmit?.();
+            return;
+          }
+          valueRef.current += "\n";
+          onUpdate?.(valueRef.current);
         }}
       />
     );
@@ -216,5 +230,33 @@ describe("ChatInput attachment wiring", () => {
     // The agent picker / context anchor adornments may render zero buttons
     // in this test (no leftAdornment passed). So a single button = submit.
     expect(buttons.length).toBe(1);
+  });
+
+  it("submits the chat message on bare Enter", async () => {
+    const onSend = vi.fn();
+    renderInput({ onSend });
+    const editor = screen.getByTestId("editor");
+
+    fireEvent.change(editor, { target: { value: "hello" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith("hello", undefined);
+  });
+
+  it("keeps Shift+Enter as a newline instead of sending", async () => {
+    const onSend = vi.fn();
+    renderInput({ onSend });
+    const editor = screen.getByTestId("editor");
+
+    fireEvent.change(editor, { target: { value: "hello" } });
+    fireEvent.keyDown(editor, { key: "Enter", shiftKey: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      const sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
   });
 });
