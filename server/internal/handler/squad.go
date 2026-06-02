@@ -1031,6 +1031,11 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return
 	}
 
+	// Private-leader gate: deny if the actor cannot access the leader.
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, uuidToString(issue.WorkspaceID)) {
+		return
+	}
+
 	// Dedup: skip if leader already has a pending task for this issue.
 	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issue.ID,
