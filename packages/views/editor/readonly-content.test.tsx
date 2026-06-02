@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const { getAttachmentTextContentMock } = vi.hoisted(() => ({
@@ -122,6 +123,82 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ReadonlyContent issue mention Markdown", () => {
+  it("renders an issue mention inside a task list as an issue mention card", () => {
+    const { container, getByTestId } = render(
+      <ReadonlyContent content="- [ ] [MUL-123](mention://issue/issue-123)" />,
+    );
+
+    expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
+    expect(getByTestId("issue-mention-card").textContent).toBe("MUL-123");
+  });
+
+  it("documents the CommonMark quoted-emphasis edge case before Korean particles", () => {
+    const unsafe = render(
+      <ReadonlyContent content={'**"무엇을 먼저 정해두고 시작할지"**가'} />,
+    );
+
+    expect(unsafe.container.querySelector("strong")).toBeNull();
+    expect(unsafe.container.textContent).toContain(
+      '**"무엇을 먼저 정해두고 시작할지"**가',
+    );
+
+    const safe = render(
+      <ReadonlyContent content={'"**무엇을 먼저 정해두고 시작할지**"가'} />,
+    );
+
+    expect(safe.container.querySelector("strong")?.textContent).toBe(
+      "무엇을 먼저 정해두고 시작할지",
+    );
+    expect(safe.container.textContent).toContain('"무엇을 먼저 정해두고 시작할지"가');
+  });
+});
+
+describe("ReadonlyContent code styling", () => {
+  const literalCode = "uv run --extra dev pytest -q";
+
+  it("renders inline and fenced code through rich-text-editor code selectors", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={[
+          `<code>${literalCode}</code>`,
+          "",
+          "```",
+          literalCode,
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    const inlineCode = Array.from(container.querySelectorAll("code")).find(
+      (code) => !code.closest("pre"),
+    );
+    const blockCode = container.querySelector("pre code");
+
+    expect(inlineCode?.textContent).toBe(literalCode);
+    expect(blockCode?.textContent).toBe(literalCode);
+  });
+
+  it("renders code blocks without a language tag (lowlight highlightAuto fallback)", () => {
+    const token = "mul_407ec1e4464b580304362ed749f821901fd7d310";
+    const { container } = render(
+      <ReadonlyContent content={["```", token, "```"].join("\n")} />,
+    );
+    const blockCode = container.querySelector("pre code");
+    expect(blockCode?.textContent?.trim()).toBe(token);
+  });
+
+  it("keeps editor code literal by disabling font ligatures", () => {
+    const codeCss = readFileSync("editor/styles/code.css", "utf8");
+
+    expect(codeCss).toContain(".rich-text-editor code");
+    expect(codeCss).toContain(".rich-text-editor pre");
+    expect(codeCss).toContain(".rich-text-editor pre code");
+    expect(codeCss).toContain("font-variant-ligatures: none;");
+    expect(codeCss).toContain('font-feature-settings: "liga" 0;');
   });
 });
 

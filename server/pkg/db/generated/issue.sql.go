@@ -673,6 +673,68 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 	return items, nil
 }
 
+const listChildrenByParents = `-- name: ListChildrenByParents :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata FROM issue
+WHERE workspace_id = $1
+  AND parent_issue_id = ANY($2::uuid[])
+ORDER BY parent_issue_id, position ASC, created_at DESC
+`
+
+type ListChildrenByParentsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	ParentIds   []pgtype.UUID `json:"parent_ids"`
+}
+
+// Batched variant of ListChildIssues: returns all children for the given
+// parent set in one round trip. Used by Swimlane to avoid an N+1 fan-out
+// (one request per visible parent lane). Result is grouped client-side by
+// parent_issue_id; the workspace filter is also enforced so callers can't
+// enumerate children of parents in workspaces they don't belong to.
+func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByParentsParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listChildrenByParents, arg.WorkspaceID, arg.ParentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssues = `-- name: ListIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,

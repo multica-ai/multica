@@ -15,6 +15,7 @@ import {
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
+import { projectKeys } from "../projects/queries";
 import type {
   AgentActivityBucket,
   AgentRunCount,
@@ -35,6 +36,7 @@ const ISSUE_ID = "issue-1";
 const OTHER_ISSUE_ID = "issue-2";
 const PARENT_ISSUE_ID = "parent-1";
 const AGENT_ID = "agent-1";
+const PROJECT_ID = "project-1";
 
 const labelA: Label = {
   id: "label-a",
@@ -213,6 +215,50 @@ describe("onIssueMetadataChanged", () => {
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.list(WS_ID))).toBeUndefined();
+  });
+});
+
+describe("project progress invalidation", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+    qc.setQueryData(projectKeys.list(WS_ID), [
+      {
+        id: PROJECT_ID,
+        workspace_id: WS_ID,
+        title: "Project",
+        description: null,
+        icon: null,
+        status: "in_progress",
+        priority: "none",
+        lead_type: null,
+        lead_id: null,
+        issue_count: 1,
+        done_count: 0,
+        resource_count: 0,
+        created_at: "2025-01-01T00:00:00Z",
+        updated_at: "2025-01-01T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("invalidates project queries when an issue status changes", () => {
+    onIssueUpdated(qc, WS_ID, {
+      id: ISSUE_ID,
+      status: "done",
+    });
+
+    expectInvalidated(qc, projectKeys.list(WS_ID));
+  });
+
+  it("invalidates project queries when a project issue is created", () => {
+    onIssueCreated(qc, WS_ID, {
+      ...baseIssue,
+      project_id: PROJECT_ID,
+    });
+
+    expectInvalidated(qc, projectKeys.list(WS_ID));
   });
 });
 

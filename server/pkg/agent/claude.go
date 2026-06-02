@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -78,12 +78,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("claude stdin pipe: %w", err)
 	}
-	closeStdin := func() {
-		if stdin != nil {
-			_ = stdin.Close()
-			stdin = nil
-		}
-	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	// Capture stderr into both the daemon log (as before) and a bounded tail
 	// buffer so we can include the last few KB in Result.Error when claude
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
@@ -97,19 +93,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
-	if err := writeClaudeInput(stdin, prompt); err != nil {
-		// claude almost certainly died during startup (broken pipe). The
-		// real reason is sitting in stderrBuf — surface it the same way the
-		// post-handshake error path does, otherwise the daemon log is the
-		// only place that knows whether it was a V8 abort, a missing native
-		// module, or anything else. cmd.Wait() flushes os/exec's stderr
-		// copy goroutine, so stderrBuf.Tail() is safe to read.
-		closeStdin()
-		cancel()
-		_ = cmd.Wait()
-		return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
-	}
-	closeStdin()
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -118,6 +101,21 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
+
+	// writeClaudeInput runs in its own goroutine so it cannot deadlock
+	// against the stdout reader. With --verbose --output-format stream-json
+	// the CLI emits a startup banner before reading its first stdin frame;
+	// if nothing is draining stdout while we write the prompt, claude blocks
+	// writing stdout, never reads stdin, and our Write blocks until runCtx
+	// fires. The field symptom is "write |1: The pipe has been ended."
+	// surfacing exactly at the per-task timeout when the kill invalidates
+	// the still-blocked pipe.
+	writeDone := make(chan error, 1)
+	go func() {
+		err := writeClaudeInput(stdin, prompt)
+		closeStdin()
+		writeDone <- err
+	}()
 
 	go func() {
 		defer cancel()
@@ -165,7 +163,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
-				closeStdin()
 				sessionID = msg.SessionID
 				if msg.ResultText != "" {
 					output.Reset()
@@ -192,14 +189,25 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Wait for process exit
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
+		// writeDone is buffered (cap 1) and the writer always sends — by the
+		// time cmd has exited, the prompt write has either succeeded, hit a
+		// broken pipe, or been unblocked by the kill that ended cmd.
+		writeErr := <-writeDone
 
-		if runCtx.Err() == context.DeadlineExceeded {
+		switch {
+		case runCtx.Err() == context.DeadlineExceeded:
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf("claude timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
+		case runCtx.Err() == context.Canceled:
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" {
+		case writeErr != nil && finalStatus == "completed" && sessionID == "":
+			// No result event landed and the prompt write failed — claude
+			// died before reading the prompt. Surface the write error; the
+			// stderr tail attached below carries the real reason.
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("write claude input: %v", writeErr)
+		case exitErr != nil && finalStatus == "completed":
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
 		}
@@ -602,18 +610,24 @@ const (
 // only block args that would break the communication protocol, not every
 // possible dangerous flag. Workspace members are trusted to configure agents
 // sensibly, same as with custom_env.
+//
+// Shell quoting is stripped from each arg before processing: users commonly
+// type custom_args in config fields using shell syntax (e.g.
+// --deny-tool='write'). Since the daemon spawns processes directly without a
+// shell, those quotes would otherwise be passed literally to the child process,
+// which typically rejects them as unrecognised flag values.
 func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *slog.Logger) []string {
 	if len(args) == 0 {
 		return args
 	}
 	filtered := make([]string, 0, len(args))
 	skip := false
-	for _, arg := range args {
+	for _, raw := range args {
 		if skip {
 			skip = false
 			continue
 		}
-		// Check if this arg is a blocked flag or starts with "blockedFlag=".
+		arg := unshellQuoteArg(raw)
 		flag := arg
 		hasInlineValue := false
 		if idx := strings.Index(arg, "="); idx > 0 {
@@ -632,6 +646,44 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 		filtered = append(filtered, arg)
 	}
 	return filtered
+}
+
+// unshellQuoteArg strips a single layer of shell-style single or double quotes
+// from an argument. It handles two forms:
+//
+//   - --flag='value' or --flag="value" → --flag=value
+//   - 'standalone' or "standalone"     → standalone
+//
+// Only flag-style args (`-x=…`, `--flag=…`) get inline value unquoting. Plain
+// assignment syntax like `model="o3"` is left alone because the quotes may be
+// semantic for the child process (for example Codex `-c model="o3"`). Only
+// matching outer quotes are stripped; no escape processing is done.
+func unshellQuoteArg(arg string) string {
+	if strings.HasPrefix(arg, "-") {
+		if idx := strings.Index(arg, "="); idx > 0 {
+			value := arg[idx+1:]
+			if unquoted, ok := stripSurroundingQuotes(value); ok {
+				return arg[:idx+1] + unquoted
+			}
+			return arg
+		}
+	}
+	if unquoted, ok := stripSurroundingQuotes(arg); ok {
+		return unquoted
+	}
+	return arg
+}
+
+// stripSurroundingQuotes removes a matching outer pair of single or double
+// quotes from s and returns (unquoted, true). Returns (s, false) if s does not
+// start and end with the same quote character.
+func stripSurroundingQuotes(s string) (string, bool) {
+	if len(s) >= 2 {
+		if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
+			return s[1 : len(s)-1], true
+		}
+	}
+	return s, false
 }
 
 // writeMcpConfigToTemp writes raw MCP config JSON to a temporary file and returns

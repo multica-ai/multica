@@ -16,7 +16,7 @@
  * Mention suggestion is only attached in edit mode — readonly doesn't need
  * the autocomplete popup.
  *
- * All link styling is controlled by content-editor.css (var(--brand) color),
+ * All link styling is controlled by styles/prose.css (var(--brand) color),
  * not Tailwind HTMLAttributes, to keep a single source of truth.
  */
 import type { RefObject } from "react";
@@ -35,6 +35,7 @@ import { Markdown } from "@tiptap/markdown";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion } from "./mention-suggestion";
 import { SlashCommandExtension } from "./slash-command-extension";
@@ -59,7 +60,7 @@ const LinkExtension = Link.extend({ inclusive: false }).configure({
   defaultProtocol: "https",
 });
 
-const ImageExtension = Image.extend({
+export const ImageExtension = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -73,6 +74,15 @@ const ImageExtension = Image.extend({
   },
   addNodeView() {
     return ReactNodeViewRenderer(ImageView);
+  },
+  renderMarkdown: (node: any) => {
+    const src = node.attrs?.src || "";
+    const alt = escapeMarkdownLabel(node.attrs?.alt || "");
+    const title = node.attrs?.title;
+    if (title) {
+      return `![${alt}](${src} "${title}")\n\n`;
+    }
+    return `![${alt}](${src})\n\n`;
   },
 }).configure({
   inline: false,

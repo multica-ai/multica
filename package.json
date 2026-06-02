@@ -35,7 +35,8 @@
     ],
     "overrides": {
       "@types/react": "catalog:",
-      "@types/react-dom": "catalog:"
+      "@types/react-dom": "catalog:",
+      "@xmldom/xmldom": "^0.8.13"
     }
   },
   "devDependencies": {
@@ -45,10 +46,5 @@
     "pg": "^8.20.0",
     "turbo": "^2.5.4",
     "typescript": "catalog:"
-  },
-  "dependencies": {
-    "expo": "~55.0.23",
-    "react": "19.2.0",
-    "react-native": "0.83.6"
   }
 }

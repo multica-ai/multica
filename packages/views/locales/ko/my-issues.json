@@ -1,0 +1,45 @@
+{
+  "page": {
+    "breadcrumb": "내 이슈",
+    "workspace_fallback": "워크스페이스",
+    "empty_title": "내게 할당된 이슈가 없습니다",
+    "empty_description": "내가 만들었거나 담당자로 지정된 이슈가 여기에 표시됩니다."
+  },
+  "header": {
+    "scope": {
+      "all_label": "전체",
+      "all_description": "내게 할당됐거나, 내가 만들었거나, 내 에이전트와 스쿼드가 참여한 이슈",
+      "assigned_label": "할당됨",
+      "assigned_description": "내게 할당된 이슈",
+      "created_label": "내가 만든 이슈",
+      "created_description": "내가 생성한 이슈",
+      "agents_label": "내 에이전트와 스쿼드",
+      "agents_description": "내 에이전트에게 할당된 이슈"
+    },
+    "filter_button": "필터",
+    "filter_status": "상태",
+    "filter_priority": "우선순위",
+    "issue_count_one": "이슈 {{count}}개",
+    "issue_count_other": "이슈 {{count}}개",
+    "reset_filters": "필터 모두 초기화",
+    "display_settings": "보기 설정",
+    "grouping": "그룹화",
+    "group_status": "상태",
+    "group_assignee": "담당자",
+    "ordering": "정렬",
+    "ascending": "오름차순",
+    "descending": "내림차순",
+    "card_properties": "카드 속성",
+    "view_board": "보드 보기",
+    "view_list": "리스트 보기",
+    "view_swimlane": "스윔레인 보기",
+    "view_label": "보기",
+    "view_board_short": "보드",
+    "view_list_short": "리스트",
+    "view_swimlane_short": "스윔레인",
+    "sort_manual": "수동"
+  },
+  "errors": {
+    "move_failed": "이슈를 이동하지 못했습니다"
+  }
+}

@@ -1,6 +1,6 @@
 {
   "page": {
-    "breadcrumb_title": "issue",
+    "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有 issue",
     "empty_hint": "创建一个 issue 开始使用。",
@@ -47,7 +47,8 @@
     "agents_group": "智能体",
     "squads_group": "小队",
     "issue_count_other": "{{count}} 个 issue",
-    "reset": "重置全部筛选"
+    "reset": "重置全部筛选",
+    "active_count_other": "{{count}} 个筛选"
   },
   "display": {
     "tooltip": "显示设置",
@@ -58,6 +59,8 @@
     "descending_title": "降序",
     "group_status": "状态",
     "group_assignee": "负责人",
+    "group_parent": "父级 issue",
+    "group_project": "项目",
     "sort_manual": "手动",
     "sort_priority": "优先级",
     "sort_start_date": "开始日期",
@@ -77,10 +80,12 @@
     "tooltip_board": "看板视图",
     "tooltip_list": "列表视图",
     "tooltip_gantt": "甘特图",
+    "tooltip_swimlane": "泳道视图",
     "section": "视图",
     "board": "看板",
     "list": "列表",
-    "gantt": "甘特图"
+    "gantt": "甘特图",
+    "swimlane": "泳道"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -119,13 +124,22 @@
     "empty_status": "无 issue",
     "add_issue_tooltip": "新建 issue"
   },
+  "swimlane": {
+    "no_parent": "无父级",
+    "other_parents": "其他父级",
+    "no_project": "无项目",
+    "no_assignee": "未指派",
+    "open_parent": "打开父级 issue",
+    "toggle_collapse": "切换泳道"
+  },
   "board": {
     "hidden_columns_label": "隐藏的列",
     "hide_column": "隐藏列",
     "show_column": "显示列",
     "add_issue_tooltip": "新建 issue",
     "empty_column": "无 issue",
-    "empty_grouping": "没有匹配的 issue"
+    "empty_grouping": "没有匹配的 issue",
+    "ordered_by": "按{{field}}排序"
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",
@@ -235,7 +249,9 @@
     "squad_leader_failed_reason": "评估失败：{{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} 条动态",
-    "activity_count_other": "{{count}} 条动态"
+    "activity_count_other": "{{count}} 条动态",
+    "show_more_activities_one": "展开更早 {{count}} 条动态",
+    "show_more_activities_other": "展开更早 {{count}} 条动态"
   },
   "comment": {
     "delete_title": "删除评论",
@@ -284,6 +300,7 @@
   "agent_live": {
     "is_working": "{{name}} 正在处理",
     "is_queued": "{{name}} 排队中",
+    "is_waiting_local_directory": "{{name}} 正在等待本地目录",
     "queued_elapsed_prefix": "已排队 {{elapsed}}",
     "fallback_name": "智能体",
     "tool_count_other": "{{count}} 次工具调用",
@@ -312,6 +329,7 @@
     "trigger_initial": "首次运行",
     "status_queued": "排队中",
     "status_dispatched": "启动中",
+    "status_waiting_local_directory": "等待本地目录释放",
     "status_running": "处理中",
     "status_completed": "已完成",
     "status_failed": "失败",

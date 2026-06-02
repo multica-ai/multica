@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw, Hermes,
-// Gemini, Pi, Cursor, Kimi, Kiro). It mirrors the happy-cli AgentBackend
-// pattern, translated to idiomatic Go.
+// Gemini, Pi, Cursor, Kimi, Kiro, Antigravity). It mirrors the happy-cli
+// AgentBackend pattern, translated to idiomatic Go.
 package agent
 
 import (
@@ -37,10 +37,11 @@ type ExecOptions struct {
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
-	// medium|high|xhigh"). Empty means "use the runtime/model default" —
+	// medium|high|xhigh", OpenCode's model variant names). Empty means
+	// "use the runtime/model default" —
 	// every backend that consumes this skips its --effort / reasoning_effort
 	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude and codex backends only; other backends ignore the
+	// by the claude, codex, and opencode backends; other backends ignore the
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
@@ -101,13 +102,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli)
+	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, agy)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro".
+// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "antigravity".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -136,8 +137,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &kimiBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
+	case "antigravity":
+		return &antigravityBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity)", agentType)
 	}
 }
 
@@ -153,17 +156,18 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"claude":   "claude (stream-json)",
-	"codex":    "codex app-server",
-	"copilot":  "copilot (json)",
-	"cursor":   "cursor-agent (stream-json)",
-	"gemini":   "gemini (stream-json)",
-	"hermes":   "hermes acp",
-	"openclaw": "openclaw agent (json)",
-	"opencode": "opencode run (json)",
-	"pi":       "pi (json mode)",
-	"kimi":     "kimi acp",
-	"kiro":     "kiro-cli acp",
+	"antigravity": "agy -p (print mode)",
+	"claude":      "claude (stream-json)",
+	"codex":       "codex app-server",
+	"copilot":     "copilot (json)",
+	"cursor":      "cursor-agent (stream-json)",
+	"gemini":      "gemini (stream-json)",
+	"hermes":      "hermes acp",
+	"kimi":        "kimi acp",
+	"kiro":        "kiro-cli acp",
+	"openclaw":    "openclaw agent (json)",
+	"opencode":    "opencode run (json)",
+	"pi":          "pi (json mode)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

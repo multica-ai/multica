@@ -413,4 +413,54 @@ describe("AgentCreatePanel", () => {
 
     expect(mockSetLastProjectId).not.toHaveBeenCalled();
   });
+
+  // When the modal was opened from "Add sub issue" on an existing issue,
+  // the manual panel transfers parent_issue_id through the `data` payload
+  // on switch-to-agent. The agent panel must forward that UUID to the
+  // quick-create API silently — without surfacing a parent picker — so the
+  // new issue is filed as a sub-issue. Dropping parent_issue_id here was
+  // the original bug; this locks the wiring in.
+  it("forwards parent_issue_id from the carry payload to the quick-create API", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: {
+        parent_issue_id: "parent-uuid-1",
+        parent_issue_identifier: "MUL-2534",
+      },
+    });
+
+    // Sub-issue context chip is visible so the user knows the new issue
+    // will be filed as a sub-issue.
+    expect(screen.getByTestId("agent-sub-issue-chip")).toBeInTheDocument();
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Investigate the regression");
+
+    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith({
+        agent_id: "agent-1",
+        prompt: "Investigate the regression",
+        project_id: undefined,
+        parent_issue_id: "parent-uuid-1",
+      });
+    });
+  });
+
+  // The sub-issue chip is purely opt-in context — it only appears when the
+  // modal was opened from an "Add sub issue" entry. A plain quick-create
+  // (no parent in data) must NOT render the chip; otherwise users would see
+  // a stray badge on every quick-create.
+  it("does not render the sub-issue chip when no parent is seeded", () => {
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.queryByTestId("agent-sub-issue-chip")).toBeNull();
+  });
 });

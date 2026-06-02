@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
+import { projectKeys } from "../projects/queries";
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -15,12 +16,15 @@ export function onIssueCreated(
   wsId: string,
   issue: Issue,
 ) {
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? addIssueToBuckets(old, issue) : old,
-  );
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
+  }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  if (issue.project_id) {
+    qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+  }
   // Refresh every Project Gantt cache that might be observing this issue.
   // We invalidate the whole prefix rather than the issue's own project
   // because a fresh issue isn't necessarily scheduled yet; the active Gantt
@@ -40,23 +44,30 @@ export function onIssueUpdated(
   // Look up the OLD parent before mutating list state, so we can keep
   // the parent's children cache in sync (powers the sub-issues list
   // shown on the parent issue page).
-  const listData = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+  const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+  const firstListData = listQueries[0]?.[1];
   const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
   const oldParentId =
     detailData?.parent_issue_id ??
-    (listData ? findIssueLocation(listData, issue.id)?.issue.parent_issue_id : null) ??
+    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue.parent_issue_id : null) ??
     null;
   // The NEW parent comes from the WS payload when parent_issue_id changed
   const newParentId = issue.parent_issue_id ?? null;
   const parentChanged =
     issue.parent_issue_id !== undefined && newParentId !== oldParentId;
 
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? patchIssueInBuckets(old, issue.id, issue) : old,
-  );
+  for (const [key, data] of listQueries) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issue.id, issue));
+  }
+  if (issue.position !== undefined) {
+    qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+  }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  if (issue.status !== undefined || issue.project_id !== undefined) {
+    qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+  }
   // Any field change can shift Gantt membership — start_date / due_date may
   // have moved in or out of the `scheduled` set, project_id may have
   // changed, or the row that is in the cache may need to mirror updated
@@ -85,6 +96,7 @@ export function onIssueUpdated(
     if (issue.status !== undefined || issue.parent_issue_id !== undefined) {
       qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
     }
+    qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
   }
 }
 
@@ -105,9 +117,9 @@ export function onIssueLabelsChanged(
   issueId: string,
   labels: Label[],
 ) {
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? patchIssueInBuckets(old, issueId, { labels }) : old,
-  );
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
+  }
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
@@ -148,9 +160,9 @@ export function onIssueMetadataChanged(
   issueId: string,
   metadata: IssueMetadata,
 ) {
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? patchIssueInBuckets(old, issueId, { metadata }) : old,
-  );
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
+  }
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
   );
@@ -165,4 +177,5 @@ export function onIssueDeleted(
   cleanupDeletedIssueCaches(qc, wsId, issueId);
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
 }

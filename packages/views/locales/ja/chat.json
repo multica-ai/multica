@@ -1,0 +1,129 @@
+{
+  "fab": {
+    "running": "Multica が作業中です...",
+    "unread_other": "未読のチャット {{count}}件",
+    "default": "Multica に質問"
+  },
+  "input": {
+    "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
+    "placeholder_archived": "このセッションはアーカイブされています",
+    "placeholder_named": "{{name}} に指示してください…",
+    "placeholder_default": "やってほしいことを入力してください…",
+    "send_tooltip": "送信",
+    "stop_tooltip": "停止"
+  },
+  "message_list": {
+    "show_details": "詳細を表示",
+    "replied_in": "{{elapsed}}で返信",
+    "failed_after": "{{elapsed}}後に失敗",
+    "task_failed_fallback": "タスクが失敗しました",
+    "tools_other": "ツール {{count}}個",
+    "tool_result_named": "{{tool}} の結果: ",
+    "tool_result_unnamed": "結果: ",
+    "process_steps_other": "ステップ {{count}}個",
+    "copy_action": "コピー",
+    "copied_toast": "コピーしました",
+    "copy_failed_toast": "コピーに失敗しました"
+  },
+  "session_history": {
+    "untitled": "無題",
+    "time": {
+      "just_now": "たった今",
+      "minutes": "{{count}}分前",
+      "hours": "{{count}}時間前",
+      "days": "{{count}}日前"
+    },
+    "row_delete_aria": "チャットセッションを削除",
+    "row_rename_aria": "チャットセッションの名前を変更",
+    "delete_dialog": {
+      "title": "チャットセッションを削除",
+      "description_with_title": "\"{{title}}\" とそのメッセージが完全に削除されます。この操作は取り消せません。",
+      "description_default": "このチャットセッションとそのメッセージが完全に削除されます。この操作は取り消せません。",
+      "cancel": "キャンセル",
+      "confirm": "削除",
+      "confirming": "削除中..."
+    },
+    "row_stop_aria": "現在の実行を停止",
+    "stop_action": "停止",
+    "row_subtitle": {
+      "working": "作業中",
+      "completed": "完了",
+      "new_reply": "新しい返信"
+    },
+    "stop_dialog": {
+      "title": "この実行を停止しますか？",
+      "description_with_title": "\"{{title}}\" の現在のエージェントタスクをキャンセルします。生成済みの内容はチャットに残ります。",
+      "description_default": "現在のエージェントタスクをキャンセルします。生成済みの内容はチャットに残ります。",
+      "cancel": "実行を続ける",
+      "confirm": "実行を停止",
+      "confirming": "停止中..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "新規チャット",
+    "restore_tooltip": "復元",
+    "expand_tooltip": "展開",
+    "minimize_tooltip": "最小化",
+    "another_running": "別のチャットが実行中です",
+    "another_unread": "別のチャットに未読の返信があります",
+    "running": "実行中",
+    "unread": "未読",
+    "no_previous": "以前のチャットはありません",
+    "untitled": "新規チャット",
+    "my_agents": "マイエージェント",
+    "others": "その他",
+    "no_agents": "エージェントなし",
+    "history_group": "チャット履歴"
+  },
+  "empty_state": {
+    "first_time_title": "エージェントとチャット",
+    "first_time_intro": "✨ エージェントはあなたのワークスペースを把握しています —",
+    "first_time_pillars": "イシュー、プロジェクト、スキル",
+    "first_time_pillars_suffix": "。",
+    "first_time_actions": "要約を頼んだり、今日の予定を立てたり、簡単なタスクを任せたりしてみましょう。",
+    "returning_title_named": "こんにちは、{{name}} です",
+    "returning_title_default": "Multica へようこそ",
+    "returning_subtitle": "こう聞いてみましょう"
+  },
+  "starter_prompts": {
+    "list_open": "オープンなタスクを優先度順にまとめて",
+    "summarize_today": "今日やったことを要約して",
+    "plan_next": "次に取り組むことを計画して"
+  },
+  "context_anchor": {
+    "tooltip_disabled": "このページに Multica へ共有できる内容はありません",
+    "tooltip_off": "Multica に現在表示中の内容を知らせる",
+    "tooltip_on_issue": "Multica は {{label}} を表示中だと把握しています · クリックでオフ",
+    "tooltip_on_project": "Multica はプロジェクト \"{{label}}\" を表示中だと把握しています · クリックでオフ",
+    "card_tooltip_issue_with_subtitle": "Multica は {{label}} を表示中だと把握しています — {{subtitle}}",
+    "card_tooltip_issue": "Multica は {{label}} を表示中だと把握しています",
+    "card_tooltip_project": "Multica はプロジェクト \"{{label}}\" を表示中だと把握しています",
+    "aria_stop": "現在のページの共有を停止",
+    "aria_start": "現在のページを Multica に共有"
+  },
+  "no_agent_banner": "チャットを始めるにはエージェントが必要です。",
+  "offline_banner": {
+    "fallback_name": "エージェント",
+    "unstable": "{{name}} の接続が不安定です。返信が遅れる場合があります。",
+    "offline": "{{name}} はオフラインです。再接続されたらメッセージが届きます。"
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "オフライン",
+      "reconnecting": "再接続中",
+      "queued": "待機中",
+      "waiting_local_directory": "ローカルディレクトリを待機中",
+      "starting_up": "起動中",
+      "thinking": "考え中",
+      "typing": "入力中"
+    },
+    "tools": {
+      "running_command": "コマンドを実行中",
+      "reading_files": "ファイルを読み込み中",
+      "searching_code": "コードを検索中",
+      "making_edits": "編集中",
+      "searching_web": "ウェブを検索中",
+      "fallback": "作業中"
+    }
+  }
+}

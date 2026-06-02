@@ -27,6 +27,7 @@ export type Source =
   | "social_x"
   | "social_linkedin"
   | "social_youtube"
+  | "social_github"
   | "social_other"
   | "blog_newsletter"
   | "ai_assistant"

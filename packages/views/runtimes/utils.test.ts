@@ -250,6 +250,98 @@ describe("estimateCost", () => {
       }),
     ).toBe(0);
   });
+
+  // The Chinese-model rates below are spot-checked against the literal
+  // numbers on the three official price sheets cited in MODEL_PRICING's
+  // header comment. Pinning them in tests is what catches a future edit
+  // that copies a price from a near-named neighbour by accident — the
+  // mistake the previous attempt (PR #3170, closed) made.
+  it("prices deepseek-v4-flash at the official $0.14/$0.28 with ~50× cache-hit discount", () => {
+    // 1M input × $0.14 + 1M output × $0.28 + 1M cache read × $0.0028 = $0.4228.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-flash",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
+  });
+
+  it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
+    // The DeepSeek docs explicitly route both legacy names to v4-flash —
+    // they must hit the same numbers, not the older $0.27/$1.10 tier.
+    const flash = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-flash",
+      input_tokens: 1_000_000,
+    });
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-chat",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(flash, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-reasoner",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(flash, 5);
+  });
+
+  it("prices kimi-k2.6 at the official $0.95 / $4.00 tier (not the K2 tier)", () => {
+    // Moonshot's K2.6 page is the only authoritative source today; K2.6 is
+    // explicitly NOT priced like K2. 1M input × $0.95 + 1M output × $4.00 = $4.95.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(4.95, 5);
+  });
+
+  it("prices glm-5.1 at the official $1.4 / $4.4 tier", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "glm-5.1",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1.4 + 4.4, 5);
+  });
+
+  it("prices glm-4.5-flash at the official Free tier ($0)", () => {
+    // z.ai currently ships Free tiers for the *-flash family; $0 is the
+    // literal price on the page, not a placeholder. Anything non-zero
+    // here would mean we mis-copied a paid SKU's number into the row.
+    expect(isModelPriced("glm-4.5-flash")).toBe(true);
+    expect(isModelPriced("glm-4.7-flash")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "glm-4.5-flash",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBe(0);
+  });
+
+  it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
+    // opencode + OpenRouter route IDs through as `<provider>/<model>`.
+    // canonicalCandidates strips the prefix; without this the rows above
+    // would only fire on bare IDs and the dashboard would still show
+    // $0.00 for the runtime that actually triggered this work.
+    expect(isModelPriced("deepseek/deepseek-v4-flash")).toBe(true);
+    expect(isModelPriced("moonshotai/kimi-k2.6")).toBe(true);
+    expect(isModelPriced("zhipuai/glm-5.1")).toBe(true);
+    expect(isModelPriced("zhipuai/glm-4.5-air")).toBe(true);
+  });
 });
 
 describe("isModelPriced", () => {

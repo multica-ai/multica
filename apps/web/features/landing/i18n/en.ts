@@ -5,9 +5,14 @@ export function createEnDict(allowSignup: boolean): LandingDict {
   return {
   header: {
     github: "GitHub",
-    login: "Log in",
+    cta: "Get started",
     dashboard: "Dashboard",
+    docs: "Docs",
     changelog: "Changelog",
+    useCases: "Use cases",
+    navigation: "Primary navigation",
+    openMenu: "Open navigation menu",
+    closeMenu: "Close navigation menu",
   },
 
   hero: {
@@ -96,7 +101,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 11 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 12 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -111,7 +116,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 11 supported coding tools \u2014 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 12 supported coding tools \u2014 Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -131,7 +136,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 11 supported coding tools (Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 12 supported coding tools (Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -187,7 +192,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 11 coding tools out of the box: Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 12 coding tools out of the box: Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -228,6 +233,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "Features", href: "#features" },
           { label: "How it Works", href: "#how-it-works" },
+          { label: "Use cases", href: "/usecases" },
           { label: "Changelog", href: "/changelog" },
           { label: "Download", href: "/download" },
         ],
@@ -286,6 +292,157 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.3.13",
+        date: "2026-06-01",
+        title: "Skill Search and CLI Updates",
+        changes: [],
+        features: [
+          "The CLI can now search Skills and list pull requests linked to an Issue, making release checks and automation audits easier from the terminal",
+          "Teams can change squad member roles from the CLI without opening the app",
+          "Agent lists can be filtered by runtime machine, so teams can quickly find the agents tied to a device or local service",
+          "SMTP relays now support secure SMTPS connections on port 465",
+          "OpenCode runtimes can use MCP settings saved on an agent",
+          "OpenCode agents now expose model variants as thinking controls and pass the selected effort through the runtime",
+        ],
+        improvements: [
+          "Mobile Issue headers now use cleaner controls that stay easier to reach on small screens",
+          "Chat history rows show running states and actions more predictably",
+          "Importing the same Skill twice now reports a clear result instead of interrupting the flow",
+        ],
+        fixes: [
+          "Replies stay attached to the exact comment they were sent under",
+          "Claude runs are less likely to stall while prompts are being sent",
+          "Self-hosted local runtime setup links now point users to the right addresses",
+          "MCP setup guidance and runtime support checks now match what the product can run",
+          "Execution logs now clear active-row highlights after the related work finishes",
+        ],
+      },
+      {
+        version: "0.3.12",
+        date: "2026-05-29",
+        title: "Issue Session Resume and Korean Support",
+        changes: [],
+        features: [
+          "Agents that continue work from an Issue comment now resume the previous session instead of starting over, keeping the task context intact",
+          "Multica now supports Korean across the app, public site, and documentation, including Korean docs pages and localized date formatting",
+          "Issue pages now keep active agent work visible near the title, with a cleaner view when multiple agents are working at once",
+          "Agents can scan Issue discussions faster with thread previews, reply counts, and recent activity before opening the full conversation",
+          "OpenClaw runtimes can use the MCP setup saved on an agent, and Claude Opus 4.8 is available in model selection and usage estimates",
+        ],
+        improvements: [
+          "Detail pages now share clearer breadcrumb headers, making Issues, projects, runtimes, skills, agents, and squads feel more consistent",
+          "Resumed agent tasks spend less time re-reading comments they already have, so follow-up work returns to the right discussion faster",
+          "Issue mention guidance and CLI command snippets are easier to read and safer to copy",
+        ],
+        fixes: [
+          "Agent skills stay visible after updates, archive, restore, template creation, and environment changes",
+          "Parent Issues assigned to a single agent continue when that agent completes a child Issue",
+          "Desktop now groups WSL2 local runtimes under the local machine when they belong to the current user",
+          "CLI login now accepts Cloud Node tokens",
+        ],
+      },
+      {
+        version: "0.3.11",
+        date: "2026-05-28",
+        title: "Antigravity CLI Support",
+        changes: [],
+        features: [
+          "Antigravity CLI is now a supported coding runtime",
+          "Agent settings now include MCP configuration for Hermes, Kimi, and Kiro",
+          "Self-hosted admins can turn off self-service workspace creation",
+          "Desktop local runtimes can renew access tokens before they expire",
+        ],
+        improvements: [
+          "Helm charts can be published to GHCR, and email setup docs are clearer",
+          "Task transcripts show shorter, safer working-folder labels",
+          "New Issues stay at the top in manual boards, and deleted Issues stay out of recents",
+          "Local runtime machines are grouped by device name",
+        ],
+        fixes: [
+          "Terminal task completion retries brief callback failures",
+          "Local-directory runs preserve existing CLAUDE.md, AGENTS.md, and GEMINI.md files",
+          "Windows Pi runs keep multi-line prompts intact",
+          "Provider logos render consistently",
+          "Daemon cleanup skips incomplete parent-task metadata",
+        ],
+      },
+      {
+        version: "0.3.10",
+        date: "2026-05-27",
+        title: "Local Working Directories",
+        changes: [],
+        features: [
+          "Projects can now use a local working directory on Desktop, so tasks can run in an existing folder while Multica shows when another task is waiting for that directory",
+          "Autopilot webhook triggers can now filter incoming events and actions before work starts, with docs linked directly from the setup flow",
+          "Swimlane views can group Issues by parent Issue, project, or assignee, making large boards easier to slice by how the team plans work",
+          "Comments now support selecting multiple attachments and keeping, removing, or replacing attachments while editing",
+        ],
+        improvements: [
+          "Chinese product copy is more consistent across navigation, settings, search, and runtime screens",
+          "The frontend codebase received accessibility and React cleanup across common screens, and mobile checks now run only when mobile code changes",
+          "CLI list output is cleaner for automated readers, and squad lists now show member counts when available",
+        ],
+        fixes: [
+          "Swimlane lanes no longer appear empty when nested Issues load beyond the first page",
+          "Creating a sub-Issue with an intelligent agent now preserves the parent Issue relationship",
+          "Scheduled autopilot titles and descriptions now use the trigger's configured timezone",
+          "Comment editors avoid duplicate live-update flashes, keep text after failed sends, and apply mention behavior consistently when edited",
+          "Code blocks without a detected language now render their text instead of an empty block",
+          "Desktop and web avatars now resolve relative upload paths correctly",
+          "Codex, Cursor, and Hermes runtime handling received fixes for Desktop discovery, command arguments, usage attribution, and clearer stalled-run diagnostics",
+          "Private intelligent agents can no longer be triggered by plain comments from users who cannot access them",
+          "Several UI details were cleaned up across GitHub settings, project creation, board sorting, and agent skill screens",
+        ],
+      },
+      {
+        version: "0.3.9",
+        date: "2026-05-26",
+        title: "Swimlanes & More Predictable Issues",
+        changes: [],
+        features: [
+          "Issues now support a swimlane view, letting teams review parent work and status columns together when large projects have many subtasks",
+          "Issue lists now support drag-and-drop ordering, sticky group headers, and stable ordering when more results load",
+        ],
+        improvements: [
+          "The CLI now shows the local service version in status output and uses cleaner status fields",
+          "Self-hosting guidance now explains the hourly usage rollup required for accurate usage views, with updated English and Chinese troubleshooting notes",
+          "Agent skill settings were simplified before release so unsupported local-skill controls no longer appear in the product",
+          "Dependency checks are stricter, helping missing packages surface earlier before builds or desktop runs",
+        ],
+        fixes: [
+          "GitHub PRs now finish linked Issues only when the PR clearly says it closes them, so reference-only links no longer close work by accident",
+          "Parent/child Issue automation waits for dependency checks before starting queued follow-up work, and agent-driven status changes trigger the right assignee",
+          "Issue threads and list pages keep their order when loading more content, and board drag positions stay stable",
+          "Chat resize behavior, board-card assignee rows, and XML parsing security received smaller stability fixes",
+        ],
+      },
+      {
+        version: "0.3.8",
+        date: "2026-05-25",
+        title: "Multica for iOS, Helm Self-Hosting & Smoother Collaboration",
+        changes: [],
+        features: [
+          "Multica for iOS is now available as our first official usable mobile client, covering login, workspaces, inbox, Issues, projects, chat, comments, reactions, presence, and live updates; it is not on the App Store yet, so users need to build and install it manually",
+          "Self-hosted teams can now deploy Multica to Kubernetes with a Helm chart, while Docker-based installs keep clearer port and URL controls",
+          "Project resource pickers now include repository search, and workspace repository settings can store descriptions that help agents understand each codebase",
+          "Runtime usage now recognizes DeepSeek, Kimi K2.6, Zhipu GLM, and long-context Claude Opus model costs more accurately",
+          "The public site now supports use-case pages and a clearer path to Docs, Changelog, and getting started",
+        ],
+        improvements: [
+          "Squad avatars and board cards now show richer hover details, clearer member information, and better live status handling",
+          "Desktop tabs better preserve position in long Issues and chats when switching views, with navigation that avoids duplicate history entries",
+          "Code and rich-text content are easier to read, with literal command text preserved and editor styling split into focused areas",
+          "Repository descriptions now travel with the workspace context given to agents, so assigned work can include more useful project background",
+          "Documentation and README content now better reflect mobile support, automatic workflows, license details, and self-host options",
+        ],
+        fixes: [
+          "Issue timelines stay in chronological order when live comments and activity arrive close together",
+          "Codex runs no longer inherit hidden host memory during Multica tasks, and Pi runs receive a cleaner end-of-input signal",
+          "Local runtime delete actions now avoid self-healing rows that would immediately reappear, and dependency updates close server security advisories",
+          "Title fields now refresh safely after external updates, and markdown code no longer uses ligatures that can distort command flags",
+        ],
+      },
       {
         version: "0.3.6",
         date: "2026-05-22",

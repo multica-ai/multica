@@ -564,6 +564,50 @@ describe("CreateIssueModal", () => {
     );
   });
 
+  // Manual → agent must forward parent_issue_id when the modal was opened
+  // from "Add sub issue". Before this, the agent panel received no parent
+  // context and the new issue was filed as a standalone — silently dropping
+  // the sub-issue intent set by openCreateSubIssue. The parent_issue_identifier
+  // tags along so the agent panel can render a "Sub-issue of MUL-XX" chip
+  // without an extra round-trip.
+  //
+  // The identifier fallback matters here: the mocked issueDetailOptions
+  // resolves to null (parent query not hydrated), so without the
+  // `data.parent_issue_identifier` fallback the agent chip would render as
+  // "Sub-issue of " with an empty tail. The UUID alone still wires the
+  // sub-issue relationship correctly, but the visible affordance breaks.
+  it("forwards parent_issue_id and falls back to seeded identifier when switching to agent mode", async () => {
+    const user = userEvent.setup();
+    const onSwitchMode = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={onSwitchMode}
+        data={{
+          parent_issue_id: "parent-uuid-1",
+          parent_issue_identifier: "MUL-2534",
+        }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+        backlogHintIssueId={null}
+        setBacklogHintIssueId={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+
+    expect(onSwitchMode).toHaveBeenCalledTimes(1);
+    expect(onSwitchMode.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        prompt: "Refactor auth",
+        parent_issue_id: "parent-uuid-1",
+        parent_issue_identifier: "MUL-2534",
+      }),
+    );
+  });
+
   // Start date is a low-frequency field — by default it lives behind the
   // ⋯ overflow menu and is not rendered inline. Clicking the overflow
   // entry opens it (and mounts the inline pill so the popover has an

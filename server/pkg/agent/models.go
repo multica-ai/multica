@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -82,11 +83,10 @@ const modelCacheTTL = 60 * time.Second
 // openclaw) it shells out with caching and falls back to the static
 // list on failure.
 //
-// For claude and codex, the static catalog is augmented with per-model
-// thinking-level options discovered from the local CLI (see
-// discoverClaudeThinking / discoverCodexThinking). Discovery failures
-// silently leave Thinking == nil on each entry, which the UI treats
-// as "no picker for this model" rather than blocking model selection.
+// For claude, codex, and opencode, the catalog is augmented with per-model
+// thinking-level options discovered from the local CLI. Discovery failures
+// silently leave Thinking == nil on each entry, which the UI treats as
+// "no picker for this model" rather than blocking model selection.
 //
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
@@ -102,6 +102,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return models, nil
 	case "gemini":
 		return geminiStaticModels(), nil
+	case "antigravity":
+		// Antigravity CLI (`agy`) does not expose a `--model` flag today;
+		// model selection lives in the user's Antigravity settings and is
+		// communicated to the backend internally by the CLI itself. Return
+		// an empty catalog so the daemon's model_list endpoint succeeds
+		// without populating a misleading dropdown.
+		return []Model{}, nil
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -123,7 +130,7 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			return discoverKiroModels(ctx, executablePath)
 		})
 	case "opencode":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
 		})
 	case "pi":
@@ -140,14 +147,20 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 }
 
 // ModelSelectionSupported reports whether setting `agent.model` has
-// any effect for the given provider. Today every provider in the
-// registry honours `opts.Model` end-to-end: Hermes routes it through
-// the ACP `session/set_model` RPC before each prompt, which means
-// the UI's dropdown choice is carried all the way down to the LLM
-// call. The helper is retained so we can add a `return false` branch
-// the next time a provider legitimately ignores model selection.
+// any effect for the given provider. Most providers honour `opts.Model`
+// end-to-end — Hermes routes it through the ACP `session/set_model` RPC
+// before each prompt, Claude / Codex / Cursor / Gemini / Copilot / Kimi /
+// Kiro / OpenCode / OpenClaw / Pi pass it via flag or session config.
+//
+// Antigravity is the lone exception: `agy` has no `--model` flag today,
+// and the backend in antigravity.go deliberately drops opts.Model on the
+// floor. Returning false here makes the UI render a disabled
+// "Managed by runtime" picker instead of an empty dropdown plus a
+// silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
-	_ = providerType
+	if providerType == "antigravity" {
+		return false
+	}
 	return true
 }
 
@@ -175,6 +188,13 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 	return models, nil
 }
 
+func discoveryCacheKey(providerType, executablePath string) string {
+	if executablePath == "" {
+		return providerType
+	}
+	return providerType + ":" + executablePath
+}
+
 // ── Static catalogs ──
 
 // claudeStaticModels reflects the Claude Code CLI's accepted --model
@@ -184,6 +204,7 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
 		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
 		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
 		{ID: "claude-opus-4-6", Label: "Claude Opus 4.6", Provider: "anthropic"},
@@ -316,9 +337,12 @@ func isOpenAIReasoningSeriesID(id string) bool {
 
 // ── Dynamic discovery ──
 
-// discoverOpenCodeModels runs `opencode models` and parses its tabular
-// output. The CLI prints `provider/model` rows; we emit them verbatim
-// as IDs so what the user sees matches what `--model` accepts.
+// discoverOpenCodeModels runs `opencode models --verbose` and parses its
+// output. The CLI prints `provider/model` rows, followed by JSON metadata
+// when verbose mode is enabled; we emit IDs verbatim so what the user sees
+// matches what `--model` accepts, and project any model `variants` into the
+// thinking-level picker because OpenCode's `run --variant` flag is its
+// provider-specific reasoning-effort surface.
 // On any failure (CLI missing, parse error, timeout) we fall back to
 // an empty list so the creatable UI still works.
 func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model, error) {
@@ -330,51 +354,191 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	cmd := exec.CommandContext(runCtx, executablePath, "models", "--verbose")
 	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		return []Model{}, nil
+		cmd = exec.CommandContext(runCtx, executablePath, "models")
+		hideAgentWindow(cmd)
+		out, err = cmd.Output()
+		if err != nil {
+			return []Model{}, nil
+		}
 	}
 	return parseOpenCodeModels(string(out)), nil
 }
 
 // parseOpenCodeModels accepts the `opencode models` text output and
-// extracts IDs. Output format (v0.x): a header row followed by rows
-// whose first whitespace-delimited field is `provider/model`.
+// extracts IDs. Non-verbose output is one `provider/model` row per line.
+// Verbose output appends a pretty-printed JSON object after each ID; when
+// that object contains `variants`, each enabled variant becomes a thinking
+// level that the backend later passes through `opencode run --variant`.
 func parseOpenCodeModels(output string) []Model {
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lines := strings.Split(output, "\n")
 	var models []Model
-	seen := map[string]bool{}
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	indexByID := map[string]int{}
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
-		first := strings.Fields(line)
-		if len(first) == 0 {
+		id := parseOpenCodeModelIDLine(line)
+		if id == "" {
 			continue
 		}
-		id := first[0]
-		if !strings.Contains(id, "/") {
+		idx, seen := indexByID[id]
+		if !seen {
+			provider := ""
+			if slash := strings.Index(id, "/"); slash > 0 {
+				provider = id[:slash]
+			}
+			idx = len(models)
+			indexByID[id] = idx
+			models = append(models, Model{ID: id, Label: id, Provider: provider})
+		}
+
+		next := i + 1
+		for next < len(lines) && strings.TrimSpace(lines[next]) == "" {
+			next++
+		}
+		if next >= len(lines) || !strings.HasPrefix(strings.TrimSpace(lines[next]), "{") {
 			continue
 		}
-		// Skip the header row (opencode prints e.g. PROVIDER/MODEL in caps).
-		if id == strings.ToUpper(id) {
-			continue
+		raw, resumeAt := collectOpenCodeModelJSON(lines, next)
+		if json.Valid(raw) {
+			annotateOpenCodeModelMetadata(&models[idx], raw)
 		}
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		provider := ""
-		if i := strings.Index(id, "/"); i > 0 {
-			provider = id[:i]
-		}
-		models = append(models, Model{ID: id, Label: id, Provider: provider})
+		i = resumeAt - 1
 	}
 	return models
+}
+
+func parseOpenCodeModelIDLine(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return ""
+	}
+	id := fields[0]
+	if strings.HasPrefix(id, `"`) || strings.HasPrefix(id, "{") || strings.HasPrefix(id, "[") {
+		return ""
+	}
+	if !strings.Contains(id, "/") {
+		return ""
+	}
+	// Skip header rows such as PROVIDER/MODEL.
+	if id == strings.ToUpper(id) {
+		return ""
+	}
+	return id
+}
+
+func collectOpenCodeModelJSON(lines []string, start int) ([]byte, int) {
+	var b strings.Builder
+	for i := start; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if i > start && parseOpenCodeModelIDLine(line) != "" {
+			return []byte(b.String()), i
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(lines[i])
+		if json.Valid([]byte(b.String())) {
+			return []byte(b.String()), i + 1
+		}
+	}
+	return []byte(b.String()), len(lines)
+}
+
+type opencodeModelMetadata struct {
+	Reasoning bool                            `json:"reasoning"`
+	Variants  map[string]opencodeModelVariant `json:"variants"`
+}
+
+type opencodeModelVariant struct {
+	Disabled        bool            `json:"disabled"`
+	ReasoningEffort string          `json:"reasoningEffort"`
+	Thinking        json.RawMessage `json:"thinking"`
+}
+
+var opencodeVariantLabel = map[string]string{
+	"none":    "None",
+	"minimal": "Minimal",
+	"low":     "Low",
+	"medium":  "Medium",
+	"high":    "High",
+	"xhigh":   "Extra high",
+	"max":     "Max",
+}
+
+var opencodeVariantOrder = map[string]int{
+	"none":    0,
+	"minimal": 1,
+	"low":     2,
+	"medium":  3,
+	"high":    4,
+	"xhigh":   5,
+	"max":     6,
+}
+
+func annotateOpenCodeModelMetadata(model *Model, raw []byte) {
+	var meta opencodeModelMetadata
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return
+	}
+	if !meta.Reasoning && !openCodeVariantsLookReasoning(meta.Variants) {
+		return
+	}
+	levels := openCodeThinkingLevelsFromVariants(meta.Variants)
+	if len(levels) == 0 {
+		return
+	}
+	model.Thinking = &ModelThinking{SupportedLevels: levels}
+}
+
+func openCodeVariantsLookReasoning(variants map[string]opencodeModelVariant) bool {
+	for name, variant := range variants {
+		if _, known := opencodeVariantOrder[name]; known {
+			return true
+		}
+		if variant.ReasoningEffort != "" || len(variant.Thinking) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func openCodeThinkingLevelsFromVariants(variants map[string]opencodeModelVariant) []ThinkingLevel {
+	if len(variants) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(variants))
+	for value, variant := range variants {
+		if value == "" || variant.Disabled {
+			continue
+		}
+		values = append(values, value)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		left, leftKnown := opencodeVariantOrder[values[i]]
+		right, rightKnown := opencodeVariantOrder[values[j]]
+		if leftKnown && rightKnown {
+			return left < right
+		}
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		return values[i] < values[j]
+	})
+	levels := make([]ThinkingLevel, 0, len(values))
+	for _, value := range values {
+		label, ok := opencodeVariantLabel[value]
+		if !ok {
+			label = strings.Title(strings.ReplaceAll(value, "-", " ")) //nolint:staticcheck
+		}
+		levels = append(levels, ThinkingLevel{Value: value, Label: label})
+	}
+	return levels
 }
 
 // discoverPiModels runs `pi --list-models` and parses its output.
@@ -697,42 +861,63 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 // the caller can distinguish "parsed with no models" (valid but
 // empty catalog) from "couldn't find the structure at all".
 func parseACPSessionNewModels(raw json.RawMessage) []Model {
+	type acpModelInfo struct {
+		ModelID      string `json:"modelId"`
+		ModelIDSnake string `json:"model_id"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+	}
 	var resp struct {
 		Models struct {
-			AvailableModels []struct {
-				ModelID     string `json:"modelId"`
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			} `json:"availableModels"`
-			CurrentModelID string `json:"currentModelId"`
+			AvailableModels      []acpModelInfo `json:"availableModels"`
+			AvailableModelsSnake []acpModelInfo `json:"available_models"`
+			CurrentModelID       string         `json:"currentModelId"`
+			CurrentModelIDSnake  string         `json:"current_model_id"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil
 	}
-	models := make([]Model, 0, len(resp.Models.AvailableModels))
+	availableModels := resp.Models.AvailableModels
+	if len(availableModels) == 0 && resp.Models.AvailableModelsSnake != nil {
+		availableModels = resp.Models.AvailableModelsSnake
+	}
+	currentModelID := strings.TrimSpace(resp.Models.CurrentModelID)
+	if currentModelID == "" {
+		currentModelID = strings.TrimSpace(resp.Models.CurrentModelIDSnake)
+	}
+	models := make([]Model, 0, len(availableModels))
 	seen := map[string]bool{}
-	for _, m := range resp.Models.AvailableModels {
-		if m.ModelID == "" || seen[m.ModelID] {
+	for _, m := range availableModels {
+		modelID := strings.TrimSpace(m.ModelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(m.ModelIDSnake)
+		}
+		if modelID == "" || seen[modelID] {
 			continue
 		}
-		seen[m.ModelID] = true
-		label := m.Name
-		if label == "" {
-			label = m.ModelID
-		}
+		seen[modelID] = true
+		label := acpModelLabel(m.Name, modelID)
 		provider := ""
-		if idx := strings.Index(m.ModelID, ":"); idx > 0 {
-			provider = m.ModelID[:idx]
+		if idx := strings.Index(modelID, ":"); idx > 0 {
+			provider = modelID[:idx]
 		}
 		models = append(models, Model{
-			ID:       m.ModelID,
+			ID:       modelID,
 			Label:    label,
 			Provider: provider,
-			Default:  m.ModelID == resp.Models.CurrentModelID,
+			Default:  modelID == currentModelID,
 		})
 	}
 	return models
+}
+
+func acpModelLabel(name, modelID string) string {
+	label := strings.TrimSpace(name)
+	if label == "" || strings.EqualFold(label, "unknown") {
+		return modelID
+	}
+	return label
 }
 
 // discoverCursorModels runs `cursor-agent --list-models` and parses

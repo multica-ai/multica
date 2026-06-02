@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -144,9 +146,9 @@ func TestInferCopilotProvider(t *testing.T) {
 		"raptor-mini":       "",
 		// negative cases: must not be misidentified as OpenAI
 		// reasoning series even though they start with `o`.
-		"opus-fake":         "",
-		"omni":              "",
-		"o":                 "",
+		"opus-fake": "",
+		"omni":      "",
+		"o":         "",
 	}
 	for id, want := range cases {
 		if got := inferCopilotProvider(id); got != want {
@@ -281,6 +283,126 @@ nonprefixed-line
 	}
 	if models[1].ID != "anthropic/claude-sonnet-4-6" || models[1].Provider != "anthropic" {
 		t.Errorf("unexpected second model: %+v", models[1])
+	}
+}
+
+func TestParseOpenCodeModelsVerboseVariants(t *testing.T) {
+	input := `openai/gpt-5
+{
+  "id": "gpt-5",
+  "name": "GPT-5",
+  "reasoning": true,
+  "variants": {
+    "high": { "reasoningEffort": "high" },
+    "low": { "reasoningEffort": "low" },
+    "xhigh": { "reasoningEffort": "xhigh" },
+    "fast-mode": { "reasoningEffort": "low" },
+    "disabled": { "disabled": true }
+  }
+}
+anthropic/claude-sonnet-4-6
+{
+  "id": "claude-sonnet-4-6",
+  "reasoning": true,
+  "variants": {
+    "max": { "thinking": { "type": "enabled", "budgetTokens": 32000 } },
+    "high": { "thinking": { "type": "enabled", "budgetTokens": 16000 } }
+  }
+}
+`
+	models := parseOpenCodeModels(input)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	if models[0].Thinking == nil {
+		t.Fatalf("expected first model to expose thinking variants")
+	}
+	got := make([]string, 0, len(models[0].Thinking.SupportedLevels))
+	for _, lvl := range models[0].Thinking.SupportedLevels {
+		got = append(got, lvl.Value)
+		if lvl.Value == "xhigh" && lvl.Label != "Extra high" {
+			t.Errorf("xhigh label: got %q, want Extra high", lvl.Label)
+		}
+		if lvl.Value == "fast-mode" && lvl.Label != "Fast Mode" {
+			t.Errorf("custom variant label: got %q, want Fast Mode", lvl.Label)
+		}
+	}
+	want := []string{"low", "high", "xhigh", "fast-mode"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("variant order/values: got %v, want %v", got, want)
+	}
+	if models[1].Thinking == nil || len(models[1].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("expected second model variants, got %+v", models[1].Thinking)
+	}
+}
+
+func TestParseOpenCodeModelsMalformedVerboseBlockKeepsFollowingModels(t *testing.T) {
+	input := `openai/gpt-5
+{
+  "id": "gpt-5",
+  "reasoning": true,
+  "variants": {
+    "high": {}
+  }
+anthropic/claude-sonnet-4-6
+{
+  "id": "claude-sonnet-4-6",
+  "reasoning": true,
+  "variants": {
+    "high": {},
+    "max": {}
+  }
+}
+`
+	models := parseOpenCodeModels(input)
+	if len(models) != 2 {
+		t.Fatalf("expected both model rows to survive malformed JSON, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "openai/gpt-5" {
+		t.Fatalf("unexpected first model: %+v", models[0])
+	}
+	if models[0].Thinking != nil {
+		t.Fatalf("malformed first JSON block should not annotate thinking: %+v", models[0].Thinking)
+	}
+	if models[1].ID != "anthropic/claude-sonnet-4-6" {
+		t.Fatalf("unexpected second model: %+v", models[1])
+	}
+	if models[1].Thinking == nil || len(models[1].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("valid following JSON block should still annotate thinking: %+v", models[1].Thinking)
+	}
+}
+
+func TestDiscoverOpenCodeModelsFallsBackWhenVerboseFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "opencode")
+	script := `#!/bin/sh
+if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then
+  exit 2
+fi
+if [ "$1" = "models" ]; then
+  cat <<'EOF'
+PROVIDER/MODEL                     CONTEXT  MAX_OUT
+openai/gpt-4o                      128000   16384
+EOF
+  exit 0
+fi
+exit 1
+`
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverOpenCodeModels(context.Background(), fake)
+	if err != nil {
+		t.Fatalf("discoverOpenCodeModels: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected fallback non-verbose model, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "openai/gpt-4o" || models[0].Thinking != nil {
+		t.Fatalf("unexpected fallback model: %+v", models[0])
 	}
 }
 
@@ -511,6 +633,32 @@ func TestParseHermesSessionNewModels(t *testing.T) {
 	}
 }
 
+func TestParseHermesSessionNewModelsSnakeCaseAndUnknownNames(t *testing.T) {
+	raw := []byte(`{
+      "session_id": "ses_123",
+      "models": {
+        "available_models": [
+          {"model_id": "nous:moonshotai/kimi-k2.6", "name": "Unknown", "description": "Provider: Nous"},
+          {"model_id": "nous:anthropic/claude-sonnet-4.6", "name": "unknown", "description": "Provider: Nous"}
+        ],
+        "current_model_id": "nous:moonshotai/kimi-k2.6"
+      }
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	if models[0].Label != "nous:moonshotai/kimi-k2.6" {
+		t.Errorf("Unknown label should fall back to model id, got %+v", models[0])
+	}
+	if !models[0].Default {
+		t.Errorf("snake_case current_model_id should mark default: %+v", models[0])
+	}
+	if models[1].Label != "nous:anthropic/claude-sonnet-4.6" {
+		t.Errorf("lowercase unknown label should fall back to model id, got %+v", models[1])
+	}
+}
+
 func TestParseHermesSessionNewModelsMissingField(t *testing.T) {
 	// session/new without the models field — older hermes or
 	// failed _build_model_state — should yield nil so the caller
@@ -533,6 +681,18 @@ func TestHermesModelSelectionSupported(t *testing.T) {
 	// not be disabled for it.
 	if !ModelSelectionSupported("hermes") {
 		t.Error("hermes should be model-selection-supported now that set_session_model is wired")
+	}
+}
+
+// TestAntigravityModelSelectionUnsupported pins that the antigravity
+// provider reports model selection as unsupported: `agy` has no
+// `--model` flag and antigravityBackend deliberately drops opts.Model on
+// the floor, so the UI must render a disabled "Managed by runtime"
+// picker rather than an empty dropdown that accepts a silently-ignored
+// custom value.
+func TestAntigravityModelSelectionUnsupported(t *testing.T) {
+	if ModelSelectionSupported("antigravity") {
+		t.Error("antigravity should not be model-selection-supported: agy has no --model flag")
 	}
 }
 

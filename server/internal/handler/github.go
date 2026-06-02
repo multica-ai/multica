@@ -88,8 +88,8 @@ type GitHubPullRequestResponse struct {
 }
 
 type GitHubConnectResponse struct {
-	URL       string `json:"url"`
-	Configured bool  `json:"configured"`
+	URL        string `json:"url"`
+	Configured bool   `json:"configured"`
 }
 
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
@@ -489,6 +489,19 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 // version numbers like "v1.2-3".
 var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-(\d+)\b`)
 
+// closingIdentifierRe extracts identifiers that appear immediately after a
+// GitHub-style closing keyword ("close[sd]?", "fix(e[sd])?", "resolve[sd]?"),
+// optionally separated by a colon and whitespace. Matching is intentionally
+// strict on adjacency — "Fix MUL-1" closes MUL-1, but "Fix login MUL-1"
+// does not. This mirrors GitHub's own closing-keyword grammar and is the
+// gate the webhook uses to decide whether to auto-advance an issue to
+// `done` after a PR merges. References like "Follow up in MUL-2" and bare
+// title prefixes like "MUL-1: ..." link the PR (via identifierRe) but
+// never auto-close.
+var closingIdentifierRe = regexp.MustCompile(
+	`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{1,9})-(\d+)\b`,
+)
+
 // HandleGitHubWebhook (POST /api/webhooks/github) is GitHub's destination for
 // every event from a connected installation. We verify HMAC signature, route
 // on X-GitHub-Event, and either upsert PR rows + auto-link to issues or
@@ -635,7 +648,7 @@ type ghPullRequestPayload struct {
 			AvatarURL string `json:"avatar_url"`
 		} `json:"user"`
 	} `json:"pull_request"`
-	Changes *ghPRChanges `json:"changes"`
+	Changes    *ghPRChanges `json:"changes"`
 	Repository struct {
 		Name  string `json:"name"`
 		Owner struct {
@@ -669,27 +682,27 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
-		WorkspaceID:           inst.WorkspaceID,
-		InstallationID:        inst.InstallationID,
-		RepoOwner:             p.Repository.Owner.Login,
-		RepoName:              p.Repository.Name,
-		PrNumber:              p.PullRequest.Number,
-		Title:                 p.PullRequest.Title,
-		State:                 state,
-		HtmlUrl:               p.PullRequest.HTMLURL,
-		Branch:                ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
-		AuthorLogin:           ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
-		AuthorAvatarUrl:       ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
-		MergedAt:              parseGHTime(p.PullRequest.MergedAt),
-		ClosedAt:              parseGHTime(p.PullRequest.ClosedAt),
-		PrCreatedAt:           parseGHTimeRequired(p.PullRequest.CreatedAt),
-		PrUpdatedAt:           parseGHTimeRequired(p.PullRequest.UpdatedAt),
-		HeadSha:               p.PullRequest.Head.SHA,
-		MergeableState:        mergeable,
-		ClearMergeableState:   pgtype.Bool{Bool: clearMergeable, Valid: true},
-		Additions:             p.PullRequest.Additions,
-		Deletions:             p.PullRequest.Deletions,
-		ChangedFiles:          p.PullRequest.ChangedFiles,
+		WorkspaceID:         inst.WorkspaceID,
+		InstallationID:      inst.InstallationID,
+		RepoOwner:           p.Repository.Owner.Login,
+		RepoName:            p.Repository.Name,
+		PrNumber:            p.PullRequest.Number,
+		Title:               p.PullRequest.Title,
+		State:               state,
+		HtmlUrl:             p.PullRequest.HTMLURL,
+		Branch:              ptrToText(strPtrOrNil(p.PullRequest.Head.Ref)),
+		AuthorLogin:         ptrToText(strPtrOrNil(p.PullRequest.User.Login)),
+		AuthorAvatarUrl:     ptrToText(strPtrOrNil(p.PullRequest.User.AvatarURL)),
+		MergedAt:            parseGHTime(p.PullRequest.MergedAt),
+		ClosedAt:            parseGHTime(p.PullRequest.ClosedAt),
+		PrCreatedAt:         parseGHTimeRequired(p.PullRequest.CreatedAt),
+		PrUpdatedAt:         parseGHTimeRequired(p.PullRequest.UpdatedAt),
+		HeadSha:             p.PullRequest.Head.SHA,
+		MergeableState:      mergeable,
+		ClearMergeableState: pgtype.Bool{Bool: clearMergeable, Valid: true},
+		Additions:           p.PullRequest.Additions,
+		Deletions:           p.PullRequest.Deletions,
+		ChangedFiles:        p.PullRequest.ChangedFiles,
 	})
 	if err != nil {
 		slog.Warn("github: upsert pr failed", "err", err)
@@ -701,7 +714,8 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 
 	// Auto-link: scan title/body/branch for issue identifiers, look them
 	// up in this workspace, attach the link rows. Idempotent (ON CONFLICT
-	// DO NOTHING) so re-firing the webhook doesn't duplicate.
+	// upserts the close_intent flag — see LinkIssueToPullRequest) so
+	// re-firing the webhook doesn't duplicate.
 	//
 	// RFC MUL-2414 §4.8: the PR mirror upsert above always runs (so re-enabling
 	// GitHub features restores history without backfill), but the link rows
@@ -711,43 +725,80 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	linkedIssueIDs := make([]string, 0)
 	if h.workspaceAutoLinkPRsEnabled(ctx, inst.WorkspaceID) {
 		idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
+		// closingIdents is the subset of identifiers that this PR explicitly
+		// declared via a closing keyword ("Closes/Fixes/Resolves MUL-X").
+		// Linking still happens for every mention (idents above), but the
+		// link row's close_intent column — and therefore whether the
+		// auto-advance gate eventually fires — is only set for keyword-
+		// declared identifiers. Bare title prefixes and branch-name
+		// references are link-only.
+		closingIdents := map[string]struct{}{}
+		for _, c := range extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body) {
+			closingIdents[c] = struct{}{}
+		}
+		// close_intent should follow the PR title/body while the PR is still
+		// editable before its terminal close event. Once GitHub has delivered
+		// a terminal event, later edit/synchronize webhooks must not rewrite
+		// the merge-time close decision.
+		preserveCloseIntent := p.Action != "closed" && (state == "merged" || state == "closed")
 		prefix := h.getIssuePrefix(ctx, inst.WorkspaceID)
+		// reevalIssues collects each issue whose link row we just touched so
+		// we can re-run the auto-advance gate against the persisted aggregate
+		// after every link upsert in this event. Driving the gate off
+		// persisted state (instead of "did *this* webhook declare closing
+		// intent?") is what fixes the multi-PR sibling case: a PR with
+		// `Closes MUL-1` merges first while a link-only sibling is still
+		// open, then the sibling closes later — its webhook has no closing
+		// keyword, but the earlier link row carries close_intent=true, so
+		// MUL-1 still advances.
+		reevalIssues := make([]db.Issue, 0, len(idents))
 		for _, id := range idents {
 			issue, ok := h.lookupIssueByIdentifier(ctx, inst.WorkspaceID, prefix, id)
 			if !ok {
 				continue
 			}
+			_, declared := closingIdents[id]
+			closeIntent := declared && !preserveCloseIntent
 			if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-				IssueID:        issue.ID,
-				PullRequestID:  pr.ID,
-				LinkedByType:   strToText("system"),
-				LinkedByID:     pgtype.UUID{},
+				IssueID:             issue.ID,
+				PullRequestID:       pr.ID,
+				CloseIntent:         closeIntent,
+				PreserveCloseIntent: preserveCloseIntent,
+				LinkedByType:        strToText("system"),
+				LinkedByID:          pgtype.UUID{},
 			}); err != nil {
 				slog.Warn("github: link failed", "err", err)
 				continue
 			}
 			linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
+			reevalIssues = append(reevalIssues, issue)
+		}
 
-			// A terminal PR event (`merged` or `closed`) may be the moment the
-			// last in-flight sibling resolves, so we re-evaluate the issue on
-			// both. We advance the issue to done when:
-			//   1. the issue isn't already terminal (`done` / `cancelled`);
-			//   2. no sibling PR is still `open` / `draft`;
-			//   3. at least one linked PR (this one or a sibling) is `merged`.
-			// Rule (3) prevents an "all closed-without-merge" sequence from
-			// silently auto-closing the issue — if nothing was ever delivered,
-			// the user should decide what to do manually.
-			if (state == "merged" || state == "closed") && issue.Status != "done" && issue.Status != "cancelled" {
-				counts, err := h.Queries.GetSiblingPullRequestStateCountsForIssue(ctx, db.GetSiblingPullRequestStateCountsForIssueParams{
-					IssueID: issue.ID,
-					ID:      pr.ID,
-				})
-				if err != nil {
-					slog.Warn("github: count sibling pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
+		// A terminal PR event (`merged` or `closed`) may be the moment the
+		// last in-flight sibling resolves. We re-evaluate every issue we
+		// just linked once both the PR row and the link row are persisted,
+		// so the aggregate query sees the freshest state. We advance the
+		// issue to done when:
+		//   1. the issue isn't already terminal (`done` / `cancelled`);
+		//   2. no linked PR is still `open` / `draft`;
+		//   3. at least one merged linked PR declared close_intent (a
+		//      "Closes/Fixes/Resolves" keyword on its link row).
+		// Rule (3) is what prevents "Follow up in MUL-2" / "Unblocks MUL-3"
+		// references from being treated the same as "Closes MUL-1", and
+		// also prevents an "all closed-without-merge" sequence from
+		// silently auto-closing the issue — if nothing carrying closing
+		// intent was ever delivered, the user should decide manually.
+		if state == "merged" || state == "closed" {
+			for _, issue := range reevalIssues {
+				if issue.Status == "done" || issue.Status == "cancelled" {
 					continue
 				}
-				anyMerged := state == "merged" || counts.MergedCount > 0
-				if counts.OpenCount == 0 && anyMerged {
+				counts, err := h.Queries.GetIssuePullRequestCloseAggregate(ctx, issue.ID)
+				if err != nil {
+					slog.Warn("github: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
+					continue
+				}
+				if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
 					h.advanceIssueToDone(ctx, issue, workspaceID)
 				}
 			}
@@ -757,7 +808,7 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	// Broadcast PR change to the workspace so any open issue detail page
 	// re-queries its PR list.
 	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
-		"pull_request": resp,
+		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
 }
@@ -979,6 +1030,29 @@ func extractIdentifiers(parts ...string) []string {
 	out := []string{}
 	for _, src := range parts {
 		for _, m := range identifierRe.FindAllStringSubmatch(src, -1) {
+			ident := strings.ToUpper(m[1]) + "-" + m[2]
+			if _, dup := seen[ident]; dup {
+				continue
+			}
+			seen[ident] = struct{}{}
+			out = append(out, ident)
+		}
+	}
+	return out
+}
+
+// extractClosingIdentifiers pulls every "PREFIX-NUMBER" identifier that
+// appears immediately after a GitHub-style closing keyword in the supplied
+// fields, deduplicating in input order. Identifiers in branch names are
+// intentionally excluded — callers should pass only title and body — because
+// branch names are not natural-language fields and treating "mul-1/fix-login"
+// as a close declaration would silently re-open the bug this gate is meant
+// to fix.
+func extractClosingIdentifiers(parts ...string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, src := range parts {
+		for _, m := range closingIdentifierRe.FindAllStringSubmatch(src, -1) {
 			ident := strings.ToUpper(m[1]) + "-" + m[2]
 			if _, dup := seen[ident]; dup {
 				continue

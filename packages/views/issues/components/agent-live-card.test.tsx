@@ -46,6 +46,9 @@ vi.mock("@multica/core/realtime", () => ({
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
     getActorName: (_: string, id: string) => (id ? `Agent ${id}` : "Agent"),
+    getActorInitials: (_: string, id: string) =>
+      id ? id.slice(0, 2).toUpperCase() : "AG",
+    getActorAvatarUrl: () => null,
   }),
 }));
 
@@ -57,9 +60,13 @@ vi.mock("../../common/actor-avatar", () => ({
 
 vi.mock("../../common/task-transcript", async () => {
   const buildTimeline = vi.fn().mockReturnValue([]);
+  const coalesceTimelineItems = vi.fn((items) => items);
+  const appendTimelineItem = vi.fn((items, item) => [...items, item]);
   return {
     TranscriptButton: () => <button data-testid="transcript-button">transcript</button>,
+    appendTimelineItem,
     buildTimeline,
+    coalesceTimelineItems,
   };
 });
 
@@ -298,29 +305,67 @@ describe("AgentLiveCard queued rendering", () => {
     expect(mockApi.cancelTask).not.toHaveBeenCalled();
   });
 
-  it("running tasks sort above queued tasks so the sticky slot stays on the active one", async () => {
-    const runningTask = makeTask("task-r", { status: "running" });
+  it("running tasks sort above queued tasks in the multi-agent accordion", async () => {
+    const runningTask = makeTask("task-r", { status: "running", agent_id: "agent-r" });
     const queuedTask = makeTask("task-q", {
       status: "queued",
+      agent_id: "agent-q",
       dispatched_at: null,
       started_at: null,
     });
     // Server returns queued first (created_at DESC), but the client must
-    // re-sort so the running banner takes the sticky position.
+    // re-sort so the running row leads the popover list.
     mockApi.getActiveTasksForIssue.mockResolvedValueOnce({
       tasks: [queuedTask, runningTask],
     });
 
     renderCard();
 
+    // Two agents → collapsed summary; the per-agent rows aren't in the DOM
+    // until the accordion is expanded.
     await waitFor(() => {
-      expect(screen.getByText(/is working/)).toBeTruthy();
-      expect(screen.getByText(/is queued/)).toBeTruthy();
+      expect(screen.getByText(/agents working/)).toBeTruthy();
+    });
+    expect(screen.queryByText(/is working/)).toBeNull();
+
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText(/agents working/));
     });
 
-    const working = screen.getByText(/is working/);
+    const working = await screen.findByText(/is working/);
     const queued = screen.getByText(/is queued/);
-    // Running banner appears earlier in the document order.
+    // Running row appears earlier in the document order.
     expect(working.compareDocumentPosition(queued) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("collapses multiple agents into a summary and exposes each agent's Stop inside the accordion", async () => {
+    const taskA = makeTask("task-a", { status: "running", agent_id: "agent-a" });
+    const taskB = makeTask("task-b", { status: "running", agent_id: "agent-b" });
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [taskA, taskB] });
+    mockApi.cancelTask.mockResolvedValue(undefined);
+
+    renderCard();
+
+    // Collapsed: one summary, no inline banners.
+    await waitFor(() => {
+      expect(screen.getByText(/2 agents working/)).toBeTruthy();
+    });
+    expect(screen.queryByText(/is working/)).toBeNull();
+
+    // Expand the accordion → one row per agent, each with its own Stop.
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText(/2 agents working/));
+    });
+    const [firstStop, secondStop] = await screen.findAllByText("Stop");
+    expect(secondStop).toBeTruthy();
+
+    // Stop on the first row → confirm → cancelTask fires for that task only.
+    await act(async () => {
+      rtlFireEvent.click(firstStop!);
+    });
+    await act(async () => {
+      rtlFireEvent.click(screen.getByRole("button", { name: "Stop task" }));
+    });
+    expect(mockApi.cancelTask).toHaveBeenCalledWith("issue-1", "task-a");
   });
 });

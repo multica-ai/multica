@@ -64,6 +64,8 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_direction?: "asc" | "desc";
 }
 
 export interface IssueActorRef {
@@ -95,6 +97,8 @@ export interface ListGroupedIssuesParams {
   label_ids?: string[];
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_direction?: "asc" | "desc";
 }
 
 /** Raw backend response shape for `GET /api/issues`. */
