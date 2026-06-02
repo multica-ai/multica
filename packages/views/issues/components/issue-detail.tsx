@@ -1023,11 +1023,20 @@ export function IssueDetail({
   // popover would stay open behind the newly auto-opened picker — two
   // popovers stacked. We close it explicitly in `addOptionalProp`.
   const [addPropPopoverOpen, setAddPropPopoverOpen] = useState(false);
-  // Virtuoso's `customScrollParent` wants the HTMLElement, not a ref. A plain
-  // `useRef.current` does not trigger a re-render when it populates, so the
-  // Virtuoso prop would never receive the element. Callback ref + state fixes
-  // that: setState triggers the re-render that hands Virtuoso the element.
-  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  // Virtuoso's `customScrollParent` wants the HTMLElement, not a ref.
+  // We store the element in a ref (no sync re-render on commit) and defer
+  // a single state flip to the next animation frame so Virtuoso mounts only
+  // after the scroll container's layout has stabilized — avoids #185.
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [virtuosoReady, setVirtuosoReady] = useState(false);
+  const scrollRefCallback = useCallback((el: HTMLDivElement | null) => {
+    scrollContainerRef.current = el;
+    if (el) {
+      requestAnimationFrame(() => setVirtuosoReady(true));
+    } else {
+      setVirtuosoReady(false);
+    }
+  }, []);
   const detailRootRef = useRef<HTMLDivElement>(null);
   const commentInputRef = useRef<CommentInputRef>(null);
   const replyControllersRef = useRef<Map<string, ReplyInputRef>>(new Map());
@@ -1045,12 +1054,13 @@ export function IssueDetail({
     }
   }, []);
   const scrollToTop = useCallback(() => {
-    scrollContainerEl?.scrollTo({ top: 0, behavior: "smooth" });
-  }, [scrollContainerEl]);
+    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
   const scrollToBottom = useCallback(() => {
-    if (!scrollContainerEl) return;
-    scrollContainerEl.scrollTo({ top: scrollContainerEl.scrollHeight, behavior: "smooth" });
-  }, [scrollContainerEl]);
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, []);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   // Per-session: which resolved threads the user has temporarily expanded.
@@ -1569,10 +1579,10 @@ export function IssueDetail({
   // (only the resolved-bar root is). Auto-expand the thread first; the
   // effect re-runs once items re-flatten.
   //
-  // `scrollContainerEl` is in deps because the component early-returns a
-  // loading skeleton while the issue query is pending. The scroll-container
-  // ref populates only on the post-loading render, so it's the signal that
-  // the timeline (and the deep-link target id) has actually rendered.
+  // `virtuosoReady` is in deps because the component early-returns a
+  // loading skeleton while the issue query is pending. The flag flips only
+  // after the scroll container ref populates and layout stabilizes, so it's
+  // the signal that the timeline (and the deep-link target id) has rendered.
   useEffect(() => {
     if (!requestedCommentId || items.length === 0) return;
     if (didHighlightRef.current === requestedCommentId) return;
@@ -1596,7 +1606,7 @@ export function IssueDetail({
     setHighlightedId(requestedCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
     return () => clearTimeout(fade);
-  }, [requestedCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
+  }, [requestedCommentId, items, targetIdx, virtuosoReady, replyToRoot, toggleResolvedExpand]);
 
   // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
   // the viewport — off-screen comments are invisible to browser find-in-page.
@@ -2498,7 +2508,7 @@ export function IssueDetail({
         {/* Content — scrollable */}
         <div className="flex flex-1 min-h-0">
         <div
-          ref={setScrollContainerEl}
+          ref={scrollRefCallback}
           data-tab-scroll-root
           className="relative flex-1 overflow-y-auto"
         >
@@ -2763,8 +2773,8 @@ export function IssueDetail({
               // heights vs real heights). Trying to satisfy both in one
               // path is what produced the bug history this PR closes.
               !requestedCommentId ? (
-                !scrollContainerEl ? (
-                  // Skeleton while the callback ref populates so the gap
+                !virtuosoReady ? (
+                  // Skeleton while the scroll container stabilizes so the gap
                   // between IssueDetail mount and Virtuoso mount doesn't
                   // flash empty.
                   <TimelineSkeleton />
@@ -2772,11 +2782,10 @@ export function IssueDetail({
                   <div className="mt-4">
                     <Virtuoso
                       key={`${wsId}:${id}`}
-                      customScrollParent={scrollContainerEl}
+                      customScrollParent={scrollContainerRef.current!}
                       data={items}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
-                      skipAnimationFrameInResizeObserver
                       // followOutput intentionally NOT set. Virtuoso treats
                       // it as a sticky "is at bottom" flag and resets
                       // scrollTop to maxScrollTop on every height-change
