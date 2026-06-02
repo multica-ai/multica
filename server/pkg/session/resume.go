@@ -177,8 +177,24 @@ func buildResumeContext(s *Session, cfg Config) ResumeContext {
 
 	ctx.TokensEstimated = estimateTokens(ctx)
 	if ctx.TokensEstimated > ResumeTokenCap {
-		ctx.Summary = truncateByTokens(ctx.Summary, ResumeTokenCap)
+		// Cap total context: reduce summary proportionally, then trim decisions.
+		summaryTokens := int(float64(len(strings.Fields(ctx.Summary))) * 1.3)
+		if summaryTokens > 0 {
+			// Allocate half the cap to summary, half to decisions+files.
+			summaryBudget := ResumeTokenCap / 2
+			ctx.Summary = truncateByTokens(ctx.Summary, summaryBudget)
+		}
+		// Trim decisions if still over cap after summary truncation.
 		ctx.TokensEstimated = estimateTokens(ctx)
+		for ctx.TokensEstimated > ResumeTokenCap && len(ctx.Decisions) > 1 {
+			ctx.Decisions = ctx.Decisions[:len(ctx.Decisions)-1]
+			ctx.TokensEstimated = estimateTokens(ctx)
+		}
+		// Trim files as last resort.
+		for ctx.TokensEstimated > ResumeTokenCap && len(ctx.FilesModified) > 0 {
+			ctx.FilesModified = ctx.FilesModified[:len(ctx.FilesModified)-1]
+			ctx.TokensEstimated = estimateTokens(ctx)
+		}
 	}
 	return ctx
 }

@@ -116,6 +116,28 @@ func (a *sessionServiceAdapter) CleanupExpired(ctx context.Context) (int, error)
 	return a.ts.repo.expireBefore(ctx, cutoff)
 }
 
+func (a *sessionServiceAdapter) ListSessions(_ context.Context, issueID uuid.UUID) ([]*Session, error) {
+	a.ts.repo.mu.Lock()
+	defer a.ts.repo.mu.Unlock()
+	var out []*Session
+	for _, s := range a.ts.repo.sessions {
+		if s.IssueID == issueID {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+func (a *sessionServiceAdapter) GetSession(_ context.Context, sessionID uuid.UUID) (*Session, error) {
+	a.ts.repo.mu.Lock()
+	defer a.ts.repo.mu.Unlock()
+	s, ok := a.ts.repo.sessions[sessionID]
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+	return s, nil
+}
+
 func buildResumerFromTest(svc *testService) *Resumer {
 	return NewResumer(&sessionServiceAdapter{ts: svc}, svc.config)
 }
@@ -751,8 +773,12 @@ func TestEdgeCase_SessionWithOver100Messages_Compression(t *testing.T) {
 		t.Errorf("after compression: got %d messages, want 100", len(data.Messages))
 	}
 
-	if data.Messages[0].Content != "message 50" {
-		t.Errorf("first retained message = %q, want 'message 50'", data.Messages[0].Content)
+	// First message is the compression summary; original messages start at index 1.
+	if data.Messages[0].Role != "system" {
+		t.Errorf("first message should be compression summary, got role %q", data.Messages[0].Role)
+	}
+	if data.Messages[1].Content != "message 51" {
+		t.Errorf("first retained original = %q, want 'message 51'", data.Messages[1].Content)
 	}
 	if data.Messages[99].Content != "message 149" {
 		t.Errorf("last retained message = %q, want 'message 149'", data.Messages[99].Content)
