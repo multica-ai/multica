@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	urlpath "path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -28,6 +30,9 @@ import (
 const ChecksumManifestName = "checksums.txt"
 
 const DefaultUpdateDownloadTimeout = 120 * time.Second
+const defaultUpdateAPIBase = "https://api.github.com"
+const updateAPIBaseEnv = "MULTICA_UPDATE_GH_API_BASE"
+const updateDownloadBaseEnv = "MULTICA_UPDATE_GH_DOWNLOAD_BASE"
 
 // GitHubRelease is the subset of the GitHub releases API response we need.
 type GitHubRelease struct {
@@ -122,6 +127,34 @@ func parseReleaseVersion(v string) ([3]int, bool) {
 type GitHubReleaseAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+func updateAPIBase() string {
+	base := strings.TrimSpace(os.Getenv(updateAPIBaseEnv))
+	if base == "" {
+		return defaultUpdateAPIBase
+	}
+	return strings.TrimRight(base, "/")
+}
+
+func updateReleaseURL(path string) string {
+	return updateAPIBase() + "/repos/multica-ai/multica/" + strings.TrimLeft(path, "/")
+}
+
+func rewriteAssetDownloadURL(rawURL string) string {
+	base := strings.TrimSpace(os.Getenv(updateDownloadBaseEnv))
+	if base == "" {
+		return rawURL
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	filename := urlpath.Base(parsed.Path)
+	if filename == "." || filename == "/" || filename == "" {
+		return rawURL
+	}
+	return strings.TrimRight(base, "/") + "/" + filename
 }
 
 func releaseArchiveExtension(goos string) string {
@@ -223,7 +256,7 @@ func verifyAssetSHA256(data []byte, expectedHex, assetName string) error {
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
+	req, err := http.NewRequest(http.MethodGet, updateReleaseURL("releases/tags/"+tag), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +282,7 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 // FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, updateReleaseURL("releases/latest"), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -383,14 +416,14 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	if err != nil {
 		return "", err
 	}
-	downloadURL := asset.BrowserDownloadURL
+	downloadURL := rewriteAssetDownloadURL(asset.BrowserDownloadURL)
 	assetName := asset.Name
 
 	// Pull the checksum manifest first so a release that is half-published
 	// (archives uploaded but checksums.txt not yet) fails before we eat the
 	// archive's bandwidth.
 	timeout := updateDownloadTimeoutOrDefault(downloadTimeout)
-	manifestData, err := fetchURLBytes(manifestAsset.BrowserDownloadURL, timeout)
+	manifestData, err := fetchURLBytes(rewriteAssetDownloadURL(manifestAsset.BrowserDownloadURL), timeout)
 	if err != nil {
 		return "", fmt.Errorf("download checksum manifest: %w", err)
 	}

@@ -154,6 +154,96 @@ func TestIsNewerVersion(t *testing.T) {
 	}
 }
 
+func TestUpdateAPIBase(t *testing.T) {
+	t.Run("defaults to GitHub API", func(t *testing.T) {
+		t.Setenv(updateAPIBaseEnv, "")
+		if got := updateAPIBase(); got != defaultUpdateAPIBase {
+			t.Fatalf("updateAPIBase() = %q, want %q", got, defaultUpdateAPIBase)
+		}
+	})
+
+	t.Run("uses environment override", func(t *testing.T) {
+		t.Setenv(updateAPIBaseEnv, "http://localhost:9876")
+		if got := updateAPIBase(); got != "http://localhost:9876" {
+			t.Fatalf("updateAPIBase() = %q", got)
+		}
+	})
+
+	t.Run("trims whitespace and trailing slashes", func(t *testing.T) {
+		t.Setenv(updateAPIBaseEnv, "  http://localhost:9876///  ")
+		if got := updateAPIBase(); got != "http://localhost:9876" {
+			t.Fatalf("updateAPIBase() = %q", got)
+		}
+	})
+
+	t.Run("whitespace falls back to default", func(t *testing.T) {
+		t.Setenv(updateAPIBaseEnv, "   ")
+		if got := updateAPIBase(); got != defaultUpdateAPIBase {
+			t.Fatalf("updateAPIBase() = %q, want %q", got, defaultUpdateAPIBase)
+		}
+	})
+}
+
+func TestUpdateReleaseURL(t *testing.T) {
+	t.Run("builds default GitHub release tag URL", func(t *testing.T) {
+		t.Setenv(updateAPIBaseEnv, "")
+		want := "https://api.github.com/repos/multica-ai/multica/releases/tags/v1.2.3"
+		if got := updateReleaseURL("releases/tags/v1.2.3"); got != want {
+			t.Fatalf("updateReleaseURL() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("builds relay latest release URL", func(t *testing.T) {
+		t.Setenv(updateAPIBaseEnv, "http://localhost:9876/")
+		want := "http://localhost:9876/repos/multica-ai/multica/releases/latest"
+		if got := updateReleaseURL("/releases/latest"); got != want {
+			t.Fatalf("updateReleaseURL() = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestRewriteAssetDownloadURL(t *testing.T) {
+	original := "https://github.com/multica-ai/multica/releases/download/v1.2.3/multica-cli-1.2.3-linux-amd64.tar.gz"
+
+	t.Run("passes through without override", func(t *testing.T) {
+		t.Setenv(updateDownloadBaseEnv, "")
+		if got := rewriteAssetDownloadURL(original); got != original {
+			t.Fatalf("rewriteAssetDownloadURL() = %q, want passthrough", got)
+		}
+	})
+
+	t.Run("rewrites to relay asset base", func(t *testing.T) {
+		t.Setenv(updateDownloadBaseEnv, "http://localhost:9876/assets")
+		want := "http://localhost:9876/assets/multica-cli-1.2.3-linux-amd64.tar.gz"
+		if got := rewriteAssetDownloadURL(original); got != want {
+			t.Fatalf("rewriteAssetDownloadURL() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("trims trailing slash from relay base", func(t *testing.T) {
+		t.Setenv(updateDownloadBaseEnv, "http://localhost:9876/assets/")
+		want := "http://localhost:9876/assets/multica-cli-1.2.3-linux-amd64.tar.gz"
+		if got := rewriteAssetDownloadURL(original); got != want {
+			t.Fatalf("rewriteAssetDownloadURL() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("whitespace override passes through", func(t *testing.T) {
+		t.Setenv(updateDownloadBaseEnv, "   ")
+		if got := rewriteAssetDownloadURL(original); got != original {
+			t.Fatalf("rewriteAssetDownloadURL() = %q, want passthrough", got)
+		}
+	})
+
+	t.Run("empty filename passes through", func(t *testing.T) {
+		t.Setenv(updateDownloadBaseEnv, "http://localhost:9876/assets")
+		raw := "https://github.com/"
+		if got := rewriteAssetDownloadURL(raw); got != raw {
+			t.Fatalf("rewriteAssetDownloadURL() = %q, want passthrough", got)
+		}
+	})
+}
+
 func TestFindChecksumManifestAsset(t *testing.T) {
 	t.Run("finds checksums.txt among assets", func(t *testing.T) {
 		assets := []GitHubReleaseAsset{
