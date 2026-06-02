@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -189,9 +190,33 @@ func textToPtr(t pgtype.Text) *string               { return util.TextToPtr(t) }
 func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
 func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
-func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
-func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
-func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
+
+// dateToPtr renders a DATE column as an ISO-8601 date string (YYYY-MM-DD), or
+// nil when the column is NULL.
+func dateToPtr(d pgtype.Date) *string {
+	if !d.Valid {
+		return nil
+	}
+	s := d.Time.Format("2006-01-02")
+	return &s
+}
+
+// parseDateParam parses an optional ISO-8601 date string into a pgtype.Date.
+// A nil/empty/unparseable input yields a zero (NULL) Date, which on the update
+// path means "leave unchanged" via COALESCE and on create means NULL.
+func parseDateParam(s *string) pgtype.Date {
+	if s == nil || strings.TrimSpace(*s) == "" {
+		return pgtype.Date{}
+	}
+	t, err := time.Parse("2006-01-02", strings.TrimSpace(*s))
+	if err != nil {
+		return pgtype.Date{}
+	}
+	return pgtype.Date{Time: t, Valid: true}
+}
+func timestampToPtr(t pgtype.Timestamptz) *string { return util.TimestampToPtr(t) }
+func uuidToPtr(u pgtype.UUID) *string             { return util.UUIDToPtr(u) }
+func int8ToPtr(v pgtype.Int8) *int64              { return util.Int8ToPtr(v) }
 
 // parseUUIDOrBadRequest validates a UUID string sourced from user input
 // (URL params, request body, headers). On invalid input it writes a 400

@@ -26,10 +26,17 @@ type ProjectResponse struct {
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
-	IssueCount  int64   `json:"issue_count"`
-	DoneCount   int64   `json:"done_count"`
+	StartDate   *string `json:"start_date"`
+	TargetDate  *string `json:"target_date"`
+	// Health is the most recent project update's health (on_track/at_risk/
+	// off_track), or nil when the project has no updates yet. LastUpdateAt is
+	// the timestamp of that update. Both are derived, not stored on project.
+	Health       *string `json:"health"`
+	LastUpdateAt *string `json:"last_update_at"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
+	IssueCount   int64   `json:"issue_count"`
+	DoneCount    int64   `json:"done_count"`
 	// ResourceCount is a breadcrumb pointing at the sub-collection at
 	// /api/projects/{id}/resources. Resources themselves stay out of this
 	// payload to keep parent metadata and child collections separate; clients
@@ -48,6 +55,8 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Priority:    p.Priority,
 		LeadType:    textToPtr(p.LeadType),
 		LeadID:      uuidToPtr(p.LeadID),
+		StartDate:   dateToPtr(p.StartDate),
+		TargetDate:  dateToPtr(p.TargetDate),
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
 	}
@@ -77,6 +86,8 @@ type CreateProjectRequest struct {
 	Priority    string                                `json:"priority"`
 	LeadType    *string                               `json:"lead_type"`
 	LeadID      *string                               `json:"lead_id"`
+	StartDate   *string                               `json:"start_date"`
+	TargetDate  *string                               `json:"target_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 }
 
@@ -98,6 +109,8 @@ type UpdateProjectRequest struct {
 	Priority    *string `json:"priority"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
+	StartDate   *string `json:"start_date"`
+	TargetDate  *string `json:"target_date"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -124,9 +137,10 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Batch-fetch issue stats and resource counts for all projects
+	// Batch-fetch issue stats, resource counts, and latest health for all projects
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
 	resourceCountMap := make(map[string]int64)
+	healthByProject := make(map[string]db.GetLatestUpdatesForProjectsRow)
 	if len(projects) > 0 {
 		projectIDs := make([]pgtype.UUID, len(projects))
 		for i, p := range projects {
@@ -144,6 +158,14 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
 			}
 		}
+		latest, err := h.Queries.GetLatestUpdatesForProjects(r.Context(), projectIDs)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load project health")
+			return
+		}
+		for _, row := range latest {
+			healthByProject[uuidToString(row.ProjectID)] = row
+		}
 	}
 
 	resp := make([]ProjectResponse, len(projects))
@@ -154,6 +176,12 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			resp[i].DoneCount = s.DoneCount
 		}
 		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
+		if row, found := healthByProject[resp[i].ID]; found {
+			hv := row.Health
+			resp[i].Health = &hv
+			ts := timestampToString(row.LastUpdateAt)
+			resp[i].LastUpdateAt = &ts
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }
@@ -179,6 +207,13 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	latest, _ := h.Queries.GetLatestUpdatesForProjects(r.Context(), []pgtype.UUID{project.ID})
+	if len(latest) > 0 {
+		hv := latest[0].Health
+		resp.Health = &hv
+		ts := timestampToString(latest[0].LastUpdateAt)
+		resp.LastUpdateAt = &ts
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -267,6 +302,8 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		LeadType:    leadType,
 		LeadID:      leadID,
 		Priority:    priority,
+		StartDate:   parseDateParam(req.StartDate),
+		TargetDate:  parseDateParam(req.TargetDate),
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -439,6 +476,14 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
 		}
+	}
+	// start_date / target_date use COALESCE in SQL, so a NULL (zero) Date keeps
+	// the current value. A present field with a parseable date overrides it.
+	if _, ok := rawFields["start_date"]; ok {
+		params.StartDate = parseDateParam(req.StartDate)
+	}
+	if _, ok := rawFields["target_date"]; ok {
+		params.TargetDate = parseDateParam(req.TargetDate)
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {
