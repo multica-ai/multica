@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { KeyRound, ShieldOff } from "lucide-react";
+import { KeyRound, Plus, ShieldOff } from "lucide-react";
 
 import {
   Table,
@@ -12,12 +12,14 @@ import {
   TableCell,
 } from "@multica/ui/components/ui/table";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { useCurrentMember } from "@multica/core/permissions";
 import { useWorkspaceId } from "@multica/core/hooks";
 
 import { CREDENTIAL_TYPE_LABEL } from "../types";
-import { useCredentialsList } from "../queries";
+import type { Credential } from "../types";
+import { useCreateQAFixtureCredential, useCredentialsList } from "../queries";
 import { ExpiryBadge } from "./expiry-badge";
 import { CredentialStatusBadge } from "./credential-status-badge";
 import { CredentialDetailPage } from "./credential-detail-page";
@@ -26,8 +28,9 @@ export function CredentialsListPage() {
   const wsId = useWorkspaceId();
   const { role, isLoading: isMemberLoading } = useCurrentMember(wsId);
   const { data: credentials = [], isLoading, isError } = useCredentialsList(wsId);
+  const createFixture = useCreateQAFixtureCredential(wsId);
   const [filter, setFilter] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Credential | null>(null);
 
   if (!wsId || isMemberLoading) {
     return (
@@ -62,8 +65,6 @@ export function CredentialsListPage() {
     );
   });
 
-  const selected = credentials.find((c) => c.id === selectedId) ?? null;
-
   return (
     <div className="flex h-full flex-col gap-6 p-6">
       <header className="flex items-center justify-between">
@@ -73,20 +74,39 @@ export function CredentialsListPage() {
             Credentials
           </h1>
           <p className="text-sm text-muted-foreground">
-            Workspace credentials and governance policies. Read-only —
-            create/rotate/reveal are admin actions performed via the API
-            (JEH-1196) and the CLI.
+            Workspace credentials and governance policies.
           </p>
         </div>
-        <Badge variant="outline">
-          {isLoading ? "Loading…" : `${visible.length} credentials`}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              createFixture.mutate(undefined, {
+                onSuccess: (credential) => setSelected(credential),
+              });
+            }}
+            disabled={createFixture.isPending}
+          >
+            <Plus className="size-4" />
+            {createFixture.isPending ? "Creating…" : "Create QA fixture"}
+          </Button>
+          <Badge variant="outline">
+            {isLoading ? "Loading…" : `${visible.length} credentials`}
+          </Badge>
+        </div>
       </header>
 
       {isError ? (
         <p className="text-sm text-destructive">
           Failed to load credentials. The encryption key may not be configured
           on this server (MULTICA_CREDENTIALS_KEY).
+        </p>
+      ) : null}
+      {createFixture.isError ? (
+        <p className="text-sm text-destructive">
+          Failed to create QA fixture.
         </p>
       ) : null}
 
@@ -115,7 +135,7 @@ export function CredentialsListPage() {
               key={c.id}
               data-testid={`credential-row-${c.id}`}
               className="cursor-pointer"
-              onClick={() => setSelectedId(c.id)}
+              onClick={() => setSelected(c)}
             >
               <TableCell className="font-medium">{c.name}</TableCell>
               <TableCell>
@@ -141,7 +161,7 @@ export function CredentialsListPage() {
       {selected ? (
         <CredentialDetailPage
           credential={selected}
-          onClose={() => setSelectedId(null)}
+          onClose={() => setSelected(null)}
         />
       ) : null}
     </div>

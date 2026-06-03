@@ -852,13 +852,28 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-credentials-client): JEH-1199 read-only credential
+  // CEREBRO-PATCH(cerebro-credentials-client): JEH-1199 credential
   // registry methods. Bodies are `unknown` so the cerebro-credentials package
   // owns the schema via parseWithFallback (the API Response Compatibility
-  // rule in CLAUDE.md). Mutating endpoints (create/reveal/rotate/delete)
-  // are not exposed here yet — the admin UI today only reads.
+  // rule in CLAUDE.md).
   async listCerebroCredentials<T = unknown>(wsId: string): Promise<T> {
     return this.fetch<T>(`/api/workspaces/${wsId}/credentials`);
+  }
+  async createCerebroCredential<T = unknown>(
+    wsId: string,
+    body: {
+      type: string;
+      name: string;
+      description?: string;
+      value: string;
+      metadata?: unknown;
+      expires_at?: string | null;
+    },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/credentials`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
   async listCerebroCredentialAudit<T = unknown>(
     wsId: string,
