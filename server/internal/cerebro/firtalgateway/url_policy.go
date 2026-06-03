@@ -22,7 +22,7 @@ const defaultHTTPTimeout = 10 * time.Minute
 // relaxes the policy for the trusted server env gateway URL (and the
 // request-time dials of that URL); untrusted workspace-supplied URLs are always
 // validated strictly. Default unset = strict public-HTTPS SSRF policy.
-const allowInternalEnvVar = "FIRTAL_DATA_REGISTRY_AI_GATEWAY_ALLOW_INTERNAL"
+const allowInternalEnvVar = "FIRTAL_REGISTRY_ALLOW_INTERNAL"
 
 var disallowedGatewayIPPrefixes = mustParsePrefixes([]string{
 	"0.0.0.0/8",
@@ -112,7 +112,7 @@ func ValidateBaseURL(raw string) (string, error) {
 }
 
 // ValidateTrustedBaseURL validates the operator-trusted server env gateway URL
-// (FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL). When GatewayAllowsInternal() is set it
+// (FIRTAL_REGISTRY_URL). When GatewayAllowsInternal() is set it
 // permits an internal http:// address (private host/IP) so the gateway can be
 // reached over the private container network.
 func ValidateTrustedBaseURL(raw string) (string, error) {

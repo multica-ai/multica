@@ -106,40 +106,36 @@ func (b *firtalGatewayBackend) Execute(ctx context.Context, prompt string, opts 
 }
 
 func (b *firtalGatewayBackend) config(opts ExecOptions) (firtalGatewayConfig, error) {
-	baseURL := strings.TrimRight(firstEnv(b.cfg.Env,
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
-		"FIRTAL_AE_GATEWAY_URL",
-		"FIRTAL_DATA_REGISTRY_URL",
-	), "/")
-	apiKey := firstEnv(b.cfg.Env,
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
-		"FIRTAL_AE_GATEWAY_KEY",
-		"FIRTAL_DATA_REGISTRY_API_KEY",
-	)
+	// CEREBRO-PATCH(agent-firtal-gateway-single-source): FIR-2825 — one canonical
+	// URL+key env pair. Legacy aliases (FIRTAL_AE_GATEWAY_*, FIRTAL_DATA_REGISTRY_URL,
+	// FIRTAL_DATA_REGISTRY_API_KEY) removed to stop the same gateway being addressed
+	// by five different keys across the deployment.
+	baseURL := strings.TrimRight(firstEnv(b.cfg.Env, "FIRTAL_REGISTRY_URL"), "/")
+	apiKey := firstEnv(b.cfg.Env, "FIRTAL_REGISTRY_KEY")
 	if baseURL == "" {
-		return firtalGatewayConfig{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL is required")
+		return firtalGatewayConfig{}, fmt.Errorf("FIRTAL_REGISTRY_URL is required")
 	}
 	if apiKey == "" {
-		return firtalGatewayConfig{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY is required")
+		return firtalGatewayConfig{}, fmt.Errorf("FIRTAL_REGISTRY_KEY is required")
 	}
 
 	model := strings.TrimSpace(opts.Model)
 	if model == "" || model == "auto" {
-		model = firstEnv(b.cfg.Env, "FIRTAL_DATA_REGISTRY_AI_MODEL", "FIRTAL_AE_GATEWAY_MODEL")
+		model = firstEnv(b.cfg.Env, "FIRTAL_REGISTRY_MODEL")
 	}
 	if model == "" {
 		model = firtalGatewayDefaultModel
 	}
 
 	maxTokens := 4096
-	if raw := firstEnv(b.cfg.Env, "FIRTAL_DATA_REGISTRY_AI_MAX_TOKENS", "FIRTAL_AE_GATEWAY_MAX_TOKENS"); raw != "" {
+	if raw := firstEnv(b.cfg.Env, "FIRTAL_REGISTRY_MAX_TOKENS"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			maxTokens = parsed
 		}
 	}
 
 	var temperature *float64
-	if raw := firstEnv(b.cfg.Env, "FIRTAL_DATA_REGISTRY_AI_TEMPERATURE", "FIRTAL_AE_GATEWAY_TEMPERATURE"); raw != "" {
+	if raw := firstEnv(b.cfg.Env, "FIRTAL_REGISTRY_TEMPERATURE"); raw != "" {
 		if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
 			temperature = &parsed
 		}
@@ -317,21 +313,14 @@ func discoverFirtalGatewayModels(ctx context.Context) ([]Model, error) {
 // DiscoverFirtalGatewayModels fetches the live model catalog from the
 // Data Registry AI Gateway using optional environment overrides.
 func DiscoverFirtalGatewayModels(ctx context.Context, env map[string]string) ([]Model, error) {
-	baseURL := strings.TrimRight(firstEnv(env,
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
-		"FIRTAL_AE_GATEWAY_URL",
-		"FIRTAL_DATA_REGISTRY_URL",
-	), "/")
-	apiKey := firstEnv(env,
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
-		"FIRTAL_AE_GATEWAY_KEY",
-		"FIRTAL_DATA_REGISTRY_API_KEY",
-	)
+	// CEREBRO-PATCH(agent-firtal-gateway-single-source): FIR-2825 — one canonical pair.
+	baseURL := strings.TrimRight(firstEnv(env, "FIRTAL_REGISTRY_URL"), "/")
+	apiKey := firstEnv(env, "FIRTAL_REGISTRY_KEY")
 	if baseURL == "" {
-		return []Model{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL is required")
+		return []Model{}, fmt.Errorf("FIRTAL_REGISTRY_URL is required")
 	}
 	if apiKey == "" {
-		return []Model{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY is required")
+		return []Model{}, fmt.Errorf("FIRTAL_REGISTRY_KEY is required")
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

@@ -105,26 +105,12 @@ func GatewayConfigFromEnv() GatewayConfig {
 	if model == "" {
 		model = JudgeModel
 	}
+	// FIR-2825: one canonical URL+key env pair.
 	return GatewayConfig{
-		BaseURL: strings.TrimRight(strings.TrimSpace(firstNonEmpty(
-			os.Getenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL"),
-			os.Getenv("FIRTAL_AE_GATEWAY_URL"),
-		)), "/"),
-		APIKey: strings.TrimSpace(firstNonEmpty(
-			os.Getenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY"),
-			os.Getenv("FIRTAL_AE_GATEWAY_KEY"),
-		)),
-		Model: model,
+		BaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_URL")), "/"),
+		APIKey:  strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_KEY")),
+		Model:   model,
 	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // Judger calls the Firtal AI Gateway to classify candidates against the

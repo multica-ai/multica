@@ -152,17 +152,14 @@ func withFirtalGatewayDefaults(cfg FirtalGatewayRuntimeConfig) FirtalGatewayRunt
 // from environment variables. If the explicit enable flag is absent, the
 // worker is enabled so workspace-level settings can activate the runtime
 // without another server deploy.
+//
+// FIR-2825: there is exactly ONE canonical URL env var and ONE canonical key
+// env var. Legacy aliases (FIRTAL_AE_GATEWAY_URL, FIRTAL_DATA_REGISTRY_URL,
+// FIRTAL_AE_GATEWAY_KEY, FIRTAL_DATA_REGISTRY_API_KEY) were removed so the same
+// gateway is not addressed by five different keys across the deployment.
 func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
-	baseURL := strings.TrimRight(firstNonEmptyEnv(
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
-		"FIRTAL_AE_GATEWAY_URL",
-		"FIRTAL_DATA_REGISTRY_URL",
-	), "/")
-	apiKey := firstNonEmptyEnv(
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
-		"FIRTAL_AE_GATEWAY_KEY",
-		"FIRTAL_DATA_REGISTRY_API_KEY",
-	)
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_URL")), "/")
+	apiKey := strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_KEY"))
 
 	enabled, explicit, err := boolFromEnv(
 		"MULTICA_SERVER_FIRTAL_GATEWAY_ENABLED",
@@ -179,8 +176,8 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 		Enabled:        enabled,
 		BaseURL:        baseURL,
 		APIKey:         apiKey,
-		Model:          firstNonEmptyEnv("FIRTAL_DATA_REGISTRY_AI_MODEL", "FIRTAL_AE_GATEWAY_MODEL"),
-		MaxTokens:      positiveIntFromEnv(4096, "FIRTAL_DATA_REGISTRY_AI_MAX_TOKENS", "FIRTAL_AE_GATEWAY_MAX_TOKENS"),
+		Model:          firstNonEmptyEnv("FIRTAL_REGISTRY_MODEL"),
+		MaxTokens:      positiveIntFromEnv(4096, "FIRTAL_REGISTRY_MAX_TOKENS"),
 		RuntimeName:    stringFromEnv(defaultFirtalGatewayRuntimeName, "MULTICA_SERVER_FIRTAL_GATEWAY_RUNTIME_NAME"),
 		PollInterval:   durationFromEnv(defaultFirtalGatewayPollInterval, "MULTICA_SERVER_FIRTAL_GATEWAY_POLL_INTERVAL"),
 		SyncInterval:   durationFromEnv(defaultFirtalGatewaySyncInterval, "MULTICA_SERVER_FIRTAL_GATEWAY_SYNC_INTERVAL"),
@@ -189,10 +186,10 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 		MaxConcurrency: positiveIntFromEnv(defaultFirtalGatewayMaxConcurrency, "MULTICA_SERVER_FIRTAL_GATEWAY_MAX_CONCURRENCY"),
 	})
 
-	if raw := firstNonEmptyEnv("FIRTAL_DATA_REGISTRY_AI_TEMPERATURE", "FIRTAL_AE_GATEWAY_TEMPERATURE"); raw != "" {
+	if raw := firstNonEmptyEnv("FIRTAL_REGISTRY_TEMPERATURE"); raw != "" {
 		parsed, err := strconv.ParseFloat(raw, 64)
 		if err != nil {
-			return FirtalGatewayRuntimeConfig{}, fmt.Errorf("invalid FIRTAL_DATA_REGISTRY_AI_TEMPERATURE: %w", err)
+			return FirtalGatewayRuntimeConfig{}, fmt.Errorf("invalid FIRTAL_REGISTRY_TEMPERATURE: %w", err)
 		}
 		cfg.Temperature = &parsed
 	}
@@ -235,7 +232,7 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 		// Operator-trusted server env URL: honors the internal-address opt-in.
 		normalizedURL, err := firtalgateway.ValidateTrustedBaseURL(cfg.BaseURL)
 		if err != nil {
-			return FirtalGatewayRuntimeConfig{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL %w", err)
+			return FirtalGatewayRuntimeConfig{}, fmt.Errorf("FIRTAL_REGISTRY_URL %w", err)
 		}
 		cfg.BaseURL = normalizedURL
 	}
@@ -243,6 +240,15 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 	return cfg, nil
 }
 
+// FirtalGatewayConfigFromWorkspaceSettings resolves the gateway runtime config
+// for a workspace.
+//
+// FIR-2825: the operator-supplied env URL/key are AUTHORITATIVE — when the
+// server env var is set, it wins over the workspace setting. Workspace fields
+// are a fallback for self-host installs where the operator has not configured
+// the runtime centrally. This keeps the network path (which Sliplane service
+// the gateway runs on, internal vs public) under the operator's control while
+// the workspace still gets to flip the runtime on/off and pick a model.
 func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGatewayRuntimeConfig) (FirtalGatewayRuntimeConfig, bool, error) {
 	cfg := withFirtalGatewayDefaults(fallback)
 	if !cfg.Enabled {
@@ -256,18 +262,24 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 		}
 	}
 
+	envURLSet := cfg.BaseURL != ""
+	envKeySet := cfg.APIKey != ""
 	workspaceProvidedURL := false
 	if envelope.FirtalGateway != nil {
 		settings := envelope.FirtalGateway
 		if !settings.Enabled {
 			return cfg, false, nil
 		}
-		if gatewayURL := strings.TrimSpace(settings.GatewayURL); gatewayURL != "" {
-			cfg.BaseURL = strings.TrimRight(gatewayURL, "/")
-			workspaceProvidedURL = true
+		if !envURLSet {
+			if gatewayURL := strings.TrimSpace(settings.GatewayURL); gatewayURL != "" {
+				cfg.BaseURL = strings.TrimRight(gatewayURL, "/")
+				workspaceProvidedURL = true
+			}
 		}
-		if key := strings.TrimSpace(settings.APIKey); key != "" {
-			cfg.APIKey = key
+		if !envKeySet {
+			if key := strings.TrimSpace(settings.APIKey); key != "" {
+				cfg.APIKey = key
+			}
 		}
 		if model := strings.TrimSpace(settings.Model); model != "" {
 			cfg.Model = model
@@ -279,9 +291,9 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 		return cfg, false, nil
 	}
 	// A workspace-supplied URL is untrusted input and is always validated
-	// strictly (public HTTPS). When the workspace inherits the operator's env
-	// URL, validate it with the trusted policy so an opted-in internal address
-	// is accepted.
+	// strictly (public HTTPS). When the URL comes from the operator's env
+	// (the common case after FIR-2825), validate with the trusted policy so an
+	// opted-in internal address is accepted.
 	validate := firtalgateway.ValidateTrustedBaseURL
 	if workspaceProvidedURL {
 		validate = firtalgateway.ValidateBaseURL

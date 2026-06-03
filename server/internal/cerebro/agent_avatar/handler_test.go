@@ -170,9 +170,9 @@ func (s stubWorkspaceLoader) GetWorkspace(context.Context, pgtype.UUID) (db.Work
 }
 
 func TestGatewayConfigPrefersWorkspaceSettings(t *testing.T) {
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://env.example.com")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_env")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AVATAR_MODEL", "")
+	t.Setenv("FIRTAL_REGISTRY_URL", "https://env.example.com")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_env")
+	t.Setenv("FIRTAL_REGISTRY_AVATAR_MODEL", "")
 
 	wsID := "11111111-1111-1111-1111-111111111111"
 
@@ -209,9 +209,9 @@ func TestGatewayConfigPrefersWorkspaceSettings(t *testing.T) {
 }
 
 func TestGatewayConfigFromEnvUsesAvatarModelDefault(t *testing.T) {
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", " https://registry.example.com/ ")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", " rk_test ")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AVATAR_MODEL", "")
+	t.Setenv("FIRTAL_REGISTRY_URL", " https://registry.example.com/ ")
+	t.Setenv("FIRTAL_REGISTRY_KEY", " rk_test ")
+	t.Setenv("FIRTAL_REGISTRY_AVATAR_MODEL", "")
 
 	cfg := gatewayConfigFromEnv()
 
@@ -346,8 +346,8 @@ func TestGenerateForAgentStoresAndUpdatesOnlyAvatarURL(t *testing.T) {
 	}))
 	defer gateway.Close()
 
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", gateway.URL)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", gateway.URL)
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	store := &fakeStorage{}
 	agents := &fakeAgentStore{}
@@ -392,8 +392,8 @@ func TestBackfillStartsBackgroundJobAndTracksProgress(t *testing.T) {
 	}))
 	defer gateway.Close()
 
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", gateway.URL)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", gateway.URL)
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	agents := &fakeAgentStore{agents: []db.Agent{
 		{ID: util.MustParseUUID("22222222-2222-2222-2222-222222222222"), WorkspaceID: util.MustParseUUID("11111111-1111-1111-1111-111111111111"), Name: "Missing"},
@@ -449,8 +449,8 @@ func TestBackfillForceRegeneratesAllExceptExcluded(t *testing.T) {
 	}))
 	defer gateway.Close()
 
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", gateway.URL)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", gateway.URL)
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	ws := util.MustParseUUID("11111111-1111-1111-1111-111111111111")
 	keep := util.MustParseUUID("44444444-4444-4444-4444-444444444444") // "Mia" — excluded

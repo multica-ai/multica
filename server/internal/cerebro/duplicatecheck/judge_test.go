@@ -12,10 +12,8 @@ import (
 
 func TestJudgeReturnsNilWhenNoConfig(t *testing.T) {
 	// Isolate from any operator env (the dev shell sets these).
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "")
-	t.Setenv("FIRTAL_AE_GATEWAY_URL", "")
-	t.Setenv("FIRTAL_AE_GATEWAY_KEY", "")
+	t.Setenv("FIRTAL_REGISTRY_URL", "")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "")
 
 	j := &Judger{}
 	got := j.Judge(context.Background(), Draft{Title: "x"}, []Candidate{{ID: "c1", Title: "y"}})

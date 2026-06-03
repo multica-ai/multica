@@ -721,13 +721,13 @@ type gatewayConfig struct {
 }
 
 func gatewayConfigFromEnv() gatewayConfig {
-	model := strings.TrimSpace(os.Getenv("FIRTAL_DATA_REGISTRY_AVATAR_MODEL"))
+	model := strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_AVATAR_MODEL"))
 	if model == "" {
 		model = defaultAvatarModel
 	}
 	return gatewayConfig{
-		baseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL")), "/"),
-		apiKey:  strings.TrimSpace(os.Getenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY")),
+		baseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_URL")), "/"),
+		apiKey:  strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_KEY")),
 		model:   model,
 	}
 }
