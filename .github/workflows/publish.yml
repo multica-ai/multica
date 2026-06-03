@@ -125,8 +125,10 @@ jobs:
     secrets: inherit
 
   bake-build-agentrunner-runtime:
-    # FROMs devenv-runtime until the agentrunner image is dissociated.
-    needs: [bake-build-devenv-runtime]
+    # Post-S1A: FROMs agent-runtime-base directly (no devenv-runtime in the
+    # FROM chain). Builds in parallel with bake-build-devenv-runtime — both
+    # only wait on the shared base image.
+    needs: [bake-build-agent-runtime-base]
     uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
     with:
       environment: prod
