@@ -2,11 +2,13 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -19,8 +21,13 @@ import (
 //  1. The query returns in well under the sleep duration (cancelled by
 //     the server, not by our caller-side context — the SET LOCAL is
 //     doing the work).
-//  2. The error counter for that named query advances.
-//  3. The duration histogram records the cancellation latency, so
+//  2. The Postgres error we caught carries SQLSTATE 57014
+//     ("query_canceled"). This is the canonical proof of statement_timeout
+//     firing, and it's the assertion that catches the regression where
+//     someone deletes the SET LOCAL line and the test would otherwise
+//     pass on a context-cancellation timeout instead.
+//  3. The error counter for that named query advances.
+//  4. The duration histogram records the cancellation latency, so
 //     dashboards can see it happen.
 //
 // Skips cleanly when no DATABASE_URL is set, mirroring the integration
@@ -58,12 +65,14 @@ func TestBusinessSamplerStatementTimeoutCutsHungQuery(t *testing.T) {
 	defer conn.Release()
 
 	const queryName = "pg_sleep_canary"
+	var capturedErr error
 	start := time.Now()
 	c.runQuery(ctx, conn, queryName, func(ctx context.Context, tx pgx.Tx) error {
 		// 2 s is comfortably longer than the 500 ms statement_timeout
 		// AND the 550 ms outer context deadline, so whichever layer
 		// fires first we still observe a cancelled query.
 		_, err := tx.Exec(ctx, "SELECT pg_sleep(2)")
+		capturedErr = err
 		return err
 	})
 	elapsed := time.Since(start)
@@ -77,6 +86,22 @@ func TestBusinessSamplerStatementTimeoutCutsHungQuery(t *testing.T) {
 	}
 	if elapsed <= 250*time.Millisecond {
 		t.Fatalf("query returned suspiciously fast (%s); SET LOCAL statement_timeout may not be in force", elapsed)
+	}
+
+	// SQLSTATE 57014 ("query_canceled") is the canonical proof that
+	// Postgres itself terminated the query because of statement_timeout.
+	// If a future refactor accidentally drops the SET LOCAL line, the
+	// query would still get cancelled — but by our caller-side context,
+	// not by Postgres, and this assertion would catch it.
+	if capturedErr == nil {
+		t.Fatal("expected pg_sleep to return an error; got nil")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(capturedErr, &pgErr) {
+		t.Fatalf("expected *pgconn.PgError from pg_sleep cancellation; got %T: %v", capturedErr, capturedErr)
+	}
+	if pgErr.Code != "57014" {
+		t.Fatalf("expected SQLSTATE 57014 (query_canceled); got %q (%s)", pgErr.Code, pgErr.Message)
 	}
 
 	// One labelled error must have been recorded against the named query.
