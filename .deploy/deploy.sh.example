@@ -8,12 +8,17 @@
 # runner's deploy.sh.
 #
 # Usage on the runner:
-#   - Triggered by the webhook tool when GitHub posts a push event for main.
+#   - Triggered by the webhook tool when GitHub posts a push event for production.
 #   - Or run manually:  bash ~/code/firtal-cerebro/.deploy/deploy.sh
 #
+# The `main` branch is the working branch and is NOT deployed. Production
+# only updates when `main` is merged into `production` via the
+# `auto-deploy-trigger` autopilot's release-issue approval flow — see
+# DEPLOY.md.
+#
 # Behaviour:
-#   1. git fetch origin/main, exit 0 if no new commits.
-#   2. git reset --hard origin/main (no local commits expected).
+#   1. git fetch origin/production, exit 0 if no new commits.
+#   2. git reset --hard origin/production (no local commits expected).
 #   3. pnpm install + Go build + migrate + Next build.
 #   4. Restart backend + frontend unconditionally (JEH-438).
 #      Daemon is restarted ONLY if daemon source changed (server/cmd/multica/,
@@ -45,7 +50,7 @@ OLD_SHA=$(git rev-parse HEAD)
 echo "Current SHA: $OLD_SHA"
 
 git fetch origin main
-NEW_SHA=$(git rev-parse origin/main)
+NEW_SHA=$(git rev-parse origin/production)
 echo "Remote SHA:  $NEW_SHA"
 
 if [ "$OLD_SHA" = "$NEW_SHA" ]; then
@@ -53,8 +58,8 @@ if [ "$OLD_SHA" = "$NEW_SHA" ]; then
   exit 0
 fi
 
-echo "Resetting to origin/main…"
-git reset --hard origin/main
+echo "Resetting to origin/production…"
+git reset --hard origin/production
 
 echo "Installing deps (pnpm)…"
 pnpm install --frozen-lockfile
