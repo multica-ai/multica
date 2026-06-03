@@ -63,6 +63,11 @@ export interface MentionListRef {
   onKeyDown: (props: { event: KeyboardEvent }) => boolean;
 }
 
+export interface MentionSuggestionScope {
+  memberIds?: string[];
+  getMemberIds?: () => string[] | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Group items by section
 // ---------------------------------------------------------------------------
@@ -372,7 +377,7 @@ function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">
 }
 
 
-export function createMentionSuggestion(qc: QueryClient): Omit<
+export function createMentionSuggestion(qc: QueryClient, scope?: MentionSuggestionScope): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
 > {
@@ -388,7 +393,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     const wsId = getCurrentWsId();
     if (!wsId) return [];
 
-    const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
+    const allMembers: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
     const squads: Squad[] = qc.getQueryData(workspaceKeys.squads(wsId)) ?? [];
     const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
@@ -401,8 +406,13 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     // store. Used to gate personal agents in the @mention list so no user
     // (including admins) can @mention agents owned by other users.
     const userId = useAuthStore.getState().user?.id ?? null;
+    const scopedIds = scope?.getMemberIds?.() ?? scope?.memberIds;
+    const scopedMemberIds = scopedIds ? new Set(scopedIds) : null;
+    const members = scopedMemberIds
+      ? allMembers.filter((m) => scopedMemberIds.has(m.user_id))
+      : allMembers;
     const myRole =
-      members.find((m) => m.user_id === userId)?.role ?? null;
+      allMembers.find((m) => m.user_id === userId)?.role ?? null;
 
     const q = query.toLowerCase();
 
@@ -477,6 +487,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
           });
 
           popup = document.createElement("div");
+          popup.dataset.slot = "mention-suggestion-content";
           popup.style.position = "fixed";
           popup.style.zIndex = "50";
           popup.appendChild(renderer.element);

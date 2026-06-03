@@ -137,6 +137,35 @@ describe("createMentionSuggestion", () => {
     expect(items.some((i) => i.type === "agent" && i.label === "Aegis")).toBe(true);
   });
 
+  it("can scope member suggestions while preserving permitted agents and squads", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "u-current", name: "CurrentUser", role: "member" },
+        { user_id: "u1", name: "Alice", role: "member" },
+        { user_id: "u2", name: "Bob", role: "member" },
+      ],
+      agents: [
+        {
+          id: "a1",
+          name: "Aegis",
+          archived_at: null,
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
+      squads: [{ id: "s1", name: "Channel Squad", archived_at: null }],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc, { memberIds: ["u-current", "u1"] });
+    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+
+    expect(result.some((i) => i.type === "member" && i.id === "u1")).toBe(true);
+    expect(result.some((i) => i.type === "member" && i.id === "u2")).toBe(false);
+    expect(result.some((i) => i.type === "agent" && i.id === "a1")).toBe(true);
+    expect(result.some((i) => i.type === "squad" && i.id === "s1")).toBe(true);
+  });
+
   it("loads server issue matches into the popup when the list cache misses", async () => {
     searchIssuesMock.mockResolvedValue({
       issues: [

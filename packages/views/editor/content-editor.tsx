@@ -40,6 +40,7 @@ import {
 import { useEditor, EditorContent } from "@tiptap/react";
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import type { MentionSuggestionScope } from "./extensions/mention-suggestion";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Attachment } from "@multica/core/types";
@@ -111,6 +112,7 @@ interface ContentEditorProps {
    * prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  mentionScope?: MentionSuggestionScope;
   /**
    * Attachments referenced by this content. The download buttons on file
    * cards and images inside the editor look up an attachment by `url` and
@@ -172,6 +174,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       submitOnEnter = false,
       currentIssueId,
       disableMentions = false,
+      mentionScope,
       attachments,
       selectionQuoteActions,
     },
@@ -182,6 +185,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onUploadFileRef = useRef(onUploadFile);
+    const mentionScopeRef = useRef(mentionScope);
     const lastEmittedRef = useRef<string | null>(null);
 
     // Current workspace slug kept in a ref so the click handler always sees the
@@ -196,6 +200,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
     onUploadFileRef.current = onUploadFile;
+    mentionScopeRef.current = mentionScope;
 
     const queryClient = useQueryClient();
 
@@ -216,6 +221,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onUploadFileRef,
         submitOnEnter,
         disableMentions,
+        mentionScope: {
+          getMemberIds: () => mentionScopeRef.current?.memberIds,
+        },
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;

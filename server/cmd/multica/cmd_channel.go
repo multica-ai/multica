@@ -34,6 +34,13 @@ var channelCreateCmd = &cobra.Command{
 	RunE:  runChannelCreate,
 }
 
+var channelUpdateCmd = &cobra.Command{
+	Use:   "update <channel-id>",
+	Short: "Update a channel",
+	Args:  exactArgs(1),
+	RunE:  runChannelUpdate,
+}
+
 // ---- message subcommands ----
 
 var channelMessageCmd = &cobra.Command{
@@ -123,6 +130,7 @@ var channelContextCmd = &cobra.Command{
 func init() {
 	channelCmd.AddCommand(channelListCmd)
 	channelCmd.AddCommand(channelCreateCmd)
+	channelCmd.AddCommand(channelUpdateCmd)
 	channelCmd.AddCommand(channelMessageCmd)
 	channelCmd.AddCommand(channelMemberCmd)
 	channelCmd.AddCommand(channelThreadCmd)
@@ -146,6 +154,11 @@ func init() {
 	channelCreateCmd.Flags().String("description", "", "Channel description")
 	channelCreateCmd.Flags().String("access-mode", "open", "Access mode: open or invite")
 	channelCreateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	channelUpdateCmd.Flags().String("access-mode", "", "Access mode: open or invite")
+	channelUpdateCmd.Flags().String("name", "", "Channel name")
+	channelUpdateCmd.Flags().String("description", "", "Channel description")
+	channelUpdateCmd.Flags().String("output", "json", "Output format: json")
 
 	channelMessageListCmd.Flags().String("output", "table", "Output format: table or json")
 	channelMessageListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -245,6 +258,42 @@ func runChannelCreate(cmd *cobra.Command, _ []string) error {
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/channels", body, &result); err != nil {
 		return fmt.Errorf("create channel: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runChannelUpdate(cmd *cobra.Command, args []string) error {
+	access, _ := cmd.Flags().GetString("access-mode")
+	name, _ := cmd.Flags().GetString("name")
+	desc, _ := cmd.Flags().GetString("description")
+
+	body := map[string]any{}
+	if access != "" {
+		if access != "open" && access != "invite" {
+			return fmt.Errorf("--access-mode must be open or invite")
+		}
+		body["access_mode"] = access
+	}
+	if name != "" {
+		body["name"] = name
+	}
+	if desc != "" {
+		body["description"] = desc
+	}
+	if len(body) == 0 {
+		return fmt.Errorf("provide at least one field to update")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PatchJSON(ctx, "/api/channels/"+args[0], body, &result); err != nil {
+		return fmt.Errorf("update channel: %w", err)
 	}
 	return cli.PrintJSON(os.Stdout, result)
 }
