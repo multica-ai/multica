@@ -71,6 +71,8 @@ export interface Issue {
   due_date: string | null;
   start_date: string | null;
   end_date: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
   parent_issue?: IssueReference | null;
   child_issues?: IssueReference[];
   labels?: IssueLabel[];

@@ -180,6 +180,12 @@ const issuesRoute = createRoute({
   component: IssueListPage,
 });
 
+const archivedIssuesRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "issues/archived",
+  component: () => <IssueListPage archived />,
+});
+
 const issueDetailRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "issues/$id",
@@ -329,6 +335,7 @@ const routeTree = rootRoute.addChildren([
   inviteRoute,
   protectedRoute.addChildren([
     issuesRoute,
+    archivedIssuesRoute,
     issueDetailRoute,
     boardRoute,
     projectsRoute,

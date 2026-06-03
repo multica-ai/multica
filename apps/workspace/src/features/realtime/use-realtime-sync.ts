@@ -27,6 +27,9 @@ import type {
   IssueCreatedPayload,
   IssueBulkCreatedPayload,
   IssueDeletedPayload,
+  IssueArchivedPayload,
+  IssueRestoredPayload,
+  IssueBatchArchivedPayload,
   InboxNewPayload,
 } from "@/shared/types";
 
@@ -52,7 +55,7 @@ export function useRealtimeSync(ws: WSClient | null) {
 
     // Event types handled by specific handlers below — skip generic refresh
     const specificEvents = new Set([
-      "issue:updated", "issue:created", "issue:bulk_created", "issue:deleted", "issue:imported", "inbox:new",
+      "issue:updated", "issue:created", "issue:bulk_created", "issue:deleted", "issue:archived", "issue:restored", "issue:batch_archived", "issue:imported", "inbox:new",
     ]);
 
     const refreshMap: Record<string, () => void> = {
@@ -146,6 +149,29 @@ export function useRealtimeSync(ws: WSClient | null) {
       if (issue_id) useIssueStore.getState().removeIssue(issue_id);
     });
 
+    const unsubIssueArchived = ws.on("issue:archived", (p) => {
+      const { issue } = p as IssueArchivedPayload;
+      if (!issue?.id) return;
+      useIssueStore.getState().removeIssue(issue.id);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+      const workspaceId = useWorkspaceStore.getState().workspace?.id;
+      if (workspaceId) void queryClient.invalidateQueries({ queryKey: queryKeys.inbox.all(workspaceId) });
+    });
+
+    const unsubIssueRestored = ws.on("issue:restored", (p) => {
+      const { issue } = p as IssueRestoredPayload;
+      if (issue) useIssueStore.getState().addIssue(issue);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+    });
+
+    const unsubIssueBatchArchived = ws.on("issue:batch_archived", (p) => {
+      const { issue_ids } = p as IssueBatchArchivedPayload;
+      issue_ids?.forEach((issueId) => useIssueStore.getState().removeIssue(issueId));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+      const workspaceId = useWorkspaceStore.getState().workspace?.id;
+      if (workspaceId) void queryClient.invalidateQueries({ queryKey: queryKeys.inbox.all(workspaceId) });
+    });
+
     const unsubIssueImported = ws.on("issue:imported", () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
     });
@@ -194,6 +220,9 @@ export function useRealtimeSync(ws: WSClient | null) {
       unsubIssueCreated();
       unsubIssueBulkCreated();
       unsubIssueDeleted();
+      unsubIssueArchived();
+      unsubIssueRestored();
+      unsubIssueBatchArchived();
       unsubIssueImported();
       unsubInboxNew();
       unsubWsDeleted();

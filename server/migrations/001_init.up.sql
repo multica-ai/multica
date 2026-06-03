@@ -67,6 +67,8 @@ CREATE TABLE issue (
     context_refs JSONB NOT NULL DEFAULT '[]',
     position FLOAT NOT NULL DEFAULT 0,
     due_date TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ,
+    archived_by UUID REFERENCES "user"(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -120,6 +122,12 @@ CREATE TABLE inbox_item (
     body TEXT,
     read BOOLEAN NOT NULL DEFAULT FALSE,
     archived BOOLEAN NOT NULL DEFAULT FALSE,
+    triage_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (triage_status IN ('pending', 'handled', 'dismissed', 'snoozed')),
+    snoozed_until TIMESTAMPTZ,
+    handled_at TIMESTAMPTZ,
+    dismissed_at TIMESTAMPTZ,
+    triaged_by UUID REFERENCES "user"(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -168,9 +176,11 @@ CREATE TABLE activity_log (
 CREATE INDEX idx_issue_workspace ON issue(workspace_id);
 CREATE INDEX idx_issue_assignee ON issue(assignee_type, assignee_id);
 CREATE INDEX idx_issue_status ON issue(workspace_id, status);
+CREATE INDEX idx_issue_workspace_archived ON issue(workspace_id, archived_at);
 CREATE INDEX idx_issue_parent ON issue(parent_issue_id);
 CREATE INDEX idx_comment_issue ON comment(issue_id);
 CREATE INDEX idx_inbox_recipient ON inbox_item(recipient_type, recipient_id, read);
+CREATE INDEX idx_inbox_triage_visible ON inbox_item(workspace_id, recipient_type, recipient_id, triage_status, snoozed_until) WHERE archived = false;
 CREATE INDEX idx_agent_task_queue_agent ON agent_task_queue(agent_id, status);
 CREATE INDEX idx_activity_log_issue ON activity_log(issue_id);
 CREATE INDEX idx_member_workspace ON member(workspace_id);

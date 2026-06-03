@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -207,4 +208,59 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+type CreateAgentRuntimeRequest struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+}
+
+func (h *Handler) CreateAgentRuntime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := resolveWorkspaceID(r)
+
+	if _, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found"); !ok {
+		return
+	}
+
+	var req CreateAgentRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	req.Provider = strings.TrimSpace(req.Provider)
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+	if req.Provider != "github_copilot" {
+		writeError(w, http.StatusBadRequest, "unsupported provider")
+		return
+	}
+	if req.Name == "" {
+		req.Name = "GitHub Copilot Cloud"
+	}
+
+	metadata, _ := json.Marshal(map[string]any{
+		"capabilities": []string{"coding_agent", "summary"},
+		"managed_by":   "multica",
+	})
+
+	runtime, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		DaemonID:    strToText("cloud:github_copilot"),
+		Name:        req.Name,
+		RuntimeMode: "cloud",
+		Provider:    req.Provider,
+		Status:      "online",
+		DeviceInfo:  "GitHub Copilot cloud agent",
+		Metadata:    metadata,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create runtime: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, runtimeToResponse(runtime))
 }

@@ -27,6 +27,8 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     due_date: null,
     start_date: null,
     end_date: null,
+    archived_at: null,
+    archived_by: null,
     created_at: "2026-04-11T08:00:00Z",
     updated_at: "2026-04-11T08:00:00Z",
     ...overrides,

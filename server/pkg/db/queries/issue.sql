@@ -1,6 +1,18 @@
 -- name: ListIssues :many
 SELECT * FROM issue
 WHERE workspace_id = $1
+  AND (
+      (COALESCE(sqlc.narg('include_archived')::bool, false) = true)
+      OR (
+          COALESCE(sqlc.narg('archived_only')::bool, false) = true
+          AND archived_at IS NOT NULL
+      )
+      OR (
+          COALESCE(sqlc.narg('include_archived')::bool, false) = false
+          AND COALESCE(sqlc.narg('archived_only')::bool, false) = false
+          AND archived_at IS NULL
+      )
+  )
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
@@ -94,6 +106,18 @@ LIMIT $2 OFFSET $3;
 -- name: CountListedIssues :one
 SELECT count(*) FROM issue
 WHERE workspace_id = $1
+  AND (
+      (COALESCE(sqlc.narg('include_archived')::bool, false) = true)
+      OR (
+          COALESCE(sqlc.narg('archived_only')::bool, false) = true
+          AND archived_at IS NOT NULL
+      )
+      OR (
+          COALESCE(sqlc.narg('include_archived')::bool, false) = false
+          AND COALESCE(sqlc.narg('archived_only')::bool, false) = false
+          AND archived_at IS NULL
+      )
+  )
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
@@ -228,6 +252,22 @@ UPDATE issue SET
 WHERE id = $1
 RETURNING *;
 
+-- name: ArchiveIssue :one
+UPDATE issue SET
+    archived_at = COALESCE(archived_at, now()),
+    archived_by = COALESCE(archived_by, $2),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $3
+RETURNING *;
+
+-- name: RestoreIssue :one
+UPDATE issue SET
+    archived_at = NULL,
+    archived_by = NULL,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
 -- name: DeleteIssue :exec
 DELETE FROM issue WHERE id = $1;
 
@@ -237,6 +277,7 @@ SELECT id, workspace_id, title, status, priority,
        parent_issue_id, position, due_date, created_at, updated_at, number, project_id
 FROM issue
 WHERE workspace_id = $1
+  AND archived_at IS NULL
   AND status NOT IN ('done', 'cancelled')
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
@@ -248,6 +289,7 @@ ORDER BY position ASC, created_at DESC;
 -- name: CountIssues :one
 SELECT count(*) FROM issue
 WHERE workspace_id = $1
+  AND archived_at IS NULL
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))

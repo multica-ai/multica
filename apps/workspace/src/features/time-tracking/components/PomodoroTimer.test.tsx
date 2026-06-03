@@ -2,6 +2,7 @@ import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act, screen } from "@testing-library/react";
 import { PomodoroTimer } from "./PomodoroTimer";
+import type { PomodoroSettings } from "../hooks/use-pomodoro-settings";
 
 // ── Sonner mock: capture toast action so the test can trigger the "toast Skip" ──
 let capturedToastAction: (() => void) | undefined;
@@ -17,6 +18,30 @@ vi.mock("sonner", () => ({
 
 // ── completeMutation spy ──────────────────────────────────────────────────────
 const mockCompleteMutate = vi.fn();
+const mockPomodoroSettings = vi.hoisted(() => {
+  const settings: PomodoroSettings = {
+    work_minutes: 25,
+    short_break_minutes: 5,
+    long_break_minutes: 15,
+    long_break_after: 4,
+    auto_start_break: false,
+    auto_start_work: false,
+    white_noise: "none" as const,
+    sound_enabled: false,
+    tick_enabled: false,
+    volume: 0.8,
+  };
+  return { settings };
+});
+const mockSoundSystem = vi.hoisted(() => ({
+  playWorkComplete: vi.fn(),
+  playBreakComplete: vi.fn(),
+  playStartTick: vi.fn(),
+  playTick: vi.fn(),
+  startWhiteNoise: vi.fn(),
+  stopWhiteNoise: vi.fn(),
+  updateWhiteNoiseVolume: vi.fn(),
+}));
 
 // Stable session object — a new object reference on each render would cause
 // useEffect([session]) to reset completingRef on every render cycle, which
@@ -46,28 +71,11 @@ vi.mock("../hooks/use-pomodoro", () => ({
 }));
 
 vi.mock("../hooks/use-pomodoro-settings", () => ({
-  usePomodoroSettings: () => ({
-    settings: {
-      work_minutes: 25,
-      short_break_minutes: 5,
-      long_break_minutes: 15,
-      long_break_after: 4,
-      auto_start_break: false,
-      auto_start_work: false,
-      white_noise: "none",
-      sound_enabled: false,
-    },
-  }),
+  usePomodoroSettings: () => mockPomodoroSettings,
 }));
 
 vi.mock("../hooks/use-sound-system", () => ({
-  useSoundSystem: () => ({
-    playWorkComplete: vi.fn(),
-    playBreakComplete: vi.fn(),
-    playStartTick: vi.fn(),
-    startWhiteNoise: vi.fn(),
-    stopWhiteNoise: vi.fn(),
-  }),
+  useSoundSystem: () => mockSoundSystem,
 }));
 
 vi.mock("../hooks/use-time-tracking", () => ({
@@ -83,6 +91,119 @@ describe("PomodoroTimer – double-completion guard (Bug 1)", () => {
     vi.setSystemTime(new Date(FAKE_NOW));
     capturedToastAction = undefined;
     mockCompleteMutate.mockClear();
+    mockPomodoroSettings.settings = {
+      work_minutes: 25,
+      short_break_minutes: 5,
+      long_break_minutes: 15,
+      long_break_after: 4,
+      auto_start_break: false,
+      auto_start_work: false,
+      white_noise: "none",
+      sound_enabled: false,
+      tick_enabled: false,
+      volume: 0.8,
+    };
+    mockSoundSystem.playWorkComplete.mockClear();
+    mockSoundSystem.playBreakComplete.mockClear();
+    mockSoundSystem.playStartTick.mockClear();
+    mockSoundSystem.playTick.mockClear();
+    mockSoundSystem.startWhiteNoise.mockClear();
+    mockSoundSystem.stopWhiteNoise.mockClear();
+    mockSoundSystem.updateWhiteNoiseVolume.mockClear();
+  });
+
+  it("starts ambient sound when pomodoro is running and the setting is enabled", () => {
+    mockPomodoroSettings.settings = {
+      work_minutes: 25,
+      short_break_minutes: 5,
+      long_break_minutes: 15,
+      long_break_after: 4,
+      auto_start_break: false,
+      auto_start_work: false,
+      white_noise: "rain",
+      sound_enabled: true,
+      tick_enabled: false,
+      volume: 0.8,
+    };
+
+    render(<PomodoroTimer />);
+
+    expect(mockSoundSystem.startWhiteNoise).toHaveBeenCalledWith("rain");
+    expect(mockSoundSystem.updateWhiteNoiseVolume).toHaveBeenCalledWith(0.8);
+  });
+
+  it("stops ambient sound when sound is disabled during a running pomodoro", () => {
+    mockPomodoroSettings.settings = {
+      work_minutes: 25,
+      short_break_minutes: 5,
+      long_break_minutes: 15,
+      long_break_after: 4,
+      auto_start_break: false,
+      auto_start_work: false,
+      white_noise: "rain",
+      sound_enabled: true,
+      tick_enabled: false,
+      volume: 0.8,
+    };
+
+    const { rerender } = render(<PomodoroTimer />);
+
+    expect(mockSoundSystem.startWhiteNoise).toHaveBeenCalledWith("rain");
+
+    mockPomodoroSettings.settings = {
+      ...mockPomodoroSettings.settings,
+      sound_enabled: false,
+    };
+
+    rerender(<PomodoroTimer />);
+
+    expect(mockSoundSystem.stopWhiteNoise).toHaveBeenCalled();
+  });
+
+  it("plays a tick sound on each second while running when enabled", async () => {
+    mockPomodoroSettings.settings = {
+      work_minutes: 25,
+      short_break_minutes: 5,
+      long_break_minutes: 15,
+      long_break_after: 4,
+      auto_start_break: false,
+      auto_start_work: false,
+      white_noise: "none",
+      sound_enabled: true,
+      tick_enabled: true,
+      volume: 0.8,
+    };
+
+    render(<PomodoroTimer />);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(mockSoundSystem.playTick).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not play a tick sound when ticking is disabled", async () => {
+    mockPomodoroSettings.settings = {
+      work_minutes: 25,
+      short_break_minutes: 5,
+      long_break_minutes: 15,
+      long_break_after: 4,
+      auto_start_break: false,
+      auto_start_work: false,
+      white_noise: "none",
+      sound_enabled: true,
+      tick_enabled: false,
+      volume: 0.8,
+    };
+
+    render(<PomodoroTimer />);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(mockSoundSystem.playTick).not.toHaveBeenCalled();
   });
 
   afterEach(() => {
@@ -92,29 +213,28 @@ describe("PomodoroTimer – double-completion guard (Bug 1)", () => {
   it("fires completeMutation exactly once even if both inline Skip and toast Skip are triggered", async () => {
     render(<PomodoroTimer />);
 
-    // Step through the countdown one second at a time so React commits each
-    // setRemaining state update before the next tick reads `prev`.
-    // t=1s: remaining 2 → 1
+    // Advance the countdown one second at a time so each state update lands before the next tick.
+    // t=1s: remaining 2 -> 1
     await act(async () => { vi.advanceTimersByTime(1000); });
-    // t=2s: remaining 1 → 0 → completingRef=true, setTimeout(0) scheduled
+    // t=2s: remaining 1 -> 0, then the completion branch schedules setTimeout(0).
     await act(async () => { vi.advanceTimersByTime(1000); });
-    // Flush the scheduled setTimeout(0) which calls setCompletionFlow + toast.
+    // Flush the scheduled setTimeout(0) so the completion flow becomes observable.
     await act(async () => { vi.advanceTimersByTime(0); });
 
-    // Inline "Skip" button should now be visible because completionFlow was set.
+    // The inline Skip button should now be visible.
     const skipButton = screen.getByRole("button", { name: /skip/i });
 
-    // Click inline Skip — this calls fireComplete once.
+    // Click inline Skip to trigger one completion flow.
     await act(async () => {
       skipButton.click();
     });
 
-    // The toast action (a second independent path) should be blocked by the guard.
+    // The second independent toast path should be blocked by the guard.
     await act(async () => {
       capturedToastAction?.();
     });
 
-    // Only one mutation call, regardless of which path fired first.
+    // Only one mutation call should happen regardless of which path fired first.
     expect(mockCompleteMutate).toHaveBeenCalledTimes(1);
   });
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -30,6 +31,11 @@ type InboxItemResponse struct {
 	ActorType     *string         `json:"actor_type"`
 	ActorID       *string         `json:"actor_id"`
 	Details       json.RawMessage `json:"details"`
+	TriageStatus  string          `json:"triage_status"`
+	SnoozedUntil  *string         `json:"snoozed_until"`
+	HandledAt     *string         `json:"handled_at"`
+	DismissedAt   *string         `json:"dismissed_at"`
+	TriagedBy     *string         `json:"triaged_by"`
 }
 
 func inboxToResponse(i db.InboxItem) InboxItemResponse {
@@ -49,6 +55,11 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		ActorType:     textToPtr(i.ActorType),
 		ActorID:       uuidToPtr(i.ActorID),
 		Details:       json.RawMessage(i.Details),
+		TriageStatus:  i.TriageStatus,
+		SnoozedUntil:  timestampToPtr(i.SnoozedUntil),
+		HandledAt:     timestampToPtr(i.HandledAt),
+		DismissedAt:   timestampToPtr(i.DismissedAt),
+		TriagedBy:     uuidToPtr(i.TriagedBy),
 	}
 }
 
@@ -70,6 +81,11 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		ActorType:     textToPtr(r.ActorType),
 		ActorID:       uuidToPtr(r.ActorID),
 		Details:       json.RawMessage(r.Details),
+		TriageStatus:  r.TriageStatus,
+		SnoozedUntil:  timestampToPtr(r.SnoozedUntil),
+		HandledAt:     timestampToPtr(r.HandledAt),
+		DismissedAt:   timestampToPtr(r.DismissedAt),
+		TriagedBy:     uuidToPtr(r.TriagedBy),
 	}
 }
 
@@ -162,6 +178,125 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	})
 
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) HandleInboxItem(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	item, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
+		return
+	}
+	userID := requestUserID(r)
+
+	handled, err := h.Queries.HandleInboxItem(r.Context(), db.HandleInboxItemParams{
+		ID:        item.ID,
+		TriagedBy: parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to handle inbox item")
+		return
+	}
+
+	if handled.IssueID.Valid {
+		_, _ = h.Queries.HandleInboxByIssue(r.Context(), db.HandleInboxByIssueParams{
+			WorkspaceID:   handled.WorkspaceID,
+			RecipientType: handled.RecipientType,
+			RecipientID:   handled.RecipientID,
+			TriagedBy:     parseUUID(userID),
+			IssueID:       handled.IssueID,
+		})
+	}
+
+	workspaceID := uuidToString(handled.WorkspaceID)
+	h.publish(protocol.EventInboxHandled, workspaceID, "member", userID, map[string]any{
+		"item_id":      uuidToString(handled.ID),
+		"issue_id":     uuidToPtr(handled.IssueID),
+		"recipient_id": uuidToString(handled.RecipientID),
+	})
+
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(handled), handled.IssueID)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) DismissInboxItem(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	item, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
+		return
+	}
+	userID := requestUserID(r)
+
+	dismissed, err := h.Queries.DismissInboxItem(r.Context(), db.DismissInboxItemParams{
+		ID:        item.ID,
+		TriagedBy: parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to dismiss inbox item")
+		return
+	}
+
+	workspaceID := uuidToString(dismissed.WorkspaceID)
+	h.publish(protocol.EventInboxDismissed, workspaceID, "member", userID, map[string]any{
+		"item_id":      uuidToString(dismissed.ID),
+		"issue_id":     uuidToPtr(dismissed.IssueID),
+		"recipient_id": uuidToString(dismissed.RecipientID),
+	})
+
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(dismissed), dismissed.IssueID)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type SnoozeInboxRequest struct {
+	SnoozedUntil string `json:"snoozed_until"`
+}
+
+func (h *Handler) SnoozeInboxItem(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	item, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if item.TriageStatus == "handled" || item.TriageStatus == "dismissed" {
+		writeError(w, http.StatusBadRequest, "handled or dismissed inbox items cannot be snoozed")
+		return
+	}
+
+	var req SnoozeInboxRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	parsed, err := time.Parse(time.RFC3339, req.SnoozedUntil)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snoozed_until format (use RFC 3339)")
+		return
+	}
+	if !parsed.After(time.Now()) {
+		writeError(w, http.StatusBadRequest, "snoozed_until must be in the future")
+		return
+	}
+
+	userID := requestUserID(r)
+	snoozed, err := h.Queries.SnoozeInboxItem(r.Context(), db.SnoozeInboxItemParams{
+		ID:           item.ID,
+		SnoozedUntil: pgtype.Timestamptz{Time: parsed, Valid: true},
+		TriagedBy:    parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to snooze inbox item")
+		return
+	}
+
+	workspaceID := uuidToString(snoozed.WorkspaceID)
+	h.publish(protocol.EventInboxSnoozed, workspaceID, "member", userID, map[string]any{
+		"item_id":       uuidToString(snoozed.ID),
+		"issue_id":      uuidToPtr(snoozed.IssueID),
+		"recipient_id":  uuidToString(snoozed.RecipientID),
+		"snoozed_until": timestampToString(snoozed.SnoozedUntil),
+	})
+
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(snoozed), snoozed.IssueID)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -282,5 +417,124 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 		"count":        count,
 	})
 
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+func (h *Handler) HandleCompletedInbox(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := r.Header.Get("X-Workspace-ID")
+
+	count, err := h.Queries.HandleCompletedInbox(r.Context(), db.HandleCompletedInboxParams{
+		WorkspaceID: parseUUID(workspaceID),
+		RecipientID: parseUUID(userID),
+		TriagedBy:   parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to handle completed inbox")
+		return
+	}
+
+	slog.Info("inbox: handle completed", append(logger.RequestAttrs(r), "user_id", userID, "count", count)...)
+	h.publish(protocol.EventInboxBatchTriaged, workspaceID, "member", userID, map[string]any{
+		"recipient_id":  userID,
+		"triage_status": "handled",
+		"count":         count,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+func (h *Handler) BatchHandleInbox(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := r.Header.Get("X-Workspace-ID")
+
+	count, err := h.Queries.BatchHandleInbox(r.Context(), db.BatchHandleInboxParams{
+		WorkspaceID: parseUUID(workspaceID),
+		RecipientID: parseUUID(userID),
+		TriagedBy:   parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to handle inbox items")
+		return
+	}
+
+	h.publish(protocol.EventInboxBatchTriaged, workspaceID, "member", userID, map[string]any{
+		"recipient_id":  userID,
+		"count":         count,
+		"triage_status": "handled",
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+func (h *Handler) BatchDismissInbox(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := r.Header.Get("X-Workspace-ID")
+
+	count, err := h.Queries.BatchDismissInbox(r.Context(), db.BatchDismissInboxParams{
+		WorkspaceID: parseUUID(workspaceID),
+		RecipientID: parseUUID(userID),
+		TriagedBy:   parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to dismiss inbox items")
+		return
+	}
+
+	h.publish(protocol.EventInboxBatchTriaged, workspaceID, "member", userID, map[string]any{
+		"recipient_id":  userID,
+		"count":         count,
+		"triage_status": "dismissed",
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+func (h *Handler) BatchSnoozeInbox(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := r.Header.Get("X-Workspace-ID")
+
+	var req SnoozeInboxRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	parsed, err := time.Parse(time.RFC3339, req.SnoozedUntil)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snoozed_until format (use RFC 3339)")
+		return
+	}
+	if !parsed.After(time.Now()) {
+		writeError(w, http.StatusBadRequest, "snoozed_until must be in the future")
+		return
+	}
+
+	count, err := h.Queries.BatchSnoozeInbox(r.Context(), db.BatchSnoozeInboxParams{
+		WorkspaceID:  parseUUID(workspaceID),
+		RecipientID:  parseUUID(userID),
+		SnoozedUntil: pgtype.Timestamptz{Time: parsed, Valid: true},
+		TriagedBy:    parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to snooze inbox items")
+		return
+	}
+
+	h.publish(protocol.EventInboxBatchTriaged, workspaceID, "member", userID, map[string]any{
+		"recipient_id":  userID,
+		"count":         count,
+		"triage_status": "snoozed",
+		"snoozed_until": parsed.Format(time.RFC3339),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }

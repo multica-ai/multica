@@ -3,11 +3,14 @@ package protocol
 // Event types for WebSocket communication between server, web clients, and daemon.
 const (
 	// Issue events
-	EventIssueCreated     = "issue:created"
-	EventIssueUpdated     = "issue:updated"
-	EventIssueDeleted     = "issue:deleted"
-	EventIssueBulkCreated = "issue:bulk_created"
-	EventIssueImported    = "issue:imported"
+	EventIssueCreated       = "issue:created"
+	EventIssueUpdated       = "issue:updated"
+	EventIssueDeleted       = "issue:deleted"
+	EventIssueArchived      = "issue:archived"
+	EventIssueRestored      = "issue:restored"
+	EventIssueBatchArchived = "issue:batch_archived"
+	EventIssueBulkCreated   = "issue:bulk_created"
+	EventIssueImported      = "issue:imported"
 
 	// Comment events
 	EventCommentCreated       = "comment:created"
@@ -39,6 +42,10 @@ const (
 	EventInboxNew           = "inbox:new"
 	EventInboxRead          = "inbox:read"
 	EventInboxArchived      = "inbox:archived"
+	EventInboxHandled       = "inbox:handled"
+	EventInboxDismissed     = "inbox:dismissed"
+	EventInboxSnoozed       = "inbox:snoozed"
+	EventInboxBatchTriaged  = "inbox:batch_triaged"
 	EventInboxBatchRead     = "inbox:batch-read"
 	EventInboxBatchArchived = "inbox:batch-archived"
 

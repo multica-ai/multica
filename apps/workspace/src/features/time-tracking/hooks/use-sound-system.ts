@@ -87,6 +87,17 @@ export function useSoundSystem(settings: PomodoroSettings) {
     playTone(ctx, 2000, ctx.currentTime, 60, settings.volume * 0.4);
   }, [settings.sound_enabled, settings.volume, ensureResumed]);
 
+  /**
+   * Very short ticking sound used while the countdown is running.
+   * It is intentionally quieter and shorter than the start confirmation tone.
+   */
+  const playTick = useCallback(async () => {
+    if (!settings.sound_enabled) return;
+    const ctx = await ensureResumed();
+    if (!ctx) return;
+    playTone(ctx, 1600, ctx.currentTime, 25, settings.volume * 0.18);
+  }, [settings.sound_enabled, settings.volume, ensureResumed]);
+
   /** Start looping white noise. Stops any previously playing noise first. */
   const startWhiteNoise = useCallback(
     async (type: PomodoroSettings["white_noise"]) => {
@@ -145,6 +156,14 @@ export function useSoundSystem(settings: PomodoroSettings) {
     [settings.volume, ensureResumed],
   );
 
+  /**
+   * Sync the ambient-noise gain so volume changes apply without restarting the node.
+   */
+  const updateWhiteNoiseVolume = useCallback((volume: number) => {
+    if (!whiteNoiseGainRef.current) return;
+    whiteNoiseGainRef.current.gain.value = volume * 0.15;
+  }, []);
+
   const stopWhiteNoise = useCallback(() => {
     if (whiteNoiseNodeRef.current) {
       try {
@@ -170,8 +189,10 @@ export function useSoundSystem(settings: PomodoroSettings) {
     playWorkComplete,
     playBreakComplete,
     playStartTick,
+    playTick,
     startWhiteNoise,
     stopWhiteNoise,
+    updateWhiteNoiseVolume,
     isWhiteNoisePlaying,
   };
 }

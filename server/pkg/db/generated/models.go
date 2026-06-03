@@ -187,6 +187,11 @@ type InboxItem struct {
 	Body          pgtype.Text        `json:"body"`
 	Read          bool               `json:"read"`
 	Archived      bool               `json:"archived"`
+	TriageStatus  string             `json:"triage_status"`
+	SnoozedUntil  pgtype.Timestamptz `json:"snoozed_until"`
+	HandledAt     pgtype.Timestamptz `json:"handled_at"`
+	DismissedAt   pgtype.Timestamptz `json:"dismissed_at"`
+	TriagedBy     pgtype.UUID        `json:"triaged_by"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	ActorType     pgtype.Text        `json:"actor_type"`
 	ActorID       pgtype.UUID        `json:"actor_id"`
@@ -209,6 +214,8 @@ type Issue struct {
 	ContextRefs        []byte             `json:"context_refs"`
 	Position           float64            `json:"position"`
 	DueDate            pgtype.Timestamptz `json:"due_date"`
+	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy         pgtype.UUID        `json:"archived_by"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`

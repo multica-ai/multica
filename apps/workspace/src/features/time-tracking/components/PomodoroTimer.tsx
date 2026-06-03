@@ -14,6 +14,7 @@ import {
 } from "../hooks/use-pomodoro";
 import { usePomodoroSettings } from "../hooks/use-pomodoro-settings";
 import { useSoundSystem } from "../hooks/use-sound-system";
+import type { PomodoroSettings } from "../hooks/use-pomodoro-settings";
 import { useTimeEntryLabelsQuery, useTimeEntryLabelMutations } from "../hooks/use-time-tracking";
 import { TimeEntryLabelPicker } from "./time-entry-label-picker";
 
@@ -65,7 +66,15 @@ function phaseDuration(
 export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
   const { data: session, isLoading } = usePomodoroQuery();
   const { settings } = usePomodoroSettings();
-  const sound = useSoundSystem(settings);
+  const {
+    playWorkComplete,
+    playBreakComplete,
+    playStartTick,
+    playTick,
+    startWhiteNoise,
+    stopWhiteNoise,
+    updateWhiteNoiseVolume,
+  } = useSoundSystem(settings);
   const { data: workspaceLabels = [] } = useTimeEntryLabelsQuery();
   const { createTimeEntryLabel } = useTimeEntryLabelMutations();
 
@@ -90,6 +99,8 @@ export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
 
   // Track previous session status to detect transitions.
   const prevStatusRef = useRef<string | undefined>(undefined);
+  // Track the current ambient-noise type so setting changes can restart cleanly.
+  const prevAmbientNoiseRef = useRef<PomodoroSettings["white_noise"] | null>(null);
 
   // Sync remaining from server whenever the session changes.
   useEffect(() => {
@@ -113,22 +124,41 @@ export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
     };
   }, [session?.status, remaining]);
 
-  // Handle white noise transitions when session status changes.
+  // Handle ambient-sound transitions when the session or sound settings change.
   useEffect(() => {
-    const prev = prevStatusRef.current;
-    const curr = session?.status;
-    prevStatusRef.current = curr;
+    const prevStatus = prevStatusRef.current;
+    const currStatus = session?.status;
+    const ambientNoiseEnabled = currStatus === "running" && settings.sound_enabled && settings.white_noise !== "none";
+    const prevAmbientNoise = prevAmbientNoiseRef.current;
 
-    if (curr === "running" && prev !== "running") {
-      // Session just started or resumed — start white noise if configured.
-      if (settings.white_noise !== "none") {
-        sound.startWhiteNoise(settings.white_noise);
+    prevStatusRef.current = currStatus;
+
+    if (!ambientNoiseEnabled) {
+      // Stop ambient noise whenever the timer is not running or sound is disabled.
+      if (prevAmbientNoise !== null) {
+        stopWhiteNoise();
       }
-    } else if (curr !== "running" && prev === "running") {
-      // Session paused, completed, or reset — stop white noise.
-      sound.stopWhiteNoise();
+      prevAmbientNoiseRef.current = null;
+      return;
     }
-  }, [session?.status, settings.white_noise, sound]);
+
+    // Restart the noise node on the first running transition or when the noise type changes.
+    if (prevStatus !== "running" || prevAmbientNoise !== settings.white_noise) {
+      stopWhiteNoise();
+      startWhiteNoise(settings.white_noise);
+    }
+    // Keep the ambient-noise gain in sync while the timer is running.
+    updateWhiteNoiseVolume(settings.volume);
+    prevAmbientNoiseRef.current = settings.white_noise;
+  }, [
+    session?.status,
+    settings.sound_enabled,
+    settings.white_noise,
+    settings.volume,
+    startWhiteNoise,
+    stopWhiteNoise,
+    updateWhiteNoiseVolume,
+  ]);
 
   // Helper: fire completePomodoro and handle the full onSuccess flow inline.
   const fireComplete = (body?: CompletePomodoroBody) => {
@@ -188,6 +218,9 @@ export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
     const id = setInterval(() => {
       setRemaining((prev) => {
         const next = prev - 1;
+        if (next > 0 && settings.sound_enabled && settings.tick_enabled) {
+          void playTick();
+        }
         if (next <= 0 && !completingRef.current) {
           completingRef.current = true;
           const isWorkPhase = session.phase === "work";
@@ -195,7 +228,7 @@ export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
           setTimeout(() => {
             if (isWorkPhase) {
               // Work phase complete: play sound and show action toast.
-              sound.playWorkComplete();
+              playWorkComplete();
               setCompletionFlow({ isWorkPhase: true, pendingLabelIds: [] });
               toast(
                 "🍅 Pomodoro complete!",
@@ -213,7 +246,7 @@ export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
               );
             } else {
               // Break phase complete: auto-dismiss toast and fire immediately.
-              sound.playBreakComplete();
+              playBreakComplete();
               toast.info("☕ Break time over!", { duration: 5_000 });
               fireComplete({ long_break_after: settings.long_break_after });
             }
@@ -225,8 +258,7 @@ export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
     }, 1000);
 
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [playBreakComplete, playTick, playWorkComplete, session, settings.long_break_after, settings.sound_enabled, settings.tick_enabled]);
 
   const handleToggle = () => {
     if (!session) return;
@@ -235,7 +267,7 @@ export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
     } else {
       startMutation.mutate(undefined, {
         onSuccess: () => {
-          sound.playStartTick();
+          playStartTick();
         },
       });
     }
@@ -586,4 +618,3 @@ export function PomodoroTimer({ onWorkComplete, variant = "compact" }: Props) {
     </div>
   );
 }
-

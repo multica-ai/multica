@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import {
   Calendar,
+  Archive,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -12,7 +13,7 @@ import {
   Link2,
   MoreHorizontal,
   PanelRight,
-  Trash2,
+  RotateCcw,
   UserMinus,
   Users,
   X,
@@ -526,7 +527,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const issueDetailQuery = useIssueDetailQuery(id);
   const {
     updateIssue,
-    deleteIssue,
+    archiveIssue,
+    restoreIssue,
     addIssueLabel,
     removeIssueLabel,
     addIssueDependency,
@@ -626,12 +628,25 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await deleteIssue(issue!.id);
-      toast.success("Issue deleted");
+      await archiveIssue(issue!.id);
+      toast.success("Issue archived");
       if (onDelete) onDelete();
       else router.push(backHref);
     } catch {
-      toast.error("Failed to delete issue");
+      toast.error("Failed to archive issue");
+      setDeleting(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!issue) return;
+    setDeleting(true);
+    try {
+      await restoreIssue(issue.id);
+      toast.success("Issue restored");
+      setDeleting(false);
+    } catch {
+      toast.error("Failed to restore issue");
       setDeleting(false);
     }
   };
@@ -943,13 +958,17 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                 <DropdownMenuSeparator />
 
                 {/* Delete */}
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => setDeleteDialogOpen(true)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete issue
-                </DropdownMenuItem>
+                {issue.archived_at ? (
+                  <DropdownMenuItem onClick={handleRestore}>
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Restore issue
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem onClick={() => setDeleteDialogOpen(true)}>
+                    <Archive className="h-3.5 w-3.5" />
+                    Archive issue
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             {!isMobile ? (
@@ -976,13 +995,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             ) : null}
           </div>
 
-            {/* Delete confirmation dialog (controlled by state) */}
+            {/* Archive confirmation dialog (controlled by state) */}
             <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Delete issue</AlertDialogTitle>
+                  <AlertDialogTitle>Archive issue</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This will permanently delete this issue and all its comments. This action cannot be undone.
+                    This issue will leave active views, but comments, attachments, labels, links, and time history will be preserved.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -990,9 +1009,8 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   <AlertDialogAction
                     onClick={handleDelete}
                     disabled={deleting}
-                    className="bg-destructive text-white hover:bg-destructive/90"
                   >
-                    {deleting ? "Deleting..." : "Delete"}
+                    {deleting ? "Archiving..." : "Archive"}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -1002,6 +1020,15 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         {/* Content — scrollable */}
         <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
+          {issue.archived_at && (
+            <div className="mb-5 flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">This issue is archived.</span>
+              <Button size="sm" variant="outline" onClick={handleRestore} disabled={deleting}>
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                Restore
+              </Button>
+            </div>
+          )}
           <TitleEditor
             key={`title-${id}`}
             defaultValue={issue.title}
