@@ -148,3 +148,38 @@ WHERE id = $1;
 -- unread boundary stable across multiple incoming replies.
 UPDATE chat_session SET unread_since = now()
 WHERE id = $1 AND unread_since IS NULL;
+
+-- name: ListChatsForMobile :many
+-- Paginated chat list for the mobile MessagesScreen. Joins the agent for the
+-- display name and pulls the latest chat_message (if any) via a LEFT JOIN on
+-- a correlated subquery that resolves the latest message id per session. The
+-- direct LEFT JOIN on chat_message (rather than a LATERAL derived row) makes
+-- sqlc infer pgtype.Text / pgtype.Timestamptz (nullable) for lm.content /
+-- lm.created_at — same pattern as ListInboxItems' LEFT JOIN on issue.
+SELECT
+  cs.id,
+  cs.title,
+  cs.agent_id,
+  a.name AS agent_name,
+  lm.content AS last_message,
+  lm.created_at AS last_message_at,
+  cs.created_at,
+  cs.updated_at
+FROM chat_session cs
+JOIN agent a ON a.id = cs.agent_id
+LEFT JOIN chat_message lm ON lm.id = (
+  SELECT id FROM chat_message
+  WHERE chat_session_id = cs.id
+  ORDER BY created_at DESC
+  LIMIT 1
+)
+WHERE cs.workspace_id = @workspace_id AND cs.creator_id = @creator_id
+ORDER BY cs.updated_at DESC
+LIMIT @limit_count OFFSET @row_offset;
+
+-- name: CountChatSessionsByCreator :one
+-- Total session count for the same scope as ListChatsForMobile, used to drive
+-- the has_more flag on the mobile pagination response.
+SELECT COUNT(*) AS total
+FROM chat_session
+WHERE workspace_id = @workspace_id AND creator_id = @creator_id;
