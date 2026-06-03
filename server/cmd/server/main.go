@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -260,13 +261,31 @@ func main() {
 	var metricsServer *http.Server
 	var httpMetrics *obsmetrics.HTTPMetrics
 	var businessMetrics *obsmetrics.BusinessMetrics
+	var samplerPool *pgxpool.Pool
 	if metricsConfig.Enabled() {
+		// Build a dedicated tiny pool for the BusinessSamplerCollector
+		// so a stalled scrape can never starve business traffic. If the
+		// pool fails to construct we log and continue without the
+		// sampler — the rest of /metrics is still useful.
+		var err error
+		samplerPool, err = newSamplerDBPool(ctx, dbURL)
+		if err != nil {
+			slog.Warn("metrics: failed to build sampler pgxpool; sampler disabled", "error", err)
+			samplerPool = nil
+		}
+
 		metricsRegistry := obsmetrics.NewRegistry(obsmetrics.RegistryOptions{
 			Pool:     pool,
 			Realtime: realtime.M,
 			DaemonWS: daemonws.M,
 			Version:  version,
 			Commit:   commit,
+			BusinessSampler: func() *obsmetrics.BusinessSamplerOptions {
+				if samplerPool == nil {
+					return nil
+				}
+				return &obsmetrics.BusinessSamplerOptions{Pool: samplerPool}
+			}(),
 		})
 		httpMetrics = metricsRegistry.HTTP
 		businessMetrics = metricsRegistry.Business
@@ -282,6 +301,9 @@ func main() {
 				"addr", metricsConfig.Addr,
 			)
 		}
+	}
+	if samplerPool != nil {
+		defer samplerPool.Close()
 	}
 
 	// Construct the BatchedHeartbeatScheduler before the router so it can

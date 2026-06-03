@@ -22,31 +22,34 @@ import (
 // of their issues inside each rolling window. We deliberately skip Postgres
 // `now() - interval '$1'` substitution and instead pass a typed interval as
 // a bind parameter so the caller cannot inject SQL via the window string.
+//
+// Note on cardinality: there is intentionally NO `LIMIT` on the inner
+// distinct subquery — capping it would silently truncate the COUNT to 100
+// and report a wrong active-user value. The result row count is already
+// pinned to 1 (the COUNT scalar). Cardinality of the *output metric* is
+// bounded by the fixed `samplerWindows` allow-list, not by the SQL shape.
 func (c *BusinessSamplerCollector) queryActiveUsers(
 	ctx context.Context, tx pgx.Tx, snap *samplerSnapshot,
 ) error {
 	const stmt = `
-SELECT count(*) FROM (
-  SELECT DISTINCT user_id FROM (
-    SELECT cs.creator_id AS user_id
-    FROM chat_session cs
-    WHERE EXISTS (
-      SELECT 1 FROM chat_message cm
-      WHERE cm.chat_session_id = cs.id
-        AND cm.created_at > now() - $1::interval
+SELECT count(DISTINCT user_id) FROM (
+  SELECT cs.creator_id AS user_id
+  FROM chat_session cs
+  WHERE EXISTS (
+    SELECT 1 FROM chat_message cm
+    WHERE cm.chat_session_id = cs.id
+      AND cm.created_at > now() - $1::interval
+  )
+  UNION ALL
+  SELECT i.creator_id AS user_id
+  FROM issue i
+  WHERE i.creator_type = 'member'
+    AND EXISTS (
+      SELECT 1 FROM agent_task_queue atq
+      WHERE atq.issue_id = i.id
+        AND atq.created_at > now() - $1::interval
     )
-    UNION ALL
-    SELECT i.creator_id AS user_id
-    FROM issue i
-    WHERE i.creator_type = 'member'
-      AND EXISTS (
-        SELECT 1 FROM agent_task_queue atq
-        WHERE atq.issue_id = i.id
-          AND atq.created_at > now() - $1::interval
-      )
-  ) u
-  LIMIT 100
-) bounded
+) u
 `
 	for _, w := range samplerWindows {
 		var n int64
@@ -59,32 +62,30 @@ SELECT count(*) FROM (
 }
 
 // queryActiveWorkspaces counts distinct workspaces with chat or task
-// activity in each window. Mirrors queryActiveUsers but groups by
-// workspace_id.
+// activity in each window. Mirrors queryActiveUsers and intentionally has
+// no inner LIMIT for the same reason: a LIMIT inside the distinct subquery
+// would truncate the COUNT and report a wrong value.
 func (c *BusinessSamplerCollector) queryActiveWorkspaces(
 	ctx context.Context, tx pgx.Tx, snap *samplerSnapshot,
 ) error {
 	const stmt = `
-SELECT count(*) FROM (
-  SELECT DISTINCT workspace_id FROM (
-    SELECT cs.workspace_id
-    FROM chat_session cs
-    WHERE EXISTS (
-      SELECT 1 FROM chat_message cm
-      WHERE cm.chat_session_id = cs.id
-        AND cm.created_at > now() - $1::interval
-    )
-    UNION ALL
-    SELECT i.workspace_id
-    FROM issue i
-    WHERE EXISTS (
-      SELECT 1 FROM agent_task_queue atq
-      WHERE atq.issue_id = i.id
-        AND atq.created_at > now() - $1::interval
-    )
-  ) w
-  LIMIT 100
-) bounded
+SELECT count(DISTINCT workspace_id) FROM (
+  SELECT cs.workspace_id
+  FROM chat_session cs
+  WHERE EXISTS (
+    SELECT 1 FROM chat_message cm
+    WHERE cm.chat_session_id = cs.id
+      AND cm.created_at > now() - $1::interval
+  )
+  UNION ALL
+  SELECT i.workspace_id
+  FROM issue i
+  WHERE EXISTS (
+    SELECT 1 FROM agent_task_queue atq
+    WHERE atq.issue_id = i.id
+      AND atq.created_at > now() - $1::interval
+  )
+) w
 `
 	for _, w := range samplerWindows {
 		var n int64
