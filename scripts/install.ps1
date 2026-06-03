@@ -1,10 +1,10 @@
 # Multica installer for Windows — one command to get started.
 #
 # Install CLI (default): connects to multica.ai
-#   irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Askhz/multica/main/scripts/install.ps1 | iex
 #
 # Self-host: starts a local Multica server + installs CLI + configures
-#   $env:MULTICA_MODE="local"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+#   $env:MULTICA_MODE="local"; irm https://raw.githubusercontent.com/Askhz/multica/main/scripts/install.ps1 | iex
 #
 
 $ErrorActionPreference = "Stop"
@@ -283,15 +283,21 @@ function Install-Cli {
         $currentVer = Get-InstalledCliVersion
         $latestVer = Get-LatestVersion
 
+        if (-not $latestVer) {
+            Write-Warn "Could not check latest release from GitHub. Will attempt to re-install anyway..."
+            Install-CliBinary
+            return
+        }
+
         $currentCmp = if ($currentVer) { $currentVer -replace '^v','' } else { $null }
         $latestCmp = if ($latestVer) { $latestVer -replace '^v','' } else { $null }
 
-        $isUpToDate = $currentCmp -and -not $latestCmp
-        if (-not $isUpToDate) {
+        $isUpToDate = $false
+        if ($currentCmp -and $latestCmp) {
             try {
-                $isUpToDate = $currentCmp -and $latestCmp -and ([System.Version]$currentCmp -ge [System.Version]$latestCmp)
+                $isUpToDate = [System.Version]$currentCmp -ge [System.Version]$latestCmp
             } catch {
-                $isUpToDate = $currentCmp -and $latestCmp -and ($currentCmp -eq $latestCmp)
+                $isUpToDate = $currentCmp -eq $latestCmp
             }
         }
 
@@ -429,7 +435,7 @@ function Start-DefaultInstall {
     Write-Host "     multica setup self-host      " -NoNewline; Write-Host "# Connect to a self-hosted server" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  Self-hosting? Install the server first:"
-    Write-Host '     $env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex'
+    Write-Host '     $env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/Askhz/multica/main/scripts/install.ps1 | iex'
     Write-Host ""
 }
 
@@ -463,7 +469,7 @@ function Start-LocalInstall {
     Write-Host "  or read the generated code from backend logs when Resend is unset."
     Write-Host ""
     Write-Host "  To stop all services:"
-    Write-Host '     $env:MULTICA_MODE="stop"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex'
+    Write-Host '     $env:MULTICA_MODE="stop"; irm https://raw.githubusercontent.com/Askhz/multica/main/scripts/install.ps1 | iex'
     Write-Host ""
 }
 
