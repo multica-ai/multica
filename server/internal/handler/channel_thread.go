@@ -310,6 +310,7 @@ func (h *Handler) insertChannelMessage(r *http.Request, channel db.Channel, thre
 		"channel_id": uuidToString(channel.ID),
 		"thread_id":  uuidToString(thread.ID),
 	})
+	h.processChannelMessageMentions(r.Context(), channel, msg, actorType, actorID)
 	return msg, true
 }
 

@@ -39,6 +39,7 @@ import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
+import { buildChannelInboxPathForSlug } from "../inbox/channel";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
@@ -520,19 +521,23 @@ export function useRealtimeSync(
               slug: string;
               itemId: string;
               issueKey: string;
+              targetPath?: string;
               title: string;
               body: string;
             }) => void;
           };
         }
       ).desktopAPI;
-      // `issueKey` matches the inbox page's URL selector (issue id when the
-      // item is attached to an issue, otherwise the inbox item id). `itemId`
-      // is the inbox row's own id, needed to fire markInboxRead on click.
+      const targetPath = buildChannelInboxPathForSlug(item, slug) ?? undefined;
+      // `issueKey` matches the inbox page's URL selector for issue-backed
+      // items. Channel-origin items carry `targetPath` so the desktop bridge
+      // can navigate directly to the channel message without treating it as an
+      // issue.
       desktopAPI?.showNotification?.({
         slug,
         itemId: item.id,
         issueKey: item.issue_id ?? item.id,
+        targetPath,
         title: item.title,
         body: item.body ?? "",
       });

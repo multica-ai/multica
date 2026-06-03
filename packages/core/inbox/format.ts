@@ -1,5 +1,6 @@
 import { PRIORITY_CONFIG, STATUS_CONFIG } from "../issues/config";
 import type { InboxItem, InboxItemType, IssuePriority, IssueStatus } from "../types";
+import { getChannelInboxTarget } from "./channel";
 
 export const inboxTypeLabels: Record<InboxItemType, string> = {
   issue_assigned: "Assigned",
@@ -45,6 +46,7 @@ export function formatInboxDetailText(
   getActorName: (type: string, id: string) => string,
 ): string {
   const details = item.details ?? {};
+  if (getChannelInboxTarget(item)) return inboxTypeLabels[item.type] ?? item.type;
 
   switch (item.type) {
     case "status_changed": {

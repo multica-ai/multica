@@ -249,6 +249,63 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+func TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow(t *testing.T) {
+	out := BuildPromptWithRunMode(Task{
+		WorkspaceID:                      "ws-1",
+		ChannelID:                        "channel-1",
+		ChannelName:                      "release",
+		ChannelMessageID:                 "message-1",
+		ChannelTriggerContent:            "please inspect this",
+		ChannelMentionType:               "agent",
+		RequestingUserName:               "Guodage",
+		PriorSessionID:                   "prior-session",
+		PriorWorkDir:                     "/tmp/prior-workdir",
+		IssueID:                          "issue-should-not-drive-prompt",
+		TriggerCommentID:                 "comment-should-not-drive-prompt",
+		TriggerCommentContent:            "comment should be ignored",
+		TriggerAuthorType:                "member",
+		TriggerAuthorName:                "Member",
+		NewCommentCount:                  3,
+		NewCommentsSince:                 "2026-06-03T00:00:00Z",
+		ChatSessionID:                    "",
+		ChannelThreadID:                  "thread-1",
+		ChannelReplyToID:                 "reply-parent-1",
+		QuickCreatePrompt:                "",
+		RequestingUserProfileDescription: "prefers direct replies",
+	}, "normal")
+
+	mustContain := []string{
+		"Channel message mention",
+		"Channel ID: channel-1",
+		"Channel name: release",
+		"Triggering message ID: message-1",
+		"multica channel context channel-1 --message message-1 --include-replies --recent 20 --output json",
+		"multica channel message reply <channel-id> <message-id>",
+		"Prior session available",
+		"Guodage",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("channel prompt missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+	mustNotContain := []string{
+		"Your assigned issue ID",
+		"multica issue get",
+		"multica issue metadata list",
+		"multica issue comment list",
+		"multica issue status",
+		"multica issue comment add",
+		"Issue Metadata",
+		"triggering comment",
+	}
+	for _, s := range mustNotContain {
+		if strings.Contains(out, s) {
+			t.Errorf("channel prompt must not include issue workflow text %q\n--- output ---\n%s", s, out)
+		}
+	}
+}
+
 // TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
 // prompt (no trigger comment, no chat, no autopilot, no quick-create) also
 // teaches the agent about --recent as the long-issue-friendly alternative

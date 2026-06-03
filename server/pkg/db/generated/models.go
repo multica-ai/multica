@@ -109,6 +109,10 @@ type AgentTaskQueue struct {
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
 	WaitReason        pgtype.Text        `json:"wait_reason"`
+	ChannelID         pgtype.UUID        `json:"channel_id"`
+	ChannelMessageID  pgtype.UUID        `json:"channel_message_id"`
+	ChannelThreadID   pgtype.UUID        `json:"channel_thread_id"`
+	ChannelReplyToID  pgtype.UUID        `json:"channel_reply_to_id"`
 }
 
 type Attachment struct {

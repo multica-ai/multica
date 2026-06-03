@@ -46,6 +46,7 @@
     "./issues/stores/view-store-context": "./issues/stores/view-store-context.tsx",
     "./issues/stores/*": "./issues/stores/*.ts",
     "./inbox": "./inbox/index.ts",
+    "./inbox/channel": "./inbox/channel.ts",
     "./inbox/queries": "./inbox/queries.ts",
     "./inbox/mutations": "./inbox/mutations.ts",
     "./inbox/ws-updaters": "./inbox/ws-updaters.ts",

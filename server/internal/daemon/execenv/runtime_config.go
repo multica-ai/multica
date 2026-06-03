@@ -532,10 +532,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	// Issue Metadata semantics — emitted only for tasks that operate on a real
-	// issue (comment-triggered or assignment-triggered). Chat / quick-create /
-	// run-only autopilot don't carry an issue id and would just generate a
-	// failed `metadata list` call on every entry.
-	hasIssueContext := ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == ""
+	// issue (comment-triggered or assignment-triggered). Chat / channel /
+	// quick-create / run-only autopilot don't carry an issue id and would just
+	// generate a failed `metadata list` call on every entry.
+	hasIssueContext := ctx.ChatSessionID == "" && ctx.ChannelID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == ""
 	if hasIssueContext {
 		b.WriteString("## Issue Metadata\n\n")
 		b.WriteString("Each issue carries a small KV `metadata` bag — a high-signal scratchpad where agents pin the handful of facts that future runs on this same issue will look up over and over (the PR URL, the deploy URL, what we're blocked on). It is NOT a place to record every fact you discover — that's what comments and the description are for. Most runs write **zero** new keys; that's the expected case, not a failure.\n\n")
@@ -572,6 +572,19 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Run exactly one `multica issue create` invocation, then exit.\n")
 		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
 		b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
+	} else if ctx.ChannelID != "" {
+		b.WriteString("**This task was triggered by a channel message mention.** There is no assigned Multica issue for this run. Work from the triggering channel message and fetch channel context on demand.\n\n")
+		fmt.Fprintf(&b, "- Channel ID: `%s`\n", ctx.ChannelID)
+		if ctx.ChannelName != "" {
+			fmt.Fprintf(&b, "- Channel: %s\n", ctx.ChannelName)
+		}
+		if ctx.ChannelMessageID != "" {
+			fmt.Fprintf(&b, "- Triggering message ID: `%s`\n", ctx.ChannelMessageID)
+		}
+		b.WriteString("- Start by reading the triggering message in the user prompt, then run the channel context CLI if you need more context:\n")
+		fmt.Fprintf(&b, "  `multica channel context %s --message %s --include-replies --recent 20 --output json`\n", ctx.ChannelID, ctx.ChannelMessageID)
+		b.WriteString("- Do NOT run `multica issue get`, `multica issue metadata list`, `multica issue comment list`, `multica issue comment add`, or `multica issue status` unless you explicitly decide to create or update an issue as part of the work.\n")
+		b.WriteString("- If you need to reply in the channel, use `multica channel message reply` for the triggering message or `multica channel message send` for a top-level channel message.\n\n")
 	} else if ctx.AutopilotRunID != "" {
 		// Autopilot run_only task: no issue exists, so the agent must not
 		// follow the assignment/comment workflow.
@@ -648,9 +661,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// parent-notification guidance was dropped in MUL-2538: the platform
 	// now posts a system comment on the parent itself when a child enters
 	// `done`, and the agent has nothing to do or avoid on that path.
-	// Section is skipped for chat, quick-create, and run-only autopilot
+	// Section is skipped for chat, channel, quick-create, and run-only autopilot
 	// runs (no parent/child semantics there).
-	if ctx.IssueID != "" && ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" {
+	if ctx.IssueID != "" && ctx.ChatSessionID == "" && ctx.ChannelID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" {
 		b.WriteString("## Sub-issue Creation\n\n")
 		b.WriteString("**Choosing `--status` when creating sub-issues.** `--status todo` = **start now** (the default — an agent assignee fires immediately). `--status backlog` = **wait** (assignee is set but no trigger fires; promote later with `multica issue status <child-id> todo`). Parallel children: all `--status todo`. Strict serial Step 1→2→3: only Step 1 is `todo`; Steps 2/3 are `--status backlog` from the start, promoted in turn.\n\n")
 	}
@@ -721,6 +734,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
 		b.WriteString("- Print exactly one final line: `Created <identifier-or-id>: <title>` after a successful `multica issue create`. Use the created issue's `identifier` from JSON output when available; otherwise use its `id`. Do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")
 		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
+	case ctx.ChannelID != "":
+		b.WriteString("This is a channel-origin task, not an Issue task. Your final answer should normally be posted back to the channel only when a reply is useful.\n\n")
+		b.WriteString("- To reply to the triggering message, use `multica channel message reply <channel-id> <message-id> --content \"...\"`.\n")
+		b.WriteString("- To send a top-level channel message, use `multica channel message send <channel-id> --content \"...\"`.\n")
+		b.WriteString("- Do NOT call `multica issue comment add` for this task unless you explicitly created or selected a real issue that needs a comment.\n")
 	default:
 		if ctx.IsSquadLeader {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")

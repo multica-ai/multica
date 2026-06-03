@@ -449,6 +449,56 @@ func (q *Queries) GetChannelMessage(ctx context.Context, id pgtype.UUID) (Channe
 	return i, err
 }
 
+const getChannelMessageForContext = `-- name: GetChannelMessageForContext :one
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+    u.name AS author_name,
+    u.avatar_url AS author_avatar_url
+FROM channel_message m
+LEFT JOIN "user" u ON u.id = m.author_id
+WHERE m.channel_id = $1 AND m.id = $2
+`
+
+type GetChannelMessageForContextParams struct {
+	ChannelID pgtype.UUID `json:"channel_id"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+type GetChannelMessageForContextRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	ThreadID        pgtype.UUID        `json:"thread_id"`
+	ChannelID       pgtype.UUID        `json:"channel_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	AuthorType      string             `json:"author_type"`
+	AuthorID        pgtype.UUID        `json:"author_id"`
+	Content         string             `json:"content"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ReplyToID       pgtype.UUID        `json:"reply_to_id"`
+	AuthorName      pgtype.Text        `json:"author_name"`
+	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
+}
+
+// Returns a specific message in a channel with display metadata for agent context.
+func (q *Queries) GetChannelMessageForContext(ctx context.Context, arg GetChannelMessageForContextParams) (GetChannelMessageForContextRow, error) {
+	row := q.db.QueryRow(ctx, getChannelMessageForContext, arg.ChannelID, arg.ID)
+	var i GetChannelMessageForContextRow
+	err := row.Scan(
+		&i.ID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ReplyToID,
+		&i.AuthorName,
+		&i.AuthorAvatarUrl,
+	)
+	return i, err
+}
+
 const getChannelThread = `-- name: GetChannelThread :one
 SELECT id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id FROM channel_thread WHERE id = $1
 `
@@ -551,6 +601,82 @@ func (q *Queries) ListChannelMembers(ctx context.Context, channelID pgtype.UUID)
 			&i.UserName,
 			&i.UserEmail,
 			&i.UserAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChannelMessageRepliesForContext = `-- name: ListChannelMessageRepliesForContext :many
+WITH trigger AS (
+    SELECT m.id, m.reply_to_id
+    FROM channel_message m
+    WHERE m.channel_id = $1 AND m.id = $2
+),
+root AS (
+    SELECT COALESCE(reply_to_id, id) AS root_message_id
+    FROM trigger
+)
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+    u.name AS author_name,
+    u.avatar_url AS author_avatar_url
+FROM channel_message m
+JOIN root ON m.reply_to_id = root.root_message_id
+LEFT JOIN "user" u ON u.id = m.author_id
+WHERE m.channel_id = $1
+ORDER BY m.created_at ASC
+`
+
+type ListChannelMessageRepliesForContextParams struct {
+	ChannelID pgtype.UUID `json:"channel_id"`
+	ID        pgtype.UUID `json:"id"`
+}
+
+type ListChannelMessageRepliesForContextRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	ThreadID        pgtype.UUID        `json:"thread_id"`
+	ChannelID       pgtype.UUID        `json:"channel_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	AuthorType      string             `json:"author_type"`
+	AuthorID        pgtype.UUID        `json:"author_id"`
+	Content         string             `json:"content"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ReplyToID       pgtype.UUID        `json:"reply_to_id"`
+	AuthorName      pgtype.Text        `json:"author_name"`
+	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
+}
+
+// Returns replies for a trigger message. For a top-level message it returns
+// the direct replies; for a reply it returns the sibling reply window under
+// the same root so the agent can see the local conversation.
+func (q *Queries) ListChannelMessageRepliesForContext(ctx context.Context, arg ListChannelMessageRepliesForContextParams) ([]ListChannelMessageRepliesForContextRow, error) {
+	rows, err := q.db.Query(ctx, listChannelMessageRepliesForContext, arg.ChannelID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelMessageRepliesForContextRow{}
+	for rows.Next() {
+		var i ListChannelMessageRepliesForContextRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ThreadID,
+			&i.ChannelID,
+			&i.WorkspaceID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ReplyToID,
+			&i.AuthorName,
+			&i.AuthorAvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -1045,35 +1171,6 @@ func (q *Queries) UpdateChannel(ctx context.Context, arg UpdateChannelParams) (C
 	return i, err
 }
 
-const updateChannelThreadTitle = `-- name: UpdateChannelThreadTitle :one
-UPDATE channel_thread SET title = $2, updated_at = now()
-WHERE id = $1
-RETURNING id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id
-`
-
-type UpdateChannelThreadTitleParams struct {
-	ID    pgtype.UUID `json:"id"`
-	Title string      `json:"title"`
-}
-
-func (q *Queries) UpdateChannelThreadTitle(ctx context.Context, arg UpdateChannelThreadTitleParams) (ChannelThread, error) {
-	row := q.db.QueryRow(ctx, updateChannelThreadTitle, arg.ID, arg.Title)
-	var i ChannelThread
-	err := row.Scan(
-		&i.ID,
-		&i.ChannelID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.CreatedBy,
-		&i.MessageCount,
-		&i.LastMessageAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.RootMessageID,
-	)
-	return i, err
-}
-
 const updateChannelMessage = `-- name: UpdateChannelMessage :one
 UPDATE channel_message SET content = $2, updated_at = now()
 WHERE id = $1
@@ -1099,6 +1196,35 @@ func (q *Queries) UpdateChannelMessage(ctx context.Context, arg UpdateChannelMes
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReplyToID,
+	)
+	return i, err
+}
+
+const updateChannelThreadTitle = `-- name: UpdateChannelThreadTitle :one
+UPDATE channel_thread SET title = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id
+`
+
+type UpdateChannelThreadTitleParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Title string      `json:"title"`
+}
+
+func (q *Queries) UpdateChannelThreadTitle(ctx context.Context, arg UpdateChannelThreadTitleParams) (ChannelThread, error) {
+	row := q.db.QueryRow(ctx, updateChannelThreadTitle, arg.ID, arg.Title)
+	var i ChannelThread
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.CreatedBy,
+		&i.MessageCount,
+		&i.LastMessageAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RootMessageID,
 	)
 	return i, err
 }

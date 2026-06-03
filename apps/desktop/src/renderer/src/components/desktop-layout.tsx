@@ -133,9 +133,9 @@ function DesktopInboxBridge() {
   useDesktopUnreadBadge(workspace?.id ?? null);
 
   useEffect(() => {
-    return window.desktopAPI.onInboxOpen(({ slug, issueKey }) => {
+    return window.desktopAPI.onInboxOpen(({ slug, issueKey, targetPath }) => {
       if (!slug) return;
-      const inboxPath = `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}`;
+      const inboxPath = targetPath || `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}`;
       window.dispatchEvent(
         new CustomEvent("multica:navigate", { detail: { path: inboxPath } }),
       );

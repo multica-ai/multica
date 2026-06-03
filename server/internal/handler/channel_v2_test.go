@@ -2,9 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestV2FlatMessageSendAndList verifies the V2 flat message flow:
@@ -373,5 +377,354 @@ func TestV2LockedChannelPermission(t *testing.T) {
 	testHandler.SendChannelMessage(rr, req)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("locked channel: manager should be able to post, got %d (%s)", rr.Code, rr.Body.String())
+	}
+}
+
+func createChannelForMentionTest(t *testing.T, name string, accessMode string) ChannelResponse {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	body := map[string]any{"name": name}
+	if accessMode != "" {
+		body["access_mode"] = accessMode
+	}
+	testHandler.CreateChannel(rr, newRequest(http.MethodPost, "/api/channels", body))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("CreateChannel: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var channel ChannelResponse
+	decodeJSON(t, rr, &channel)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM channel WHERE id = $1`, channel.ID)
+	})
+	return channel
+}
+
+func addChannelMemberForMentionTest(t *testing.T, channelID, userID, role string) {
+	t.Helper()
+	if role == "" {
+		role = "member"
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO channel_member (channel_id, user_id, role) VALUES ($1, $2, $3)
+		 ON CONFLICT (channel_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+		channelID, userID, role); err != nil {
+		t.Fatalf("add channel member: %v", err)
+	}
+}
+
+func sendChannelMessageForMentionTest(t *testing.T, channelID, authorID, content string) ChannelMessageV2Response {
+	t.Helper()
+	req := withURLParam(newRequestAs(authorID, http.MethodPost, "/", map[string]any{
+		"content": content,
+	}), "id", channelID)
+	rr := httptest.NewRecorder()
+	testHandler.SendChannelMessage(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("SendChannelMessage: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var msg ChannelMessageV2Response
+	decodeJSON(t, rr, &msg)
+	return msg
+}
+
+func countChannelInboxItemsForUser(t *testing.T, recipientID, channelID string) int {
+	t.Helper()
+	var count int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM inbox_item
+		WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND type = 'mentioned'
+		  AND details->>'source_type' = 'channel_message'
+		  AND details->>'channel_id' = $3
+	`, testWorkspaceID, recipientID, channelID).Scan(&count); err != nil {
+		t.Fatalf("count inbox items: %v", err)
+	}
+	return count
+}
+
+func channelMentionTasksForAgent(t *testing.T, agentID, channelID string) []db.AgentTaskQueue {
+	t.Helper()
+	taskRows, err := testPool.Query(context.Background(), `
+		SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at,
+		       result, error, created_at, context, runtime_id, session_id, work_dir,
+		       trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts,
+		       parent_task_id, failure_reason, trigger_summary, force_fresh_session,
+		       is_leader_task, wait_reason, channel_id, channel_message_id, channel_thread_id, channel_reply_to_id
+		FROM agent_task_queue
+		WHERE agent_id = $1 AND channel_id = $2
+		ORDER BY created_at ASC
+	`, agentID, channelID)
+	if err != nil {
+		t.Fatalf("query tasks: %v", err)
+	}
+	defer taskRows.Close()
+	var rows []db.AgentTaskQueue
+	for taskRows.Next() {
+		var task db.AgentTaskQueue
+		if err := taskRows.Scan(
+			&task.ID, &task.AgentID, &task.IssueID, &task.Status, &task.Priority, &task.DispatchedAt,
+			&task.StartedAt, &task.CompletedAt, &task.Result, &task.Error, &task.CreatedAt,
+			&task.Context, &task.RuntimeID, &task.SessionID, &task.WorkDir, &task.TriggerCommentID,
+			&task.ChatSessionID, &task.AutopilotRunID, &task.Attempt, &task.MaxAttempts,
+			&task.ParentTaskID, &task.FailureReason, &task.TriggerSummary, &task.ForceFreshSession,
+			&task.IsLeaderTask, &task.WaitReason, &task.ChannelID, &task.ChannelMessageID,
+			&task.ChannelThreadID, &task.ChannelReplyToID,
+		); err != nil {
+			t.Fatalf("scan task: %v", err)
+		}
+		rows = append(rows, task)
+	}
+	if err := taskRows.Err(); err != nil {
+		t.Fatalf("iterate tasks: %v", err)
+	}
+	return rows
+}
+
+func TestV2ChannelMemberMentionCreatesInboxWithNullIssueAndChannelDetails(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	recipientID := createWorkspaceMemberUser(t, "Channel Mention Recipient", "channel-mention-recipient@multica.test")
+	channel := createChannelForMentionTest(t, "Mention Inbox Channel", "open")
+
+	sendChannelMessageForMentionTest(t, channel.ID, testUserID,
+		"please review [@Recipient](mention://member/"+recipientID+")")
+
+	rows, err := testHandler.Queries.ListInboxItems(ctx, db.ListInboxItemsParams{
+		WorkspaceID:   util.MustParseUUID(testWorkspaceID),
+		RecipientType: "member",
+		RecipientID:   util.MustParseUUID(recipientID),
+	})
+	if err != nil {
+		t.Fatalf("list inbox: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 inbox item for explicit member mention, got %d", len(rows))
+	}
+	item := rows[0]
+	if item.IssueID.Valid {
+		t.Fatalf("channel inbox item must not reference an issue, got %s", uuidToString(item.IssueID))
+	}
+	var details map[string]any
+	if err := json.Unmarshal(item.Details, &details); err != nil {
+		t.Fatalf("decode details: %v", err)
+	}
+	if details["source_type"] != "channel_message" {
+		t.Fatalf("details.source_type = %v, want channel_message", details["source_type"])
+	}
+	if details["channel_id"] != channel.ID {
+		t.Fatalf("details.channel_id = %v, want %s", details["channel_id"], channel.ID)
+	}
+	if details["message_id"] == "" || details["link"] == "" {
+		t.Fatalf("details must include message_id and link, got %+v", details)
+	}
+
+	var eventIssueID *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT issue_id FROM notification_event
+		WHERE workspace_id = $1 AND recipient_user_id = $2 AND type = 'mentioned'
+		ORDER BY created_at DESC LIMIT 1
+	`, testWorkspaceID, recipientID).Scan(&eventIssueID); err != nil {
+		t.Fatalf("load notification event: %v", err)
+	}
+	if eventIssueID != nil {
+		t.Fatalf("channel notification event must have NULL issue_id, got %s", *eventIssueID)
+	}
+}
+
+func TestV2ChannelMemberMentionOpenChannelSkipsNonWorkspaceUser(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	var outsiderID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Channel Mention Outsider', 'channel-mention-outsider@multica.test')
+		RETURNING id
+	`).Scan(&outsiderID); err != nil {
+		t.Fatalf("create outsider user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, outsiderID)
+	})
+	channel := createChannelForMentionTest(t, "Open Mention Visibility Channel", "open")
+
+	sendChannelMessageForMentionTest(t, channel.ID, testUserID,
+		"do not notify outsider [@Outsider](mention://member/"+outsiderID+")")
+
+	if got := countChannelInboxItemsForUser(t, outsiderID, channel.ID); got != 0 {
+		t.Fatalf("outsider inbox count = %d, want 0", got)
+	}
+}
+
+func TestV2ChannelAllMentionInviteOnlyNotifiesOnlyChannelMembers(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	channelMemberID := createWorkspaceMemberUser(t, "Channel All Member", "channel-all-member@multica.test")
+	workspaceOnlyID := createWorkspaceMemberUser(t, "Channel All Workspace Only", "channel-all-workspace-only@multica.test")
+	channel := createChannelForMentionTest(t, "Invite All Mention Channel", "invite")
+	addChannelMemberForMentionTest(t, channel.ID, channelMemberID, "member")
+
+	sendChannelMessageForMentionTest(t, channel.ID, testUserID,
+		"heads up [@All](mention://all/all)")
+
+	if got := countChannelInboxItemsForUser(t, channelMemberID, channel.ID); got != 1 {
+		t.Fatalf("channel member inbox count = %d, want 1", got)
+	}
+	if got := countChannelInboxItemsForUser(t, workspaceOnlyID, channel.ID); got != 0 {
+		t.Fatalf("workspace-only member inbox count = %d, want 0", got)
+	}
+	if got := countChannelInboxItemsForUser(t, testUserID, channel.ID); got != 0 {
+		t.Fatalf("@all should exclude sender by default, sender inbox count = %d", got)
+	}
+}
+
+func TestV2ChannelPrivateAgentMentionRequiresTriggerPermission(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	plainMemberID := createWorkspaceMemberUser(t, "Channel Private Agent Caller", "channel-private-agent-caller@multica.test")
+	privateAgentID := createHandlerTestAgent(t, "Channel Private Mention Agent", nil)
+	channel := createChannelForMentionTest(t, "Private Agent Mention Channel", "open")
+	addChannelMemberForMentionTest(t, channel.ID, plainMemberID, "member")
+
+	sendChannelMessageForMentionTest(t, channel.ID, plainMemberID,
+		"please run [@PrivateAgent](mention://agent/"+privateAgentID+")")
+
+	var count int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_task_queue
+		WHERE agent_id = $1 AND channel_id = $2
+	`, privateAgentID, channel.ID).Scan(&count); err != nil {
+		t.Fatalf("count channel agent tasks: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("private agent should not be enqueued by unallowed member, got %d tasks", count)
+	}
+}
+
+func TestV2ChannelAgentAndSquadMentionEnqueuesLeaderOnceWithContext(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	leaderID := createHandlerTestAgent(t, "Channel Squad Leader", nil)
+	squad := seedSquadForBriefing(t, leaderID, "Channel Mention Squad", "Act as the channel lead.")
+	channel := createChannelForMentionTest(t, "Agent Squad Mention Channel", "open")
+
+	sendChannelMessageForMentionTest(t, channel.ID, testUserID,
+		"same leader twice [@Leader](mention://agent/"+leaderID+") [@Squad](mention://squad/"+uuidToString(squad.ID)+")")
+
+	rows := channelMentionTasksForAgent(t, leaderID, channel.ID)
+	if len(rows) != 1 {
+		t.Fatalf("same message must enqueue resolved leader once, got %d tasks", len(rows))
+	}
+	task := rows[0]
+	if task.IssueID.Valid || task.TriggerCommentID.Valid {
+		t.Fatal("channel mention task must not reference issue/comment")
+	}
+	if !task.ChannelID.Valid || uuidToString(task.ChannelID) != channel.ID {
+		t.Fatalf("task channel_id = %s, want %s", uuidToString(task.ChannelID), channel.ID)
+	}
+	if task.IsLeaderTask {
+		t.Fatal("explicit agent mention should win first and not mark the deduped task as squad leader task")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(task.Context, &payload); err != nil {
+		t.Fatalf("decode task context: %v", err)
+	}
+	if payload["type"] != "channel_mention" {
+		t.Fatalf("context.type = %v, want channel_mention", payload["type"])
+	}
+	if payload["mention_type"] != "agent" {
+		t.Fatalf("context.mention_type = %v, want agent", payload["mention_type"])
+	}
+
+	squadOnlyAgentID := createHandlerTestAgent(t, "Channel Squad Only Leader", nil)
+	squadOnly := seedSquadForBriefing(t, squadOnlyAgentID, "Channel Squad Only", "")
+	sendChannelMessageForMentionTest(t, channel.ID, testUserID,
+		"squad only [@SquadOnly](mention://squad/"+uuidToString(squadOnly.ID)+")")
+	squadRows := channelMentionTasksForAgent(t, squadOnlyAgentID, channel.ID)
+	if len(squadRows) != 1 {
+		t.Fatalf("expected 1 squad-only task, got %d", len(squadRows))
+	}
+	task = squadRows[0]
+	if !task.IsLeaderTask {
+		t.Fatal("squad mention should enqueue leader task with is_leader_task=true")
+	}
+	if err := json.Unmarshal(task.Context, &payload); err != nil {
+		t.Fatalf("decode squad task context: %v", err)
+	}
+	if payload["mention_type"] != "squad" || payload["squad_id"] != uuidToString(squadOnly.ID) {
+		t.Fatalf("squad task context missing squad identity: %+v", payload)
+	}
+}
+
+func TestV2ChannelMentionTasksCanResumeByAgentAndChannel(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Channel Resume Agent", nil)
+	channel := createChannelForMentionTest(t, "Resume Mention Channel", "open")
+
+	first := sendChannelMessageForMentionTest(t, channel.ID, testUserID,
+		"first [@Resume](mention://agent/"+agentID+")")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed', session_id = 'resume-session-1', work_dir = '/tmp/channel-resume'
+		WHERE agent_id = $1 AND channel_message_id = $2
+	`, agentID, first.ID); err != nil {
+		t.Fatalf("mark first task completed: %v", err)
+	}
+	sendChannelMessageForMentionTest(t, channel.ID, testUserID,
+		"second [@Resume](mention://agent/"+agentID+")")
+
+	row, err := testHandler.Queries.GetLastChannelTaskSession(ctx, db.GetLastChannelTaskSessionParams{
+		AgentID:   util.MustParseUUID(agentID),
+		ChannelID: util.MustParseUUID(channel.ID),
+	})
+	if err != nil {
+		t.Fatalf("GetLastChannelTaskSession: %v", err)
+	}
+	if row.SessionID.String != "resume-session-1" || row.WorkDir.String != "/tmp/channel-resume" {
+		t.Fatalf("last channel session = (%q, %q), want resume-session-1 and workdir",
+			row.SessionID.String, row.WorkDir.String)
+	}
+}
+
+func TestV2ChannelContextIncludesTriggerAndReplies(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	channel := createChannelForMentionTest(t, "Context Mention Channel", "open")
+	root := sendChannelMessageForMentionTest(t, channel.ID, testUserID, "root trigger message")
+	req := withURLParam(newRequest(http.MethodPost, "/", map[string]any{
+		"content": "reply context",
+	}), "id", channel.ID)
+	req = withURLParam(req, "msgId", root.ID)
+	rr := httptest.NewRecorder()
+	testHandler.ReplyToMessage(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("ReplyToMessage: %d (%s)", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodGet, "/?message="+root.ID+"&include-replies=true&recent=10", nil), "id", channel.ID)
+	testHandler.GetChannelContext(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GetChannelContext: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var resp ChannelContextResponse
+	decodeJSON(t, rr, &resp)
+	if resp.TriggerMessage == nil || resp.TriggerMessage.ID != root.ID {
+		t.Fatalf("expected trigger_message %s, got %+v", root.ID, resp.TriggerMessage)
+	}
+	if len(resp.Messages) == 0 {
+		t.Fatal("expected recent top-level messages")
+	}
+	if len(resp.Replies) != 1 || resp.Replies[0].Content != "reply context" {
+		t.Fatalf("expected reply context, got %+v", resp.Replies)
 	}
 }

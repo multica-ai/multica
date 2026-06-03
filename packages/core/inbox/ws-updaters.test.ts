@@ -142,4 +142,40 @@ describe("deduplicateInboxItems", () => {
     expect(result[0]?.id).toBe("i2");
     expect(result[0]?.details?.comment_id).toBeUndefined();
   });
+
+  it("deduplicates channel mention rows by channel message instead of null issue id", () => {
+    const items = [
+      makeItem("newest-same-message", null, {
+        created_at: "2025-01-03T00:00:00Z",
+        details: {
+          source_type: "channel_message",
+          channel_id: "channel-a",
+          message_id: "message-a",
+        },
+      }),
+      makeItem("older-same-message", null, {
+        created_at: "2025-01-02T00:00:00Z",
+        details: {
+          source_type: "channel_message",
+          channel_id: "channel-a",
+          message_id: "message-a",
+        },
+      }),
+      makeItem("different-message", null, {
+        created_at: "2025-01-01T00:00:00Z",
+        details: {
+          source_type: "channel_message",
+          channel_id: "channel-a",
+          message_id: "message-b",
+        },
+      }),
+    ];
+
+    const result = deduplicateInboxItems(items);
+
+    expect(result.map((i) => i.id)).toEqual([
+      "newest-same-message",
+      "different-message",
+    ]);
+  });
 });

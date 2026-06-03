@@ -147,7 +147,7 @@ type Daemon struct {
 	// surfaced via the server-side waiting_local_directory status while it
 	// waits. See MUL-2663.
 	localPathLocks *LocalPathLocker
-	taskProviders sync.Map // taskID (string) -> provider (string); set on task start, deleted on completion
+	taskProviders  sync.Map // taskID (string) -> provider (string); set on task start, deleted on completion
 
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
@@ -2693,6 +2693,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
+		ChannelID:                        task.ChannelID,
+		ChannelName:                      task.ChannelName,
+		ChannelMessageID:                 task.ChannelMessageID,
+		ChannelThreadID:                  task.ChannelThreadID,
+		ChannelReplyToID:                 task.ChannelReplyToID,
+		ChannelTriggerContent:            task.ChannelTriggerContent,
+		ChannelMentionType:               task.ChannelMentionType,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,

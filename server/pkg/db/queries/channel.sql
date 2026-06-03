@@ -205,6 +205,37 @@ WHERE m.channel_id = $1 AND m.thread_id IS NULL
 ORDER BY m.created_at DESC
 LIMIT $2;
 
+-- name: GetChannelMessageForContext :one
+-- Returns a specific message in a channel with display metadata for agent context.
+SELECT m.*,
+    u.name AS author_name,
+    u.avatar_url AS author_avatar_url
+FROM channel_message m
+LEFT JOIN "user" u ON u.id = m.author_id
+WHERE m.channel_id = $1 AND m.id = $2;
+
+-- name: ListChannelMessageRepliesForContext :many
+-- Returns replies for a trigger message. For a top-level message it returns
+-- the direct replies; for a reply it returns the sibling reply window under
+-- the same root so the agent can see the local conversation.
+WITH trigger AS (
+    SELECT m.id, m.reply_to_id
+    FROM channel_message m
+    WHERE m.channel_id = $1 AND m.id = $2
+),
+root AS (
+    SELECT COALESCE(reply_to_id, id) AS root_message_id
+    FROM trigger
+)
+SELECT m.*,
+    u.name AS author_name,
+    u.avatar_url AS author_avatar_url
+FROM channel_message m
+JOIN root ON m.reply_to_id = root.root_message_id
+LEFT JOIN "user" u ON u.id = m.author_id
+WHERE m.channel_id = $1
+ORDER BY m.created_at ASC;
+
 -- ============ Issue <-> thread linkage ============
 
 -- name: LinkIssueSource :exec

@@ -187,6 +187,8 @@ func init() {
 	channelThreadCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	channelContextCmd.Flags().Int("recent", 20, "Number of recent messages to include")
+	channelContextCmd.Flags().String("message", "", "Trigger message ID to include")
+	channelContextCmd.Flags().Bool("include-replies", false, "Include replies around the trigger message")
 	channelContextCmd.Flags().String("output", "json", "Output format")
 }
 
@@ -559,7 +561,17 @@ func runChannelContext(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	recent, _ := cmd.Flags().GetInt("recent")
-	path := fmt.Sprintf("/api/channels/%s/context?recent=%d", args[0], recent)
+	messageID, _ := cmd.Flags().GetString("message")
+	includeReplies, _ := cmd.Flags().GetBool("include-replies")
+	params := url.Values{}
+	params.Set("recent", fmt.Sprintf("%d", recent))
+	if messageID != "" {
+		params.Set("message", messageID)
+	}
+	if includeReplies {
+		params.Set("include-replies", "true")
+	}
+	path := fmt.Sprintf("/api/channels/%s/context?%s", args[0], params.Encode())
 	var result map[string]any
 	if err := client.GetJSON(ctx, path, &result); err != nil {
 		return fmt.Errorf("get context: %w", err)

@@ -20,6 +20,9 @@ func BuildPromptWithRunMode(task Task, runMode string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
+	if task.ChannelID != "" {
+		return buildChannelMentionPrompt(task)
+	}
 	if task.TriggerCommentID != "" {
 		return buildCommentPrompt(task, runMode)
 	}
@@ -37,6 +40,53 @@ func BuildPromptWithRunMode(task Task, runMode string) string {
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	return b.String()
+}
+
+func buildChannelMentionPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	writeLanguageInstruction(&b)
+	writeRetryInstruction(&b, task)
+	b.WriteString("This task was triggered by a Channel message mention, not by an Issue. Do not treat this as an assigned issue unless the channel conversation explicitly asks you to create or update one.\n\n")
+	fmt.Fprintf(&b, "Workspace ID: %s\n", task.WorkspaceID)
+	fmt.Fprintf(&b, "Channel ID: %s\n", task.ChannelID)
+	if task.ChannelName != "" {
+		fmt.Fprintf(&b, "Channel name: %s\n", task.ChannelName)
+	}
+	fmt.Fprintf(&b, "Triggering message ID: %s\n", task.ChannelMessageID)
+	if task.ChannelThreadID != "" {
+		fmt.Fprintf(&b, "Thread ID: %s\n", task.ChannelThreadID)
+	}
+	if task.ChannelReplyToID != "" {
+		fmt.Fprintf(&b, "Reply-to message ID: %s\n", task.ChannelReplyToID)
+	}
+	if task.ChannelMentionType != "" {
+		fmt.Fprintf(&b, "Mention type: %s\n", task.ChannelMentionType)
+	}
+	if task.RequestingUserName != "" {
+		fmt.Fprintf(&b, "Requesting user: %s\n", task.RequestingUserName)
+	}
+	if strings.TrimSpace(task.RequestingUserProfileDescription) != "" {
+		b.WriteString("Requesting user profile:\n")
+		for _, line := range strings.Split(task.RequestingUserProfileDescription, "\n") {
+			fmt.Fprintf(&b, "> %s\n", line)
+		}
+	}
+	if task.PriorSessionID != "" {
+		b.WriteString("Prior session available: the runtime may resume your previous conversation for this agent in this channel.\n")
+		if task.PriorWorkDir != "" {
+			fmt.Fprintf(&b, "Prior work dir: %s\n", task.PriorWorkDir)
+		}
+	}
+	b.WriteString("\nTriggering message:\n")
+	for _, line := range strings.Split(task.ChannelTriggerContent, "\n") {
+		fmt.Fprintf(&b, "> %s\n", line)
+	}
+	b.WriteString("\nStart by understanding the triggering message. If you need surrounding context, run:\n\n")
+	fmt.Fprintf(&b, "`multica channel context %s --message %s --include-replies --recent 20 --output json`\n\n", task.ChannelID, task.ChannelMessageID)
+	b.WriteString("You may also use workspace/member/agent/repo CLI commands as needed. Avoid Issue-oriented commands unless you explicitly create or choose a real issue during this task.\n\n")
+	b.WriteString("When a channel reply is warranted, post it with `multica channel message reply <channel-id> <message-id> --content \"...\"`. For a top-level channel update, use `multica channel message send <channel-id> --content \"...\"`. If no visible reply is warranted, finish silently after doing the required work.\n")
 	return b.String()
 }
 

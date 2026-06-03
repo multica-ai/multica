@@ -28,9 +28,11 @@ type ChannelMessageV2Response struct {
 }
 
 type ChannelContextResponse struct {
-	Channel  ChannelResponse         `json:"channel"`
-	Members  []ChannelMemberResponse `json:"members"`
-	Messages []ChannelContextMessage `json:"messages"`
+	Channel        ChannelResponse         `json:"channel"`
+	Members        []ChannelMemberResponse `json:"members"`
+	Messages       []ChannelContextMessage `json:"messages"`
+	TriggerMessage *ChannelContextMessage  `json:"trigger_message,omitempty"`
+	Replies        []ChannelContextMessage `json:"replies,omitempty"`
 }
 
 type ChannelContextMessage struct {
@@ -69,6 +71,39 @@ func channelMessageToV2Response(m db.ChannelMessage, replyCount int32) ChannelMe
 		ReplyCount:  replyCount,
 		CreatedAt:   timestampToString(m.CreatedAt),
 		UpdatedAt:   timestampToString(m.UpdatedAt),
+	}
+}
+
+func channelContextRowToMessage(m db.GetChannelContextRow) ChannelContextMessage {
+	return ChannelContextMessage{
+		ID:         uuidToString(m.ID),
+		AuthorType: m.AuthorType,
+		AuthorID:   uuidToPtr(m.AuthorID),
+		AuthorName: textToPtr(m.AuthorName),
+		Content:    m.Content,
+		CreatedAt:  timestampToString(m.CreatedAt),
+	}
+}
+
+func channelMessageForContextToMessage(m db.GetChannelMessageForContextRow) ChannelContextMessage {
+	return ChannelContextMessage{
+		ID:         uuidToString(m.ID),
+		AuthorType: m.AuthorType,
+		AuthorID:   uuidToPtr(m.AuthorID),
+		AuthorName: textToPtr(m.AuthorName),
+		Content:    m.Content,
+		CreatedAt:  timestampToString(m.CreatedAt),
+	}
+}
+
+func channelReplyForContextToMessage(m db.ListChannelMessageRepliesForContextRow) ChannelContextMessage {
+	return ChannelContextMessage{
+		ID:         uuidToString(m.ID),
+		AuthorType: m.AuthorType,
+		AuthorID:   uuidToPtr(m.AuthorID),
+		AuthorName: textToPtr(m.AuthorName),
+		Content:    m.Content,
+		CreatedAt:  timestampToString(m.CreatedAt),
 	}
 }
 
@@ -149,6 +184,7 @@ func (h *Handler) SendChannelMessage(w http.ResponseWriter, r *http.Request) {
 		"message":    resp,
 		"channel_id": uuidToString(cctx.channel.ID),
 	})
+	h.processChannelMessageMentions(r.Context(), cctx.channel, msg, actorType, actorID)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -252,6 +288,7 @@ func (h *Handler) ReplyToMessage(w http.ResponseWriter, r *http.Request) {
 		"thread_id":  uuidToString(thread.ID),
 		"reply_to":   msgID,
 	})
+	h.processChannelMessageMentions(r.Context(), cctx.channel, reply, actorType, actorID)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"message": resp,
 		"thread":  channelThreadToResponse(thread),
@@ -504,6 +541,8 @@ func (h *Handler) GetChannelContext(w http.ResponseWriter, r *http.Request) {
 			recent = int32(n)
 		}
 	}
+	messageID := strings.TrimSpace(r.URL.Query().Get("message"))
+	includeReplies := r.URL.Query().Get("include_replies") == "true" || r.URL.Query().Get("include-replies") == "true"
 
 	// Get members.
 	members, err := h.Queries.ListChannelMembers(r.Context(), cctx.channel.ID)
@@ -528,20 +567,43 @@ func (h *Handler) GetChannelContext(w http.ResponseWriter, r *http.Request) {
 	// Reverse to chronological order (query returns DESC).
 	msgResp := make([]ChannelContextMessage, len(msgs))
 	for i, m := range msgs {
-		msgResp[len(msgs)-1-i] = ChannelContextMessage{
-			ID:         uuidToString(m.ID),
-			AuthorType: m.AuthorType,
-			AuthorID:   uuidToPtr(m.AuthorID),
-			AuthorName: textToPtr(m.AuthorName),
-			Content:    m.Content,
-			CreatedAt:  timestampToString(m.CreatedAt),
-		}
+		msgResp[len(msgs)-1-i] = channelContextRowToMessage(m)
 	}
 
 	resp := ChannelContextResponse{
 		Channel:  channelToResponse(cctx.channel),
 		Members:  memberResp,
 		Messages: msgResp,
+	}
+	if messageID != "" {
+		msgUUID, ok := parseUUIDOrBadRequest(w, messageID, "message id")
+		if !ok {
+			return
+		}
+		trigger, err := h.Queries.GetChannelMessageForContext(r.Context(), db.GetChannelMessageForContextParams{
+			ChannelID: cctx.channel.ID,
+			ID:        msgUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		triggerResp := channelMessageForContextToMessage(trigger)
+		resp.TriggerMessage = &triggerResp
+		if includeReplies {
+			replies, err := h.Queries.ListChannelMessageRepliesForContext(r.Context(), db.ListChannelMessageRepliesForContextParams{
+				ChannelID: cctx.channel.ID,
+				ID:        msgUUID,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to get message replies")
+				return
+			}
+			resp.Replies = make([]ChannelContextMessage, len(replies))
+			for i, reply := range replies {
+				resp.Replies[i] = channelReplyForContextToMessage(reply)
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
