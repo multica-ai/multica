@@ -63,10 +63,10 @@ import {
   ContextMenuTrigger,
 } from "@multica/ui/components/ui/context-menu";
 import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@multica/ui/components/ui/resizable";
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -74,11 +74,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { cn } from "@multica/ui/lib/utils";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -104,21 +99,36 @@ const SIDE_PANEL_DEFAULT_WIDTH = 360;
 const SIDE_PANEL_MIN_WIDTH = 320;
 const SIDE_PANEL_MAX_WIDTH = 520;
 const SIDE_PANEL_MAIN_MIN_WIDTH = 560;
+const CHANNEL_LIST_DEFAULT_WIDTH = 280;
+const CHANNEL_LIST_MIN_WIDTH = 240;
+const CHANNEL_LIST_MAX_WIDTH = 420;
+const CHANNEL_MAIN_MIN_WIDTH = 520;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function getSidePanelBounds(containerWidth: number) {
+function getSidePanelBounds(containerWidth: number, channelListWidth = 0) {
+  const availableWidth = Math.max(0, containerWidth - channelListWidth);
   const min = Math.min(
     SIDE_PANEL_MIN_WIDTH,
-    Math.max(240, Math.floor(containerWidth * 0.45)),
+    Math.max(240, Math.floor(availableWidth * 0.45)),
   );
   const max = Math.max(
     min,
-    Math.min(SIDE_PANEL_MAX_WIDTH, containerWidth - SIDE_PANEL_MAIN_MIN_WIDTH),
+    Math.min(SIDE_PANEL_MAX_WIDTH, availableWidth - SIDE_PANEL_MAIN_MIN_WIDTH),
   );
   return { min, max };
+}
+
+function getChannelListBounds(containerWidth: number, showRightPanel: boolean, sidePanelWidth: number) {
+  const reservedWidth = showRightPanel ? sidePanelWidth : 0;
+  const availableWidth = Math.max(0, containerWidth - reservedWidth);
+  const max = Math.max(
+    CHANNEL_LIST_MIN_WIDTH,
+    Math.min(CHANNEL_LIST_MAX_WIDTH, availableWidth - CHANNEL_MAIN_MIN_WIDTH),
+  );
+  return { min: CHANNEL_LIST_MIN_WIDTH, max };
 }
 
 function formatTime(ts?: string): string {
@@ -155,6 +165,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [sidePanel, setSidePanel] = useState<SidePanelMode | null>(null);
   const [sidePanelWidth, setSidePanelWidth] = useState(SIDE_PANEL_DEFAULT_WIDTH);
+  const [channelListWidth, setChannelListWidth] = useState(CHANNEL_LIST_DEFAULT_WIDTH);
   const [replyMessageId, setReplyMessageId] = useState<string | null>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const sidePanelRef = useRef<HTMLDivElement>(null);
@@ -222,19 +233,32 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
   const showRightPanel = !!sidePanel && !!channelId && !!activeChannel;
 
   useEffect(() => {
+    const clampToContainer = () => {
+      const containerWidth = pageRef.current?.getBoundingClientRect().width;
+      if (!containerWidth) return;
+      const { min, max } = getChannelListBounds(containerWidth, showRightPanel, sidePanelWidth);
+      setChannelListWidth((width) => clampNumber(width, min, max));
+    };
+
+    clampToContainer();
+    window.addEventListener("resize", clampToContainer);
+    return () => window.removeEventListener("resize", clampToContainer);
+  }, [showRightPanel, sidePanelWidth]);
+
+  useEffect(() => {
     if (!showRightPanel) return;
 
     const clampToContainer = () => {
       const containerWidth = pageRef.current?.getBoundingClientRect().width;
       if (!containerWidth) return;
-      const { min, max } = getSidePanelBounds(containerWidth);
+      const { min, max } = getSidePanelBounds(containerWidth, channelListWidth);
       setSidePanelWidth((width) => clampNumber(width, min, max));
     };
 
     clampToContainer();
     window.addEventListener("resize", clampToContainer);
     return () => window.removeEventListener("resize", clampToContainer);
-  }, [showRightPanel]);
+  }, [channelListWidth, showRightPanel]);
 
   const startSidePanelResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -243,7 +267,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
     const handlePointerMove = (moveEvent: PointerEvent) => {
       const containerRect = pageRef.current?.getBoundingClientRect();
       if (!containerRect) return;
-      const { min, max } = getSidePanelBounds(containerRect.width);
+      const { min, max } = getSidePanelBounds(containerRect.width, channelListWidth);
       setSidePanelWidth(clampNumber(containerRect.right - moveEvent.clientX, min, max));
     };
 
@@ -254,59 +278,76 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
 
     document.addEventListener("pointermove", handlePointerMove);
     document.addEventListener("pointerup", handlePointerUp);
-  }, []);
+  }, [channelListWidth]);
+
+  const startChannelListResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const containerRect = pageRef.current?.getBoundingClientRect();
+      if (!containerRect) return;
+      const { min, max } = getChannelListBounds(containerRect.width, showRightPanel, sidePanelWidth);
+      setChannelListWidth(clampNumber(moveEvent.clientX - containerRect.left, min, max));
+    };
+
+    const handlePointerUp = () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp);
+  }, [showRightPanel, sidePanelWidth]);
 
   return (
     <div ref={pageRef} className="flex h-full min-h-0 min-w-0 overflow-hidden">
-      <ResizablePanelGroup
-        key={showRightPanel ? "channel-main-with-side-panel" : "channel-main-full"}
-        orientation="horizontal"
-        className="min-h-0 min-w-0 flex-1"
+      <aside className="h-full shrink-0 min-w-0" style={{ width: channelListWidth }}>
+        <ChannelList
+          channels={channels ?? []}
+          activeChannelId={channelId ?? null}
+          loading={loadingChannels}
+          onCreate={() => setShowCreateDialog(true)}
+          onSelect={(id) => nav.push(paths.channelDetail(id))}
+        />
+      </aside>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整频道列表宽度"
+        data-panel-resize-handle="channel-list"
+        className="relative z-20 flex w-0 shrink-0 cursor-col-resize items-center justify-center before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:transition-colors hover:before:bg-foreground/15 after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2"
+        onPointerDown={startChannelListResize}
       >
-        <ResizablePanel
-          id="channel-list"
-          defaultSize={showRightPanel ? 26 : 18}
-          minSize={showRightPanel ? 22 : 14}
-          maxSize={showRightPanel ? 36 : 30}
-          className="min-w-0"
-        >
-          <ChannelList
-            channels={channels ?? []}
-            activeChannelId={channelId ?? null}
-            loading={loadingChannels}
-            onCreate={() => setShowCreateDialog(true)}
-            onSelect={(id) => nav.push(paths.channelDetail(id))}
-          />
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel id="channel-main" minSize={35} className="min-w-0">
-          {channelId && activeChannel ? (
-            <div className="flex h-full min-w-0 flex-col">
-              <ChannelHeader
-                channel={activeChannel}
-                memberCount={members.length}
-                onOpenMembers={openMembers}
-              />
-              <MessageList
-                messages={messages ?? []}
-                loading={loadingMessages}
-                channelId={channelId}
-                wsId={wsId}
-                memberIds={members.map((m) => m.user_id)}
-                onOpenReplies={openReplies}
-                qc={qc}
-              />
+        <div className="z-10 flex h-6 w-1 shrink-0 rounded-lg bg-border" />
+      </div>
+      <main className="min-h-0 min-w-0 flex-1">
+        {channelId && activeChannel ? (
+          <div className="flex h-full min-w-0 flex-col">
+            <ChannelHeader
+              channel={activeChannel}
+              memberCount={members.length}
+              onOpenMembers={openMembers}
+            />
+            <MessageList
+              messages={messages ?? []}
+              loading={loadingMessages}
+              channelId={channelId}
+              wsId={wsId}
+              memberIds={members.map((m) => m.user_id)}
+              onOpenReplies={openReplies}
+              qc={qc}
+            />
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <MessagesSquare className="mx-auto mb-2 h-10 w-10 opacity-30" />
+              <p className="text-sm">选择一个频道开始聊天</p>
             </div>
-          ) : (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              <div className="text-center">
-                <MessagesSquare className="mx-auto mb-2 h-10 w-10 opacity-30" />
-                <p className="text-sm">选择一个频道开始聊天</p>
-              </div>
-            </div>
-          )}
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          </div>
+        )}
+      </main>
       {showRightPanel && (
         <>
           <div
