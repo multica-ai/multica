@@ -10,12 +10,14 @@ import {
   Loader2,
   SkipForward,
 } from "lucide-react";
-import type { Skill } from "@multica/core/types";
+import type { Skill, SkillCandidate } from "@multica/core/types";
+import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { skillListOptions } from "@multica/core/workspace/queries";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { Input } from "@multica/ui/components/ui/input";
 import { Progress } from "@multica/ui/components/ui/progress";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useT } from "../../i18n";
@@ -58,6 +60,23 @@ function folderToCandidate(c: FolderCandidate): Candidate {
   };
 }
 
+function githubToCandidate(c: SkillCandidate): Candidate {
+  return {
+    key: "gh::" + c.import_url,
+    name: c.name,
+    description: c.description,
+    path: c.path,
+    fileCount: 0,
+    toTask: () => ({
+      key: "gh::" + c.import_url,
+      name: c.name,
+      kind: "url",
+      url: c.import_url,
+      importName: c.name,
+    }),
+  };
+}
+
 export function BulkSkillImportPanel({
   onBulkDone,
 }: {
@@ -72,6 +91,7 @@ export function BulkSkillImportPanel({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reading, setReading] = useState(false);
   const [error, setError] = useState("");
+  const [githubUrl, setGithubUrl] = useState("");
   const folderInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
@@ -116,6 +136,33 @@ export function BulkSkillImportPanel({
       applyCandidates(fc.map(folderToCandidate), tr);
     } catch {
       setError(t(($) => $.bulk_import.discover_failed));
+    } finally {
+      setReading(false);
+    }
+  };
+
+  const onDiscover = async () => {
+    const url = githubUrl.trim();
+    if (!url) return;
+    setReading(true);
+    setError("");
+    try {
+      const res = await api.discoverSkills({ url });
+      if (!res?.candidates?.length) {
+        applyCandidates([], false);
+        setError(t(($) => $.bulk_import.empty_no_skills));
+        return;
+      }
+      applyCandidates(
+        res.candidates.map(githubToCandidate),
+        res.truncated === true,
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : t(($) => $.bulk_import.discover_failed),
+      );
     } finally {
       setReading(false);
     }
@@ -307,6 +354,47 @@ export function BulkSkillImportPanel({
           ))}
         </div>
       </div>
+
+      {/* GitHub URL input */}
+      {source === "github" && (
+        <div
+          className={`shrink-0 space-y-1.5 border-b px-5 py-3 ${importing ? "pointer-events-none opacity-60" : ""}`}
+        >
+          <Input
+            value={githubUrl}
+            onChange={(e) => {
+              setGithubUrl(e.target.value);
+              setError("");
+            }}
+            placeholder={t(($) => $.bulk_import.github_url_placeholder)}
+            className="font-mono text-sm"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onDiscover();
+            }}
+          />
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!githubUrl.trim() || reading}
+              onClick={onDiscover}
+            >
+              {reading ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {t(($) => $.bulk_import.discovering)}
+                </>
+              ) : (
+                <>
+                  <Download className="h-3 w-3" />
+                  {t(($) => $.bulk_import.discover)}
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Hidden folder input */}
       <input
