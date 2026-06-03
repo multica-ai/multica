@@ -49,23 +49,19 @@ const nextConfig = {
   // the files traced — and the memory the step holds — without changing what
   // ships. Excludes are paths relative to outputFileTracingRoot.
   outputFileTracingRoot: resolve(currentDir, "../.."),
-  outputFileTracingIncludes: {
-    // next is required by server.js but @vercel/nft can miss it when
-    // outputFileTracingExcludes covers .next/**  (which are the tracer's
-    // own starting-point files). Pinning it here guarantees it lands in
-    // standalone/node_modules/ regardless of tracer behaviour.
-    //
-    // @swc/helpers is a runtime dep of next: next/dist/shared/lib/constants.js
-    // does require("@swc/helpers/_/_interop_require_default"). nft cannot
-    // resolve that "./_/*" exports-subpath in the pnpm layout, so it gets
-    // dropped from the standalone trace and the container exits at start-up
-    // with "Cannot find module '@swc/helpers/_/_interop_require_default'".
-    // Pin the whole package so it always lands in standalone/node_modules/.
-    "*": [
-      "./node_modules/next/**/*",
-      "./node_modules/.pnpm/@swc+helpers@*/node_modules/@swc/helpers/**/*",
-    ],
-  },
+  // Deliberately NO outputFileTracingIncludes here. A previous
+  // `"./node_modules/next/**/*"` pin (added for "Cannot find module 'next'",
+  // whose real cause was excluding .next/** below) backfired badly: include
+  // globs are PROJECT-relative (apps/web), so the glob resolved through the
+  // apps/web/node_modules/next pnpm symlink and materialized next as a real,
+  // flattened directory in the standalone output — shadowing the proper
+  // symlink into node_modules/.pnpm/. From that flattened copy, Node's
+  // realpath-based resolution can never reach next's deps inside .pnpm,
+  // crashing the container at boot with "Cannot find module
+  // '@swc/helpers/_/_interop_require_default'". Normal tracing (with .next/**
+  // NOT excluded) already emits next + all its deps as a correct .pnpm
+  // symlink farm. Do not re-add force-includes for packages that are
+  // reachable through pnpm symlinks.
   outputFileTracingExcludes: {
     "*": [
       "node_modules/.pnpm/@swc+core*/**",
