@@ -1,0 +1,73 @@
+# 3J Tracker — daily PostgreSQL backup sidecar.
+#
+# Runs alongside docker-compose.selfhost.yml to take nightly pg_dump snapshots
+# compressed with gzip, retaining the last 7 days.
+#
+# Usage (merge with main stack):
+#   docker compose \
+#     -f docker-compose.selfhost.yml \
+#     -f docker-compose.backup.yml \
+#     up -d
+#
+# Backups land in a named volume (tracker_backups) and are also bind-mountable:
+#   BACKUP_HOST_DIR=/mnt/backups docker compose -f docker-compose.backup.yml up -d
+#
+# The backup service runs once at container start (suitable for a nightly cron
+# restart), then exits cleanly. To schedule it, add a cron job on the host:
+#   0 2 * * * docker compose -p multica-v1 \
+#       -f /opt/3j-platform/services/multica-v1/docker-compose.yml \
+#       -f /opt/3j-platform/services/multica-v1/docker-compose.backup.yml \
+#       run --rm backup
+#
+# Environment variables (inherit from the main .env):
+#   POSTGRES_USER     — default: multica
+#   POSTGRES_PASSWORD — required
+#   POSTGRES_DB       — default: multica
+#   BACKUP_RETAIN_DAYS — how many daily dumps to keep; default: 7
+
+name: multica-v1
+
+services:
+  backup:
+    image: pgvector/pgvector:pg17
+    container_name: multica-v1-backup
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_USER: ${POSTGRES_USER:-multica}
+      POSTGRES_DB: ${POSTGRES_DB:-multica}
+      BACKUP_RETAIN_DAYS: ${BACKUP_RETAIN_DAYS:-7}
+    volumes:
+      - tracker_backups:/backups
+    networks:
+      - multica-net
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        STAMP=$(date -u +%Y%m%d_%H%M%S)
+        OUTFILE="/backups/tracker_${STAMP}.sql.gz"
+        echo "[backup] dumping ${POSTGRES_DB} → ${OUTFILE}"
+        pg_dump \
+          -h postgres \
+          -U "${POSTGRES_USER}" \
+          "${POSTGRES_DB}" \
+          | gzip -9 > "${OUTFILE}"
+        echo "[backup] dump complete ($(du -sh ${OUTFILE} | cut -f1))"
+        echo "[backup] pruning files older than ${BACKUP_RETAIN_DAYS} days"
+        find /backups -name 'tracker_*.sql.gz' \
+          -mtime +${BACKUP_RETAIN_DAYS} -delete
+        echo "[backup] done. current backups:"
+        ls -lh /backups/tracker_*.sql.gz 2>/dev/null || echo "  (none)"
+
+volumes:
+  tracker_backups:
+    name: multica-v1-backups
+
+networks:
+  multica-net:
+    name: multica-v1-net
+    external: true

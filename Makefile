@@ -150,6 +150,9 @@ selfhost-stop: ## Stop the self-hosted Docker Compose stack
 	docker compose -f docker-compose.selfhost.yml down
 	@echo "✓ All services stopped."
 
+new-client: ## Provision a new isolated client instance — generates secrets and prints a ready-to-deploy .env
+	@bash scripts/new-client.sh
+
 # ---------- One-click commands ----------
 ##@ One-click
 

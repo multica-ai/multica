@@ -119,18 +119,35 @@ func envDuration(name string, def time.Duration) time.Duration {
 func main() {
 	logger.Init()
 
-	// Warn about missing configuration
-	if os.Getenv("JWT_SECRET") == "" {
+	// Startup guards — fail fast on dangerous / broken configurations.
+	isProd := strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if isProd && jwtSecret == "change-me-in-production" {
+		slog.Error("FATAL: JWT_SECRET is still set to the default placeholder 'change-me-in-production'. " +
+			"Set a strong random secret before running in production (e.g. openssl rand -hex 32).")
+		os.Exit(1)
+	}
+	if jwtSecret == "" {
 		slog.Warn("JWT_SECRET is not set — using insecure default. Set JWT_SECRET for production use.")
 	}
-	if os.Getenv("RESEND_API_KEY") == "" && strings.TrimSpace(os.Getenv("SMTP_HOST")) == "" {
+
+	hasResend := os.Getenv("RESEND_API_KEY") != ""
+	hasSmtp := strings.TrimSpace(os.Getenv("SMTP_HOST")) != ""
+	if !hasResend && !hasSmtp {
+		if isProd {
+			slog.Error("FATAL: No email backend configured (RESEND_API_KEY and SMTP_HOST both empty) in APP_ENV=production. " +
+				"OTP login and invitations will not work. Set RESEND_API_KEY or SMTP_HOST before starting.")
+			os.Exit(1)
+		}
 		slog.Warn("no email backend configured (RESEND_API_KEY and SMTP_HOST both empty) — verification codes will be printed to the log instead of emailed.")
 	}
-	if os.Getenv("MULTICA_DEV_VERIFICATION_CODE") != "" {
-		if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") {
-			slog.Warn("MULTICA_DEV_VERIFICATION_CODE is set but ignored because APP_ENV=production.")
+
+	if os.Getenv("TRACKER_DEV_VERIFICATION_CODE") != "" || os.Getenv("MULTICA_DEV_VERIFICATION_CODE") != "" {
+		if isProd {
+			slog.Warn("TRACKER_DEV_VERIFICATION_CODE / MULTICA_DEV_VERIFICATION_CODE is set but ignored because APP_ENV=production.")
 		} else {
-			slog.Warn("MULTICA_DEV_VERIFICATION_CODE is enabled. Use it only for local development or private test instances.")
+			slog.Warn("TRACKER_DEV_VERIFICATION_CODE is enabled. Use it only for local development or private test instances.")
 		}
 	}
 
