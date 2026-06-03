@@ -16,6 +16,7 @@ import {
 } from "@multica/core/onboarding";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import type { AgentRuntime, Workspace } from "@multica/core/types";
+import { useConfigStore } from "@multica/core/config";
 import { StepWelcome } from "./steps/step-welcome";
 import { StepSource } from "./steps/step-source";
 import { StepRole } from "./steps/step-role";
@@ -118,6 +119,7 @@ export function OnboardingFlow({
 }) {
   const { t } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
+  const isGenericMode = useConfigStore((s) => s.genericMode);
   if (!user) {
     throw new Error("OnboardingFlow requires an authenticated user");
   }
@@ -222,12 +224,29 @@ export function OnboardingFlow({
   }, [workspaces, onComplete]);
 
   const handleWorkspaceCreated = useCallback(
-    (ws: Workspace) => {
+    async (ws: Workspace) => {
       setWorkspace(ws);
       setCurrentWorkspace(ws.slug, ws.id);
+      // In generic mode the runtime step is hidden (non-IT users have no
+      // agent runtime concept). Skip it automatically: mark onboarding
+      // complete server-side so the workspace guard is satisfied, then
+      // navigate directly into the workspace.
+      if (isGenericMode) {
+        try {
+          await completeOnboarding("runtime_skipped", ws.id);
+        } catch (err) {
+          toast.error(
+            err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
+          );
+          return;
+        }
+        useWelcomeStore.getState().set({ workspaceId: ws.id, choice: "skip" });
+        onComplete(ws, undefined);
+        return;
+      }
       advanceFrom("workspace");
     },
-    [advanceFrom],
+    [advanceFrom, isGenericMode, onComplete, t],
   );
 
   const handleRuntimeNext = useCallback(

@@ -145,6 +145,10 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
+// Items visible only in the full (non-generic) nav.
+const WORKSPACE_NAV_AGENT_KEYS: NavKey[] = ["autopilots", "agents", "squads", "usage"];
+const CONFIGURE_NAV_AGENT_KEYS: NavKey[] = ["runtimes", "skills"];
+
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "runtimes", labelKey: "runtimes", icon: Monitor },
   { key: "skills", labelKey: "skills", icon: BookOpenText },
@@ -352,6 +356,15 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  const isGenericMode = useConfigStore((s) => s.genericMode);
+
+  // In generic mode collapse nav to Tasks + Projects (no AI/dev surfaces).
+  const visibleWorkspaceNav = isGenericMode
+    ? workspaceNav.filter((item) => !WORKSPACE_NAV_AGENT_KEYS.includes(item.key))
+    : workspaceNav;
+  const visibleConfigureNav = isGenericMode
+    ? configureNav.filter((item) => !CONFIGURE_NAV_AGENT_KEYS.includes(item.key))
+    : configureNav;
 
   const wsId = workspace?.id;
   const { data: inboxItems = EMPTY_INBOX } = useQuery({
@@ -678,7 +691,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
+                {visibleWorkspaceNav.map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
                   return (
@@ -702,7 +715,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>{t(($) => $.sidebar.configure_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {configureNav.map((item) => {
+                {visibleConfigureNav.map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
                   return (

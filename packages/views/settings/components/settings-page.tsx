@@ -27,6 +27,7 @@ import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { useT } from "../../i18n";
+import { useConfigStore } from "@multica/core/config";
 
 const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
@@ -44,6 +45,13 @@ const WORKSPACE_TAB_KEYS = [
   "labs",
   "members",
 ] as const;
+
+// Tabs that expose dev/AI-specific functionality — hidden in generic mode.
+const GENERIC_HIDDEN_WORKSPACE_TABS: ReadonlyArray<(typeof WORKSPACE_TAB_KEYS)[number]> = [
+  "repositories",
+  "github",
+  "labs",
+];
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
@@ -80,18 +88,27 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const { t } = useT("settings");
   const workspaceName = useCurrentWorkspace()?.name;
   const navigation = useNavigation();
+  const isGenericMode = useConfigStore((s) => s.genericMode);
+
+  // In generic mode hide dev-specific workspace tabs.
+  const visibleWorkspaceTabKeys = isGenericMode
+    ? WORKSPACE_TAB_KEYS.filter((k) => !GENERIC_HIDDEN_WORKSPACE_TABS.includes(k))
+    : WORKSPACE_TAB_KEYS;
 
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
   // surfacing in the DOM via Radix Tabs internals.
+  // In generic mode we narrow the whitelist to the visible tabs so a direct
+  // URL like ?tab=github redirects to the default rather than rendering a
+  // hidden tab.
   const validTabs = React.useMemo(
     () =>
       new Set<string>([
         ...ACCOUNT_TAB_KEYS,
-        ...Object.values(WORKSPACE_TAB_VALUES),
+        ...visibleWorkspaceTabKeys.map((k) => WORKSPACE_TAB_VALUES[k]),
         ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
       ]),
-    [extraAccountTabs],
+    [extraAccountTabs, visibleWorkspaceTabKeys],
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
@@ -141,7 +158,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
             {workspaceName ?? t(($) => $.page.workspace_fallback)}
           </span>
-          {WORKSPACE_TAB_KEYS.map((key) => {
+          {visibleWorkspaceTabKeys.map((key) => {
             const Icon = WORKSPACE_TAB_ICONS[key];
             return (
               <TabsTrigger key={key} value={WORKSPACE_TAB_VALUES[key]}>

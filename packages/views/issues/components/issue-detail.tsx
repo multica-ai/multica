@@ -83,6 +83,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import { useConfigStore } from "@multica/core/config";
 
 function SubscriberPopoverContent({
   members,
@@ -662,6 +663,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
+  const isGenericMode = useConfigStore((s) => s.genericMode);
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
@@ -1430,10 +1432,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
       )}
 
-      {/* Pull requests — hidden when the workspace disables the PR sidebar
-          (or the GitHub master switch is off). Backend data is kept either
-          way so re-enabling restores the section instantly. */}
-      {githubSettings.prSidebar && (
+      {/* Pull requests — hidden in generic mode (non-IT users) and when the
+          workspace disables the PR sidebar / GitHub master switch is off.
+          Backend data is kept either way so re-enabling restores the section instantly. */}
+      {!isGenericMode && githubSettings.prSidebar && (
         <div>
           <button
             type="button"
@@ -1473,8 +1475,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
       {/* Execution log — active runs + collapsed past runs. Self-contained;
           owns its own collapse state and WS subscriptions. Hides itself
-          when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} />
+          when there are no runs to show. Hidden in generic mode. */}
+      {!isGenericMode && <ExecutionLogSection issueId={id} />}
 
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
@@ -1943,8 +1945,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 clears any in-flight task state from the previous issue.
                 The execution log itself (per-task timeline + past runs)
                 lives in the right panel via ExecutionLogSection — this
-                card is just a header-style "agent is working" anchor. */}
-            <AgentLiveCard key={id} issueId={id} />
+                card is just a header-style "agent is working" anchor.
+                Hidden in generic mode. */}
+            {!isGenericMode && <AgentLiveCard key={id} issueId={id} />}
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment

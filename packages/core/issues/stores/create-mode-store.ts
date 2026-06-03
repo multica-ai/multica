@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../../platform/storage";
 import { useModalStore } from "../../modals";
+import { configStore } from "../../config";
 
 /**
  * Last create-issue mode the user landed on. Drives the global `c` shortcut
@@ -23,15 +24,30 @@ interface CreateModeState {
   setLastMode: (mode: CreateMode) => void;
 }
 
+// In generic mode the persisted "agent" preference must be ignored so new
+// users landing on the tracker always see the manual form, not the AI agent
+// flow. We achieve this by re-hydrating the store with "manual" whenever
+// generic mode is active — the `merge` override on the persist middleware
+// wins over whatever was previously written to localStorage.
+const _isGenericMode = () => configStore.getState().genericMode;
+
 export const useCreateModeStore = create<CreateModeState>()(
   persist(
     (set) => ({
-      lastMode: "agent",
+      lastMode: _isGenericMode() ? "manual" : "agent",
       setLastMode: (mode) => set({ lastMode: mode }),
     }),
     {
       name: "multica_create_mode",
       storage: createJSONStorage(() => defaultStorage),
+      merge: (persisted, current) => {
+        // In generic mode override any persisted "agent" value so the manual
+        // form is always the default even for returning users.
+        if (_isGenericMode()) {
+          return { ...current, ...(persisted as Partial<CreateModeState>), lastMode: "manual" };
+        }
+        return { ...current, ...(persisted as Partial<CreateModeState>) };
+      },
     },
   ),
 );
@@ -46,7 +62,10 @@ export const useCreateModeStore = create<CreateModeState>()(
 export function openCreateIssueWithPreference(
   data?: Record<string, unknown> | null,
 ) {
-  const lastMode = useCreateModeStore.getState().lastMode;
+  // In generic mode always open the manual form regardless of the persisted
+  // preference — the agent quick-create flow is hidden from non-IT users.
+  const isGeneric = configStore.getState().genericMode;
+  const lastMode = isGeneric ? "manual" : useCreateModeStore.getState().lastMode;
   const modal = lastMode === "manual" ? "create-issue" : "quick-create-issue";
   useModalStore.getState().open(modal, data ?? null);
 }

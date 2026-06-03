@@ -1,4 +1,5 @@
 import type { OnboardingStep } from "./types";
+import { configStore } from "../config";
 
 /**
  * Canonical order of the persisted onboarding steps.
@@ -18,11 +19,21 @@ import type { OnboardingStep } from "./types";
  * part of the in-flow sequence. Helper agent creation now happens after
  * onboarding exits, via the workspace OnboardingHelperModal — see
  * `packages/views/workspace/onboarding-helper-modal.tsx`.
+ *
+ * In generic mode the "runtime" step is excluded — non-IT users have no
+ * concept of agent runtimes and the step would be confusing / blocking.
+ * The workspace step calls `completeOnboarding("runtime_skipped", wsId)`
+ * so the server-side guard is satisfied without the user seeing the step.
  */
-export const ONBOARDING_STEP_ORDER: readonly OnboardingStep[] = [
+const ALL_STEPS: readonly OnboardingStep[] = [
   "source",
   "role",
   "use_case",
   "workspace",
   "runtime",
 ] as const;
+
+export const ONBOARDING_STEP_ORDER: readonly OnboardingStep[] =
+  configStore.getState().genericMode
+    ? ALL_STEPS.filter((s) => s !== "runtime")
+    : ALL_STEPS;

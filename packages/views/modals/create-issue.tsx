@@ -56,6 +56,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+import { useConfigStore } from "@multica/core/config";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -90,6 +91,7 @@ export function ManualCreatePanel({
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
+  const isGenericMode = useConfigStore((s) => s.genericMode);
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
@@ -249,7 +251,11 @@ export function ManualCreatePanel({
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
       clearDraft();
+      // In generic mode the BacklogAgentHintDialog is suppressed entirely —
+      // non-IT users have no concept of AI agents and would find the dialog
+      // confusing.
       const shouldShowBacklogHint =
+        !isGenericMode &&
         status === "backlog" && assigneeType === "agent" && assigneeId &&
         localStorage.getItem("multica:backlog-agent-hint-dismissed") !== "true";
 

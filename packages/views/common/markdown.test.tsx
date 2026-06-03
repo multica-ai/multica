@@ -5,6 +5,7 @@ import { Markdown } from "./markdown";
 vi.mock("@multica/core/config", () => ({
   useConfigStore: (selector: (state: { cdnDomain: string }) => unknown) =>
     selector({ cdnDomain: "" }),
+  configStore: { getState: () => ({ genericMode: false }) },
 }));
 
 vi.mock("../issues/components/issue-mention-card", () => ({

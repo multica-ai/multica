@@ -18,6 +18,7 @@ import {
 } from "./property-picker";
 import { useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
+import { useConfigStore } from "@multica/core/config";
 
 /**
  * Legacy boolean shape kept around for callers (e.g. `use-issue-actions.ts`)
@@ -63,6 +64,7 @@ export function AssigneePicker({
   const [filter, setFilter] = useState("");
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
+  const isGenericMode = useConfigStore((s) => s.genericMode);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
@@ -162,8 +164,8 @@ export function AssigneePicker({
         </PickerSection>
       )}
 
-      {/* Agents */}
-      {filteredAgents.length > 0 && (
+      {/* Agents — hidden in generic mode (non-IT users don't assign to AI agents) */}
+      {!isGenericMode && filteredAgents.length > 0 && (
         <PickerSection label={t(($) => $.pickers.assignee.agents_group)}>
           {filteredAgents.map((a) => {
             const decision = canAssignAgentToIssue(a, {

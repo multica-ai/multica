@@ -30,6 +30,7 @@ vi.mock("../../auth", () => ({
 vi.mock("@multica/core/config", () => ({
   useConfigStore: (selector: (state: { workspaceCreationDisabled: boolean }) => unknown) =>
     mockUseConfigStore(selector),
+  configStore: { getState: () => ({ genericMode: false }) },
 }));
 
 vi.mock("@multica/core/workspace/mutations", () => ({
