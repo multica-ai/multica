@@ -1488,6 +1488,8 @@ type Workspace struct {
 	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+	// CEREBRO-PATCH(workspace-avatar-model): FIR-2580 — avatar_url column added by 9060_cerebro_workspace_avatar.
+	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 }
 
 type WorkspaceBudgetConfig struct {
