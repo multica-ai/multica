@@ -170,11 +170,13 @@ UPDATE workspace SET
     settings = COALESCE($5, settings),
     repos = COALESCE($6, repos),
     issue_prefix = COALESCE($7, issue_prefix),
+    avatar_url = COALESCE($8, avatar_url),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url
 `
 
+// CEREBRO-PATCH(workspace-avatar-query): FIR-2580 — AvatarUrl added by 9060_cerebro_workspace_avatar migration.
 type UpdateWorkspaceParams struct {
 	ID          pgtype.UUID `json:"id"`
 	Name        pgtype.Text `json:"name"`
@@ -183,6 +185,7 @@ type UpdateWorkspaceParams struct {
 	Settings    []byte      `json:"settings"`
 	Repos       []byte      `json:"repos"`
 	IssuePrefix pgtype.Text `json:"issue_prefix"`
+	AvatarUrl   pgtype.Text `json:"avatar_url"`
 }
 
 func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (Workspace, error) {
@@ -194,6 +197,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		arg.Settings,
 		arg.Repos,
 		arg.IssuePrefix,
+		arg.AvatarUrl,
 	)
 	var i Workspace
 	err := row.Scan(
@@ -208,6 +212,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.AvatarUrl,
 	)
 	return i, err
 }

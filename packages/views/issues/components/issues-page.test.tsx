@@ -62,6 +62,8 @@ vi.mock("../../navigation", () => ({
 // Mock workspace avatar
 vi.mock("../../workspace/workspace-avatar", () => ({
   WorkspaceAvatar: ({ name }: { name: string }) => <span data-testid="workspace-avatar">{name.charAt(0)}</span>,
+  // FIR-2580: breadcrumb logo helper renders its fallback unless a logo is set.
+  WorkspaceBreadcrumbLogo: ({ fallback }: { fallback: React.ReactNode }) => <>{fallback}</>,
 }));
 
 // Mock api (queries use api internally)
