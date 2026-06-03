@@ -223,7 +223,7 @@ func verifyAssetSHA256(data []byte, expectedHex, assetName string) error {
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/Askhz/multica/releases/tags/"+tag, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +249,7 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 // FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/Askhz/multica/releases/latest", nil)
 	if err != nil {
 		return nil, err
 	}
