@@ -8,8 +8,8 @@ allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 # Working on Multica issues
 
 Product contracts the runtime brief does not fully encode: PR linking vs close
-intent, reading linked-PR state, metadata keys, status side effects, sub-issue
-enqueue behavior, and the CLI-only rule for platform data.
+intent, reading linked-PR state, metadata keys, status side effects, and
+sub-issue enqueue behavior.
 
 For building mention links, load `multica-mentioning` instead — not this skill.
 
@@ -138,13 +138,6 @@ multica issue status <child-id> todo   # promote when the previous step is truly
 ```
 
 Creating every serial step as `todo` enqueues the whole chain at once.
-
-## Platform data goes through the CLI
-
-Use the `multica` CLI for all Multica resources. Do not fetch Multica resource
-URLs with curl, wget, or any direct HTTP client — they require authenticated
-access only the CLI provides. For issue/comment attachments, inspect the
-attachment CLI help and use that authenticated path.
 
 ## Incorrect → correct
 
