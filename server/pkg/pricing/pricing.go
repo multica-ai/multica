@@ -72,6 +72,8 @@ var modelPricing = map[string]Pricing{
 
 	// OpenAI — gpt-5 family. Cache read priced at 10% of input per OpenAI's
 	// public schedule; no separate cache-write line (writes are free).
+	// CEREBRO-PATCH(pricing-gpt55): FIR-2776 add gpt-5.5 — without it Codex agents fell back to Opus 4.1 ($15/$75), a 12× over-charge vs actual $5/$30.
+	"gpt-5.5":    {InputCentsPerMtok: 500, OutputCentsPerMtok: 3000, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 500},
 	"gpt-5":      {InputCentsPerMtok: 125, OutputCentsPerMtok: 1000, CacheReadCentsPerMtok: 12.5, CacheWriteCentsPerMtok: 0},
 	"gpt-5-mini": {InputCentsPerMtok: 25, OutputCentsPerMtok: 200, CacheReadCentsPerMtok: 2.5, CacheWriteCentsPerMtok: 0},
 
