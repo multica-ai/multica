@@ -19,7 +19,21 @@ spec:
     # 16.4 -> 16.8 is a valid in-place minor upgrade (no replacement).
     engineVersion: "16.8"
     allowMajorVersionUpgrade: true
-    applyImmediately: false
+    # Apply the parameter group association immediately; don't wait for the
+    # Sunday maintenance window. The static param (shared_preload_libraries=
+    # pg_cron) still requires a manual cluster reboot after this syncs.
+    applyImmediately: true
+
+    # Cluster parameter group: enables pg_cron via shared_preload_libraries.
+    # policy.resolve: Always — same reason as base/rds-cluster.yaml:
+    # Crossplane late-initialization already wrote default.aurora-postgresql16
+    # here, so IfNotPresent never overwrites it. Always forces every reconcile
+    # to re-resolve and push the correct value.
+    dbClusterParameterGroupNameRef:
+      name: agentfarm-postgres-cluster-params
+      policy:
+        resolve: Always
+
     databaseName: agentfarm
     masterUsername: agentfarmadmin
     masterPasswordSecretRef:
