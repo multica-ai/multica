@@ -314,13 +314,43 @@ func encodeResult(in map[string]any) (string, error) {
 }
 
 // latestPlanInfo returns the latest known plan_time for (job, scope)
-// and whether the row is in a terminal state. Used by the latest-only
-// catch-up path to decide whether the most recently due plan needs
-// claiming.
+// plus the fields the catch-up planner needs to decide whether the row
+// is still claimable at the same plan_time (FAILED-with-retry) or
+// finished and the next plan_time should advance past it.
 type latestPlanInfo struct {
-	Found    bool
-	PlanTime time.Time
-	Status   string
+	Found       bool
+	PlanTime    time.Time
+	Status      string
+	Attempt     int
+	MaxAttempts int
+	// NextRetryAt is zero (NULL in DB) when the row is not in a
+	// retry-eligible state, or when the next retry is due immediately
+	// (FAILED with no backoff configured).
+	NextRetryAt time.Time
+}
+
+// RetryEligible reports whether the latest stored row should still be
+// considered for the same plan_time on the next tick. True for FAILED
+// rows that have remaining attempts and whose next_retry_at has
+// passed; the every_plan planner uses this to keep the cursor on the
+// retry-eligible bucket so tryClaim's retry-from-FAILED branch can
+// fire.
+func (i latestPlanInfo) RetryEligible(now time.Time) bool {
+	if !i.Found {
+		return false
+	}
+	if i.Status != "FAILED" {
+		return false
+	}
+	if i.Attempt >= i.MaxAttempts {
+		return false
+	}
+	if i.NextRetryAt.IsZero() {
+		// COALESCE-style: NULL next_retry_at means "as soon as
+		// possible", which is right now.
+		return true
+	}
+	return !i.NextRetryAt.After(now)
 }
 
 func latestPlan(
@@ -330,15 +360,20 @@ func latestPlan(
 	scope Scope,
 ) (latestPlanInfo, error) {
 	var info latestPlanInfo
+	var nextRetry pgtype.Timestamptz
 	err := pool.QueryRow(ctx, `
-		SELECT plan_time, status
+		SELECT plan_time, status, attempt, max_attempts, next_retry_at
 		  FROM sys_cron_executions
 		 WHERE job_name   = $1
 		   AND scope_kind = $2
 		   AND scope_id   = $3
 		 ORDER BY plan_time DESC
 		 LIMIT 1
-	`, jobName, scope.Kind, scope.ID).Scan(&info.PlanTime, &info.Status)
+	`, jobName, scope.Kind, scope.ID).Scan(
+		&info.PlanTime, &info.Status,
+		&info.Attempt, &info.MaxAttempts,
+		&nextRetry,
+	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return info, nil
@@ -347,5 +382,8 @@ func latestPlan(
 	}
 	info.Found = true
 	info.PlanTime = info.PlanTime.UTC()
+	if nextRetry.Valid {
+		info.NextRetryAt = nextRetry.Time.UTC()
+	}
 	return info, nil
 }

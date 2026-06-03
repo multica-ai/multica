@@ -218,12 +218,27 @@ func (m *Manager) plansForTick(
 			oldestAllowed = latest
 		}
 		var start time.Time
-		if info.Found {
-			// Continue right after the most recent stored plan, even
-			// if it is still RUNNING — the conflict path handles the
-			// duplicate insert.
+		switch {
+		case info.Found && info.RetryEligible(now):
+			// FAILED at info.PlanTime with attempts remaining and
+			// next_retry_at <= now. Keep the cursor on the same
+			// plan_time so tryClaim's retry-from-FAILED branch picks
+			// it up; then advance forward through any newer plans
+			// that may also be due. Without this case the cursor
+			// would unconditionally jump to PlanTime+cadence and
+			// strand the FAILED row until max_attempts is reached
+			// elsewhere — which never happens in steady state.
+			//
+			// (MUL-2957 review: see张大彪's retry blocker.)
+			start = info.PlanTime
+		case info.Found:
+			// Latest stored plan is SUCCESS, RUNNING, or FAILED with
+			// no remaining retry budget — advance past it so we do
+			// not redundantly attempt to insert the same plan_time.
 			start = info.PlanTime.Add(job.Cadence)
-		} else {
+		default:
+			// No history yet for this (job, scope). Fall through to
+			// the latest plan to bootstrap.
 			start = latest
 		}
 		if start.Before(oldestAllowed) {
