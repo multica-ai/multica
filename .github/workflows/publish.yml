@@ -135,68 +135,128 @@ jobs:
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 
-  extract-tags:
-    needs: [bake-build-backend, bake-build-web, bake-build-devenv-runtime, bake-build-agentrunner-runtime]
+  # ----------------------------------------------------------------------------
+  # Tag extraction + GitOps image bumps.
+  #
+  # The deploy fans out into two independent groups so a fast server build is
+  # never held hostage by the slow runner build chain (PLA-391). Previously a
+  # single `extract-tags` job depended on all four bake-builds, so the backend
+  # (built in ~30s) could not deploy until the base -> devenv -> agentrunner
+  # chain finished minutes later.
+  #
+  #   * Server group  — backend + web build in parallel, then bump their two
+  #     image tags in gitops/environments/tools/kustomization.yaml.
+  #   * Runner group  — agent-runtime-base -> devenv -> agentrunner build in
+  #     sequence (FROM chain); each runner image bumps its gitops target as
+  #     soon as that image is built.
+  #
+  # Serialization rule for the commits below: the reusable gitops-deploy
+  # workflow keys its concurrency group on (repository + kustomization path)
+  # and pushes with a plain `git push` (no rebase/retry). Two deploys racing on
+  # the SAME repo+path are queued safely; two deploys to the same repo at
+  # DIFFERENT paths are NOT — the second push is rejected non-fast-forward.
+  # Every commit that targets g2crowd/agentfarm is therefore chained into one
+  # sequence (backend -> web -> agent-runtime). The devenv-runtime bump targets
+  # the separate g2crowd/configuration repo and runs fully in parallel.
+  # ----------------------------------------------------------------------------
+
+  extract-server-tags:
+    needs: [bake-build-backend, bake-build-web]
     runs-on: ubuntu-latest
     outputs:
       backend_tag: ${{ steps.extract.outputs.backend_tag }}
       web_tag: ${{ steps.extract.outputs.web_tag }}
-      devenv_runtime_tag: ${{ steps.extract.outputs.devenv_runtime_tag }}
-      agentrunner_runtime_tag: ${{ steps.extract.outputs.agentrunner_runtime_tag }}
     steps:
-      - name: Extract tags from image_name
+      - name: Extract server image tags
         id: extract
         env:
           BACKEND_IMAGE: ${{ needs.bake-build-backend.outputs.image_name }}
           WEB_IMAGE: ${{ needs.bake-build-web.outputs.image_name }}
-          DEVENV_RUNTIME_IMAGE: ${{ needs.bake-build-devenv-runtime.outputs.image_name }}
-          AGENTRUNNER_RUNTIME_IMAGE: ${{ needs.bake-build-agentrunner-runtime.outputs.image_name }}
         run: |
           echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+
+  extract-devenv-runtime-tag:
+    needs: [bake-build-devenv-runtime]
+    runs-on: ubuntu-latest
+    outputs:
+      devenv_runtime_tag: ${{ steps.extract.outputs.devenv_runtime_tag }}
+    steps:
+      - name: Extract devenv-runtime image tag
+        id: extract
+        env:
+          DEVENV_RUNTIME_IMAGE: ${{ needs.bake-build-devenv-runtime.outputs.image_name }}
+        run: |
           echo "devenv_runtime_tag=${DEVENV_RUNTIME_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+
+  extract-agentrunner-runtime-tag:
+    needs: [bake-build-agentrunner-runtime]
+    runs-on: ubuntu-latest
+    outputs:
+      agentrunner_runtime_tag: ${{ steps.extract.outputs.agentrunner_runtime_tag }}
+    steps:
+      - name: Extract agentrunner-runtime image tag
+        id: extract
+        env:
+          AGENTRUNNER_RUNTIME_IMAGE: ${{ needs.bake-build-agentrunner-runtime.outputs.image_name }}
+        run: |
           echo "agentrunner_runtime_tag=${AGENTRUNNER_RUNTIME_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
+  # ---- Server group: bump backend then web in tools/kustomization.yaml ----
+  # backend and web write the same file (indices [0] and [1]); chaining them
+  # keeps the two pushes ordered and deterministic. Neither waits on the runner
+  # build chain anymore.
   commit-to-gitops-backend:
-    needs: [bake-build-backend, bake-build-web, extract-tags]
+    needs: [extract-server-tags]
     uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
     secrets: inherit
     with:
       gitops_repository: g2crowd/agentfarm
-      image_tag: ${{ needs.extract-tags.outputs.backend_tag }}
+      image_tag: ${{ needs.extract-server-tags.outputs.backend_tag }}
       app_repo_branch: ${{ github.head_ref || github.ref_name }}
       path_to_kustomization: gitops/environments/tools/kustomization.yaml
       image_yq_matcher: .images[0].newTag
 
   commit-to-gitops-web:
-    needs: [bake-build-backend, bake-build-web, extract-tags, commit-to-gitops-backend]
+    needs: [extract-server-tags, commit-to-gitops-backend]
     uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
     secrets: inherit
     with:
       gitops_repository: g2crowd/agentfarm
-      image_tag: ${{ needs.extract-tags.outputs.web_tag }}
+      image_tag: ${{ needs.extract-server-tags.outputs.web_tag }}
       app_repo_branch: ${{ github.head_ref || github.ref_name }}
       path_to_kustomization: gitops/environments/tools/kustomization.yaml
       image_yq_matcher: .images[1].newTag
 
+  # ---- Runner group ----
+  # devenv-runtime bumps the separate g2crowd/configuration repo, so it fires
+  # as soon as the devenv image is built and runs in parallel with the server
+  # group — no agentfarm push contention.
   commit-to-gitops-devenv-runtime:
-    needs: [bake-build-devenv-runtime, extract-tags, commit-to-gitops-web]
+    needs: [extract-devenv-runtime-tag]
     uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
     secrets: inherit
     with:
       gitops_repository: g2crowd/configuration
-      image_tag: ${{ needs.extract-tags.outputs.devenv_runtime_tag }}
+      image_tag: ${{ needs.extract-devenv-runtime-tag.outputs.devenv_runtime_tag }}
       app_repo_branch: ${{ github.head_ref || github.ref_name }}
       path_to_kustomization: kustomize/DevOps/devenv/environments/development/kustomization.yaml
       image_yq_matcher: .images[1].newTag
 
+  # agent-runtime bumps g2crowd/agentfarm at a DIFFERENT path than the server
+  # bump, so the reusable workflow's repo+path concurrency group does NOT
+  # serialize it against the server commits. It is chained after
+  # commit-to-gitops-web to avoid a concurrent push to agentfarm main, which
+  # the shared gitops-deploy workflow does not rebase/retry. By the time the
+  # agentrunner image (last in the build chain) is ready, the server commits
+  # have long finished, so this dependency adds no real latency.
   commit-to-gitops-agent-runtime:
-    needs: [bake-build-agentrunner-runtime, extract-tags, commit-to-gitops-devenv-runtime]
+    needs: [extract-agentrunner-runtime-tag, commit-to-gitops-web]
     uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
     secrets: inherit
     with:
       gitops_repository: g2crowd/agentfarm
-      image_tag: ${{ needs.extract-tags.outputs.agentrunner_runtime_tag }}
+      image_tag: ${{ needs.extract-agentrunner-runtime-tag.outputs.agentrunner_runtime_tag }}
       app_repo_branch: ${{ github.head_ref || github.ref_name }}
       path_to_kustomization: gitops/environments/development/agent-runtime/kustomization.yaml
       image_yq_matcher: .images[0].newTag
