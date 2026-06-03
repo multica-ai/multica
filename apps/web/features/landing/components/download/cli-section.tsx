@@ -3,10 +3,16 @@
 import { useState } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
 import { useLocale } from "../../i18n";
+import { useConfigStore } from "@multica/core/config";
 
 const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
-const SETUP_CMD = "multica setup";
+  "curl -fsSL https://raw.githubusercontent.com/Askhz/multica/main/scripts/install.sh | bash";
+
+function makeTokenCmd(serverUrl: string) {
+  return `multica config set server_url ${serverUrl || "https://api.multica.ai"}
+multica login --token <YOUR_TOKEN>
+multica daemon start`;
+}
 
 /**
  * Scenario-first CLI section. Copy leans into servers / remote dev
@@ -16,6 +22,8 @@ const SETUP_CMD = "multica setup";
 export function CliSection() {
   const { t } = useLocale();
   const d = t.download.cli;
+  const serverUrl = useConfigStore((s) => s.serverUrl);
+  const tokenCmd = makeTokenCmd(serverUrl);
 
   return (
     <section id="cli" className="bg-[#f7f7f5] py-20 text-[#0a0d12] sm:py-24">
@@ -36,7 +44,7 @@ export function CliSection() {
           />
           <CommandBlock
             label={d.startLabel}
-            cmd={SETUP_CMD}
+            cmd={tokenCmd}
             copyLabel={d.copyLabel}
             copiedLabel={d.copiedLabel}
           />

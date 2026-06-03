@@ -1179,6 +1179,7 @@ export class ApiClient {
     google_client_id?: string;
     casdoor_enabled?: boolean;
     casdoor_login_url?: string;
+    server_url?: string;
     posthog_key?: string;
     posthog_host?: string;
     analytics_environment?: string;

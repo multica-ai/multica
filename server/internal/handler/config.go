@@ -21,6 +21,12 @@ type AppConfig struct {
 	CasdoorEnabled bool   `json:"casdoor_enabled"`
 	CasdoorLoginUrl string `json:"casdoor_login_url,omitempty"`
 
+	// ServerURL is the public HTTP(S) address of this backend. Returned so
+	// the frontend can generate accurate CLI setup commands for self-hosted
+	// deployments (e.g. http://localhost:8080) without baking URLs into the
+	// build. Empty for builds where the operator has not set SERVER_URL.
+	ServerURL string `json:"server_url,omitempty"`
+
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
@@ -44,6 +50,15 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()
+	}
+
+	// SERVER_URL is the canonical public backend address (e.g. https://api.multica.ai
+	// or http://localhost:8080). REMOTE_API_URL is the Next.js proxy target and
+	// works as a fallback for deployments where only the web tier has the explicit
+	// backend address.
+	config.ServerURL = os.Getenv("SERVER_URL")
+	if config.ServerURL == "" {
+		config.ServerURL = os.Getenv("REMOTE_API_URL")
 	}
 
 	// Re-read from env on every request so operators can rotate keys via

@@ -3,11 +3,13 @@ import { useStore } from "zustand";
 
 interface ConfigState {
   cdnDomain: string;
+  serverUrl: string;
   allowSignup: boolean;
   googleClientId: string;
   casdoorEnabled: boolean;
   casdoorLoginUrl: string;
   setCdnDomain: (domain: string) => void;
+  setServerUrl: (url: string) => void;
   setAuthConfig: (config: {
     allowSignup: boolean;
     googleClientId?: string;
@@ -18,11 +20,13 @@ interface ConfigState {
 
 export const configStore = createStore<ConfigState>((set) => ({
   cdnDomain: "",
+  serverUrl: "",
   allowSignup: true,
   googleClientId: "",
   casdoorEnabled: false,
   casdoorLoginUrl: "",
   setCdnDomain: (domain) => set({ cdnDomain: domain }),
+  setServerUrl: (url) => set({ serverUrl: url }),
   setAuthConfig: ({ allowSignup, googleClientId = "", casdoorEnabled = false, casdoorLoginUrl = "" }) =>
     set({ allowSignup, googleClientId, casdoorEnabled, casdoorLoginUrl }),
 }));

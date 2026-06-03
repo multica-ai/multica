@@ -18,16 +18,18 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { useConfigStore } from "@multica/core/config";
 
 type Step = "instructions" | "success";
 
 const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
-const SETUP_CMD = "multica setup";
-const TOKEN_CMD = `multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai
+  "curl -fsSL https://raw.githubusercontent.com/Askhz/multica/main/scripts/install.sh | bash";
+
+function makeTokenCmd(serverUrl: string) {
+  return `multica config set server_url ${serverUrl || "https://api.multica.ai"}
 multica login --token <YOUR_TOKEN>
 multica daemon start`;
+}
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>("instructions");
@@ -37,9 +39,6 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   const navigation = useNavigation();
   const newRuntimeIdRef = useRef<string | null>(null);
 
-  // `multica setup` is one blocking command that handles config + login
-  // + daemon start; the dialog passively listens for the resulting
-  // `daemon:register` WS event and auto-advances to success.
   const handleDaemonRegister = useCallback(
     (payload: unknown) => {
       if (step !== "instructions") return;
@@ -157,6 +156,8 @@ function CommandStep({
 
 function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
+  const serverUrl = useConfigStore((s) => s.serverUrl);
+  const tokenCmd = makeTokenCmd(serverUrl);
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
@@ -177,21 +178,14 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
             copyAria={t(($) => $.connect.copy_aria)}
           />
 
-          <div>
-            <CommandStep
-              n={2}
-              label={t(($) => $.connect.step2_label)}
-              cmd={SETUP_CMD}
-              copyAria={t(($) => $.connect.copy_aria)}
-            />
-            <p className="mt-1.5 text-[11px] leading-[1.55] text-muted-foreground">
-              {t(($) => $.connect.step2_hint)}
-            </p>
-          </div>
+          <CommandStep
+            n={2}
+            label={t(($) => $.connect.step2_label)}
+            cmd={tokenCmd}
+            copyAria={t(($) => $.connect.copy_aria)}
+          />
 
           <LiveListening />
-
-          <TroubleshootingDetails />
         </div>
       </div>
 
@@ -201,55 +195,6 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
         </Button>
       </DialogFooter>
     </>
-  );
-}
-
-function TroubleshootingDetails() {
-  const { t } = useT("runtimes");
-  return (
-    <details className="group rounded-lg border border-dashed">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <ChevronRight
-          className="h-3 w-3 transition-transform group-open:rotate-90"
-          aria-hidden
-        />
-        {t(($) => $.connect.troubleshooting)}
-      </summary>
-      <div className="space-y-2 border-t px-3 pt-2.5 pb-3 text-[11px] leading-[1.55] text-muted-foreground">
-        <p>{t(($) => $.connect.trouble_intro)}</p>
-        <CommandStep
-          n={2}
-          label={t(($) => $.connect.step2_label)}
-          cmd={TOKEN_CMD}
-          copyAria={t(($) => $.connect.copy_aria)}
-        />
-        <p>
-          {t(($) => $.connect.trouble_token_hint_prefix)}
-          <span className="font-medium text-foreground">
-            {t(($) => $.connect.trouble_token_hint_destination)}
-          </span>
-          {t(($) => $.connect.trouble_token_hint_suffix)}
-        </p>
-        <ul className="space-y-1">
-          <li className="flex items-center gap-1.5">
-            <span>{t(($) => $.connect.trouble_check_status)}</span>
-            {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
-              {"multica daemon status"}
-            </code>
-          </li>
-          <li className="flex items-center gap-1.5">
-            <span>{t(($) => $.connect.trouble_view_logs)}</span>
-            {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
-              {"multica daemon logs -f"}
-            </code>
-          </li>
-        </ul>
-      </div>
-    </details>
   );
 }
 

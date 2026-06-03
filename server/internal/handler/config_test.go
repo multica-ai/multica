@@ -14,6 +14,7 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 
 	t.Setenv("ALLOW_SIGNUP", "false")
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
+	t.Setenv("SERVER_URL", "https://api.example.com")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
 
@@ -38,6 +39,9 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if cfg.GoogleClientID != "google-client-id" {
 		t.Fatalf("google_client_id: want google-client-id, got %q", cfg.GoogleClientID)
+	}
+	if cfg.ServerURL != "https://api.example.com" {
+		t.Fatalf("server_url: want https://api.example.com, got %q", cfg.ServerURL)
 	}
 	if cfg.PosthogKey != "phc_test" {
 		t.Fatalf("posthog_key: want phc_test, got %q", cfg.PosthogKey)
