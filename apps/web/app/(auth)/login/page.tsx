@@ -182,8 +182,7 @@ void resolveLoggedInDestination(qc, hasOnboarded, list).then((dest) =>
       return;
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    const dest = await resolveLoggedInDestination(qc, onboarded, list);
-    router.push(dest);
+    router.push(await resolveLoggedInDestination(qc, onboarded, list));
   };
 
   // Build Google OAuth state: encode platform + next URL so the callback

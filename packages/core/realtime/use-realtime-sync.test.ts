@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import {
   agentActivityKeys,
@@ -13,6 +13,7 @@ import type {
   ChatDonePayload,
   ChatMessage,
   ChatPendingTask,
+  ChatMessagesPage,
   Workspace,
 } from "../types";
 import {
@@ -72,7 +73,7 @@ describe("applyChatDoneToCache", () => {
     applyChatDoneToCache(qc, donePayload());
 
     expect(setQueryData.mock.calls[0]?.[0]).toEqual(messagesKey);
-    expect(setQueryData.mock.calls[1]?.[0]).toEqual(pendingKey);
+    expect(setQueryData.mock.calls[2]?.[0]).toEqual(pendingKey);
     expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({});
     expect(qc.getQueryData<ChatMessage[]>(messagesKey)).toEqual([
       userMessage(),
@@ -148,6 +149,7 @@ describe("applyWorkspaceUpdatedToCache", () => {
       settings: {},
       repos: [],
       issue_prefix: "TES",
+      avatar_url: null,
       created_at: "2026-05-18T00:00:00Z",
       updated_at: "2026-05-18T00:00:00Z",
       ...overrides,
@@ -273,5 +275,35 @@ describe("workspace task invalidation", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("applyChatDoneToCache paged messages", () => {
+  it("patches page zero and skips older pages without duplicating replayed events", () => {
+    const qc = createQueryClient();
+    const older = userMessage();
+    const latest: ChatMessage = {
+      id: "msg-latest",
+      chat_session_id: sessionId,
+      role: "user",
+      content: "latest",
+      task_id: null,
+      created_at: "2026-05-13T05:00:01Z",
+    };
+    qc.setQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sessionId), {
+      pages: [
+        { messages: [latest], limit: 1, has_more: true, next_cursor: { created_at: latest.created_at, id: latest.id } },
+        { messages: [older], limit: 1, has_more: false, next_cursor: null },
+      ],
+      pageParams: [null, { created_at: latest.created_at, id: latest.id }],
+    });
+
+    applyChatDoneToCache(qc, donePayload());
+    applyChatDoneToCache(qc, donePayload());
+
+    const paged = qc.getQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sessionId));
+
+    expect(paged?.pages[0]?.messages.map((m) => m.id)).toEqual(["msg-latest", "msg-assistant"]);
+    expect(paged?.pages[1]?.messages.map((m) => m.id)).toEqual(["msg-user"]);
   });
 });

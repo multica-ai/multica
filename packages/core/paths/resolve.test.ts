@@ -14,6 +14,7 @@ function makeWs(slug: string): Workspace {
     repos: [],
     wiki_content: null,
     issue_prefix: slug.toUpperCase(),
+    avatar_url: null,
     created_at: "",
     updated_at: "",
   };

@@ -839,16 +839,7 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 	if !cmd.Flags().Changed("skill-ids") {
 		return fmt.Errorf("--skill-ids is required (comma-separated skill IDs; use --skill-ids '' to clear all)")
 	}
-	skillIDs, _ := cmd.Flags().GetStringSlice("skill-ids")
-	// Allow passing empty string to clear all skills.
-	cleanIDs := make([]string, 0, len(skillIDs))
-	for _, id := range skillIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			cleanIDs = append(cleanIDs, id)
-		}
-	}
-
+	cleanIDs := cleanSkillIDsFlag(cmd)
 	body := map[string]any{
 		"skill_ids": cleanIDs,
 	}
@@ -861,15 +852,7 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("set agent skills: %w", err)
 	}
 
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		var pretty any
-		json.Unmarshal(result, &pretty)
-		return cli.PrintJSON(os.Stdout, pretty)
-	}
-
-	fmt.Printf("Skills updated for agent %s\n", args[0])
-	return nil
+	return printAgentSkillsMutationResult(cmd, args[0], result)
 }
 
 func runAgentSkillsAdd(cmd *cobra.Command, args []string) error {
@@ -879,50 +862,40 @@ func runAgentSkillsAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	if !cmd.Flags().Changed("skill-ids") {
-		return fmt.Errorf("--skill-ids is required (comma-separated skill IDs to add)")
+		return fmt.Errorf("--skill-ids is required (comma-separated skill IDs)")
 	}
-	skillIDs, _ := cmd.Flags().GetStringSlice("skill-ids")
-	addIDs := make([]string, 0, len(skillIDs))
-	for _, id := range skillIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			addIDs = append(addIDs, id)
-		}
+	cleanIDs := cleanSkillIDsFlag(cmd)
+	if len(cleanIDs) == 0 {
+		return fmt.Errorf("--skill-ids must include at least one skill ID")
 	}
-	if len(addIDs) == 0 {
-		return fmt.Errorf("--skill-ids must contain at least one non-empty ID")
+	body := map[string]any{
+		"skill_ids": cleanIDs,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Fetch current skills.
-	var skills []map[string]any
-	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/skills", &skills); err != nil {
-		return fmt.Errorf("list agent skills: %w", err)
-	}
-
-	// Build the merged set (existing + new, no duplicates).
-	existing := make(map[string]struct{}, len(skills))
-	merged := make([]string, 0, len(skills)+len(addIDs))
-	for _, s := range skills {
-		id := strVal(s, "id")
-		existing[id] = struct{}{}
-		merged = append(merged, id)
-	}
-	for _, id := range addIDs {
-		if _, dup := existing[id]; !dup {
-			merged = append(merged, id)
-			existing[id] = struct{}{}
-		}
-	}
-
-	body := map[string]any{"skill_ids": merged}
 	var result json.RawMessage
-	if err := client.PutJSON(ctx, "/api/agents/"+args[0]+"/skills", body, &result); err != nil {
+	if err := client.PostJSON(ctx, "/api/agents/"+args[0]+"/skills/add", body, &result); err != nil {
 		return fmt.Errorf("add agent skills: %w", err)
 	}
 
+	return printAgentSkillsMutationResult(cmd, args[0], result)
+}
+
+func cleanSkillIDsFlag(cmd *cobra.Command) []string {
+	skillIDs, _ := cmd.Flags().GetStringSlice("skill-ids")
+	cleanIDs := make([]string, 0, len(skillIDs))
+	for _, id := range skillIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIDs = append(cleanIDs, id)
+		}
+	}
+	return cleanIDs
+}
+
+func printAgentSkillsMutationResult(cmd *cobra.Command, agentID string, result json.RawMessage) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		var pretty any
@@ -930,7 +903,24 @@ func runAgentSkillsAdd(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, pretty)
 	}
 
-	fmt.Printf("Skills added for agent %s\n", args[0])
+	var skills []map[string]any
+	if err := json.Unmarshal(result, &skills); err != nil {
+		return fmt.Errorf("decode agent skills response: %w", err)
+	}
+	if len(skills) == 0 {
+		fmt.Printf("No skills assigned to agent %s\n", agentID)
+		return nil
+	}
+	headers := []string{"ID", "NAME", "DESCRIPTION"}
+	rows := make([][]string, 0, len(skills))
+	for _, s := range skills {
+		rows = append(rows, []string{
+			strVal(s, "id"),
+			strVal(s, "name"),
+			strVal(s, "description"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }
 

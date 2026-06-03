@@ -35,6 +35,7 @@
     "./issues/hooks": "./issues/hooks.ts",
     "./issues/mutations": "./issues/mutations.ts",
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
+    "./issues/date": "./issues/date.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/config": "./issues/config/index.ts",
     "./issues/config/status": "./issues/config/status.ts",
@@ -111,7 +112,9 @@
     "./analytics": "./analytics/index.ts",
     "./i18n": "./i18n/index.ts",
     "./i18n/react": "./i18n/react.ts",
-    "./i18n/browser": "./i18n/browser.ts"
+    "./i18n/browser": "./i18n/browser.ts",
+    "./skills": "./skills/index.ts",
+    "./skills/frontmatter": "./skills/frontmatter.ts"
   },
   "dependencies": {
     "@formatjs/intl-localematcher": "catalog:",
@@ -120,6 +123,7 @@
     "i18next": "catalog:",
     "posthog-js": "catalog:",
     "react-i18next": "catalog:",
+    "yaml": "catalog:",
     "zod": "catalog:",
     "zustand": "catalog:"
   },

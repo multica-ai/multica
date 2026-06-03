@@ -72,6 +72,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { Attachment, Issue, IssueStatus, IssuePriority, LocalPreview, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
@@ -225,10 +226,7 @@ function SubscriberPopoverContent({
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
 type ActivityT = ReturnType<typeof useT<"issues">>["t"];
@@ -288,12 +286,12 @@ function formatActivity(
     }
     case "start_date_changed": {
       if (!details.to) return t(($) => $.activity.start_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.start_date_set, { date: formatted });
     }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.due_date_set, { date: formatted });
     }
     case "title_changed":

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -271,15 +272,40 @@ func main() {
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
 	var httpMetrics *obsmetrics.HTTPMetrics
+	var businessMetrics *obsmetrics.BusinessMetrics
+	var samplerPool *pgxpool.Pool
 	if metricsConfig.Enabled() {
+		// Build a dedicated tiny pool for the BusinessSamplerCollector
+		// so a stalled scrape can never starve business traffic. If the
+		// pool fails to construct we log and continue without the
+		// sampler — the rest of /metrics is still useful.
+		var err error
+		samplerPool, err = newSamplerDBPool(ctx, dbURL)
+		if err != nil {
+			slog.Warn("metrics: failed to build sampler pgxpool; sampler disabled", "error", err)
+			samplerPool = nil
+		}
+
 		metricsRegistry := obsmetrics.NewRegistry(obsmetrics.RegistryOptions{
 			Pool:     pool,
 			Realtime: realtime.M,
 			DaemonWS: daemonws.M,
 			Version:  version,
 			Commit:   commit,
+			BusinessSampler: func() *obsmetrics.BusinessSamplerOptions {
+				if samplerPool == nil {
+					return nil
+				}
+				return &obsmetrics.BusinessSamplerOptions{Pool: samplerPool}
+			}(),
 		})
 		httpMetrics = metricsRegistry.HTTP
+		businessMetrics = metricsRegistry.Business
+		// Forward inbound daemon WS frames into the per-kind counter so
+		// dashboards can split heartbeat / unknown / invalid traffic.
+		if daemonHub != nil {
+			daemonHub.SetMessageKindRecorder(businessMetrics)
+		}
 		metricsServer = obsmetrics.NewServer(metricsConfig.Addr, metricsRegistry.Gatherer)
 		if !obsmetrics.IsLoopbackAddr(metricsConfig.Addr) {
 			slog.Warn(
@@ -287,6 +313,9 @@ func main() {
 				"addr", metricsConfig.Addr,
 			)
 		}
+	}
+	if samplerPool != nil {
+		defer samplerPool.Close()
 	}
 
 	// Construct the BatchedHeartbeatScheduler before the router so it can
@@ -297,6 +326,7 @@ func main() {
 
 	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
+		BusinessMetrics:    businessMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
 		HeartbeatScheduler: heartbeatScheduler,
@@ -312,6 +342,7 @@ func main() {
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
+	taskSvc.Metrics = businessMetrics
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	uploadCleanupHandler := handler.New(queries, pool, hub, bus, service.NewEmailService(), storageForAttachmentCleanup(), nil, analyticsClient, handler.Config{})
 	registerAutopilotListeners(bus, autopilotSvc)

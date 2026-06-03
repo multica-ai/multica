@@ -44,9 +44,10 @@ Use this option when your deployment cannot reach the public internet or you alr
 | `SMTP_PORT` | SMTP port | `25` |
 | `SMTP_USERNAME` | SMTP username (leave empty for unauthenticated relay) | - |
 | `SMTP_PASSWORD` | SMTP password | - |
+| `SMTP_TLS` | TLS mode. `implicit` (aliases `smtps`, `ssl`) forces SMTPS on connect; port `465` auto-enables it. Unset / `starttls` upgrades via STARTTLS | `starttls` |
 | `SMTP_TLS_INSECURE` | Set `true` to skip TLS certificate verification (self-signed / private CA certs) | `false` |
 
-STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / implicit TLS) is not currently supported - use ports 25 or 587 with STARTTLS.
+STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / implicit TLS) is supported and auto-enables implicit TLS; set `SMTP_TLS=implicit` (aliases `smtps`, `ssl`) to force it on a non-standard port.
 
 > **Note:** If neither Resend nor SMTP is configured, generated verification codes are printed to backend logs — copy them from there to log in. A fixed local testing code (e.g. `888888`) is **opt-in only**: set `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env` and keep `APP_ENV` non-production. The Docker self-host stack pins `APP_ENV=production`, so the shortcut is ignored there. **Never enable a fixed code on a publicly reachable instance.**
 
@@ -114,7 +115,7 @@ The `Secure` flag on session cookies is derived automatically from the scheme of
 | `PORT` | `8080` | Backend server port |
 | `METRICS_ADDR` | empty | Optional Prometheus metrics listener, for example `127.0.0.1:9090` |
 | `FRONTEND_PORT` | `3000` | Frontend port |
-| `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins |
+| `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins. Governs **both** the HTTP CORS allowlist **and** the WebSocket `Origin` check. A browser origin that isn't listed here (and isn't `localhost`) has its real-time WebSocket upgrade rejected with `403`, so live updates stop working until a manual refresh. |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
 ### CLI / Daemon
@@ -339,6 +340,8 @@ multica.example.com {
 }
 ```
 
+> Even on a single domain, set `FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS` to that public origin (e.g. `https://multica.example.com`) on the backend. The backend's default origin allowlist is `localhost` only, so without this it rejects the WebSocket upgrade from the public URL with `403` and real-time updates silently stop working. See [LAN / Non-localhost Access](#lan--non-localhost-access).
+
 **Separate-domain layout** — frontend and backend on different hostnames:
 
 ```
@@ -457,6 +460,8 @@ HTTP requests (issues, comments, uploads) work on LAN out of the box — Next.js
    ```
 
    `NEXT_PUBLIC_WS_URL` is a build-time variable (see `Dockerfile.web`), so setting it only in `environment:` on the pre-built image has no effect — you must use the `selfhost.build.yml` override that rebuilds the image.
+
+**Also required: allowlist the browser origin.** The two options above fix the WebSocket *upgrade proxying*, but a second, independent setting gates the connection: the backend validates the WebSocket `Origin` header against an allowlist that defaults to `localhost` only. When you open Multica from any other origin — a LAN IP **or a public domain behind a reverse proxy** — set `CORS_ALLOWED_ORIGINS` (or `FRONTEND_ORIGIN`) on the backend to that exact origin and restart, exactly as shown under [LAN / Non-localhost Access](#lan--non-localhost-access) above. Otherwise the upgrade is refused with `403`: the backend logs `websocket: request origin not allowed by Upgrader.CheckOrigin` and the browser console loops `disconnected, reconnecting in 3s`, while HTTP requests (and manual page refreshes) keep working because they are same-origin to the page. The single value covers both HTTP CORS and the WebSocket origin check.
 
 > **Note:** If you need to hard-code a different public API / WebSocket endpoint into the web image for any other reason, use the same source-build override: `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 

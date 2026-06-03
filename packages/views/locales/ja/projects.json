@@ -1,0 +1,120 @@
+{
+  "page": {
+    "title": "プロジェクト",
+    "new_project": "新規プロジェクト",
+    "empty": "プロジェクトはまだありません",
+    "create_first": "最初のプロジェクトを作成",
+    "view_compact": "コンパクト",
+    "view_comfortable": "ゆったり",
+    "search_placeholder": "プロジェクトを検索...",
+    "no_search_results": "検索条件に一致する結果はありません"
+  },
+  "table": {
+    "name": "名前",
+    "priority": "優先度",
+    "status": "ステータス",
+    "progress": "進捗",
+    "lead": "リード",
+    "created": "作成日"
+  },
+  "status": {
+    "planned": "計画中",
+    "in_progress": "進行中",
+    "paused": "一時停止",
+    "completed": "完了",
+    "cancelled": "キャンセル"
+  },
+  "priority": {
+    "urgent": "緊急",
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+    "none": "優先度なし"
+  },
+  "lead": {
+    "no_lead": "リードなし",
+    "assign_placeholder": "リードを割り当て...",
+    "members_group": "メンバー",
+    "agents_group": "エージェント",
+    "no_results": "結果なし"
+  },
+  "relative_date": {
+    "today": "今日",
+    "one_day_ago": "1日前",
+    "days_ago": "{{count}}日前",
+    "months_ago": "{{count}}か月前"
+  },
+  "detail": {
+    "not_found": "プロジェクトが見つかりません",
+    "breadcrumb_fallback": "プロジェクト",
+    "title_placeholder": "プロジェクトのタイトル",
+    "icon_tooltip": "アイコンを変更",
+    "pin_tooltip": "サイドバーに固定",
+    "unpin_tooltip": "サイドバーの固定を解除",
+    "sidebar_tooltip": "サイドバーの開閉",
+    "copy_link": "リンクをコピー",
+    "delete_action": "プロジェクトを削除",
+    "section_properties": "プロパティ",
+    "section_progress": "進捗",
+    "section_description": "説明",
+    "description_placeholder": "説明を追加...",
+    "empty_issues_title": "リンクされたイシューはありません",
+    "empty_issues_hint": "新しいイシューを作成するか、既存のイシューをこのプロジェクトに割り当ててください。",
+    "empty_issues_new_button": "新規イシュー",
+    "no_issues_yet": "イシューはまだありません",
+    "toast_link_copied": "リンクをコピーしました",
+    "toast_project_deleted": "プロジェクトを削除しました",
+    "toast_move_issue_failed": "イシューを移動できませんでした"
+  },
+  "resources": {
+    "section_header": "リソース",
+    "empty": "添付されたリソースはありません。",
+    "add_button": "リソースを追加",
+    "popover_title": "GitHub リポジトリを添付",
+    "repos_search_placeholder": "リポジトリを検索...",
+    "repos_search_empty": "検索条件に一致するリポジトリはありません。",
+    "attached_badge": "添付済み",
+    "remove_tooltip": "削除",
+    "url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",
+    "url_submit": "追加",
+    "toast_attached": "リポジトリを添付しました",
+    "toast_attach_failed": "添付できませんでした",
+    "toast_removed": "リソースを削除しました",
+    "toast_remove_failed": "リソースを削除できませんでした",
+    "add_local_directory_button": "ローカルディレクトリを追加",
+    "local_daemon_offline_hint": "このマシンのディレクトリを添付するには、ローカルデーモンを起動してください。",
+    "local_daemon_already_attached_hint": "このマシンにはすでにローカルディレクトリが添付されています。新しく追加するには、先に既存のものを削除してください。",
+    "local_rename_tooltip": "名前を変更",
+    "local_rename_label": "ローカルディレクトリのラベル",
+    "local_no_daemon_tooltip": "ローカルデーモンがまだ ID を報告していないため、エージェントはこのディレクトリを開けません。",
+    "local_other_machine_tooltip": "このディレクトリを登録したマシンでのみ利用できます。",
+    "chat_hint_prefix": "エージェントは次の場所で直接作業します:",
+    "toast_local_attached": "ローカルディレクトリを添付しました",
+    "toast_local_renamed": "名前を変更しました",
+    "toast_local_rename_failed": "名前を変更できませんでした",
+    "toast_local_pick_failed": "ディレクトリを選択できませんでした",
+    "toast_local_already_attached": "このディレクトリはすでにこのマシンのプロジェクトに添付されています。",
+    "toast_local_daemon_already_attached": "このマシンにはすでにこのプロジェクトのローカルディレクトリが添付されています。新しく追加するには、先に既存のものを削除してください。",
+    "toast_local_daemon_not_running": "ローカルデーモンが実行されていません。",
+    "local_validate_not_absolute": "絶対パスを選択してください。",
+    "local_validate_not_found": "パスが存在しません。",
+    "local_validate_not_a_directory": "パスはディレクトリではありません。",
+    "local_validate_not_readable": "ディレクトリを読み取れません。",
+    "local_validate_not_writable": "ディレクトリに書き込めません。",
+    "local_validate_unsupported": "ローカルディレクトリはデスクトップアプリでのみ選択できます。"
+  },
+  "delete_dialog": {
+    "title": "プロジェクトを削除",
+    "description": "プロジェクトが削除されます。イシューは削除されませんが、リンクが解除されます。",
+    "confirm": "削除",
+    "cancel": "キャンセル"
+  },
+  "picker": {
+    "no_project": "プロジェクトなし",
+    "remove": "プロジェクトから削除",
+    "empty": "プロジェクトはまだありません"
+  },
+  "chip": {
+    "fallback_label": "プロジェクト"
+  }
+}

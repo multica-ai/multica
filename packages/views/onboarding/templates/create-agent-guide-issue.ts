@@ -23,10 +23,11 @@ export const CREATE_AGENT_GUIDE_ISSUE_TITLE = {
   en: "Step 2 — Create your first Multica Agent",
   zh: "第 2 步 —— 创建你的第一个 Multica Agent",
   ko: "2단계 — 첫 Multica Agent 만들기",
+  ja: "ステップ2 — 最初の Multica Agent を作成する",
 } as const;
 
 interface BodyOpts {
-  lang: "en" | "zh" | "ko";
+  lang: "en" | "zh" | "ko" | "ja";
   installRuntimeIdentifier: string;
   installRuntimeId: string;
 }
@@ -38,6 +39,9 @@ export function getCreateAgentGuideBody(opts: BodyOpts): string {
   }
   if (opts.lang === "ko") {
     return koBody(mention);
+  }
+  if (opts.lang === "ja") {
+    return jaBody(mention);
   }
   return enBody(mention);
 }
@@ -166,4 +170,46 @@ ${HELPER_INSTRUCTIONS.ko}
 - **Squads** — 함께 배정할 수 있는 agent 그룹입니다.
 - **Autopilots** — 예약 또는 webhook으로 실행되는 작업입니다.
 - **Docs** — https://multica.ai/docs.`;
+}
+
+function jaBody(installRuntimeMention: string): string {
+  return `runtime が online になったら(${installRuntimeMention} を参照)、最初の agent である Multica Helper を作りましょう。下の prompt はあらかじめ書いてあるので、そのままコピーするだけです。
+
+## 1. 新しい agent の画面を開く
+
+サイドバーの **Agents** を開き、**New Agent** をクリックします。
+
+## 2. さっきインストールした runtime を選ぶ
+
+"Runtime" でその runtime を選びます。何も表示されない場合は runtime がまだ online ではありません。${installRuntimeMention} のインストール手順を先に終わらせてください。
+
+## 3. 各ブロックを対応するフィールドにコピーする
+
+**Name**
+\`\`\`md
+${HELPER_AGENT_NAME}
+\`\`\`
+
+**Description**
+\`\`\`md
+${HELPER_DESCRIPTION.ja}
+\`\`\`
+
+**Instructions**
+\`\`\`md
+${HELPER_INSTRUCTIONS.ja}
+\`\`\`
+
+## 4. 保存 → issue を割り当てる
+
+**Create** を押します。新しい agent がワークスペースの agent 一覧に表示されます。
+
+次に issue を作る(または既存の issue を割り当て直す)→ assignee を Multica Helper にする → status を **todo** にします。runtime が数秒以内にタスクを受け取って作業を始めます。進捗は issue の task panel で確認できます。
+
+## 次に見る場所
+
+- **Skills** — どの agent にも付けられる、再利用可能な instruction パックです。
+- **Squads** — 一緒に割り当てられる agent のグループです。
+- **Autopilots** — スケジュールや webhook で実行される処理です。
+- **Docs** — https://multica.ai/docs。`;
 }

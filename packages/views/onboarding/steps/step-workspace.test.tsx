@@ -36,6 +36,10 @@ vi.mock("@multica/core/workspace/mutations", () => ({
   useCreateWorkspace: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
+vi.mock("@multica/core/api", () => ({
+  api: { getBaseUrl: () => "http://127.0.0.1:8080" },
+}));
+
 import { StepWorkspace } from "./step-workspace";
 
 function I18nWrapper({ children }: { children: ReactNode }) {

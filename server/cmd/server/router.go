@@ -18,6 +18,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -98,9 +99,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 }
 
 type RouterOptions struct {
-	HTTPMetrics  *obsmetrics.HTTPMetrics
-	DaemonHub    *daemonws.Hub
-	DaemonWakeup service.TaskWakeupNotifier
+	HTTPMetrics     *obsmetrics.HTTPMetrics
+	BusinessMetrics *obsmetrics.BusinessMetrics
+	DaemonHub       *daemonws.Hub
+	DaemonWakeup    service.TaskWakeupNotifier
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -141,6 +143,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h.Metrics = opts.BusinessMetrics
+	h.TaskService.Metrics = opts.BusinessMetrics
+	if opts.BusinessMetrics != nil {
+		// Wire the BusinessMetrics receiver into the cloud runtime client
+		// so every outbound Fleet/Gateway request feeds the
+		// multica_cloudruntime_request_* histograms.
+		if client, ok := h.CloudRuntime.(*cloudruntime.Client); ok {
+			client.SetRecorder(opts.BusinessMetrics)
+		}
+	}
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
 	}
@@ -690,6 +702,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
+					r.Post("/skills/add", h.AddAgentSkills)
 					r.Get("/allowed-principals", h.ListAgentAllowedPrincipals)
 					r.Put("/allowed-principals", h.UpdateAgentAllowedPrincipals)
 					// Dedicated env-management endpoint. Owner/admin only;
@@ -713,6 +726,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)
 				r.Post("/", h.CreateSkill)
+				r.Get("/search", h.SearchSkills)
 				r.Post("/import", h.ImportSkill)
 				r.Post("/import/discover", h.DiscoverImportSkills)
 				r.Post("/batch-import", h.BatchImportSkills)
@@ -811,6 +825,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
 					r.Get("/messages", h.ListChatMessages)
+					r.Get("/messages/page", h.ListChatMessagesPage)
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Post("/read", h.MarkChatSessionRead)
 					r.Route("/messages/{messageId}", func(r chi.Router) {

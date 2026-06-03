@@ -53,6 +53,7 @@
     "status_idle": "유휴",
     "status_offline": "오프라인",
     "status_unstable": "불안정",
+    "status_archived": "보관됨",
     "issue_status_blocked": "막힘",
     "active_issue_more": "외 {{count}}개",
     "last_active_label": "마지막 활동 {{time}}"

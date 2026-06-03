@@ -11,6 +11,7 @@
       "english": "English",
       "chinese": "中文",
       "korean": "한국어",
+      "japanese": "日本語",
       "sync_failed": "이 기기에는 언어가 저장되었지만 계정 동기화에 실패했습니다. 다른 기기에서는 이전 언어가 표시될 수 있습니다."
     },
     "timezone": {
@@ -122,6 +123,10 @@
   },
   "workspace": {
     "section_general": "일반",
+    "change_logo_aria": "워크스페이스 로고 변경",
+    "click_logo_hint": "로고를 클릭하여 새 이미지를 업로드하세요",
+    "toast_logo_updated": "워크스페이스 로고를 업데이트했습니다",
+    "toast_logo_failed": "워크스페이스 로고를 업로드하지 못했습니다",
     "name_label": "이름",
     "description_label": "설명",
     "description_placeholder": "이 워크스페이스는 무엇에 집중하나요?",

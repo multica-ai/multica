@@ -58,6 +58,7 @@ import {
   Italic,
   Strikethrough,
   Code,
+  Highlighter,
   Link2,
   List,
   ListOrdered,
@@ -119,13 +120,14 @@ function serializeSelectedMarkdown(editor: Editor): string {
 // Mark Toggle Button
 // ---------------------------------------------------------------------------
 
-type InlineMark = "bold" | "italic" | "strike" | "code";
+type InlineMark = "bold" | "italic" | "strike" | "code" | "highlight";
 
 const toggleMarkActions: Record<InlineMark, (editor: Editor) => void> = {
   bold: (e) => e.chain().focus().toggleBold().run(),
   italic: (e) => e.chain().focus().toggleItalic().run(),
   strike: (e) => e.chain().focus().toggleStrike().run(),
   code: (e) => e.chain().focus().toggleCode().run(),
+  highlight: (e) => e.chain().focus().toggleHighlight().run(),
 };
 
 function MarkButton({
@@ -629,6 +631,7 @@ function EditorBubbleMenu({
       italic: e.isActive("italic"),
       strike: e.isActive("strike"),
       code: e.isActive("code"),
+      highlight: e.isActive("highlight"),
       link: e.isActive("link"),
       blockquote: e.isActive("blockquote"),
       bulletList: e.isActive("bulletList"),
@@ -749,6 +752,7 @@ function EditorBubbleMenu({
             <MarkButton editor={editor} mark="italic" icon={Italic} label={t(($) => $.bubble_menu.italic)} shortcut={`${modKey}+I`} isActive={fmt.italic} />
             <MarkButton editor={editor} mark="strike" icon={Strikethrough} label={t(($) => $.bubble_menu.strikethrough)} shortcut={`${modKey}+Shift+S`} isActive={fmt.strike} />
             <MarkButton editor={editor} mark="code" icon={Code} label={t(($) => $.bubble_menu.code)} shortcut={`${modKey}+E`} isActive={fmt.code} />
+            <MarkButton editor={editor} mark="highlight" icon={Highlighter} label={t(($) => $.bubble_menu.highlight)} shortcut={`${modKey}+Shift+H`} isActive={fmt.highlight} />
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <Tooltip>
               <TooltipTrigger render={

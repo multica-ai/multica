@@ -11,7 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -457,6 +460,13 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	resp := autopilotToResponse(autopilot)
 	h.publish(protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AutopilotCreated(
+		userID,
+		workspaceID,
+		uuidToString(autopilot.ID),
+		"manual",
+		"manual",
+	))
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -888,6 +898,13 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 		}
 		if leader.ArchivedAt.Valid {
 			writeError(w, http.StatusUnprocessableEntity, "squad leader is archived; pick a different squad or rotate the leader before assigning autopilot")
+			return false
+		}
+		// Private-leader gate: the member configuring the autopilot must have
+		// access to the private leader, same as validateAssigneePair.
+		actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(workspaceID))
+		if !h.canAccessPrivateAgent(r.Context(), leader, actorType, actorID, util.UUIDToString(workspaceID)) {
+			writeError(w, http.StatusForbidden, "cannot assign autopilot to squad with private leader")
 			return false
 		}
 		return true

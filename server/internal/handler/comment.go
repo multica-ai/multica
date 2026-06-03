@@ -20,33 +20,33 @@ import (
 )
 
 type CommentResponse struct {
-ID                string               `json:"id"`
-IssueID           string               `json:"issue_id"`
-AuthorType        string               `json:"author_type"`
-AuthorID          string               `json:"author_id"`
-AuthorDisplayName *string              `json:"author_display_name,omitempty"`
-Content           string               `json:"content"`
-Type              string               `json:"type"`
-ParentID          *string              `json:"parent_id"`
-CreatedAt         string               `json:"created_at"`
-UpdatedAt         string               `json:"updated_at"`
-ResolvedAt        *string              `json:"resolved_at"`
-ResolvedByType    *string              `json:"resolved_by_type"`
-ResolvedByID      *string              `json:"resolved_by_id"`
-Reactions         []ReactionResponse   `json:"reactions"`
-Attachments       []AttachmentResponse `json:"attachments"`
-// Orientation stats — populated only on the roots_only path and omitted in
-// every other mode, so the default response shape stays byte-identical for
-// existing callers. ReplyCount is the number of descendants in the thread;
-// LastActivityAt is the MAX(created_at) across the whole subtree. Together
-// they let an agent triage which thread to drill into without fetching any
-// replies.
-ReplyCount     *int    `json:"reply_count,omitempty"`
-LastActivityAt *string `json:"last_activity_at,omitempty"`
-// ContentTruncated is set only under summary=true: true when Content was
-// clipped to the summary budget, false when it fit. nil (omitted) means the
-// caller did not request a summary projection, so Content is verbatim.
-ContentTruncated *bool `json:"content_truncated,omitempty"`
+	ID                string               `json:"id"`
+	IssueID           string               `json:"issue_id"`
+	AuthorType        string               `json:"author_type"`
+	AuthorID          string               `json:"author_id"`
+	AuthorDisplayName *string              `json:"author_display_name,omitempty"`
+	Content           string               `json:"content"`
+	Type              string               `json:"type"`
+	ParentID          *string              `json:"parent_id"`
+	CreatedAt         string               `json:"created_at"`
+	UpdatedAt         string               `json:"updated_at"`
+	ResolvedAt        *string              `json:"resolved_at"`
+	ResolvedByType    *string              `json:"resolved_by_type"`
+	ResolvedByID      *string              `json:"resolved_by_id"`
+	Reactions         []ReactionResponse   `json:"reactions"`
+	Attachments       []AttachmentResponse `json:"attachments"`
+	// Orientation stats — populated only on the roots_only path and omitted in
+	// every other mode, so the default response shape stays byte-identical for
+	// existing callers. ReplyCount is the number of descendants in the thread;
+	// LastActivityAt is the MAX(created_at) across the whole subtree. Together
+	// they let an agent triage which thread to drill into without fetching any
+	// replies.
+	ReplyCount     *int    `json:"reply_count,omitempty"`
+	LastActivityAt *string `json:"last_activity_at,omitempty"`
+	// ContentTruncated is set only under summary=true: true when Content was
+	// clipped to the summary budget, false when it fit. nil (omitted) means the
+	// caller did not request a summary projection, so Content is verbatim.
+	ContentTruncated *bool `json:"content_truncated,omitempty"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
@@ -380,23 +380,23 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	resp := make([]CommentResponse, len(result.Comments))
 	for i, c := range result.Comments {
 		cid := uuidToString(c.ID)
-resp[i] = commentToResponseWithDisplay(c, grouped[cid], groupedAtt[cid], displayNames[cid])
-// Attach roots_only orientation stats when present (nil map elsewhere).
-if st, ok := result.RootStats[cid]; ok {
-rc := st.ReplyCount
-resp[i].ReplyCount = &rc
-if st.LastActivityAt.Valid {
-la := timestampToString(st.LastActivityAt)
-resp[i].LastActivityAt = &la
-}
-}
-// Apply the summary projection last so it clips whatever content the
-// chosen read mode produced, uniformly across every mode.
-if summary {
-clipped, truncated := summarizeContent(resp[i].Content)
-resp[i].Content = clipped
-resp[i].ContentTruncated = &truncated
-}
+		resp[i] = commentToResponseWithDisplay(c, grouped[cid], groupedAtt[cid], displayNames[cid])
+		// Attach roots_only orientation stats when present (nil map elsewhere).
+		if st, ok := result.RootStats[cid]; ok {
+			rc := st.ReplyCount
+			resp[i].ReplyCount = &rc
+			if st.LastActivityAt.Valid {
+				la := timestampToString(st.LastActivityAt)
+				resp[i].LastActivityAt = &la
+			}
+		}
+		// Apply the summary projection last so it clips whatever content the
+		// chosen read mode produced, uniformly across every mode.
+		if summary {
+			clipped, truncated := summarizeContent(resp[i].Content)
+			resp[i].Content = clipped
+			resp[i].ContentTruncated = &truncated
+		}
 	}
 
 	// Emit the next cursor as response headers when the page is likely not
@@ -983,24 +983,21 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
 	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
-// Collapse parent_id to the thread root before storing so the comment tree
-// never exceeds depth 1 (the 2-level model the product and UI assume — see
-// GetThreadRoot). The agent-drift guard above already compared the *raw*
-// parent_id to the task's trigger comment, so normalization happens only
-// here, after that check. We also repoint parentComment at the root so the
-// downstream thread-aware steps (AutoUnresolveThreadOnReply,
-// isReplyToMemberThread) act on the thread root, not an interior reply.
-if parentID.Valid {
-if root, err := h.Queries.GetThreadRoot(r.Context(), db.GetThreadRootParams{
-CommentID:   parentID,
-WorkspaceID: issue.WorkspaceID,
-}); err == nil {
-parentID = root.ID
-parentComment = &root
-}
-}
+	// parent_id stores the exact comment being replied to. Thread-level behavior
+	// (for example auto-unresolving a resolved thread) resolves the root
+	// separately so storing a reply-to-reply does not destroy the direct-parent
+	// signal used by trigger decisions.
+	var rootComment *db.Comment
+	if parentID.Valid {
+		if root, err := h.Queries.GetThreadRoot(r.Context(), db.GetThreadRootParams{
+			CommentID:   parentID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			rootComment = &root
+		}
+	}
 
-comment, updatedIssue, prevIssueStatus, err := h.createCommentWithIssueProgress(r.Context(), issue, db.CreateCommentParams{
+	comment, updatedIssue, prevIssueStatus, err := h.createCommentWithIssueProgress(r.Context(), issue, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  authorType,
@@ -1041,7 +1038,7 @@ comment, updatedIssue, prevIssueStatus, err := h.createCommentWithIssueProgress(
 	// so the reply is visible regardless of the unresolve outcome. Shared with
 	// the agent task path (TaskService.createAgentComment) — both reply paths
 	// must keep the resolved root in sync.
-	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
+	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
 	taskContext := taskContextForCommentType(req.Type)
 	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, taskContext)
@@ -1137,7 +1134,7 @@ func (h *Handler) publishIssueStatusChangedFromComment(r *http.Request, issue db
 		"prev_assignee_id":    uuidToPtr(issue.AssigneeID),
 		"prev_status":         prevStatus,
 		"prev_priority":       issue.Priority,
-		"prev_due_date":       timestampToPtr(issue.DueDate),
+		"prev_due_date":       dateToPtr(issue.DueDate),
 		"prev_description":    textToPtr(issue.Description),
 		"creator_type":        issue.CreatorType,
 		"creator_id":          uuidToString(issue.CreatorID),

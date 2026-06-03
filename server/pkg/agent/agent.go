@@ -98,10 +98,11 @@ type ExecOptions struct {
 	ClaudeUseSDKBridge        bool             // route Claude execution through the Agent SDK bridge
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
-	// medium|high|xhigh"). Empty means "use the runtime/model default" —
+	// medium|high|xhigh", OpenCode's model variant names). Empty means
+	// "use the runtime/model default" —
 	// every backend that consumes this skips its --effort / reasoning_effort
 	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude and codex backends only; other backends ignore the
+	// by the claude, codex, and opencode backends; other backends ignore the
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string

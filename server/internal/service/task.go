@@ -19,11 +19,13 @@ import (
 	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 type TaskService struct {
@@ -32,6 +34,7 @@ type TaskService struct {
 	Hub       *realtime.Hub
 	Bus       *events.Bus
 	Analytics analytics.Client
+	Metrics   *obsmetrics.BusinessMetrics
 	Wakeup    TaskWakeupNotifier
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
@@ -210,10 +213,18 @@ func isNoActionReasoning(output string) bool {
 }
 
 func (s *TaskService) captureTaskQueued(ctx context.Context, task db.AgentTaskQueue) {
+	if s.Metrics != nil {
+		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
+		s.Metrics.RecordTaskEnqueued(source, runtimeMode)
+	}
 	s.captureTaskEvent(ctx, analytics.AgentTaskQueued(s.taskAnalyticsContext(ctx, task)))
 }
 
 func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTaskQueue) {
+	if s.Metrics != nil {
+		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
+		s.Metrics.RecordTaskDispatched(util.UUIDToString(task.ID), source, runtimeMode, taskQueueWaitSeconds(task))
+	}
 	s.captureTaskEvent(ctx, analytics.AgentTaskDispatched(s.taskAnalyticsContext(ctx, task)))
 }
 
@@ -222,10 +233,18 @@ func (s *TaskService) AnalyticsContextForTask(ctx context.Context, task db.Agent
 }
 
 func (s *TaskService) captureTaskStarted(ctx context.Context, task db.AgentTaskQueue) {
+	if s.Metrics != nil {
+		source, runtimeMode, provider := s.taskMetricsContext(ctx, task)
+		s.Metrics.RecordTaskStarted(source, runtimeMode, provider)
+	}
 	s.captureTaskEvent(ctx, analytics.AgentTaskStarted(s.taskAnalyticsContext(ctx, task)))
 }
 
 func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTaskQueue) {
+	if s.Metrics != nil {
+		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
+		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
+	}
 	s.captureTaskEvent(ctx, analytics.AgentTaskCompleted(
 		s.taskAnalyticsContext(ctx, task),
 		taskDurationMS(task),
@@ -234,6 +253,11 @@ func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTas
 
 func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQueue) {
 	failureReason := taskFailureReason(task)
+	if s.Metrics != nil {
+		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
+		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
+		s.Metrics.RecordTaskFailed(source, runtimeMode, failureReason)
+	}
 	s.captureTaskEvent(ctx, analytics.AgentTaskFailed(
 		s.taskAnalyticsContext(ctx, task),
 		taskDurationMS(task),
@@ -244,6 +268,10 @@ func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQu
 }
 
 func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTaskQueue) {
+	if s.Metrics != nil {
+		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
+		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
+	}
 	s.captureTaskEvent(ctx, analytics.AgentTaskCancelled(
 		s.taskAnalyticsContext(ctx, task),
 		taskDurationMS(task),
@@ -257,6 +285,34 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 	if err := s.Queries.DeleteTaskTokensByTask(ctx, task.ID); err != nil {
 		slog.Warn("cancel task: failed to revoke task tokens",
 			"task_id", util.UUIDToString(task.ID), "error", err)
+	}
+}
+
+func (s *TaskService) CaptureTaskUsage(ctx context.Context, task db.AgentTaskQueue, provider, model string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) {
+	if s.Metrics == nil {
+		return
+	}
+	source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
+	s.Metrics.RecordLLMUsage(source, runtimeMode, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens)
+}
+
+func (s *TaskService) CaptureQueuedExpiredTasks(ctx context.Context, tasks []db.AgentTaskQueue) {
+	if s.Metrics == nil {
+		return
+	}
+	for _, task := range tasks {
+		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
+		s.Metrics.RecordTaskQueuedExpired(source, runtimeMode)
+	}
+}
+
+func (s *TaskService) CaptureLeaseExpiredTasks(ctx context.Context, tasks []db.AgentTaskQueue) {
+	if s.Metrics == nil {
+		return
+	}
+	for _, task := range tasks {
+		source, _, _ := s.taskMetricsContext(ctx, task)
+		s.Metrics.RecordTaskLeaseExpired(source)
 	}
 }
 
@@ -320,6 +376,30 @@ func taskAnalyticsContextKey(task db.AgentTaskQueue) string {
 		util.UUIDToString(task.ChatSessionID),
 		util.UUIDToString(task.AutopilotRunID),
 	}, "|")
+}
+
+func (s *TaskService) taskMetricsContext(ctx context.Context, task db.AgentTaskQueue) (source, runtimeMode, provider string) {
+	tc := s.taskAnalyticsContext(ctx, task)
+	source = "other"
+	switch {
+	case task.ChatSessionID.Valid:
+		source = "chat"
+	case task.IssueID.Valid:
+		if tc.Source == analytics.SourceAutopilot {
+			source = "autopilot_issue"
+		} else {
+			source = "issue"
+		}
+	case task.AutopilotRunID.Valid:
+		source = "autopilot"
+	default:
+		if _, ok := s.parseQuickCreateContext(task); ok {
+			source = "quick_create"
+		} else if tc.Source != "" {
+			source = tc.Source
+		}
+	}
+	return source, tc.RuntimeMode, tc.Provider
 }
 
 func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTaskQueue) analytics.TaskContext {
@@ -425,6 +505,29 @@ func taskDurationMS(task db.AgentTaskQueue) int64 {
 		return 0
 	}
 	return ms
+}
+
+func taskQueueWaitSeconds(task db.AgentTaskQueue) float64 {
+	return durationSeconds(task.CreatedAt, task.DispatchedAt)
+}
+
+func taskRunSeconds(task db.AgentTaskQueue) float64 {
+	return durationSeconds(task.StartedAt, task.CompletedAt)
+}
+
+func taskTotalSeconds(task db.AgentTaskQueue) float64 {
+	return durationSeconds(task.CreatedAt, task.CompletedAt)
+}
+
+func durationSeconds(start, end pgtype.Timestamptz) float64 {
+	if !start.Valid || !end.Valid {
+		return -1
+	}
+	seconds := end.Time.Sub(start.Time).Seconds()
+	if seconds < 0 {
+		return 0
+	}
+	return seconds
 }
 
 func taskFailureReason(task db.AgentTaskQueue) string {
@@ -1302,8 +1405,23 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 // chat turn would silently start a brand-new session and lose memory.
 //
 // failureReason is a coarse classifier consumed by the auto-retry path.
-// Pass "" when unknown (treated as 'agent_error').
+// Pass "" when unknown — the server runs the raw error text through
+// taskfailure.Classify so the persisted failure_reason still lands in
+// the canonical refined taxonomy rather than the legacy "agent_error"
+// coarse bucket. Daemon callers that already produced a refined reason
+// (via classifyPoisonedError, the timeout / runtime classifier, etc.)
+// will have their value preserved untouched.
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string) (*db.AgentTaskQueue, error) {
+	// MUL-2946: synthesise a refined reason from the error text whenever the
+	// caller didn't supply one. This is the last write-path guard against
+	// "agent_error" coarse rows ending up in agent_task_queue.failure_reason
+	// — every other path either provides a classified reason directly
+	// (sweepers writing 'queued_expired' / 'runtime_offline' / 'timeout'
+	// / 'runtime_recovery' via SQL) or runs the daemon's classifyPoisonedError
+	// + taskfailure.Classify chain.
+	if failureReason == "" {
+		failureReason = taskfailure.Classify(errMsg).String()
+	}
 	var task db.AgentTaskQueue
 	var blockedIssue *db.Issue
 	var prevIssueStatus string
@@ -1858,7 +1976,12 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
-		data := AgentSkillData{Name: sk.Name, Description: sk.Description, Content: sk.Content}
+		data := AgentSkillData{
+			ID:          util.UUIDToString(sk.ID),
+			Name:        sk.Name,
+			Description: sk.Description,
+			Content:     sk.Content,
+		}
 		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
 		for _, f := range files {
 			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content})
@@ -1870,6 +1993,7 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 // AgentSkillData represents a skill for task execution responses.
 type AgentSkillData struct {
+	ID          string               `json:"id"`
 	Name        string               `json:"name"`
 	Description string               `json:"description,omitempty"`
 	Content     string               `json:"content"`
@@ -2120,12 +2244,9 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if err != nil {
 		return
 	}
-	// Resolve thread root: collapse parentID to the top-level thread root so the
-	// comment tree never exceeds depth 1 (the 2-level model the product and UI
-	// assume — see GetThreadRoot). GetThreadRoot walks parent_id all the way to
-	// the root, so this stays correct even if a reply-to-a-reply ever reached the
-	// store. rootComment captures the root row so we can auto-unresolve it after
-	// the reply is committed (see AutoUnresolveThreadOnReply).
+	// Resolve the thread root for thread-level side effects without overwriting
+	// parentID. The stored parent_id must remain the exact comment being replied
+	// to; recursive thread reads recover the root when needed.
 	var rootComment *db.Comment
 	if parentID.Valid {
 		if root, err := s.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
@@ -2133,7 +2254,6 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			WorkspaceID: issue.WorkspaceID,
 		}); err == nil {
 			rootComment = &root
-			parentID = root.ID
 		}
 	}
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
@@ -2236,8 +2356,8 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"creator_id":      util.UUIDToString(issue.CreatorID),
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
 		"position":        issue.Position,
-		"start_date":      util.TimestampToPtr(issue.StartDate),
-		"due_date":        util.TimestampToPtr(issue.DueDate),
+		"start_date":      util.DateToPtr(issue.StartDate),
+		"due_date":        util.DateToPtr(issue.DueDate),
 		"created_at":      util.TimestampToString(issue.CreatedAt),
 		"updated_at":      util.TimestampToString(issue.UpdatedAt),
 	}

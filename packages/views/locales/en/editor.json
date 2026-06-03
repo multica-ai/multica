@@ -4,6 +4,7 @@
     "italic": "Italic",
     "strikethrough": "Strikethrough",
     "code": "Code",
+    "highlight": "Highlight",
     "link": "Link",
     "list": "List",
     "quote": "Quote",
@@ -63,6 +64,10 @@
     "all_members": "All members",
     "searching": "Searching...",
     "no_results": "No results"
+  },
+  "slash_command": {
+    "no_skills_configured": "No skills configured",
+    "no_results": "No matching skills"
   },
   "code_block": {
     "copy_code": "Copy code",

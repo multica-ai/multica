@@ -14,7 +14,7 @@ import (
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, wiki_content
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, wiki_content, avatar_url
 `
 
 type CreateWorkspaceParams struct {
@@ -47,6 +47,7 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.IssuePrefix,
 		&i.IssueCounter,
 		&i.WikiContent,
+		&i.AvatarUrl,
 	)
 	return i, err
 }
@@ -61,7 +62,7 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, wiki_content FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, wiki_content, avatar_url FROM workspace
 WHERE id = $1
 `
 
@@ -81,12 +82,13 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 		&i.IssuePrefix,
 		&i.IssueCounter,
 		&i.WikiContent,
+		&i.AvatarUrl,
 	)
 	return i, err
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, wiki_content FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, wiki_content, avatar_url FROM workspace
 WHERE slug = $1
 `
 
@@ -106,6 +108,7 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.IssuePrefix,
 		&i.IssueCounter,
 		&i.WikiContent,
+		&i.AvatarUrl,
 	)
 	return i, err
 }
@@ -126,7 +129,7 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.wiki_content
+       w.issue_prefix, w.issue_counter, w.wiki_content, w.avatar_url
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
@@ -155,6 +158,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.IssuePrefix,
 			&i.IssueCounter,
 			&i.WikiContent,
+			&i.AvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -175,9 +179,10 @@ UPDATE workspace SET
     settings = COALESCE($6, settings),
     repos = COALESCE($7, repos),
     issue_prefix = COALESCE($8, issue_prefix),
+    avatar_url = COALESCE($9, avatar_url),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, wiki_content
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, wiki_content, avatar_url
 `
 
 type UpdateWorkspaceParams struct {
@@ -189,6 +194,7 @@ type UpdateWorkspaceParams struct {
 	Settings    []byte      `json:"settings"`
 	Repos       []byte      `json:"repos"`
 	IssuePrefix pgtype.Text `json:"issue_prefix"`
+	AvatarUrl   pgtype.Text `json:"avatar_url"`
 }
 
 func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (Workspace, error) {
@@ -201,6 +207,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		arg.Settings,
 		arg.Repos,
 		arg.IssuePrefix,
+		arg.AvatarUrl,
 	)
 	var i Workspace
 	err := row.Scan(
@@ -216,6 +223,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.IssuePrefix,
 		&i.IssueCounter,
 		&i.WikiContent,
+		&i.AvatarUrl,
 	)
 	return i, err
 }

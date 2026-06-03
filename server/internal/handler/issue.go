@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +20,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -81,8 +82,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		StartDate:     timestampToPtr(i.StartDate),
-		DueDate:       timestampToPtr(i.DueDate),
+		StartDate:     dateToPtr(i.StartDate),
+		DueDate:       dateToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
@@ -108,8 +109,8 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		StartDate:     timestampToPtr(i.StartDate),
-		DueDate:       timestampToPtr(i.DueDate),
+		StartDate:     dateToPtr(i.StartDate),
+		DueDate:       dateToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
@@ -167,8 +168,8 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		StartDate:     timestampToPtr(i.StartDate),
-		DueDate:       timestampToPtr(i.DueDate),
+		StartDate:     dateToPtr(i.StartDate),
+		DueDate:       dateToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
@@ -915,12 +916,15 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	offset := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
 			limit = v
 		}
 	}
+	if limit > 100 {
+		limit = 100
+	}
 	if o := r.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
 			offset = v
 		}
 	}
@@ -2218,24 +2222,24 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		labelIDs = dedup
 	}
 
-	var startDate pgtype.Timestamptz
+	var startDate pgtype.Date
 	if req.StartDate != nil && *req.StartDate != "" {
-		t, err := time.Parse(time.RFC3339, *req.StartDate)
+		d, err := util.ParseCalendarDate(*req.StartDate)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+			writeError(w, http.StatusBadRequest, "invalid start_date format, expected YYYY-MM-DD")
 			return
 		}
-		startDate = pgtype.Timestamptz{Time: t, Valid: true}
+		startDate = d
 	}
 
-	var dueDate pgtype.Timestamptz
+	var dueDate pgtype.Date
 	if req.DueDate != nil && *req.DueDate != "" {
-		t, err := time.Parse(time.RFC3339, *req.DueDate)
+		d, err := util.ParseCalendarDate(*req.DueDate)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339")
+			writeError(w, http.StatusBadRequest, "invalid due_date format, expected YYYY-MM-DD")
 			return
 		}
-		dueDate = pgtype.Timestamptz{Time: t, Valid: true}
+		dueDate = d
 	}
 
 	// Use a transaction to atomically guard against active duplicates,
@@ -2456,7 +2460,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 	}
-	h.Analytics.Capture(analytics.IssueCreated(
+	platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(
 		analyticsActorID,
 		workspaceID,
 		uuidToString(issue.ID),
@@ -2464,6 +2469,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		analyticsTaskID,
 		analyticsAutopilotRunID,
 		analyticsSource,
+		platform,
 	))
 
 	// Enqueue agent task when an agent-assigned issue is created.
@@ -2578,26 +2584,26 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["start_date"]; ok {
 		if req.StartDate != nil && *req.StartDate != "" {
-			t, err := time.Parse(time.RFC3339, *req.StartDate)
+			d, err := util.ParseCalendarDate(*req.StartDate)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+				writeError(w, http.StatusBadRequest, "invalid start_date format, expected YYYY-MM-DD")
 				return
 			}
-			params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+			params.StartDate = d
 		} else {
-			params.StartDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
+			params.StartDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
 		if req.DueDate != nil && *req.DueDate != "" {
-			t, err := time.Parse(time.RFC3339, *req.DueDate)
+			d, err := util.ParseCalendarDate(*req.DueDate)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339")
+				writeError(w, http.StatusBadRequest, "invalid due_date format, expected YYYY-MM-DD")
 				return
 			}
-			params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
+			params.DueDate = d
 		} else {
-			params.DueDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
+			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
 	if _, ok := rawFields["parent_issue_id"]; ok {
@@ -2743,10 +2749,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
-	prevStartDate := timestampToPtr(prevIssue.StartDate)
+	prevStartDate := dateToPtr(prevIssue.StartDate)
 	startDateChanged := prevStartDate != resp.StartDate && (prevStartDate == nil) != (resp.StartDate == nil) ||
 		(prevStartDate != nil && resp.StartDate != nil && *prevStartDate != *resp.StartDate)
-	prevDueDate := timestampToPtr(prevIssue.DueDate)
+	prevDueDate := dateToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
@@ -2827,7 +2833,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// loops in PR #2918). The helper guards on transition + parent state and
 	// fails best-effort.
 	if statusChanged {
-		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2905,9 +2911,9 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		if err != nil || leader.ArchivedAt.Valid {
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
 		}
-		actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID)
-		if actorType != "agent" && !memberCanSelectSquadAgent(leader, requestUserID(r)) {
-			return http.StatusForbidden, "squad leader must be one of your agents or a workspace agent"
+		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+		if !h.canAccessPrivateAgent(ctx, leader, actorType, actorID, workspaceID) {
+			return http.StatusForbidden, "cannot assign to squad with private leader"
 		}
 		return 0, ""
 	default:
@@ -3199,24 +3205,24 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := rawUpdates["start_date"]; ok {
 			if req.Updates.StartDate != nil && *req.Updates.StartDate != "" {
-				t, err := time.Parse(time.RFC3339, *req.Updates.StartDate)
+				d, err := util.ParseCalendarDate(*req.Updates.StartDate)
 				if err != nil {
 					continue
 				}
-				params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+				params.StartDate = d
 			} else {
-				params.StartDate = pgtype.Timestamptz{Valid: false}
+				params.StartDate = pgtype.Date{Valid: false}
 			}
 		}
 		if _, ok := rawUpdates["due_date"]; ok {
 			if req.Updates.DueDate != nil && *req.Updates.DueDate != "" {
-				t, err := time.Parse(time.RFC3339, *req.Updates.DueDate)
+				d, err := util.ParseCalendarDate(*req.Updates.DueDate)
 				if err != nil {
 					continue
 				}
-				params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
+				params.DueDate = d
 			} else {
-				params.DueDate = pgtype.Timestamptz{Valid: false}
+				params.DueDate = pgtype.Date{Valid: false}
 			}
 		}
 
@@ -3395,7 +3401,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Platform-driven parent notification, mirrored from UpdateIssue
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
-			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 		}
 
 		updated++

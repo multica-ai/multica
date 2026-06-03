@@ -111,6 +111,9 @@ catalogs:
     vitest:
       specifier: ^4.1.0
       version: 4.1.0
+    yaml:
+      specifier: ^2.6.0
+      version: 2.9.0
     zod:
       specifier: ^4.1.5
       version: 4.3.6
@@ -692,6 +695,9 @@ importers:
       react-i18next:
         specifier: 'catalog:'
         version: 17.0.6(i18next@26.0.8(typescript@5.9.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@5.9.3)
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.0
       zod:
         specifier: 'catalog:'
         version: 4.3.6
@@ -926,6 +932,9 @@ importers:
         version: 3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))(@tiptap/extension-code-block@3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))(@tiptap/pm@3.22.1))(@tiptap/pm@3.22.1)(highlight.js@11.11.1)(lowlight@3.3.0)
       '@tiptap/extension-document':
         specifier: ^3.22.1
+        version: 3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))
+      '@tiptap/extension-highlight':
+        specifier: 3.22.1
         version: 3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))
       '@tiptap/extension-image':
         specifier: ^3.22.1
@@ -4012,6 +4021,11 @@ packages:
 
   '@tiptap/extension-heading@3.22.1':
     resolution: {integrity: sha512-EaIihzrOfXUHQlL6fFyJCkDrjgg0e/eD4jpkjhKpeuJDcqf7eJ1c0E2zcNRAiZkeXdN/hTQFaXKsSyNUE7T7Sg==}
+    peerDependencies:
+      '@tiptap/core': ^3.22.1
+
+  '@tiptap/extension-highlight@3.22.1':
+    resolution: {integrity: sha512-3XH0HWViJVzr+FUZY/HQn2vasOgOssVlOjdirKck9AmHoDFUceJbAygSJIdj2fZF3RQl0ohjMGi+OpGMVJ83sw==}
     peerDependencies:
       '@tiptap/core': ^3.22.1
 
@@ -14584,6 +14598,10 @@ snapshots:
       '@tiptap/core': 3.22.1(@tiptap/pm@3.22.1)
 
   '@tiptap/extension-heading@3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))':
+    dependencies:
+      '@tiptap/core': 3.22.1(@tiptap/pm@3.22.1)
+
+  '@tiptap/extension-highlight@3.22.1(@tiptap/core@3.22.1(@tiptap/pm@3.22.1))':
     dependencies:
       '@tiptap/core': 3.22.1(@tiptap/pm@3.22.1)
 

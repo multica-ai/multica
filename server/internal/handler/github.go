@@ -528,6 +528,8 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	event := r.Header.Get("X-GitHub-Event")
+	action := extractGitHubAction(body)
+	h.Metrics.RecordGithubEventReceived(event, action)
 	ctx := r.Context()
 	switch event {
 	case "ping":
@@ -544,6 +546,19 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		// but ignore types we don't model.
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// extractGitHubAction sniffs the top-level "action" field from a webhook
+// body without committing to a typed struct (each event has its own shape;
+// we just need the verb for the metric label).
+func extractGitHubAction(body []byte) string {
+	var probe struct {
+		Action string `json:"action"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return ""
+	}
+	return probe.Action
 }
 
 func verifyWebhookSignature(secret, header string, body []byte) bool {
@@ -935,6 +950,25 @@ func parseGHTimeRequired(s string) pgtype.Timestamptz {
 	return t
 }
 
+// pullRequestMergeSeconds returns the open-to-merge latency in seconds, or
+// 0 (caller skips) when either timestamp is missing or the merge happened
+// before the create timestamp (clock skew safety).
+func pullRequestMergeSeconds(createdAt, mergedAt string) float64 {
+	created, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return 0
+	}
+	merged, err := time.Parse(time.RFC3339, mergedAt)
+	if err != nil {
+		return 0
+	}
+	delta := merged.Sub(created).Seconds()
+	if delta <= 0 {
+		return 0
+	}
+	return delta
+}
+
 // extractIdentifiers pulls every "PREFIX-NUMBER" match across the supplied
 // fields, deduplicating in input order.
 func extractIdentifiers(parts ...string) []string {
@@ -1045,7 +1079,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 	// it here would leave the parent silent for the dominant completion path.
 	// notifyParentOfChildDone re-checks every guard (prev != done, parent
 	// exists, parent not terminal), so calling it unconditionally is safe.
-	h.notifyParentOfChildDone(ctx, issue, updated)
+	h.notifyParentOfChildDone(ctx, issue, updated, "system", "")
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)

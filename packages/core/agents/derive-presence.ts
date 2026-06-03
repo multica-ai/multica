@@ -94,6 +94,20 @@ interface DerivePresenceInput {
 }
 
 export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPresenceDetail {
+  // Archived wins over every runtime/task signal — a retired agent must
+  // never read as live anywhere. Short-circuit before deriving runtime
+  // health or workload so a leftover online runtime row or a stale snapshot
+  // task can't leak "Online" / "Working" into any consumer.
+  if (input.agent.archived_at) {
+    return {
+      availability: "archived",
+      workload: "idle",
+      runningCount: 0,
+      queuedCount: 0,
+      capacity: input.agent.max_concurrent_tasks,
+    };
+  }
+
   const availability = deriveAgentAvailability(input.runtime, input.now);
   const detail = deriveWorkloadDetail(input.tasks);
 

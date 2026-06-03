@@ -76,6 +76,7 @@ import type {
   Attachment,
   ChatSession,
   ChatMessage,
+  ChatMessagesPage,
   ChatPendingTask,
   PendingChatTasksResponse,
   SendChatMessageResponse,
@@ -198,6 +199,7 @@ import {
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
+  EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
   EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
@@ -215,6 +217,8 @@ import {
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
+  AppConfigSchema,
+  type AppConfigResponse,
   GroupedIssuesResponseSchema,
   DiscoverImportSkillsResponseSchema,
   IssueLabelsResponseSchema,
@@ -1961,22 +1965,11 @@ export class ApiClient {
   }
 
   // App Config
-  async getConfig(): Promise<{
-    cdn_domain: string;
-    allow_signup: boolean;
-    google_client_id?: string;
-    google_ios_client_id?: string;
-    dingtalk_client_id?: string;
-    dingtalk_oauth_scope?: string;
-    hide_email_login?: boolean;
-    posthog_key?: string;
-    posthog_host?: string;
-    analytics_environment?: string;
-    // Self-host gate (#3433). Optional because older servers omit the field
-    // entirely; consumers must default to false.
-    workspace_creation_disabled?: boolean;
-  }> {
-    return this.fetch("/api/config");
+  async getConfig(): Promise<AppConfigResponse> {
+    const raw = await this.fetch<unknown>("/api/config");
+    return parseWithFallback<AppConfigResponse>(raw, AppConfigSchema, EMPTY_APP_CONFIG, {
+      endpoint: "GET /api/config",
+    });
   }
 
   // Workspaces
@@ -1995,7 +1988,7 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; wiki_content?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; wiki_content?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -2388,6 +2381,37 @@ export class ApiClient {
 
   async listChatMessages(sessionId: string): Promise<ChatMessage[]> {
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
+  }
+
+  async listChatMessagesPage(
+    sessionId: string,
+    params: { before?: { created_at: string; id: string } | null; limit?: number } = {},
+  ): Promise<ChatMessagesPage> {
+    const limit = params.limit ?? 50;
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (params.before) {
+      query.set("before_created_at", params.before.created_at);
+      query.set("before_id", params.before.id);
+    }
+    try {
+      return await this.fetch(
+        `/api/chat/sessions/${sessionId}/messages/page?${query.toString()}`,
+      );
+    } catch (err) {
+      // Deployment-order compatibility: a backend deployed before this endpoint
+      // existed returns 404 for the unknown route. Fall back to the legacy
+      // full-list endpoint so chat never white-screens regardless of whether
+      // the server or the client deploys first. Only the initial (cursorless)
+      // page falls back — the legacy endpoint returns every message at once, so
+      // the fallback page reports has_more: false and there is no follow-up
+      // request to translate. A 404 on a cursor request is an unexpected state
+      // and propagates instead of duplicating the whole list.
+      if (err instanceof ApiError && err.status === 404 && !params.before) {
+        const messages = await this.listChatMessages(sessionId);
+        return { messages, limit, has_more: false, next_cursor: null };
+      }
+      throw err;
+    }
   }
 
   async sendChatMessage(
