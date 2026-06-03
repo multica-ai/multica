@@ -62,6 +62,12 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
+	slog.Info("autopilot dispatch triggered",
+		"autopilot_id", util.UUIDToString(autopilot.ID),
+		"source", source,
+		"execution_mode", autopilot.ExecutionMode,
+	)
+
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
 	}
