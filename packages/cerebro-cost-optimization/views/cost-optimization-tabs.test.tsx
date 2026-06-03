@@ -40,6 +40,17 @@ describe("CostOptimizationTabs", () => {
     expect(screen.getByText("System prompt inspector")).toBeInTheDocument();
   });
 
+  it("keeps cost-optimization subtabs horizontal inside vertical settings tabs", () => {
+    render(<CostOptimizationTabs />);
+
+    const tabList = screen.getByRole("tablist");
+    expect(tabList).toHaveClass("!flex-row");
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab).toHaveClass("!w-auto");
+      expect(tab).toHaveClass("!flex-none");
+    }
+  });
+
   it("honors analytics deeplink and preserves the parent settings tab in URL changes", () => {
     params = new URLSearchParams("tab=cost-optimization&subtab=analytics");
     render(<CostOptimizationTabs />);
