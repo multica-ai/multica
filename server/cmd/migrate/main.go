@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/logger"
 )
 
@@ -33,7 +32,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dbURL)
+	pool, err := logger.NewDBPool(ctx, dbURL)
 	if err != nil {
 		slog.Error("unable to connect to database", "error", err)
 		os.Exit(1)
