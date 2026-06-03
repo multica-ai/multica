@@ -338,7 +338,9 @@ When using browser automation (blueprint, claude-in-chrome, etc.) to verify UI f
 
 1. Read the current URL via `browser_status` / `browser_tabs list` / a screenshot.
 2. If it points at a tunnel, production host, or any non-`localhost` origin, you are testing **someone else's deployment**, not your branch. Examples that LOOK local but aren't:
-   - `sara.tailbde0.ts.net/...` / `*.firtal.com` → Firtal production (sara.local mac mini, runs `origin/production`)
+   - `Sara.firtal.com` → Firtal **staging** (sara.local mac mini, runs `origin/main`)
+   - `Multica.firtal.com` → Firtal **production** (Sliplane containers, runs `origin/production`)
+   - `sara.tailbde0.ts.net/...` → also Firtal staging (tailscale alias for the same mac mini)
    - any tailscale `.ts.net` host → another machine
 3. To test your branch's running dev server, navigate explicitly to the port from your worktree's `.env.worktree` (`FRONTEND_PORT`, typically 13083 or 3000).
 4. Authenticating on your local dev: cerebro has removed the upstream `888888` master code as a security patch (`server/internal/handler/auth_master_code_test.go` enforces this). Use the real "Send code" flow — the code is printed to `/tmp/multica-server.log` when `RESEND_API_KEY` is unset.
@@ -459,9 +461,16 @@ make check
 
 **Quick iteration:** If you know only TypeScript or Go is affected, run individual checks first for faster feedback, then finish with a full `make check` before marking work complete.
 
-## Production Deploy (sara.tailbde0.ts.net)
+## Environments + Deploy
 
-Production runs on a self-hosted Mac mini at `/Users/sara/code/firtal-cerebro`. Backend, frontend, and daemon each run as a launchd job (`com.multica.backend`, `com.multica.frontend`, `com.multica.daemon`). There is no Vercel / Netlify / cloud deploy — everything ships from `origin/production` on the runner.
+| Branch | Environment | URL | Platform |
+|---|---|---|---|
+| `main` | Staging | `https://Sara.firtal.com` | Mac mini (sara.local, launchd) |
+| `production` | Production | `https://Multica.firtal.com` | Sliplane (Docker containers) |
+
+**Staging** runs on a self-hosted Mac mini at `/Users/sara/code/firtal-cerebro`. Backend, frontend, and daemon each run as a launchd job (`com.multica.backend`, `com.multica.frontend`, `com.multica.daemon`). It tracks `origin/main` and updates automatically on each push.
+
+**Production** runs on Sliplane as Docker containers built from `Dockerfile.web` (frontend) and `Dockerfile` (backend). It tracks `origin/production` and rebuilds on each push to that branch.
 
 **Deploy flow — gated, not direct.** Merging a PR into `main` does NOT deploy. Live deploy fires only when `main` is merged into the `production` branch. The `main → production` merge is gated by an approval comment on a release-issue in Multica's "Deployments" project — created automatically by the `auto-deploy-trigger` autopilot.
 
@@ -484,9 +493,9 @@ bash ~/code/firtal-cerebro/.deploy/deploy.sh
 
 Logs land in `.deploy/logs/deploy-latest.log` on the runner.
 
-**Verifying a deploy from outside the runner.** The server has no `/version` endpoint exposing the deployed git SHA, so an agent that merges `main → production` cannot programmatically confirm the deploy fired. Trust the webhook fired and check the visible behaviour change at `https://sara.tailbde0.ts.net`.
+**Verifying a deploy from outside the runner.** Check `https://Multica.firtal.com` for production (Sliplane containers) or `https://Sara.firtal.com` for staging (mac mini). The server exposes a `/version` endpoint (commit SHA) for programmatic verification.
 
-**Important — CLI release is NOT a prod deploy.** Cutting a `v0.x.y` tag only publishes binaries to GitHub Releases + Homebrew. It does NOT push code to sara.tailbde0.ts.net. Prod always runs `origin/production`, regardless of the latest CLI tag. The two pipelines are fully independent.
+**Important — CLI release is NOT a prod deploy.** Cutting a `v0.x.y` tag only publishes binaries to GitHub Releases + Homebrew. It does NOT push code to `Multica.firtal.com`. Prod always runs `origin/production`, regardless of the latest CLI tag. The two pipelines are fully independent.
 
 ## CLI Release (binary distribution)
 
