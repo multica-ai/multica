@@ -42,6 +42,11 @@ COPY server/migrations/ ./migrations/
 COPY docker/entrypoint.sh .
 RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
+# Run as a non-root user. The server listens on 8080 (>1024) and writes
+# nothing under /app at runtime, so an unprivileged user is sufficient.
+RUN addgroup -S app && adduser -S -G app app && chown -R app:app /app
+USER app
+
 EXPOSE 8080
 
 ENTRYPOINT ["./entrypoint.sh"]
