@@ -218,10 +218,10 @@ describe("applyChatDoneToCache paged messages", () => {
     };
     qc.setQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sessionId), {
       pages: [
-        { messages: [latest], page: 0, limit: 1, total_count: 2, has_more: true, first_item_index: 1 },
-        { messages: [older], page: 1, limit: 1, total_count: 2, has_more: false, first_item_index: 0 },
+        { messages: [latest], limit: 1, has_more: true, next_cursor: { created_at: latest.created_at, id: latest.id } },
+        { messages: [older], limit: 1, has_more: false, next_cursor: null },
       ],
-      pageParams: [0, 1],
+      pageParams: [null, { created_at: latest.created_at, id: latest.id }],
     });
 
     applyChatDoneToCache(qc, donePayload());
@@ -231,7 +231,5 @@ describe("applyChatDoneToCache paged messages", () => {
 
     expect(paged?.pages[0]?.messages.map((m) => m.id)).toEqual(["msg-latest", "msg-assistant"]);
     expect(paged?.pages[1]?.messages.map((m) => m.id)).toEqual(["msg-user"]);
-    expect(paged?.pages[0]?.total_count).toBe(3);
-    expect(paged?.pages[1]?.total_count).toBe(3);
   });
 });

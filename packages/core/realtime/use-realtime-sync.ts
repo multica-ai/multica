@@ -130,11 +130,9 @@ function patchLatestChatMessagePage(
   return {
     ...old,
     pages: old.pages.map((page, index) => {
-      const total_count = page.total_count + 1;
-      if (index !== 0) return { ...page, total_count };
+      if (index !== 0) return page;
       return {
         ...page,
-        total_count,
         messages: [...page.messages, message],
       };
     }),

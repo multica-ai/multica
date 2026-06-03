@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { Virtuoso } from "react-virtuoso";
@@ -60,6 +60,12 @@ export function ChatMessageList({
   onLoadOlderMessages,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    setScrollContainerEl(node);
+  }, []);
   const fadeStyle = useScrollFade(scrollRef);
   const { t } = useT("chat");
 
@@ -90,17 +96,24 @@ export function ChatMessageList({
 
   return (
     <div
-      ref={scrollRef}
+      ref={setScrollContainerRef}
       data-tab-scroll-root
       style={fadeStyle}
       className="flex-1 overflow-y-auto"
     >
+      {!scrollContainerEl ? (
+        <div className="mx-auto w-full max-w-4xl px-5 pt-4 space-y-3">
+          <ChatMessageSkeleton />
+        </div>
+      ) : (
       <Virtuoso
-        customScrollParent={scrollRef.current ?? undefined}
+        customScrollParent={scrollContainerEl}
         data={messages}
         firstItemIndex={firstIndex}
         increaseViewportBy={{ top: 400, bottom: 600 }}
-        followOutput="smooth"
+        atBottomThreshold={120}
+        atBottomStateChange={setIsNearBottom}
+        followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {
             onLoadOlderMessages?.();
@@ -141,6 +154,7 @@ export function ChatMessageList({
           </div>
         )}
       />
+      )}
     </div>
   );
 }

@@ -11,18 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countChatMessages = `-- name: CountChatMessages :one
-SELECT count(*) FROM chat_message
-WHERE chat_session_id = $1
-`
-
-func (q *Queries) CountChatMessages(ctx context.Context, chatSessionID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countChatMessages, chatSessionID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createChatMessage = `-- name: CreateChatMessage :one
 INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -411,18 +399,28 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 const listChatMessagesPage = `-- name: ListChatMessagesPage :many
 SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM chat_message
 WHERE chat_session_id = $1
-ORDER BY created_at DESC
-LIMIT $2 OFFSET $3
+  AND (
+    $3::timestamptz IS NULL
+    OR (created_at, id) < ($3::timestamptz, $4::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $2
 `
 
 type ListChatMessagesPageParams struct {
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
-	Limit         int32       `json:"limit"`
-	Offset        int32       `json:"offset"`
+	ChatSessionID   pgtype.UUID        `json:"chat_session_id"`
+	Limit           int32              `json:"limit"`
+	BeforeCreatedAt pgtype.Timestamptz `json:"before_created_at"`
+	BeforeID        pgtype.UUID        `json:"before_id"`
 }
 
 func (q *Queries) ListChatMessagesPage(ctx context.Context, arg ListChatMessagesPageParams) ([]ChatMessage, error) {
-	rows, err := q.db.Query(ctx, listChatMessagesPage, arg.ChatSessionID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listChatMessagesPage,
+		arg.ChatSessionID,
+		arg.Limit,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+	)
 	if err != nil {
 		return nil, err
 	}

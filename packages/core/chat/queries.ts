@@ -58,10 +58,10 @@ export function chatMessagesPageOptions(sessionId: string, limit = 50) {
   return infiniteQueryOptions({
     queryKey: chatKeys.messagesPage(sessionId),
     queryFn: ({ pageParam }) =>
-      api.listChatMessagesPage(sessionId, { page: pageParam, limit }),
-    initialPageParam: 0,
+      api.listChatMessagesPage(sessionId, { before: pageParam, limit }),
+    initialPageParam: null as { created_at: string; id: string } | null,
     getNextPageParam: (lastPage) =>
-      lastPage.has_more ? lastPage.page + 1 : undefined,
+      lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
     enabled: !!sessionId,
     staleTime: Infinity,
   });

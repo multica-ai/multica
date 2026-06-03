@@ -1592,12 +1592,15 @@ export class ApiClient {
 
   async listChatMessagesPage(
     sessionId: string,
-    params: { page?: number; limit?: number } = {},
+    params: { before?: { created_at: string; id: string } | null; limit?: number } = {},
   ): Promise<ChatMessagesPage> {
-    const page = params.page ?? 0;
-    const limit = params.limit ?? 50;
+    const query = new URLSearchParams({ limit: String(params.limit ?? 50) });
+    if (params.before) {
+      query.set("before_created_at", params.before.created_at);
+      query.set("before_id", params.before.id);
+    }
     return this.fetch(
-      `/api/chat/sessions/${sessionId}/messages/page?page=${page}&limit=${limit}`,
+      `/api/chat/sessions/${sessionId}/messages/page?${query.toString()}`,
     );
   }
 

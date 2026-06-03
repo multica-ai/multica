@@ -55,13 +55,16 @@ export interface ChatMessage {
   elapsed_ms?: number | null;
 }
 
+export interface ChatMessagesCursor {
+  created_at: string;
+  id: string;
+}
+
 export interface ChatMessagesPage {
   messages: ChatMessage[];
-  page: number;
   limit: number;
-  total_count: number;
   has_more: boolean;
-  first_item_index: number;
+  next_cursor?: ChatMessagesCursor | null;
 }
 
 export interface SendChatMessageResponse {

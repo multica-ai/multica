@@ -83,15 +83,15 @@ SELECT * FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC;
 
--- name: CountChatMessages :one
-SELECT count(*) FROM chat_message
-WHERE chat_session_id = $1;
-
 -- name: ListChatMessagesPage :many
 SELECT * FROM chat_message
 WHERE chat_session_id = $1
-ORDER BY created_at DESC
-LIMIT $2 OFFSET $3;
+  AND (
+    sqlc.narg('before_created_at')::timestamptz IS NULL
+    OR (created_at, id) < (sqlc.narg('before_created_at')::timestamptz, sqlc.narg('before_id')::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $2;
 
 -- name: GetChatMessage :one
 SELECT * FROM chat_message

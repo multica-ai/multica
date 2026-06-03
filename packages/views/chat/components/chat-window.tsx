@@ -61,7 +61,7 @@ import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
-
+const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
 function seedChatMessagesPageCache(
   qc: ReturnType<typeof useQueryClient>,
@@ -73,13 +73,11 @@ function seedChatMessagesPageCache(
     (old) => old ?? {
       pages: [{
         messages,
-        page: 0,
         limit: 50,
-        total_count: messages.length,
         has_more: false,
-        first_item_index: 0,
+        next_cursor: null,
       }],
-      pageParams: [0],
+      pageParams: [null],
     },
   );
 }
@@ -107,13 +105,16 @@ export function ChatWindow() {
     isFetchingNextPage: isFetchingOlderMessages,
   } = useInfiniteQuery(chatMessagesPageOptions(activeSessionId ?? ""));
   // When no active session, always show empty — don't use stale cache.
-  // Page 0 contains the latest chronological window; higher page numbers are
+  // Page 0 contains the latest chronological window; later cursor pages are
   // older chronological windows. Reverse pages so older fetched pages render
-  // above the initial latest page.
+  // above the initial latest page. The Virtuoso firstItemIndex is client-owned:
+  // it starts from a large stable base and only subtracts the count of loaded
+  // prepended rows, so concurrent server inserts cannot drift the scroll anchor.
   const messagePages = activeSessionId ? rawMessagePages?.pages ?? [] : [];
   const messages = [...messagePages].reverse().flatMap((page) => page.messages);
-  const firstItemIndex = messagePages.length > 0
-    ? Math.min(...messagePages.map((page) => page.first_item_index))
+  const olderMessageCount = messagePages.slice(1).reduce((sum, page) => sum + page.messages.length, 0);
+  const firstItemIndex = messages.length > 0
+    ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
     : 0;
   // Skeleton only shows for an un-cached session fetch. Cached switches
   // return data synchronously — no flash. `enabled: false` (new chat)

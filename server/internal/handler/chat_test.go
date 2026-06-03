@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -195,8 +196,30 @@ func TestSendChatMessage_InvalidAttachmentIDs(t *testing.T) {
 	}
 }
 
-func TestListChatMessagesPage_PaginatesWithoutChangingLegacyList(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatPaginationAgent", []byte("[]"))
+func fetchChatMessagesPageForTest(t *testing.T, sessionID string, params url.Values) ChatMessagesPageResponse {
+	t.Helper()
+	target := "/api/chat/sessions/" + sessionID + "/messages/page"
+	if encoded := params.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req = withURLParam(req, "sessionId", sessionID)
+	req = withChatTestWorkspaceCtx(t, req)
+	w := httptest.NewRecorder()
+	testHandler.ListChatMessagesPage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListChatMessagesPage: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var page ChatMessagesPageResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode page messages: %v", err)
+	}
+	return page
+}
+
+func TestListChatMessagesPage_UsesCursorWithoutChangingLegacyList(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatCursorPaginationAgent", []byte("[]"))
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	for i, content := range []string{"oldest", "middle", "newest"} {
@@ -230,24 +253,90 @@ func TestListChatMessagesPage_PaginatesWithoutChangingLegacyList(t *testing.T) {
 		t.Fatalf("legacy messages = %#v", legacy)
 	}
 
-	pageReq := httptest.NewRequest(http.MethodGet, "/api/chat/sessions/"+sessionID+"/messages/page?page=0&limit=2", nil)
-	pageReq.Header.Set("X-User-ID", testUserID)
-	pageReq = withURLParam(pageReq, "sessionId", sessionID)
-	pageReq = withChatTestWorkspaceCtx(t, pageReq)
-	pageW := httptest.NewRecorder()
-	testHandler.ListChatMessagesPage(pageW, pageReq)
-	if pageW.Code != http.StatusOK {
-		t.Fatalf("ListChatMessagesPage: expected 200, got %d: %s", pageW.Code, pageW.Body.String())
+	latest := fetchChatMessagesPageForTest(t, sessionID, url.Values{"limit": {"2"}})
+	if latest.Limit != 2 || !latest.HasMore || latest.NextCursor == nil {
+		t.Fatalf("latest page metadata = %#v", latest)
 	}
-	var page ChatMessagesPageResponse
-	if err := json.Unmarshal(pageW.Body.Bytes(), &page); err != nil {
-		t.Fatalf("decode page messages: %v", err)
+	if len(latest.Messages) != 2 || latest.Messages[0].Content != "middle" || latest.Messages[1].Content != "newest" {
+		t.Fatalf("latest page messages = %#v", latest)
 	}
-	if page.Page != 0 || page.Limit != 2 || page.TotalCount != 3 || !page.HasMore {
-		t.Fatalf("page metadata = %#v", page)
+
+	older := fetchChatMessagesPageForTest(t, sessionID, url.Values{
+		"limit":             {"2"},
+		"before_created_at": {latest.NextCursor.CreatedAt},
+		"before_id":         {latest.NextCursor.ID},
+	})
+	if older.HasMore || older.NextCursor != nil {
+		t.Fatalf("older page metadata = %#v", older)
 	}
-	if page.FirstItemIndex != 1 || len(page.Messages) != 2 || page.Messages[0].Content != "middle" || page.Messages[1].Content != "newest" {
-		t.Fatalf("page messages = %#v", page)
+	if len(older.Messages) != 1 || older.Messages[0].Content != "oldest" {
+		t.Fatalf("older page messages = %#v", older)
+	}
+}
+
+func TestListChatMessagesPage_CursorTieBreaksSameTimestampWithoutDupesOrGaps(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatCursorTieBreakAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	contents := []string{"a", "b", "c", "d", "e"}
+	for _, content := range contents {
+		_, err := testPool.Exec(
+			context.Background(),
+			`INSERT INTO chat_message (chat_session_id, role, content, created_at)
+			 VALUES ($1, 'user', $2, timestamp '2026-01-01 00:00:00')`,
+			sessionID,
+			content,
+		)
+		if err != nil {
+			t.Fatalf("insert chat message %q: %v", content, err)
+		}
+	}
+
+	seen := map[string]bool{}
+	var ordered []string
+	params := url.Values{"limit": {"2"}}
+	for {
+		page := fetchChatMessagesPageForTest(t, sessionID, params)
+		for _, msg := range page.Messages {
+			if seen[msg.ID] {
+				t.Fatalf("duplicate message id %s across cursor pages", msg.ID)
+			}
+			seen[msg.ID] = true
+			ordered = append(ordered, msg.Content)
+		}
+		if !page.HasMore {
+			if page.NextCursor != nil {
+				t.Fatalf("terminal page has next cursor: %#v", page.NextCursor)
+			}
+			break
+		}
+		if page.NextCursor == nil {
+			t.Fatalf("has_more page missing next cursor: %#v", page)
+		}
+		params = url.Values{
+			"limit":             {"2"},
+			"before_created_at": {page.NextCursor.CreatedAt},
+			"before_id":         {page.NextCursor.ID},
+		}
+	}
+
+	if len(ordered) != len(contents) {
+		t.Fatalf("expected %d messages across pages, got %d: %v", len(contents), len(ordered), ordered)
+	}
+	// Pages are newest-window first and chronological within each page. With all
+	// timestamps equal, the id tie-break must still produce a deterministic,
+	// gap-free traversal.
+	for _, content := range contents {
+		found := false
+		for _, got := range ordered {
+			if got == content {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing content %q across cursor pages: %v", content, ordered)
+		}
 	}
 }
 
@@ -255,7 +344,7 @@ func TestListChatMessagesPage_RejectsInvalidLimit(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "ChatPaginationBadLimitAgent", []byte("[]"))
 	sessionID := createHandlerTestChatSession(t, agentID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/chat/sessions/"+sessionID+"/messages/page?page=0&limit=0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/sessions/"+sessionID+"/messages/page?limit=0", nil)
 	req.Header.Set("X-User-ID", testUserID)
 	req = withURLParam(req, "sessionId", sessionID)
 	req = withChatTestWorkspaceCtx(t, req)
