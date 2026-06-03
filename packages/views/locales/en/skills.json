@@ -162,6 +162,10 @@
       "runtime": {
         "title": "Copy from runtime",
         "desc": "Scan a local runtime and promote one of its on-disk skills into this workspace."
+      },
+      "bulk": {
+        "title": "Import a set",
+        "desc": "Import many skills at once from a GitHub repo or a local folder."
       }
     },
     "method_card": {
@@ -170,7 +174,9 @@
       "url_title": "Import from URL",
       "url_desc": "Pull a published skill from ClawHub or Skills.sh.",
       "runtime_title": "Copy from runtime",
-      "runtime_desc": "Promote a skill already installed on your local runtime."
+      "runtime_desc": "Promote a skill already installed on your local runtime.",
+      "bulk_title": "Import a set",
+      "bulk_desc": "Many skills at once — a GitHub repo or a local folder."
     },
     "manual": {
       "name_label": "Name",
@@ -198,6 +204,26 @@
       "cancel": "Cancel",
       "toast_imported": "Skill imported"
     }
+  },
+  "bulk_import": {
+    "source_label": "Source",
+    "source_github": "GitHub repo",
+    "source_folder": "Local folder",
+    "github_url_label": "Repository or folder URL",
+    "github_url_placeholder": "github.com/owner/repo or .../tree/main/skills",
+    "discover": "Discover",
+    "discovering": "Discovering…",
+    "folder_pick": "Choose a folder",
+    "folder_drop_hint": "or drop a folder here",
+    "folder_reading": "Reading folder…",
+    "candidates_title": "Found skills",
+    "already_exists": "already exists",
+    "empty_no_skills": "No SKILL.md found here.",
+    "empty_hint": "Each skill is a folder containing a SKILL.md.",
+    "capped_notice": "Showing the first {{count}} skills; more were found.",
+    "folder_too_large": "Folder is too large to read in the browser.",
+    "discover_failed": "Could not read that source.",
+    "import_selected": "Import {{count}} selected"
   },
   "runtime_import": {
     "runtime_label": "Runtime",
