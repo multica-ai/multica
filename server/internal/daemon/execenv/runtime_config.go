@@ -366,10 +366,95 @@ func buildLocalPreviewInstructions(ctx TaskContextForEnv) string {
 	return b.String()
 }
 
+type roleMetadataNormalization struct {
+	Frontmatter  string
+	Instructions string
+}
+
+func normalizeRoleMetadata(ctx TaskContextForEnv) roleMetadataNormalization {
+	instructions := ctx.AgentInstructions
+	// The merge layer has already flattened system, personal, and agent
+	// instructions. Keep that order intact; only lift the role metadata
+	// contract so providers see it immediately after Agent Identity.
+	if frontmatter, remainder, ok := extractRoleFrontmatter(instructions); ok {
+		return roleMetadataNormalization{
+			Frontmatter:  strings.TrimRight(frontmatter, " \t\r\n"),
+			Instructions: strings.TrimLeft(remainder, " \t\r\n"),
+		}
+	}
+
+	name := strings.TrimSpace(ctx.AgentName)
+	if name == "" {
+		return roleMetadataNormalization{
+			Instructions: instructions,
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "name: %s\n", yamlEscapeInline(name))
+	if desc := strings.TrimSpace(ctx.AgentDescription); desc != "" {
+		fmt.Fprintf(&b, "description: %s\n", yamlEscapeInline(desc))
+	}
+	b.WriteString("---")
+	return roleMetadataNormalization{
+		Frontmatter:  b.String(),
+		Instructions: instructions,
+	}
+}
+
+func extractRoleFrontmatter(content string) (frontmatter, remainder string, ok bool) {
+	cursor := 0
+	for {
+		idx := strings.Index(content[cursor:], "---")
+		if idx < 0 {
+			return "", content, false
+		}
+		start := cursor + idx
+		if start != 0 && content[start-1] != '\n' && content[start-1] != '\r' {
+			cursor = start + len("---")
+			continue
+		}
+		bodyStart, ok := frontmatterBodyStart(content[start:])
+		if !ok {
+			cursor = start + len("---")
+			continue
+		}
+
+		afterOpen := start + bodyStart
+		closeRel := strings.Index(content[afterOpen:], "\n---")
+		if closeRel < 0 {
+			return "", content, false
+		}
+		closeStart := afterOpen + closeRel + 1
+		closeEnd := closeStart + len("---")
+		if closeEnd < len(content) {
+			switch content[closeEnd] {
+			case '\r':
+				if closeEnd+1 < len(content) && content[closeEnd+1] == '\n' {
+					closeEnd += 2
+				} else {
+					closeEnd++
+				}
+			case '\n':
+				closeEnd++
+			}
+		}
+
+		if !hasFrontmatterName(content[afterOpen:closeStart]) {
+			cursor = closeEnd
+			continue
+		}
+
+		return content[start:closeEnd], content[:start] + content[closeEnd:], true
+	}
+}
+
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
+	roleMetadata := normalizeRoleMetadata(ctx)
 
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
@@ -385,14 +470,24 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			}
 			b.WriteString("\n\n")
 		}
-		if ctx.AgentInstructions != "" {
-			b.WriteString(ctx.AgentInstructions)
+		if roleMetadata.Frontmatter != "" {
+			b.WriteString(roleMetadata.Frontmatter)
 			b.WriteString("\n\n")
 		}
-	} else if ctx.AgentInstructions != "" {
+		if roleMetadata.Instructions != "" {
+			b.WriteString(roleMetadata.Instructions)
+			b.WriteString("\n\n")
+		}
+	} else if roleMetadata.Frontmatter != "" || roleMetadata.Instructions != "" {
 		b.WriteString("## Agent Identity\n\n")
-		b.WriteString(ctx.AgentInstructions)
-		b.WriteString("\n\n")
+		if roleMetadata.Frontmatter != "" {
+			b.WriteString(roleMetadata.Frontmatter)
+			b.WriteString("\n\n")
+		}
+		if roleMetadata.Instructions != "" {
+			b.WriteString(roleMetadata.Instructions)
+			b.WriteString("\n\n")
+		}
 	}
 
 	// Requesting User block: human-supplied self-description for the user the
