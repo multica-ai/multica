@@ -1405,3 +1405,112 @@ func TestReconcileSyncedIssueTasksDoesNotCancelOnNonTerminalStatus(t *testing.T)
 		})
 	}
 }
+
+func TestResolveAttachmentContentType(t *testing.T) {
+	pngBytes := []byte("\x89PNG\r\n\x1a\nrest-of-png-bytes")
+	pdfBytes := []byte("%PDF-1.4\n1 0 obj\n")
+	tests := []struct {
+		name     string
+		declared string
+		filename string
+		data     []byte
+		want     string
+	}{
+		{
+			// The production bug: Feishu's file/download endpoint returns a
+			// generic text/plain header for a PNG, which must not win over the
+			// real bytes.
+			name:     "generic text/plain over png resolves by extension",
+			declared: "text/plain; charset=utf-8",
+			filename: "客户端截图.png",
+			data:     pngBytes,
+			want:     "image/png",
+		},
+		{
+			name:     "empty declared resolves by extension",
+			declared: "",
+			filename: "shot.PNG",
+			data:     pngBytes,
+			want:     "image/png",
+		},
+		{
+			name:     "specific declared type is trusted",
+			declared: "image/jpeg",
+			filename: "weird.png",
+			data:     pngBytes,
+			want:     "image/jpeg",
+		},
+		{
+			name:     "octet-stream with unknown extension falls back to sniffing",
+			declared: "application/octet-stream",
+			filename: "noext",
+			data:     pdfBytes,
+			want:     "application/pdf",
+		},
+		{
+			name:     "log file stays text/plain",
+			declared: "text/plain",
+			filename: "client.log",
+			data:     []byte("2026-06-03 boot ok\n"),
+			want:     "text/plain",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveAttachmentContentType(tt.declared, tt.filename, tt.data)
+			if !strings.HasPrefix(got, tt.want) {
+				t.Fatalf("resolveAttachmentContentType(%q, %q) = %q, want prefix %q", tt.declared, tt.filename, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFeishuProjectFileTokenFromURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"stream download url", "https://project.feishu.cn/goapi/v5/platform/file/stream/download/AbC_1-23==", "AbC_1-23=="},
+		{"strips query and fragment", "https://project.feishu.cn/goapi/v5/platform/file/stream/download/tok?x=1#f", "tok"},
+		{"non-file url", "https://example.com/public.png", ""},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := feishuProjectFileTokenFromURL(tt.url); got != tt.want {
+				t.Fatalf("feishuProjectFileTokenFromURL(%q) = %q, want %q", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFeishuProjectInlineImageUsesURLTokenAsExternalID(t *testing.T) {
+	// Description inline image with no <!-- id --> comment: the external ID must
+	// fall back to the durable file token in the stream URL so it dedups across
+	// syncs instead of re-downloading every time.
+	_, attachments := normalizeFeishuProjectDescription(
+		"shot\n\n![](https://project.feishu.cn/goapi/v5/platform/file/stream/download/TOKEN-123==)\n")
+	if len(attachments) != 1 {
+		t.Fatalf("len(attachments) = %d, want 1: %#v", len(attachments), attachments)
+	}
+	if attachments[0].ID != "TOKEN-123==" {
+		t.Fatalf("normalize ID = %q, want token from URL", attachments[0].ID)
+	}
+
+	// Rich-text doc op carrying a src URL but no uuid attribute.
+	att, ok := feishuProjectRichTextImageFromAttrs(map[string]any{
+		"image": "true",
+		"src":   "https://project.feishu.cn/goapi/v5/platform/file/stream/download/OP-TOKEN==",
+	})
+	if !ok || att.ID != "OP-TOKEN==" {
+		t.Fatalf("rich-text attrs: ok=%v att=%#v, want ID=OP-TOKEN==", ok, att)
+	}
+
+	// HTML <img> with src but no id attribute.
+	html := feishuProjectRichTextImagesFromHTML(
+		`<img src="https://project.feishu.cn/goapi/v5/platform/file/stream/download/HTML-TOKEN==">`)
+	if len(html) != 1 || html[0].ID != "HTML-TOKEN==" {
+		t.Fatalf("html images = %#v, want one with ID=HTML-TOKEN==", html)
+	}
+}
