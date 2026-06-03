@@ -12,6 +12,8 @@ export type WSEventType =
   | "issue:created"
   | "issue:updated"
   | "issue:deleted"
+  | "issue:archived"
+  | "issue:unarchived"
   | "comment:created"
   | "comment:updated"
   | "comment:deleted"
@@ -415,6 +417,8 @@ export interface WSEventPayloadMap {
   "issue:created": IssueCreatedPayload;
   "issue:updated": IssueUpdatedPayload;
   "issue:deleted": IssueDeletedPayload;
+  "issue:archived": IssueUpdatedPayload;
+  "issue:unarchived": IssueUpdatedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
   "issue_reaction:added": IssueReactionAddedPayload;
   "issue_reaction:removed": IssueReactionRemovedPayload;

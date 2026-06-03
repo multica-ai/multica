@@ -332,6 +332,7 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
 
 export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress, disableSorting }: { issue: Issue; childProgress?: ChildProgress; disableSorting?: boolean }) {
   const p = useWorkspacePaths();
+  const isArchived = !!issue.archived_at;
   const {
     attributes,
     listeners,
@@ -343,7 +344,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
     id: issue.id,
     data: { status: issue.status },
     animateLayoutChanges,
-    disabled: disableSorting ? { droppable: true } : undefined,
+    disabled: disableSorting || isArchived ? { droppable: true } : undefined,
   });
 
   const style = {
@@ -358,13 +359,16 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
         style={style}
         {...attributes}
         {...listeners}
-        className={`group/card ${isDragging ? "opacity-30" : ""}`}
+        className={`group/card ${isDragging ? "opacity-30" : ""} ${isArchived ? "opacity-60" : ""}`}
       >
         <AppLink
           href={p.issueDetail(issue.identifier)}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <BoardCardContent issue={issue} editable childProgress={childProgress} />
+          <BoardCardContent issue={issue} editable={!isArchived} childProgress={childProgress} />
+          {isArchived && (
+            <div className="px-2.5 pb-2 pt-1 text-[11px] text-muted-foreground">Archived</div>
+          )}
         </AppLink>
       </div>
     </IssueActionsContextMenu>

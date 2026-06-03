@@ -771,6 +771,7 @@ export class ApiClient {
     if (params?.scheduled) search.set("scheduled", "true");
     if (params?.sort_by) search.set("sort", params.sort_by);
     if (params?.sort_direction) search.set("direction", params.sort_direction);
+    if (params?.archived) search.set("archived", "true");
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
@@ -898,6 +899,14 @@ export class ApiClient {
 
   async deleteIssue(id: string): Promise<void> {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
+  }
+
+  async archiveIssue(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/archive`, { method: "PATCH" });
+  }
+
+  async unarchiveIssue(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/unarchive`, { method: "PATCH" });
   }
 
   async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {

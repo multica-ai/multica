@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  Archive,
   ChartGantt,
   Check,
   ChevronDown,
@@ -609,6 +610,7 @@ export function IssueDisplayControls({
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const showArchived = useViewStore((s) => s.showArchived);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
@@ -1104,6 +1106,21 @@ export function IssueDisplayControls({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={showArchived ? "default" : "outline"}
+                size="sm"
+                className={showArchived ? "gap-1 bg-brand text-white hover:bg-brand/90" : "gap-1 text-muted-foreground"}
+                onClick={() => act.toggleShowArchived()}
+              >
+                <Archive className="size-3.5" />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom">{showArchived ? t(($) => $.page.hide_archived) : t(($) => $.page.show_archived)}</TooltipContent>
+        </Tooltip>
     </div>
   );
 }

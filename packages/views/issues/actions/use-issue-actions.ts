@@ -27,6 +27,8 @@ export interface UseIssueActionsResult {
   openSetParent: () => void;
   openAddChild: () => void;
   openDeleteConfirm: (opts?: { onDeletedNavigateTo?: string }) => void;
+  openArchiveConfirm: () => void;
+  openUnarchiveConfirm: () => void;
 }
 
 /**
@@ -92,8 +94,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
             ),
         },
       );
-      // Hint: assigning an agent to a backlog issue won't trigger execution
-      // until the issue is moved to an active status.
       if (
         updates.assignee_type === "agent" &&
         updates.assignee_id &&
@@ -170,6 +170,16 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     [openModal, issueId, issueIdentifier],
   );
 
+  const openArchiveConfirm = useCallback(() => {
+    if (!issueId) return;
+    openModal("issue-archive-confirm", { issueId, issueTitle });
+  }, [openModal, issueId, issueTitle]);
+
+  const openUnarchiveConfirm = useCallback(() => {
+    if (!issueId) return;
+    openModal("issue-unarchive-confirm", { issueId, issueTitle });
+  }, [openModal, issueId, issueTitle]);
+
   return {
     isPinned,
     canDelete,
@@ -181,5 +191,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openSetParent,
     openAddChild,
     openDeleteConfirm,
+    openArchiveConfirm,
+    openUnarchiveConfirm,
   };
 }

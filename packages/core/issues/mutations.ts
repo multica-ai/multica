@@ -407,6 +407,60 @@ export function useDeleteIssue() {
   });
 }
 
+export function useArchiveIssue() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.archiveIssue(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
+        old ? { ...old, archived_at: new Date().toISOString() } : old,
+      );
+      return { prevDetail, id };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prevDetail) {
+        qc.setQueryData(issueKeys.detail(wsId, ctx.id), ctx.prevDetail);
+      }
+    },
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars) });
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+    },
+  });
+}
+
+export function useUnarchiveIssue() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.unarchiveIssue(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
+        old ? { ...old, archived_at: null, archived_by: null } : old,
+      );
+      return { prevDetail, id };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prevDetail) {
+        qc.setQueryData(issueKeys.detail(wsId, ctx.id), ctx.prevDetail);
+      }
+    },
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars) });
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+    },
+  });
+}
+
 export function useBatchUpdateIssues() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

@@ -4,7 +4,9 @@
     "breadcrumb_workspace_fallback": "Workspace",
     "empty_title": "No issues yet",
     "empty_hint": "Create an issue to get started.",
-    "move_failed": "Failed to move issue"
+    "move_failed": "Failed to move issue",
+    "show_archived": "Show archived ({{count}}) →",
+    "hide_archived": "Hide archived"
   },
   "status": {
     "backlog": "Backlog",
@@ -425,7 +427,9 @@
     "create_sub_issue": "Create sub-issue",
     "set_parent_issue": "Set parent issue...",
     "add_sub_issue": "Add sub-issue...",
-    "delete_issue": "Delete issue"
+    "delete_issue": "Delete issue",
+    "archive_issue": "Archive issue",
+    "unarchive_issue": "Unarchive issue"
   },
   "pickers": {
     "filter_options_aria": "Filter options",

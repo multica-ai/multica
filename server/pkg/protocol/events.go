@@ -8,6 +8,10 @@ const (
 	EventIssueDeleted         = "issue:deleted"
 	EventIssueMetadataChanged = "issue_metadata:changed"
 
+	// Issue archive events
+	EventIssueArchived   = "issue:archived"
+	EventIssueUnarchived = "issue:unarchived"
+
 	// Comment events
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
