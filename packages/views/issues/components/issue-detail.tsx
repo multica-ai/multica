@@ -58,13 +58,13 @@ import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useGitHubSettings } from "@multica/core/github";
-import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueKeys, issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -657,6 +657,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const id = issueId;
+  const qc = useQueryClient();
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
@@ -792,6 +793,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, []);
   const didHighlightRef = useRef<string | null>(null);
+  const requestedMissingHighlightRef = useRef<string | null>(null);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -1057,6 +1059,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
 
   const loading = issueLoading;
+
+  // Inbox deep-links can reopen an issue whose timeline cache is "fresh"
+  // under the app-wide staleTime: Infinity defaults, but still missing the
+  // newly referenced comment. Detect that gap and force one authoritative
+  // refetch so the highlighted comment can appear without restarting.
+  useEffect(() => {
+    if (!highlightCommentId) {
+      requestedMissingHighlightRef.current = null;
+      return;
+    }
+    if (loading || timelineLoading) return;
+    if (timeline.some((entry) => entry.id === highlightCommentId)) {
+      requestedMissingHighlightRef.current = null;
+      return;
+    }
+    const requestKey = `${id}:${highlightCommentId}`;
+    if (requestedMissingHighlightRef.current === requestKey) return;
+    requestedMissingHighlightRef.current = requestKey;
+    qc.invalidateQueries({ queryKey: issueKeys.timeline(id) });
+  }, [highlightCommentId, id, loading, qc, timeline, timelineLoading]);
 
   // Deep-link landing. Semantically equivalent to navigating to
   // `#comment-${id}`: find the element with that id, scrollIntoView it.
