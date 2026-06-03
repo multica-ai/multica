@@ -185,7 +185,7 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     label: "Snapshot in start prompt",
     description:
       "Put the issue and the latest comment thread directly into the run's start prompt, so the agent does not have to fetch the issue and its comments itself on every run.",
-    metric: "tokens",
+    metric: "context_tokens",
     runtimeScope: "both",
     estimateNote: "Typically ~3,200 input tokens per run (issue + thread not fetched separately).",
   },
@@ -194,7 +194,7 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     label: "Bundled context read",
     description:
       "Serve a single combined \"issue context\" call (issue + comments + members + labels) instead of 4-5 separate calls.",
-    metric: "tokens",
+    metric: "context_tokens",
     runtimeScope: "both",
     estimateNote: "Typically ~600 input tokens per run (four separate reads → one bundled payload).",
   },

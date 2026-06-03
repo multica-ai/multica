@@ -7,6 +7,7 @@ package handler
 // separate `multica issue get` + `comment list` (+ `workspace members` +
 // `issue label list`) round-trips it makes today. Exposed to agents as
 // `multica issue context <id>`.
+// CEREBRO-PATCH(cost-savings-context-tokens): FIR-2572 — bundled payload → context_tokens rows.
 //
 // Measurement: when the caller is a daemon task (X-Task-ID present, validated
 // by the AllowTaskScopeForIssue middleware) and the workspace has bundled_read
@@ -18,6 +19,7 @@ package handler
 // governs whether the saving is credited.
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -72,7 +74,7 @@ func (h *Handler) GetIssueContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.recordBundledReadUsage(r, issue)
+	h.recordBundledReadUsage(r, issue, bundledPayloadChars(resp))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -192,7 +194,16 @@ func (h *Handler) buildIssueContextLabels(r *http.Request, issue db.Issue) []Lab
 // still count as one bundled run. shadow/off do not record here — shadow's
 // would-save is written at claim time; off is untouched. Best-effort: a
 // measurement failure never affects the served response.
-func (h *Handler) recordBundledReadUsage(r *http.Request, issue db.Issue) {
+// bundledPayloadChars approximates the bundled response size for token scoring.
+func bundledPayloadChars(resp IssueContextResponse) int64 {
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return 0
+	}
+	return int64(len(b))
+}
+
+func (h *Handler) recordBundledReadUsage(r *http.Request, issue db.Issue, payloadChars int64) {
 	if h.CerebroQueries == nil || !issue.WorkspaceID.Valid {
 		return
 	}
@@ -209,7 +220,7 @@ func (h *Handler) recordBundledReadUsage(r *http.Request, issue db.Issue) {
 	if !shouldCreditBundledReadUsage(bundledMode, snapshotMode) {
 		return
 	}
-	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(r.Context(), bundledReadMeasurementParams(issue.WorkspaceID, taskUUID, costSavingModeOn)); err != nil {
+	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(r.Context(), bundledReadMeasurementParams(issue.WorkspaceID, taskUUID, costSavingModeOn, payloadChars)); err != nil {
 		slog.Warn("bundled-read cost-saving: record usage failed", "task_id", ts.TaskID, "error", err)
 	}
 }
