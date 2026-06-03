@@ -45,7 +45,7 @@ import (
 // actions an operator wants to hold behind approval.
 func toolCapabilityKey(toolName string) string {
 	switch toolName {
-	case "web_fetch", "firtal_bq_query":
+	case "web_fetch", "firtal_registry":
 		// Reaches a host outside Multica over the network.
 		return "network.external"
 	case "credential_list":

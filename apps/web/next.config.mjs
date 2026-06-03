@@ -60,6 +60,9 @@ const nextConfig = {
       "node_modules/.pnpm/typescript@*/**",
       "node_modules/.pnpm/@playwright+*/**",
       "node_modules/.pnpm/playwright*/**",
+      "apps/web/.next/**",
+      "apps/web/.next.new/**",
+      "apps/web/.next.old/**",
     ],
   },
   // Allow deploy.sh to build into a side-by-side directory and atomically

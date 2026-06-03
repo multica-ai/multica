@@ -717,15 +717,16 @@ type CerebroSprintSetting struct {
 }
 
 type CerebroStatusModel struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Name          string             `json:"name"`
-	Description   pgtype.Text        `json:"description"`
-	Statuses      []byte             `json:"statuses"`
-	CreatedByID   pgtype.UUID        `json:"created_by_id"`
-	CreatedByType string             `json:"created_by_type"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Name             string             `json:"name"`
+	Description      pgtype.Text        `json:"description"`
+	Statuses         []byte             `json:"statuses"`
+	WorkspaceDefault bool               `json:"workspace_default"`
+	CreatedByID      pgtype.UUID        `json:"created_by_id"`
+	CreatedByType    string             `json:"created_by_type"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroToolPolicy struct {

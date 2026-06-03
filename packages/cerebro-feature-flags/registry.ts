@@ -52,6 +52,8 @@ export type CerebroFlagKey =
   | "cerebro_duplicate_check_on_create"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
   | "cerebro_google_identity"
+  // FIR-2580: per-workspace logo (upload + sidebar/breadcrumbs + web favicon + desktop dock icon).
+  | "cerebro_workspace_logo"
   // FIR-2666: project sprint feature (sprint settings, auto-create next sprint, recurring tasks).
   | "cerebro_sprints"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
@@ -141,6 +143,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // signup is the launch feature, and the table starts empty so a fresh
   // workspace with no configured domains is still a no-op.
   cerebro_google_identity: true,
+  // FIR-2580: ships default OFF — opt-in per workspace before the logo
+  // surfaces (upload UI, favicon swap, desktop dock icon).
+  cerebro_workspace_logo: false,
   // FIR-2666: project sprint feature. Defaults OFF — turn on per workspace
   // when ready. Hides the Sprints tab on the project page, the sprint picker
   // in the issue sidebar, and skips the sprint sweeper.
@@ -527,6 +532,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Adds an Auth & Permissions tab to workspace settings: owner/admin can list email domains that auto-provision into this workspace on first Google login, and pick the default role new members get. Off hides the tab and disables the auto-membership hook. FIR-2523.",
+  },
+  {
+    key: "cerebro_workspace_logo",
+    label: "Workspace logo",
+    group: "workspace",
+    description:
+      "Let owners/admins upload a workspace logo in Settings → General. The logo replaces the letter tile in the sidebar, switcher and breadcrumbs, the browser-tab favicon on web, and the dock/window icon in the desktop app. Off hides the uploader and keeps the default icons. FIR-2580.",
   },
   {
     key: "cerebro_sprints",

@@ -110,7 +110,10 @@ export type WSEventType =
   | "approval:created"
   | "approval:decided"
   | "approval:delegated"
-  | "approval:expired";
+  | "approval:expired"
+  // CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717 — runtime pause/unpause WS events for queued task banner refresh.
+  | "runtime:paused"
+  | "runtime:unpaused";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

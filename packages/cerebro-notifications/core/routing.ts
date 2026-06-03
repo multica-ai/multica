@@ -180,9 +180,9 @@ export const DEFAULT_CHANNEL_TRANSPORT: Record<Channel, ChannelTransport> = {
   mail: { digest: "daily" },
 };
 
-// Read the master "send a mobile push for everything that lands in inbox"
-// toggle out of the preferences blob. When true, the server resolves mobile
-// routing by mirroring the inbox channel's per-key resolution — see
+// Read the master "send a mobile push for primary inbox events" toggle out
+// of the preferences blob. When true, the server resolves mobile routing by
+// checking whether the event's primary routing channel is inbox — see
 // `resolveChannelChoice` in server/cmd/server/notification_routing.go (the
 // JEH-737 master toggle). Mirror of the JSON path
 // `preferences.notifications.notify_all_mobile_inbox`.

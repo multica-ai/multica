@@ -55,6 +55,15 @@ func TestComputeCents_KnownModels(t *testing.T) {
 			want:  0,
 		},
 		{
+			// CEREBRO-PATCH(pricing-gpt55-test): FIR-2776 — gpt-5.5 @ $5/$30 per Mtok.
+			// 1M input = 500 cents, 1M output = 3000 cents → 3500 cents total.
+			// Confirms gpt-5.5 does NOT fall through to the Opus 4.1 fallback ($9000).
+			name:  "gpt-5.5 — 1M in / 1M out (no fallback to opus)",
+			model: "gpt-5.5",
+			usage: Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000},
+			want:  3500,
+		},
+		{
 			// Empty usage → 0, no NaN, no panic.
 			name:  "zero usage",
 			model: "claude-opus-4-7",

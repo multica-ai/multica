@@ -1488,6 +1488,7 @@ type Workspace struct {
 	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 }
 
 type WorkspaceBudgetConfig struct {

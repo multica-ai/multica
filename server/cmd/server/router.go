@@ -400,7 +400,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler instance; FIR-2049 pass queries so avatar reads gateway creds from workspace settings
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler instance
-	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries)
+	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
 
 	r := chi.NewRouter()
 
@@ -802,6 +802,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+					// CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (owner/admin).
+					r.Post("/generate-logo", cerebroAgentAvatarHandler.GenerateLogos)
 				})
 			})
 		})
@@ -1414,6 +1416,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", cerebroSprintsHandler.ListSprints)
 				r.Post("/", cerebroSprintsHandler.CreateSprint)
 			})
+			// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2699 manual sprint sweep trigger for ops + QA.
+			r.Post("/api/cerebro/projects/{projectID}/sprint-sweep", cerebroSprintsHandler.SweepProject)
 			r.Route("/api/cerebro/projects/{projectID}/sprint-recurring-tasks", func(r chi.Router) {
 				r.Get("/", cerebroSprintsHandler.ListRecurringTasks)
 				r.Post("/", cerebroSprintsHandler.CreateRecurringTask)
@@ -1445,6 +1449,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/", cerebroStatusModelsHandler.Create)
 					r.Put("/{id}", cerebroStatusModelsHandler.Update)
 					r.Delete("/{id}", cerebroStatusModelsHandler.Delete)
+					// CEREBRO-PATCH(cerebro-status-models-workspace-default): FIR-2800 workspace default model.
+					r.Patch("/{id}/set-default", cerebroStatusModelsHandler.SetWorkspaceDefault)
+					r.Delete("/default", cerebroStatusModelsHandler.ClearWorkspaceDefault)
 				})
 			})
 			// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 per-project status-model selection.

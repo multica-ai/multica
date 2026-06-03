@@ -5,7 +5,19 @@
 
 import type {} from "@multica/core/types/agent";
 import type {} from "@multica/core/types/autopilot";
+import type {} from "@multica/core/types/workspace";
 import type {} from "@multica/core/types/issue";
+
+// FIR-2580: per-workspace logo. Server adds the column via
+// 9055_cerebro_workspace_avatar and surfaces it on WorkspaceResponse
+// (ListWorkspaces projection + GetWorkspace/UpdateWorkspace). Nullable
+// end-to-end — older servers omit it and every consumer falls back to the
+// letter avatar / default favicon when it is null/empty.
+declare module "@multica/core/types/workspace" {
+  interface Workspace {
+    avatar_url?: string | null;
+  }
+}
 
 // FIR-1550 v2b: per-issue custom_status pin joined onto the upstream Issue
 // response. Server returns it via the cerebro-issue-custom-status enricher;
@@ -41,8 +53,6 @@ declare module "@multica/core/types/issue" {
     on_behalf_of?: IssueOnBehalfOf | null;
   }
 }
-
-// JEH-848 runtime pause/unpause fields on the upstream RuntimeDevice
 // interface. Server adds the columns via 9016_cerebro_runtime_pause and
 // surfaces them on AgentRuntimeResponse via the runtime-pause-response
 // patch. All three fields are optional on the wire — older clients

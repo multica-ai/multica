@@ -10,6 +10,12 @@ import type { SkillMentionItem } from "./types";
 interface SkillMentionListProps {
   items: SkillMentionItem[];
   selectedIndex: number;
+  /**
+   * Which side of the caret the popup sits on. The list aligns toward the
+   * input so it stays glued to where you type: bottom-aligned when the popup
+   * is above the input, top-aligned when it drops below (FIR-2637).
+   */
+  side: "top" | "bottom";
   onSelect: (index: number) => void;
   onHover: (index: number) => void;
 }
@@ -23,6 +29,7 @@ interface SkillMentionListProps {
 export function SkillMentionList({
   items,
   selectedIndex,
+  side,
   onSelect,
   onHover,
 }: SkillMentionListProps) {
@@ -43,8 +50,10 @@ export function SkillMentionList({
   const activeItem = items[selectedIndex];
 
   return (
-    <div className="flex items-start gap-2">
-      <div className="w-72 max-h-[300px] overflow-y-auto rounded-md border bg-popover py-1 shadow-md">
+    <div
+      className={`flex gap-2 ${side === "top" ? "items-end" : "items-start"}`}
+    >
+      <div className="w-[min(20rem,calc(100vw-1.5rem))] max-h-[300px] overflow-y-auto rounded-md border bg-popover py-1 shadow-md sm:w-72">
         <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
           Skills
         </div>
@@ -62,15 +71,63 @@ export function SkillMentionList({
           >
             <span className="font-medium">{item.name}</span>
             {item.description && (
-              <span className="line-clamp-1 text-[11px] text-muted-foreground">
+              // Highlighted skill shows its full description on mobile (the
+              // side panel that used to carry it is hidden there); other rows
+              // and all desktop rows stay clamped (FIR-2637).
+              <span
+                className={`text-[11px] text-muted-foreground sm:line-clamp-1 ${
+                  idx === selectedIndex ? "" : "line-clamp-2"
+                }`}
+              >
                 {item.description}
               </span>
+            )}
+            {/* Inline preview for the highlighted skill on small screens,
+                where the side panel below doesn't fit (FIR-2637). */}
+            {idx === selectedIndex && (
+              <SkillInlinePreview item={item} className="sm:hidden" />
             )}
           </button>
         ))}
       </div>
-      {activeItem && <SkillPreviewPanel item={activeItem} />}
+      {/* Side preview panel — desktop only. On mobile it overflowed the
+          viewport edge, so the inline preview above replaces it (FIR-2637). */}
+      {activeItem && (
+        <div className="hidden sm:block">
+          <SkillPreviewPanel item={activeItem} />
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * Compact preview shown inline under the highlighted skill on small screens,
+ * where the side SkillPreviewPanel doesn't fit. Reuses the same cached
+ * skill-detail query as the side panel, so it's instant once fetched.
+ */
+function SkillInlinePreview({
+  item,
+  className = "",
+}: {
+  item: SkillMentionItem;
+  className?: string;
+}) {
+  const wsId = getCurrentWsId();
+  const { data: skill } = useQuery({
+    ...skillDetailOptions(wsId ?? "", item.id),
+    enabled: !!wsId && !!item.id,
+  });
+
+  const preview = skillPreviewText(skill?.content);
+  if (!preview) return null;
+
+  return (
+    <span
+      className={`mt-1 line-clamp-3 w-full whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground/80 ${className}`}
+    >
+      {preview}
+    </span>
   );
 }
 

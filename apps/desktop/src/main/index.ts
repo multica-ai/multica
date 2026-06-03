@@ -462,6 +462,29 @@ if (!gotTheLock) {
       }
     });
 
+    // FIR-2580: swap the dock / window icon to the active workspace's logo,
+    // or restore the bundled default when iconDataUrl is null. macOS shows the
+    // dock icon (the BrowserWindow `icon` option is ignored there); Windows/
+    // Linux use the per-window icon. Only the *running* icon is dynamic — the
+    // packaged bundle icon (resources/icon.png, build/icons) is build-time and
+    // cannot change per workspace. Best-effort: a bad/empty image is ignored.
+    ipcMain.on("workspace-icon:set", (_event, iconDataUrl: string | null) => {
+      try {
+        const icon =
+          iconDataUrl && iconDataUrl.startsWith("data:")
+            ? nativeImage.createFromDataURL(iconDataUrl)
+            : nativeImage.createFromPath(BUNDLED_ICON_PATH);
+        if (icon.isEmpty()) return;
+        if (process.platform === "darwin") {
+          app.dock?.setIcon(icon);
+        } else {
+          mainWindow?.setIcon(icon);
+        }
+      } catch (err) {
+        console.warn("workspace-icon:set failed", err);
+      }
+    });
+
     createWindow();
 
     setupAutoUpdater(() => mainWindow);

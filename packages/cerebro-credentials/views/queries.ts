@@ -32,6 +32,7 @@ const CredentialServerSchema = z
     updated_at: z.string(),
     expires_at: z.string().nullable().optional(),
     last_rotated_at: z.string().nullable().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .loose();
 
@@ -100,18 +101,20 @@ function toUICredential(c: z.infer<typeof CredentialServerSchema>): Credential {
     updated_at: c.updated_at,
     expires_at: c.expires_at ?? undefined,
     last_rotated_at: c.last_rotated_at ?? undefined,
+    metadata: c.metadata,
   };
 }
 
 function toUIAudit(a: z.infer<typeof AuditServerSchema>): AuditEntry {
+  const outcome = a.result === "deny" ? "deny" : "allow";
   return {
     id: a.id,
     credential_id: a.credential_id,
     actor_kind: (a.actor_type === "agent" ? "agent" : "member") as AuditEntry["actor_kind"],
     actor_id: a.actor_id,
     actor_label: a.actor_id,
-    action: a.action as AuditEntry["action"],
-    outcome: a.result === "deny" ? "deny" : "allow",
+    action: (a.action === "delete" ? "revoke" : a.action) as AuditEntry["action"],
+    outcome,
     reason: a.reason || undefined,
     occurred_at: a.created_at,
   };
@@ -160,6 +163,92 @@ export function useCredentialsList(wsId: string) {
   });
 }
 
+export function useCreateQAFixtureCredential(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<Credential> => {
+      const stamp = new Date().toISOString();
+      const raw = await api.createCerebroCredential(wsId, {
+        type: "api_key",
+        name: `QA lifecycle fixture ${stamp}`,
+        description: "Ephemeral fake credential for browser QA of rotate, revoke, and audit.",
+        value: `fake_qa_credential_${crypto.randomUUID()}`,
+        metadata: {
+          qa_fixture: true,
+          issue: "JEH-1572",
+          safe: "fake-secret-only",
+          created_at: stamp,
+        },
+      });
+      return toUICredential(
+        parseWithFallback<z.infer<typeof CredentialServerSchema>>(
+          raw,
+          CredentialServerSchema,
+          {
+            id: "",
+            workspace_id: wsId,
+            type: "api_key",
+            name: "QA lifecycle fixture",
+            description: "",
+            value_hint: "",
+            created_at: stamp,
+            updated_at: stamp,
+          },
+          { endpoint: "POST /api/workspaces/:id/credentials" },
+        ),
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: credentialKeys.list(wsId) });
+    },
+  });
+}
+
+export function useRotateCredential(wsId: string, credId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<Credential> => {
+      const raw = await api.rotateCerebroCredential(
+        wsId,
+        credId,
+        { value: `fake_qa_rotated_${crypto.randomUUID()}` },
+      );
+      return toUICredential(
+        parseWithFallback<z.infer<typeof CredentialServerSchema>>(
+          raw,
+          CredentialServerSchema,
+          {
+            id: credId,
+            workspace_id: wsId,
+            type: "api_key",
+            name: "Credential",
+            description: "",
+            value_hint: "",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { endpoint: "POST /api/workspaces/:id/credentials/:credId/rotate" },
+        ),
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: credentialKeys.list(wsId) });
+      void queryClient.invalidateQueries({ queryKey: credentialKeys.audit(wsId, credId) });
+    },
+  });
+}
+
+export function useRevokeCredential(wsId: string, credId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.revokeCerebroCredential(wsId, credId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: credentialKeys.list(wsId) });
+      void queryClient.invalidateQueries({ queryKey: credentialKeys.audit(wsId, credId) });
+    },
+  });
+}
+
 export function useCredentialAudit(wsId: string, credId: string | null) {
   return useQuery({
     queryKey: credId ? credentialKeys.audit(wsId, credId) : ["credentials", wsId, "audit-disabled"],
@@ -192,28 +281,6 @@ export function useCredentialBindings(wsId: string, credId: string | null) {
         { endpoint: "GET /api/workspaces/:id/credentials/:credId/bindings" },
       );
       return parsed.bindings.map(toUIBinding);
-    },
-  });
-}
-
-export function useRotateCredential(wsId: string, credId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (value: string) =>
-      api.rotateCerebroCredential(wsId, credId, { value }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: credentialKeys.list(wsId) });
-      qc.invalidateQueries({ queryKey: credentialKeys.audit(wsId, credId) });
-    },
-  });
-}
-
-export function useRevokeCredential(wsId: string, credId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.revokeCerebroCredential(wsId, credId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: credentialKeys.all(wsId) });
     },
   });
 }

@@ -400,19 +400,26 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	cred, err := h.Service.Get(r.Context(), wsID, credID)
-	if err != nil {
-		h.writeServiceError(w, r, err)
-		return
-	}
-	if err := h.Service.AuthorizeRead(r.Context(), cred.WorkspaceID, cred.ID, Type(cred.Type), actorType, actorID); err != nil {
-		h.writeServiceError(w, r, err)
-		return
-	}
 	limit := int32(100)
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			limit = int32(parsed)
+		}
+	}
+	cred, err := h.Service.Get(r.Context(), wsID, credID)
+	if err != nil {
+		if !errors.Is(err, ErrCredentialNotFound) {
+			h.writeServiceError(w, r, err)
+			return
+		}
+	} else if err := h.Service.AuthorizeRead(r.Context(), cred.WorkspaceID, cred.ID, Type(cred.Type), actorType, actorID); err != nil {
+		h.writeServiceError(w, r, err)
+		return
+	}
+	if errors.Is(err, ErrCredentialNotFound) {
+		if err := h.Service.AuthorizeRead(r.Context(), wsID, credID, "", actorType, actorID); err != nil {
+			h.writeServiceError(w, r, err)
+			return
 		}
 	}
 	rows, err := h.Service.ListAudit(r.Context(), wsID, credID, limit)
