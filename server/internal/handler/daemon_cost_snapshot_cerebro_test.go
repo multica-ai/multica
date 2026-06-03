@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure"
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure" // CEREBRO-PATCH(cost-saving-tokens): switch metric to tokens (FIR-2786)
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 
 	"github.com/jackc/pgx/v5/pgtype"

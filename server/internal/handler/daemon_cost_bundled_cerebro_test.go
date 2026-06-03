@@ -5,7 +5,7 @@ package handler
 import (
 	"testing"
 
-	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure"
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure" // CEREBRO-PATCH(cost-saving-tokens): switch metric to tokens (FIR-2786)
 )
 
 // TestBundledReadMeasurementParams: "on" records an applied (real) save,
