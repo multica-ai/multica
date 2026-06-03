@@ -36,7 +36,7 @@ pnpm --filter @multica/mobile ios
 | `android` | 通过 `expo run:android` 构建并安装 Android 原生开发包 |
 | `ios` | 通过 `expo run:ios` 构建并安装 iOS 原生开发包 |
 
-这个 app 使用了 `expo-secure-store`、`expo-document-picker`、Google Sign-In 等原生能力。只用 Expo Go 时可能无法覆盖全部功能；涉及原生模块、权限或 plugin 变化时，需要重新构建并安装 dev client 或原生包。
+这个 app 使用了 `expo-secure-store`、`expo-document-picker` 等原生能力。只用 Expo Go 时可能无法覆盖全部功能；涉及原生模块、权限或 plugin 变化时，需要重新构建并安装 dev client 或原生包。
 
 ## 运行时配置
 
@@ -47,8 +47,6 @@ pnpm --filter @multica/mobile ios
 | `EXPO_PUBLIC_API_BASE_URL` | API base URL | `app.json` 的 `expo.extra.apiBaseUrl` |
 | `EXPO_PUBLIC_WS_URL` | WebSocket URL | `app.json` 的 `expo.extra.wsUrl` |
 | `EXPO_PUBLIC_WEB_BASE_URL` | Web 入口 URL | 默认跟随 API base URL |
-| `GOOGLE_IOS_CLIENT_ID` | iOS Google 登录 client ID | 空字符串，EAS profile 中有默认配置 |
-| `GOOGLE_IOS_URL_SCHEME` | iOS Google 登录 URL scheme | 空字符串，EAS profile 中有默认配置 |
 
 当前 `app.json` 默认连接 Multica Cloud：
 
@@ -257,10 +255,6 @@ pnpm --filter @multica/mobile lint
 ### 文件选择器不可用
 
 如果看到文件选择器不可用的提示，通常说明当前安装包没有包含 `expo-document-picker` 对应的原生能力。重新构建并安装 mobile app。
-
-### iOS Google 登录失败
-
-确认构建时设置了 `GOOGLE_IOS_CLIENT_ID` 和 `GOOGLE_IOS_URL_SCHEME`。EAS profile 已配置默认值；本地原生构建如需 Google 登录，也要提供对应环境变量。
 
 ### EAS 构建或提交失败
 

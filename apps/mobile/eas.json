@@ -7,10 +7,6 @@
       "developmentClient": true,
       "distribution": "internal",
       "channel": "development",
-      "env": {
-        "GOOGLE_IOS_CLIENT_ID": "28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b.apps.googleusercontent.com",
-        "GOOGLE_IOS_URL_SCHEME": "com.googleusercontent.apps.28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b"
-      },
       "ios": {
         "simulator": false
       },
@@ -21,10 +17,6 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
-      "env": {
-        "GOOGLE_IOS_CLIENT_ID": "28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b.apps.googleusercontent.com",
-        "GOOGLE_IOS_URL_SCHEME": "com.googleusercontent.apps.28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b"
-      },
       "ios": {
         "simulator": false
       },
@@ -40,10 +32,6 @@
     },
     "production": {
       "channel": "production",
-      "env": {
-        "GOOGLE_IOS_CLIENT_ID": "28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b.apps.googleusercontent.com",
-        "GOOGLE_IOS_URL_SCHEME": "com.googleusercontent.apps.28093689205-jp1mnvqa5ip5d6eovscdigu676ub7j1b"
-      },
       "ios": {
         "autoIncrement": "buildNumber"
       },

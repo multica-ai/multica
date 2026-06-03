@@ -20,7 +20,6 @@
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@react-native-google-signin/google-signin": "^16.1.2",
     "@react-navigation/bottom-tabs": "catalog:",
     "@react-navigation/core": "catalog:",
     "@react-navigation/native": "catalog:",
