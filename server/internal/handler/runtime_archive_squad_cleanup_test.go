@@ -285,6 +285,45 @@ func TestDeleteAgentRuntime_ActiveSquadWithArchivedLeaderReturnsConflict(t *test
 	}
 }
 
+// TestDeleteAgentRuntime_ArchivedAndActiveSquadsReturnConflictWithoutDeletes
+// pins the combination case from review: if the same archived leader is
+// referenced by both an archived squad and an active squad on the runtime, the
+// handler must return 409 before deleting either squad.
+func TestDeleteAgentRuntime_ArchivedAndActiveSquadsReturnConflictWithoutDeletes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := seedIsolatedRuntime(t, "Runtime With Archived And Active Squads")
+	archivedLeader := seedAgentOnRuntime(t, runtimeID, "Archived Leader With Mixed Squads", true)
+	archivedSquad := seedSquad(t, archivedLeader, "Archived Squad On Refused Delete", true)
+	activeSquad := seedSquad(t, archivedLeader, "Active Squad On Refused Delete", false)
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("DeleteAgentRuntime: expected 409 archived-leader squad guard, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "active squads led by archived agents") {
+		t.Fatalf("DeleteAgentRuntime: expected actionable archived-leader squad message, got body %s", w.Body.String())
+	}
+
+	if !squadExists(t, archivedSquad) {
+		t.Errorf("archived squad must NOT have been deleted by a refused runtime delete")
+	}
+	if !squadExists(t, activeSquad) {
+		t.Errorf("active squad must NOT have been deleted by a refused runtime delete")
+	}
+	if !agentExists(t, archivedLeader) {
+		t.Errorf("archived leader must NOT have been deleted by a refused runtime delete")
+	}
+	if !runtimeExists(t, runtimeID) {
+		t.Errorf("runtime must NOT have been deleted by a refused delete")
+	}
+}
+
 // TestDeleteAgentRuntime_NoSquadsRegression confirms the new pre-cleanup
 // step is a safe no-op when the runtime's archived agents were never squad
 // leaders. Without this, the fix could regress the common case.

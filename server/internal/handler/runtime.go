@@ -565,6 +565,18 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refuse before any teardown-side effects if the runtime still has active
+	// squads whose leader is already archived on this runtime.
+	activeSquadCount, err := h.Queries.CountActiveSquadsWithArchivedLeadersByRuntime(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check runtime squad dependencies")
+		return
+	}
+	if activeSquadCount > 0 {
+		writeError(w, http.StatusConflict, "cannot delete runtime: it has active squads led by archived agents. Archive those squads or assign them a new leader first.")
+		return
+	}
+
 	// Pause autopilots pointing at the archived agents BEFORE we delete
 	// them. Migration 096 dropped the autopilot.assignee_id agent FK, so a
 	// hard-delete here would otherwise leave dangling rows that subsequent
@@ -584,31 +596,33 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
 	// Remove archived squads whose leader is an archived agent on this runtime
 	// so the RESTRICT FK on squad.leader_id won't block the subsequent agent
-	// deletion. Active squads need an explicit transfer-oriented cleanup path.
-	if err := h.Queries.DeleteSquadsByArchivedAgentsOnRuntime(r.Context(), rt.ID); err != nil {
+	// deletion. Active squads are handled by the 409 guard above instead.
+	if err := qtx.DeleteSquadsByArchivedAgentsOnRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up squads referencing archived agents")
 		return
 	}
 
-	activeSquadCount, err := h.Queries.CountActiveSquadsWithArchivedLeadersByRuntime(r.Context(), rt.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check runtime squad dependencies")
-		return
-	}
-	if activeSquadCount > 0 {
-		writeError(w, http.StatusConflict, "cannot delete runtime: it has active squads led by archived agents. Archive those squads or assign them a new leader first.")
-		return
-	}
-
 	// Remove archived agents so the FK constraint (ON DELETE RESTRICT) won't block deletion.
-	if err := h.Queries.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
+	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 		return
 	}
 
-	if err := h.Queries.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
+	if err := qtx.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
 		return
 	}
