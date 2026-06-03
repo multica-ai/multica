@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Linking, StyleSheet, View } from "react-native";
 import { NavigationIndependentTree } from "@react-navigation/core";
 import {
   NavigationContainer,
@@ -41,9 +41,11 @@ import {
   addMobilePushNotificationUrlListener,
   consumeMobilePushPendingNotificationUrl,
 } from "../push/mobile-push-notifications";
+import { getMobileIssueLinkBaseUrls } from "../runtime/env";
 import { colors, spacing } from "../theme/tokens";
+import { parseMobileIssueLink } from "./issue-links";
 import { linking } from "./linking";
-import { WorkspaceContext } from "./workspace-context";
+import { useMobileWorkspace, WorkspaceContext } from "./workspace-context";
 
 export type RootStackParamList = {
   Main: undefined;
@@ -131,6 +133,7 @@ export function RootNavigator() {
 function AuthenticatedNavigator() {
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
   const pendingNotificationUrlRef = useRef<string | null>(null);
+  const [navigationReady, setNavigationReady] = useState(false);
   const { data: workspaces = [], isError, isLoading } = useWorkspaceList();
 
   useEffect(() => {
@@ -157,6 +160,7 @@ function AuthenticatedNavigator() {
       <NavigationContainer
         linking={linking}
         onReady={() => {
+          setNavigationReady(true);
           const url = pendingNotificationUrlRef.current;
           if (!url || !navigationRef.current) return;
           pendingNotificationUrlRef.current = null;
@@ -165,6 +169,11 @@ function AuthenticatedNavigator() {
         ref={navigationRef}
       >
         <WorkspaceGate workspaces={workspaces}>
+          <MobileWebDeepLinkHandler
+            navigationReady={navigationReady}
+            navigationRef={navigationRef}
+            workspaces={workspaces}
+          />
           <Stack.Navigator
             screenOptions={{
               contentStyle: { backgroundColor: colors.background },
@@ -192,6 +201,90 @@ function AuthenticatedNavigator() {
       </NavigationContainer>
     </NavigationIndependentTree>
   );
+}
+
+function MobileWebDeepLinkHandler({
+  navigationReady,
+  navigationRef,
+  workspaces,
+}: {
+  navigationReady: boolean;
+  navigationRef: React.RefObject<NavigationContainerRef<RootStackParamList> | null>;
+  workspaces: Workspace[];
+}) {
+  const checkedInitialUrlRef = useRef(false);
+  const { t } = useTranslation();
+  const { workspace, setWorkspace } = useMobileWorkspace();
+
+  const openIssue = useCallback((issueId: string, commentId?: string) => {
+    if (!navigationRef.current) return;
+    navigationRef.current.navigate("IssueDetail", {
+      issueId,
+      ...(commentId ? { commentId } : {}),
+    });
+  }, [navigationRef]);
+
+  const handleUrl = useCallback((url: string) => {
+    const target = parseMobileIssueLink(url, getMobileIssueLinkBaseUrls());
+    if (!target) return;
+
+    const targetWorkspace = workspaces.find((item) => item.slug === target.workspaceSlug);
+    if (!targetWorkspace) {
+      Alert.alert(
+        t("issues.link_unavailable_title"),
+        t("issues.link_workspace_unavailable"),
+      );
+      return;
+    }
+
+    if (targetWorkspace.id === workspace.id) {
+      openIssue(target.issueId, target.commentId);
+      return;
+    }
+
+    Alert.alert(
+      t("issues.switch_workspace_title"),
+      t("issues.switch_workspace_description", { name: targetWorkspace.name }),
+      [
+        { style: "cancel", text: t("common.cancel") },
+        {
+          text: t("issues.switch_workspace_confirm"),
+          onPress: () => {
+            setCurrentWorkspace(targetWorkspace.slug, targetWorkspace.id);
+            setWorkspace(targetWorkspace);
+            openIssue(target.issueId, target.commentId);
+          },
+        },
+      ],
+    );
+  }, [
+    openIssue,
+    setWorkspace,
+    t,
+    workspace.id,
+    workspaces,
+  ]);
+
+  useEffect(() => {
+    if (!navigationReady) return;
+
+    if (!checkedInitialUrlRef.current) {
+      checkedInitialUrlRef.current = true;
+      void Linking.getInitialURL().then((url) => {
+        if (url) handleUrl(url);
+      });
+    }
+
+    const subscription = Linking.addEventListener("url", (event) => {
+      handleUrl(event.url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [handleUrl, navigationReady]);
+
+  return null;
 }
 
 function navigateToNotificationUrl(
