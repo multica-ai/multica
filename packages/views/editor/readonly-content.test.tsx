@@ -242,6 +242,45 @@ describe("ReadonlyContent issue mention Markdown", () => {
   });
 });
 
+describe("ReadonlyContent highlight Markdown", () => {
+  // `==text==` is lowered to a raw <mark> by highlightToHtml; rehype-raw turns
+  // it into an element and the sanitize schema must whitelist <mark> or it gets
+  // stripped. These guard both halves of that contract.
+  it("renders ==text== as a <mark> element", () => {
+    const { container } = render(<ReadonlyContent content={"a ==hi== b"} />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    expect(mark?.textContent).toBe("hi");
+  });
+
+  it("keeps inner Markdown formatting inside a highlight", () => {
+    const { container } = render(<ReadonlyContent content={"==**bold**=="} />);
+    expect(container.querySelector("mark strong")).not.toBeNull();
+  });
+
+  it("does not highlight == inside inline code", () => {
+    const { container } = render(<ReadonlyContent content={"`a ==b== c`"} />);
+    expect(container.querySelector("mark")).toBeNull();
+    expect(container.querySelector("code")?.textContent).toBe("a ==b== c");
+  });
+
+  // Boundary regressions (Emacs review, PR #3661).
+
+  it("wraps the whole span when an inner == lives in inline code", () => {
+    const { container } = render(<ReadonlyContent content={"==a `b==c` d=="} />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    // inner `==` stays inside the code, not consumed as the closing fence
+    expect(mark?.querySelector("code")?.textContent).toBe("b==c");
+    expect(mark?.textContent).toBe("a b==c d");
+  });
+
+  it("does not highlight across a blank line", () => {
+    const { container } = render(<ReadonlyContent content={"==a\n\nb=="} />);
+    expect(container.querySelector("mark")).toBeNull();
+  });
+});
+
 describe("ReadonlyContent code styling", () => {
   const literalCode = "uv run --extra dev pytest -q";
 
@@ -276,6 +315,18 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
+  it("renders ordinary code blocks without the private readonly copy header", () => {
+    const { container, queryByText } = render(
+      <ReadonlyContent
+        content={["```ts", "const value = 1;", "```"].join("\n")}
+      />,
+    );
+
+    expect(container.querySelector("pre code.language-ts")).not.toBeNull();
+    expect(queryByText("Copy")).toBeNull();
+    expect(queryByText("ts")).toBeNull();
+  });
+
   it("keeps editor code literal by disabling font ligatures", () => {
     const codeCss = readFileSync("editor/styles/code.css", "utf8");
 
@@ -284,6 +335,27 @@ describe("ReadonlyContent code styling", () => {
     expect(codeCss).toContain(".rich-text-editor pre code");
     expect(codeCss).toContain("font-variant-ligatures: none;");
     expect(codeCss).toContain('font-feature-settings: "liga" 0;');
+  });
+});
+
+describe("ReadonlyContent slash command rendering", () => {
+  it("renders slash skill links as slash command pills", () => {
+    const { container } = render(
+      <ReadonlyContent content="[/deploy](slash://skill/abc-123)" />,
+    );
+
+    const pill = container.querySelector(".slash-command");
+    expect(pill).not.toBeNull();
+    expect(pill?.textContent).toBe("/deploy");
+  });
+
+  it("does not affect regular links", () => {
+    const { container } = render(
+      <ReadonlyContent content="[docs](https://example.com)" />,
+    );
+
+    expect(container.querySelector(".slash-command")).toBeNull();
+    expect(container.querySelector("a")).not.toBeNull();
   });
 });
 
