@@ -15,6 +15,7 @@ import {
 } from "../i18n/mobile-locale";
 import { mobileStorage } from "../platform/storage";
 import { RootNavigator } from "../navigation/root-navigator";
+import { MobilePushRegistrationSync } from "../push/mobile-push-registration";
 import { colors } from "../theme/tokens";
 
 export function MobileProviders() {
@@ -53,6 +54,7 @@ export function MobileProviders() {
       >
         <MobileI18nProvider key={locale}>
           <MobileUserLocaleSync />
+          <MobilePushRegistrationSync />
           <RootNavigator />
         </MobileI18nProvider>
       </CoreProvider>

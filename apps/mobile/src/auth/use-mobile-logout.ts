@@ -7,12 +7,15 @@ import {
 } from "@multica/core/platform";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Workspace } from "@multica/core/types";
+import { disableCurrentMobilePushRegistration } from "../push/mobile-push-registration";
 
 export function useMobileLogout() {
   const queryClient = useCoreQueryClient();
   const authLogout = useAuthStore((state) => state.logout);
 
-  return useCallback(() => {
+  return useCallback(async () => {
+    await disableCurrentMobilePushRegistration().catch(() => {});
+
     const cachedWorkspaces =
       queryClient.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
 

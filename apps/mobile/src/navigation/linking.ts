@@ -5,7 +5,7 @@ export const linking = {
   prefixes: [
     Linking.createURL("/"),
     `${MOBILE_ENV.appScheme}://`,
-    "wujieai_multicam://",
+    "wujieai-multicam://",
   ],
   config: {
     screens: {

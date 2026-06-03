@@ -1194,6 +1194,12 @@ func createNotificationBindingForUser(t *testing.T, userID, provider string) str
 			user_id, provider, external_user_id, display_name, status, metadata
 		)
 		VALUES ($1, $2, $3, $4, 'active', '{}'::jsonb)
+		ON CONFLICT (user_id, provider)
+		DO UPDATE SET
+			external_user_id = EXCLUDED.external_user_id,
+			display_name = EXCLUDED.display_name,
+			status = EXCLUDED.status,
+			metadata = EXCLUDED.metadata
 		RETURNING id
 	`, userID, provider, provider+"-external-user", "Bound "+provider).Scan(&bindingID); err != nil {
 		t.Fatalf("createNotificationBindingForUser: %v", err)
@@ -1213,6 +1219,199 @@ func enableNotificationPreferenceForUser(t *testing.T, userID, channel, eventTyp
 		DO UPDATE SET enabled = EXCLUDED.enabled, binding_id = EXCLUDED.binding_id
 	`, userID, channel, eventType, bindingID); err != nil {
 		t.Fatalf("enableNotificationPreferenceForUser: %v", err)
+	}
+}
+
+func upsertNotificationPreferenceForUser(t *testing.T, userID string, prefs map[string]string) {
+	t.Helper()
+
+	preferences, err := json.Marshal(prefs)
+	if err != nil {
+		t.Fatalf("marshal notification preferences: %v", err)
+	}
+	queries := db.New(testPool)
+	if _, err := queries.UpsertNotificationPreference(context.Background(), db.UpsertNotificationPreferenceParams{
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
+		UserID:      util.MustParseUUID(userID),
+		Preferences: preferences,
+	}); err != nil {
+		t.Fatalf("UpsertNotificationPreference: %v", err)
+	}
+}
+
+func createMobilePushRegistrationForUser(t *testing.T, userID, installationID, platform, provider string) db.MobilePushRegistration {
+	t.Helper()
+
+	queries := db.New(testPool)
+	registration, err := queries.UpsertMobilePushRegistration(context.Background(), db.UpsertMobilePushRegistrationParams{
+		UserID:           util.MustParseUUID(userID),
+		InstallationID:   installationID,
+		Platform:         platform,
+		Provider:         provider,
+		ProviderClientID: "cid-" + installationID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertMobilePushRegistration: %v", err)
+	}
+	return registration
+}
+
+func createNotificationEventForMobilePushTest(t *testing.T, queries *db.Queries, userID, issueID, commentID, notificationType string) db.NotificationEvent {
+	t.Helper()
+
+	var commentUUID pgtype.UUID
+	if commentID != "" {
+		commentUUID = util.MustParseUUID(commentID)
+	}
+	event, err := queries.CreateNotificationEvent(context.Background(), db.CreateNotificationEventParams{
+		WorkspaceID:     util.MustParseUUID(testWorkspaceID),
+		RecipientUserID: util.MustParseUUID(userID),
+		Type:            notificationType,
+		Severity:        "info",
+		IssueID:         util.MustParseUUID(issueID),
+		CommentID:       commentUUID,
+		ActorType:       util.StrToText("member"),
+		ActorID:         util.MustParseUUID(testUserID),
+		Title:           "mobile push issue",
+		Body:            util.StrToText("mobile push body"),
+		Link:            util.StrToText("http://localhost:3000/test/issues/1"),
+		Details:         []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateNotificationEvent: %v", err)
+	}
+	return event
+}
+
+func TestRecordMobilePushDeliveries(t *testing.T) {
+	tests := []struct {
+		name           string
+		platform       string
+		provider       string
+		disable        bool
+		mutedPrefs     map[string]string
+		preexisting    bool
+		expectedMobile int
+	}{
+		{name: "enabled android getui registration", platform: "android", provider: "getui", expectedMobile: 1},
+		{name: "enabled ios apns registration", platform: "ios", provider: "apns", expectedMobile: 1},
+		{name: "disabled registration", platform: "android", provider: "getui", disable: true, expectedMobile: 0},
+		{name: "non android registration", platform: "ios", provider: "getui", expectedMobile: 0},
+		{name: "non getui registration", platform: "android", provider: "apns", expectedMobile: 0},
+		{name: "muted notification group", platform: "android", provider: "getui", mutedPrefs: map[string]string{"comments": "muted"}, expectedMobile: 0},
+		{name: "deduplicates existing comment delivery", platform: "android", provider: "getui", preexisting: true, expectedMobile: 1},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queries := db.New(testPool)
+			recipientEmail := fmt.Sprintf("mobile-push-%d@multica.ai", i)
+			recipientID := createTestUser(t, recipientEmail)
+			t.Cleanup(func() { cleanupTestUser(t, recipientEmail) })
+
+			issueID := createTestIssue(t, testWorkspaceID, testUserID)
+			t.Cleanup(func() {
+				cleanupInboxForIssue(t, issueID)
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_delivery WHERE notification_event_id IN (SELECT id FROM notification_event WHERE issue_id = $1)`, issueID)
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_event WHERE issue_id = $1`, issueID)
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM mobile_push_registration WHERE user_id = $1`, recipientID)
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_preference WHERE user_id = $1`, recipientID)
+				cleanupTestIssue(t, issueID)
+			})
+
+			commentID := fmt.Sprintf("00000000-0000-0000-0000-1512000000%02d", i)
+			if _, err := testPool.Exec(context.Background(), `
+				INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`, commentID, issueID, testWorkspaceID, "member", testUserID, "mobile push mention", "comment"); err != nil {
+				t.Fatalf("insert comment: %v", err)
+			}
+
+			registration := createMobilePushRegistrationForUser(t, recipientID, fmt.Sprintf("install-%d", i), tt.platform, tt.provider)
+			if tt.disable {
+				if _, err := testPool.Exec(context.Background(), `UPDATE mobile_push_registration SET enabled = false WHERE id = $1`, util.UUIDToString(registration.ID)); err != nil {
+					t.Fatalf("disable mobile_push_registration: %v", err)
+				}
+			}
+			if tt.mutedPrefs != nil {
+				upsertNotificationPreferenceForUser(t, recipientID, tt.mutedPrefs)
+			}
+
+			event := createNotificationEventForMobilePushTest(t, queries, recipientID, issueID, commentID, "mentioned")
+			payloadSnapshot := []byte(`{"type":"mentioned","title":"mobile push issue","body":"mobile push body"}`)
+			if tt.preexisting {
+				if _, err := queries.CreateTargetedNotificationDelivery(context.Background(), db.CreateTargetedNotificationDeliveryParams{
+					NotificationEventID: event.ID,
+					Channel:             "mobile_push",
+					TargetType:          "mobile_push_registration",
+					TargetID:            registration.ID,
+					Status:              "pending",
+					PayloadSnapshot:     payloadSnapshot,
+				}); err != nil {
+					t.Fatalf("CreateTargetedNotificationDelivery: %v", err)
+				}
+			}
+
+			recordMobilePushDeliveries(context.Background(), queries, recipientID, event, payloadSnapshot)
+
+			deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(event.ID))
+			mobileCount := 0
+			for _, delivery := range deliveries {
+				if delivery.Channel == "mobile_push" {
+					mobileCount++
+					if delivery.TargetType != "mobile_push_registration" {
+						t.Fatalf("expected target_type mobile_push_registration, got %q", delivery.TargetType)
+					}
+					if !delivery.TargetID.Valid || util.UUIDToString(delivery.TargetID) != util.UUIDToString(registration.ID) {
+						t.Fatalf("expected target_id %q, got %q", util.UUIDToString(registration.ID), util.UUIDToString(delivery.TargetID))
+					}
+				}
+			}
+			if mobileCount != tt.expectedMobile {
+				t.Fatalf("expected %d mobile_push deliveries, got %d", tt.expectedMobile, mobileCount)
+			}
+		})
+	}
+}
+
+func TestRecordMobilePushDeliveries_CreatesGetuiAndAPNSTargets(t *testing.T) {
+	queries := db.New(testPool)
+	recipientEmail := "mobile-push-dual@multica.ai"
+	recipientID := createTestUser(t, recipientEmail)
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_delivery WHERE notification_event_id IN (SELECT id FROM notification_event WHERE issue_id = $1)`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_event WHERE issue_id = $1`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM mobile_push_registration WHERE user_id = $1`, recipientID)
+		cleanupTestIssue(t, issueID)
+		cleanupTestUser(t, recipientEmail)
+	})
+
+	commentID := "00000000-0000-0000-0000-151299000001"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", testUserID, "mobile push dual", "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	getuiRegistration := createMobilePushRegistrationForUser(t, recipientID, "dual-android", "android", "getui")
+	apnsRegistration := createMobilePushRegistrationForUser(t, recipientID, "dual-ios", "ios", "apns")
+	event := createNotificationEventForMobilePushTest(t, queries, recipientID, issueID, commentID, "mentioned")
+	payloadSnapshot := []byte(`{"type":"mentioned","title":"mobile push issue","body":"mobile push body"}`)
+
+	recordMobilePushDeliveries(context.Background(), queries, recipientID, event, payloadSnapshot)
+
+	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(event.ID))
+	targets := map[string]bool{}
+	for _, delivery := range deliveries {
+		if delivery.Channel == "mobile_push" && delivery.TargetID.Valid {
+			targets[util.UUIDToString(delivery.TargetID)] = true
+		}
+	}
+	if len(targets) != 2 || !targets[util.UUIDToString(getuiRegistration.ID)] || !targets[util.UUIDToString(apnsRegistration.ID)] {
+		t.Fatalf("expected getui and apns targets, got %#v", targets)
 	}
 }
 
@@ -2372,7 +2571,6 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 `, agentCommentID, issueID, testWorkspaceID, "agent", agentID, "agent result", "comment"); err != nil {
 		t.Fatalf("insert agent comment: %v", err)
 	}
-
 	bus.Publish(events.Event{
 		Type:        protocol.EventTaskFailed,
 		WorkspaceID: testWorkspaceID,
@@ -2396,6 +2594,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 	allEvents := notificationEventsForRecipient(t, queries, testUserID)
 	weixinDeliveryCount := 0
 	for _, ne := range allEvents {
+		if util.UUIDToString(ne.IssueID) != issueID {
+			continue
+		}
 		deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
 		for _, d := range deliveries {
 			if d.Channel == "openclaw_weixin" {
@@ -2412,11 +2613,11 @@ func TestNotification_OpenclawWeixinTaskCompletedIgnoresStaleAgentCommentDeliver
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
-	var agentID string
+	var agentID, runtimeID string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		`SELECT id::text, runtime_id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
 		testWorkspaceID,
-	).Scan(&agentID); err != nil {
+	).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("load fixture agent: %v", err)
 	}
 
@@ -2468,10 +2669,10 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, now() - interval '5 minutes')
 
 	var taskID string
 	if err := testPool.QueryRow(context.Background(), `
-INSERT INTO agent_task_queue (agent_id, issue_id, status, started_at, completed_at, result)
-VALUES ($1, $2, 'completed', now() - interval '1 minute', now(), '{"notification_summary":"fresh completion"}'::jsonb)
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, started_at, completed_at, result)
+VALUES ($1, $2, $3, 'completed', now() - interval '1 minute', now(), '{"notification_summary":"fresh completion"}'::jsonb)
 RETURNING id::text
-`, agentID, issueID).Scan(&taskID); err != nil {
+`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
 	t.Cleanup(func() {

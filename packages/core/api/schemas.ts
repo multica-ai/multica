@@ -20,6 +20,7 @@ import type {
   ListIssuesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
+  MobilePushRegistrationResponse,
   Squad,
   TimelineEntry,
   User,
@@ -1115,4 +1116,32 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
+};
+
+export const MobilePushRegistrationResponseSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  installation_id: z.string(),
+  platform: z.string(),
+  provider: z.string(),
+  provider_client_id: z.string(),
+  app_version: z.string().nullable().optional(),
+  enabled: z.boolean(),
+  last_seen_at: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE: MobilePushRegistrationResponse = {
+  id: "",
+  user_id: "",
+  installation_id: "",
+  platform: "android",
+  provider: "getui",
+  provider_client_id: "",
+  app_version: null,
+  enabled: false,
+  last_seen_at: "",
+  created_at: "",
+  updated_at: "",
 };

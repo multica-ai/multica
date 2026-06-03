@@ -37,6 +37,10 @@ import { SquadsScreen } from "../screens/mine/squads-screen";
 import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
 import { WikiDetailScreen, WikiScreen } from "../screens/wiki/wiki-screen";
 import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
+import {
+  addMobilePushNotificationUrlListener,
+  consumeMobilePushPendingNotificationUrl,
+} from "../push/mobile-push-notifications";
 import { colors, spacing } from "../theme/tokens";
 import { linking } from "./linking";
 import { WorkspaceContext } from "./workspace-context";
@@ -126,7 +130,23 @@ export function RootNavigator() {
 
 function AuthenticatedNavigator() {
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+  const pendingNotificationUrlRef = useRef<string | null>(null);
   const { data: workspaces = [], isError, isLoading } = useWorkspaceList();
+
+  useEffect(() => {
+    function openNotificationUrl(url: string) {
+      if (!navigationRef.current) {
+        pendingNotificationUrlRef.current = url;
+        return;
+      }
+      navigateToNotificationUrl(navigationRef.current, url);
+    }
+
+    void consumeMobilePushPendingNotificationUrl().then((url) => {
+      if (url) openNotificationUrl(url);
+    });
+    return addMobilePushNotificationUrlListener(openNotificationUrl);
+  }, []);
 
   if (isLoading) return <LoadingState />;
   if (isError) return <SignedInErrorScreen />;
@@ -134,7 +154,16 @@ function AuthenticatedNavigator() {
 
   return (
     <NavigationIndependentTree>
-      <NavigationContainer linking={linking} ref={navigationRef}>
+      <NavigationContainer
+        linking={linking}
+        onReady={() => {
+          const url = pendingNotificationUrlRef.current;
+          if (!url || !navigationRef.current) return;
+          pendingNotificationUrlRef.current = null;
+          navigateToNotificationUrl(navigationRef.current, url);
+        }}
+        ref={navigationRef}
+      >
         <WorkspaceGate workspaces={workspaces}>
           <Stack.Navigator
             screenOptions={{
@@ -163,6 +192,30 @@ function AuthenticatedNavigator() {
       </NavigationContainer>
     </NavigationIndependentTree>
   );
+}
+
+function navigateToNotificationUrl(
+  navigation: NavigationContainerRef<RootStackParamList>,
+  url: string,
+) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "wujieai-multicam:") return;
+
+  const path = `${parsed.hostname}${parsed.pathname}`.replace(/^\/+/, "");
+  const [route, id] = path.split("/");
+  if (route === "issues" && id) {
+    const commentId = parsed.searchParams.get("commentId") ?? undefined;
+    navigation.navigate("IssueDetail", { issueId: id, commentId });
+    return;
+  }
+  if (route === "inbox" && id) {
+    navigation.navigate("InboxDetail", { inboxItemId: id });
+  }
 }
 
 function WorkspaceGate({

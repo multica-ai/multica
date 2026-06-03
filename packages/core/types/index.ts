@@ -118,6 +118,12 @@ export type {
 } from "./notification";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
+export type {
+  MobilePushPlatform,
+  MobilePushProvider,
+  MobilePushRegistrationResponse,
+  UpsertMobilePushRegistrationRequest,
+} from "./mobile-push";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type { TimelineEntry, AssigneeFrequencyEntry, MentionFrequencyEntry } from "./activity";
