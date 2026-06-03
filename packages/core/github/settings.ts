@@ -9,6 +9,7 @@ export interface GitHubSettings {
   coAuthor: boolean;
   /** Auto-link issues ↔ PRs from webhook payloads. Implies `enabled`. */
   autoLinkPRs: boolean;
+  prApprovalGate: boolean;
 }
 
 /**
@@ -25,5 +26,6 @@ export function deriveGitHubSettings(
     prSidebar: enabled && s.github_pr_sidebar_enabled !== false,
     coAuthor: enabled && s.co_authored_by_enabled !== false,
     autoLinkPRs: enabled && s.github_auto_link_prs_enabled !== false,
+    prApprovalGate: enabled && s.require_pr_approval_before_done === true,
   };
 }

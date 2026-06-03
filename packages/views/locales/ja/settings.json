@@ -221,7 +221,9 @@
     "section_repositories": "リポジトリ",
     "repositories_shortcut_label": "リポジトリ URL はリポジトリタブにあります",
     "repositories_shortcut_link": "リポジトリを管理 →",
-    "toast_failed": "GitHub 設定を更新できませんでした"
+    "toast_failed": "GitHub 設定を更新できませんでした",
+    "feature_pr_approval_gate_label": "Require PR approval before Done",
+    "feature_pr_approval_gate_description": "When enabled, issues cannot be marked as Done unless all linked pull requests have at least one approved review."
   },
   "repositories": {
     "section_title": "リポジトリ",

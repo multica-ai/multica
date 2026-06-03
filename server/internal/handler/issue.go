@@ -28,25 +28,25 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID            string                  `json:"id"`
-	WorkspaceID   string                  `json:"workspace_id"`
-	Number        int32                   `json:"number"`
-	Identifier    string                  `json:"identifier"`
-	Title         string                  `json:"title"`
-	Description   *string                 `json:"description"`
-	Status        string                  `json:"status"`
-	Priority      string                  `json:"priority"`
-	AssigneeType  *string                 `json:"assignee_type"`
-	AssigneeID    *string                 `json:"assignee_id"`
-	CreatorType   string                  `json:"creator_type"`
-	CreatorID     string                  `json:"creator_id"`
-	ParentIssueID *string                 `json:"parent_issue_id"`
-	ProjectID     *string                 `json:"project_id"`
-	Position      float64                 `json:"position"`
-	StartDate     *string                 `json:"start_date"`
-	DueDate       *string                 `json:"due_date"`
-	CreatedAt     string                  `json:"created_at"`
-	UpdatedAt     string                  `json:"updated_at"`
+	ID            string  `json:"id"`
+	WorkspaceID   string  `json:"workspace_id"`
+	Number        int32   `json:"number"`
+	Identifier    string  `json:"identifier"`
+	Title         string  `json:"title"`
+	Description   *string `json:"description"`
+	Status        string  `json:"status"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type"`
+	AssigneeID    *string `json:"assignee_id"`
+	CreatorType   string  `json:"creator_type"`
+	CreatorID     string  `json:"creator_id"`
+	ParentIssueID *string `json:"parent_issue_id"`
+	ProjectID     *string `json:"project_id"`
+	Position      float64 `json:"position"`
+	StartDate     *string `json:"start_date"`
+	DueDate       *string `json:"due_date"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -199,10 +199,10 @@ func assigneeGroupID(assigneeType pgtype.Text, assigneeID pgtype.UUID) string {
 // SearchIssueResponse extends IssueResponse with search metadata.
 type SearchIssueResponse struct {
 	IssueResponse
-	MatchSource                string  `json:"match_source"`
-	MatchedSnippet             *string `json:"matched_snippet,omitempty"`
-	MatchedDescriptionSnippet  *string `json:"matched_description_snippet,omitempty"`
-	MatchedCommentSnippet      *string `json:"matched_comment_snippet,omitempty"`
+	MatchSource               string  `json:"match_source"`
+	MatchedSnippet            *string `json:"matched_snippet,omitempty"`
+	MatchedDescriptionSnippet *string `json:"matched_description_snippet,omitempty"`
+	MatchedCommentSnippet     *string `json:"matched_comment_snippet,omitempty"`
 }
 
 // extractSnippet extracts a snippet of text around the first occurrence of query.
@@ -2456,6 +2456,35 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// PR approval gate: when transitioning to "done", honor the workspace
+	// setting `require_pr_approval_before_done`. If enabled, block the
+	// transition while any linked PRs lack an approved review.
+	if req.Status != nil && *req.Status == "done" {
+		ws, wsErr := h.Queries.GetWorkspace(r.Context(), prevIssue.WorkspaceID)
+		if wsErr != nil {
+			slog.Warn("update issue: GetWorkspace failed for pr-approval gate", append(logger.RequestAttrs(r), "error", wsErr, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to load workspace for pr-approval check")
+			return
+		}
+		if workspaceRequiresPRApprovalBeforeDone(ws.Settings) {
+			unapproved, prErr := h.Queries.GetUnapprovedLinkedPRsByIssue(r.Context(), prevIssue.ID)
+			if prErr != nil {
+				slog.Warn("update issue: GetUnapprovedLinkedPRsByIssue failed", append(logger.RequestAttrs(r), "error", prErr, "issue_id", id)...)
+				writeError(w, http.StatusInternalServerError, "failed to load linked PRs for pr-approval check")
+				return
+			}
+			if len(unapproved) > 0 {
+				names := make([]string, 0, len(unapproved))
+				for _, pr := range unapproved {
+					names = append(names, fmt.Sprintf("%s/%s#%d", pr.RepoOwner, pr.RepoName, pr.PrNumber))
+				}
+				prList := strings.Join(names, ", ")
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("cannot mark issue as done: %d linked PR(s) still need approval: %s", len(unapproved), prList))
+				return
+			}
+		}
+	}
+
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
@@ -2981,6 +3010,21 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// PR approval gate: skip issue silently in batch when gating is
+		// enabled and linked PRs lack approval. Errors are logged and the
+		// issue is skipped, matching the batch handler's per-issue skip pattern.
+		if req.Updates.Status != nil && *req.Updates.Status == "done" {
+			if ws, wsErr := h.Queries.GetWorkspace(r.Context(), prevIssue.WorkspaceID); wsErr == nil {
+				if workspaceRequiresPRApprovalBeforeDone(ws.Settings) {
+					if unapproved, prErr := h.Queries.GetUnapprovedLinkedPRsByIssue(r.Context(), prevIssue.ID); prErr == nil && len(unapproved) > 0 {
+						slog.Warn("batch update: PR approval gate blocked done transition",
+							"issue_id", issueID, "unapproved_count", len(unapproved))
+						continue
+					}
+				}
+			}
+		}
+
 		issue, err := h.Queries.UpdateIssue(r.Context(), params)
 		if err != nil {
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
@@ -3110,4 +3154,19 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}
+
+// workspaceRequiresPRApprovalBeforeDone reports whether the workspace setting
+// `require_pr_approval_before_done` is enabled. Default: false.
+func workspaceRequiresPRApprovalBeforeDone(settings []byte) bool {
+	if len(settings) == 0 {
+		return false
+	}
+	var s struct {
+		RequirePRApprovalBeforeDone bool `json:"require_pr_approval_before_done"`
+	}
+	if err := json.Unmarshal(settings, &s); err != nil {
+		return false
+	}
+	return s.RequirePRApprovalBeforeDone
 }

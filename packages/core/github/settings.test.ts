@@ -13,6 +13,7 @@ describe("deriveGitHubSettings", () => {
       prSidebar: true,
       coAuthor: true,
       autoLinkPRs: true,
+      prApprovalGate: false,
     });
   });
 
@@ -22,6 +23,7 @@ describe("deriveGitHubSettings", () => {
       prSidebar: true,
       coAuthor: true,
       autoLinkPRs: true,
+      prApprovalGate: false,
     });
   });
 
@@ -39,6 +41,7 @@ describe("deriveGitHubSettings", () => {
       prSidebar: false,
       coAuthor: false,
       autoLinkPRs: false,
+      prApprovalGate: false,
     });
   });
 

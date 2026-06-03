@@ -308,6 +308,10 @@ export function useRealtimeSync(
         // PR queries — the open issue detail page will refetch its own list.
         qc.invalidateQueries({ queryKey: ["github", "pull-requests"] });
       },
+      pull_request_review: () => {
+        // PR reviews feed the approval badge on each PR card.
+        qc.invalidateQueries({ queryKey: ["github", "pr-reviews"] });
+      },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the
       // workspace-wide agent-task-snapshot query so per-agent presence

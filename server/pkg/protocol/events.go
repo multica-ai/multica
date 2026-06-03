@@ -30,15 +30,15 @@ const (
 	// subscribes by `task:` prefix and invalidates the workspace task
 	// snapshot, so the granularity here is "what does the user want to see
 	// change" — not "every internal status flip".
-	EventTaskQueued                  = "task:queued"                    // ∅ → queued (enqueue / retry create)
-	EventTaskDispatch                = "task:dispatch"                  // queued → dispatched (daemon claim)
-	EventTaskRunning                 = "task:running"                   // dispatched → running (daemon started)
-	EventTaskWaitingLocalDirectory   = "task:waiting_local_directory"   // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
-	EventTaskProgress                = "task:progress"
-	EventTaskCompleted               = "task:completed"                 // running → completed
-	EventTaskFailed                  = "task:failed"                    // running → failed
-	EventTaskMessage                 = "task:message"
-	EventTaskCancelled               = "task:cancelled"                 // * → cancelled
+	EventTaskQueued                = "task:queued"                  // ∅ → queued (enqueue / retry create)
+	EventTaskDispatch              = "task:dispatch"                // queued → dispatched (daemon claim)
+	EventTaskRunning               = "task:running"                 // dispatched → running (daemon started)
+	EventTaskWaitingLocalDirectory = "task:waiting_local_directory" // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
+	EventTaskProgress              = "task:progress"
+	EventTaskCompleted             = "task:completed" // running → completed
+	EventTaskFailed                = "task:failed"    // running → failed
+	EventTaskMessage               = "task:message"
+	EventTaskCancelled             = "task:cancelled" // * → cancelled
 
 	// Inbox events
 	EventInboxNew           = "inbox:new"
@@ -124,4 +124,5 @@ const (
 	EventPullRequestLinked         = "pull_request:linked"
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
+	EventPRReviewSubmitted         = "pull_request_review:submitted"
 )

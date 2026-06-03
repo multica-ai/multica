@@ -76,3 +76,18 @@ export interface GitHubConnectResponse {
   url?: string;
   configured: boolean;
 }
+
+export type GitHubPRReviewState = "approved" | "changes_requested" | "commented" | "dismissed";
+
+/** Latest review per (PR, reviewer) — used to render approval badges on PR cards. */
+export interface GitHubPRReview {
+  pr_id: string;
+  reviewer_login: string;
+  reviewer_avatar_url: string | null;
+  state: GitHubPRReviewState;
+  submitted_at: string;
+  repo_owner: string;
+  repo_name: string;
+  pr_number: number;
+  pr_html_url: string;
+}

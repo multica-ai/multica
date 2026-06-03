@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, GitCommitHorizontal, Link2, PanelRight } from "lucide-react";
+import { ExternalLink, GitCommitHorizontal, Link2, PanelRight, Shield } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Label } from "@multica/ui/components/ui/label";
@@ -36,7 +36,8 @@ type SettingsKey =
   | "github_enabled"
   | "github_pr_sidebar_enabled"
   | "co_authored_by_enabled"
-  | "github_auto_link_prs_enabled";
+  | "github_auto_link_prs_enabled"
+  | "require_pr_approval_before_done";
 
 export function GitHubTab() {
   const { t } = useT("settings");
@@ -301,6 +302,20 @@ export function GitHubTab() {
               checked={flags.autoLinkPRs}
               disabled={!canManage || !flags.enabled || savingKey === "github_auto_link_prs_enabled"}
               onCheckedChange={(v) => persistSetting("github_auto_link_prs_enabled", v)}
+            />
+
+            <FeatureRow
+              id="github-pr-approval-gate"
+              icon={<Shield className="h-4 w-4" />}
+              label={t(($) => $.github.feature_pr_approval_gate_label)}
+              description={
+                <p className="text-sm text-muted-foreground">
+                  {t(($) => $.github.feature_pr_approval_gate_description)}
+                </p>
+              }
+              checked={flags.prApprovalGate}
+              disabled={!canManage || !flags.enabled || savingKey === "require_pr_approval_before_done"}
+              onCheckedChange={(v) => persistSetting("require_pr_approval_before_done", v)}
             />
           </CardContent>
         </Card>
