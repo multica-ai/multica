@@ -1166,7 +1166,7 @@ func normalizeFeishuProjectDescription(raw string) (string, []FeishuProjectAttac
 			name = fmt.Sprintf("image-%d", imageIndex)
 		}
 		attachments = append(attachments, FeishuProjectAttachment{
-			ID:          id,
+			ID:          firstNonEmpty(id, feishuProjectFileTokenFromURL(rawURL)),
 			Name:        name,
 			URL:         rawURL,
 			ContentType: "image/*",
@@ -1311,7 +1311,7 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 			continue
 		}
 		filename = firstNonEmpty(filename, ext.Name)
-		contentType = firstNonEmpty(contentType, ext.ContentType, http.DetectContentType(data))
+		contentType = resolveAttachmentContentType(firstNonEmpty(contentType, ext.ContentType), filename, data)
 		id, err := uuid.NewV7()
 		if err != nil {
 			return "", err
@@ -3455,7 +3455,7 @@ func feishuProjectRichTextImageFromAttrs(attrs map[string]any) (FeishuProjectAtt
 		return FeishuProjectAttachment{}, false
 	}
 	return FeishuProjectAttachment{
-		ID:          id,
+		ID:          firstNonEmpty(id, feishuProjectFileTokenFromURL(rawURL)),
 		Name:        firstNonEmpty(id, "image"),
 		URL:         rawURL,
 		ContentType: "image/*",
@@ -3479,7 +3479,7 @@ func feishuProjectRichTextImagesFromHTML(rawHTML string) []FeishuProjectAttachme
 		}
 		name := firstNonEmpty(attrs["data-name"], attrs["id"], "image")
 		out = append(out, FeishuProjectAttachment{
-			ID:          attrs["id"],
+			ID:          firstNonEmpty(attrs["id"], feishuProjectFileTokenFromURL(rawURL)),
 			Name:        name,
 			URL:         rawURL,
 			ContentType: "image/*",
@@ -3548,6 +3548,60 @@ func dedupeFeishuProjectAttachments(items []FeishuProjectAttachment) []FeishuPro
 		out = append(out, item)
 	}
 	return out
+}
+
+// resolveAttachmentContentType picks the most trustworthy MIME type for a
+// downloaded attachment. Feishu's file/download endpoint hands back a generic
+// text/plain (or application/octet-stream) Content-Type for binary files, so a
+// declared type that is empty or generic must not win over the file's real
+// bytes — otherwise PNGs land in storage as text/plain and the UI can't preview
+// them. When the declared type is untrustworthy, resolve by filename extension
+// first (reliable for office docs that would otherwise sniff as zip), then by
+// magic-byte detection.
+func resolveAttachmentContentType(declared, filename string, data []byte) string {
+	if declared != "" && !isGenericContentType(declared) {
+		return declared
+	}
+	if byExt := mime.TypeByExtension(strings.ToLower(path.Ext(filename))); byExt != "" {
+		return byExt
+	}
+	if len(data) > 0 {
+		if sniffed := http.DetectContentType(data); sniffed != "" {
+			return sniffed
+		}
+	}
+	return firstNonEmpty(declared, "application/octet-stream")
+}
+
+// isGenericContentType reports whether a declared MIME type carries no real
+// signal — empty, or one of the catch-all values Feishu returns for binary
+// downloads.
+func isGenericContentType(ct string) bool {
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	return ct == "" ||
+		strings.HasPrefix(ct, "text/plain") ||
+		strings.HasPrefix(ct, "application/octet-stream") ||
+		strings.HasPrefix(ct, "binary/octet-stream")
+}
+
+// feishuProjectFileTokenFromURL extracts the durable Feishu file token from a
+// file/stream/download URL. Inline rich-text images often arrive with only a
+// src URL and no uuid/id attribute; the path token is the same durable handle
+// multi_attachment exposes as fileToken/uid, so using it as the external ID
+// lets inline images dedup (and download via the POST endpoint) exactly like
+// panel attachments instead of re-downloading every sync. Returns "" when the
+// URL is not a stream/download URL.
+func feishuProjectFileTokenFromURL(rawURL string) string {
+	const marker = "/file/stream/download/"
+	idx := strings.Index(rawURL, marker)
+	if idx < 0 {
+		return ""
+	}
+	token := rawURL[idx+len(marker):]
+	if i := strings.IndexAny(token, "?#"); i >= 0 {
+		token = token[:i]
+	}
+	return strings.TrimSpace(token)
 }
 
 func feishuProjectStringValue(v any) string {
