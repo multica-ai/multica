@@ -96,8 +96,8 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 
 	svc := &Service{Cerebro: queries} // nil TaskSvc/Bus: the failed task is never suspended.
 
-	// Cycles below the limit: counter climbs, unpause_at stays scheduled, and
-	// the fallback backoff grows.
+	// Cycles below the limit: counter climbs, unpause_at stays scheduled, the
+	// fallback backoff grows, and each pause posts the issue-facing reason.
 	for cycle := int32(1); cycle < autoPauseCircuitLimit; cycle++ {
 		before := time.Now()
 		if !svc.MaybeAutoPauseOnFailure(ctx, loadTask()) {
@@ -120,13 +120,13 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 		if got < want-time.Minute || got > want+time.Minute {
 			t.Fatalf("cycle %d: backoff %s, want ≈%s", cycle, got, want)
 		}
-		if c := countComments(); c != 0 {
-			t.Fatalf("cycle %d: expected no issue comments, got %d", cycle, c)
+		if c := countComments(); c != int(cycle) {
+			t.Fatalf("cycle %d: expected %d notice(s), got %d", cycle, cycle, c)
 		}
 	}
 
 	// The trip cycle: counter hits the limit, unpause_at clears (manual-only),
-	// and the manual-intervention notice is posted.
+	// and the trip reason is posted.
 	if !svc.MaybeAutoPauseOnFailure(ctx, loadTask()) {
 		t.Fatal("trip cycle: expected a pause")
 	}
@@ -140,11 +140,12 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if unpauseAt.Valid {
 		t.Fatal("trip cycle: unpause_at must be NULL once the circuit is open")
 	}
-	if c := countComments(); c != 1 {
-		t.Fatalf("trip cycle: expected 1 manual-intervention notice, got %d", c)
+	if c := countComments(); c != int(autoPauseCircuitLimit) {
+		t.Fatalf("trip cycle: expected %d notices, got %d", autoPauseCircuitLimit, c)
 	}
 
-	// Past the trip: circuit stays open, no duplicate notice.
+	// Past the trip: circuit stays open and still records why this attempt
+	// failed without scheduling auto-resume.
 	if !svc.MaybeAutoPauseOnFailure(ctx, loadTask()) {
 		t.Fatal("post-trip cycle: expected a pause")
 	}
@@ -155,8 +156,8 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if unpauseAt.Valid {
 		t.Fatal("post-trip: unpause_at must stay NULL")
 	}
-	if c := countComments(); c != 1 {
-		t.Fatalf("post-trip: notice must not repeat, got %d", c)
+	if c := countComments(); c != int(autoPauseCircuitLimit+1) {
+		t.Fatalf("post-trip: expected %d notices, got %d", autoPauseCircuitLimit+1, c)
 	}
 
 	// A successful run resets the counter.

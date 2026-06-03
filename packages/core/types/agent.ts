@@ -74,13 +74,15 @@ export type TaskFailureReason =
   | "runtime_offline"
   | "runtime_recovery"
   | "manual"
-  | "rate_limit"
   | "runtime_paused"
+  | "rate_limit"
+  | "auth_error"
   | "queued_expired"
+  | "idle_watchdog"
+  | "codex_semantic_inactivity"
   | "iteration_limit"
   | "agent_fallback_message"
-  | "api_invalid_request"
-  | "codex_semantic_inactivity";
+  | "api_invalid_request";
 
 // One daily bucket for the Agents-list ACTIVITY sparkline. The back-end
 // only returns days that had at least one completion; the front-end fills
