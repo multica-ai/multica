@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const expoNotifications = vi.hoisted(() => ({
   addNotificationResponseReceivedListener: vi.fn(),
   addPushTokenListener: vi.fn(),
+  getPermissionsAsync: vi.fn(),
   getDevicePushTokenAsync: vi.fn(),
   requestPermissionsAsync: vi.fn(),
 }));
@@ -32,7 +33,7 @@ describe("apns-push", () => {
   });
 
   it("does not fetch a token when notification permission is denied", async () => {
-    expoNotifications.requestPermissionsAsync.mockResolvedValue({
+    expoNotifications.getPermissionsAsync.mockResolvedValue({
       granted: false,
       status: "denied",
     });
@@ -42,7 +43,7 @@ describe("apns-push", () => {
   });
 
   it("returns the iOS APNs token when permission is granted", async () => {
-    expoNotifications.requestPermissionsAsync.mockResolvedValue({
+    expoNotifications.getPermissionsAsync.mockResolvedValue({
       granted: true,
       status: "granted",
     });

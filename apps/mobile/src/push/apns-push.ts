@@ -12,7 +12,7 @@ export function isApnsPushAvailable() {
 export async function initializeApnsPush(): Promise<string | null> {
   if (!isApnsPushAvailable()) return null;
 
-  const permission = await Notifications.requestPermissionsAsync();
+  const permission = await Notifications.getPermissionsAsync();
   if (!permission.granted && permission.status !== "granted") return null;
 
   const token = await Notifications.getDevicePushTokenAsync();

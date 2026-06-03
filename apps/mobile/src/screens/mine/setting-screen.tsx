@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
-import { useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useCallback, useState } from "react";
+import { Alert, AppState, Image, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTranslation } from "react-i18next";
 import { api } from "@multica/core/api";
@@ -12,6 +12,13 @@ import { Button, Screen } from "../../components/ui/primitives";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import { useMobileLocale } from "../../i18n/mobile-locale";
 import type { RootStackParamList } from "../../navigation/root-navigator";
+import {
+  getMobileNotificationPermissionStatus,
+  openMobileNotificationSettings,
+  requestMobileNotificationPermission,
+  type MobileNotificationPermissionState,
+} from "../../push/mobile-notification-permissions";
+import { syncCurrentMobilePushRegistration } from "../../push/mobile-push-registration";
 import { colors, radii, spacing } from "../../theme/tokens";
 import appIcon from "../../../assets/icon-android.png";
 
@@ -30,6 +37,39 @@ export function SettingScreen() {
   const { t } = useTranslation();
   const version = Constants.expoConfig?.version ?? "unknown";
   const [syncError, setSyncError] = useState(false);
+  const [notificationPermission, setNotificationPermission] =
+    useState<MobileNotificationPermissionState | null>(null);
+  const [notificationPermissionUpdating, setNotificationPermissionUpdating] = useState(false);
+  const notificationPermissionSupported = Platform.OS === "android" || Platform.OS === "ios";
+
+  const refreshNotificationPermission = useCallback(async () => {
+    if (!notificationPermissionSupported) return null;
+    const next = await getMobileNotificationPermissionStatus();
+    setNotificationPermission(next);
+    return next;
+  }, [notificationPermissionSupported]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!notificationPermissionSupported) return undefined;
+      let mounted = true;
+
+      const refresh = async () => {
+        const next = await getMobileNotificationPermissionStatus();
+        if (mounted) setNotificationPermission(next);
+      };
+
+      void refresh();
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") void refresh();
+      });
+
+      return () => {
+        mounted = false;
+        subscription.remove();
+      };
+    }, [notificationPermissionSupported]),
+  );
 
   async function handleLanguageChange(next: SupportedLocale) {
     if (next === locale) return;
@@ -48,6 +88,70 @@ export function SettingScreen() {
       return;
     }
   }
+
+  async function requestNotificationPermission() {
+    setNotificationPermissionUpdating(true);
+    try {
+      const next = await requestMobileNotificationPermission();
+      setNotificationPermission(next);
+      if (next.granted) {
+        await syncCurrentMobilePushRegistration();
+      }
+      return next;
+    } catch {
+      Alert.alert(
+        t("settings.notification_permission_error_title"),
+        t("settings.notification_permission_error_body"),
+      );
+      return refreshNotificationPermission();
+    } finally {
+      setNotificationPermissionUpdating(false);
+    }
+  }
+
+  async function handleAndroidNotificationToggle(nextEnabled: boolean) {
+    if (notificationPermissionUpdating) return;
+    if (nextEnabled) {
+      const next = await requestNotificationPermission();
+      if (next && !next.granted && !next.canRequest) {
+        Alert.alert(
+          t("settings.notification_permission_settings_title"),
+          t("settings.notification_permission_settings_body"),
+          [
+            { text: t("common.cancel"), style: "cancel" },
+            {
+              text: t("settings.open_system_settings"),
+              onPress: () => void openMobileNotificationSettings(),
+            },
+          ],
+        );
+      }
+      return;
+    }
+
+    Alert.alert(
+      t("settings.notification_permission_settings_title"),
+      t("settings.notification_permission_settings_body"),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("settings.open_system_settings"),
+          onPress: () => void openMobileNotificationSettings(),
+        },
+      ],
+    );
+  }
+
+  async function handleIosNotificationPress() {
+    if (notificationPermissionUpdating) return;
+    if (notificationPermission?.status === "undetermined" && notificationPermission.canRequest) {
+      await requestNotificationPermission();
+      return;
+    }
+    await openMobileNotificationSettings();
+  }
+
+  const notificationStatusLabel = getNotificationStatusLabel(notificationPermission);
 
   return (
     <Screen padded={false} safeArea={false}>
@@ -93,6 +197,53 @@ export function SettingScreen() {
             <Text style={styles.syncError}>{t("settings.sync_failed")}</Text>
           ) : null}
         </View>
+        {Platform.OS === "android" ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings.notifications")}</Text>
+            <View style={styles.settingRow}>
+              <View style={styles.settingRowText}>
+                <Text style={styles.rowTitle}>{t("settings.notification_permission")}</Text>
+                <Text style={styles.rowDetail}>
+                  {t("settings.notification_permission_android_detail")}
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel={t("settings.notification_permission")}
+                disabled={notificationPermissionUpdating || !notificationPermission}
+                onValueChange={(value) => void handleAndroidNotificationToggle(value)}
+                thumbColor={colors.card}
+                trackColor={{ false: colors.border, true: colors.foreground }}
+                value={notificationPermission?.granted === true}
+              />
+            </View>
+          </View>
+        ) : null}
+        {Platform.OS === "ios" ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings.notifications")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={notificationPermissionUpdating}
+              onPress={() => void handleIosNotificationPress()}
+              style={({ pressed }) => [
+                styles.settingRow,
+                pressed && styles.buttonPressed,
+                notificationPermissionUpdating && styles.rowDisabled,
+              ]}
+            >
+              <View style={styles.settingRowText}>
+                <Text style={styles.rowTitle}>{t("settings.notification_permission")}</Text>
+                <Text style={styles.rowDetail}>
+                  {t("settings.notification_permission_ios_detail")}
+                </Text>
+              </View>
+              <View style={styles.statusColumn}>
+                <Text style={styles.permissionStatus}>{t(notificationStatusLabel)}</Text>
+                <Text style={styles.openSettingsText}>{t("settings.open_system_settings")}</Text>
+              </View>
+            </Pressable>
+          </View>
+        ) : null}
         <View style={styles.footer}>
           <Button onPress={logout} style={styles.logoutButton} variant="secondary">
             {t("common.log_out")}
@@ -175,4 +326,61 @@ const styles = StyleSheet.create({
   logoutButton: {
     width: "60%",
   },
+  openSettingsText: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  permissionStatus: {
+    color: colors.foreground,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  rowDetail: {
+    color: colors.mutedForeground,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  rowDisabled: {
+    opacity: 0.7,
+  },
+  rowTitle: {
+    color: colors.foreground,
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  settingRow: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+    minHeight: 64,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  settingRowText: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  statusColumn: {
+    alignItems: "flex-end",
+    gap: spacing.xs,
+  },
 });
+
+function getNotificationStatusLabel(permission: MobileNotificationPermissionState | null) {
+  switch (permission?.status) {
+    case "granted":
+      return "settings.notification_permission_enabled";
+    case "denied":
+      return "settings.notification_permission_disabled";
+    case "undetermined":
+      return "settings.notification_permission_not_requested";
+    default:
+      return "settings.notification_permission_unknown";
+  }
+}

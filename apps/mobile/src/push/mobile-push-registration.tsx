@@ -1,11 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import Constants from "expo-constants";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import type { MobilePushPlatform, MobilePushProvider } from "@multica/core/types";
 import { createSafeId } from "@multica/core/utils";
 import { mobileStorage } from "../platform/storage";
+import { isMobileNotificationPermissionGranted } from "./mobile-notification-permissions";
 import {
   addApnsDeviceTokenListener,
   initializeApnsPush,
@@ -18,6 +19,7 @@ import {
 } from "./getui-push";
 
 const INSTALLATION_ID_KEY = "multica_mobile_push_installation_id";
+let registeredKey: string | null = null;
 
 type MobilePushAdapter = {
   addTokenListener: (listener: (token: string) => void) => () => void;
@@ -29,12 +31,11 @@ type MobilePushAdapter = {
 
 export function MobilePushRegistrationSync() {
   const userId = useAuthStore((state) => state.user?.id ?? null);
-  const registeredKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const adapter = getCurrentMobilePushAdapter();
     if (!userId || !adapter?.isAvailable()) {
-      registeredKeyRef.current = null;
+      registeredKey = null;
       return;
     }
 
@@ -42,37 +43,48 @@ export function MobilePushRegistrationSync() {
 
     const registerProviderToken = async (providerToken: string | null) => {
       if (cancelled || !providerToken) return;
-      const installationId = getOrCreateInstallationId();
-      const registrationKey = `${userId}:${installationId}:${adapter.provider}:${providerToken}`;
-      if (registeredKeyRef.current === registrationKey) return;
+      if (!(await isMobileNotificationPermissionGranted())) return;
+      await registerMobilePushToken(userId, adapter, providerToken);
+    };
 
-      await api.upsertMobilePushRegistration({
-        installation_id: installationId,
-        platform: adapter.platform,
-        provider: adapter.provider,
-        provider_client_id: providerToken,
-        app_version: Constants.expoConfig?.version,
-      });
-      registeredKeyRef.current = registrationKey;
+    const syncRegistration = async () => {
+      if (cancelled) return;
+      await syncCurrentMobilePushRegistration(userId);
     };
 
     const removeListener = adapter.addTokenListener((providerToken) => {
       void registerProviderToken(providerToken);
     });
 
-    adapter.initialize()
-      .then(registerProviderToken)
-      .catch(() => {
+    void syncRegistration().catch(() => {
+      // Push registration should never block the signed-in app.
+    });
+
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      void syncRegistration().catch(() => {
         // Push registration should never block the signed-in app.
       });
+    });
 
     return () => {
       cancelled = true;
+      appStateSubscription.remove();
       removeListener();
     };
   }, [userId]);
 
   return null;
+}
+
+export async function syncCurrentMobilePushRegistration(userIdOverride?: string | null) {
+  const userId = userIdOverride ?? useAuthStore.getState().user?.id ?? null;
+  const adapter = getCurrentMobilePushAdapter();
+  if (!userId || !adapter?.isAvailable()) return;
+  if (!(await isMobileNotificationPermissionGranted())) return;
+
+  const providerToken = await adapter.initialize();
+  await registerMobilePushToken(userId, adapter, providerToken);
 }
 
 export async function disableCurrentMobilePushRegistration() {
@@ -90,6 +102,26 @@ function getOrCreateInstallationId() {
   const next = createSafeId();
   mobileStorage.setItem(INSTALLATION_ID_KEY, next);
   return next;
+}
+
+async function registerMobilePushToken(
+  userId: string,
+  adapter: MobilePushAdapter,
+  providerToken: string | null,
+) {
+  if (!providerToken) return;
+  const installationId = getOrCreateInstallationId();
+  const nextRegisteredKey = `${userId}:${installationId}:${adapter.provider}:${providerToken}`;
+  if (registeredKey === nextRegisteredKey) return;
+
+  await api.upsertMobilePushRegistration({
+    installation_id: installationId,
+    platform: adapter.platform,
+    provider: adapter.provider,
+    provider_client_id: providerToken,
+    app_version: Constants.expoConfig?.version,
+  });
+  registeredKey = nextRegisteredKey;
 }
 
 function getCurrentMobilePushAdapter(): MobilePushAdapter | null {

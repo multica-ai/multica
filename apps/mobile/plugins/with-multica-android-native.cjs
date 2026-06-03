@@ -16,6 +16,7 @@ const GETUI_GTC_DEPENDENCY = "implementation 'com.getui:gtc:3.3.1.0'";
 const GETUI_GTSDK_DEPENDENCY = "implementation 'com.getui:gtsdk:3.3.13.0'";
 const GETUI_QUERY_ACTION = "com.getui.sdk.action";
 const GETUI_INTENT_SERVICE_PERMISSION = "android.permission.BIND_JOB_SERVICE";
+const POST_NOTIFICATIONS_PERMISSION = "android.permission.POST_NOTIFICATIONS";
 const GETUI_DEBUG_LOGGER_IMPORTS = [
   "android.app.ActivityManager",
   "android.app.Application",
@@ -41,6 +42,7 @@ function withMulticaAndroidNative(config, options = {}) {
 
   config = withGetuiMavenRepository(config);
   config = withGetuiAppBuildGradle(config, getuiAppId);
+  config = withAndroidPostNotificationsPermission(config);
   config = withGetuiAndroidManifest(config);
   config = withAndroidNativeSources(config);
   config = withDebugKeystore(config);
@@ -48,6 +50,26 @@ function withMulticaAndroidNative(config, options = {}) {
   config = withAndroidWindowSettings(config);
   config = withAndroidResourceSettings(config);
   return config;
+}
+
+function withAndroidPostNotificationsPermission(config) {
+  return withAndroidManifest(config, (modConfig) => {
+    const manifest = modConfig.modResults.manifest;
+    const permissions = manifest["uses-permission"] ?? (manifest["uses-permission"] = []);
+    const hasPostNotifications = permissions.some(
+      (permission) => permission.$?.["android:name"] === POST_NOTIFICATIONS_PERMISSION
+    );
+
+    if (!hasPostNotifications) {
+      permissions.push({
+        $: {
+          "android:name": POST_NOTIFICATIONS_PERMISSION,
+        },
+      });
+    }
+
+    return modConfig;
+  });
 }
 
 function withGetuiMavenRepository(config) {
