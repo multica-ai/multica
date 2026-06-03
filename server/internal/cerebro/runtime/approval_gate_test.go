@@ -69,7 +69,7 @@ func newGatedExecutor(res *gateFakeResolver, ap *gateFakeApprovals, allow ...pgt
 func TestToolCapabilityKey(t *testing.T) {
 	cases := map[string]string{
 		"web_fetch":           "network.external",
-		"firtal_bq_query":     "network.external",
+		"firtal_registry":     "network.external",
 		"credential_list":     "credentials.read",
 		"gogcli_sheets_write": "prod.write",
 		// Internal Multica CRUD stays ungated on purpose.
