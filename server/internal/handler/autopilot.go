@@ -412,6 +412,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	creatorType, creatorID := h.resolveActor(r, userID, workspaceID)
 
 	assigneeUUID, ok := parseUUIDOrBadRequest(w, req.AssigneeID, "assignee_id")
 	if !ok {
@@ -445,8 +446,8 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:         assigneeUUID,
 		Status:             "active",
 		ExecutionMode:      req.ExecutionMode,
-		CreatedByType:      "member",
-		CreatedByID:        parseUUID(userID),
+		CreatedByType:      creatorType,
+		CreatedByID:        parseUUID(creatorID),
 		Description:        ptrToText(req.Description),
 		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
 		ProjectID:          projectID,
@@ -457,7 +458,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := autopilotToResponse(autopilot)
-	h.publish(protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
+	h.publish(protocol.EventAutopilotCreated, workspaceID, creatorType, creatorID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
 

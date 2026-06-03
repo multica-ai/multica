@@ -1293,6 +1293,53 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 	}
 }
 
+func TestCreateAutopilotAttributesTrustedAgentActor(t *testing.T) {
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, fmt.Sprintf("Autopilot Actor Agent %d", time.Now().UnixNano()), nil)
+	taskID := createHandlerTestTaskForAgent(t, agentID)
+	var autopilotID string
+	t.Cleanup(func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	})
+
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Agent-authored autopilot",
+		"assignee_id":    agentID,
+		"execution_mode": "run_only",
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	w := httptest.NewRecorder()
+
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+	if autopilot.CreatedByType != "agent" || autopilot.CreatedByID != agentID {
+		t.Fatalf("autopilot created_by = %s/%s, want agent/%s", autopilot.CreatedByType, autopilot.CreatedByID, agentID)
+	}
+
+	var creatorType, creatorID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT created_by_type, created_by_id
+		FROM autopilot
+		WHERE id = $1
+	`, autopilotID).Scan(&creatorType, &creatorID); err != nil {
+		t.Fatalf("load autopilot creator: %v", err)
+	}
+	if creatorType != "agent" || creatorID != agentID {
+		t.Fatalf("stored autopilot created_by = %s/%s, want agent/%s", creatorType, creatorID, agentID)
+	}
+}
+
 // TestCreateIssueRejectsNonexistentMemberAssignee covers the bug where any
 // well-formed UUID was accepted as assignee_id without checking workspace
 // membership.
