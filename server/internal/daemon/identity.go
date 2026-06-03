@@ -48,11 +48,6 @@ func EnsureDaemonID(profile, configPath string) (string, error) {
 		return "", fmt.Errorf("create profile directory: %w", err)
 	}
 
-	// One-time promotion from pre-change per-profile layout.
-	if promoted, ok := promoteProfileDaemonID(profile, configPath, path); ok {
-		return promoted, nil
-	}
-
 	id, err := uuid.NewV7()
 	if err != nil {
 		return "", fmt.Errorf("generate daemon id: %w", err)
@@ -62,34 +57,6 @@ func EnsureDaemonID(profile, configPath string) (string, error) {
 		return "", err
 	}
 	return id.String(), nil
-}
-
-// promoteProfileDaemonID copies a pre-change per-profile daemon.id into the
-// canonical machine-scoped location. Returns the promoted UUID and true on
-// success; returns "", false when there is nothing valid to promote (empty
-// profile, missing/corrupt source file, any I/O failure). Promotion is a
-// best-effort migration — a failure here falls through to fresh UUID mint.
-func promoteProfileDaemonID(profile, configPath, targetPath string) (string, bool) {
-	if profile == "" || strings.TrimSpace(configPath) != "" {
-		return "", false
-	}
-	profileDir, err := cli.ProfileDir(profile)
-	if err != nil {
-		return "", false
-	}
-	src := filepath.Join(profileDir, daemonIDFileName)
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return "", false
-	}
-	id := strings.TrimSpace(string(data))
-	if _, err := uuid.Parse(id); err != nil {
-		return "", false
-	}
-	if err := writeDaemonIDFile(targetPath, id); err != nil {
-		return "", false
-	}
-	return id, true
 }
 
 // writeDaemonIDFile writes the UUID to path atomically with 0600 mode.
@@ -180,47 +147,16 @@ func LegacyDaemonIDs(hostname, profile string) []string {
 	return out
 }
 
-// LegacyDaemonUUIDs scans `~/.multica/profiles/*/daemon.id` and returns every
-// UUID that survives parsing. These are identities that were minted per
-// profile before daemon identity became machine-scoped; runtime rows
-// registered under them — potentially on multiple backends (prod/dev/self-
-// host) — need to be merged into the canonical machine UUID. The list is
-// safe to emit to every backend: a UUID that was never registered there
-// simply matches nothing in the server's merge lookup.
+// LegacyDaemonUUIDs is deprecated and always returns (nil, nil).
 //
-// Errors reading individual profile files are swallowed: a bad file
-// shouldn't block daemon startup. A missing profiles directory returns
-// (nil, nil) — that's the common case on a clean install.
+// Before the per-profile daemon_id isolation change (#323 / OPE-2082), daemon
+// identity was machine-scoped and per-profile daemon.id files were considered
+// leftovers to be merged. Now that each profile's daemon.id IS its canonical
+// identity, scanning profiles/*/daemon.id would return active IDs belonging
+// to other profiles — causing the server to incorrectly merge and destroy
+// their runtime rows.
 func LegacyDaemonUUIDs() ([]string, error) {
-	root, err := cli.ProfileDir("")
-	if err != nil {
-		return nil, err
-	}
-	profilesDir := filepath.Join(root, "profiles")
-	entries, err := os.ReadDir(profilesDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read profiles dir: %w", err)
-	}
-
-	var ids []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(profilesDir, entry.Name(), daemonIDFileName))
-		if err != nil {
-			continue
-		}
-		id := strings.TrimSpace(string(data))
-		if _, err := uuid.Parse(id); err != nil {
-			continue
-		}
-		ids = append(ids, id)
-	}
-	return ids, nil
+	return nil, nil
 }
 
 // filterLegacyIDs removes any entry equal to current (e.g. when the user
