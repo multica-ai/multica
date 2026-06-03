@@ -74,10 +74,10 @@ The installer supports both Codex CLI variants that expose plugin install as
 ## Packaging
 
 Build a user-distributable package with the same layout expected by the
-installer:
+installer. The package script builds the current-platform CLI for direct
+installation and full-platform CLI release artifacts for distribution:
 
 ```bash
-make build
 scripts/package_multica_codex_app.sh ~/Downloads/multica --force
 ```
 
@@ -86,11 +86,15 @@ versioned `.tar.gz` and `.zip` archives:
 
 ```text
 ~/Downloads/multica/
+~/Downloads/multica/cli/multica
+~/Downloads/multica/cli-artifacts/
 ~/Downloads/multica/multica-codex-app-<version>.tar.gz
 ~/Downloads/multica/multica-codex-app-<version>.zip
 ```
 
-Set `MULTICA_SOURCE_BIN=/path/to/multica` to package a specific CLI binary.
+Set `MULTICA_SOURCE_BIN=/path/to/multica` to package a specific
+current-platform CLI binary. Full-platform CLI artifacts are still built unless
+`MULTICA_SKIP_CLI_BUILD=1` is set.
 
 ## Helper Commands
 

@@ -21,7 +21,7 @@ manual user installs:
   <output-dir>/
     .agents/plugins/marketplace.json
     cli/multica
-    cli-artifacts/                  copied when artifacts/cli exists
+    cli-artifacts/                  full-platform CLI release artifacts
     install_multica_codex_app.sh
     INSTALL_WITH_CODEX_APP.md
     plugins/${PLUGIN_NAME}/
@@ -30,9 +30,10 @@ manual user installs:
     ${PLUGIN_NAME}-<version>.zip
 
 Environment overrides:
-  MULTICA_SOURCE_BIN       Source multica binary. Default: server/bin/multica,
-                           then server/multica, then PATH.
-  CLI_ARTIFACTS_DIR        Optional CLI artifacts directory to copy.
+  MULTICA_SOURCE_BIN       Optional source binary for cli/multica. When unset,
+                           the current-platform CLI is built automatically.
+  CLI_ARTIFACTS_DIR        Output/source directory for full-platform CLI artifacts.
+  MULTICA_SKIP_CLI_BUILD   Set to 1 to skip automatic CLI builds.
   MULTICA_PLUGIN_VERSION   Package/cachebuster version override.
 USAGE
 }
@@ -109,6 +110,20 @@ resolve_source_multica_bin() {
     return
   fi
   die "missing multica binary; run make build or set MULTICA_SOURCE_BIN"
+}
+
+build_current_platform_cli() {
+  if [[ -n "${MULTICA_SOURCE_BIN:-}" ]]; then
+    printf 'skip current-platform CLI build; MULTICA_SOURCE_BIN is set\n'
+    return
+  fi
+  log "Build current-platform Multica CLI"
+  (cd "$REPO_ROOT" && make build-cli)
+}
+
+build_full_platform_cli_artifacts() {
+  log "Build full-platform Multica CLI artifacts"
+  CLI_ARTIFACTS_DIR="$CLI_ARTIFACTS_SOURCE_DIR" bash "${REPO_ROOT}/scripts/build-cli-artifacts.sh"
 }
 
 file_size() {
@@ -213,6 +228,9 @@ build_archives() {
   mkdir -p "$stage_dir"
   cp -pR "${output_dir}/.agents" "$stage_dir/"
   cp -pR "${output_dir}/cli" "$stage_dir/"
+  if [[ -d "${output_dir}/cli-artifacts" ]]; then
+    cp -pR "${output_dir}/cli-artifacts" "$stage_dir/"
+  fi
   cp -pR "${output_dir}/plugins" "$stage_dir/"
   cp -p "${output_dir}/install_multica_codex_app.sh" "$stage_dir/"
   cp -p "${output_dir}/INSTALL_WITH_CODEX_APP.md" "$stage_dir/"
@@ -264,6 +282,14 @@ need_cmd python3
 [[ -f "$MARKETPLACE_FILE" ]] || die "missing marketplace file: $MARKETPLACE_FILE"
 [[ -f "$INSTALL_SCRIPT" ]] || die "missing install script: $INSTALL_SCRIPT"
 
+if [[ "${MULTICA_SKIP_CLI_BUILD:-0}" != "1" ]]; then
+  need_cmd go
+  build_current_platform_cli
+  build_full_platform_cli_artifacts
+else
+  printf 'skip automatic CLI builds; MULTICA_SKIP_CLI_BUILD=1\n'
+fi
+
 SOURCE_MULTICA="$(resolve_source_multica_bin)"
 [[ -f "$SOURCE_MULTICA" ]] || die "missing source multica binary: $SOURCE_MULTICA"
 
@@ -294,11 +320,8 @@ cp -p "$INSTALL_SCRIPT" "${OUTPUT_DIR}/install_multica_codex_app.sh"
 cp -p "$SOURCE_MULTICA" "${OUTPUT_DIR}/cli/multica"
 chmod 0755 "${OUTPUT_DIR}/install_multica_codex_app.sh" "${OUTPUT_DIR}/cli/multica"
 
-if [[ -d "$CLI_ARTIFACTS_SOURCE_DIR" ]]; then
-  cp -pR "$CLI_ARTIFACTS_SOURCE_DIR" "${OUTPUT_DIR}/cli-artifacts"
-else
-  printf 'skip missing CLI artifacts directory: %s\n' "$CLI_ARTIFACTS_SOURCE_DIR"
-fi
+[[ -d "$CLI_ARTIFACTS_SOURCE_DIR" ]] || die "missing CLI artifacts directory after build: $CLI_ARTIFACTS_SOURCE_DIR"
+cp -pR "$CLI_ARTIFACTS_SOURCE_DIR" "${OUTPUT_DIR}/cli-artifacts"
 
 rewrite_packaged_plugin_version "${OUTPUT_DIR}/plugins/${PLUGIN_NAME}/.codex-plugin/plugin.json" "$PLUGIN_VERSION"
 write_install_doc "$OUTPUT_DIR" "${OUTPUT_DIR}/INSTALL_WITH_CODEX_APP.md"
