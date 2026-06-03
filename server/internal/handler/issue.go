@@ -3604,16 +3604,6 @@ func (h *Handler) actorDisplayName(ctx context.Context, actorType, actorID, user
 // Issue Archive/Unarchive
 // ---------------------------------------------------------------------------
 
-// ArchiveIssueRequest is the request for PATCH /api/issues/:id/archive
-type ArchiveIssueRequest struct {
-	// empty request body
-}
-
-// UnarchiveIssueRequest is the request for PATCH /api/issues/:id/unarchive
-type UnarchiveIssueRequest struct {
-	// empty request body
-}
-
 // ArchiveIssue archives an issue (soft delete)
 func (h *Handler) ArchiveIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -3622,15 +3612,9 @@ func (h *Handler) ArchiveIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req ArchiveIssueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
 	// Check if the issue is already archived
 	if issue.ArchivedAt.Valid {
-		writeError(w, http.StatusBadRequest, "issue is already archived")
+		writeError(w, http.StatusConflict, "issue is already archived")
 		return
 	}
 
@@ -3670,15 +3654,9 @@ func (h *Handler) UnarchiveIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req UnarchiveIssueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
 	// Check if the issue is not archived
 	if !issue.ArchivedAt.Valid {
-		writeError(w, http.StatusBadRequest, "issue is not archived")
+		writeError(w, http.StatusConflict, "issue is not archived")
 		return
 	}
 

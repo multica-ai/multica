@@ -344,7 +344,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
     id: issue.id,
     data: { status: issue.status },
     animateLayoutChanges,
-    disabled: disableSorting || isArchived ? { droppable: true } : undefined,
+    disabled: disableSorting || isArchived ? true : undefined,
   });
 
   const style = {

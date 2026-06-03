@@ -453,6 +453,24 @@ export function useRealtimeSync(
       }
     });
 
+    const unsubIssueArchived = ws.on("issue:archived", (p) => {
+      const { issue } = p as IssueUpdatedPayload;
+      if (!issue?.id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) {
+        onIssueDeleted(qc, wsId, issue.id);
+      }
+    });
+
+    const unsubIssueUnarchived = ws.on("issue:unarchived", (p) => {
+      const { issue } = p as IssueUpdatedPayload;
+      if (!issue) return;
+      const wsId = getCurrentWsId();
+      if (wsId) {
+        onIssueCreated(qc, wsId, issue);
+      }
+    });
+
     const unsubIssueLabelsChanged = ws.on("issue_labels:changed", (p) => {
       const { issue_id, labels } = p as IssueLabelsChangedPayload;
       if (!issue_id) return;
@@ -1019,6 +1037,8 @@ export function useRealtimeSync(
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
+      unsubIssueArchived();
+      unsubIssueUnarchived();
       unsubIssueLabelsChanged();
       unsubIssueMetadataChanged();
       unsubInboxNew();
