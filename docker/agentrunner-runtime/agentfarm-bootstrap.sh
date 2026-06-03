@@ -79,15 +79,19 @@ done
 }
 echo "agentfarm-bootstrap: claude runtime registered: ${CLAUDE_RUNTIME_ID}"
 
-# ── 4. Flip the claude runtime to public. ────────────────────────────────────
+# ── 4. Flip all runtimes for this device to public. ──────────────────────────
 #    No multica CLI command for this today; curl is acceptable per PLA-339.
 #    Idempotent: public→public is a no-op in runtime.go's UpdateAgentRuntime.
-curl -fsS -X PATCH "${MULTICA_SERVER_URL}/api/runtimes/${CLAUDE_RUNTIME_ID}" \
-  -H "Authorization: Bearer ${MULTICA_PAT}" \
-  -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}" \
-  -H "Content-Type: application/json" \
-  -d '{"visibility":"public"}'
-echo "agentfarm-bootstrap: runtime ${CLAUDE_RUNTIME_ID} set to public"
+while IFS= read -r _rid; do
+  curl -fsS -X PATCH "${MULTICA_SERVER_URL}/api/runtimes/${_rid}" \
+    -H "Authorization: Bearer ${MULTICA_PAT}" \
+    -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}" \
+    -H "Content-Type: application/json" \
+    -d '{"visibility":"public"}'
+  echo "agentfarm-bootstrap: runtime ${_rid} set to public"
+done < <(multica runtime list --output json \
+  | jq -r --arg name "${DEVICE_NAME}" \
+      '.[] | select(.device_info | startswith($name)) | .id')
 
 # ── 5. Build the provider env matrix (Anthropic + OpenAI only). ─────────────
 #    Both providers route through the same litellm virtual key.
