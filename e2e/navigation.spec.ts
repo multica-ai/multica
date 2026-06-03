@@ -39,7 +39,7 @@ test.describe("Navigation", () => {
     await page.waitForURL("**/projects");
     await expect(page).toHaveURL(/\/projects/);
 
-    await page.getByRole("link", { name: "Notifications" }).click();
+    await page.getByRole("link", { name: "Inbox" }).click();
     await page.waitForURL("**/notifications");
     await expect(page).toHaveURL(/\/notifications/);
 
@@ -52,7 +52,7 @@ test.describe("Navigation", () => {
     await page.getByRole("link", { name: "Settings" }).click();
     await page.waitForURL("**/settings");
 
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.locator("main").getByRole("tab", { name: "Profile" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Profile" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Members" })).toBeVisible();
   });
@@ -61,7 +61,7 @@ test.describe("Navigation", () => {
     await page.getByRole("link", { name: "Agents" }).click();
     await page.waitForURL("**/agents");
 
-    await expect(page.getByRole("heading", { name: "Agents" })).toBeVisible();
+    await expect(page.getByTestId("list").getByRole("heading", { name: "Agents" })).toBeVisible();
   });
 
   test("agent detail route opens the selected agent", async ({ page }, testInfo) => {
@@ -93,7 +93,7 @@ test.describe("Navigation", () => {
     await page.getByRole("link", { name: "Settings" }).click();
     await page.waitForURL("**/settings");
 
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.locator("main").getByRole("tab", { name: "Profile" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Profile" })).toBeVisible();
   });
 

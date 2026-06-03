@@ -39,6 +39,8 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     due_date: "2026-05-10T08:00:00Z",
     start_date: "2026-05-07T08:00:00Z",
     end_date: "2026-05-09T08:00:00Z",
+    archived_at: null,
+    archived_by: null,
     labels: [
       { id: "label-1", workspace_id: "ws-1", name: "Release", color: "blue" },
       { id: "label-2", workspace_id: "ws-1", name: "Ops", color: "green" },

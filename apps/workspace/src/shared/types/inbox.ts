@@ -35,6 +35,11 @@ export interface InboxItem {
   issue_status: IssueStatus | null;
   read: boolean;
   archived: boolean;
+  triage_status: "pending" | "handled" | "dismissed" | "snoozed";
+  snoozed_until: string | null;
+  handled_at: string | null;
+  dismissed_at: string | null;
+  triaged_by: string | null;
   created_at: string;
   details: Record<string, string> | null;
 }

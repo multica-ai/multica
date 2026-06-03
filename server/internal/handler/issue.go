@@ -39,6 +39,8 @@ type IssueResponse struct {
 	DueDate       *string                        `json:"due_date"`
 	StartDate     *string                        `json:"start_date"`
 	EndDate       *string                        `json:"end_date"`
+	ArchivedAt    *string                        `json:"archived_at"`
+	ArchivedBy    *string                        `json:"archived_by"`
 	CreatedAt     string                         `json:"created_at"`
 	UpdatedAt     string                         `json:"updated_at"`
 	ParentIssue   *IssueReferenceResponse        `json:"parent_issue,omitempty"`
@@ -285,6 +287,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		DueDate:       timestampToPtr(i.DueDate),
 		StartDate:     timestampToPtr(i.StartDate),
 		EndDate:       timestampToPtr(i.EndDate),
+		ArchivedAt:    timestampToPtr(i.ArchivedAt),
+		ArchivedBy:    uuidToPtr(i.ArchivedBy),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
@@ -400,30 +404,34 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	includeArchived := pgtype.Bool{Bool: strings.EqualFold(r.URL.Query().Get("include_archived"), "true"), Valid: true}
+	archivedOnly := pgtype.Bool{Bool: strings.EqualFold(r.URL.Query().Get("archived"), "true") || strings.EqualFold(r.URL.Query().Get("archived_only"), "true"), Valid: true}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID:    parseUUID(workspaceID),
-		Limit:          int32(limit),
-		Offset:         int32(offset),
-		Status:         statusFilter,
-		Priority:       priorityFilter,
-		AssigneeID:     assigneeFilter,
-		AssigneeType:   assigneeTypeFilter,
-		CreatorID:      creatorFilter,
-		ProjectID:      projectFilter,
-		CreatorType:    creatorTypeFilter,
-		SearchText:     searchText,
-		SearchUuid:     searchUUID,
-		SearchNumber:   searchNumber,
-		DueFrom:        dueFrom,
-		DueTo:          dueTo,
-		StartFrom:      startFrom,
-		StartTo:        startTo,
-		EndFrom:        endFrom,
-		EndTo:          endTo,
-		LabelIds:       labelIDs,
-		LabelMatchMode: labelMatchMode,
-		View:           viewFilter,
+		WorkspaceID:     parseUUID(workspaceID),
+		Limit:           int32(limit),
+		Offset:          int32(offset),
+		IncludeArchived: includeArchived,
+		ArchivedOnly:    archivedOnly,
+		Status:          statusFilter,
+		Priority:        priorityFilter,
+		AssigneeID:      assigneeFilter,
+		AssigneeType:    assigneeTypeFilter,
+		CreatorID:       creatorFilter,
+		ProjectID:       projectFilter,
+		CreatorType:     creatorTypeFilter,
+		SearchText:      searchText,
+		SearchUuid:      searchUUID,
+		SearchNumber:    searchNumber,
+		DueFrom:         dueFrom,
+		DueTo:           dueTo,
+		StartFrom:       startFrom,
+		StartTo:         startTo,
+		EndFrom:         endFrom,
+		EndTo:           endTo,
+		LabelIds:        labelIDs,
+		LabelMatchMode:  labelMatchMode,
+		View:            viewFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -431,26 +439,28 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	total, err := h.Queries.CountListedIssues(ctx, db.CountListedIssuesParams{
-		WorkspaceID:    parseUUID(workspaceID),
-		Status:         statusFilter,
-		Priority:       priorityFilter,
-		AssigneeID:     assigneeFilter,
-		AssigneeType:   assigneeTypeFilter,
-		CreatorID:      creatorFilter,
-		ProjectID:      projectFilter,
-		CreatorType:    creatorTypeFilter,
-		SearchText:     searchText,
-		SearchUuid:     searchUUID,
-		SearchNumber:   searchNumber,
-		DueFrom:        dueFrom,
-		DueTo:          dueTo,
-		StartFrom:      startFrom,
-		StartTo:        startTo,
-		EndFrom:        endFrom,
-		EndTo:          endTo,
-		LabelIds:       labelIDs,
-		LabelMatchMode: labelMatchMode,
-		View:           viewFilter,
+		WorkspaceID:     parseUUID(workspaceID),
+		IncludeArchived: includeArchived,
+		ArchivedOnly:    archivedOnly,
+		Status:          statusFilter,
+		Priority:        priorityFilter,
+		AssigneeID:      assigneeFilter,
+		AssigneeType:    assigneeTypeFilter,
+		CreatorID:       creatorFilter,
+		ProjectID:       projectFilter,
+		CreatorType:     creatorTypeFilter,
+		SearchText:      searchText,
+		SearchUuid:      searchUUID,
+		SearchNumber:    searchNumber,
+		DueFrom:         dueFrom,
+		DueTo:           dueTo,
+		StartFrom:       startFrom,
+		StartTo:         startTo,
+		EndFrom:         endFrom,
+		EndTo:           endTo,
+		LabelIds:        labelIDs,
+		LabelMatchMode:  labelMatchMode,
+		View:            viewFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count issues")
@@ -959,6 +969,75 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) ArchiveIssue(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	prevIssue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(prevIssue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	h.TaskService.CancelTasksForIssue(r.Context(), prevIssue.ID)
+
+	issue, err := h.Queries.ArchiveIssue(r.Context(), db.ArchiveIssueParams{
+		ID:          prevIssue.ID,
+		ArchivedBy:  parseUUID(userID),
+		WorkspaceID: prevIssue.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive issue")
+		return
+	}
+
+	_, _ = h.Queries.DismissInboxByIssueInWorkspace(r.Context(), db.DismissInboxByIssueInWorkspaceParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+		TriagedBy:   parseUUID(userID),
+	})
+
+	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	resp := issueToResponse(issue, prefix)
+	h.publish(protocol.EventIssueArchived, workspaceID, actorType, actorID, map[string]any{"issue": resp})
+	slog.Info("issue archived", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) RestoreIssue(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	prevIssue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(prevIssue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	issue, err := h.Queries.RestoreIssue(r.Context(), db.RestoreIssueParams{
+		ID:          prevIssue.ID,
+		WorkspaceID: prevIssue.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to restore issue")
+		return
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	resp := issueToResponse(issue, prefix)
+	h.publish(protocol.EventIssueRestored, workspaceID, actorType, actorID, map[string]any{"issue": resp})
+	slog.Info("issue restored", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // ---------------------------------------------------------------------------
 // Batch operations
 // ---------------------------------------------------------------------------
@@ -1127,6 +1206,67 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 type BatchDeleteIssuesRequest struct {
 	IssueIDs []string `json:"issue_ids"`
+}
+
+type BatchArchiveIssuesRequest struct {
+	IssueIDs []string `json:"issue_ids"`
+}
+
+func (h *Handler) BatchArchiveIssues(w http.ResponseWriter, r *http.Request) {
+	var req BatchArchiveIssuesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.IssueIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "issue_ids is required")
+		return
+	}
+
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	workspaceID := resolveWorkspaceID(r)
+	archived := 0
+	for _, issueID := range req.IssueIDs {
+		prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          parseUUID(issueID),
+			WorkspaceID: parseUUID(workspaceID),
+		})
+		if err != nil {
+			continue
+		}
+
+		h.TaskService.CancelTasksForIssue(r.Context(), prevIssue.ID)
+
+		issue, err := h.Queries.ArchiveIssue(r.Context(), db.ArchiveIssueParams{
+			ID:          prevIssue.ID,
+			ArchivedBy:  parseUUID(userID),
+			WorkspaceID: prevIssue.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("batch archive issue failed", "issue_id", issueID, "error", err)
+			continue
+		}
+
+		_, _ = h.Queries.DismissInboxByIssueInWorkspace(r.Context(), db.DismissInboxByIssueInWorkspaceParams{
+			WorkspaceID: issue.WorkspaceID,
+			IssueID:     issue.ID,
+			TriagedBy:   parseUUID(userID),
+		})
+		archived++
+	}
+
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	h.publish(protocol.EventIssueBatchArchived, workspaceID, actorType, actorID, map[string]any{
+		"issue_ids": req.IssueIDs,
+		"count":     archived,
+	})
+	slog.Info("batch archive issues", append(logger.RequestAttrs(r), "count", archived)...)
+	writeJSON(w, http.StatusOK, map[string]any{"archived": archived})
 }
 
 func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {

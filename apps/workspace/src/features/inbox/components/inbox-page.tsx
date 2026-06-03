@@ -14,8 +14,9 @@ import {
   MoreHorizontal,
   Inbox,
   CheckCheck,
-  Archive,
-  BookCheck,
+  Check,
+  Clock,
+  XCircle,
   ListChecks,
 } from "lucide-react";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@/shared/types";
@@ -168,12 +169,16 @@ function InboxListItem({
   item,
   isSelected,
   onClick,
-  onArchive,
+  onHandle,
+  onDismiss,
+  onSnooze,
 }: {
   item: InboxItem;
   isSelected: boolean;
   onClick: () => void;
-  onArchive: () => void;
+  onHandle: () => void;
+  onDismiss: () => void;
+  onSnooze: () => void;
 }) {
   return (
     <button
@@ -203,20 +208,44 @@ function InboxListItem({
             <span
               role="button"
               tabIndex={-1}
-              title="Archive"
+              title="Done"
               onClick={(e) => {
                 e.stopPropagation();
-                onArchive();
+                onHandle();
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.stopPropagation();
-                  onArchive();
+                  onHandle();
                 }
               }}
               className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:inline-flex"
             >
-              <Archive className="h-3.5 w-3.5" />
+              <Check className="h-3.5 w-3.5" />
+            </span>
+            <span
+              role="button"
+              tabIndex={-1}
+              title="Snooze until tomorrow"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSnooze();
+              }}
+              className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:inline-flex"
+            >
+              <Clock className="h-3.5 w-3.5" />
+            </span>
+            <span
+              role="button"
+              tabIndex={-1}
+              title="Dismiss"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDismiss();
+              }}
+              className="hidden rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground group-hover:inline-flex"
+            >
+              <XCircle className="h-3.5 w-3.5" />
             </span>
             {item.issue_status && (
               <StatusIcon status={item.issue_status} className="h-3.5 w-3.5 shrink-0" />
@@ -270,11 +299,14 @@ export default function InboxPage() {
   const loading = useInboxStore((s) => s.loading);
   const {
     markRead,
-    archive,
+    handle,
+    dismiss,
+    snooze,
     markAllRead,
-    archiveAll,
-    archiveAllRead,
-    archiveCompleted,
+    handleCompleted,
+    batchHandle,
+    batchDismiss,
+    batchSnooze,
   } = useInboxMutations();
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -296,13 +328,40 @@ export default function InboxPage() {
     }
   };
 
-  const handleArchive = async (id: string) => {
+  const tomorrowISO = () => {
+    const next = new Date();
+    next.setDate(next.getDate() + 1);
+    next.setHours(9, 0, 0, 0);
+    return next.toISOString();
+  };
+
+  const handleDone = async (id: string) => {
     try {
-      await archive(id);
-      const archived = items.find((i) => i.id === id);
-      if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey("");
+      await handle(id);
+      const handled = items.find((i) => i.id === id);
+      if (handled && (handled.issue_id ?? handled.id) === selectedKey) setSelectedKey("");
     } catch {
-      toast.error("Failed to archive");
+      toast.error("Failed to mark done");
+    }
+  };
+
+  const handleDismiss = async (id: string) => {
+    try {
+      await dismiss(id);
+      const dismissed = items.find((i) => i.id === id);
+      if (dismissed && (dismissed.issue_id ?? dismissed.id) === selectedKey) setSelectedKey("");
+    } catch {
+      toast.error("Failed to dismiss");
+    }
+  };
+
+  const handleSnooze = async (id: string) => {
+    try {
+      await snooze(id, tomorrowISO());
+      const snoozed = items.find((i) => i.id === id);
+      if (snoozed && (snoozed.issue_id ?? snoozed.id) === selectedKey) setSelectedKey("");
+    } catch {
+      toast.error("Failed to snooze");
     }
   };
 
@@ -315,31 +374,39 @@ export default function InboxPage() {
     }
   };
 
-  const handleArchiveAll = async () => {
+  const handleBatchDone = async () => {
     try {
-      await archiveAll();
+      await batchHandle();
       setSelectedKey("");
     } catch {
-      toast.error("Failed to archive all");
+      toast.error("Failed to mark all done");
     }
   };
 
-  const handleArchiveAllRead = async () => {
+  const handleBatchDismiss = async () => {
     try {
-      const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
-      await archiveAllRead();
-      if (readKeys.includes(selectedKey)) setSelectedKey("");
+      await batchDismiss();
+      setSelectedKey("");
     } catch {
-      toast.error("Failed to archive read items");
+      toast.error("Failed to dismiss all");
     }
   };
 
-  const handleArchiveCompleted = async () => {
+  const handleBatchSnooze = async () => {
     try {
-      await archiveCompleted();
+      await batchSnooze(tomorrowISO());
       setSelectedKey("");
     } catch {
-      toast.error("Failed to archive completed");
+      toast.error("Failed to snooze all");
+    }
+  };
+
+  const handleCompletedItems = async () => {
+    try {
+      await handleCompleted();
+      setSelectedKey("");
+    } catch {
+      toast.error("Failed to mark completed done");
     }
   };
 
@@ -393,7 +460,7 @@ export default function InboxPage() {
                 layoutId="multica_inbox_issue_detail_layout"
                 highlightCommentId={selected.details?.comment_id ?? undefined}
                 onDelete={() => {
-                  handleArchive(selected.id);
+                  handleDone(selected.id);
                 }}
               />
             ) : (
@@ -411,10 +478,18 @@ export default function InboxPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => handleArchive(selected.id)}
+                    onClick={() => handleDone(selected.id)}
                   >
-                    <Archive className="mr-1.5 h-3.5 w-3.5" />
-                    Archive
+                    <Check className="mr-1.5 h-3.5 w-3.5" />
+                    Done
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDismiss(selected.id)}
+                  >
+                    <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                    Dismiss
                   </Button>
                 </div>
               </div>
@@ -453,17 +528,21 @@ export default function InboxPage() {
                 Mark all as read
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleArchiveAll}>
-                <Archive className="h-4 w-4" />
-                Archive all
+              <DropdownMenuItem onClick={handleBatchDone}>
+                <Check className="h-4 w-4" />
+                Done all
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleArchiveAllRead}>
-                <BookCheck className="h-4 w-4" />
-                Archive all read
+              <DropdownMenuItem onClick={handleBatchDismiss}>
+                <XCircle className="h-4 w-4" />
+                Dismiss all
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleArchiveCompleted}>
+              <DropdownMenuItem onClick={handleBatchSnooze}>
+                <Clock className="h-4 w-4" />
+                Snooze all until tomorrow
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleCompletedItems}>
                 <ListChecks className="h-4 w-4" />
-                Archive completed
+                Done completed
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -483,7 +562,9 @@ export default function InboxPage() {
                   item={item}
                   isSelected={false}
                   onClick={() => handleSelect(item)}
-                  onArchive={() => handleArchive(item.id)}
+                  onHandle={() => handleDone(item.id)}
+                  onDismiss={() => handleDismiss(item.id)}
+                  onSnooze={() => handleSnooze(item.id)}
                 />
               ))}
             </div>
@@ -525,17 +606,21 @@ export default function InboxPage() {
                 Mark all as read
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleArchiveAll}>
-                <Archive className="h-4 w-4" />
-                Archive all
+              <DropdownMenuItem onClick={handleBatchDone}>
+                <Check className="h-4 w-4" />
+                Done all
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleArchiveAllRead}>
-                <BookCheck className="h-4 w-4" />
-                Archive all read
+              <DropdownMenuItem onClick={handleBatchDismiss}>
+                <XCircle className="h-4 w-4" />
+                Dismiss all
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleArchiveCompleted}>
+              <DropdownMenuItem onClick={handleBatchSnooze}>
+                <Clock className="h-4 w-4" />
+                Snooze all until tomorrow
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleCompletedItems}>
                 <ListChecks className="h-4 w-4" />
-                Archive completed
+                Done completed
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -555,7 +640,9 @@ export default function InboxPage() {
                 item={item}
                 isSelected={(item.issue_id ?? item.id) === selectedKey}
                 onClick={() => handleSelect(item)}
-                onArchive={() => handleArchive(item.id)}
+                onHandle={() => handleDone(item.id)}
+                onDismiss={() => handleDismiss(item.id)}
+                onSnooze={() => handleSnooze(item.id)}
               />
             ))}
           </div>
@@ -575,7 +662,7 @@ export default function InboxPage() {
             layoutId="multica_inbox_issue_detail_layout"
             highlightCommentId={selected.details?.comment_id ?? undefined}
             onDelete={() => {
-              handleArchive(selected.id);
+              handleDone(selected.id);
             }}
           />
         ) : selected ? (
@@ -593,10 +680,10 @@ export default function InboxPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleArchive(selected.id)}
+                onClick={() => handleDone(selected.id)}
               >
-                <Archive className="mr-1.5 h-3.5 w-3.5" />
-                Archive
+                <Check className="mr-1.5 h-3.5 w-3.5" />
+                Done
               </Button>
             </div>
           </div>

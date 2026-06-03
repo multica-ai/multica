@@ -27,7 +27,7 @@ test.describe("Pomodoro", () => {
   test("Pomodoro page is reachable from the sidebar", async ({ page }) => {
     await page.getByRole("link", { name: /pomodoro/i }).click();
     await page.waitForURL("**/pomodoro");
-    await expect(page.getByRole("heading", { name: /pomodoro/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Current session" })).toBeVisible();
   });
 
   // ── Empty state ─────────────────────────────────────────────────────────────
@@ -35,72 +35,60 @@ test.describe("Pomodoro", () => {
   test("Pomodoro page renders the focus-first layout even with no sessions", async ({ page }) => {
     await page.goto("/pomodoro");
     // Focus-first shell is always present regardless of session history.
-    await expect(page.getByRole("heading", { name: "Pomodoro" })).toBeVisible({ timeout: 8000 });
+    await expect(page.getByRole("heading", { name: "Current session" })).toBeVisible({ timeout: 8000 });
     await expect(page.getByText("Focus mode first. History stays below.")).toBeVisible();
     await expect(page.getByText("Recent sessions")).toBeVisible();
   });
 
-  // ── Timer widget ────────────────────────────────────────────────────────────
+  // ── Timer controls ──────────────────────────────────────────────────────────
 
-  test("Pomodoro timer widget shows work phase by default", async ({ page }) => {
-    await page.goto("/issues");
-    // Switch to pomodoro mode — the sidebar widget defaults to normal timer mode.
-    await page.getByText("番茄钟").click();
-    // The timer widget is rendered in the sidebar. "专注" is the work-phase label.
+  test("Pomodoro timer shows work phase by default", async ({ page }) => {
+    await page.goto("/pomodoro");
     await expect(page.getByText("专注")).toBeVisible({ timeout: 8000 });
   });
 
-  test("can start and pause the pomodoro timer via the sidebar widget", async ({ page }) => {
-    await page.goto("/issues");
-
-    // Switch to pomodoro mode — the sidebar widget defaults to normal timer mode.
-    await page.getByText("番茄钟").click();
+  test("can start and pause the pomodoro timer from the page", async ({ page }) => {
+    await page.goto("/pomodoro");
 
     // Wait for the widget to finish loading the session from the server.
-    const startBtn = page.getByRole("button", { name: "开始番茄钟" });
+    const startBtn = page.getByRole("button", { name: "Start timer" });
     await expect(startBtn).toBeVisible({ timeout: 8000 });
 
     // Start the timer.
     await startBtn.click();
 
     // The pause button should now be present.
-    const pauseBtn = page.getByRole("button", { name: "暂停番茄钟" });
+    const pauseBtn = page.getByRole("button", { name: "Pause timer" });
     await expect(pauseBtn).toBeVisible({ timeout: 5000 });
 
     // Pause it.
     await pauseBtn.click();
 
     // After pausing the start button returns.
-    await expect(page.getByRole("button", { name: "开始番茄钟" })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: "Start timer" })).toBeVisible({ timeout: 5000 });
   });
 
-  test("can reset the pomodoro timer via the sidebar widget", async ({ page }) => {
+  test("can reset the pomodoro timer from the page", async ({ page }) => {
     // Start a session via the API so the timer is in a paused state.
     await api.startPomodoroSession();
     await api.pausePomodoroSession();
 
-    await page.goto("/issues");
-
-    // Switch to pomodoro mode — the sidebar widget defaults to normal timer mode.
-    await page.getByText("番茄钟").click();
+    await page.goto("/pomodoro");
 
     // The reset button should be visible.
-    const resetBtn = page.getByRole("button", { name: "重置番茄钟" });
+    const resetBtn = page.getByRole("button", { name: "Reset timer" });
     await expect(resetBtn).toBeVisible({ timeout: 8000 });
 
     await resetBtn.click();
 
     // After reset the start button should reappear (idle state).
-    await expect(page.getByRole("button", { name: "开始番茄钟" })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: "Start timer" })).toBeVisible({ timeout: 5000 });
   });
 
   test("document title updates while the timer is running", async ({ page }) => {
-    await page.goto("/issues");
+    await page.goto("/pomodoro");
 
-    // Switch to pomodoro mode — the sidebar widget defaults to normal timer mode.
-    await page.getByText("番茄钟").click();
-
-    const startBtn = page.getByRole("button", { name: "开始番茄钟" });
+    const startBtn = page.getByRole("button", { name: "Start timer" });
     await expect(startBtn).toBeVisible({ timeout: 8000 });
     await startBtn.click();
 
@@ -108,7 +96,7 @@ test.describe("Pomodoro", () => {
     await expect(page).toHaveTitle(/🍅/, { timeout: 5000 });
 
     // Pause to clean up.
-    await page.getByRole("button", { name: "暂停番茄钟" }).click();
+    await page.getByRole("button", { name: "Pause timer" }).click();
   });
 
   // ── Focus-first layout ──────────────────────────────────────────────────────
@@ -117,7 +105,6 @@ test.describe("Pomodoro", () => {
     await api.startPomodoroSession();
     await page.goto("/pomodoro");
 
-    await expect(page.getByRole("heading", { name: "Pomodoro" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Current session" })).toBeVisible();
     await expect(page.getByText("Quick capture")).toBeVisible();
     await expect(page.getByText("Recent sessions")).toBeVisible();
@@ -155,6 +142,7 @@ test.describe("Pomodoro", () => {
 
   test("today summary shows capped progress after hitting the focus target", async ({ page }) => {
     const now = new Date();
+    now.setHours(12, 0, 0, 0);
     for (let index = 0; index < 6; index += 1) {
       const start = new Date(now.getTime() - (index + 1) * 40 * 60 * 1000);
       const stop = new Date(start.getTime() + 25 * 60 * 1000);

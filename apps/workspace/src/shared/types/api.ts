@@ -52,6 +52,8 @@ export interface ListIssuesParams {
   end_from?: string;
   end_to?: string;
   view?: "backlog" | "today" | "upcoming";
+  archived?: boolean;
+  include_archived?: boolean;
 }
 
 export interface ListIssuesResponse {

@@ -94,7 +94,7 @@ func (q *Queries) ArchiveInboxByIssue(ctx context.Context, arg ArchiveInboxByIss
 const archiveInboxItem = `-- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, triage_status, snoozed_until, handled_at, dismissed_at, triaged_by, created_at, actor_type, actor_id, details
 `
 
 func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -112,6 +112,11 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 		&i.Body,
 		&i.Read,
 		&i.Archived,
+		&i.TriageStatus,
+		&i.SnoozedUntil,
+		&i.HandledAt,
+		&i.DismissedAt,
+		&i.TriagedBy,
 		&i.CreatedAt,
 		&i.ActorType,
 		&i.ActorID,
@@ -120,9 +125,110 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 	return i, err
 }
 
+const batchDismissInbox = `-- name: BatchDismissInbox :execrows
+UPDATE inbox_item SET
+    triage_status = 'dismissed',
+    dismissed_at = now(),
+    handled_at = NULL,
+    snoozed_until = NULL,
+    triaged_by = $3,
+    read = true
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND archived = false
+  AND triage_status IN ('pending', 'snoozed')
+`
+
+type BatchDismissInboxParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	TriagedBy   pgtype.UUID `json:"triaged_by"`
+}
+
+func (q *Queries) BatchDismissInbox(ctx context.Context, arg BatchDismissInboxParams) (int64, error) {
+	result, err := q.db.Exec(ctx, batchDismissInbox, arg.WorkspaceID, arg.RecipientID, arg.TriagedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const batchHandleInbox = `-- name: BatchHandleInbox :execrows
+UPDATE inbox_item SET
+    triage_status = 'handled',
+    handled_at = now(),
+    dismissed_at = NULL,
+    snoozed_until = NULL,
+    triaged_by = $3,
+    read = true
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND archived = false
+  AND triage_status IN ('pending', 'snoozed')
+`
+
+type BatchHandleInboxParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	TriagedBy   pgtype.UUID `json:"triaged_by"`
+}
+
+func (q *Queries) BatchHandleInbox(ctx context.Context, arg BatchHandleInboxParams) (int64, error) {
+	result, err := q.db.Exec(ctx, batchHandleInbox, arg.WorkspaceID, arg.RecipientID, arg.TriagedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const batchSnoozeInbox = `-- name: BatchSnoozeInbox :execrows
+UPDATE inbox_item SET
+    triage_status = 'snoozed',
+    snoozed_until = $3,
+    handled_at = NULL,
+    dismissed_at = NULL,
+    triaged_by = $4,
+    read = true
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND archived = false
+  AND triage_status IN ('pending', 'snoozed')
+`
+
+type BatchSnoozeInboxParams struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	RecipientID  pgtype.UUID        `json:"recipient_id"`
+	SnoozedUntil pgtype.Timestamptz `json:"snoozed_until"`
+	TriagedBy    pgtype.UUID        `json:"triaged_by"`
+}
+
+func (q *Queries) BatchSnoozeInbox(ctx context.Context, arg BatchSnoozeInboxParams) (int64, error) {
+	result, err := q.db.Exec(ctx, batchSnoozeInbox,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.SnoozedUntil,
+		arg.TriagedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countUnreadInbox = `-- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false
+WHERE workspace_id = $1
+  AND recipient_type = $2
+  AND recipient_id = $3
+  AND read = false
+  AND archived = false
+  AND (
+      triage_status = 'pending'
+      OR (triage_status = 'snoozed' AND snoozed_until <= now())
+  )
 `
 
 type CountUnreadInboxParams struct {
@@ -144,7 +250,7 @@ INSERT INTO inbox_item (
     type, severity, issue_id, title, body,
     actor_type, actor_id, details
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, triage_status, snoozed_until, handled_at, dismissed_at, triaged_by, created_at, actor_type, actor_id, details
 `
 
 type CreateInboxItemParams struct {
@@ -188,6 +294,122 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		&i.Body,
 		&i.Read,
 		&i.Archived,
+		&i.TriageStatus,
+		&i.SnoozedUntil,
+		&i.HandledAt,
+		&i.DismissedAt,
+		&i.TriagedBy,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
+const dismissInboxByIssue = `-- name: DismissInboxByIssue :execrows
+UPDATE inbox_item SET
+    triage_status = 'dismissed',
+    dismissed_at = now(),
+    handled_at = NULL,
+    snoozed_until = NULL,
+    triaged_by = $4,
+    read = true
+WHERE workspace_id = $1
+  AND recipient_type = $2
+  AND recipient_id = $3
+  AND issue_id = $5
+  AND archived = false
+  AND triage_status IN ('pending', 'snoozed')
+`
+
+type DismissInboxByIssueParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	TriagedBy     pgtype.UUID `json:"triaged_by"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) DismissInboxByIssue(ctx context.Context, arg DismissInboxByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, dismissInboxByIssue,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.TriagedBy,
+		arg.IssueID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const dismissInboxByIssueInWorkspace = `-- name: DismissInboxByIssueInWorkspace :execrows
+UPDATE inbox_item SET
+    triage_status = 'dismissed',
+    dismissed_at = now(),
+    handled_at = NULL,
+    snoozed_until = NULL,
+    triaged_by = $3,
+    read = true
+WHERE workspace_id = $1
+  AND issue_id = $2
+  AND archived = false
+  AND triage_status IN ('pending', 'snoozed')
+`
+
+type DismissInboxByIssueInWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	TriagedBy   pgtype.UUID `json:"triaged_by"`
+}
+
+func (q *Queries) DismissInboxByIssueInWorkspace(ctx context.Context, arg DismissInboxByIssueInWorkspaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, dismissInboxByIssueInWorkspace, arg.WorkspaceID, arg.IssueID, arg.TriagedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const dismissInboxItem = `-- name: DismissInboxItem :one
+UPDATE inbox_item SET
+    triage_status = 'dismissed',
+    dismissed_at = now(),
+    handled_at = NULL,
+    snoozed_until = NULL,
+    triaged_by = $2,
+    read = true
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, triage_status, snoozed_until, handled_at, dismissed_at, triaged_by, created_at, actor_type, actor_id, details
+`
+
+type DismissInboxItemParams struct {
+	ID        pgtype.UUID `json:"id"`
+	TriagedBy pgtype.UUID `json:"triaged_by"`
+}
+
+func (q *Queries) DismissInboxItem(ctx context.Context, arg DismissInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, dismissInboxItem, arg.ID, arg.TriagedBy)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.TriageStatus,
+		&i.SnoozedUntil,
+		&i.HandledAt,
+		&i.DismissedAt,
+		&i.TriagedBy,
 		&i.CreatedAt,
 		&i.ActorType,
 		&i.ActorID,
@@ -197,7 +419,7 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 }
 
 const getInboxItem = `-- name: GetInboxItem :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, triage_status, snoozed_until, handled_at, dismissed_at, triaged_by, created_at, actor_type, actor_id, details FROM inbox_item
 WHERE id = $1
 `
 
@@ -216,6 +438,11 @@ func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, 
 		&i.Body,
 		&i.Read,
 		&i.Archived,
+		&i.TriageStatus,
+		&i.SnoozedUntil,
+		&i.HandledAt,
+		&i.DismissedAt,
+		&i.TriagedBy,
 		&i.CreatedAt,
 		&i.ActorType,
 		&i.ActorID,
@@ -225,7 +452,7 @@ func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, 
 }
 
 const getInboxItemInWorkspace = `-- name: GetInboxItemInWorkspace :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, triage_status, snoozed_until, handled_at, dismissed_at, triaged_by, created_at, actor_type, actor_id, details FROM inbox_item
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -249,6 +476,129 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 		&i.Body,
 		&i.Read,
 		&i.Archived,
+		&i.TriageStatus,
+		&i.SnoozedUntil,
+		&i.HandledAt,
+		&i.DismissedAt,
+		&i.TriagedBy,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
+const handleCompletedInbox = `-- name: HandleCompletedInbox :execrows
+UPDATE inbox_item i SET
+    triage_status = 'handled',
+    handled_at = now(),
+    dismissed_at = NULL,
+    snoozed_until = NULL,
+    triaged_by = $3,
+    read = true
+WHERE i.workspace_id = $1
+  AND i.recipient_type = 'member'
+  AND i.recipient_id = $2
+  AND i.archived = false
+  AND i.triage_status IN ('pending', 'snoozed')
+  AND i.issue_id IN (
+      SELECT id FROM issue
+      WHERE workspace_id = $1
+        AND status IN ('done', 'cancelled')
+        AND archived_at IS NULL
+  )
+`
+
+type HandleCompletedInboxParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	TriagedBy   pgtype.UUID `json:"triaged_by"`
+}
+
+func (q *Queries) HandleCompletedInbox(ctx context.Context, arg HandleCompletedInboxParams) (int64, error) {
+	result, err := q.db.Exec(ctx, handleCompletedInbox, arg.WorkspaceID, arg.RecipientID, arg.TriagedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const handleInboxByIssue = `-- name: HandleInboxByIssue :execrows
+UPDATE inbox_item SET
+    triage_status = 'handled',
+    handled_at = now(),
+    dismissed_at = NULL,
+    snoozed_until = NULL,
+    triaged_by = $4,
+    read = true
+WHERE workspace_id = $1
+  AND recipient_type = $2
+  AND recipient_id = $3
+  AND issue_id = $5
+  AND archived = false
+  AND triage_status IN ('pending', 'snoozed')
+`
+
+type HandleInboxByIssueParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	TriagedBy     pgtype.UUID `json:"triaged_by"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) HandleInboxByIssue(ctx context.Context, arg HandleInboxByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, handleInboxByIssue,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.TriagedBy,
+		arg.IssueID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const handleInboxItem = `-- name: HandleInboxItem :one
+UPDATE inbox_item SET
+    triage_status = 'handled',
+    handled_at = now(),
+    dismissed_at = NULL,
+    snoozed_until = NULL,
+    triaged_by = $2,
+    read = true
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, triage_status, snoozed_until, handled_at, dismissed_at, triaged_by, created_at, actor_type, actor_id, details
+`
+
+type HandleInboxItemParams struct {
+	ID        pgtype.UUID `json:"id"`
+	TriagedBy pgtype.UUID `json:"triaged_by"`
+}
+
+func (q *Queries) HandleInboxItem(ctx context.Context, arg HandleInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, handleInboxItem, arg.ID, arg.TriagedBy)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.TriageStatus,
+		&i.SnoozedUntil,
+		&i.HandledAt,
+		&i.DismissedAt,
+		&i.TriagedBy,
 		&i.CreatedAt,
 		&i.ActorType,
 		&i.ActorID,
@@ -258,11 +608,18 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 }
 
 const listInboxItems = `-- name: ListInboxItems :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.triage_status, i.snoozed_until, i.handled_at, i.dismissed_at, i.triaged_by, i.created_at, i.actor_type, i.actor_id, i.details,
        iss.status as issue_status
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
-WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
+WHERE i.workspace_id = $1
+  AND i.recipient_type = $2
+  AND i.recipient_id = $3
+  AND i.archived = false
+  AND (
+      i.triage_status = 'pending'
+      OR (i.triage_status = 'snoozed' AND i.snoozed_until <= now())
+  )
 ORDER BY i.created_at DESC
 `
 
@@ -284,6 +641,11 @@ type ListInboxItemsRow struct {
 	Body          pgtype.Text        `json:"body"`
 	Read          bool               `json:"read"`
 	Archived      bool               `json:"archived"`
+	TriageStatus  string             `json:"triage_status"`
+	SnoozedUntil  pgtype.Timestamptz `json:"snoozed_until"`
+	HandledAt     pgtype.Timestamptz `json:"handled_at"`
+	DismissedAt   pgtype.Timestamptz `json:"dismissed_at"`
+	TriagedBy     pgtype.UUID        `json:"triaged_by"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	ActorType     pgtype.Text        `json:"actor_type"`
 	ActorID       pgtype.UUID        `json:"actor_id"`
@@ -312,6 +674,11 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.Body,
 			&i.Read,
 			&i.Archived,
+			&i.TriageStatus,
+			&i.SnoozedUntil,
+			&i.HandledAt,
+			&i.DismissedAt,
+			&i.TriagedBy,
 			&i.CreatedAt,
 			&i.ActorType,
 			&i.ActorID,
@@ -349,7 +716,7 @@ func (q *Queries) MarkAllInboxRead(ctx context.Context, arg MarkAllInboxReadPara
 const markInboxRead = `-- name: MarkInboxRead :one
 UPDATE inbox_item SET read = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, triage_status, snoozed_until, handled_at, dismissed_at, triaged_by, created_at, actor_type, actor_id, details
 `
 
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -367,6 +734,57 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 		&i.Body,
 		&i.Read,
 		&i.Archived,
+		&i.TriageStatus,
+		&i.SnoozedUntil,
+		&i.HandledAt,
+		&i.DismissedAt,
+		&i.TriagedBy,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
+const snoozeInboxItem = `-- name: SnoozeInboxItem :one
+UPDATE inbox_item SET
+    triage_status = 'snoozed',
+    snoozed_until = $2,
+    handled_at = NULL,
+    dismissed_at = NULL,
+    triaged_by = $3,
+    read = true
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, triage_status, snoozed_until, handled_at, dismissed_at, triaged_by, created_at, actor_type, actor_id, details
+`
+
+type SnoozeInboxItemParams struct {
+	ID           pgtype.UUID        `json:"id"`
+	SnoozedUntil pgtype.Timestamptz `json:"snoozed_until"`
+	TriagedBy    pgtype.UUID        `json:"triaged_by"`
+}
+
+func (q *Queries) SnoozeInboxItem(ctx context.Context, arg SnoozeInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, snoozeInboxItem, arg.ID, arg.SnoozedUntil, arg.TriagedBy)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.TriageStatus,
+		&i.SnoozedUntil,
+		&i.HandledAt,
+		&i.DismissedAt,
+		&i.TriagedBy,
 		&i.CreatedAt,
 		&i.ActorType,
 		&i.ActorID,

@@ -11,6 +11,9 @@ export type WSEventType =
   | "issue:created"
   | "issue:updated"
   | "issue:deleted"
+  | "issue:archived"
+  | "issue:restored"
+  | "issue:batch_archived"
   | "issue:bulk_created"
   | "issue:imported"
   | "comment:created"
@@ -29,6 +32,10 @@ export type WSEventType =
   | "inbox:new"
   | "inbox:read"
   | "inbox:archived"
+  | "inbox:handled"
+  | "inbox:dismissed"
+  | "inbox:snoozed"
+  | "inbox:batch_triaged"
   | "inbox:batch-read"
   | "inbox:batch-archived"
   | "workspace:updated"
@@ -78,6 +85,19 @@ export interface IssueDeletedPayload {
   issue_id: string;
 }
 
+export interface IssueArchivedPayload {
+  issue: Issue;
+}
+
+export interface IssueRestoredPayload {
+  issue: Issue;
+}
+
+export interface IssueBatchArchivedPayload {
+  issue_ids: string[];
+  count: number;
+}
+
 export interface AgentStatusPayload {
   agent: Agent;
 }
@@ -106,6 +126,17 @@ export interface InboxReadPayload {
 export interface InboxArchivedPayload {
   item_id: string;
   recipient_id: string;
+}
+
+export interface InboxTriagedPayload {
+  item_id: string;
+  recipient_id: string;
+}
+
+export interface InboxBatchTriagedPayload {
+  recipient_id: string;
+  count: number;
+  triage_status: "handled" | "dismissed" | "snoozed";
 }
 
 export interface InboxBatchReadPayload {

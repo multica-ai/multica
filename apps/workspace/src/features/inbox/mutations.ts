@@ -35,6 +35,32 @@ export function useInboxMutations() {
     },
   });
 
+  const removeTriagedItem = (itemId: string) => {
+    updateInboxItems(queryClient, workspaceId, (items) => items.filter((item) => item.id !== itemId));
+  };
+
+  const handleMutation = useMutation({
+    mutationFn: (itemId: string) => api.handleInbox(itemId),
+    onSuccess: (item) => {
+      removeTriagedItem(item.id);
+    },
+  });
+
+  const dismissMutation = useMutation({
+    mutationFn: (itemId: string) => api.dismissInbox(itemId),
+    onSuccess: (item) => {
+      removeTriagedItem(item.id);
+    },
+  });
+
+  const snoozeMutation = useMutation({
+    mutationFn: ({ itemId, snoozedUntil }: { itemId: string; snoozedUntil: string }) =>
+      api.snoozeInbox(itemId, snoozedUntil),
+    onSuccess: (item) => {
+      removeTriagedItem(item.id);
+    },
+  });
+
   const markAllReadMutation = useMutation({
     mutationFn: () => api.markAllInboxRead(),
     onSuccess: () => {
@@ -62,8 +88,32 @@ export function useInboxMutations() {
     },
   });
 
-  const archiveCompletedMutation = useMutation({
-    mutationFn: () => api.archiveCompletedInbox(),
+  const handleCompletedMutation = useMutation({
+    mutationFn: () => api.handleCompletedInbox(),
+    onSuccess: async () => {
+      if (!workspaceId) return;
+      await queryClient.invalidateQueries({ queryKey: queryKeys.inbox.all(workspaceId) });
+    },
+  });
+
+  const batchHandleMutation = useMutation({
+    mutationFn: () => api.batchHandleInbox(),
+    onSuccess: async () => {
+      if (!workspaceId) return;
+      await queryClient.invalidateQueries({ queryKey: queryKeys.inbox.all(workspaceId) });
+    },
+  });
+
+  const batchDismissMutation = useMutation({
+    mutationFn: () => api.batchDismissInbox(),
+    onSuccess: async () => {
+      if (!workspaceId) return;
+      await queryClient.invalidateQueries({ queryKey: queryKeys.inbox.all(workspaceId) });
+    },
+  });
+
+  const batchSnoozeMutation = useMutation({
+    mutationFn: (snoozedUntil: string) => api.batchSnoozeInbox(snoozedUntil),
     onSuccess: async () => {
       if (!workspaceId) return;
       await queryClient.invalidateQueries({ queryKey: queryKeys.inbox.all(workspaceId) });
@@ -73,16 +123,28 @@ export function useInboxMutations() {
   return {
     markRead: (itemId: string) => markReadMutation.mutateAsync(itemId),
     archive: (itemId: string) => archiveMutation.mutateAsync(itemId),
+    handle: (itemId: string) => handleMutation.mutateAsync(itemId),
+    dismiss: (itemId: string) => dismissMutation.mutateAsync(itemId),
+    snooze: (itemId: string, snoozedUntil: string) => snoozeMutation.mutateAsync({ itemId, snoozedUntil }),
     markAllRead: () => markAllReadMutation.mutateAsync(),
     archiveAll: () => archiveAllMutation.mutateAsync(),
     archiveAllRead: () => archiveAllReadMutation.mutateAsync(),
-    archiveCompleted: () => archiveCompletedMutation.mutateAsync(),
+    handleCompleted: () => handleCompletedMutation.mutateAsync(),
+    batchHandle: () => batchHandleMutation.mutateAsync(),
+    batchDismiss: () => batchDismissMutation.mutateAsync(),
+    batchSnooze: (snoozedUntil: string) => batchSnoozeMutation.mutateAsync(snoozedUntil),
     isMutating:
       markReadMutation.isPending ||
       archiveMutation.isPending ||
+      handleMutation.isPending ||
+      dismissMutation.isPending ||
+      snoozeMutation.isPending ||
       markAllReadMutation.isPending ||
       archiveAllMutation.isPending ||
       archiveAllReadMutation.isPending ||
-      archiveCompletedMutation.isPending,
+      handleCompletedMutation.isPending ||
+      batchHandleMutation.isPending ||
+      batchDismissMutation.isPending ||
+      batchSnoozeMutation.isPending,
   };
 }

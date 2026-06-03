@@ -216,11 +216,14 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 				r.Post("/", h.CreateIssue)
 				r.Post("/bulk", h.BulkCreateIssues)
 				r.Post("/batch-update", h.BatchUpdateIssues)
+				r.Post("/batch-archive", h.BatchArchiveIssues)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
+					r.Post("/archive", h.ArchiveIssue)
+					r.Post("/restore", h.RestoreIssue)
 					r.Post("/worklogs", h.CreateWorklog)
 					r.Get("/worklogs", h.ListWorklogs)
 					r.Post("/labels", h.AddIssueLabel)
@@ -339,6 +342,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
+				r.Post("/", h.CreateAgentRuntime)
 				r.Get("/", h.ListAgentRuntimes)
 				r.Get("/{runtimeId}/usage", h.GetRuntimeUsage)
 				r.Get("/{runtimeId}/activity", h.GetRuntimeTaskActivity)
@@ -356,8 +360,15 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
+				r.Post("/handle-completed", h.HandleCompletedInbox)
+				r.Post("/batch-handle", h.BatchHandleInbox)
+				r.Post("/batch-dismiss", h.BatchDismissInbox)
+				r.Post("/batch-snooze", h.BatchSnoozeInbox)
 				r.Post("/{id}/read", h.MarkInboxRead)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
+				r.Post("/{id}/handle", h.HandleInboxItem)
+				r.Post("/{id}/dismiss", h.DismissInboxItem)
+				r.Post("/{id}/snooze", h.SnoozeInboxItem)
 			})
 
 			// Notification preferences
