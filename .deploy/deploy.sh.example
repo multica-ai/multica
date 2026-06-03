@@ -83,6 +83,11 @@ echo "Running migrations…"
 ) || { echo "ERROR: migrate failed — aborting before restarting services." >&2; exit 1; }
 
 echo "Building Next.js frontend…"
+# Bake the deployed SHA + build time into the static /version response so an
+# external observer can curl https://<host>/version and verify which commit
+# is actually running, without guessing from page-bundle hashes (JEH-1761).
+export COMMIT_SHA="$NEW_SHA"
+export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 pnpm --filter @multica/web build
 
 # Restart backend + frontend unconditionally. JEH-438: make build overwrites
