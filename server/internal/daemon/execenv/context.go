@@ -83,9 +83,11 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 // directory. Schema is intentionally a thin pass-through of the API response
 // so consumers (skills, future tooling) don't need a separate parser.
 type projectResourceFile struct {
-	ProjectID    string                  `json:"project_id,omitempty"`
-	ProjectTitle string                  `json:"project_title,omitempty"`
-	Resources    []ProjectResourceForEnv `json:"resources"`
+	ProjectID               string                  `json:"project_id,omitempty"`
+	ProjectTitle            string                  `json:"project_title,omitempty"`
+	ProjectWorkdirPolicy    string                  `json:"project_workdir_policy,omitempty"`
+	ProjectCanonicalWorkdir string                  `json:"project_canonical_workdir,omitempty"`
+	Resources               []ProjectResourceForEnv `json:"resources"`
 }
 
 // MarshalJSON renders the resource_ref field as raw JSON instead of a base64
@@ -130,9 +132,11 @@ func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *side
 		resources = []ProjectResourceForEnv{}
 	}
 	payload := projectResourceFile{
-		ProjectID:    ctx.ProjectID,
-		ProjectTitle: ctx.ProjectTitle,
-		Resources:    resources,
+		ProjectID:               ctx.ProjectID,
+		ProjectTitle:            ctx.ProjectTitle,
+		ProjectWorkdirPolicy:    ctx.ProjectWorkdirPolicy,
+		ProjectCanonicalWorkdir: ctx.ProjectCanonicalWorkdir,
+		Resources:               resources,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

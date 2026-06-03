@@ -15,6 +15,7 @@
     "status": "状态",
     "progress": "进度",
     "lead": "负责人",
+    "workdir": "Workdir",
     "created": "创建时间"
   },
   "status": {
@@ -102,6 +103,15 @@
     "local_validate_not_readable": "目录不可读。",
     "local_validate_not_writable": "目录不可写。",
     "local_validate_unsupported": "本地目录仅能在桌面端选择。"
+  },
+  "workdir": {
+    "not_set": "未设置",
+    "advisory_badge": "建议",
+    "title": "首选 workdir",
+    "description": "会作为项目建议路径传给智能体；这不是文件系统沙箱强制限制。",
+    "placeholder": "/Users/name/code/project",
+    "clear": "清除",
+    "save": "保存"
   },
   "delete_dialog": {
     "title": "删除项目",
