@@ -2,8 +2,14 @@ package daemon
 
 import (
 	"log/slog"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestTaskWakeupURL(t *testing.T) {
@@ -73,5 +79,62 @@ func TestWSHeartbeatFreshnessSuppressesHTTP(t *testing.T) {
 	d.clearWSHeartbeatAcks()
 	if d.wsHeartbeatRecentlyAcked("runtime-2") {
 		t.Fatalf("expected clearWSHeartbeatAcks to drop all entries")
+	}
+}
+
+func TestApplyCustomRuntimeAddPersistsAndUpdatesInMemoryConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "codewhale")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake codewhale: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	d := New(Config{
+		Agents:         map[string]AgentEntry{},
+		WorkspacesRoot: t.TempDir(),
+	}, slog.Default())
+
+	err := d.applyCustomRuntimeAdd(protocol.CustomRuntimeAddPayload{
+		RequestID:      "req-1",
+		Provider:       "CodeWhale",
+		Name:           "CodeWhale",
+		Path:           "codewhale",
+		Args:           []string{"exec", "--auto", "--output-format", "stream-json", "{{prompt}}"},
+		ResumeArgs:     []string{"exec", "--resume", "{{session_id}}", "{{prompt}}"},
+		SessionIDRegex: `"sessionId":"([^"]+)"`,
+	})
+	if err != nil {
+		t.Fatalf("applyCustomRuntimeAdd: %v", err)
+	}
+
+	entry, ok := d.cfg.Agents["codewhale"]
+	if !ok {
+		t.Fatalf("expected codewhale in daemon cfg agents, got %v", d.cfg.Agents)
+	}
+	if entry.DisplayName != "CodeWhale" {
+		t.Fatalf("DisplayName = %q", entry.DisplayName)
+	}
+	if !reflect.DeepEqual(entry.Custom.Args, []string{"exec", "--auto", "--output-format", "stream-json", "{{prompt}}"}) {
+		t.Fatalf("Custom.Args = %v", entry.Custom.Args)
+	}
+	if !reflect.DeepEqual(entry.Custom.ResumeArgs, []string{"exec", "--resume", "{{session_id}}", "{{prompt}}"}) {
+		t.Fatalf("Custom.ResumeArgs = %v", entry.Custom.ResumeArgs)
+	}
+	if entry.Custom.SessionIDRegex != `"sessionId":"([^"]+)"` {
+		t.Fatalf("Custom.SessionIDRegex = %q", entry.Custom.SessionIDRegex)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(home, ".multica", "custom-runtimes.json"))
+	if err != nil {
+		t.Fatalf("read managed custom runtime config: %v", err)
+	}
+	if !strings.Contains(string(raw), `"provider": "codewhale"`) {
+		t.Fatalf("managed config missing normalized provider: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"resume_args": [`) {
+		t.Fatalf("managed config missing resume args: %s", raw)
 	}
 }

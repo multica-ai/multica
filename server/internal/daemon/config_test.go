@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -255,6 +256,203 @@ func TestLoadConfig_AutoUpdateDefault_SelfHostOff(t *testing.T) {
 	}
 	if cfg.AutoUpdateEnabled {
 		t.Fatalf("AutoUpdateEnabled = true for self-host (localhost) server, want false")
+	}
+}
+
+func TestManagedCustomAgents_PersistAndLoad(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := stageFakeAgent(t)
+	fake := filepath.Join(binDir, "codewhale")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake codewhale: %v", err)
+	}
+
+	if err := UpsertManagedCustomAgent("", ManagedCustomAgent{
+		Provider:       "CodeWhale",
+		Name:           "CodeWhale",
+		Path:           "codewhale",
+		Args:           []string{"exec", "--auto", "--output-format", "stream-json", "{{prompt}}"},
+		ResumeArgs:     []string{"exec", "--resume", "{{session_id}}", "{{prompt}}"},
+		SessionIDRegex: `"sessionId":"([^"]+)"`,
+	}); err != nil {
+		t.Fatalf("UpsertManagedCustomAgent: %v", err)
+	}
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["codewhale"]
+	if !ok {
+		t.Fatalf("expected managed codewhale agent in cfg.Agents, got keys %v", cfg.Agents)
+	}
+	if entry.DisplayName != "CodeWhale" {
+		t.Fatalf("DisplayName = %q, want CodeWhale", entry.DisplayName)
+	}
+	if entry.Path != "codewhale" {
+		t.Fatalf("Path = %q, want codewhale", entry.Path)
+	}
+	if !reflect.DeepEqual(entry.Custom.Args, []string{"exec", "--auto", "--output-format", "stream-json", "{{prompt}}"}) {
+		t.Fatalf("Custom.Args = %v", entry.Custom.Args)
+	}
+	if !reflect.DeepEqual(entry.Custom.ResumeArgs, []string{"exec", "--resume", "{{session_id}}", "{{prompt}}"}) {
+		t.Fatalf("Custom.ResumeArgs = %v", entry.Custom.ResumeArgs)
+	}
+	if entry.Custom.SessionIDRegex != `"sessionId":"([^"]+)"` {
+		t.Fatalf("Custom.SessionIDRegex = %q", entry.Custom.SessionIDRegex)
+	}
+	if entry.LaunchHeader != "codewhale exec --auto --output-format stream-json {{prompt}}" {
+		t.Fatalf("LaunchHeader = %q", entry.LaunchHeader)
+	}
+	if !entry.SkipVersion {
+		t.Fatalf("managed custom agents should skip version detection by default")
+	}
+}
+
+func TestManagedCustomAgents_UpsertReplacesExistingProvider(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := UpsertManagedCustomAgent("", ManagedCustomAgent{
+		Provider: "codewhale",
+		Name:     "CodeWhale",
+		Path:     "codewhale",
+		Args:     []string{"--model", "auto"},
+	}); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if err := UpsertManagedCustomAgent("", ManagedCustomAgent{
+		Provider: "codewhale",
+		Name:     "CodeWhale traced",
+		Path:     "codewhale",
+		Args:     []string{"--trace-id", "abc"},
+	}); err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(home, ".multica", "custom-runtimes.json"))
+	if err != nil {
+		t.Fatalf("read custom-runtimes.json: %v", err)
+	}
+	var saved []ManagedCustomAgent
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatalf("parse custom-runtimes.json: %v", err)
+	}
+	if len(saved) != 1 {
+		t.Fatalf("saved len = %d, want 1: %s", len(saved), raw)
+	}
+	if saved[0].Name != "CodeWhale traced" {
+		t.Fatalf("saved name = %q, want replacement", saved[0].Name)
+	}
+	if !reflect.DeepEqual(saved[0].Args, []string{"--trace-id", "abc"}) {
+		t.Fatalf("saved args = %v", saved[0].Args)
+	}
+}
+
+func TestLoadConfig_CustomAgentsFromEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := stageFakeAgent(t)
+	kingPath := filepath.Join(binDir, "king")
+	if err := os.WriteFile(kingPath, []byte("#!/bin/sh\nprintf 'king 1.2.3\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake king: %v", err)
+	}
+	t.Setenv("MULTICA_CUSTOM_AGENTS", `[
+		{
+			"provider": "king",
+			"name": "Code King",
+			"path": "king",
+			"args": ["-p", "{{prompt}}"]
+		}
+	]`)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	entry, ok := cfg.Agents["king"]
+	if !ok {
+		t.Fatalf("expected custom king agent, got %#v", cfg.Agents)
+	}
+	if entry.Path != "king" {
+		t.Fatalf("custom path = %q, want king", entry.Path)
+	}
+	if entry.DisplayName != "Code King" {
+		t.Fatalf("display name = %q, want Code King", entry.DisplayName)
+	}
+	if entry.Custom == nil {
+		t.Fatal("custom invocation is nil")
+	}
+	if !reflect.DeepEqual(entry.Custom.Args, []string{"-p", "{{prompt}}"}) {
+		t.Fatalf("custom args = %#v", entry.Custom.Args)
+	}
+	if !entry.SkipVersion {
+		t.Fatal("custom agent should skip version probing by default")
+	}
+}
+
+func TestLoadConfig_CustomAgentsCanSkipVersionProbe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := stageFakeAgent(t)
+	kingPath := filepath.Join(binDir, "king")
+	if err := os.WriteFile(kingPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake king: %v", err)
+	}
+	t.Setenv("MULTICA_CUSTOM_AGENTS", `[{
+		"provider": "king",
+		"path": "king",
+		"args": ["-p", "{{prompt}}"],
+		"version_args": []
+	}]`)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	entry := cfg.Agents["king"]
+	if entry.Custom == nil {
+		t.Fatal("custom invocation is nil")
+	}
+	if !entry.SkipVersion {
+		t.Fatal("custom agent with empty version_args should skip version probe")
+	}
+}
+
+func TestLoadConfig_CustomAgentsRejectBuiltinProvider(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CUSTOM_AGENTS", `[{
+		"provider": "claude",
+		"path": "king",
+		"args": ["-p", "{{prompt}}"]
+	}]`)
+
+	_, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected LoadConfig to reject custom agent overriding builtin provider")
+	}
+	if !strings.Contains(err.Error(), "provider \"claude\" is reserved") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

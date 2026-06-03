@@ -1053,6 +1053,57 @@ export class ApiClient {
     });
   }
 
+  async addCustomRuntime(payload: {
+    targetRuntimeId: string;
+    provider: string;
+    name: string;
+    path: string;
+    args: string[];
+    resumeArgs?: string[];
+    sessionIdRegex?: string;
+  }): Promise<{ status: string }> {
+    return this.fetch("/api/runtimes/custom", {
+      method: "POST",
+      body: JSON.stringify({
+        target_runtime_id: payload.targetRuntimeId,
+        provider: payload.provider,
+        name: payload.name,
+        path: payload.path,
+        args: payload.args,
+        resume_args: payload.resumeArgs ?? [],
+        session_id_regex: payload.sessionIdRegex ?? "",
+      }),
+    });
+  }
+
+  async updateCustomRuntime(
+    runtimeId: string,
+    payload: {
+      name: string;
+      path: string;
+      args: string[];
+      resumeArgs?: string[];
+      sessionIdRegex?: string;
+    },
+  ): Promise<{ status: string }> {
+    return this.fetch(`/api/runtimes/${runtimeId}/custom`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: payload.name,
+        path: payload.path,
+        args: payload.args,
+        resume_args: payload.resumeArgs ?? [],
+        session_id_regex: payload.sessionIdRegex ?? "",
+      }),
+    });
+  }
+
+  async deleteCustomRuntime(runtimeId: string): Promise<{ status: string }> {
+    return this.fetch(`/api/runtimes/${runtimeId}/custom`, {
+      method: "DELETE",
+    });
+  }
+
   async getRuntimeUsage(
     runtimeId: string,
     params?: { days?: number; tz?: string },

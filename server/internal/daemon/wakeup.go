@@ -125,7 +125,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- d.readTaskWakeupMessages(conn, taskWakeups)
+		errCh <- d.readTaskWakeupMessages(conn, taskWakeups, writes)
 	}()
 
 	// Defer cleanup must shut goroutines down in this order:
@@ -255,7 +255,7 @@ func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatRespons
 	d.handleHeartbeatActions(ctx, ack.RuntimeID, ack)
 }
 
-func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- struct{}) error {
+func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- struct{}, writes chan<- []byte) error {
 	conn.SetReadLimit(64 * 1024)
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -287,8 +287,134 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			d.handleWSHeartbeatAck(context.Background(), &ack)
+		case protocol.EventDaemonCustomRuntimeAdd:
+			var payload protocol.CustomRuntimeAddPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("custom runtime add invalid payload", "error", err)
+				continue
+			}
+			err := d.applyCustomRuntimeAdd(payload)
+			d.sendCustomRuntimeAddResult(writes, payload.RequestID, err)
+			if err != nil {
+				d.logger.Warn("custom runtime add failed", "provider", payload.Provider, "error", err)
+				continue
+			}
+			go func() {
+				if err := d.refreshAllWorkspaceRuntimes(d.recoveryContext()); err != nil {
+					d.logger.Warn("custom runtime re-register failed", "error", err)
+				}
+			}()
+		case protocol.EventDaemonCustomRuntimeDelete:
+			var payload protocol.CustomRuntimeDeletePayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("custom runtime delete invalid payload", "error", err)
+				continue
+			}
+			err := d.applyCustomRuntimeDelete(payload)
+			d.sendCustomRuntimeAddResult(writes, payload.RequestID, err)
+			if err != nil {
+				d.logger.Warn("custom runtime delete failed", "provider", payload.Provider, "error", err)
+				continue
+			}
+			go func() {
+				if err := d.refreshAllWorkspaceRuntimes(d.recoveryContext()); err != nil {
+					d.logger.Warn("custom runtime re-register failed", "error", err)
+				}
+			}()
 		}
 	}
+}
+
+func (d *Daemon) applyCustomRuntimeAdd(payload protocol.CustomRuntimeAddPayload) error {
+	managed, err := normalizeManagedCustomAgent(ManagedCustomAgent{
+		Provider:       payload.Provider,
+		Name:           payload.Name,
+		Path:           payload.Path,
+		Args:           payload.Args,
+		ResumeArgs:     payload.ResumeArgs,
+		SessionIDRegex: payload.SessionIDRegex,
+	})
+	if err != nil {
+		return err
+	}
+	entries, err := customAgentsToAgentEntries("custom runtime add", []ManagedCustomAgent{managed}, defaultCustomAgentPathResolver, true)
+	if err != nil {
+		return err
+	}
+	entry := entries[managed.Provider]
+	if err := UpsertManagedCustomAgent(d.cfg.Profile, managed); err != nil {
+		return err
+	}
+	if d.cfg.Agents == nil {
+		d.cfg.Agents = make(map[string]AgentEntry)
+	}
+	d.cfg.Agents[managed.Provider] = entry
+	return nil
+}
+
+func (d *Daemon) applyCustomRuntimeDelete(payload protocol.CustomRuntimeDeletePayload) error {
+	provider := strings.ToLower(strings.TrimSpace(payload.Provider))
+	if provider == "" {
+		return fmt.Errorf("custom runtime provider is required")
+	}
+	if err := DeleteManagedCustomAgent(d.cfg.Profile, provider); err != nil {
+		return err
+	}
+	delete(d.cfg.Agents, provider)
+	return nil
+}
+
+func (d *Daemon) sendCustomRuntimeAddResult(writes chan<- []byte, requestID string, err error) {
+	if requestID == "" || writes == nil {
+		return
+	}
+	resp := protocol.CustomRuntimeAddResultPayload{
+		RequestID: requestID,
+		OK:        err == nil,
+	}
+	if err != nil {
+		resp.Error = err.Error()
+	}
+	frame, marshalErr := json.Marshal(protocol.Message{
+		Type:    protocol.EventDaemonCustomRuntimeAddResult,
+		Payload: marshalRaw(resp),
+	})
+	if marshalErr != nil {
+		d.logger.Debug("custom runtime add result marshal failed", "error", marshalErr)
+		return
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			d.logger.Debug("custom runtime add result dropped: writer closed", "request_id", requestID)
+		}
+	}()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case writes <- frame:
+	case <-timer.C:
+		d.logger.Debug("custom runtime add result dropped: writer backlog", "request_id", requestID)
+	}
+}
+
+func (d *Daemon) refreshAllWorkspaceRuntimes(ctx context.Context) error {
+	d.mu.Lock()
+	workspaceIDs := make([]string, 0, len(d.workspaces))
+	for workspaceID := range d.workspaces {
+		workspaceIDs = append(workspaceIDs, workspaceID)
+	}
+	d.mu.Unlock()
+	var failed []string
+	for _, workspaceID := range workspaceIDs {
+		if err := d.reregisterWorkspaceAfterRuntimeGone(ctx, workspaceID); err != nil {
+			d.logger.Warn("custom runtime re-register failed", "workspace_id", workspaceID, "error", err)
+			failed = append(failed, fmt.Sprintf("%s: %v", workspaceID, err))
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("custom runtime re-register failed: %s", strings.Join(failed, "; "))
+	}
+	return nil
 }
 
 func signalTaskWakeup(taskWakeups chan<- struct{}) {

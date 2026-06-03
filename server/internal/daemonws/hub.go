@@ -3,6 +3,7 @@ package daemonws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -82,6 +83,9 @@ type Hub struct {
 
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
+
+	customMu      sync.Mutex
+	customWaiters map[string]chan protocol.CustomRuntimeAddResultPayload
 }
 
 func NewHub() *Hub {
@@ -94,8 +98,9 @@ func NewHub() *Hub {
 			// grows cookie fallback.
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		clients:   make(map[*client]bool),
-		byRuntime: make(map[string]map[*client]bool),
+		clients:       make(map[*client]bool),
+		byRuntime:     make(map[string]map[*client]bool),
+		customWaiters: make(map[string]chan protocol.CustomRuntimeAddResultPayload),
 	}
 }
 
@@ -159,6 +164,96 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity C
 // NotifyTaskAvailable sends a best-effort wakeup to daemons watching runtimeID.
 func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
 	h.notifyTaskAvailable(runtimeID, taskID, "")
+}
+
+// NotifyCustomRuntimeAdd sends a custom-runtime add request to the daemon
+// connection currently serving targetRuntimeID. The target runtime is just a
+// routing handle: the new provider is persisted on that same daemon host and
+// will appear after the daemon re-registers its full runtime set.
+func (h *Hub) NotifyCustomRuntimeAdd(targetRuntimeID string, payload protocol.CustomRuntimeAddPayload) bool {
+	if h == nil || targetRuntimeID == "" {
+		return false
+	}
+	data, err := customRuntimeAddFrame(payload)
+	if err != nil {
+		return false
+	}
+	delivered, _ := h.notifyFrame(targetRuntimeID, data, "")
+	return delivered
+}
+
+// RequestCustomRuntimeAdd sends a custom-runtime add request and waits for the
+// daemon's explicit acknowledgement. This keeps Web callers from treating a
+// no-op delivery to an older daemon as success: the server only returns success
+// after the selected daemon has persisted the local runtime config. The daemon
+// re-registers its refreshed runtime set immediately after that acknowledgement.
+func (h *Hub) RequestCustomRuntimeAdd(ctx context.Context, targetRuntimeID string, payload protocol.CustomRuntimeAddPayload) (protocol.CustomRuntimeAddResultPayload, bool, error) {
+	if payload.RequestID == "" {
+		return protocol.CustomRuntimeAddResultPayload{}, false, errors.New("custom runtime request_id is required")
+	}
+	data, err := customRuntimeAddFrame(payload)
+	if err != nil {
+		return protocol.CustomRuntimeAddResultPayload{}, false, err
+	}
+	return h.requestCustomRuntime(ctx, targetRuntimeID, payload.RequestID, data)
+}
+
+func (h *Hub) RequestCustomRuntimeDelete(ctx context.Context, targetRuntimeID string, payload protocol.CustomRuntimeDeletePayload) (protocol.CustomRuntimeAddResultPayload, bool, error) {
+	if payload.RequestID == "" {
+		return protocol.CustomRuntimeAddResultPayload{}, false, errors.New("custom runtime request_id is required")
+	}
+	data, err := customRuntimeDeleteFrame(payload)
+	if err != nil {
+		return protocol.CustomRuntimeAddResultPayload{}, false, err
+	}
+	return h.requestCustomRuntime(ctx, targetRuntimeID, payload.RequestID, data)
+}
+
+func (h *Hub) requestCustomRuntime(ctx context.Context, targetRuntimeID, requestID string, data []byte) (protocol.CustomRuntimeAddResultPayload, bool, error) {
+	var zero protocol.CustomRuntimeAddResultPayload
+	if h == nil || targetRuntimeID == "" {
+		return zero, false, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	resultCh := make(chan protocol.CustomRuntimeAddResultPayload, 1)
+	h.customMu.Lock()
+	h.customWaiters[requestID] = resultCh
+	h.customMu.Unlock()
+	defer func() {
+		h.customMu.Lock()
+		delete(h.customWaiters, requestID)
+		h.customMu.Unlock()
+	}()
+
+	delivered, _ := h.notifyFrame(targetRuntimeID, data, "")
+	if !delivered {
+		return zero, false, nil
+	}
+
+	select {
+	case result := <-resultCh:
+		return result, true, nil
+	case <-ctx.Done():
+		return zero, true, ctx.Err()
+	}
+}
+
+func (h *Hub) completeCustomRuntimeAdd(payload protocol.CustomRuntimeAddResultPayload) {
+	if h == nil || payload.RequestID == "" {
+		return
+	}
+	h.customMu.Lock()
+	ch := h.customWaiters[payload.RequestID]
+	h.customMu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- payload:
+	default:
+	}
 }
 
 func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
@@ -241,6 +336,20 @@ func taskAvailableFrame(runtimeID, taskID string) ([]byte, error) {
 			RuntimeID: runtimeID,
 			TaskID:    taskID,
 		}),
+	})
+}
+
+func customRuntimeAddFrame(payload protocol.CustomRuntimeAddPayload) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type:    protocol.EventDaemonCustomRuntimeAdd,
+		Payload: mustMarshalRaw(payload),
+	})
+}
+
+func customRuntimeDeleteFrame(payload protocol.CustomRuntimeDeletePayload) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type:    protocol.EventDaemonCustomRuntimeDelete,
+		Payload: mustMarshalRaw(payload),
 	})
 }
 
@@ -348,6 +457,13 @@ func (c *client) handleFrame(raw []byte) {
 	switch msg.Type {
 	case protocol.EventDaemonHeartbeat:
 		c.handleHeartbeatFrame(msg.Payload)
+	case protocol.EventDaemonCustomRuntimeAddResult:
+		var payload protocol.CustomRuntimeAddResultPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			slog.Debug("daemon websocket custom runtime add result invalid payload", "error", err, "daemon_id", c.identity.DaemonID)
+			return
+		}
+		c.hub.completeCustomRuntimeAdd(payload)
 	default:
 		// Unknown app messages are intentionally ignored for forward
 		// compatibility with future daemon → server message types.

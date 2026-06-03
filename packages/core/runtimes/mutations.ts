@@ -59,3 +59,55 @@ export function useUpdateRuntime(wsId: string) {
     },
   });
 }
+
+export function useAddCustomRuntime(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: {
+      targetRuntimeId: string;
+      provider: string;
+      name: string;
+      path: string;
+      args: string[];
+      resumeArgs?: string[];
+      sessionIdRegex?: string;
+    }) => api.addCustomRuntime(payload),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    },
+  });
+}
+
+export function useUpdateCustomRuntime(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      runtimeId,
+      payload,
+    }: {
+      runtimeId: string;
+      payload: {
+        name: string;
+        path: string;
+        args: string[];
+        resumeArgs?: string[];
+        sessionIdRegex?: string;
+      };
+    }) => api.updateCustomRuntime(runtimeId, payload),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    },
+  });
+}
+
+export function useDeleteCustomRuntime(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runtimeId: string) => api.deleteCustomRuntime(runtimeId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    },
+  });
+}

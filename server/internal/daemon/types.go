@@ -1,11 +1,21 @@
 package daemon
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
+)
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path          string // path to CLI binary
+	Model         string // model override (optional)
+	DisplayName   string // optional runtime display name override
+	LaunchHeader  string // optional launch skeleton for UI display
+	Custom        *agent.CustomInvocation
+	ManagedCustom bool     // true when sourced from profile-local custom-runtimes.json
+	VersionArgs   []string // nil = use --version; empty with SkipVersion = no probe
+	SkipVersion   bool
 }
 
 // Runtime represents a registered daemon runtime.

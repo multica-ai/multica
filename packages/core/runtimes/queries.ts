@@ -52,6 +52,11 @@ export function runtimeListOptions(wsId: string, owner?: "me") {
   return queryOptions({
     queryKey: owner === "me" ? runtimeKeys.listMine(wsId) : runtimeKeys.list(wsId),
     queryFn: () => api.listRuntimes({ workspace_id: wsId, owner }),
+    // Runtime health is driven by daemon heartbeats updating status/last_seen_at.
+    // Heartbeats are intentionally noisy, so the server does not broadcast a
+    // WebSocket event for every tick; active runtime views poll this narrow
+    // list so the UI can recover from a stale offline snapshot.
+    refetchInterval: 30 * 1000,
   });
 }
 

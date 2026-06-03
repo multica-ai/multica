@@ -8,6 +8,7 @@ import {
   Plus,
   Search,
   Server,
+  Terminal,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -30,6 +31,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
+import { CustomRuntimeDialog } from "./custom-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import {
@@ -109,6 +111,7 @@ export function RuntimesPage({
   }, []);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
+  const [showCustomRuntimeDialog, setShowCustomRuntimeDialog] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_runtimes_layout",
   });
@@ -189,6 +192,8 @@ export function RuntimesPage({
   // Desktop always has a synthesized local machine row, so the
   // "register a runtime" empty state would hide the Start button.
   const showEmpty = totalCount === 0 && !bootstrapping && !hasLocalMachine;
+  const customRuntimeTarget = selectedMachine?.runtimes[0] ?? null;
+  const canAddCustomRuntimeToSelectedMachine = Boolean(customRuntimeTarget);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -221,6 +226,8 @@ export function RuntimesPage({
             updatableIds={updatableIds}
             now={now}
             bootstrapping={bootstrapping}
+            canAddCustomRuntime={canAddCustomRuntimeToSelectedMachine}
+            onOpenCustomRuntime={() => setShowCustomRuntimeDialog(true)}
             actions={
               selectedMachine?.isCurrent ? localMachineActions : undefined
             }
@@ -261,6 +268,8 @@ export function RuntimesPage({
                 updatableIds={updatableIds}
                 now={now}
                 bootstrapping={bootstrapping}
+                canAddCustomRuntime={canAddCustomRuntimeToSelectedMachine}
+                onOpenCustomRuntime={() => setShowCustomRuntimeDialog(true)}
                 actions={
                   selectedMachine?.isCurrent ? localMachineActions : undefined
                 }
@@ -275,6 +284,13 @@ export function RuntimesPage({
       )}
       {cloudRuntimeEnabled && showCloudRuntimeDialog && (
         <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
+      )}
+      {customRuntimeTarget && showCustomRuntimeDialog && (
+        <CustomRuntimeDialog
+          wsId={wsId}
+          targetRuntime={customRuntimeTarget}
+          onClose={() => setShowCustomRuntimeDialog(false)}
+        />
       )}
     </div>
   );
@@ -573,12 +589,16 @@ function MachineDetail({
   updatableIds,
   now,
   bootstrapping,
+  canAddCustomRuntime,
+  onOpenCustomRuntime,
   actions,
 }: {
   machine: RuntimeMachine | null;
   updatableIds: Set<string>;
   now: number;
   bootstrapping?: boolean;
+  canAddCustomRuntime?: boolean;
+  onOpenCustomRuntime?: () => void;
   actions?: React.ReactNode;
 }) {
   const { t } = useT("runtimes");
@@ -608,6 +628,24 @@ function MachineDetail({
       </main>
     );
   }
+
+  const headerActions =
+    canAddCustomRuntime || actions ? (
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {canAddCustomRuntime && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onOpenCustomRuntime}
+          >
+            <Terminal className="h-3 w-3" />
+            {t(($) => $.connect.custom_tab)}
+          </Button>
+        )}
+        {actions}
+      </div>
+    ) : null;
 
   const runtimeTotal = machine.runtimes.length;
   const busyCount = machine.runningCount + machine.queuedCount;
@@ -680,7 +718,7 @@ function MachineDetail({
               ))}
             </div>
           </div>
-          {actions && <div className="shrink-0">{actions}</div>}
+          {headerActions}
         </div>
       </div>
 

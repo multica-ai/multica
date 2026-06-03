@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -64,6 +65,167 @@ func TestNotifyTaskAvailable(t *testing.T) {
 	}
 	if payload.RuntimeID != "runtime-1" || payload.TaskID != "task-1" {
 		t.Fatalf("payload = %+v, want runtime/task IDs", payload)
+	}
+}
+
+func TestNotifyCustomRuntimeAddDeliversFrame(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{RuntimeIDs: []string{"runtime-1"}})
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for hub.RuntimeConnectionCount("runtime-1") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("runtime connection was not registered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	delivered := hub.NotifyCustomRuntimeAdd("runtime-1", protocol.CustomRuntimeAddPayload{
+		RequestID:      "req-1",
+		Provider:       "codewhale",
+		Name:           "CodeWhale",
+		Path:           "codewhale",
+		Args:           []string{"exec", "--auto", "--output-format", "stream-json", "{{prompt}}"},
+		ResumeArgs:     []string{"exec", "--resume", "{{session_id}}", "{{prompt}}"},
+		SessionIDRegex: `"sessionId":"([^"]+)"`,
+	})
+	if !delivered {
+		t.Fatal("expected custom runtime add frame to be delivered")
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+
+	var msg protocol.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal message: %v", err)
+	}
+	if msg.Type != protocol.EventDaemonCustomRuntimeAdd {
+		t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonCustomRuntimeAdd)
+	}
+
+	var payload protocol.CustomRuntimeAddPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.RequestID != "req-1" || payload.Provider != "codewhale" {
+		t.Fatalf("payload = %+v, want request/provider", payload)
+	}
+	if !reflect.DeepEqual(payload.Args, []string{"exec", "--auto", "--output-format", "stream-json", "{{prompt}}"}) {
+		t.Fatalf("payload args = %v", payload.Args)
+	}
+	if !reflect.DeepEqual(payload.ResumeArgs, []string{"exec", "--resume", "{{session_id}}", "{{prompt}}"}) {
+		t.Fatalf("payload resume args = %v", payload.ResumeArgs)
+	}
+	if payload.SessionIDRegex != `"sessionId":"([^"]+)"` {
+		t.Fatalf("payload session regex = %q", payload.SessionIDRegex)
+	}
+}
+
+func TestRequestCustomRuntimeAddWaitsForResult(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{RuntimeIDs: []string{"runtime-1"}})
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for hub.RuntimeConnectionCount("runtime-1") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("runtime connection was not registered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	resultCh := make(chan protocol.CustomRuntimeAddResultPayload, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, delivered, err := hub.RequestCustomRuntimeAdd(ctx, "runtime-1", protocol.CustomRuntimeAddPayload{
+			RequestID: "req-ack",
+			Provider:  "codewhale",
+			Name:      "CodeWhale",
+			Path:      "codewhale",
+			Args:      []string{"exec", "{{prompt}}"},
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		if !delivered {
+			errCh <- context.Canceled
+			return
+		}
+		resultCh <- result
+	}()
+
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+	var msg protocol.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal request frame: %v", err)
+	}
+	if msg.Type != protocol.EventDaemonCustomRuntimeAdd {
+		t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonCustomRuntimeAdd)
+	}
+
+	resultFrame, err := json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonCustomRuntimeAddResult,
+		Payload: mustRawMessage(t, protocol.CustomRuntimeAddResultPayload{
+			RequestID: "req-ack",
+			OK:        true,
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal result frame: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, resultFrame); err != nil {
+		t.Fatalf("WriteMessage result: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("RequestCustomRuntimeAdd returned error: %v", err)
+	case result := <-resultCh:
+		if result.RequestID != "req-ack" || !result.OK {
+			t.Fatalf("result = %+v, want ok req-ack", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for custom runtime add result")
 	}
 }
 
@@ -344,6 +506,15 @@ func attachDaemonTestClient(hub *Hub, runtimeID string) *client {
 	hub.mu.Unlock()
 
 	return c
+}
+
+func mustRawMessage(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal raw message: %v", err)
+	}
+	return raw
 }
 
 type recordingRelayPublisher struct {

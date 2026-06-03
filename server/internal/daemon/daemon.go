@@ -715,9 +715,9 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	var runtimes []map[string]string
+	var runtimes []map[string]any
 	for name, entry := range d.cfg.Agents {
-		version, err := detectAgentVersion(ctx, entry.Path)
+		version, err := detectAgentEntryVersion(ctx, name, entry)
 		if err != nil {
 			d.logger.Warn("skip registering runtime", "name", name, "error", err)
 			continue
@@ -728,16 +728,37 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		}
 		d.setAgentVersion(name, version)
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
-		displayName := strings.ToUpper(name[:1]) + name[1:]
+		displayName := entry.DisplayName
+		if displayName == "" {
+			displayName = strings.ToUpper(name[:1]) + name[1:]
+		}
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
-			"name":    displayName,
-			"type":    name,
-			"version": version,
-			"status":  "online",
-		})
+		runtime := map[string]any{
+			"name":          displayName,
+			"type":          name,
+			"version":       version,
+			"status":        "online",
+			"launch_header": runtimeLaunchHeader(name, entry),
+		}
+		if entry.Custom != nil {
+			runtime["custom_runtime"] = true
+			if entry.ManagedCustom {
+				runtime["custom_runtime_source"] = "managed"
+			} else {
+				runtime["custom_runtime_source"] = "env"
+			}
+			runtime["custom_runtime_config"] = ManagedCustomAgent{
+				Provider:       name,
+				Name:           entry.DisplayName,
+				Path:           entry.Path,
+				Args:           append([]string(nil), entry.Custom.Args...),
+				ResumeArgs:     append([]string(nil), entry.Custom.ResumeArgs...),
+				SessionIDRegex: strings.TrimSpace(entry.Custom.SessionIDRegex),
+			}
+		}
+		runtimes = append(runtimes, runtime)
 	}
 	if len(runtimes) == 0 {
 		return nil, fmt.Errorf("no agent runtimes could be registered")
@@ -762,6 +783,23 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
 	return resp, nil
+}
+
+func detectAgentEntryVersion(ctx context.Context, name string, entry AgentEntry) (string, error) {
+	if entry.SkipVersion {
+		return "custom", nil
+	}
+	if entry.VersionArgs != nil {
+		return agent.DetectVersionWithArgs(ctx, entry.Path, entry.VersionArgs)
+	}
+	return detectAgentVersion(ctx, entry.Path)
+}
+
+func runtimeLaunchHeader(name string, entry AgentEntry) string {
+	if entry.LaunchHeader != "" {
+		return entry.LaunchHeader
+	}
+	return agent.LaunchHeader(name)
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
@@ -1420,6 +1458,14 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
 			"error":  fmt.Sprintf("no agent configured for provider %q", rt.Provider),
+		})
+		return
+	}
+	if entry.Custom != nil {
+		d.reportModelListResult(ctx, rt, requestID, map[string]any{
+			"status":    "completed",
+			"models":    []any{},
+			"supported": false,
 		})
 		return
 	}
@@ -2712,6 +2758,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		Custom:         entry.Custom,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)

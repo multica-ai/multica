@@ -706,7 +706,11 @@ func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
 }
 
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
-	cmd := exec.CommandContext(ctx, execPath, "--version")
+	return detectCLIVersionWithArgs(ctx, execPath, []string{"--version"})
+}
+
+func detectCLIVersionWithArgs(ctx context.Context, execPath string, args []string) (string, error) {
+	cmd := exec.CommandContext(ctx, execPath, args...)
 	hideAgentWindow(cmd)
 	data, err := cmd.Output()
 	if err != nil {
