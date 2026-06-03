@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearQueuedTasksRuntimePauseWaitReason = `-- name: ClearQueuedTasksRuntimePauseWaitReason :exec
+UPDATE agent_task_queue
+SET wait_reason = NULL
+WHERE runtime_id = $1
+  AND status = 'queued'
+  AND wait_reason LIKE 'runtime_paused|%'
+`
+
+// Clears the pause stamp when the runtime unpauses. Scoped to our prefix so
+// unrelated wait_reason values (e.g. local_directory holds) are untouched.
+func (q *Queries) ClearQueuedTasksRuntimePauseWaitReason(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearQueuedTasksRuntimePauseWaitReason, runtimeID)
+	return err
+}
+
 const createAutoPauseAlertComment = `-- name: CreateAutoPauseAlertComment :one
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
 SELECT i.id, i.workspace_id, 'agent', $1, $2, 'comment'
@@ -454,6 +469,25 @@ WHERE id = $1
 // instead of a needless row write on every completion.
 func (q *Queries) ResetAutoPauseCount(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, resetAutoPauseCount, id)
+	return err
+}
+
+const stampQueuedTasksRuntimePauseWaitReason = `-- name: StampQueuedTasksRuntimePauseWaitReason :exec
+UPDATE agent_task_queue
+SET wait_reason = $2
+WHERE runtime_id = $1
+  AND status = 'queued'
+`
+
+type StampQueuedTasksRuntimePauseWaitReasonParams struct {
+	RuntimeID  pgtype.UUID `json:"runtime_id"`
+	WaitReason pgtype.Text `json:"wait_reason"`
+}
+
+// FIR-2717: explain queued waits on the task row instead of posting an issue
+// comment. Only touches still-queued tasks on the paused runtime.
+func (q *Queries) StampQueuedTasksRuntimePauseWaitReason(ctx context.Context, arg StampQueuedTasksRuntimePauseWaitReasonParams) error {
+	_, err := q.db.Exec(ctx, stampQueuedTasksRuntimePauseWaitReason, arg.RuntimeID, arg.WaitReason)
 	return err
 }
 

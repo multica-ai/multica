@@ -19,6 +19,7 @@ const ALPHA: CerebroStatusModel = {
     { key: "done", label: "Færdig", color: "#10b981", base_status: "done", position: 2 },
   ],
   project_count: 0,
+  workspace_default: false,
   created_by_id: "u-1",
   created_by_type: "member",
   created_at: "2026-05-27T00:00:00Z",
@@ -54,8 +55,7 @@ function nameInput(): HTMLInputElement {
 
 function editButtonFor(modelName: string): HTMLElement {
   const row = screen.getByText(modelName).closest("div.rounded-lg") as HTMLElement;
-  // The row's first button is "Rediger" (pencil), the second is delete.
-  return within(row).getAllByRole("button")[0]!;
+  return within(row).getByTitle("Edit model");
 }
 
 describe("StatusModelsTab editor state", () => {

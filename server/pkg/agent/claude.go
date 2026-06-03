@@ -671,8 +671,16 @@ func mergeEnv(base []string, extra map[string]string) []string {
 // isStrippedClaudeAuth — CEREBRO-PATCH(claude-oauth-strips-api-key): Cerebro Claude-agenter
 // kører altid OAuth via CLAUDE_CONFIG_DIR. ANTHROPIC_API_KEY/AUTH_TOKEN må aldrig
 // arves fra host-env eller injiceres via CustomEnv — det ville få Claude Code til
-// at bruge API-key i stedet for OAuth.
+// at bruge API-key i stedet for OAuth. Undtagelse: en cloud-runtime kan sætte
+// MULTICA_RUNTIME_ALLOW_API_KEY for at vælge API-key-auth pr. runtime (opt-in).
 func isStrippedClaudeAuth(key string) bool {
+	if !isClaudeAuthKey(key) {
+		return false
+	}
+	return os.Getenv("MULTICA_RUNTIME_ALLOW_API_KEY") == "" // CEREBRO-PATCH(claude-oauth-strips-api-key): runtime opt-in
+}
+
+func isClaudeAuthKey(key string) bool {
 	return key == "ANTHROPIC_API_KEY" || key == "ANTHROPIC_AUTH_TOKEN"
 }
 

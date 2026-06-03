@@ -11,10 +11,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // Handler hosts the REST surface for the cerebro sprint feature. Wired
@@ -24,12 +26,18 @@ import (
 // Every endpoint is workspace-scoped via the X-Workspace-ID header (read
 // through middleware.WorkspaceIDFromContext) and authenticated via the
 // X-User-ID header (requireUserID).
+//
+// Pool and Upstream are only used by SweepProject, which builds a Sweeper
+// on demand to run a one-off project sweep. The daily background Sweeper
+// stays owned by main.go.
 type Handler struct {
-	Cerebro *cerebrodb.Queries
+	Cerebro  *cerebrodb.Queries
+	Pool     *pgxpool.Pool
+	Upstream *db.Queries
 }
 
-func NewHandler(cerebro *cerebrodb.Queries) *Handler {
-	return &Handler{Cerebro: cerebro}
+func NewHandler(cerebro *cerebrodb.Queries, pool *pgxpool.Pool, upstream *db.Queries) *Handler {
+	return &Handler{Cerebro: cerebro, Pool: pool, Upstream: upstream}
 }
 
 // ---------------------------------------------------------------------------
@@ -905,3 +913,78 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // Silence unused-imports when the build only links a subset of the
 // handlers. time is referenced through tsString; left here as a guard.
 var _ = time.RFC3339
+
+// ---------------------------------------------------------------------------
+// Manual sweep trigger
+// ---------------------------------------------------------------------------
+
+// sweepResponse is the JSON shape returned by SweepProject. Counters are
+// always present (zero when nothing happened) so the QA + ops clients can
+// assert on exact numbers.
+type sweepResponse struct {
+	FlagEnabled           bool   `json:"flag_enabled"`
+	SprintsMarkedDone     int    `json:"sprints_marked_done"`
+	PlannedActivated      string `json:"planned_activated,omitempty"`
+	NextSprintCreated     string `json:"next_sprint_created,omitempty"`
+	IncompleteIssuesMoved int    `json:"incomplete_issues_moved"`
+	RecurringTasksCloned  int    `json:"recurring_tasks_cloned"`
+}
+
+// SweepProject runs the sprint sweeper for one project synchronously and
+// returns a summary of what changed. Used by QA + ops to verify behaviour
+// without waiting for the daily background tick.
+//
+// Workspace owner/admin only. The endpoint mirrors the daily sweeper:
+// honors the workspace cerebro_sprints flag, runs advance-expired /
+// activate-planned / maybe-create-next with the project's settings.
+func (h *Handler) SweepProject(w http.ResponseWriter, r *http.Request) {
+	member, ok := middleware.MemberFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "only workspace owners and admins can trigger a sprint sweep")
+		return
+	}
+	projectID, ok := parseUUIDParam(w, r, "projectID")
+	if !ok {
+		return
+	}
+	// Settings always carry workspace_id. Load them up front so we can
+	// reject a cross-workspace projectID before constructing the Sweeper.
+	settings, err := h.Cerebro.GetCerebroSprintSettings(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "no sprint settings for project")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load settings failed")
+		return
+	}
+	if !uuidEqual(settings.WorkspaceID, member.WorkspaceID) {
+		writeError(w, http.StatusForbidden, "workspace mismatch")
+		return
+	}
+
+	sw := NewSweeper(h.Pool, h.Cerebro, h.Upstream)
+	res, err := sw.SweepProject(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "sweep failed: "+err.Error())
+		return
+	}
+
+	resp := sweepResponse{
+		FlagEnabled:           res.FlagEnabled,
+		SprintsMarkedDone:     res.SprintsMarkedDone,
+		IncompleteIssuesMoved: res.IncompleteIssuesMoved,
+		RecurringTasksCloned:  res.RecurringTasksCloned,
+	}
+	if res.PlannedActivated.Valid {
+		resp.PlannedActivated = util.UUIDToString(res.PlannedActivated)
+	}
+	if res.NextSprintCreated.Valid {
+		resp.NextSprintCreated = util.UUIDToString(res.NextSprintCreated)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}

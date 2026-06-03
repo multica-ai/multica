@@ -354,122 +354,329 @@ func (t *FirtalAssignIssueTool) Call(ctx context.Context, args map[string]any) (
 	return string(raw), nil
 }
 
-// ── firtal_bq_query ──────────────────────────────────────────────────────────
+// ── firtal_registry ──────────────────────────────────────────────────────────
 
-// FirtalBQQueryTool implements Tool for running BigQuery SQL via the Firtal
-// Data Registry query endpoint.
-type FirtalBQQueryTool struct {
-	queries *db.Queries
-	tctx    ToolContext
+// FirtalRegistryTool implements Tool for the Firtal Data Registry agent API.
+// It exposes the documented discovery → execute workflow:
+//
+//   - list_data_sources → GET  /api/registry/data-sources
+//   - get_schema        → POST /api/registry/execute with {dataSourceId, agent_metadata: true}
+//   - execute           → POST /api/registry/execute with the full structured-query body
+//
+// Per-data-source authorisation is enforced from agent_tool_grant.config_json.
+// The default (no config row, empty allowlist) denies every data source — admins
+// must explicitly opt in via GrantAgentTool with a config_json that lists the
+// allowed dataSourceId values (or sets allowed_data_sources_all=true).
+type FirtalRegistryTool struct {
+	queries  *db.Queries
+	tctx     ToolContext
+	registry *Registry
 }
 
-func (t *FirtalBQQueryTool) Name() string { return "firtal_bq_query" }
-func (t *FirtalBQQueryTool) Description() string {
-	return "Run a BigQuery SQL query via Firtal Data Registry. Returns results as JSON array."
+// firtalRegistryGrantConfig is the per-agent grant config_json shape for the
+// firtal_registry tool. A grant row with empty/missing AllowedDataSources and
+// AllowedAll=false locks the agent out of every data source (deny-by-default).
+type firtalRegistryGrantConfig struct {
+	AllowedDataSources []string `json:"allowed_data_sources"`
+	AllowedAll         bool     `json:"allowed_data_sources_all"`
 }
-func (t *FirtalBQQueryTool) InputSchema() map[string]any {
+
+// fdrRegistrySettings is the workspace.settings envelope read for the registry
+// base URL + key. data_registry takes precedence; firtal_gateway is the
+// fallback so workspaces that haven't been migrated to a dedicated FDR section
+// keep working off their existing gateway credentials.
+type fdrRegistrySettings struct {
+	DataRegistry *struct {
+		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
+	} `json:"data_registry"`
+	FirtalGateway *WorkspaceFirtalGatewaySettings `json:"firtal_gateway"`
+}
+
+func (t *FirtalRegistryTool) Name() string { return "firtal_registry" }
+func (t *FirtalRegistryTool) Description() string {
+	return "Query the Firtal Data Registry. Use action=list_data_sources to discover available data sources, action=get_schema with data_source_id to fetch a single source's schema and parameters, and action=execute with data_source_id plus optional parameters, filter_group, pagination, and aggregation to run a query."
+}
+func (t *FirtalRegistryTool) InputSchema() map[string]any {
 	return map[string]any{
 		"type":     "object",
-		"required": []string{"query"},
+		"required": []string{"action"},
 		"properties": map[string]any{
-			"query": map[string]any{
+			"action": map[string]any{
 				"type":        "string",
-				"description": "SQL query to execute",
+				"description": "Operation to perform: list_data_sources, get_schema, or execute.",
 			},
-			"limit": map[string]any{
-				"type":        "integer",
-				"description": "Max rows to return (default 100)",
+			"data_source_id": map[string]any{
+				"type":        "string",
+				"description": "Data source UUID. Required for get_schema and execute.",
+			},
+			"parameters": map[string]any{
+				"type":        "object",
+				"description": "Named parameter values, keyed by parameter name.",
+			},
+			"filter_group": map[string]any{
+				"type":        "object",
+				"description": "Structured filter group: {logic, filters} where each filter is {field, operator, value}.",
+			},
+			"pagination": map[string]any{
+				"type":        "object",
+				"description": "Pagination cursor: {offset, limit}.",
+			},
+			"aggregation": map[string]any{
+				"type":        "object",
+				"description": "Aggregation spec: {groupBy, metrics}. metrics is a list of {function, field, alias}.",
 			},
 		},
 	}
 }
 
-type fdrWorkspaceSettings struct {
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
-}
-type fdrSettingsEnvelope struct {
-	DataRegistry *fdrWorkspaceSettings `json:"data_registry"`
-	// Firtal gateway settings are also checked as a fallback source
-	FirtalGateway *WorkspaceFirtalGatewaySettings `json:"firtal_gateway"`
-}
+const (
+	firtalRegistryListPath    = "/api/registry/data-sources"
+	firtalRegistryExecutePath = "/api/registry/execute"
+)
 
-func (t *FirtalBQQueryTool) Call(ctx context.Context, args map[string]any) (string, error) {
-	query, ok := args["query"].(string)
-	if !ok || strings.TrimSpace(query) == "" {
-		return "", fmt.Errorf("firtal_bq_query: query is required")
+func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	action, _ := args["action"].(string)
+	action = strings.TrimSpace(action)
+	if action == "" {
+		return "", fmt.Errorf("firtal_registry: action is required (one of: list_data_sources, get_schema, execute)")
+	}
+	switch action {
+	case "list_data_sources", "get_schema", "execute":
+	default:
+		return "", fmt.Errorf("firtal_registry: unknown action %q (expected one of: list_data_sources, get_schema, execute)", action)
 	}
 
-	limit := 100
-	if lv, ok := args["limit"]; ok {
-		switch v := lv.(type) {
-		case float64:
-			limit = int(v)
-		case int:
-			limit = v
+	// Both get_schema and execute address a specific data source; validate the
+	// ID is present before any DB or HTTP work so a malformed call fails fast.
+	var dsID string
+	if action == "get_schema" || action == "execute" {
+		id, err := requiredDataSourceID(args)
+		if err != nil {
+			return "", err
 		}
-		if limit <= 0 || limit > 1000 {
-			limit = 100
-		}
+		dsID = id
 	}
 
-	// Load workspace settings to get FDR URL + key.
+	baseURL, apiKey, err := t.loadRegistryCredentials(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	config, err := t.loadGrantConfig(ctx)
+	if err != nil {
+		return "", fmt.Errorf("firtal_registry: load grant config: %w", err)
+	}
+
+	switch action {
+	case "list_data_sources":
+		return t.callList(ctx, baseURL, apiKey, config)
+	case "get_schema":
+		if !config.allows(dsID) {
+			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
+		}
+		return t.callExecute(ctx, baseURL, apiKey, map[string]any{
+			"dataSourceId":   dsID,
+			"agent_metadata": true,
+		})
+	case "execute":
+		if !config.allows(dsID) {
+			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
+		}
+		body := map[string]any{"dataSourceId": dsID}
+		for _, key := range []string{"parameters", "filter_group", "pagination", "aggregation"} {
+			if v, ok := args[key]; ok {
+				body[snakeToCamelRegistryArg(key)] = v
+			}
+		}
+		return t.callExecute(ctx, baseURL, apiKey, body)
+	}
+	// unreachable — the action validation above is exhaustive.
+	return "", fmt.Errorf("firtal_registry: unreachable")
+}
+
+// allows reports whether the given data source UUID is permitted under this
+// grant's allowlist. allowed_data_sources_all=true short-circuits to allow.
+func (c firtalRegistryGrantConfig) allows(dsID string) bool {
+	if c.AllowedAll {
+		return true
+	}
+	for _, id := range c.AllowedDataSources {
+		if strings.EqualFold(strings.TrimSpace(id), dsID) {
+			return true
+		}
+	}
+	return false
+}
+
+// filterListed drops data-source entries from a /api/registry/data-sources
+// response whose `id` field is not in this grant's allowlist. The FDR returns
+// either a bare array or an envelope {data: [...]}; both shapes are handled.
+// On allowed_data_sources_all=true the body is passed through untouched.
+func (c firtalRegistryGrantConfig) filterListed(raw []byte) []byte {
+	if c.AllowedAll {
+		return raw
+	}
+	var asArray []map[string]any
+	if err := json.Unmarshal(raw, &asArray); err == nil {
+		return marshalListed(filterDataSources(asArray, c))
+	}
+	var asEnvelope map[string]any
+	if err := json.Unmarshal(raw, &asEnvelope); err == nil {
+		if items, ok := asEnvelope["data"].([]any); ok {
+			kept := make([]map[string]any, 0, len(items))
+			for _, item := range items {
+				if m, ok := item.(map[string]any); ok {
+					kept = append(kept, m)
+				}
+			}
+			asEnvelope["data"] = filterDataSources(kept, c)
+			if out, err := json.Marshal(asEnvelope); err == nil {
+				return out
+			}
+		}
+	}
+	// Unknown shape — fail safe: return an empty array rather than leak the
+	// upstream response unfiltered to an agent that does not have AllowedAll.
+	return []byte("[]")
+}
+
+func filterDataSources(items []map[string]any, c firtalRegistryGrantConfig) []map[string]any {
+	kept := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		id, _ := item["id"].(string)
+		if c.allows(id) {
+			kept = append(kept, item)
+		}
+	}
+	return kept
+}
+
+func marshalListed(items []map[string]any) []byte {
+	out, err := json.Marshal(items)
+	if err != nil {
+		return []byte("[]")
+	}
+	return out
+}
+
+// requiredDataSourceID pulls and validates the data_source_id argument shared
+// by the get_schema and execute actions.
+func requiredDataSourceID(args map[string]any) (string, error) {
+	id, _ := args["data_source_id"].(string)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", fmt.Errorf("firtal_registry: data_source_id is required for this action")
+	}
+	return id, nil
+}
+
+// snakeToCamelRegistryArg maps tool-schema arg names (snake_case for LLM
+// ergonomics) to the camelCase keys the FDR proxy expects in the execute body.
+func snakeToCamelRegistryArg(key string) string {
+	switch key {
+	case "filter_group":
+		return "filterGroup"
+	default:
+		return key
+	}
+}
+
+func (t *FirtalRegistryTool) loadGrantConfig(ctx context.Context) (firtalRegistryGrantConfig, error) {
+	if t.registry == nil {
+		return firtalRegistryGrantConfig{}, nil
+	}
+	raw, err := t.registry.GetGrantConfig(ctx, t.tctx.AgentID, "firtal_registry")
+	if err != nil {
+		return firtalRegistryGrantConfig{}, err
+	}
+	if len(raw) == 0 {
+		return firtalRegistryGrantConfig{}, nil
+	}
+	var cfg firtalRegistryGrantConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return firtalRegistryGrantConfig{}, fmt.Errorf("parse config_json: %w", err)
+	}
+	return cfg, nil
+}
+
+func (t *FirtalRegistryTool) loadRegistryCredentials(ctx context.Context) (string, string, error) {
 	ws, err := t.queries.GetWorkspace(ctx, t.tctx.WorkspaceID)
 	if err != nil {
-		return "", fmt.Errorf("firtal_bq_query: load workspace: %w", err)
+		return "", "", fmt.Errorf("firtal_registry: load workspace: %w", err)
 	}
-
-	var envelope fdrSettingsEnvelope
+	var envelope fdrRegistrySettings
 	if len(ws.Settings) > 0 {
 		_ = json.Unmarshal(ws.Settings, &envelope)
 	}
-
 	var baseURL, apiKey string
 	if envelope.DataRegistry != nil {
 		baseURL = strings.TrimRight(envelope.DataRegistry.BaseURL, "/")
 		apiKey = envelope.DataRegistry.APIKey
 	}
-	// Fallback to firtal_gateway URL/key if data_registry not set
 	if baseURL == "" && envelope.FirtalGateway != nil {
 		baseURL = strings.TrimRight(envelope.FirtalGateway.GatewayURL, "/")
 		apiKey = envelope.FirtalGateway.APIKey
 	}
 	if baseURL == "" {
-		return "", fmt.Errorf("firtal_bq_query: data registry URL not configured in workspace settings")
+		return "", "", fmt.Errorf("firtal_registry: data registry URL not configured in workspace settings")
 	}
+	return baseURL, apiKey, nil
+}
 
-	reqBody, err := json.Marshal(map[string]any{
-		"sql":      query,
-		"max_rows": limit,
-	})
+func (t *FirtalRegistryTool) callList(ctx context.Context, baseURL, apiKey string, config firtalRegistryGrantConfig) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+firtalRegistryListPath, nil)
 	if err != nil {
-		return "", fmt.Errorf("firtal_bq_query: marshal request: %w", err)
+		return "", fmt.Errorf("firtal_registry: build list request: %w", err)
 	}
+	t.setRegistryHeaders(req, apiKey)
+	body, err := doRegistryRequest(req)
+	if err != nil {
+		return "", err
+	}
+	return string(config.filterListed(body)), nil
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/data/query", bytes.NewReader(reqBody))
+func (t *FirtalRegistryTool) callExecute(ctx context.Context, baseURL, apiKey string, body map[string]any) (string, error) {
+	raw, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("firtal_bq_query: build request: %w", err)
+		return "", fmt.Errorf("firtal_registry: marshal execute body: %w", err)
 	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+firtalRegistryExecutePath, bytes.NewReader(raw))
+	if err != nil {
+		return "", fmt.Errorf("firtal_registry: build execute request: %w", err)
+	}
+	t.setRegistryHeaders(req, apiKey)
+	respBody, err := doRegistryRequest(req)
+	if err != nil {
+		return "", err
+	}
+	return string(respBody), nil
+}
+
+func (t *FirtalRegistryTool) setRegistryHeaders(req *http.Request, apiKey string) {
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
 	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("x-api-key", apiKey)
 	}
+}
 
+func doRegistryRequest(req *http.Request) ([]byte, error) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("firtal_bq_query: HTTP request: %w", err)
+		return nil, fmt.Errorf("firtal_registry: HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
-
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return "", fmt.Errorf("firtal_bq_query: read response: %w", err)
+		return nil, fmt.Errorf("firtal_registry: read response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("firtal_bq_query: HTTP %d: %s", resp.StatusCode, truncateGatewayError(string(body), 512))
+		return nil, fmt.Errorf("firtal_registry: HTTP %d: %s", resp.StatusCode, truncateGatewayError(string(body), 512))
 	}
-	return string(body), nil
+	return body, nil
 }
 
 // ── web_fetch ─────────────────────────────────────────────────────────────────
@@ -1316,7 +1523,7 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	r.Register(&FirtalListGroupsTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalGetGrantTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalCredentialListTool{cerebro: cerebroQueries, tctx: tctx})
-	r.Register(&FirtalBQQueryTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalRegistryTool{queries: queries, tctx: tctx, registry: r})
 	r.Register(&WebFetchTool{})
 	r.Register(&SheetsWriteTool{queries: queries, tctx: tctx})
 	for _, tool := range customerServiceMCPTools() {

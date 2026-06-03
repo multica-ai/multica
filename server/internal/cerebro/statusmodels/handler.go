@@ -129,29 +129,31 @@ type statusTriggers struct {
 }
 
 type statusModelResponse struct {
-	ID            string        `json:"id"`
-	WorkspaceID   string        `json:"workspace_id"`
-	Name          string        `json:"name"`
-	Description   string        `json:"description,omitempty"`
-	Statuses      []statusEntry `json:"statuses"`
-	ProjectCount  int64         `json:"project_count"`
-	CreatedByID   string        `json:"created_by_id"`
-	CreatedByType string        `json:"created_by_type"`
-	CreatedAt     string        `json:"created_at"`
-	UpdatedAt     string        `json:"updated_at"`
+	ID               string        `json:"id"`
+	WorkspaceID      string        `json:"workspace_id"`
+	Name             string        `json:"name"`
+	Description      string        `json:"description,omitempty"`
+	Statuses         []statusEntry `json:"statuses"`
+	ProjectCount     int64         `json:"project_count"`
+	WorkspaceDefault bool          `json:"workspace_default"`
+	CreatedByID      string        `json:"created_by_id"`
+	CreatedByType    string        `json:"created_by_type"`
+	CreatedAt        string        `json:"created_at"`
+	UpdatedAt        string        `json:"updated_at"`
 }
 
 func toStatusModelResponse(row cerebrodb.CerebroStatusModel, projectCount int64) statusModelResponse {
 	out := statusModelResponse{
-		ID:            util.UUIDToString(row.ID),
-		WorkspaceID:   util.UUIDToString(row.WorkspaceID),
-		Name:          row.Name,
-		Statuses:      decodeStatuses(row.Statuses),
-		ProjectCount:  projectCount,
-		CreatedByID:   util.UUIDToString(row.CreatedByID),
-		CreatedByType: row.CreatedByType,
-		CreatedAt:     row.CreatedAt.Time.UTC().Format(rfc3339),
-		UpdatedAt:     row.UpdatedAt.Time.UTC().Format(rfc3339),
+		ID:               util.UUIDToString(row.ID),
+		WorkspaceID:      util.UUIDToString(row.WorkspaceID),
+		Name:             row.Name,
+		Statuses:         decodeStatuses(row.Statuses),
+		ProjectCount:     projectCount,
+		WorkspaceDefault: row.WorkspaceDefault,
+		CreatedByID:      util.UUIDToString(row.CreatedByID),
+		CreatedByType:    row.CreatedByType,
+		CreatedAt:        row.CreatedAt.Time.UTC().Format(rfc3339),
+		UpdatedAt:        row.UpdatedAt.Time.UTC().Format(rfc3339),
 	}
 	if row.Description.Valid {
 		out.Description = row.Description.String
@@ -453,6 +455,97 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Cerebro.DeleteCerebroStatusModel(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete status model")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetWorkspaceDefault handles PATCH /api/cerebro/status-models/{id}/set-default.
+// Marks the given model as the workspace default; clears any existing default
+// first (atomically, in a single transaction). Admin/owner only (router gate).
+//
+// FIR-2800: workspace-level default model. New projects created after this is
+// set are auto-assigned the default model by the project creation hook.
+func (h *Handler) SetWorkspaceDefault(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	wsUUID, ok := workspaceUUIDOr400(w, r)
+	if !ok {
+		return
+	}
+	id, ok := pathUUIDOr400(w, r, "id")
+	if !ok {
+		return
+	}
+	existing, err := h.Cerebro.GetCerebroStatusModel(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "status model not found")
+		return
+	}
+	if !inWorkspace(r, existing.WorkspaceID) {
+		writeError(w, http.StatusNotFound, "status model not found")
+		return
+	}
+	// Two writes in one transaction: clear old default, set new one.
+	if h.Tx != nil {
+		tx, err := h.Tx.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start transaction")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		txQ := h.Cerebro.WithTx(tx)
+		if err := txQ.ClearWorkspaceDefaultStatusModel(r.Context(), wsUUID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clear existing default")
+			return
+		}
+		row, err := txQ.SetWorkspaceDefaultStatusModel(r.Context(), cerebrodb.SetWorkspaceDefaultStatusModelParams{
+			ID:          id,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to set workspace default")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to commit")
+			return
+		}
+		count, _ := h.Cerebro.CountProjectsUsingStatusModel(r.Context(), row.ID)
+		writeJSON(w, http.StatusOK, toStatusModelResponse(row, count))
+		return
+	}
+	// Fallback (no pool, e.g. unit tests): non-atomic path.
+	if err := h.Cerebro.ClearWorkspaceDefaultStatusModel(r.Context(), wsUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear existing default")
+		return
+	}
+	row, err := h.Cerebro.SetWorkspaceDefaultStatusModel(r.Context(), cerebrodb.SetWorkspaceDefaultStatusModelParams{
+		ID:          id,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set workspace default")
+		return
+	}
+	count, _ := h.Cerebro.CountProjectsUsingStatusModel(r.Context(), row.ID)
+	writeJSON(w, http.StatusOK, toStatusModelResponse(row, count))
+}
+
+// ClearWorkspaceDefault handles DELETE /api/cerebro/status-models/default.
+// Removes the workspace default flag — new projects will not be auto-assigned
+// any model until a new default is configured. Admin/owner only (router gate).
+func (h *Handler) ClearWorkspaceDefault(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	wsUUID, ok := workspaceUUIDOr400(w, r)
+	if !ok {
+		return
+	}
+	if err := h.Cerebro.ClearWorkspaceDefaultStatusModel(r.Context(), wsUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear workspace default")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
