@@ -76,7 +76,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 //                  "queued / failed / cancelled" buckets became
 //                  meaningless once Failed left the workload model.
 type View = "active" | "archived";
-type Scope = "all" | "mine";
+type Scope = "all" | "mine" | "default";
 type AvailabilityFilter = "all" | AgentAvailability;
 
 type SortKey = "recent" | "name" | "runs" | "created";
@@ -142,8 +142,17 @@ export function AgentsPage() {
   const { data: allDefaults = [] } = useQuery({
     queryKey: ["workspaces", wsId, "all-agent-defaults"],
     queryFn: () => api.listAllAgentDefaults(wsId),
-    enabled: scope === "all",
+    enabled: scope === "all" || scope === "default",
   });
+
+  const filteredAllDefaults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return allDefaults;
+    return allDefaults.filter((d) =>
+      d.user_name.toLowerCase().includes(q) ||
+      matchesPinyin(d.user_name, q),
+    );
+  }, [allDefaults, search]);
 
   const handleDuplicateDefaults = async (configId: string) => {
     try {
@@ -204,14 +213,15 @@ export function AgentsPage() {
         if (a.owner_id === currentUser.id) mine += 1;
       }
     }
-    return { all: visibleInView.length, mine };
-  }, [visibleInView, currentUser]);
+    return { all: visibleInView.length, mine, defaults: allDefaults.length };
+  }, [visibleInView, currentUser, allDefaults]);
 
   const inScope = useMemo(() => {
     // Archived view ignores Mine / All — its toolbar has no scope
     // segment, so silently filtering by `scope` would hide other
     // people's archived agents without any UI to explain why.
     if (view === "archived") return visibleInView;
+    if (scope === "default") return [];
     if (scope === "all" || !currentUser) return visibleInView;
     return visibleInView.filter((a) => a.owner_id === currentUser.id);
   }, [visibleInView, scope, currentUser, view]);
@@ -492,12 +502,14 @@ export function AgentsPage() {
                   archivedCount={archivedCount}
                   onShowArchived={() => setView("archived")}
                 />
+                {scope !== "default" && (
                 <AvailabilityFilterRow
                   value={availabilityFilter}
                   onChange={setAvailabilityFilter}
                   counts={availabilityCounts}
                   totalCount={afterWorkspaceFilter.length}
                 />
+                )}
               </>
             ) : (
               <ArchivedToolbarRow
@@ -517,10 +529,10 @@ export function AgentsPage() {
                   navigation.push(paths.agentDetail(row.original.agent.id))
                 }
                 prependRows={
-                  defaultsRowsVisible ? (
+                  defaultsRowsVisible && scope !== "all" ? (
                     <DefaultsInlineRows
                       scope={scope}
-                      allDefaults={allDefaults}
+                      allDefaults={filteredAllDefaults}
                       currentUserId={currentUser?.id ?? null}
                       onOpenPersonal={() => setDefaultsSheet("personal")}
                       onOpenSystem={() => setDefaultsSheet("system")}
@@ -574,7 +586,7 @@ export function AgentsPage() {
 
 // ---------------------------------------------------------------------------
 // Defaults inline rows — rendered inside the DataTable scroll container as
-// pinned pseudo-rows. Mine scope: Personal + System. All scope: System +
+// pinned pseudo-rows. Mine scope: Personal + System. Default scope: System +
 // all users' defaults (with owner marked).
 // ---------------------------------------------------------------------------
 
@@ -634,9 +646,7 @@ function DefaultsInlineRows({
     );
   }
 
-  // "All" scope: show system defaults + all users' defaults
-  if (allDefaults.length === 0) return null;
-
+  // Only "default" scope reaches here — show system + all users' defaults
   return (
     <div className="border-b">
       <button
@@ -786,7 +796,7 @@ function ActiveToolbarRow({
 }: {
   scope: Scope;
   setScope: (v: Scope) => void;
-  scopeCounts: { all: number; mine: number };
+  scopeCounts: { all: number; mine: number; defaults: number };
   workspaceOnly: boolean;
   setWorkspaceOnly: (v: boolean) => void;
   sort: SortKey;
@@ -831,10 +841,12 @@ function ActiveToolbarRow({
             {t(($) => $.page.show_archived, { count: archivedCount })}
           </button>
         )}
-        <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-          {t(($) => $.page.of_total, { visible: visibleCount, total: totalCount })}
-        </span>
-        <SortDropdown sort={sort} setSort={setSort} />
+        {scope !== "default" && (
+          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
+            {t(($) => $.page.of_total, { visible: visibleCount, total: totalCount })}
+          </span>
+        )}
+        {scope !== "default" && <SortDropdown sort={sort} setSort={setSort} />}
       </div>
     </div>
   );
@@ -847,7 +859,7 @@ function ScopeSegment({
 }: {
   scope: Scope;
   setScope: (v: Scope) => void;
-  counts: { all: number; mine: number };
+  counts: { all: number; mine: number; defaults: number };
 }) {
   const { t } = useT("agents");
   return (
@@ -863,6 +875,12 @@ function ScopeSegment({
         label={t(($) => $.scope.all)}
         count={counts.all}
         onClick={() => setScope("all")}
+      />
+      <ScopeButton
+        active={scope === "default"}
+        label={t(($) => $.scope.default)}
+        count={counts.defaults}
+        onClick={() => setScope("default")}
       />
     </div>
   );

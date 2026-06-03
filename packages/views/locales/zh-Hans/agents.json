@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "我的",
-    "all": "全部"
+    "all": "全部",
+    "default": "默认"
   },
   "sort": {
     "label_recent": "最近活跃",
