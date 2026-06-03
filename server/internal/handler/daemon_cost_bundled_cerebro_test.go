@@ -2,7 +2,11 @@ package handler
 
 // CEREBRO-PATCH(daemon-bundled-saving): tests for bundled_read measurement params (FIR-2384).
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure" // CEREBRO-PATCH(cost-saving-tokens): switch metric to tokens (FIR-2786)
+)
 
 // TestBundledReadMeasurementParams: "on" records an applied (real) save,
 // "shadow" a would-save (not applied). Both arms share the same baseline (the
@@ -11,7 +15,6 @@ import "testing"
 func TestBundledReadMeasurementParams(t *testing.T) {
 	t.Parallel()
 
-	// CEREBRO-PATCH(cost-optimization-token-metrics): bundled_read records token deltas.
 	ws := parseUUID("44444444-4444-4444-4444-444444444444")
 	task := parseUUID("55555555-5555-5555-5555-555555555555")
 
@@ -19,21 +22,22 @@ func TestBundledReadMeasurementParams(t *testing.T) {
 	if !on.Applied || on.HeldOut {
 		t.Fatalf("on mode must be applied and not held out, got applied=%v held=%v", on.Applied, on.HeldOut)
 	}
-	if on.SavingKey != costSavingBundledKey || on.Metric != costMetricInputTokens {
+	if on.SavingKey != costSavingBundledKey || on.Metric != costmeasure.MetricTokens {
 		t.Fatalf("unexpected key/metric: %+v", on)
 	}
-	wantBaseline := int64(bundledReadBaseline) * estimatedTokensPerSeparateRead
-	wantEffective := int64(estimatedTokensPerBundledCall)
-	if on.BaselineValue != wantBaseline || on.EffectiveValue != wantEffective {
-		t.Fatalf("expected baseline=%d effective=%d, got baseline=%d effective=%d", wantBaseline, wantEffective, on.BaselineValue, on.EffectiveValue)
+	if on.BaselineValue <= on.EffectiveValue {
+		t.Fatalf("expected baseline > effective, got baseline=%d effective=%d", on.BaselineValue, on.EffectiveValue)
+	}
+	if on.SavedCents <= 0 {
+		t.Fatalf("expected priced token saving, got saved_cents=%d", on.SavedCents)
 	}
 
 	shadow := bundledReadMeasurementParams(ws, task, costSavingModeShadow)
 	if shadow.Applied {
 		t.Fatalf("shadow mode must not be applied, got %+v", shadow)
 	}
-	if shadow.BaselineValue != wantBaseline || shadow.EffectiveValue != wantEffective {
-		t.Fatalf("shadow would-save must share token baseline/effective, got baseline=%d effective=%d", shadow.BaselineValue, shadow.EffectiveValue)
+	if shadow.BaselineValue != on.BaselineValue || shadow.EffectiveValue != on.EffectiveValue {
+		t.Fatalf("shadow would-save must match token baseline/effective, got baseline=%d effective=%d", shadow.BaselineValue, shadow.EffectiveValue)
 	}
 }
 

@@ -189,15 +189,15 @@ describe("appliedValue", () => {
     ).toBe("9,000 tokens ($4.50)");
   });
 
-  it("shows estimated tokens for a legacy call-based saving", () => {
+  it("shows saved tokens for snapshot/bundled applied savings", () => {
     expect(
       appliedValue(
         saving({
           savingKey: "bundled_read",
-          metric: "platform_calls",
-          applied: { savedUnits: 12, savedCents: 0, runCount: 4 },
+          metric: "tokens",
+          applied: { savedUnits: 600, savedCents: 1, runCount: 4 },
         }),
       ),
-    ).toBe("9,600 tokens (est. from 12 avoided calls)");
+    ).toBe("600 tokens ($0.01)");
   });
 });

@@ -23,6 +23,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure" // CEREBRO-PATCH(cost-saving-tokens): switch metric to tokens (FIR-2786)
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 
@@ -31,11 +32,6 @@ import (
 
 const (
 	costSavingBundledKey = "bundled_read"
-
-	// CEREBRO-PATCH(cost-optimization-token-metrics): measure bundled_read in estimated input tokens.
-	// Token estimates for separate multica reads vs one bundled issue-context call.
-	estimatedTokensPerSeparateRead = 750
-	estimatedTokensPerBundledCall  = 2200
 
 	// bundledReadBaseline is how many separate platform reads the single
 	// `multica issue context` call replaces: issue get + comment list +
@@ -75,12 +71,12 @@ func (h *Handler) applyBundledReadSaving(ctx context.Context, resp *AgentTaskRes
 }
 
 // bundledReadMeasurementParams builds the measurement row for one run. Baseline
-// is the estimated tokens if the agent made separate reads; effective is the
-// estimated tokens for one bundled call. Used by both shadow (claim-time) and
-// on (endpoint) paths so the two arms stay identically shaped.
+// is tokens from the separate reads the bundled call replaces; effective is
+// tokens from the single bundled response. Used by both the claim-time shadow
+// path and the endpoint's real-usage path so the two arms stay identically shaped.
 func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
-	baseline := int64(bundledReadBaseline) * estimatedTokensPerSeparateRead
-	effective := int64(estimatedTokensPerBundledCall)
+	baseline, effective := costmeasure.BundledTokensEstimate()
+	savedTokens := baseline - effective
 	return cerebrodb.RecordCerebroCostOptimizationMeasurementParams{
 		WorkspaceID:     workspaceID,
 		TaskID:          taskID,
@@ -88,10 +84,10 @@ func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) 
 		Mode:            mode,
 		Applied:         mode == costSavingModeOn,
 		HeldOut:         false,
-		Metric:          costMetricInputTokens,
+		Metric:          costmeasure.MetricTokens,
 		BaselineValue:   baseline,
 		EffectiveValue:  effective,
-		SavedCents:      0,
+		SavedCents:      costmeasure.TokenSavingCentsAtReference(savedTokens),
 		ActualCostCents: 0,
 	}
 }

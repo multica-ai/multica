@@ -14,8 +14,7 @@ import (
 	"log/slog"
 	"strings"
 
-	// CEREBRO-PATCH(cost-optimization-token-metrics): estimate snapshot_prompt saved tokens.
-	"github.com/multica-ai/multica/server/internal/cerebro/contextduplication"
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure" // CEREBRO-PATCH(cost-saving-tokens): switch metric to tokens (FIR-2786)
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 
@@ -27,11 +26,9 @@ import (
 // server/internal/cerebro/runtime/cost_savings_measure.go. "off" is the absence
 // of an override row, so it never appears as a value here.
 const (
-	costSavingSnapshotKey = "snapshot_prompt"
-	costSavingModeShadow  = "shadow"
-	costSavingModeOn      = "on"
-	costMetricInputTokens = "input_tokens"
-
+	costSavingSnapshotKey   = "snapshot_prompt"
+	costSavingModeShadow    = "shadow"
+	costSavingModeOn        = "on"
 	// snapshotInlinedReads is how many platform reads the snapshot replaces per
 	// run: the `multica issue get` + `multica issue comment list` the agent
 	// would otherwise run at the start of every comment-/assignment-triggered
@@ -59,21 +56,22 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 		return
 	}
 
-	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		Limit:       2000, // defensive cap; the renderer keeps only the most recent slice
-	})
-	if err != nil {
-		slog.Warn("snapshot cost-saving: list comments failed", "error", err)
-		return
-	}
-	snapshotText := renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
 	if mode == costSavingModeOn {
-		resp.IssueSnapshot = snapshotText
+		comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Limit:       2000, // defensive cap; the renderer keeps only the most recent slice
+		})
+		if err != nil {
+			// Could not load the thread — do NOT claim a saving we didn't apply.
+			slog.Warn("snapshot cost-saving: list comments failed", "error", err)
+			return
+		}
+		resp.IssueSnapshot = renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
 	}
 
-	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode, snapshotText)); err != nil {
+	snapshotChars := len(resp.IssueSnapshot)
+	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode, snapshotChars)); err != nil {
 		slog.Warn("snapshot cost-saving: record measurement failed", "error", err)
 	}
 }
@@ -95,14 +93,12 @@ func (h *Handler) snapshotSavingMode(ctx context.Context, workspaceID pgtype.UUI
 }
 
 // snapshotMeasurementParams builds the measurement row for one claim. Baseline
-// is the estimated tokens in the inlined snapshot; effective is 0 because the
-// agent no longer pays to fetch that context via separate tool calls.
-func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode, snapshotMarkdown string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
-	baseline := contextduplication.EstimateTokens(snapshotMarkdown)
-	if baseline <= 0 {
-		// Fallback when the thread is empty — still two avoided reads.
-		baseline = snapshotInlinedReads * 800
-	}
+// is the input tokens the issue+thread payloads would have added; effective is
+// 0 — nothing left to fetch. snapshotChars is len(inlined snapshot); 0 on
+// shadow uses the typical estimate (FIR-2786).
+func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string, snapshotChars int) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+	baseline, effective := costmeasure.SnapshotTokensEstimate(snapshotChars)
+	savedTokens := baseline - effective
 	return cerebrodb.RecordCerebroCostOptimizationMeasurementParams{
 		WorkspaceID:     workspaceID,
 		TaskID:          taskID,
@@ -110,10 +106,10 @@ func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode, snapshotMa
 		Mode:            mode,
 		Applied:         mode == costSavingModeOn,
 		HeldOut:         false,
-		Metric:          costMetricInputTokens,
+		Metric:          costmeasure.MetricTokens,
 		BaselineValue:   baseline,
-		EffectiveValue:  0,
-		SavedCents:      0,
+		EffectiveValue:  effective,
+		SavedCents:      costmeasure.TokenSavingCentsAtReference(savedTokens),
 		ActualCostCents: 0,
 	}
 }
