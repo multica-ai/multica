@@ -2284,6 +2284,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "openclaw" {
 		openclawBin = entry.Path
 	}
+	cscBin := ""
+	if provider == "csc" {
+		cscBin = entry.Path
+	}
 	if task.PriorWorkDir != "" {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:      task.PriorWorkDir,
@@ -2303,6 +2307,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:       provider,
 			CodexVersion:   codexVersion,
 			OpenclawBin:    openclawBin,
+			CSCBin:         cscBin,
 			Task:           taskCtx,
 		}, d.logger)
 		if err != nil {
