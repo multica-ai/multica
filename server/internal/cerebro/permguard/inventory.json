@@ -61,6 +61,14 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PATCH /api/cerebro/status-models/{id}/set-default",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "DELETE /api/cerebro/status-models/default",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/cerebro/workflows/{id}",
       "gate": "workspace_member"
     },

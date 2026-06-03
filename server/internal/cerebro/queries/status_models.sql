@@ -3,6 +3,7 @@
 
 -- name: ListCerebroStatusModels :many
 SELECT id, workspace_id, name, description, statuses,
+       workspace_default,
        created_by_id, created_by_type, created_at, updated_at
 FROM cerebro_status_model
 WHERE workspace_id = $1
@@ -10,9 +11,20 @@ ORDER BY created_at DESC;
 
 -- name: GetCerebroStatusModel :one
 SELECT id, workspace_id, name, description, statuses,
+       workspace_default,
        created_by_id, created_by_type, created_at, updated_at
 FROM cerebro_status_model
 WHERE id = $1;
+
+-- name: GetWorkspaceDefaultStatusModel :one
+-- FIR-2800: return the model marked as workspace default (at most one per
+-- workspace, enforced by the partial unique index on workspace_id WHERE
+-- workspace_default = true). Returns no row when no default is set.
+SELECT id, workspace_id, name, description, statuses,
+       workspace_default,
+       created_by_id, created_by_type, created_at, updated_at
+FROM cerebro_status_model
+WHERE workspace_id = $1 AND workspace_default = true;
 
 -- name: CreateCerebroStatusModel :one
 INSERT INTO cerebro_status_model (
@@ -21,6 +33,7 @@ INSERT INTO cerebro_status_model (
 )
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, workspace_id, name, description, statuses,
+          workspace_default,
           created_by_id, created_by_type, created_at, updated_at;
 
 -- name: UpdateCerebroStatusModel :one
@@ -31,6 +44,26 @@ SET name = $2,
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, name, description, statuses,
+          workspace_default,
+          created_by_id, created_by_type, created_at, updated_at;
+
+-- name: ClearWorkspaceDefaultStatusModel :exec
+-- FIR-2800: clear the workspace_default flag from every model in the workspace.
+-- Called before SetWorkspaceDefaultStatusModel to ensure at most one default.
+UPDATE cerebro_status_model
+SET workspace_default = false,
+    updated_at = now()
+WHERE workspace_id = $1 AND workspace_default = true;
+
+-- name: SetWorkspaceDefaultStatusModel :one
+-- FIR-2800: mark a specific model as the workspace default.
+-- Always call ClearWorkspaceDefaultStatusModel first (in the same tx).
+UPDATE cerebro_status_model
+SET workspace_default = true,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, description, statuses,
+          workspace_default,
           created_by_id, created_by_type, created_at, updated_at;
 
 -- name: DeleteCerebroStatusModel :exec

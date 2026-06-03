@@ -1449,6 +1449,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/", cerebroStatusModelsHandler.Create)
 					r.Put("/{id}", cerebroStatusModelsHandler.Update)
 					r.Delete("/{id}", cerebroStatusModelsHandler.Delete)
+					// CEREBRO-PATCH(cerebro-status-models-workspace-default): FIR-2800 workspace default model.
+					r.Patch("/{id}/set-default", cerebroStatusModelsHandler.SetWorkspaceDefault)
+					r.Delete("/default", cerebroStatusModelsHandler.ClearWorkspaceDefault)
 				})
 			})
 			// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 per-project status-model selection.

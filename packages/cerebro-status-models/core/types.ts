@@ -57,6 +57,11 @@ export interface CerebroStatusModel {
   statuses: StatusEntry[];
   /** How many projects currently use this model (drives the overview panel). */
   project_count: number;
+  /**
+   * FIR-2800: when true, new projects are auto-assigned this model on create.
+   * At most one model per workspace may have this flag set.
+   */
+  workspace_default: boolean;
   created_by_id: string;
   created_by_type: string;
   created_at: string;

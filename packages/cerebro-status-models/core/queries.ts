@@ -2,11 +2,13 @@ import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query
 import {
   assignProjectStatusModel,
   clearProjectStatusModel,
+  clearWorkspaceDefaultStatusModel,
   createStatusModel,
   deleteStatusModel,
   fetchStatusModel,
   fetchStatusModelAssignments,
   fetchStatusModels,
+  setWorkspaceDefaultStatusModel,
   updateStatusModel,
 } from "./api";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -111,6 +113,28 @@ export function useClearProjectStatusModelMutation(wsId: string) {
     mutationFn: (projectId: string) => clearProjectStatusModel(projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.assignments(wsId) });
+      queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.list(wsId) });
+    },
+  });
+}
+
+// FIR-2800: workspace default model mutations.
+
+export function useSetWorkspaceDefaultMutation(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => setWorkspaceDefaultStatusModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.list(wsId) });
+    },
+  });
+}
+
+export function useClearWorkspaceDefaultMutation(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => clearWorkspaceDefaultStatusModel(),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.list(wsId) });
     },
   });

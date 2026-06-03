@@ -103,6 +103,22 @@ export async function clearProjectStatusModel(projectId: string): Promise<void> 
   });
 }
 
+// FIR-2800: workspace default model — mark / clear the workspace default.
+
+export async function setWorkspaceDefaultStatusModel(id: string): Promise<CerebroStatusModel> {
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/cerebro/status-models/${id}/set-default`,
+    { method: "PATCH" },
+  );
+  return parseWithFallback(raw, statusModelSchema, EMPTY_STATUS_MODEL, {
+    endpoint: "setWorkspaceDefaultStatusModel",
+  });
+}
+
+export async function clearWorkspaceDefaultStatusModel(): Promise<void> {
+  await api.cerebroRequest<void>("/api/cerebro/status-models/default", { method: "DELETE" });
+}
+
 // v2b: per-issue custom status pin (FIR-1550).
 //
 // On 404, fetchIssueCustomStatus returns null — "this issue has no pinned

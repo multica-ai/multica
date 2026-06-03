@@ -591,6 +591,8 @@ var catalog = []Capability{
 			"POST /api/cerebro/status-models/",
 			"PUT /api/cerebro/status-models/{id}",
 			"DELETE /api/cerebro/status-models/{id}",
+			"PATCH /api/cerebro/status-models/{id}/set-default",
+			"DELETE /api/cerebro/status-models/default",
 			"PUT /api/cerebro/projects/{projectId}/status-model/",
 			"DELETE /api/cerebro/projects/{projectId}/status-model/",
 		},
@@ -646,6 +648,7 @@ var catalog = []Capability{
 			"DELETE /api/workspaces/{id}/cost-optimization/holdout/{key}",
 			"PUT /api/cerebro/workspaces/{id}/auth-settings/",
 			"POST /api/workspaces/{id}/pause-tasks",
+			"POST /api/workspaces/{id}/generate-logo",
 		},
 	},
 	{
