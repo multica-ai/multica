@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
@@ -358,6 +359,29 @@ func main() {
 	// workers, AFTER the HTTP server has drained.
 	if h.LarkHub != nil {
 		go h.LarkHub.Run(sweepCtx)
+	}
+
+	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
+	// `sys_cron_executions` table into the distributed lease + audit
+	// log for internal periodic jobs. The first job is
+	// `rollup_task_usage_hourly`, which replaces the previously
+	// operator-registered `pg_cron` entry (still safe to run
+	// concurrently — the SQL function holds advisory lock 4246).
+	//
+	// A failure to register the job is treated as fatal here only at
+	// the registration step (a duplicate name is the only realistic
+	// cause and indicates a code bug). Once running, the manager
+	// surfaces transient errors — DB unreachable, sys_cron_executions
+	// missing because of an unusual partial-migration state — by
+	// logging them on the tick that fails and retrying on the next
+	// cycle, so a temporary outage does not crash the server.
+	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
+	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
+		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
+	} else {
+		go func() {
+			_ = schedulerMgr.Run(sweepCtx)
+		}()
 	}
 
 	if metricsServer != nil {
