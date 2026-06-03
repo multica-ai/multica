@@ -16,7 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useMemo, useRef } from "react";
+import { isValidElement, memo, useState, useMemo, useRef } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -29,6 +29,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
+import { Check, Copy } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
@@ -57,6 +58,7 @@ const lowlight = createLowlight(common);
 // Anchored to whole class tokens so `language-htmlbars` / `language-mermaidx`
 // don't accidentally match and lose their <pre> wrapper.
 const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
+const LANGUAGE_CLASS_RE = /(^|\s)language-([^\s]+)(\s|$)/;
 
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
@@ -152,6 +154,64 @@ function ReadonlyLink({
     >
       {children}
     </a>
+  );
+}
+
+function getTextContent(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(getTextContent).join("");
+  }
+  if (isValidElement(node)) {
+    const props = node.props as { children?: React.ReactNode };
+    return getTextContent(props.children);
+  }
+  return "";
+}
+
+function ReadonlyCodeBlock({ children }: { children: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const childProps = isValidElement(children)
+    ? (children.props as { className?: string; children?: React.ReactNode })
+    : undefined;
+  const language = childProps?.className?.match(LANGUAGE_CLASS_RE)?.[2] ?? "text";
+  const code = getTextContent(childProps?.children ?? children).replace(/\n$/, "");
+
+  const handleCopy = async () => {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be unavailable in readonly contexts.
+    }
+  };
+
+  return (
+    <div className="code-block-wrapper group/code relative my-2">
+      <div className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100">
+        <span className="text-xs text-muted-foreground select-none">
+          {language}
+        </span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title="Copy code"
+          aria-label="Copy code"
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+      <pre>{children}</pre>
+    </div>
   );
 }
 
@@ -270,7 +330,7 @@ function buildComponents(): Partial<Components> {
           return <>{children}</>;
         }
       }
-      return <pre>{children}</pre>;
+      return <ReadonlyCodeBlock>{children}</ReadonlyCodeBlock>;
     },
   };
 }

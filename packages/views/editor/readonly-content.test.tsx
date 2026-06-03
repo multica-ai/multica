@@ -315,16 +315,44 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
-  it("renders ordinary code blocks without the private readonly copy header", () => {
-    const { container, queryByText } = render(
+  it("renders ordinary code blocks with the screenshot-style floating toolbar", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    const { container, getByTitle, queryByTitle } = render(
       <ReadonlyContent
         content={["```ts", "const value = 1;", "```"].join("\n")}
       />,
     );
 
-    expect(container.querySelector("pre code.language-ts")).not.toBeNull();
-    expect(queryByText("Copy")).toBeNull();
-    expect(queryByText("ts")).toBeNull();
+    const wrapper = container.querySelector(".code-block-wrapper");
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.className).toContain("group/code");
+    expect(wrapper?.querySelector(".code-block-header")?.className).toContain(
+      "absolute top-0 right-0",
+    );
+    expect(wrapper?.querySelector("pre code.language-ts")).not.toBeNull();
+    expect(wrapper?.textContent).toContain("ts");
+    expect(queryByTitle("Delete")).toBeNull();
+
+    fireEvent.click(getByTitle("Copy code"));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("const value = 1;");
+    });
+  });
+
+  it("labels code fences without an explicit language as text", () => {
+    const { container } = render(
+      <ReadonlyContent content={["```", "plain text", "```"].join("\n")} />,
+    );
+
+    expect(container.querySelector(".code-block-header")?.textContent).toContain(
+      "text",
+    );
   });
 
   it("keeps editor code literal by disabling font ligatures", () => {
