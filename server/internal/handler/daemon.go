@@ -1179,6 +1179,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		resp.Agent = &TaskAgentData{
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
+			Description:   agent.Description,
 			Visibility:    agent.Visibility,
 			OwnerID:       uuidToString(agent.OwnerID),
 			Instructions:  merged.Instructions,

@@ -2471,7 +2471,7 @@ func TestSyncCodexSkillsWorkspaceSkillWinsCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read workspace SKILL.md: %v", err)
 	}
-	if string(skillMd) != "workspace" {
+	if !strings.Contains(string(skillMd), "name: code-review") || !strings.Contains(string(skillMd), "\n\nworkspace") {
 		t.Errorf("workspace skill content = %q", string(skillMd))
 	}
 
@@ -2574,7 +2574,7 @@ func TestReuseRefreshesCodexWorkspaceSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read refreshed SKILL.md: %v", err)
 	}
-	if string(newSkill) != "new" {
+	if !strings.Contains(string(newSkill), "name: new-skill") || !strings.Contains(string(newSkill), "\n\nnew") {
 		t.Errorf("refreshed skill content = %q", string(newSkill))
 	}
 }
