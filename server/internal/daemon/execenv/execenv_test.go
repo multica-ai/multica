@@ -3578,6 +3578,7 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			"pr_url",
 			"pr_number",
 			"pipeline_status",
+			"artifact_summary",
 			"deploy_url",
 			"external_issue_url",
 			"waiting_on",
@@ -3728,6 +3729,35 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInjectRuntimeConfigRequiresDurableArtifactsBeforeReview(t *testing.T) {
+	t.Parallel()
+
+	const issueID = "11111111-2222-3333-4444-555555555555"
+	dir := t.TempDir()
+	if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: issueID}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"## Artifact Durability",
+		"Workdirs are execution scratch space",
+		"PR URL or commit URL",
+		"multica issue comment add <issue-id> --attachment <path>",
+		"missing repo/resource",
+		"move the issue to `blocked`",
+		"`multica issue status " + issueID + " in_review` only after the final comment includes durable evidence",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("runtime config missing artifact durability guardrail %q\n---\n%s", want, s)
+		}
 	}
 }
 

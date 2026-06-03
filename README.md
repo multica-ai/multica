@@ -130,6 +130,8 @@ Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just
 
 Create an issue from the board (or via `multica issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
 
+If a task creates files, the task workdir is only execution scratch space. Before an agent moves an issue to review, durable work should be linked in the final issue comment: a PR or commit URL for repo-backed work, a patch, a Multica attachment, or the complete artifact contents when the file is short enough to paste.
+
 ---
 
 ## CLI
