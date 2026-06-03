@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net/url"
 	"regexp"
@@ -434,6 +435,7 @@ func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg not
 	title := buildMobilePushTitle(eventPayload)
 	body := buildMobilePushBody(eventPayload, title)
 	clickURL := buildMobilePushClickURL(eventPayload)
+	notifyID := mobilePushNotifyIDForIssue(eventPayload.IssueID)
 	requestID := strings.ReplaceAll(util.UUIDToString(claimed.ID), "-", "")
 	if len(requestID) > 32 {
 		requestID = requestID[:32]
@@ -445,6 +447,7 @@ func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg not
 		Title:     title,
 		Body:      body,
 		ClickURL:  clickURL,
+		NotifyID:  notifyID,
 		TTL:       int64(getuiPushTTL / time.Millisecond),
 	}); err != nil {
 		finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
@@ -637,6 +640,18 @@ func buildMobilePushClickURL(event notificationEventPayload) string {
 		clickURL += "?commentId=" + url.QueryEscape(commentID)
 	}
 	return clickURL
+}
+
+func mobilePushNotifyIDForIssue(issueID string) *int {
+	issueUUID, err := util.ParseUUID(strings.TrimSpace(issueID))
+	if err != nil {
+		return nil
+	}
+
+	h := fnv.New32a()
+	_, _ = h.Write(issueUUID.Bytes[:])
+	notifyID := int(h.Sum32() & 0x7fffffff)
+	return &notifyID
 }
 
 func loadDingTalkDispatchContext(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) (dingtalkDeliveryPayload, notificationEventPayload, db.ExternalAccountBinding, error) {

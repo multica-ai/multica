@@ -169,6 +169,10 @@ func loadNotificationDeliveryByEvent(t *testing.T, eventID string) db.Notificati
 }
 
 func seedPendingMobilePushDelivery(t *testing.T, cid string) (string, string) {
+	return seedPendingMobilePushDeliveryForIssue(t, cid, "", "")
+}
+
+func seedPendingMobilePushDeliveryForIssue(t *testing.T, cid, issueID, commentID string) (string, string) {
 	t.Helper()
 
 	queries := db.New(testPool)
@@ -190,7 +194,9 @@ func seedPendingMobilePushDelivery(t *testing.T, cid string) (string, string) {
 		"summary":          "please review this change",
 		"body":             "please review this change",
 		"link":             "https://app.multica.test/test/issues/123",
+		"issue_id":         issueID,
 		"issue_identifier": "OPE-20",
+		"comment_id":       commentID,
 	}
 	payloadSnapshot, err := json.Marshal(map[string]any{
 		"registration_id":    util.UUIDToString(registration.ID),
@@ -202,13 +208,22 @@ func seedPendingMobilePushDelivery(t *testing.T, cid string) (string, string) {
 		t.Fatalf("marshal mobile push payload: %v", err)
 	}
 
+	var issueUUID pgtype.UUID
+	if strings.TrimSpace(issueID) != "" {
+		issueUUID = util.MustParseUUID(issueID)
+	}
+	var commentUUID pgtype.UUID
+	if strings.TrimSpace(commentID) != "" {
+		commentUUID = util.MustParseUUID(commentID)
+	}
+
 	event, err := queries.CreateNotificationEvent(context.Background(), db.CreateNotificationEventParams{
 		WorkspaceID:     util.MustParseUUID(testWorkspaceID),
 		RecipientUserID: util.MustParseUUID(testUserID),
 		Type:            "mentioned",
 		Severity:        "info",
-		IssueID:         pgtype.UUID{},
-		CommentID:       pgtype.UUID{},
+		IssueID:         issueUUID,
+		CommentID:       commentUUID,
 		ActorType:       util.StrToText("member"),
 		ActorID:         util.MustParseUUID(testUserID),
 		Title:           "dispatcher issue",
@@ -477,6 +492,7 @@ func TestDispatchPendingMobilePushDeliveries_MarksSent(t *testing.T) {
 						Title     string `json:"title"`
 						Body      string `json:"body"`
 						ClickType string `json:"click_type"`
+						NotifyID  *int   `json:"notify_id"`
 					} `json:"notification"`
 				} `json:"push_message"`
 			}
@@ -497,6 +513,9 @@ func TestDispatchPendingMobilePushDeliveries_MarksSent(t *testing.T) {
 			}
 			if body.PushMessage.Notification.ClickType != "none" {
 				t.Fatalf("unexpected click_type: %q", body.PushMessage.Notification.ClickType)
+			}
+			if body.PushMessage.Notification.NotifyID != nil {
+				t.Fatalf("notify_id should be omitted without issue_id, got %#v", body.PushMessage.Notification.NotifyID)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"code":0,"msg":"","data":{"task-dispatch":{"cid-dispatch":"successed_online"}}}`))
@@ -527,6 +546,95 @@ func TestDispatchPendingMobilePushDeliveries_MarksSent(t *testing.T) {
 	}
 	if authCalls != 1 || pushCalls != 1 {
 		t.Fatalf("expected one auth and one push, got auth=%d push=%d", authCalls, pushCalls)
+	}
+}
+
+func TestDispatchPendingMobilePushDeliveries_UsesStableIssueNotifyID(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	issueA := createTestIssue(t, testWorkspaceID, testUserID)
+	issueB := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupNotificationDispatchData(t)
+		cleanupInboxForIssue(t, issueA)
+		cleanupInboxForIssue(t, issueB)
+		cleanupTestIssue(t, issueA)
+		cleanupTestIssue(t, issueB)
+	})
+
+	type capturedPush struct {
+		RequestID string
+		NotifyID  *int
+	}
+	pushesByCID := map[string]capturedPush{}
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/getui-notify-id-app/auth":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"msg":"","data":{"expire_time":"` + getuiDispatchFutureMillis() + `","token":"notify-id-token"}}`))
+		case "/v2/getui-notify-id-app/push/single/cid":
+			var body struct {
+				RequestID string `json:"request_id"`
+				Audience  struct {
+					CID []string `json:"cid"`
+				} `json:"audience"`
+				PushMessage struct {
+					Notification struct {
+						NotifyID *int `json:"notify_id"`
+					} `json:"notification"`
+				} `json:"push_message"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode getui push body: %v", err)
+			}
+			if len(body.Audience.CID) != 1 {
+				t.Fatalf("expected one cid, got %#v", body.Audience.CID)
+			}
+			pushesByCID[body.Audience.CID[0]] = capturedPush{
+				RequestID: body.RequestID,
+				NotifyID:  body.PushMessage.Notification.NotifyID,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"msg":"","data":{"task-notify-id":{"` + body.Audience.CID[0] + `":"successed_online"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(apiServer.Close)
+
+	t.Setenv("GETUI_APP_ID", "getui-notify-id-app")
+	t.Setenv("GETUI_APP_KEY", "getui-notify-id-key")
+	t.Setenv("GETUI_MASTER_SECRET", "getui-notify-id-secret")
+	t.Setenv("GETUI_BASE_URL", apiServer.URL+"/v2")
+
+	seedPendingMobilePushDeliveryForIssue(t, "cid-issue-a-1", issueA, "")
+	seedPendingMobilePushDeliveryForIssue(t, "cid-issue-a-2", issueA, "")
+	seedPendingMobilePushDeliveryForIssue(t, "cid-issue-b", issueB, "")
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, nil)
+
+	if len(pushesByCID) != 3 {
+		t.Fatalf("expected 3 getui pushes, got %d: %#v", len(pushesByCID), pushesByCID)
+	}
+	first := pushesByCID["cid-issue-a-1"]
+	second := pushesByCID["cid-issue-a-2"]
+	other := pushesByCID["cid-issue-b"]
+	if first.NotifyID == nil || second.NotifyID == nil || other.NotifyID == nil {
+		t.Fatalf("expected notify_id for issue pushes, got %#v", pushesByCID)
+	}
+	if *first.NotifyID != *second.NotifyID {
+		t.Fatalf("same issue notify_id mismatch: %d vs %d", *first.NotifyID, *second.NotifyID)
+	}
+	if *first.NotifyID == *other.NotifyID {
+		t.Fatalf("different issues should have different notify_id, got %d", *first.NotifyID)
+	}
+	if *first.NotifyID < 0 || *first.NotifyID > 2147483647 || *other.NotifyID < 0 || *other.NotifyID > 2147483647 {
+		t.Fatalf("notify_id out of range: first=%d other=%d", *first.NotifyID, *other.NotifyID)
+	}
+	if first.RequestID == "" || second.RequestID == "" || first.RequestID == second.RequestID {
+		t.Fatalf("request_id should stay unique per delivery: first=%q second=%q", first.RequestID, second.RequestID)
+	}
+	if len(first.RequestID) != 32 || len(second.RequestID) != 32 || len(other.RequestID) != 32 {
+		t.Fatalf("request_id should be 32 chars: first=%q second=%q other=%q", first.RequestID, second.RequestID, other.RequestID)
 	}
 }
 

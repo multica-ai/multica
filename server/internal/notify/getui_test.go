@@ -51,19 +51,10 @@ func TestGetuiPushSingleByCID_AuthenticatesAndSends(t *testing.T) {
 						Body      string `json:"body"`
 						ClickType string `json:"click_type"`
 						Payload   string `json:"payload"`
+						NotifyID  *int   `json:"notify_id"`
 					} `json:"notification"`
 				} `json:"push_message"`
-				PushChannel struct {
-					Android struct {
-						UPS struct {
-							Notification struct {
-								Title     string `json:"title"`
-								Body      string `json:"body"`
-								ClickType string `json:"click_type"`
-							} `json:"notification"`
-						} `json:"ups"`
-					} `json:"android"`
-				} `json:"push_channel"`
+				PushChannel *json.RawMessage `json:"push_channel"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode push body: %v", err)
@@ -74,10 +65,13 @@ func TestGetuiPushSingleByCID_AuthenticatesAndSends(t *testing.T) {
 			if body.PushMessage.Notification.Title != "OPE-1" || body.PushMessage.Notification.Body != "hello" || body.PushMessage.Notification.ClickType != "payload" || body.PushMessage.Notification.Payload != "wujieai-multicam://issues/issue-1?commentId=comment-1" {
 				t.Fatalf("unexpected notification: %#v", body.PushMessage.Notification)
 			}
-			if body.PushChannel.Android.UPS.Notification.Title != "OPE-1" || body.PushChannel.Android.UPS.Notification.Body != "hello" || body.PushChannel.Android.UPS.Notification.ClickType != "startapp" {
-				t.Fatalf("unexpected offline notification: %#v", body.PushChannel.Android.UPS.Notification)
+			if body.PushMessage.Notification.NotifyID == nil || *body.PushMessage.Notification.NotifyID != 12345 {
+				t.Fatalf("expected notify_id 12345, got %#v", body.PushMessage.Notification.NotifyID)
 			}
-			if body.Settings.Strategy["default"] != 1 || body.Settings.Strategy["hw"] != 1 || body.Settings.Strategy["ho"] != 1 {
+			if body.PushChannel != nil {
+				t.Fatalf("push_channel should be omitted when forcing Getui channel, got %s", string(*body.PushChannel))
+			}
+			if body.Settings.Strategy["default"] != 3 || len(body.Settings.Strategy) != 1 {
 				t.Fatalf("unexpected strategy: %#v", body.Settings.Strategy)
 			}
 			if len(body.RequestID) != 32 {
@@ -105,6 +99,7 @@ func TestGetuiPushSingleByCID_AuthenticatesAndSends(t *testing.T) {
 		Title:     "OPE-1",
 		Body:      "hello",
 		ClickURL:  "wujieai-multicam://issues/issue-1?commentId=comment-1",
+		NotifyID:  intPtr(12345),
 	})
 	if err != nil {
 		t.Fatalf("PushSingleByCID: %v", err)
@@ -129,6 +124,19 @@ func TestGetuiPushSingleByCID_RefreshesExpiredToken(t *testing.T) {
 			_, _ = w.Write([]byte(`{"code":0,"msg":"","data":{"expire_time":"` + futureMillis() + `","token":"token-` + strconv.Itoa(authCalls) + `"}}`))
 		case "/v2/app-refresh/push/single/cid":
 			pushTokens = append(pushTokens, r.Header.Get("token"))
+			var body struct {
+				PushMessage struct {
+					Notification struct {
+						NotifyID *int `json:"notify_id"`
+					} `json:"notification"`
+				} `json:"push_message"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode push body: %v", err)
+			}
+			if body.PushMessage.Notification.NotifyID != nil {
+				t.Fatalf("notify_id should be omitted when NotifyID is nil, got %#v", body.PushMessage.Notification.NotifyID)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			if len(pushTokens) == 1 {
 				_, _ = w.Write([]byte(`{"code":10001,"msg":"token invalid","data":{}}`))
@@ -166,4 +174,8 @@ func TestGetuiPushSingleByCID_RefreshesExpiredToken(t *testing.T) {
 
 func futureMillis() string {
 	return strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
+}
+
+func intPtr(value int) *int {
+	return &value
 }

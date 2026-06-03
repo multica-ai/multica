@@ -44,6 +44,7 @@ type GetuiPushMessage struct {
 	Title     string
 	Body      string
 	ClickURL  string
+	NotifyID  *int
 	TTL       int64
 }
 
@@ -176,16 +177,14 @@ func (c GetuiConfig) pushSingleByCIDWithToken(ctx context.Context, token string,
 		"title": truncateRunes(firstNonBlank(msg.Title, "Multica"), 50),
 		"body":  truncateRunes(firstNonBlank(msg.Body, "You have a new notification."), 256),
 	}
-	offlineNotification := map[string]any{
-		"title":      notification["title"],
-		"body":       notification["body"],
-		"click_type": "startapp",
-	}
 	if clickURL := normalizeGetuiClickURL(msg.ClickURL); clickURL != "" {
 		notification["click_type"] = "payload"
 		notification["payload"] = clickURL
 	} else {
 		notification["click_type"] = "none"
+	}
+	if msg.NotifyID != nil {
+		notification["notify_id"] = *msg.NotifyID
 	}
 
 	body, err := json.Marshal(map[string]any{
@@ -193,9 +192,7 @@ func (c GetuiConfig) pushSingleByCIDWithToken(ctx context.Context, token string,
 		"settings": map[string]any{
 			"ttl": ttl,
 			"strategy": map[string]any{
-				"default": 1,
-				"hw":      1,
-				"ho":      1,
+				"default": 3,
 			},
 		},
 		"audience": map[string]any{
@@ -203,13 +200,6 @@ func (c GetuiConfig) pushSingleByCIDWithToken(ctx context.Context, token string,
 		},
 		"push_message": map[string]any{
 			"notification": notification,
-		},
-		"push_channel": map[string]any{
-			"android": map[string]any{
-				"ups": map[string]any{
-					"notification": offlineNotification,
-				},
-			},
 		},
 	})
 	if err != nil {
