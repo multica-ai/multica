@@ -24,6 +24,14 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { RetryWithNoteDialog } from "./retry-with-note-dialog";
 import { useAgentColorMap } from "./task-agent-colors";
 
+// Fade the trigger text before fixed-width metadata/actions so truncation does
+// not land as a hard visual edge.
+const TRIGGER_MASK_STYLE: React.CSSProperties = {
+  maskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
+  WebkitMaskImage:
+    "linear-gradient(to right, black calc(100% - 12px), transparent)",
+};
+
 // Right-panel section that lists every agent run for this issue. Active
 // runs sit at the top (always visible when present); past runs (terminal
 // statuses) collapse behind a "Show past runs (N)" toggle.
@@ -267,6 +275,19 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
   cancelled: "text-muted-foreground",
 };
 
+function activeTimeText(task: AgentTask, timeAgo: (dateStr: string) => string): string {
+  if (task.status === "running" && task.started_at) {
+    return timeAgo(task.started_at);
+  }
+  if (
+    (task.status === "dispatched" || task.status === "waiting_local_directory") &&
+    task.dispatched_at
+  ) {
+    return timeAgo(task.dispatched_at);
+  }
+  return timeAgo(task.created_at);
+}
+
 // ─── Active row ────────────────────────────────────────────────────────────
 
 function useTriggerText(task: AgentTask): string {
@@ -338,11 +359,13 @@ function ActiveRow({
   onHighlightComment?: (commentId: string) => void;
 }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
+  const time = activeTimeText(task, timeAgo);
 
   // Transcript only meaningful once messages exist — pure-queued tasks
   // have nothing to show yet.

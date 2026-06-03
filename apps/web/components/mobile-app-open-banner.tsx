@@ -1,4 +1,4 @@
-type Locale = "en" | "zh-Hans" | "ko";
+type Locale = "en" | "zh-Hans" | "ko" | "ja";
 
 const COPY = {
   en: {
@@ -12,6 +12,11 @@ const COPY = {
     action: "打开 App",
   },
   ko: {
+    title: "Have Multica installed?",
+    description: "Open this issue in the mobile app.",
+    action: "Open App",
+  },
+  ja: {
     title: "Have Multica installed?",
     description: "Open this issue in the mobile app.",
     action: "Open App",

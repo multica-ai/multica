@@ -32,6 +32,9 @@ export interface AppConfigResponse {
   cdn_domain: string;
   allow_signup: boolean;
   google_client_id?: string;
+  dingtalk_client_id?: string;
+  dingtalk_oauth_scope?: string;
+  hide_email_login?: boolean;
   posthog_key?: string;
   posthog_host?: string;
   analytics_environment?: string;
@@ -162,6 +165,9 @@ export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
+  dingtalk_client_id: OptionalStringSchema,
+  dingtalk_oauth_scope: OptionalStringSchema,
+  hide_email_login: BooleanWithDefaultSchema(false).optional(),
   posthog_key: OptionalStringSchema,
   posthog_host: OptionalStringSchema,
   analytics_environment: OptionalStringSchema,
@@ -174,6 +180,9 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
   allow_signup: true,
   google_client_id: "",
+  dingtalk_client_id: "",
+  dingtalk_oauth_scope: "",
+  hide_email_login: false,
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
