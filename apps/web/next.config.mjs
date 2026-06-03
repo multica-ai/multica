@@ -49,6 +49,13 @@ const nextConfig = {
   // the files traced — and the memory the step holds — without changing what
   // ships. Excludes are paths relative to outputFileTracingRoot.
   outputFileTracingRoot: resolve(currentDir, "../.."),
+  outputFileTracingIncludes: {
+    // next is required by server.js but @vercel/nft can miss it when
+    // outputFileTracingExcludes covers .next/**  (which are the tracer's
+    // own starting-point files). Pinning it here guarantees it lands in
+    // standalone/node_modules/ regardless of tracer behaviour.
+    "*": ["./node_modules/next/**/*"],
+  },
   outputFileTracingExcludes: {
     "*": [
       "node_modules/.pnpm/@swc+core*/**",
@@ -60,7 +67,12 @@ const nextConfig = {
       "node_modules/.pnpm/typescript@*/**",
       "node_modules/.pnpm/@playwright+*/**",
       "node_modules/.pnpm/playwright*/**",
-      "apps/web/.next/**",
+      // .next.new and .next.old are safe to exclude — they are the atomic-swap
+      // side-directories from deploy.sh, never needed at runtime.
+      // DO NOT exclude apps/web/.next/** — the tracer starts from compiled
+      // route files in .next/server/ to discover runtime dependencies. Excluding
+      // that directory causes next (and other route-only deps) to be omitted
+      // from standalone/node_modules/, breaking container start-up.
       "apps/web/.next.new/**",
       "apps/web/.next.old/**",
     ],
