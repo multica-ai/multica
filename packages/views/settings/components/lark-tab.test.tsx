@@ -133,11 +133,17 @@ vi.mock("sonner", () => ({
 // react-qr-code renders SVG that jsdom doesn't fully support — a stub
 // keeps the dialog DOM compact and lets us assert on the surrounding
 // chrome (status text, buttons) without QR mechanics.
-vi.mock("react-qr-code", () => ({
-  default: ({ value }: { value: string }) => (
+// Expose the stub as BOTH the named `QRCode` export (what lark-tab now
+// imports — see the named-import interop fix) and `default`, so the mock
+// stays correct regardless of how the component pulls it in. The stub is
+// defined inside the factory because vi.mock is hoisted above any
+// top-level variable.
+vi.mock("react-qr-code", () => {
+  const QrStub = ({ value }: { value: string }) => (
     <span data-testid="qr-code" data-value={value} />
-  ),
-}));
+  );
+  return { QRCode: QrStub, default: QrStub };
+});
 
 import { LarkAgentBindButton, LarkTab } from "./lark-tab";
 
