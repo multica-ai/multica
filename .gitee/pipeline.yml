@@ -1,0 +1,88 @@
+version: '1.0'
+name: multica-cli-build
+displayName: CLI多架构构建
+triggers:
+  trigger: manual
+  push:
+    branches:
+      prefix:
+        - ''
+
+stages:
+  - name: build
+    displayName: 构建
+    steps:
+      - step: build@golang
+        name: build-cli
+        displayName: 构建CLI
+        golangVersion: "1.20"
+        commands: |
+          set -e
+          apt-get update -qq && apt-get install -y -qq zip git wget || true
+
+          # 安装较新的 Go 版本（1.20 不支持 go.mod 里的 1.26.1）
+          wget -q https://go.dev/dl/go1.26.1.linux-amd64.tar.gz || wget -q https://go.dev/dl/go1.26.0.linux-amd64.tar.gz || wget -q https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+          tar -C /usr/local -xzf go*.linux-amd64.tar.gz
+          export PATH=/usr/local/go/bin:$PATH
+          export GOROOT=/usr/local/go
+          export GOTOOLCHAIN=local
+          export GOPROXY=https://goproxy.cn,direct
+          go version
+
+          # 解析版本号
+          if git describe --tags --exact-match HEAD 2>/dev/null; then
+            VERSION=$(git describe --tags --exact-match HEAD | sed 's/^v//')
+          else
+            BRANCH=$(git rev-parse --abbrev-ref HEAD)
+            COMMIT_SHORT=$(git rev-parse --short HEAD)
+            VERSION="${BRANCH}-${COMMIT_SHORT}"
+          fi
+          echo "VERSION=${VERSION}"
+
+          cd server
+          sed -i 's/^go 1.26.1$/go 1.26/' go.mod
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          mkdir -p dist
+
+          # Darwin AMD64
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+            -o "bin/multica" ./cmd/multica
+          tar czf "dist/multica-cli-${VERSION}-darwin-amd64.tar.gz" -C bin multica
+          rm bin/multica
+
+          # Darwin ARM64
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+            -o "bin/multica" ./cmd/multica
+          tar czf "dist/multica-cli-${VERSION}-darwin-arm64.tar.gz" -C bin multica
+          rm bin/multica
+
+          # Linux AMD64
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+            -o "bin/multica" ./cmd/multica
+          tar czf "dist/multica-cli-${VERSION}-linux-amd64.tar.gz" -C bin multica
+          rm bin/multica
+
+          # Linux ARM64
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+            -o "bin/multica" ./cmd/multica
+          tar czf "dist/multica-cli-${VERSION}-linux-arm64.tar.gz" -C bin multica
+          rm bin/multica
+
+          # Windows AMD64
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+            -o "bin/multica.exe" ./cmd/multica
+          (cd bin && zip "../dist/multica-cli-${VERSION}-windows-amd64.zip" multica.exe)
+          rm bin/multica.exe
+
+          echo "All builds completed:"
+          ls -lh dist/
+        artifacts:
+          - name: CLI_ARTIFACTS
+            path:
+              - server/dist
