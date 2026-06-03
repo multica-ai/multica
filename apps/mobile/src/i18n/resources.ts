@@ -496,6 +496,7 @@ const en = {
     task_statuses: {
       queued: "Queued",
       dispatched: "Dispatched",
+      waiting_local_directory: "Waiting for local directory",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
@@ -1004,6 +1005,7 @@ const zhHans = {
     task_statuses: {
       queued: "排队中",
       dispatched: "已派发",
+      waiting_local_directory: "等待本地目录释放",
       running: "运行中",
       completed: "已完成",
       failed: "失败",
@@ -1019,4 +1021,5 @@ const zhHans = {
 export const MOBILE_RESOURCES: Record<SupportedLocale, LocaleResources> = {
   en,
   "zh-Hans": zhHans,
+  ko: en,
 };
