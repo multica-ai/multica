@@ -356,6 +356,7 @@ type Issue struct {
 	OriginID           pgtype.UUID        `json:"origin_id"`
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	StartDate          pgtype.Timestamptz `json:"start_date"`
+	GoalCondition      pgtype.Text        `json:"goal_condition"`
 	Metadata           []byte             `json:"metadata"`
 }
 

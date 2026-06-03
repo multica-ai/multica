@@ -1095,6 +1095,16 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// for assignment-triggered tasks it is NULL and the fallback is top-level.
 	// Chat tasks have no IssueID and are handled separately below.
 	if task.IssueID.Valid {
+		goalCondition := ""
+		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil && issue.GoalCondition.Valid {
+			goalCondition = strings.TrimSpace(issue.GoalCondition.String)
+		} else if err != nil {
+			slog.Warn("checking issue goal condition failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(task.IssueID),
+				"error", err,
+			)
+		}
 		suppressNoActionComment, err := HasSquadLeaderNoActionEvaluationForTask(ctx, s.Queries, task)
 		if err != nil {
 			slog.Warn("checking squad leader no_action evaluation failed",
@@ -1118,6 +1128,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 					// decoded into real newlines before the comment hits the DB. See
 					// util.UnescapeBackslashEscapes for the exact contract.
 					body := util.UnescapeBackslashEscapes(payload.Output)
+					if goalCondition != "" && strings.TrimSpace(payload.GoalStatus) == "" {
+						body = appendMissingGoalStatusNotice(body)
+					}
 					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
 						slog.Warn("suppressing trivial comment-trigger fallback output",
 							"task_id", util.UUIDToString(task.ID),

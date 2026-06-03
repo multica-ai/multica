@@ -285,6 +285,7 @@ func init() {
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
 	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueCreateCmd.Flags().String("goal", "", "Structured completion condition for the assigned agent")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -302,6 +303,7 @@ func init() {
 	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueUpdateCmd.Flags().String("goal", "", "New structured completion condition (pass empty string to clear)")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
@@ -652,6 +654,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if hasDesc {
 		body["description"] = desc
 	}
+	if v, _ := cmd.Flags().GetString("goal"); v != "" {
+		body["goal_condition"] = util.UnescapeBackslashEscapes(v)
+	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		body["status"] = v
 	}
@@ -813,6 +818,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		body["description"] = desc
+	}
+	if cmd.Flags().Changed("goal") {
+		v, _ := cmd.Flags().GetString("goal")
+		body["goal_condition"] = util.UnescapeBackslashEscapes(v)
 	}
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")

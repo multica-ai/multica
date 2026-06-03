@@ -208,6 +208,9 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 
 func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string) error {
 	body := map[string]any{"output": output}
+	if status := parseGoalStatus(output); status != goalStatusUnknown {
+		body["goal_status"] = string(status)
+	}
 	if branchName != "" {
 		body["branch_name"] = branchName
 	}
