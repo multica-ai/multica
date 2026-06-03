@@ -2,10 +2,13 @@ export {
   useFeatureFlag,
   useFeatureFlagsQuery,
   useSetFeatureFlagMutation,
+  useSetWorkspaceFeatureFlagMutation,
 } from "./api";
 export {
   useCerebroFeatureFlagsStore,
   useFlagValue,
+  useFlagLocked,
+  useWorkspaceFlagValue,
 } from "./store";
 export {
   CEREBRO_FLAG_DEFAULTS,

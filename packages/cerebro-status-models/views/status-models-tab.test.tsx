@@ -19,6 +19,7 @@ const ALPHA: CerebroStatusModel = {
     { key: "done", label: "Færdig", color: "#10b981", base_status: "done", position: 2 },
   ],
   project_count: 0,
+  workspace_default: false,
   created_by_id: "u-1",
   created_by_type: "member",
   created_at: "2026-05-27T00:00:00Z",
@@ -49,13 +50,12 @@ vi.mock("@multica/core/projects/queries", () => ({
 import { StatusModelsTab } from "./status-models-tab";
 
 function nameInput(): HTMLInputElement {
-  return screen.getByLabelText("Navn") as HTMLInputElement;
+  return screen.getByLabelText("Name") as HTMLInputElement;
 }
 
 function editButtonFor(modelName: string): HTMLElement {
   const row = screen.getByText(modelName).closest("div.rounded-lg") as HTMLElement;
-  // The row's first button is "Rediger" (pencil), the second is delete.
-  return within(row).getAllByRole("button")[0]!;
+  return within(row).getByTitle("Edit model");
 }
 
 describe("StatusModelsTab editor state", () => {
@@ -66,12 +66,12 @@ describe("StatusModelsTab editor state", () => {
     render(<StatusModelsTab />);
 
     await user.click(editButtonFor("Alpha"));
-    expect((await screen.findByLabelText("Navn")) as HTMLInputElement).toHaveValue("Alpha");
+    expect((await screen.findByLabelText("Name")) as HTMLInputElement).toHaveValue("Alpha");
 
-    await user.click(screen.getByRole("button", { name: /Annullér/i }));
-    await waitFor(() => expect(screen.queryByLabelText("Navn")).toBeNull());
+    await user.click(screen.getByRole("button", { name: /Cancel/i }));
+    await waitFor(() => expect(screen.queryByLabelText("Name")).toBeNull());
 
-    await user.click(screen.getByRole("button", { name: /Ny model/i }));
+    await user.click(screen.getByRole("button", { name: /New model/i }));
     expect(nameInput()).toHaveValue("");
   });
 
@@ -82,8 +82,8 @@ describe("StatusModelsTab editor state", () => {
     await user.click(editButtonFor("Alpha"));
     expect(nameInput()).toHaveValue("Alpha");
 
-    await user.click(screen.getByRole("button", { name: /Annullér/i }));
-    await waitFor(() => expect(screen.queryByLabelText("Navn")).toBeNull());
+    await user.click(screen.getByRole("button", { name: /Cancel/i }));
+    await waitFor(() => expect(screen.queryByLabelText("Name")).toBeNull());
 
     await user.click(editButtonFor("Beta"));
     expect(nameInput()).toHaveValue("Beta");

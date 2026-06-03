@@ -48,6 +48,7 @@ import type {
   SkillVersion,
   SkillChangeRequest,
   SkillFork,
+  SkillForkParent,
   UpdateSkillOwnershipRequest,
   CreateSkillChangeRequestRequest,
   ReviewSkillChangeRequestRequest,
@@ -682,7 +683,11 @@ export class ApiClient {
   // CEREBRO-PATCH(feature-flags-client): per-(workspace, user) feature flag overrides.
   // Server returns ONLY the overrides — defaults are applied client-side
   // from the cerebro-feature-flags registry.
-  async listFeatureFlags(wsId: string): Promise<{ overrides: Record<string, boolean> }> {
+  async listFeatureFlags(wsId: string): Promise<{
+    overrides: Record<string, boolean>;
+    workspace_overrides?: Record<string, boolean>;
+    locked?: Record<string, boolean>;
+  }> {
     return this.fetch(`/api/workspaces/${wsId}/feature-flags`);
   }
 
@@ -690,6 +695,28 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}`, {
       method: "PUT",
       body: JSON.stringify({ enabled }),
+    });
+  }
+
+  // CEREBRO-PATCH(feature-flags-workspace-overrides): FIR-2505 — workspace-level
+  // override (owner/admin): force a flag on/off for every member. `locked`
+  // forbids members from overriding it personally. listFeatureFlags also gains
+  // the workspace_overrides + locked maps in the same patch.
+  async setWorkspaceFeatureFlag(
+    wsId: string,
+    key: string,
+    enabled: boolean,
+    locked: boolean,
+  ): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}/workspace`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled, locked }),
+    });
+  }
+
+  async clearWorkspaceFeatureFlag(wsId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}/workspace`, {
+      method: "DELETE",
     });
   }
 
@@ -719,6 +746,77 @@ export class ApiClient {
   // the cerebro-cost-optimization package validates the shape with a zod schema.
   async getCostOptimizationDashboard(wsId: string): Promise<unknown> {
     return this.fetch(`/api/workspaces/${wsId}/cost-optimization/dashboard`);
+  }
+
+  // CEREBRO-PATCH(cost-optimization-holdout-client): FIR-2640 PER-SAVING holdout
+  // share (percent of a saving's "on" runs withheld as the A/B control arm). GET
+  // returns the raw overrides map; cerebro-cost-optimization validates it. PUT
+  // sets one saving's share; DELETE clears it (reverts to the server default).
+  async getCostOptimizationHoldout(wsId: string): Promise<unknown> {
+    return this.fetch(`/api/workspaces/${wsId}/cost-optimization/holdout`);
+  }
+
+  async setCostOptimizationHoldout(wsId: string, key: string, pct: number): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/holdout/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ holdout_pct: pct }),
+    });
+  }
+
+  async clearCostOptimizationHoldout(wsId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/holdout/${key}`, {
+      method: "DELETE",
+    });
+  }
+
+  // CEREBRO-PATCH(cost-optimization-analytics-client): FIR-2765 drill-down analytics.
+  async getCostOptimizationAnalyticsSummary(wsId: string): Promise<unknown> {
+    return this.fetch(`/api/workspaces/${wsId}/cost-optimization/analytics`);
+  }
+
+  async getCostOptimizationAnalyticsIssues(
+    wsId: string,
+    key: string,
+    opts?: { days?: number; limit?: number },
+  ): Promise<unknown> {
+    const params = new URLSearchParams();
+    if (opts?.days !== undefined) params.set("days", String(opts.days));
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    const suffix = qs ? `?${qs}` : "";
+    return this.fetch(
+      `/api/workspaces/${wsId}/cost-optimization/analytics/${encodeURIComponent(key)}/issues${suffix}`,
+    );
+  }
+
+  async getCostOptimizationAnalyticsIssueRuns(
+    wsId: string,
+    key: string,
+    issueId: string,
+    opts?: { days?: number; limit?: number },
+  ): Promise<unknown> {
+    const params = new URLSearchParams();
+    if (opts?.days !== undefined) params.set("days", String(opts.days));
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    const suffix = qs ? `?${qs}` : "";
+    return this.fetch(
+      `/api/workspaces/${wsId}/cost-optimization/analytics/${encodeURIComponent(key)}/issues/${encodeURIComponent(issueId)}/runs${suffix}`,
+    );
+  }
+
+  // CEREBRO-PATCH(cost-optimization-prompt-inspector-client): FIR-2765 composed prompt view.
+  async getCostOptimizationPromptInspector(
+    wsId: string,
+    repoUrl?: string,
+  ): Promise<unknown> {
+    const params = new URLSearchParams();
+    if (repoUrl) params.set("repo_url", repoUrl);
+    const qs = params.toString();
+    const suffix = qs ? `?${qs}` : "";
+    return this.fetch(
+      `/api/workspaces/${wsId}/cost-optimization/prompt-inspector${suffix}`,
+    );
   }
 
   // CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace accounts CRUD.
@@ -754,13 +852,28 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-credentials-client): JEH-1199 read-only credential
+  // CEREBRO-PATCH(cerebro-credentials-client): JEH-1199 credential
   // registry methods. Bodies are `unknown` so the cerebro-credentials package
   // owns the schema via parseWithFallback (the API Response Compatibility
-  // rule in CLAUDE.md). Mutating endpoints (create/reveal/rotate/delete)
-  // are not exposed here yet — the admin UI today only reads.
+  // rule in CLAUDE.md).
   async listCerebroCredentials<T = unknown>(wsId: string): Promise<T> {
     return this.fetch<T>(`/api/workspaces/${wsId}/credentials`);
+  }
+  async createCerebroCredential<T = unknown>(
+    wsId: string,
+    body: {
+      type: string;
+      name: string;
+      description?: string;
+      value: string;
+      metadata?: unknown;
+      expires_at?: string | null;
+    },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/credentials`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
   async listCerebroCredentialAudit<T = unknown>(
     wsId: string,
@@ -1157,7 +1270,14 @@ export class ApiClient {
 
   async updateCerebroAuthSettings<T = unknown>(
     workspaceId: string,
-    payload: { google_signup_domains: string[]; default_role: string },
+    payload: {
+      google_signup_domains: string[];
+      default_role: string;
+      // CEREBRO-PATCH(cerebro-identity-default-group): FIR-2732 fallback group for new members
+      default_group_id: string | null;
+      // CEREBRO-PATCH(cerebro-identity-sync-toggle): FIR-2596 per-workspace Google group sync flag
+      google_workspace_sync_enabled: boolean;
+    },
   ): Promise<T> {
     return this.fetch<T>(
       `/api/cerebro/workspaces/${encodeURIComponent(workspaceId)}/auth-settings`,
@@ -1241,6 +1361,8 @@ export class ApiClient {
     if (params?.priority) search.set("priority", params.priority);
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
+    // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 forward on-behalf-of member filter.
+    if (params?.on_behalf_of_ids?.length) search.set("on_behalf_of_ids", params.on_behalf_of_ids.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
@@ -1266,6 +1388,8 @@ export class ApiClient {
     if (params.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
     if (params.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
+    // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 forward on-behalf-of member filter (grouped).
+    if (params.on_behalf_of_ids?.length) search.set("on_behalf_of_ids", params.on_behalf_of_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
@@ -2455,6 +2579,8 @@ export class ApiClient {
     text: string;
     plannedAt: Date;
     issueId?: string | null;
+    // CEREBRO-PATCH(comment-reminder-client): FIR-2643 — pin a reminder to one comment.
+    commentId?: string | null;
   }): Promise<InboxItem> {
     return this.fetch("/api/inbox/reminders", {
       method: "POST",
@@ -2462,6 +2588,7 @@ export class ApiClient {
         text: params.text,
         planned_at: params.plannedAt.toISOString(),
         issue_id: params.issueId ?? null,
+        comment_id: params.commentId ?? null, // CEREBRO-PATCH(comment-reminder-client): FIR-2643
       }),
     });
   }
@@ -2562,7 +2689,8 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string }): Promise<Workspace> {
+  // CEREBRO-PATCH(workspace-avatar-update): FIR-2580 — accept avatar_url ("" clears the logo).
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -2783,6 +2911,15 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage; resolves to null when the skill is an original (404).
+  async getSkillForkParent(id: string): Promise<SkillForkParent | null> {
+    try {
+      return await this.fetch(`/api/skills/${id}/fork-parent`);
+    } catch {
+      return null;
+    }
   }
 
   // Personal Access Tokens
@@ -3560,5 +3697,21 @@ export class ApiClient {
   async generateAgentAvatar(agentName: string, customPrompt?: string): Promise<{ url: string }> {
     const body = JSON.stringify({ agent_name: agentName, custom_prompt: customPrompt });
     return this.fetch("/api/agents/generate-avatar", { method: "POST", body });
+  }
+
+  // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (up to 5 square icon variants).
+  async generateWorkspaceLogos(
+    workspaceId: string,
+    prompt: string,
+    count = 5,
+  ): Promise<{ urls: string[] }> {
+    const body = JSON.stringify({ prompt, count });
+    const res = await this.fetch<{ urls?: string[] }>(
+      `/api/workspaces/${workspaceId}/generate-logo`,
+      { method: "POST", body },
+    );
+    // Defensive: tolerate a malformed/empty body so the UI shows a clean
+    // "no images" state instead of throwing (API Response Compatibility).
+    return { urls: Array.isArray(res?.urls) ? res.urls.filter((u) => typeof u === "string") : [] };
   }
 }

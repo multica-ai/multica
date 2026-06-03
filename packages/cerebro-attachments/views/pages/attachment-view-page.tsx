@@ -12,7 +12,8 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
-import { ArtifactBody } from "@multica/cerebro-artifacts/views/components";
+import { ArtifactBody, PdfViewer } from "@multica/cerebro-artifacts/views/components";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -40,6 +41,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
     attachmentDetailOptions(wsId, attachmentId),
   );
 
+  const inlinePdf = useFeatureFlag("cerebro_pdf_inline_render");
   const kind = attachment
     ? viewableKind(attachment.content_type, attachment.filename)
     : null;
@@ -64,7 +66,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
   if (isError || !attachment) {
     return (
       <div className="h-full overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
+        <div className="mx-auto w-full max-w-7xl px-4 py-4 md:px-8 md:py-6">
           <div className="mb-3 flex items-center gap-2">
             <MobileSidebarTrigger className="mr-0" />
             <Button variant="ghost" size="sm" onClick={() => router.back()}>
@@ -114,7 +116,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
+      <div className="mx-auto w-full max-w-7xl px-4 py-4 md:px-8 md:py-6">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MobileSidebarTrigger className="mr-0" />
@@ -158,7 +160,13 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
         </h1>
 
         <div className="mt-6">
-          {kind === "html" ? (
+          {kind === "pdf" && inlinePdf && attachment.download_url ? (
+            <PdfViewer
+              fileUrl={attachment.download_url}
+              title={attachment.filename}
+              downloadUrl={attachment.download_url}
+            />
+          ) : kind === "html" ? (
             body.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : body.isError || !body.data ? (

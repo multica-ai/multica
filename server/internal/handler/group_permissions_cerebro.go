@@ -24,6 +24,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	// CEREBRO-PATCH(create-local-runtime-policy-gate): FIR-2672 tool-policy resolve for local runtime creation.
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -158,6 +160,56 @@ func (h *Handler) cerebroRequireCapability(w http.ResponseWriter, r *http.Reques
 	}
 	if !allowed {
 		writeError(w, http.StatusForbidden, "no group grants this capability — ask a workspace admin")
+		return false
+	}
+	return true
+}
+
+// cerebroRequireLocalRuntimePolicy gates the LOCAL-runtime setup-token mint on
+// the create_local_runtime capability, resolved through the unified tool-policy
+// chain (workspace > group > user). FIR-2672: this is the "total permissions
+// system" home for local-runtime creation — settable Allow/Ask/Deny at group
+// and member level, exactly like every other platform capability.
+//
+// The chain is consulted unconditionally (like the daemon repo-checkout gate),
+// so it is live regardless of CEREBRO_APPROVAL_GATE_ENABLED. Base = Allow: with
+// no stored rows the action is permitted, preserving today's behavior 1:1; an
+// admin tightens specific groups/members to Deny to turn local runtimes off.
+// Admins (workspace owner/admin) always pass. Resolve auto-loads the viewer's
+// group memberships from UserID, so only WorkspaceID + UserID are passed.
+//
+// nil-invoker / nil-queries fail open for the same reason as
+// cerebroRequireCapability: upstream-only test fixtures must keep working.
+//
+// CEREBRO-PATCH(create-local-runtime-policy-gate): FIR-2672 tool-policy gate for local runtime creation.
+func (h *Handler) cerebroRequireLocalRuntimePolicy(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	if h.CerebroQueries == nil {
+		return true
+	}
+	viewer, ok := h.cerebroGroupViewer(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if viewer.IsAdmin {
+		return true
+	}
+	wsUUID, perr := util.ParseUUID(workspaceID)
+	if perr != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return false
+	}
+	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
+		WorkspaceID: wsUUID,
+		ToolKey:     "create_local_runtime",
+		UserID:      viewer.UserID,
+		Base:        toolpolicy.SettingAllow,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return false
+	}
+	if eff.Setting != toolpolicy.SettingAllow {
+		writeError(w, http.StatusForbidden, "creating local runtimes is not allowed for you — ask a workspace admin")
 		return false
 	}
 	return true

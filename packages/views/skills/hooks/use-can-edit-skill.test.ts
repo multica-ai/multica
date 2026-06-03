@@ -66,4 +66,29 @@ describe("canEditSkill", () => {
       canEditSkill(skill, { userId: null, role: "member" }),
     ).toBe(false);
   });
+
+  // FIR-2629: owner + approvers edit directly, not only the creator.
+  it("allows the explicit owner even when they are not the creator", () => {
+    const s: Skill = { ...makeSkill("user-alice"), owner_id: "user-owner" };
+    expect(canEditSkill(s, { userId: "user-owner", role: "member" })).toBe(true);
+  });
+
+  it("allows an approver to edit directly", () => {
+    const s: Skill = {
+      ...makeSkill("user-alice"),
+      owner_id: "user-owner",
+      approver_ids: ["user-rev"],
+    };
+    expect(canEditSkill(s, { userId: "user-rev", role: "member" })).toBe(true);
+  });
+
+  it("denies the creator once a different owner is set", () => {
+    const s: Skill = { ...makeSkill("user-alice"), owner_id: "user-owner" };
+    expect(canEditSkill(s, { userId: "user-alice", role: "member" })).toBe(false);
+  });
+
+  it("falls back to the creator when no owner is set", () => {
+    const s: Skill = { ...makeSkill("user-alice"), owner_id: null };
+    expect(canEditSkill(s, { userId: "user-alice", role: "member" })).toBe(true);
+  });
 });

@@ -147,3 +147,19 @@ function formatRemaining(until: string, nowMs: number): string {
   const remHours = hours % 24;
   return remHours ? `${days}d ${remHours}h` : `${days}d`;
 }
+
+export function formatPauseReason(reason: string | null | undefined): string {
+  switch (reason) {
+    case "rate_limit":
+      return "rate limit or usage limit";
+    case "auto":
+      return "automatic pause";
+    case "manual":
+    case "":
+    case null:
+    case undefined:
+      return "manual pause";
+    default:
+      return reason.replaceAll("_", " ");
+  }
+}

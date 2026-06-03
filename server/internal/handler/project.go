@@ -357,6 +357,8 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to create project")
 			return
 		}
+		// CEREBRO-PATCH(project-create-default-status-model): FIR-2800 auto-assign workspace default model.
+		h.cerebroAutoAssignWorkspaceDefaultStatusModel(r.Context(), project.ID, wsUUID, userID)
 		resp := projectToResponse(project)
 		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
 		writeJSON(w, http.StatusCreated, resp)
@@ -412,6 +414,8 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit project create")
 		return
 	}
+	// CEREBRO-PATCH(project-create-default-status-model): FIR-2800 auto-assign workspace default model.
+	h.cerebroAutoAssignWorkspaceDefaultStatusModel(r.Context(), project.ID, wsUUID, userID)
 
 	resourceResp := make([]ProjectResourceResponse, len(resourceRows))
 	for i, row := range resourceRows {

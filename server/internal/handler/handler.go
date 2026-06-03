@@ -22,6 +22,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/duplicatecheck"
 	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
+	"github.com/multica-ai/multica/server/internal/cerebro/permgate" // CEREBRO-PATCH(handler-approval-gate): FIR-2586 shared approval seam.
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -138,6 +139,8 @@ type Handler struct {
 	GroupPermissions GroupPermissionsInvoker
 	// CEREBRO-PATCH(handler-mention-trigger-gate): cerebro @mention trigger gate.
 	MentionTriggerGate MentionTriggerGateInvoker
+	// CEREBRO-PATCH(handler-comment-target-guard): FIR-2674 reject agent comments with no target.
+	CommentTargetGuard CommentTargetGuardInvoker
 	// CEREBRO-PATCH(handler-private-agent-run-request): FIR-2385 — turns a member's
 	// tag of an unowned private agent into a run-request in the owner's inbox.
 	PrivateAgentRunRequester PrivateAgentRunRequesterInvoker
@@ -175,10 +178,55 @@ type Handler struct {
 	// (test fake or workspace-aware gateway) into CheckSimilarIssues; nil
 	// means the default env-resolved gateway is used.
 	DuplicateCheckJudger *duplicatecheck.Judger
+	// CEREBRO-PATCH(handler-custom-status-resolver): FIR-1550 v2b — resolver invoked from UpdateIssue.
+	CustomStatusResolver CustomStatusResolver
 	// CEREBRO-PATCH(handler-identity-provisioner): FIR-2523 Google Workspace
 	// auto-membership hook. Wired by the router; nil = no auto-provisioning.
 	IdentityProvisioner IdentityProvisionerInvoker
+	// CEREBRO-PATCH(handler-approval-gate): FIR-2586 shared approval seam for
+	// daemon repo checkout. nil when CEREBRO_APPROVAL_GATE_ENABLED is off, so an
+	// "Ask" verdict keeps its prior block; non-nil routes it to the one /approvals
+	// inbox (CheckDaemonRepoCapability creates the ask, the daemon long-polls it).
+	ApprovalGate *permgate.Gate
+	// CEREBRO-PATCH(handler-semantic-search): FIR-2604 hybrid (FTS+vector) seam.
+	SemanticSearch SemanticSearchInvoker
 }
+
+// CustomStatusResolver is the upstream-side seam for the cerebro status-model
+// sidecar. UpdateIssue invokes it after the upstream base-status write so a
+// project's custom_status pin stays in sync with the new base — and so the
+// status-picker can pass an explicit custom_status_key end-to-end through the
+// normal upstream update path (boards/live updates/activity log/triggers all
+// fire on the same event). requestedKey == "" means "auto-resolve to the
+// first matching custom status under newBase".
+//
+// CEREBRO-PATCH(handler-custom-status-resolver-iface): FIR-1550 v2b seam.
+type CustomStatusResolver interface {
+	ResolveCustomStatusAfterBaseChange(
+		ctx context.Context,
+		issueID, projectID, workspaceID pgtype.UUID,
+		newBase, actorID, actorType, requestedKey string,
+	) error
+	// ValidateCustomStatusKey is the read-only pre-commit guard: UpdateIssue
+	// calls it before committing the base-status change so an invalid explicit
+	// key returns 400 without half-applying the base status. It returns non-nil
+	// ONLY for a genuine key mismatch (the 400 case); empty key, no model, and
+	// infra hiccups all return nil so the normal update proceeds.
+	ValidateCustomStatusKey(
+		ctx context.Context,
+		projectID pgtype.UUID,
+		newBase, requestedKey string,
+	) error
+}
+
+// ErrCustomStatusKeyMismatch is the sentinel returned by a
+// CustomStatusResolver implementation when the caller's explicit
+// custom_status_key cannot be applied (key missing, or its base does not
+// match the resulting base). UpdateIssue maps this to a 400 so the client
+// knows the picker payload itself is the problem.
+//
+// CEREBRO-PATCH(handler-custom-status-resolver-err): FIR-1550 v2b error sentinel.
+var ErrCustomStatusKeyMismatch = errors.New("custom_status_key is not valid for the resulting base status in this project's model")
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime
 // pause service plugs into. Methods on *Handler in runtime_pause_cerebro.go
@@ -211,6 +259,16 @@ type RuntimePauseState struct {
 // @mention trigger gate.
 type MentionTriggerGateInvoker interface {
 	CanTriggerMention(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (bool, error)
+}
+
+// CommentTargetGuardInvoker is the upstream-side seam for Cerebro's "no agent
+// comment without a target" guard (FIR-2674). RejectComment returns
+// (message, ok=false) when an agent-authored comment references no target and
+// must be rejected; ok=true means it passes. A nil invoker disables the guard.
+//
+// CEREBRO-PATCH(handler-comment-target-guard-iface): seam for FIR-2674.
+type CommentTargetGuardInvoker interface {
+	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, content string) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 feature-flag-gated, workspace-scoped.
 }
 
 // PrivateAgentRunRequesterInvoker is the upstream-side seam for FIR-2385. It is

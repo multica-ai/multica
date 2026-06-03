@@ -432,6 +432,11 @@
       "cancel_task_tooltip": "Cancel task",
       "cancelling_tooltip": "Cancelling…",
       "cancel_failed_toast": "Failed to cancel task",
+      "_comment_retry": "CEREBRO-PATCH(activity-tab-retry): FIR-2592 — retry affordance on failed/cancelled runs in Recent Work.",
+      "retry_task_aria": "Retry run",
+      "retry_task_tooltip": "Retry run",
+      "retrying_tooltip": "Retrying…",
+      "retry_failed_toast": "Failed to retry run",
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
       "queued_prefix": "Queued {{when}}"

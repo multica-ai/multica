@@ -412,8 +412,8 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 	if isNew {
 		h.Analytics.Capture(analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
-		h.provisionMembershipForNewUser(r.Context(), user, "code") // CEREBRO-PATCH(auth-identity-hook-code): FIR-2523 auto-membership.
 	}
+	h.provisionMembershipForNewUser(r.Context(), user, "code") // CEREBRO-PATCH(auth-identity-hook-code): FIR-2523 auto-membership+group, every login (self-heal).
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
@@ -589,8 +589,8 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
 		evt.Properties["auth_method"] = "google"
 		h.Analytics.Capture(evt)
-		h.provisionMembershipForNewUser(r.Context(), user, "google") // CEREBRO-PATCH(auth-identity-hook-google): FIR-2523 auto-membership.
 	}
+	h.provisionMembershipForNewUser(r.Context(), user, "google") // CEREBRO-PATCH(auth-identity-hook-google): FIR-2523 auto-membership+group, every login (self-heal).
 
 	// Update name and avatar from Google profile if the user was just created
 	// (default name is email prefix) or has no avatar yet.

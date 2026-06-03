@@ -209,6 +209,39 @@ func (s *Service) Get(ctx context.Context, id, workspaceID pgtype.UUID) (cerebro
 	return row, err
 }
 
+// ReusableQuery identifies the request whose approval a poll-based caller wants
+// to rejoin on retry instead of raising a duplicate (FIR-2586).
+type ReusableQuery struct {
+	WorkspaceID pgtype.UUID
+	Agent       pgtype.UUID
+	Capability  string
+	Resource    string
+}
+
+// FindReusable returns the most recent still-actionable approval for the given
+// (agent, capability, resource), with ok=false when none exists. A 'pending'
+// match lets a retried poll-based request (e.g. a daemon repo checkout) rejoin
+// the same ask; an 'approved', unexpired match lets the retry through. This is
+// the dedup that stops every checkout retry from spawning a fresh inbox request
+// and makes an ask approved after the poll budget actually honourable. Callers
+// that block in-process (agent tool loop, credentials) do not need it — they
+// hold one Await across the whole window, so there is no retry to dedup.
+func (s *Service) FindReusable(ctx context.Context, q ReusableQuery) (cerebrodb.CerebroApprovalRequest, bool, error) {
+	row, err := s.Cerebro.FindReusableCerebroApprovalRequest(ctx, cerebrodb.FindReusableCerebroApprovalRequestParams{
+		WorkspaceID: q.WorkspaceID,
+		AgentID:     q.Agent,
+		Capability:  q.Capability,
+		Resource:    q.Resource,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return cerebrodb.CerebroApprovalRequest{}, false, nil
+	}
+	if err != nil {
+		return cerebrodb.CerebroApprovalRequest{}, false, fmt.Errorf("find reusable approval: %w", err)
+	}
+	return row, true, nil
+}
+
 // Approve marks a pending ask approved. Race-safe: ErrAlreadyDecided if the ask
 // is no longer pending, ErrNotFound if it does not exist.
 func (s *Service) Approve(ctx context.Context, id, workspaceID, actorID pgtype.UUID, note, surface string) (cerebrodb.CerebroApprovalRequest, error) {

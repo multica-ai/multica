@@ -156,10 +156,13 @@ export const ProjectSchema = z.object({
   title: z.string(),
   description: z.string().nullable(),
   icon: z.string().nullable(),
+  color: z.string().nullable().default(null),
+  repo_url: z.string().nullable().default(null),
   status: z.string(),
   priority: z.string(),
   lead_type: z.string().nullable(),
   lead_id: z.string().nullable(),
+  access: z.enum(["workspace", "restricted"]).catch("workspace"),
   created_at: z.string(),
   updated_at: z.string(),
   issue_count: z.number().default(0),
@@ -189,10 +192,13 @@ export const EMPTY_PROJECT: Project = {
   title: "",
   description: null,
   icon: null,
+  color: null,
+  repo_url: null,
   status: "planned",
   priority: "none",
   lead_type: null,
   lead_id: null,
+  access: "workspace",
   created_at: "",
   updated_at: "",
   issue_count: 0,
@@ -266,6 +272,7 @@ export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
+  responded_at: z.string().nullable().default(null),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -383,7 +390,21 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   // so downstream truthy checks (`if (task.failure_reason)`) don't have to
   // special-case both null/undefined AND "".
   failure_reason: z
-    .enum(["agent_error", "timeout", "runtime_offline", "runtime_recovery", "manual", ""])
+    .enum([
+      "agent_error",
+      "timeout",
+      "runtime_offline",
+      "runtime_recovery",
+      "manual",
+      "rate_limit",
+      "runtime_paused",
+      "queued_expired",
+      "iteration_limit",
+      "agent_fallback_message",
+      "api_invalid_request",
+      "codex_semantic_inactivity",
+      "",
+    ])
     .optional()
     .catch("")
     .transform((v) => (v === "" ? undefined : v)),
@@ -430,12 +451,13 @@ export const UserSchema: z.ZodType<User> = z.object({
   name: z.string().default(""),
   email: z.string().default(""),
   avatar_url: z.string().nullable().default(null),
+  preferences: z.record(z.string(), z.unknown()).default({}),
   onboarded_at: z.string().nullable().default(null),
   onboarding_questionnaire: z.record(z.string(), z.unknown()).default({}),
   starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
-  profile_description: z.string().default(""),
   timezone: z.string().nullable().default(null),
+  profile_description: z.string().default(""),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -448,12 +470,13 @@ export const EMPTY_USER: User = {
   name: "",
   email: "",
   avatar_url: null,
+  preferences: {},
   onboarded_at: null,
   onboarding_questionnaire: {},
   starter_content_state: null,
   language: null,
-  profile_description: "",
   timezone: null,
+  profile_description: "",
   created_at: "",
   updated_at: "",
 };
@@ -513,7 +536,9 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
   severity: z
     .enum(["action_required", "attention", "info"])
     .catch("info"),
+  route: z.enum(["inbox", "notifications"]).catch("inbox"),
   issue_id: z.string().nullable().default(null),
+  project_id: z.string().nullable().default(null),
   title: z.string().default(""),
   body: z.string().nullable().default(null),
   issue_status: z.string().nullable().default(null) as unknown as z.ZodType<
@@ -521,6 +546,7 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
   >,
   read: z.boolean().default(false),
   archived: z.boolean().default(false),
+  muted_until: z.string().nullable().default(null),
   created_at: z.string().default(""),
   details: z.record(z.string(), z.string()).nullable().default(null),
 }).loose();
@@ -537,6 +563,7 @@ export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   name: z.string().default(""),
   email: z.string().default(""),
   avatar_url: z.string().nullable().default(null),
+  budget_enforcement_enabled: z.boolean().default(false),
 }).loose();
 
 export const MemberListSchema = z.array(MemberWithUserSchema).default([]);
@@ -579,6 +606,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   updated_at: z.string().default(""),
   archived_at: z.string().nullable().default(null),
   archived_by: z.string().nullable().default(null),
+  persona_sandbox: z.string().default(""),
 }).loose();
 
 export const AgentListSchema = z.array(AgentSchema).default([]);
@@ -607,6 +635,12 @@ export const RuntimeSchema: z.ZodType<RuntimeDevice> = z.object({
   device_info: z.string().default(""),
   metadata: z.record(z.string(), z.unknown()).default({}),
   owner_id: z.string().nullable().default(null),
+  sandbox_enabled: z.boolean().nullable().default(null),
+  sandbox_policy: z.unknown().optional() as unknown as z.ZodType<
+    RuntimeDevice["sandbox_policy"]
+  >,
+  persona_sandbox: z.string().default(""),
+  capabilities: z.record(z.string(), z.unknown()).default({}),
   visibility: z.string().catch("private") as unknown as z.ZodType<
     RuntimeDevice["visibility"]
   >,
@@ -649,6 +683,7 @@ export const EMPTY_ISSUE_FALLBACK: import("@multica/core/types").Issue = {
   workspace_id: "",
   number: 0,
   identifier: "",
+  kind: "issue",
   title: "",
   description: null,
   status: "backlog",
@@ -665,6 +700,26 @@ export const EMPTY_ISSUE_FALLBACK: import("@multica/core/types").Issue = {
   metadata: {},
   created_at: "",
   updated_at: "",
+};
+
+// GET /api/workspaces/{id}/feature-flags (cerebro). The server returns the
+// signed-in member's personal overrides, the owner-set workspace overrides, and
+// the locked keys. Defaults are NOT sent — they live frontend-side (web's
+// packages/cerebro-feature-flags/registry.ts). `record(string, boolean)` keeps
+// the schema flag-agnostic so a new server flag never breaks parsing. Mirrors
+// the resolved shape in packages/cerebro-feature-flags/api.ts.
+export const FeatureFlagsResponseSchema = z.object({
+  overrides: z.record(z.string(), z.boolean()).default({}),
+  workspace_overrides: z.record(z.string(), z.boolean()).default({}),
+  locked: z.record(z.string(), z.boolean()).default({}),
+}).loose();
+
+export type FeatureFlagsResponse = z.infer<typeof FeatureFlagsResponseSchema>;
+
+export const EMPTY_FEATURE_FLAGS: FeatureFlagsResponse = {
+  overrides: {},
+  workspace_overrides: {},
+  locked: {},
 };
 
 // Helpers re-exported for ergonomic single-import at the call site.

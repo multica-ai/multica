@@ -385,6 +385,57 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 	return items, nil
 }
 
+const listRecentCommentsForIssue = `-- name: ListRecentCommentsForIssue :many
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification FROM comment
+WHERE issue_id = $1 AND workspace_id = $2
+ORDER BY created_at DESC, id DESC
+LIMIT $3
+`
+
+type ListRecentCommentsForIssueParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int32       `json:"limit"`
+}
+
+// CEREBRO-PATCH(orchestration-thread): newest-first, capped — used by the
+// orchestrator's comment dedup (ListCommentsForIssue returns oldest-first, so it
+// never sees a just-posted duplicate on a long thread).
+func (q *Queries) ListRecentCommentsForIssue(ctx context.Context, arg ListRecentCommentsForIssueParams) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listRecentCommentsForIssue, arg.IssueID, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Comment{}
+	for rows.Next() {
+		var i Comment
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+			&i.Classification,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentThreadCommentsForIssue = `-- name: ListRecentThreadCommentsForIssue :many
 WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
     -- Each root maps to itself.

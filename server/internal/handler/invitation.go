@@ -442,6 +442,9 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(member-default-group-placement): FIR-2732 auto-assign default group.
+	h.placeMemberInDefaultGroup(r.Context(), accepted.WorkspaceID, user.ID)
+
 	// Accepting an invite marks the invitee as onboarded. The web /
 	// desktop workspace layout has a hard onboarded_at gate; without
 	// this mark, an invitee landing on their first workspace would be

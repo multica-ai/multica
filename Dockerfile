@@ -28,7 +28,9 @@ RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/backfill_task_us
 # --- Runtime stage ---
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata
+# git is required by the FIR-2656 skill archive sync worker (no-op unless
+# CEREBRO_SKILLS_SYNC_REPO/_TOKEN are set).
+RUN apk add --no-cache ca-certificates tzdata git
 
 WORKDIR /app
 
@@ -39,6 +41,11 @@ COPY --from=builder /src/server/bin/backfill_task_usage_hourly .
 COPY server/migrations/ ./migrations/
 COPY docker/entrypoint.sh .
 RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
+
+# Run as a non-root user. The server listens on 8080 (>1024) and writes
+# nothing under /app at runtime, so an unprivileged user is sufficient.
+RUN addgroup -S app && adduser -S -G app app && chown -R app:app /app
+USER app
 
 EXPOSE 8080
 

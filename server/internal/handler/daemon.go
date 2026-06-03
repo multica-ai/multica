@@ -1571,6 +1571,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.IssueKind = issue.Kind // CEREBRO-PATCH(agent-task-issue-kind): surface issue.kind so trace upload labels channel/dm runs (FIR-2438)
+			// CEREBRO-PATCH(agent-task-issue-title): FIR-2763 M1 — stamp display
+			// titles so trace upload can write human-readable names instead of
+			// bare UUIDs. Parent lookup is best-effort: a missing parent leaves
+			// ParentIssueTitle empty (registry stores null, UI falls back to ID).
+			resp.IssueTitle = issue.Title
+			if issue.ParentIssueID.Valid {
+				if parent, perr := h.Queries.GetIssue(r.Context(), issue.ParentIssueID); perr == nil {
+					resp.ParentIssueTitle = parent.Title
+				}
+			}
 			// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — resolve the spawning user + groups for the persona-hook facts.
 			sub := cerebropersona.ResolveSpawnSubject(r.Context(), h.GroupPermissions, issue)
 			resp.PersonaSpawnUserID = sub.UserID
@@ -1648,6 +1658,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			h.applySnapshotSaving(r.Context(), &resp, issue, task.TriggerCommentID, task.ID)
 			// CEREBRO-PATCH(daemon-bundled-saving): point prompt at `issue context` (on) or record would-save (shadow) for bundled_read; defers to snapshot (FIR-2384)
 			h.applyBundledReadSaving(r.Context(), &resp, issue, task.ID)
+			// CEREBRO-PATCH(daemon-context-duplication): score meta-skill duplication (FIR-2765)
+			h.applyContextDuplicationSaving(r.Context(), &resp, issue, task.ID)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -2316,6 +2328,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 
+	var accountTokens int64 // CEREBRO-PATCH(handler-daemon-account-token-usage): derive account load from authoritative task usage reports.
 	for _, u := range req.Usage {
 		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
 			TaskID:           parseUUID(taskID),
@@ -2331,14 +2344,35 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 		}
 
+		accountTokens += u.InputTokens + u.OutputTokens
+
 		// Per-(agent, workspace) live spend rollup. User scope is not yet
 		// wired — task initiator attribution is a separate change. Failures
 		// here are warnings, not 4xx, so the raw token usage above still
 		// lands even if the rollup hits a constraint or DB hiccup.
 		h.recordBudgetSpend(r.Context(), workspaceID, task, u)
 	}
+	h.recordCerebroAccountTokenUsage(r.Context(), task, accountTokens) // CEREBRO-PATCH(handler-daemon-account-token-usage): keep account rolling windows in lockstep with task usage.
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) recordCerebroAccountTokenUsage(ctx context.Context, task db.AgentTaskQueue, tokens int64) { // CEREBRO-PATCH(handler-daemon-account-token-usage): server-side account token events for JEH-1365.
+	if tokens <= 0 || h.DB == nil {
+		return
+	}
+	if _, err := h.DB.Exec(ctx, `
+		INSERT INTO cerebro_account_token_usage (account_id, workspace_id, tokens)
+		SELECT ar.current_account_id, ar.workspace_id, $2
+		FROM agent_runtime ar
+		WHERE ar.id = $1
+		  AND ar.current_account_id IS NOT NULL
+	`, task.RuntimeID, tokens); err != nil {
+		slog.Warn("record cerebro account token usage failed",
+			"runtime_id", uuidToString(task.RuntimeID),
+			"tokens", tokens,
+			"error", err)
+	}
 }
 
 // recordBudgetSpend converts a single (model, usage) report into cents and
@@ -2893,6 +2927,10 @@ type daemonRepoCheckRequest struct {
 	Capability string `json:"capability"`
 	AgentID    string `json:"agent_id,omitempty"`
 	ProjectID  string `json:"project_id,omitempty"`
+	// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — set by the real daemon
+	// checkout so an "Ask" verdict raises one shared-inbox approval; left false by
+	// the read-only `repo check` pre-flight, which only reports the decision.
+	RaiseApproval bool `json:"raise_approval,omitempty"`
 }
 
 // CheckDaemonRepoCapability evaluates whether a repo capability is allowed for an
@@ -2956,6 +2994,30 @@ func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		slog.Error("repo capability check failed", "workspace_id", workspaceID, "url", req.URL, "error", err)
 		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return
+	}
+
+	// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — on a real checkout an
+	// "Ask" verdict no longer silently blocks: it rejoins or creates one
+	// shared-inbox approval and returns its decision (pending/allow/deny) + id so
+	// the daemon can long-poll or proceed. Rejoining a still-open ask (and
+	// honouring one approved after the daemon's earlier poll budget) is what keeps
+	// a retried checkout from piling up duplicate requests. Gate off
+	// (h.ApprovalGate==nil) or the pre-flight path (raise_approval false) keep the
+	// prior report-only behaviour, so production is unchanged.
+	if req.RaiseApproval && h.ApprovalGate != nil && eff.Setting == toolpolicy.SettingAsk {
+		allowed, decision, approvalID, askErr := h.repoCheckoutAsk(r.Context(), wsUUID, agentID, req.URL, req.Capability, eff.Reason)
+		if askErr != nil {
+			slog.Error("repo approval ask failed", "workspace_id", workspaceID, "url", req.URL, "error", askErr)
+			writeError(w, http.StatusInternalServerError, "could not create approval request")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"allowed":     allowed,
+			"decision":    decision,
+			"approval_id": util.UUIDToString(approvalID),
+			"reason":      eff.Reason,
+		})
 		return
 	}
 

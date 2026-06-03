@@ -16,6 +16,7 @@ export type CerebroFlagKey =
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
   | "cerebro_inbox_action_grouping"
+  | "cerebro_inbox_pinned_filter"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
   | "cerebro_voice_summary_enabled"
@@ -31,10 +32,13 @@ export type CerebroFlagKey =
   | "cerebro_grants"
   | "cerebro_tool_policy"
   | "cerebro_simple_tool_policy"
+  | "cerebro_platform_capabilities"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_move_comment_to_thread"
   | "cerebro_agent_passes"
+  // JEH-216: skill ownership, approvers, version history, change requests, forks.
+  | "cerebro_skill_ownership"
   | "cerebro_references"
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
   | "cerebro_agent_avatar"
@@ -48,8 +52,18 @@ export type CerebroFlagKey =
   | "cerebro_duplicate_check_on_create"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
   | "cerebro_google_identity"
-  // FIR-2564: label a parent `orchestrate` to auto-drive its sub-issue waves.
-  | "cerebro_orchestrate";
+  // FIR-2580: per-workspace logo (upload + sidebar/breadcrumbs + web favicon + desktop dock icon).
+  | "cerebro_workspace_logo"
+  // FIR-2666: project sprint feature (sprint settings, auto-create next sprint, recurring tasks).
+  | "cerebro_sprints"
+  // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
+  | "cerebro_pdf_inline_render"
+  // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
+  | "cerebro_comment_reminders"
+  // FIR-2674: reject agent comments that mention no target (person, agent, or issue).
+  | "cerebro_comment_target_guard"
+  // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
+  | "cerebro_agent_trigger_permissions";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -69,6 +83,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
   cerebro_inbox_action_grouping: true,
+  cerebro_inbox_pinned_filter: true,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
   cerebro_voice_summary_enabled: false,
@@ -84,6 +99,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_grants: false,
   cerebro_tool_policy: false,
   cerebro_simple_tool_policy: false,
+  // FIR-2594: surface the Multica platform actions (create issue, add comment,
+  // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
+  // so they are settable Allow/Ask/Deny on every layer. Default OFF — nothing
+  // new appears until an admin turns it on.
+  cerebro_platform_capabilities: false,
   // Deliberately ON (FIR-2230 phase 5): the legacy duplicate "Pending" tab on
   // the Access page was removed, so the approvals inbox is now the ONLY surface
   // for needs_approval asks. Leaving this off would leave prod with no approvals
@@ -93,6 +113,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_move_comment_to_subissue: true,
   cerebro_move_comment_to_thread: true,
   cerebro_agent_passes: true,
+  // JEH-216: ON by default. Surfaces ownership/approvers, version history,
+  // change-request review, and forking on the skill detail page. Off restores
+  // the plain upstream skill editor with no governance UI.
+  cerebro_skill_ownership: true,
   cerebro_references: true,
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
   cerebro_agent_avatar: true,
@@ -119,11 +143,31 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // signup is the launch feature, and the table starts empty so a fresh
   // workspace with no configured domains is still a no-op.
   cerebro_google_identity: true,
-  // FIR-2564: ON by default. Attaching the `orchestrate` label to a parent
-  // issue makes the platform auto-promote its sub-issues wave by wave (the
-  // label is the per-issue opt-in; this flag is the workspace kill-switch).
-  // Off makes the label inert so no auto-start fires.
-  cerebro_orchestrate: true,
+  // FIR-2580: ships default OFF — opt-in per workspace before the logo
+  // surfaces (upload UI, favicon swap, desktop dock icon).
+  cerebro_workspace_logo: false,
+  // FIR-2666: project sprint feature. Defaults OFF — turn on per workspace
+  // when ready. Hides the Sprints tab on the project page, the sprint picker
+  // in the issue sidebar, and skips the sprint sweeper.
+  cerebro_sprints: false,
+  // FIR-2661: ON by default. Uploaded PDFs in Documents and the attachment
+  // viewer render in the browser's native PDF view (scroll, zoom, search).
+  // Off restores the prior behaviour (extracted-text dump in the attachment
+  // viewer; direct file iframe in the document viewer).
+  cerebro_pdf_inline_render: true,
+  // FIR-2641: ON by default. Adds "Remind me" to the comment menu — a personal
+  // reminder that points at one comment and, when it fires, deep-links the
+  // inbox back to that comment. Reuses the existing reminder engine (inbox-only
+  // by default; per-channel push stays opt-in). Off hides the menu action and
+  // the server rejects comment-referencing reminders.
+  cerebro_comment_reminders: true,
+  // FIR-2674: OFF by default. When on, an agent-authored comment that mentions
+  // no target at all (no person, agent, or issue) is rejected by the server
+  // with a 422 telling the agent to add one. Members are never affected. Off
+  // restores the prior behaviour (comments with no target allowed).
+  cerebro_comment_target_guard: false,
+  // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
+  cerebro_agent_trigger_permissions: false,
 };
 
 /**
@@ -265,6 +309,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Add a \"Group by → Action\" option to the inbox that buckets items by what to do next (Act now / Watching / Waiting / Calm) instead of by status. Default grouping for new users; switch it off or pick another grouping from the inbox's Group by menu.",
   },
   {
+    key: "cerebro_inbox_pinned_filter",
+    label: "Inbox pinned filter",
+    group: "inbox",
+    description:
+      "Add a \"Pinned\" option to the inbox view dropdown that shows only items tied to something you pinned — the item's own issue, that issue's parent, or its project, plus pinned channels and DMs. Off removes the option from the dropdown.",
+  },
+  {
     key: "cerebro_voice_dictation_enabled",
     label: "Dictation",
     group: "voice",
@@ -370,6 +421,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
   },
   {
+    key: "cerebro_platform_capabilities",
+    label: "Platform actions in permissions",
+    group: "permissions",
+    description:
+      "Add the Multica platform actions to the tool-policy table alongside reported runtime tools: create/edit/delete issues, comments, sub-issues, autopilots, artifacts, and the management of agents, runtimes, groups, grants, and projects. Each becomes a settable Allow/Ask/Deny row on every layer (workspace › runtime › agent › group › user). Actions governed elsewhere (membership ACL, daemon token, webhook secret) are listed but marked as managed externally. Catalog is code-owned (server platformcatalog package, traceable to permguard/inventory.json). FIR-2594 phase 1.",
+  },
+  {
     key: "cerebro_approvals",
     label: "Approval inbox",
     group: "permissions",
@@ -396,6 +454,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Enable the workspace agent-pass admin page at /:workspace/agent-passes — issue, list, and revoke agent passes (machine-readable mandates that scope what an agent may do on an issue). Owner/admin only. JEH-1731.",
+  },
+  {
+    key: "cerebro_skill_ownership",
+    label: "Skill ownership & change requests",
+    group: "permissions",
+    description:
+      "Surface ownership, approvers, version history, change-request review (approve/reject with diff), and forking on the skill detail page. Owner / approvers / workspace admins can manage; everyone else can open a change request. Off hides the governance panel and the fork action. JEH-216.",
   },
   {
     key: "cerebro_references",
@@ -427,6 +492,27 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Notify the assignee when an issue's start or due date arrives (the day-of, in their timezone). Delivery follows each user's per-channel notification preferences (inbox / mobile push / desktop). Off hides the settings rows. FIR-2412.",
   },
   {
+    key: "cerebro_agent_trigger_permissions",
+    label: "Agent-start permissions",
+    group: "permissions",
+    description:
+      "Add a friendly 'Agent-start' tab under Settings → Permissions to control who may start (trigger) an agent they don't own — a workspace-wide default plus a per-agent override (Allow / run-request / owner-only). Reuses the tool-policy engine; server enforcement is unchanged when off. FIR-2409.",
+  },
+  {
+    key: "cerebro_comment_reminders",
+    label: "Comment reminders",
+    group: "issues",
+    description:
+      "Add a 'Remind me' action to the comment menu. Sets a personal reminder that points at that specific comment; when it fires, the inbox opens the issue and scrolls straight to the comment. The reminder text is suggested from the comment and editable before saving. Inbox-only by default (per-channel push stays opt-in). Off hides the action and the server rejects comment-referencing reminders. FIR-2641.",
+  },
+  {
+    key: "cerebro_comment_target_guard",
+    label: "Require a target on agent comments",
+    group: "issues",
+    description:
+      "Reject an agent-authored comment that mentions no target at all — it must point at a person, an agent, or an issue (e.g. MUL-123). An issue link counts and has no side effect, so an agent can always satisfy the rule without waking another agent; member comments are never affected. Off restores the prior behaviour (agent comments with no target allowed). FIR-2674.",
+  },
+  {
     key: "cerebro_firtal_welcome",
     label: "Firtal-branded welcome page",
     group: "onboarding",
@@ -448,11 +534,25 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Adds an Auth & Permissions tab to workspace settings: owner/admin can list email domains that auto-provision into this workspace on first Google login, and pick the default role new members get. Off hides the tab and disables the auto-membership hook. FIR-2523.",
   },
   {
-    key: "cerebro_orchestrate",
-    label: "Sub-issue orchestration",
-    group: "issues",
+    key: "cerebro_workspace_logo",
+    label: "Workspace logo",
+    group: "workspace",
     description:
-      "Attaching the `orchestrate` label to a parent issue makes the platform auto-promote its sub-issues wave by wave: each sub-issue starts the moment its `blocks` dependencies are done. The label is the per-issue opt-in; this toggle is the workspace kill-switch. Off makes the label inert. FIR-2564.",
+      "Let owners/admins upload a workspace logo in Settings → General. The logo replaces the letter tile in the sidebar, switcher and breadcrumbs, the browser-tab favicon on web, and the dock/window icon in the desktop app. Off hides the uploader and keeps the default icons. FIR-2580.",
+  },
+  {
+    key: "cerebro_sprints",
+    label: "Project sprints",
+    group: "workspace",
+    description:
+      "Turn a project into a sprint container: per-project sprint settings (duration, start-day, lead days for auto-create, move-incomplete), a Sprints tab on the project page, a sprint picker in the issue sidebar, and a daily sweeper that creates the next sprint, moves incomplete issues, and clones recurring tasks. Every period (lead days, duration) is a setting — no hardcoded values. FIR-2666.",
+  },
+  {
+    key: "cerebro_pdf_inline_render",
+    label: "Inline PDF rendering",
+    group: "workspace",
+    description:
+      "Render uploaded PDFs in Documents and the attachment viewer using the browser's native PDF view (scroll, zoom, search) instead of dumping the extracted text. Off restores the extracted-text view. FIR-2661.",
   },
 ];
 

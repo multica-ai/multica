@@ -76,10 +76,36 @@ func TestLoadFirtalGatewayRuntimeConfig_RejectsUnsafeServerURL(t *testing.T) {
 	}
 }
 
+func TestLoadFirtalGatewayRuntimeConfig_AllowsInternalServerURLWhenOptedIn(t *testing.T) {
+	clearFirtalGatewayEnv(t)
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "http://firtal-data-registry-private.internal:3000")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_ALLOW_INTERNAL", "true")
+
+	cfg, err := LoadFirtalGatewayRuntimeConfig()
+	if err != nil {
+		t.Fatalf("LoadFirtalGatewayRuntimeConfig() error = %v", err)
+	}
+	if cfg.BaseURL != "http://firtal-data-registry-private.internal:3000" {
+		t.Fatalf("BaseURL = %q", cfg.BaseURL)
+	}
+}
+
+func TestLoadFirtalGatewayRuntimeConfig_RejectsInternalServerURLWithoutOptIn(t *testing.T) {
+	clearFirtalGatewayEnv(t)
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "http://firtal-data-registry-private.internal:3000")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+
+	if _, err := LoadFirtalGatewayRuntimeConfig(); err == nil {
+		t.Fatal("expected internal server gateway URL without opt-in to fail")
+	}
+}
+
 func clearFirtalGatewayEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
+		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_ALLOW_INTERNAL",
 		"FIRTAL_AE_GATEWAY_URL",
 		"FIRTAL_DATA_REGISTRY_URL",
 		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",

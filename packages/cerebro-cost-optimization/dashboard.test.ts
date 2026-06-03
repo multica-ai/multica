@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  appliedValue,
   estimatedValue,
   formatUsd,
   parseDashboardResponse,
@@ -15,6 +16,7 @@ function saving(overrides: Partial<DashboardSaving>): DashboardSaving {
     controlRunCount: 0,
     estimatedSavedUnits: 0,
     estimatedSavedCents: 0,
+    applied: null,
     measured: null,
     ...overrides,
   };
@@ -30,8 +32,13 @@ describe("parseDashboardResponse", () => {
           shadow_run_count: 1,
           treatment_run_count: 8,
           control_run_count: 2,
-          estimated_saved_units: 4400,
-          estimated_saved_cents: 4400,
+          estimated_saved_units: 400,
+          estimated_saved_cents: 400,
+          applied: {
+            saved_units: 4000,
+            saved_cents: 4000,
+            run_count: 8,
+          },
           measured: {
             treatment_avg_cost_cents: 100,
             control_avg_cost_cents: 300,
@@ -46,9 +53,22 @@ describe("parseDashboardResponse", () => {
       savingKey: "model_routing",
       treatmentRunCount: 8,
       controlRunCount: 2,
-      estimatedSavedCents: 4400,
+      estimatedSavedCents: 400,
     });
+    expect(got[0]!.applied?.savedCents).toBe(4000);
+    expect(got[0]!.applied?.runCount).toBe(8);
     expect(got[0]!.measured?.totalSavedCents).toBe(1600);
+  });
+
+  it("treats a null or non-object applied block as no applied saving", () => {
+    const got = parseDashboardResponse({
+      savings: [
+        { saving_key: "prune_tool_results", metric: "context_tokens", applied: null },
+        { saving_key: "model_routing", metric: "model_cost", applied: "nope" },
+      ],
+    });
+    expect(got[0]!.applied).toBeNull();
+    expect(got[1]!.applied).toBeNull();
   });
 
   it("returns [] for a non-object or missing savings array", () => {
@@ -133,7 +153,9 @@ describe("estimatedValue", () => {
     ).toBe("1,500 tokens");
   });
 
-  it("prices a positive non-model_cost metric in dollars when available", () => {
+  it("leads with the token count and shows the price alongside (prune, priced)", () => {
+    // FIR-2639: the saved context is a token quantity — the card must show the
+    // token number, not hide it behind a bare dollar amount.
     expect(
       estimatedValue(
         saving({
@@ -143,6 +165,39 @@ describe("estimatedValue", () => {
           estimatedSavedUnits: 1500,
         }),
       ),
-    ).toBe("$3.20");
+    ).toBe("1,500 tokens ($3.20)");
+  });
+});
+
+describe("appliedValue", () => {
+  it("returns '—' when no run has applied the saving", () => {
+    expect(appliedValue(saving({ applied: null }))).toBe("—");
+  });
+
+  it("shows saved tokens with the price at 100% rollout (prune, priced)", () => {
+    // FIR-2572: prune on for everyone, no holdout — the measured number must
+    // still render, not '—'. FIR-2639: lead with the token count so the saved
+    // context is a clear token figure, with the dollar value alongside.
+    expect(
+      appliedValue(
+        saving({
+          savingKey: "prune_tool_results",
+          metric: "context_tokens",
+          applied: { savedUnits: 9000, savedCents: 450, runCount: 20 },
+        }),
+      ),
+    ).toBe("9,000 tokens ($4.50)");
+  });
+
+  it("shows saved tokens for snapshot/bundled applied savings", () => {
+    expect(
+      appliedValue(
+        saving({
+          savingKey: "bundled_read",
+          metric: "tokens",
+          applied: { savedUnits: 600, savedCents: 1, runCount: 4 },
+        }),
+      ),
+    ).toBe("600 tokens ($0.01)");
   });
 });

@@ -9,7 +9,34 @@
 // logic is unit-tested without a database.
 package orchestration
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
+
+// HasAcceptanceCriteria reports whether a sub-issue description carries
+// acceptance criteria the verifier can judge against: at least one markdown
+// task-list item (`- [ ]` / `- [x]`, with `*` or `+` bullets and any indent
+// accepted). The orchestrate plan-adequacy precheck refuses to run a plan whose
+// sub-issues lack criteria — without them, "verify the deliverable" has nothing
+// to check, so the verification gate would be meaningless.
+func HasAcceptanceCriteria(description string) bool {
+	for _, line := range strings.Split(description, "\n") {
+		t := strings.TrimSpace(line)
+		if len(t) < 5 {
+			continue
+		}
+		if t[0] != '-' && t[0] != '*' && t[0] != '+' {
+			continue
+		}
+		rest := strings.TrimSpace(t[1:])
+		// rest must start with "[ ]", "[x]" or "[X]" followed by content.
+		if strings.HasPrefix(rest, "[ ]") || strings.HasPrefix(rest, "[x]") || strings.HasPrefix(rest, "[X]") {
+			return true
+		}
+	}
+	return false
+}
 
 // ChildState is one sub-issue of an orchestrated parent.
 type ChildState struct {
@@ -21,16 +48,51 @@ type ChildState struct {
 
 // BlockerState is one issue that blocks a child (the upstream side of a
 // `blocks` edge). A blocker may be another child or any other issue; either
-// way the child only becomes ready once every blocker is terminal.
+// way the child only becomes ready once every blocker is satisfied.
+//
+// Verification gate (FIR-2564): a blocker that is itself an orchestrated child
+// of the same parent is only "satisfied" by a `done` status once it has ALSO
+// been independently verified (RequiresVerification + Verified). This is the
+// trust-but-verify core — the orchestrator never releases a sub-issue's
+// dependents on the worker's own `done` alone; an independent judge must
+// confirm the deliverable first. A `cancelled` blocker is always satisfied
+// (nothing delivered, nothing to verify); a non-child blocker keeps the old
+// behavior (any terminal status satisfies it).
 type BlockerState struct {
 	ID     string
 	Status string
+	// RequiresVerification is true when this blocker is an orchestrated child
+	// of the same parent and the verification gate is active. Such a blocker
+	// must be verified (not merely done) before it stops holding back
+	// dependents.
+	RequiresVerification bool
+	// Verified is true when this blocker carries the `orch-verified` label,
+	// i.e. an independent verifier confirmed its deliverable.
+	Verified bool
 }
 
 // terminalStatuses are the issue statuses that count as "blocker satisfied".
 // A blocker that is done or cancelled no longer holds back its dependents.
 func IsTerminalStatus(status string) bool {
 	return status == "done" || status == "cancelled"
+}
+
+// BlockerSatisfied reports whether a blocker no longer holds back its
+// dependents. A cancelled blocker is always satisfied. A done blocker is
+// satisfied unless it is verification-gated and not yet verified. Any other
+// status (todo, in_progress, in_review, backlog) never satisfies.
+func BlockerSatisfied(b BlockerState) bool {
+	switch b.Status {
+	case "cancelled":
+		return true
+	case "done":
+		if b.RequiresVerification {
+			return b.Verified
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 // startableStatuses are the statuses a child can be promoted/enqueued from.
@@ -99,7 +161,7 @@ func ReadyToStart(children []ChildState, blockersByChild map[string][]BlockerSta
 
 func allBlockersTerminal(blockers []BlockerState) bool {
 	for _, b := range blockers {
-		if !IsTerminalStatus(b.Status) {
+		if !BlockerSatisfied(b) {
 			return false
 		}
 	}

@@ -9,6 +9,7 @@ import { TimeRangePicker } from "./components/time-range-picker";
 import { KpiCards } from "./components/kpi-cards";
 import { ActivityChart } from "./components/activity-chart";
 import { IssuesDonut } from "./components/issues-donut";
+import { IssuesOnBehalfOf } from "./components/issues-on-behalf-of";
 import { TopActors } from "./components/top-actors";
 import { ActivityFeed } from "./components/activity-feed";
 import { RecentTasksList } from "./components/recent-tasks-list";
@@ -91,6 +92,10 @@ export function DashboardPage() {
             <IssuesDonut data={data} isLoading={overview.isLoading} kind="priority" />
             <TopActors data={data} isLoading={overview.isLoading} kind="agents" />
             <TopActors data={data} isLoading={overview.isLoading} kind="members" />
+          </section>
+
+          <section aria-label="On behalf of" className="grid gap-3">
+            <IssuesOnBehalfOf data={data} isLoading={overview.isLoading} />
           </section>
 
           <section aria-label="Recent" className="grid gap-3 lg:grid-cols-2">

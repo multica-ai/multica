@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { GitBranch, Pencil, Plus, Trash2 } from "lucide-react";
+import { GitBranch, Pencil, Plus, Star, StarOff, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -18,8 +18,9 @@ import {
   useCreateStatusModelMutation,
   useUpdateStatusModelMutation,
   useDeleteStatusModelMutation,
-  useAssignProjectStatusModelMutation,
   useClearProjectStatusModelMutation,
+  useSetWorkspaceDefaultMutation,
+  useClearWorkspaceDefaultMutation,
 } from "@multica/cerebro-status-models/core";
 import type { CerebroStatusModel } from "@multica/cerebro-status-models/core";
 import { Button } from "@multica/ui/components/ui/button";
@@ -29,6 +30,7 @@ import {
   NativeSelectOption,
 } from "@multica/ui/components/ui/native-select";
 import { StatusModelEditor } from "./status-model-editor";
+import { StatusModelAssignModal } from "./status-model-assign-modal";
 
 const DEFAULT_VALUE = "__default__";
 
@@ -43,11 +45,18 @@ export function StatusModelsTab() {
   const createMutation = useCreateStatusModelMutation(wsId);
   const updateMutation = useUpdateStatusModelMutation(wsId);
   const deleteMutation = useDeleteStatusModelMutation(wsId);
-  const assignMutation = useAssignProjectStatusModelMutation(wsId);
+  // assignMutation is invoked inside StatusModelAssignModal — kept imported
+  // for the modal child so the v2b mapping flow owns the assignment call.
   const clearMutation = useClearProjectStatusModelMutation(wsId);
+  const setDefaultMutation = useSetWorkspaceDefaultMutation(wsId);
+  const clearDefaultMutation = useClearWorkspaceDefaultMutation(wsId);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<CerebroStatusModel | undefined>();
+  // v2b (FIR-1550): mapping-modal state — open per (project, model) selection.
+  const [assigning, setAssigning] = useState<
+    { projectId: string; projectName: string; modelId: string } | null
+  >(null);
 
   const models = modelsData?.status_models ?? [];
   const assignments = assignmentsData?.assignments ?? [];
@@ -72,55 +81,74 @@ export function StatusModelsTab() {
     setEditorOpen(true);
   };
 
+  const handleToggleDefault = (model: CerebroStatusModel) => {
+    if (model.workspace_default) {
+      clearDefaultMutation.mutate(undefined, {
+        onError: () => toast.error("Could not remove the workspace default."),
+      });
+    } else {
+      setDefaultMutation.mutate(model.id, {
+        onError: () => toast.error("Could not set the workspace default."),
+        onSuccess: () =>
+          toast.success(`"${model.name}" is now the workspace standard — new projects will use it automatically.`),
+      });
+    }
+  };
+
   const handleDelete = (model: CerebroStatusModel) => {
     if (model.project_count > 0) {
       toast.error(
-        `"${model.name}" bruges af ${model.project_count} projekt(er) — fjern den der først.`,
+        `"${model.name}" is used by ${model.project_count} project(s) — remove it from those first.`,
       );
       return;
     }
     deleteMutation.mutate(model.id, {
       onError: (err) =>
-        toast.error(err instanceof Error ? err.message : "Kunne ikke slette modellen."),
-      onSuccess: () => toast.success(`"${model.name}" slettet.`),
+        toast.error(err instanceof Error ? err.message : "Could not delete the model."),
+      onSuccess: () => toast.success(`"${model.name}" deleted.`),
     });
   };
 
   const handleAssign = (projectId: string, value: string) => {
     if (value === DEFAULT_VALUE) {
       clearMutation.mutate(projectId, {
-        onError: () => toast.error("Kunne ikke nulstille projektets statusmodel."),
+        onError: () => toast.error("Could not reset the project's status model."),
       });
       return;
     }
-    assignMutation.mutate(
-      { projectId, statusModelId: value },
-      { onError: () => toast.error("Kunne ikke tildele statusmodellen.") },
-    );
+    // v2b (FIR-1550): no silent omplacering — open the mapping modal so the
+    // admin sees per-base custom_status suggestions before the assignment
+    // lands. The modal calls assignProjectStatusModel itself on confirm.
+    const project = projects?.find((p) => p.id === projectId);
+    setAssigning({
+      projectId,
+      projectName: project?.title ?? "project",
+      modelId: value,
+    });
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold">Statusmodeller</h2>
+          <h2 className="text-lg font-semibold">Status models</h2>
           <p className="text-sm text-muted-foreground">
-            Genbrugelige status-pipelines. Vælg én pr. projekt — projektets board
-            bruger så modellens statusser i stedet for standarderne.
+            Reusable status pipelines. Pick one per project — the project's board
+            then uses the model's statuses instead of the defaults.
           </p>
         </div>
         <Button onClick={openCreate}>
           <Plus className="mr-1.5 size-3.5" />
-          Ny model
+          New model
         </Button>
       </div>
 
       <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
         <GitBranch className="size-4 text-muted-foreground" />
         <span>
-          <span className="font-medium">{projectsWithModel}</span> projekt(er)
-          bruger et custom workflow ·{" "}
-          <span className="font-medium">{models.length}</span> model(ler) defineret
+          <span className="font-medium">{projectsWithModel}</span> project(s) use
+          a custom workflow ·{" "}
+          <span className="font-medium">{models.length}</span> model(s) defined
         </span>
       </div>
 
@@ -128,7 +156,7 @@ export function StatusModelsTab() {
       <div className="space-y-3">
         {models.length === 0 ? (
           <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-            Ingen statusmodeller endnu. Opret den første med "Ny model".
+            No status models yet. Create the first one with "New model".
           </p>
         ) : (
           models.map((model) => (
@@ -138,8 +166,13 @@ export function StatusModelsTab() {
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{model.name}</span>
                     <Badge variant="secondary">
-                      {model.project_count} projekt(er)
+                      {model.project_count} project(s)
                     </Badge>
+                    {model.workspace_default && (
+                      <Badge variant="outline" className="text-xs border-amber-400 text-amber-600 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400">
+                        Workspace standard
+                      </Badge>
+                    )}
                   </div>
                   {model.description && (
                     <p className="mt-0.5 text-sm text-muted-foreground">
@@ -148,12 +181,26 @@ export function StatusModelsTab() {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button variant="ghost" size="icon-sm" onClick={() => openEdit(model)}>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title={model.workspace_default ? "Remove as workspace standard" : "Set as workspace standard"}
+                    disabled={setDefaultMutation.isPending || clearDefaultMutation.isPending}
+                    onClick={() => handleToggleDefault(model)}
+                  >
+                    {model.workspace_default ? (
+                      <StarOff className="size-3.5 text-amber-500" />
+                    ) : (
+                      <Star className="size-3.5" />
+                    )}
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" title="Edit model" onClick={() => openEdit(model)}>
                     <Pencil className="size-3.5" />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon-sm"
+                    title="Delete model"
                     disabled={model.project_count > 0 || deleteMutation.isPending}
                     onClick={() => handleDelete(model)}
                   >
@@ -185,10 +232,10 @@ export function StatusModelsTab() {
 
       {/* Per-project assignment + overview */}
       <div className="space-y-2">
-        <h3 className="text-sm font-semibold">Projekter</h3>
+        <h3 className="text-sm font-semibold">Projects</h3>
         <p className="text-sm text-muted-foreground">
-          Vælg hvilken statusmodel hvert projekt bruger. "Default" giver de 7
-          standardstatusser.
+          Choose which status model each project uses. "Default" gives the 7
+          standard statuses.
         </p>
         <div className="divide-y rounded-lg border">
           {(projects ?? []).map((project) => (
@@ -213,7 +260,7 @@ export function StatusModelsTab() {
           ))}
           {(projects ?? []).length === 0 && (
             <p className="px-3 py-4 text-center text-sm text-muted-foreground">
-              Ingen projekter i dette workspace endnu.
+              No projects in this workspace yet.
             </p>
           )}
         </div>
@@ -233,6 +280,16 @@ export function StatusModelsTab() {
               ? updateMutation.mutateAsync({ id: editing.id, payload: input })
               : createMutation.mutateAsync(input)
           }
+        />
+      )}
+
+      {assigning && (
+        <StatusModelAssignModal
+          open={!!assigning}
+          projectId={assigning.projectId}
+          projectName={assigning.projectName}
+          modelId={assigning.modelId}
+          onClose={() => setAssigning(null)}
         />
       )}
     </div>

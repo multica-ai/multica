@@ -51,10 +51,10 @@ type FirtalGatewayRuntimeConfig struct {
 	MaxConcurrency int
 	WorkspaceIDs   []pgtype.UUID
 
-	// ToolsEnabledAgentIDs is the per-agent allowlist for the POC tool-loop.
-	// Populated from MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS. Agents not in
-	// this list see the unchanged chat-only behaviour — no `tools` parameter is
-	// sent and no tool_calls are dispatched.
+	// ToolsEnabledAgentIDs is loaded from MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS
+	// for backward compatibility only. Tool-loop gating uses the runtime tools
+	// cascade (see FirtalGatewayExecutor.agentHasCallableTools); this list is
+	// no longer consulted at execution time (FIR-2761).
 	ToolsEnabledAgentIDs []pgtype.UUID
 
 	// MaxToolRounds overrides firtalGatewayMaxToolRounds when > 0. Loaded from
@@ -91,8 +91,8 @@ func (c FirtalGatewayRuntimeConfig) costSavingHoldoutPct() int {
 	return pct
 }
 
-// ToolsEnabledForAgent reports whether the per-agent allowlist includes
-// agentID. An empty list means tools are disabled for everyone.
+// ToolsEnabledForAgent reports whether agentID appears in ToolsEnabledAgentIDs.
+// Deprecated for execution: kept for config parsing tests only.
 func (c FirtalGatewayRuntimeConfig) ToolsEnabledForAgent(agentID pgtype.UUID) bool {
 	if !agentID.Valid {
 		return false
@@ -232,7 +232,8 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 	}
 
 	if cfg.Enabled && cfg.BaseURL != "" {
-		normalizedURL, err := firtalgateway.ValidateBaseURL(cfg.BaseURL)
+		// Operator-trusted server env URL: honors the internal-address opt-in.
+		normalizedURL, err := firtalgateway.ValidateTrustedBaseURL(cfg.BaseURL)
 		if err != nil {
 			return FirtalGatewayRuntimeConfig{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL %w", err)
 		}
@@ -255,6 +256,7 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 		}
 	}
 
+	workspaceProvidedURL := false
 	if envelope.FirtalGateway != nil {
 		settings := envelope.FirtalGateway
 		if !settings.Enabled {
@@ -262,6 +264,7 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 		}
 		if gatewayURL := strings.TrimSpace(settings.GatewayURL); gatewayURL != "" {
 			cfg.BaseURL = strings.TrimRight(gatewayURL, "/")
+			workspaceProvidedURL = true
 		}
 		if key := strings.TrimSpace(settings.APIKey); key != "" {
 			cfg.APIKey = key
@@ -275,7 +278,15 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 	if cfg.BaseURL == "" || cfg.APIKey == "" {
 		return cfg, false, nil
 	}
-	normalizedURL, err := firtalgateway.ValidateBaseURL(cfg.BaseURL)
+	// A workspace-supplied URL is untrusted input and is always validated
+	// strictly (public HTTPS). When the workspace inherits the operator's env
+	// URL, validate it with the trusted policy so an opted-in internal address
+	// is accepted.
+	validate := firtalgateway.ValidateTrustedBaseURL
+	if workspaceProvidedURL {
+		validate = firtalgateway.ValidateBaseURL
+	}
+	normalizedURL, err := validate(cfg.BaseURL)
 	if err != nil {
 		return cfg, false, fmt.Errorf("workspace firtal gateway URL %w", err)
 	}

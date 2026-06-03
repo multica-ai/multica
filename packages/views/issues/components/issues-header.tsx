@@ -58,6 +58,8 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of member filter submenu.
+import { OnBehalfOfFilterSub } from "./cerebro-on-behalf-of-filter";
 import { LabelChip } from "../../labels/label-chip";
 import {
   SORT_OPTIONS,
@@ -110,6 +112,8 @@ function getActiveFilterCount(state: {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 count on-behalf-of filter.
+  onBehalfOfFilters: string[];
 }) {
   let count = 0;
   if (state.statusFilters.length > 0) count++;
@@ -118,6 +122,7 @@ function getActiveFilterCount(state: {
   if (state.creatorFilters.length > 0) count++;
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
   if (state.labelFilters.length > 0) count++;
+  if ((state.onBehalfOfFilters ?? []).length > 0) count++;
   return count;
 }
 
@@ -607,6 +612,8 @@ export function IssueDisplayControls({
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 read on-behalf-of filter state.
+  const onBehalfOfFilters = useViewStore((s) => s.onBehalfOfFilters);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
@@ -626,6 +633,7 @@ export function IssueDisplayControls({
     projectFilters,
     includeNoProject,
     labelFilters,
+    onBehalfOfFilters,
   });
   const hasActiveFilters = activeFilterCount > 0;
 
@@ -796,6 +804,9 @@ export function IssueDisplayControls({
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+
+            {/* CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of member filter */}
+            <OnBehalfOfFilterSub selected={onBehalfOfFilters} onToggle={act.toggleOnBehalfOfFilter} />
 
             {/* Creator */}
             <DropdownMenuSub>

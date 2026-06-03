@@ -4,12 +4,15 @@
 package inbox
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -18,6 +21,17 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// flagCommentReminders is the per-user cerebro feature flag that gates the
+// comment-reminder capability (FIR-2641). It mirrors the registry key in
+// packages/cerebro-feature-flags/registry.ts. Default-on: a reminder that
+// references a comment_id is rejected only when the user has an explicit
+// disabling override — flipping the flag off is the no-redeploy kill switch.
+const flagCommentReminders = "cerebro_comment_reminders"
+
+// reminderTextMaxRunes bounds the auto-suggested reminder text derived from a
+// comment so a long comment body does not blow up the inbox row.
+const reminderTextMaxRunes = 140
 
 // Inbox metadata WS event types. They carry the `inbox:` prefix so the client's
 // generic realtime refreshMap (which fires onInboxInvalidate for any inbox:*
@@ -87,6 +101,11 @@ type createReminderRequest struct {
 	Text      string  `json:"text"`
 	PlannedAt string  `json:"planned_at"`
 	IssueID   *string `json:"issue_id"`
+	// CommentID makes the reminder point at one specific comment (FIR-2641).
+	// When set, clicking the fired reminder opens the issue and scrolls to that
+	// comment — the inbox deep-link reads details.comment_id. text may be left
+	// empty: it is then auto-suggested from the comment body.
+	CommentID *string `json:"comment_id"`
 }
 
 // MuteInboxItem mutes an inbox item until the timestamp supplied in the
@@ -224,11 +243,6 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
-	text := strings.TrimSpace(body.Text)
-	if text == "" {
-		writeError(w, http.StatusBadRequest, "text is required")
-		return
-	}
 	plannedAt, err := time.Parse(time.RFC3339, body.PlannedAt)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "planned_at must be RFC3339")
@@ -238,10 +252,68 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "planned_at must be in the future")
 		return
 	}
+	recipientID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
 
+	// Resolve an optional comment reference first (FIR-2641): it pins the
+	// reminder to one comment, fixes the issue the reminder belongs to, and can
+	// supply the auto-suggested text. Gated by the per-user
+	// cerebro_comment_reminders flag so it can be switched off without redeploy.
+	var (
+		comment      db.Comment
+		commentIDStr string
+		haveComment  bool
+	)
+	if body.CommentID != nil && strings.TrimSpace(*body.CommentID) != "" {
+		if !h.commentRemindersEnabled(r.Context(), wsUUID, recipientID) {
+			writeError(w, http.StatusForbidden, "comment reminders are disabled")
+			return
+		}
+		parsedCommentID, err := util.ParseUUID(strings.TrimSpace(*body.CommentID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid comment_id")
+			return
+		}
+		comment, err = h.Upstream.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+			ID:          parsedCommentID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "comment not found")
+			return
+		}
+		commentIDStr = util.UUIDToString(parsedCommentID)
+		haveComment = true
+	}
+
+	// Resolve the issue. A comment reference fixes the issue to the comment's
+	// own issue; an explicit issue_id, if also supplied, must match it.
 	var issueID pgtype.UUID
 	title := "Reminder"
-	if body.IssueID != nil && strings.TrimSpace(*body.IssueID) != "" {
+	switch {
+	case haveComment:
+		if body.IssueID != nil && strings.TrimSpace(*body.IssueID) != "" {
+			parsedIssueID, err := util.ParseUUID(strings.TrimSpace(*body.IssueID))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid issue_id")
+				return
+			}
+			if util.UUIDToString(parsedIssueID) != util.UUIDToString(comment.IssueID) {
+				writeError(w, http.StatusBadRequest, "comment_id does not belong to issue_id")
+				return
+			}
+		}
+		issue, err := h.Upstream.GetIssue(r.Context(), comment.IssueID)
+		if err != nil || util.UUIDToString(issue.WorkspaceID) != wsID {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		issueID = comment.IssueID
+		title = "Reminder: " + issue.Title
+	case body.IssueID != nil && strings.TrimSpace(*body.IssueID) != "":
 		parsedIssueID, err := util.ParseUUID(strings.TrimSpace(*body.IssueID))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid issue_id")
@@ -256,24 +328,38 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 		title = "Reminder: " + issue.Title
 	}
 
-	planned := pgtype.Timestamptz{Time: plannedAt, Valid: true}
-	recipientID, err := util.ParseUUID(userID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid user id")
+	// Reminder text: caller-supplied wins; when blank and a comment is
+	// referenced, auto-suggest a snippet from the comment body. The UI pre-fills
+	// the same suggestion and lets the user edit it before saving.
+	text := strings.TrimSpace(body.Text)
+	if text == "" && haveComment {
+		text = suggestReminderText(comment.Content)
+	}
+	if text == "" {
+		writeError(w, http.StatusBadRequest, "text is required")
 		return
 	}
-	details, _ := json.Marshal(map[string]string{
+
+	planned := pgtype.Timestamptz{Time: plannedAt, Valid: true}
+	detailsMap := map[string]string{
 		// CEREBRO-PATCH(inbox-reminders-due): due sweeper only claims reminders explicitly marked pending.
 		"due_pending": "true",
 		"planned_at":  plannedAt.Format(time.RFC3339),
 		"text":        text,
-	})
+	}
+	if haveComment {
+		// The inbox deep-link (packages/views/inbox) reads details.comment_id to
+		// scroll the opened issue to this exact comment.
+		detailsMap["comment_id"] = commentIDStr
+	}
+	details, _ := json.Marshal(detailsMap)
 	existing, err := h.Cerebro.FindPendingReminder(r.Context(), cerebrodb.FindPendingReminderParams{
 		WorkspaceID: wsUUID,
 		RecipientID: recipientID,
 		Column3:     issueID,
 		Title:       title,
 		Body:        pgtype.Text{String: text, Valid: true},
+		Column6:     commentIDStr,
 	})
 	if err == nil {
 		item, err := h.Cerebro.UpdateReminderInboxItem(r.Context(), cerebrodb.UpdateReminderInboxItemParams{
@@ -305,6 +391,37 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toResponse(item))
+}
+
+// commentRemindersEnabled resolves the per-user cerebro_comment_reminders flag.
+// Default-on: only an explicit disabling override returns false. A missing row
+// (ErrNoRows) or a transient store error keeps the feature enabled — the flag
+// is an opt-out kill switch, not an opt-in gate.
+func (h *Handler) commentRemindersEnabled(ctx context.Context, wsUUID, userUUID pgtype.UUID) bool {
+	enabled, err := h.Cerebro.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: wsUUID,
+		UserID:      userUUID,
+		FlagKey:     flagCommentReminders,
+	})
+	if errors.Is(err, pgx.ErrNoRows) || err != nil {
+		return true
+	}
+	return enabled
+}
+
+// suggestReminderText turns a comment body into a one-line reminder suggestion:
+// whitespace collapsed, trimmed, and truncated to reminderTextMaxRunes with an
+// ellipsis. Falls back to a generic phrase for an empty/whitespace comment.
+func suggestReminderText(content string) string {
+	snippet := strings.Join(strings.Fields(content), " ")
+	if snippet == "" {
+		return "Reminder about this comment"
+	}
+	runes := []rune(snippet)
+	if len(runes) > reminderTextMaxRunes {
+		return strings.TrimSpace(string(runes[:reminderTextMaxRunes])) + "…"
+	}
+	return snippet
 }
 
 // notificationItemResponse mirrors handler.InboxItemResponse so the

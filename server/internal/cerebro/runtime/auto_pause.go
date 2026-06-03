@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // Auto-pause circuit-breaker tuning (FIR-2476). The pre-FIR-2476 behaviour
@@ -258,6 +259,47 @@ func (s *Service) notifyAutoPauseFailure(ctx context.Context, task db.AgentTaskQ
 		return
 	}
 	s.publishCommentCreated(comment)
+}
+
+func autoPauseCommentBody(task db.AgentTaskQueue, count int32, unpauseAt time.Time, circuitOpen bool) string {
+	taskID := util.UUIDToString(task.ID)
+	errText := ""
+	if task.Error.Valid {
+		errText = strings.TrimSpace(redact.Text(task.Error.String))
+	}
+	if errText == "" {
+		errText = "Runtimen ramte en rate-limit eller usage-limit."
+	}
+	if len([]rune(errText)) > 900 {
+		rs := []rune(errText)
+		errText = string(rs[:900]) + "..."
+	}
+
+	if circuitOpen {
+		return fmt.Sprintf(
+			"⚠️ Auto-genoptagelse er stoppet for denne runtime.\n\n"+
+				"Runtimen er blevet automatisk sat på pause %d gange i træk uden en succesfuld kørsel "+
+				"(typisk \"usage limit\" eller \"runtime paused\"). For ikke at brænde flere kreditter på "+
+				"forsøg der alligevel fejler, genoptager systemet ikke længere automatisk.\n\n"+
+				"Fejlen var:\n\n> %s\n\n"+
+				"Run: `%s`\n\n"+
+				"Et menneske skal gribe ind: vent til runtimens loft er nulstillet og genoptag den manuelt, "+
+				"eller skift den fejlende konto/nøgle ud. Tælleren nulstilles automatisk ved første succesfulde kørsel.",
+			count,
+			errText,
+			taskID,
+		)
+	}
+
+	return fmt.Sprintf(
+		"⏸️ Runtimen er sat på pause, fordi agent-runnet fejlede på en rate-limit eller usage-limit.\n\n"+
+			"Fejlen var:\n\n> %s\n\n"+
+			"Run: `%s`\n\n"+
+			"Systemet prøver automatisk igen omkring `%s`.",
+		errText,
+		taskID,
+		unpauseAt.UTC().Format(time.RFC3339),
+	)
 }
 
 // unpauseAtLog renders the unpause_at value for structured logging — "circuit

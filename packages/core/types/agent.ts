@@ -166,6 +166,13 @@ export interface AgentTask {
    */
   title?: string;
   /**
+   * CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717.
+   * When set on a queued task, explains why the task is waiting (e.g.
+   * `runtime_paused|rate_limit|2026-06-01T11:55:00Z` while the runtime is
+   * auto-paused).
+   */
+  wait_reason?: string;
+  /**
    * Server-computed source discriminator used by the activity row to label
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").
@@ -564,6 +571,10 @@ export interface SkillChangeRequest {
   review_comment: string;
   created_at: string;
   updated_at: string;
+  // CEREBRO-PATCH(skill-change-request-session): FIR-2627/FIR-2629 — the agent
+  // work session that proposed this change, so the review UI can link back to
+  // the run. Null/absent for proposals opened from the web UI by a human.
+  work_session_id?: string | null;
 }
 
 export interface SkillFork {
@@ -576,6 +587,18 @@ export interface SkillFork {
   forked_name?: string;
   forked_description?: string;
   current_version?: string;
+}
+
+// CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage
+// returned by GET /api/skills/{id}/fork-parent. Absent (404) when the skill is
+// an original, not a fork.
+export interface SkillForkParent {
+  id: string;
+  parent_skill_id: string;
+  forked_skill_id: string;
+  forked_by: string | null;
+  created_at: string;
+  parent_name: string;
 }
 
 export interface UpdateSkillOwnershipRequest {

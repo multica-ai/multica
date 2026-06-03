@@ -8,8 +8,10 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 /**
  * Whether the current user may edit/delete the given skill.
  *
- * Rule: workspace admins & owners can edit any skill; everyone else can only
- * edit skills they created. Server enforces this independently; the hook
+ * Rule: workspace admins & owners can edit any skill; the skill's owner and its
+ * approvers can edit directly; for legacy skills with no owner set, the creator
+ * can still edit. Everyone else is read-only and proposes a change request
+ * instead. Server enforces this independently (`isSkillManager`); the hook
  * mirrors it so the UI can hide/disable actions instead of waiting for a 403.
  *
  * `wsId` is explicit (not read from `WorkspaceIdProvider`) so this hook stays
@@ -38,5 +40,10 @@ export function canEditSkill(
   opts: { userId: string | null; role: MemberRole | null },
 ): boolean {
   if (opts.role === "admin" || opts.role === "owner") return true;
-  return skill.created_by === opts.userId;
+  if (opts.userId === null) return false;
+  // CEREBRO-PATCH(skill-ownership-edit-rights): JEH-216/FIR-2629 — owner + approvers edit directly; creator only when no owner is set yet. Mirrors backend isSkillManager.
+  if (skill.owner_id && skill.owner_id === opts.userId) return true;
+  if (skill.approver_ids.includes(opts.userId)) return true;
+  if (!skill.owner_id && skill.created_by === opts.userId) return true;
+  return false;
 }

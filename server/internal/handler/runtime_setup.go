@@ -50,6 +50,10 @@ func (h *Handler) CreateRuntimeSetupToken(w http.ResponseWriter, r *http.Request
 	if !h.cerebroRequireCapability(w, r, workspaceID, "create_runtime") {
 		return
 	}
+	// CEREBRO-PATCH(create-local-runtime-policy-gate): FIR-2672 gate the local-runtime mint on create_local_runtime via the tool-policy chain (group+member levels)
+	if !h.cerebroRequireLocalRuntimePolicy(w, r, workspaceID) {
+		return
+	}
 
 	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {

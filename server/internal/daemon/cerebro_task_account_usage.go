@@ -27,12 +27,14 @@ import (
 //   - 429 retry-after in comment or logs → ThrottledUntil on the account row.
 //   - Usage-window-percent in comment or logs → UsageWindowPct on the account row.
 //   - Anthropic x-ratelimit-limit/remaining headers in logs → computed pct.
-//   - Task usage entries → rolling 5h/7d token totals for the account.
+//   - Task usage entries → rolling 5h/7d token totals are recorded by the
+//     server's ReportTaskUsage path so task usage and account load cannot
+//     diverge.
 //
 // The account_id is resolved from the identity cache populated on each
 // heartbeat ack. If no account has been registered for this runtime yet the
 // call is a no-op.
-func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment, logs string, usage []TaskUsageEntry, log *slog.Logger) { // CEREBRO-PATCH(daemon-task-account-token-usage): include task token usage in account telemetry.
+func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment, logs string, _ []TaskUsageEntry, log *slog.Logger) { // CEREBRO-PATCH(daemon-task-account-token-usage): task tokens are persisted server-side from ReportTaskUsage.
 	if d.accountIdentities == nil {
 		return
 	}
@@ -48,11 +50,10 @@ func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment
 		combined = comment + "\n" + logs
 	}
 	ev := cerebroaccount.ParseAdapterOutput(combined, time.Now())
-	tokens := accountUsageTokens(usage)
-	if !ev.HasSignal() && tokens <= 0 {
+	if !ev.HasSignal() {
 		return
 	}
-	if err := d.client.ReportAccountUsage(ctx, accountID, ev.ThrottledUntil, ev.UsageWindowPct, tokens); err != nil {
+	if err := d.client.ReportAccountUsage(ctx, accountID, ev.ThrottledUntil, ev.UsageWindowPct, 0); err != nil {
 		log.Warn("report account usage failed",
 			"account_id", accountID,
 			"runtime_id", runtimeID,

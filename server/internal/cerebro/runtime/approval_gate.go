@@ -45,7 +45,7 @@ import (
 // actions an operator wants to hold behind approval.
 func toolCapabilityKey(toolName string) string {
 	switch toolName {
-	case "web_fetch", "firtal_bq_query":
+	case "web_fetch", "firtal_registry":
 		// Reaches a host outside Multica over the network.
 		return "network.external"
 	case "credential_list":
@@ -302,6 +302,25 @@ const (
 	defaultApprovalGateTTL  = 30 * time.Minute
 )
 
+// BuildApprovalGate constructs the shared approval enforcement gate — the single
+// "resolve → on Ask create an inbox request → await the human decision" seam
+// (FIR-2586). It returns nil when CEREBRO_APPROVAL_GATE_ENABLED is off, so every
+// caller keeps its prior behaviour until an operator opts in. The same gate type
+// backs the agent tool loop (MaybeEnableApprovalGate), the daemon repo checkout
+// (Handler.ApprovalGate) and credential governance, so a needs-approval verdict
+// from any of them lands in the one /approvals inbox instead of a silent block.
+func BuildApprovalGate(cerebroQueries *cerebrodb.Queries, tx approvals.TxStarter, bus *events.Bus) *permgate.Gate {
+	if !approvalGateEnvEnabled() {
+		return nil
+	}
+	resolver := permissions.New(cerebroQueries)
+	approvalsSvc := approvals.New(cerebroQueries, tx, bus)
+	gate := permgate.New(resolver, approvalsSvc)
+	gate.WaitTimeout = durationFromEnv(defaultApprovalGateWait, envApprovalGateWait)
+	gate.ApprovalTTL = durationFromEnv(defaultApprovalGateTTL, envApprovalGateTTL)
+	return gate
+}
+
 // MaybeEnableApprovalGate reads the env flags and, only when
 // CEREBRO_APPROVAL_GATE_ENABLED is truthy, constructs the resolver + approvals
 // service + gate and enables it on the executor. When the flag is off it is a
@@ -311,15 +330,10 @@ func MaybeEnableApprovalGate(e *FirtalGatewayExecutor, cerebroQueries *cerebrodb
 	if e == nil {
 		return
 	}
-	if !approvalGateEnvEnabled() {
+	gate := BuildApprovalGate(cerebroQueries, tx, bus)
+	if gate == nil {
 		return
 	}
-
-	resolver := permissions.New(cerebroQueries)
-	approvalsSvc := approvals.New(cerebroQueries, tx, bus)
-	gate := permgate.New(resolver, approvalsSvc)
-	gate.WaitTimeout = durationFromEnv(defaultApprovalGateWait, envApprovalGateWait)
-	gate.ApprovalTTL = durationFromEnv(defaultApprovalGateTTL, envApprovalGateTTL)
 
 	// Tool-policy mode resolves every tool through the unified Runtime › Agent ›
 	// Group › User chain so the permission table's Allow/Ask/Deny rows gate real

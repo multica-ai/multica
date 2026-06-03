@@ -3,7 +3,6 @@
 import { Cloud, Lock, Monitor } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { Agent, AgentRuntime } from "@multica/core/types";
-import { formatPauseReason } from "@multica/cerebro-runtime/views";
 import {
   type AgentActivity,
   type AgentPresenceDetail,
@@ -16,6 +15,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+// CEREBRO-PATCH(agents-list-pause-reason): the agent-list Status column showed
+// a bare "Paused" with no reason; the why-it-paused detail only lived on the
+// agent detail page. FIR-2592 — surface the runtime pause reason inline so the
+// list answers "why is work stopped" without a click.
+import { formatPauseReason } from "@multica/cerebro-runtime/views";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { availabilityConfig, workloadConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
@@ -270,14 +274,22 @@ function AvailabilityCell({
     );
   }
   const av = availabilityConfig[presence.availability];
-  const label =
-    presence.availability === "paused" && runtime?.paused_at
-      ? `${t(($) => $.availability.paused)} · ${formatPauseReason(runtime.pause_reason)}`
-      : t(($) => $.availability[presence.availability]);
+  // CEREBRO-PATCH(agents-list-pause-reason): append the runtime pause reason
+  // ("Paused · rate limit or usage limit") so the list explains why work is
+  // gated. Only meaningful in the paused state; other states have no reason.
+  const pauseReason =
+    presence.availability === "paused" && runtime?.pause_reason
+      ? formatPauseReason(runtime.pause_reason)
+      : null;
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex min-w-0 items-center gap-1.5">
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
-      <span className={`truncate text-xs ${av.textClass}`}>{label}</span>
+      <span className={`truncate text-xs ${av.textClass}`}>
+        {t(($) => $.availability[presence.availability])}
+        {pauseReason && (
+          <span className="text-muted-foreground"> · {pauseReason}</span>
+        )}
+      </span>
     </span>
   );
 }

@@ -327,12 +327,20 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	// Phase 5: a random holdout share of routed runs is kept on the requested
 	// (expensive) model as a control arm, so the dashboard can compare real cost.
 	costModes := e.loadCostSavingModes(parent, plan.workspaceID)
+	// FIR-2640: the holdout share is resolved PER SAVING from the UI setting when
+	// set, falling back to the env/default config. Each saving can be at full
+	// rollout (holdout 0) or any holdout independently of the others.
 	requestedModel := agent.Model.String
 	routingOn := costModes[savingModelRouting] == savingModeOn && e.cfg.CheapModel != ""
-	routingHeldOut := routingOn && costSavingHeldOut(task.ID, savingModelRouting, e.cfg.costSavingHoldoutPct())
+	routingHeldOut := routingOn && costSavingHeldOut(task.ID, savingModelRouting, e.resolveHoldoutPct(parent, plan.workspaceID, savingModelRouting))
 	if routingOn && !routingHeldOut {
 		agent.Model = pgtype.Text{String: e.cfg.CheapModel, Valid: true}
 	}
+	// prune_tool_results also runs a holdout: a deterministic share of "on" runs
+	// is the control arm with pruning withheld, so the dashboard can compare the
+	// control group's real cost against the pruned treatment group's.
+	pruneOn := costModes[savingPruneToolResults] == savingModeOn
+	pruneHeldOut := pruneOn && costSavingHeldOut(task.ID, savingPruneToolResults, e.resolveHoldoutPct(parent, plan.workspaceID, savingPruneToolResults))
 
 	runCtx, cancel := context.WithTimeout(parent, cfg.TaskTimeout)
 	defer cancel()
@@ -342,8 +350,8 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		WorkspaceID: util.UUIDToString(plan.workspaceID),
 	}
 	var completion GatewayCompletion
-	if cfg.ToolsEnabledForAgent(task.AgentID) {
-		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, costModes)
+	if e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID) {
+		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, pruneOn && !pruneHeldOut)
 	} else {
 		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, messages, meta)
 	}
@@ -357,14 +365,17 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	e.recordTaskMessage(finalCtx, task, completion.Output)
 	e.recordTaskUsage(finalCtx, task, plan.workspaceID, completion)
 	e.recordCostSavingMeasurements(finalCtx, plan.workspaceID, task.ID, costModes, CostSavingRunFacts{
-		RequestedModel:        requestedModel,
-		EffectiveModel:        completion.Model,
-		Usage:                 pricing.Usage{InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens, CacheReadTokens: completion.Usage.CacheReadTokens, CacheWriteTokens: completion.Usage.CacheWriteTokens},
-		ActualCostCents:       completionCostCents(completion),
-		InlinedContextReads:   plan.inlinedContextReads,
-		ToolResultChars:       completion.ToolResultChars,
-		PrunedToolResultChars: completion.PrunedToolResultChars,
-		RoutingHeldOut:        routingHeldOut,
+		RequestedModel:               requestedModel,
+		EffectiveModel:               completion.Model,
+		Usage:                        pricing.Usage{InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens, CacheReadTokens: completion.Usage.CacheReadTokens, CacheWriteTokens: completion.Usage.CacheWriteTokens},
+		ActualCostCents:              completionCostCents(completion),
+		InlinedContextReads:          plan.inlinedContextReads,
+		ToolResultChars:              completion.ToolResultChars,
+		PrunedToolResultChars:        completion.PrunedToolResultChars,
+		PrunedContextCharsCompounded: completion.PrunedContextCharsCompounded,
+		PromptInputChars:             completion.PromptInputChars,
+		RoutingHeldOut:               routingHeldOut,
+		PruneHeldOut:                 pruneHeldOut,
 	})
 
 	result, _ := json.Marshal(protocol.TaskCompletedPayload{
@@ -476,18 +487,96 @@ func (e *FirtalGatewayExecutor) effectiveWorkspaceConfig(ctx context.Context, wo
 	return FirtalGatewayConfigFromWorkspaceSettings(ws.Settings, e.cfg)
 }
 
-func (e *FirtalGatewayExecutor) completeGateway(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
-	if e.gateway != nil {
-		return e.gateway.Complete(ctx, model, messages, meta)
+// messagesChars sums the prompt-text characters of a request's message slice:
+// each message's Content plus the name and JSON arguments of any tool calls it
+// carries. Paired with the provider's reported input tokens for the same
+// request, this yields a real per-run chars-per-token ratio for the run's model
+// (FIR-2572), used to convert pruned characters into an accurate saved-token
+// count without needing a holdout control arm.
+func messagesChars(messages []GatewayMessage) int64 {
+	var n int64
+	for _, m := range messages {
+		n += int64(len(m.Content))
+		for _, tc := range m.ToolCalls {
+			n += int64(len(tc.Function.Name) + len(tc.Function.Arguments))
+		}
 	}
-	return NewGatewayClient(cfg, nil).Complete(ctx, model, messages, meta)
+	return n
+}
+
+// anthropicHistoryChars approximates the prompt characters sent in ONE Anthropic
+// /messages request: the system prompt plus every message currently in the
+// transcript. The Anthropic-native tool loop sums this across rounds (via its
+// accumulate closure) and pairs it with the provider-reported prompt tokens —
+// which are ALSO summed across rounds. Both numerator and denominator of the
+// chars→tokens calibration must use the same per-request, summed-across-rounds
+// basis; mixing a summed token count with a single-transcript char count skews
+// the ratio and over-measures the prune saving. This mirrors messagesChars for
+// the chat-completions tool loops. FIR-2572.
+func anthropicHistoryChars(systemText string, history []AnthropicMessage) int64 {
+	n := int64(len(systemText))
+	for _, m := range history {
+		n += anthropicContentChars(m.Content)
+	}
+	return n
+}
+
+// anthropicContentChars counts the characters in an AnthropicMessage.Content,
+// which is either a plain string (simple user/assistant turns) or a slice of
+// content blocks (text, tool_use, tool_result). tool_use input arguments and the
+// nested content of tool_result blocks are part of the prompt on later rounds,
+// so they are counted too.
+func anthropicContentChars(content any) int64 {
+	switch v := content.(type) {
+	case string:
+		return int64(len(v))
+	case []AnthropicContentBlock:
+		var n int64
+		for _, b := range v {
+			n += int64(len(b.Text) + len(b.Name))
+			if len(b.Input) > 0 {
+				if raw, err := json.Marshal(b.Input); err == nil {
+					n += int64(len(raw))
+				}
+			}
+			n += anthropicContentChars(b.Content)
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
+func (e *FirtalGatewayExecutor) completeGateway(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	var (
+		c   GatewayCompletion
+		err error
+	)
+	if e.gateway != nil {
+		c, err = e.gateway.Complete(ctx, model, messages, meta)
+	} else {
+		c, err = NewGatewayClient(cfg, nil).Complete(ctx, model, messages, meta)
+	}
+	if err == nil {
+		c.PromptInputChars = messagesChars(messages)
+	}
+	return c, err
 }
 
 func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	var (
+		c   GatewayCompletion
+		err error
+	)
 	if e.gateway != nil {
-		return e.gateway.CompleteWithTools(ctx, model, messages, tools, meta)
+		c, err = e.gateway.CompleteWithTools(ctx, model, messages, tools, meta)
+	} else {
+		c, err = NewGatewayClient(cfg, nil).CompleteWithTools(ctx, model, messages, tools, meta)
 	}
-	return NewGatewayClient(cfg, nil).CompleteWithTools(ctx, model, messages, tools, meta)
+	if err == nil {
+		c.PromptInputChars = messagesChars(messages)
+	}
+	return c, err
 }
 
 // completeGatewayForcingText is the tool-loop's forced-final call. It keeps the
@@ -495,10 +584,32 @@ func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cf
 // so the transcript stays valid for Anthropic while the model is constrained to
 // produce text instead of another tool call. See FIR-2421.
 func (e *FirtalGatewayExecutor) completeGatewayForcingText(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	var (
+		c   GatewayCompletion
+		err error
+	)
 	if e.gateway != nil {
-		return e.gateway.CompleteForcingText(ctx, model, messages, tools, meta)
+		c, err = e.gateway.CompleteForcingText(ctx, model, messages, tools, meta)
+	} else {
+		c, err = NewGatewayClient(cfg, nil).CompleteForcingText(ctx, model, messages, tools, meta)
 	}
-	return NewGatewayClient(cfg, nil).CompleteForcingText(ctx, model, messages, tools, meta)
+	if err == nil {
+		c.PromptInputChars = messagesChars(messages)
+	}
+	return c, err
+}
+
+// agentHasCallableTools reports whether this task should enter the tool loop.
+// Resolution follows the runtime tools list (cerebro_runtime_tool cascade with
+// legacy agent_tool_grant fallback), not MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS.
+func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agentID, workspaceID, originalUserID pgtype.UUID) bool {
+	if e.registry == nil {
+		return false
+	}
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID}
+	taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
+	taskRegistry.db = e.registry.db
+	return len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)) > 0
 }
 
 // runToolLoop runs the model in an Anthropic-native tool-call loop. Up to
@@ -508,12 +619,14 @@ func (e *FirtalGatewayExecutor) completeGatewayForcingText(ctx context.Context, 
 // registry or the MCP server, results are appended, and the next round runs.
 // The first round without tool calls becomes the final output. Budget is
 // checked before each tool dispatch. Usage is summed across all rounds.
-func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID, costModes map[string]string) (GatewayCompletion, error) {
+func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID, pruneApply bool) (GatewayCompletion, error) {
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID}
 	// FIR-2325: prune_tool_results actually drops superseded tool output from the
 	// transcript mid-run when "on" for this workspace. Off/shadow keep the full
 	// transcript (no behavior change), so the default fleet is unaffected.
-	pruneOn := costModes[savingPruneToolResults] == savingModeOn
+	// pruneApply is already false on held-out control runs, so pruning is
+	// withheld there while the run is still measured as the control arm.
+	pruneOn := pruneApply
 
 	// Determine tools: registry-backed when available, else fall back to the
 	// hardcoded MCP server (POC compatibility).
@@ -545,17 +658,33 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		}
 	}
 	if !useRegistry {
-		// POC fallback: MCP server with hardcoded 3 tools.
-		toolSrv = NewFirtalGatewayToolServer(e.queries, tctx)
-		for _, def := range GatewayToolDefs() {
-			anthropicTools = append(anthropicTools, AnthropicTool{
-				Name:        def.Function.Name,
-				Description: def.Function.Description,
-				InputSchema: def.Function.Parameters,
-			})
+		// Legacy POC fallback only when the runtime has no cerebro_runtime_tool
+		// rows yet. Once tools are managed on the runtime, an empty grant list
+		// means chat-only — do not inject the hardcoded three-tool MCP set.
+		runtimeToolsConfigured := false
+		if e.cerebro != nil && agentID.Valid {
+			var checkErr error
+			runtimeToolsConfigured, checkErr = e.cerebro.HasCerebroRuntimeToolsForAgent(ctx, agentID)
+			if checkErr != nil {
+				slog.Warn("firtal gateway: runtime tools configured-check failed",
+					"agent_id", util.UUIDToString(agentID),
+					"error", checkErr,
+				)
+				runtimeToolsConfigured = false
+			}
 		}
-		if len(anthropicTools) > 0 {
-			anthropicTools[len(anthropicTools)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+		if !runtimeToolsConfigured {
+			toolSrv = NewFirtalGatewayToolServer(e.queries, tctx)
+			for _, def := range GatewayToolDefs() {
+				anthropicTools = append(anthropicTools, AnthropicTool{
+					Name:        def.Function.Name,
+					Description: def.Function.Description,
+					InputSchema: def.Function.Parameters,
+				})
+			}
+			if len(anthropicTools) > 0 {
+				anthropicTools[len(anthropicTools)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+			}
 		}
 	}
 
@@ -648,6 +777,7 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 		acc.Usage.CacheReadTokens += c.Usage.CacheReadTokens
 		acc.Usage.CacheWriteTokens += c.Usage.CacheWriteTokens
 		acc.Usage.CostCents += c.Usage.CostCents
+		acc.PromptInputChars += c.PromptInputChars
 	}
 
 	maxRounds := firtalGatewayMaxToolRounds
@@ -661,6 +791,10 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 			return GatewayCompletion{}, err
 		}
 		accumulate(completion)
+		// FIR-2639: this call's prompt excluded every char pruned in prior rounds,
+		// so the prune saving compounds across calls. acc.PrunedToolResultChars is
+		// the running total pruned so far; add it once per model call.
+		acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 
 		if len(completion.ToolCalls) == 0 {
 			acc.Output = completion.Output
@@ -729,6 +863,8 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 		return GatewayCompletion{}, err
 	}
 	accumulate(final)
+	// FIR-2639: the final forcing call also excluded every pruned char — count it.
+	acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 	acc.Output = final.Output
 	return acc, nil
 }
@@ -755,6 +891,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 		acc.Usage.CacheReadTokens += c.Usage.CacheReadTokens
 		acc.Usage.CacheWriteTokens += c.Usage.CacheWriteTokens
 		acc.Usage.CostCents += c.Usage.CostCents
+		acc.PromptInputChars += c.PromptInputChars
 	}
 
 	maxRounds := firtalGatewayMaxToolRounds
@@ -768,6 +905,10 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 			return GatewayCompletion{}, err
 		}
 		accumulate(completion)
+		// FIR-2639: compound the prune saving — this call's prompt omitted every
+		// char pruned in prior rounds. acc.PrunedToolResultChars is the running
+		// total pruned so far; add it once per model call.
+		acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 
 		if len(completion.ToolCalls) == 0 {
 			acc.Output = completion.Output
@@ -850,6 +991,8 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 		return GatewayCompletion{}, err
 	}
 	accumulate(final)
+	// FIR-2639: the final forcing call also excluded every pruned char — count it.
+	acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 	acc.Output = final.Output
 	return acc, nil
 }
@@ -908,6 +1051,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 		acc.Usage.CacheReadTokens += c.Usage.CacheReadTokens
 		acc.Usage.CacheWriteTokens += c.Usage.CacheWriteTokens
 		acc.Usage.CostCents += c.Usage.CostCents
+		acc.PromptInputChars += c.PromptInputChars
 	}
 
 	gwClient := e.gateway
@@ -920,7 +1064,16 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 		if err != nil {
 			return GatewayCompletion{}, err
 		}
+		// FIR-2572: completeAnthropic does not populate PromptInputChars, so record
+		// the prompt chars actually sent THIS request (system + current transcript)
+		// here. accumulate sums it across rounds onto the same basis as the summed
+		// prompt tokens, so savedContextTokens calibrates an accurate ratio.
+		completion.PromptInputChars = anthropicHistoryChars(systemText, history)
 		accumulate(completion)
+		// FIR-2639: compound the prune saving — this call's prompt omitted every
+		// char pruned in prior rounds. acc.PrunedToolResultChars is the running
+		// total pruned so far; add it once per model call.
+		acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 
 		if len(completion.ToolCalls) == 0 {
 			acc.Output = completion.Output
@@ -1041,7 +1194,15 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 	if err != nil {
 		return GatewayCompletion{}, err
 	}
+	// FIR-2572: like every round above, record this request's prompt chars (system
+	// + full transcript) so the summed PromptInputChars stays on the same basis as
+	// the summed prompt tokens. Paired they give a real chars→tokens ratio for this
+	// run's model, so the prune saving is measured accurately at 100% rollout with
+	// no holdout control arm.
+	final.PromptInputChars = anthropicHistoryChars(systemText, history)
 	accumulate(final)
+	// FIR-2639: the final forcing call also excluded every pruned char — count it.
+	acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 	acc.Output = final.Output
 	return acc, nil
 }

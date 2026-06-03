@@ -53,6 +53,12 @@ export interface ToolPolicyRow {
   title: string;
   category: string;
   source: string;
+  /**
+   * FIR-2594: true for a platform action whose enforcement point is not the
+   * tool-policy gate (workspace-membership ACL, daemon token, webhook secret).
+   * The row is shown for visibility but its Allow/Ask/Deny choice is advisory.
+   */
+  managed_externally: boolean;
   layers: ToolPolicyLayers;
   effective: ToolPolicyEffective;
 }
@@ -111,6 +117,10 @@ const toolPolicyRowSchema = z.object({
   title: z.string().default(""),
   category: z.string().default(""),
   source: z.string().default(""),
+  // FIR-2594: true for platform actions whose enforcement point is not the
+  // tool-policy gate (membership ACL, daemon token, …). Defaults false so older
+  // backends that omit the field render as a normal, gated row.
+  managed_externally: z.boolean().default(false),
   layers: z
     .object({
       workspace: layerSettingSchema,

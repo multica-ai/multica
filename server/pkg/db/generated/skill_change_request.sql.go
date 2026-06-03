@@ -14,10 +14,10 @@ import (
 const createSkillChangeRequest = `-- name: CreateSkillChangeRequest :one
 INSERT INTO skill_change_request (
     skill_id, title, description, base_version, proposed_version,
-    proposed_content, proposed_files, proposed_by
+    proposed_content, proposed_files, proposed_by, work_session_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at, work_session_id
 `
 
 type CreateSkillChangeRequestParams struct {
@@ -29,8 +29,11 @@ type CreateSkillChangeRequestParams struct {
 	ProposedContent string      `json:"proposed_content"`
 	ProposedFiles   []byte      `json:"proposed_files"`
 	ProposedBy      pgtype.UUID `json:"proposed_by"`
+	WorkSessionID   pgtype.UUID `json:"work_session_id"`
 }
 
+// CEREBRO-PATCH(skill-change-request-session): FIR-2627 — work_session_id links
+// the change request back to the agent run that proposed it.
 func (q *Queries) CreateSkillChangeRequest(ctx context.Context, arg CreateSkillChangeRequestParams) (SkillChangeRequest, error) {
 	row := q.db.QueryRow(ctx, createSkillChangeRequest,
 		arg.SkillID,
@@ -41,6 +44,7 @@ func (q *Queries) CreateSkillChangeRequest(ctx context.Context, arg CreateSkillC
 		arg.ProposedContent,
 		arg.ProposedFiles,
 		arg.ProposedBy,
+		arg.WorkSessionID,
 	)
 	var i SkillChangeRequest
 	err := row.Scan(
@@ -59,12 +63,13 @@ func (q *Queries) CreateSkillChangeRequest(ctx context.Context, arg CreateSkillC
 		&i.ReviewComment,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkSessionID,
 	)
 	return i, err
 }
 
 const getSkillChangeRequest = `-- name: GetSkillChangeRequest :one
-SELECT id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at FROM skill_change_request
+SELECT id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at, work_session_id FROM skill_change_request
 WHERE id = $1
 `
 
@@ -87,12 +92,13 @@ func (q *Queries) GetSkillChangeRequest(ctx context.Context, id pgtype.UUID) (Sk
 		&i.ReviewComment,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkSessionID,
 	)
 	return i, err
 }
 
 const getSkillChangeRequestForUpdate = `-- name: GetSkillChangeRequestForUpdate :one
-SELECT id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at FROM skill_change_request
+SELECT id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at, work_session_id FROM skill_change_request
 WHERE id = $1
 FOR UPDATE
 `
@@ -118,12 +124,13 @@ func (q *Queries) GetSkillChangeRequestForUpdate(ctx context.Context, id pgtype.
 		&i.ReviewComment,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkSessionID,
 	)
 	return i, err
 }
 
 const listPendingChangeRequestsByWorkspace = `-- name: ListPendingChangeRequestsByWorkspace :many
-SELECT cr.id, cr.skill_id, cr.title, cr.description, cr.base_version, cr.proposed_version, cr.proposed_content, cr.proposed_files, cr.status, cr.proposed_by, cr.reviewed_by, cr.reviewed_at, cr.review_comment, cr.created_at, cr.updated_at
+SELECT cr.id, cr.skill_id, cr.title, cr.description, cr.base_version, cr.proposed_version, cr.proposed_content, cr.proposed_files, cr.status, cr.proposed_by, cr.reviewed_by, cr.reviewed_at, cr.review_comment, cr.created_at, cr.updated_at, cr.work_session_id
 FROM skill_change_request cr
 JOIN skill s ON s.id = cr.skill_id
 WHERE s.workspace_id = $1 AND cr.status = 'pending'
@@ -155,6 +162,7 @@ func (q *Queries) ListPendingChangeRequestsByWorkspace(ctx context.Context, work
 			&i.ReviewComment,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.WorkSessionID,
 		); err != nil {
 			return nil, err
 		}
@@ -168,7 +176,7 @@ func (q *Queries) ListPendingChangeRequestsByWorkspace(ctx context.Context, work
 
 const listSkillChangeRequestsBySkill = `-- name: ListSkillChangeRequestsBySkill :many
 
-SELECT id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at FROM skill_change_request
+SELECT id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at, work_session_id FROM skill_change_request
 WHERE skill_id = $1
 ORDER BY created_at DESC
 `
@@ -199,6 +207,7 @@ func (q *Queries) ListSkillChangeRequestsBySkill(ctx context.Context, skillID pg
 			&i.ReviewComment,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.WorkSessionID,
 		); err != nil {
 			return nil, err
 		}
@@ -215,7 +224,7 @@ UPDATE skill_change_request SET
     status = 'merged',
     updated_at = now()
 WHERE id = $1
-RETURNING id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at
+RETURNING id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at, work_session_id
 `
 
 func (q *Queries) MarkSkillChangeRequestMerged(ctx context.Context, id pgtype.UUID) (SkillChangeRequest, error) {
@@ -237,6 +246,7 @@ func (q *Queries) MarkSkillChangeRequestMerged(ctx context.Context, id pgtype.UU
 		&i.ReviewComment,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkSessionID,
 	)
 	return i, err
 }
@@ -249,7 +259,7 @@ UPDATE skill_change_request SET
     review_comment = $4,
     updated_at = now()
 WHERE id = $1
-RETURNING id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at
+RETURNING id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at, work_session_id
 `
 
 type ReviewSkillChangeRequestParams struct {
@@ -283,6 +293,7 @@ func (q *Queries) ReviewSkillChangeRequest(ctx context.Context, arg ReviewSkillC
 		&i.ReviewComment,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WorkSessionID,
 	)
 	return i, err
 }

@@ -47,6 +47,43 @@ func TestValidateBaseURLNormalizesValidGatewayURL(t *testing.T) {
 	}
 }
 
+func TestValidateTrustedBaseURLAllowsInternalWhenOptedIn(t *testing.T) {
+	t.Setenv(allowInternalEnvVar, "true")
+
+	got, err := ValidateTrustedBaseURL("http://firtal-data-registry-private.internal:3000")
+	if err != nil {
+		t.Fatalf("ValidateTrustedBaseURL() error = %v", err)
+	}
+	if got != "http://firtal-data-registry-private.internal:3000" {
+		t.Fatalf("normalized URL = %q", got)
+	}
+}
+
+func TestValidateTrustedBaseURLStrictByDefault(t *testing.T) {
+	t.Setenv(allowInternalEnvVar, "")
+
+	if _, err := ValidateTrustedBaseURL("http://firtal-data-registry-private.internal:3000"); err == nil {
+		t.Fatal("ValidateTrustedBaseURL() without opt-in succeeded, want error")
+	}
+}
+
+// ValidateBaseURL guards untrusted workspace-supplied URLs and must never relax,
+// even when the operator opted the trusted server URL into internal addresses.
+func TestValidateBaseURLStaysStrictRegardlessOfOptIn(t *testing.T) {
+	t.Setenv(allowInternalEnvVar, "true")
+
+	for _, raw := range []string{
+		"http://firtal-data-registry-private.internal:3000",
+		"https://registry.internal",
+		"https://10.0.0.5",
+		"http://registry.example",
+	} {
+		if _, err := ValidateBaseURL(raw); err == nil {
+			t.Fatalf("ValidateBaseURL(%q) with opt-in succeeded, want error", raw)
+		}
+	}
+}
+
 func TestNewHTTPClientBlocksLoopbackDial(t *testing.T) {
 	t.Parallel()
 

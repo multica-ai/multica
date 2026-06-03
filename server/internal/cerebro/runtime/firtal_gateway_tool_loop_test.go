@@ -481,7 +481,7 @@ func TestRunToolLoopUsesGatewayCompatTransportForToolEnabledTasks(t *testing.T) 
 		pgtype.UUID{},
 		pgtype.UUID{},
 		pgtype.UUID{},
-		nil,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)

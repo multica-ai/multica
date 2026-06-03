@@ -74,6 +74,7 @@ export interface DashboardOverview {
   spend_cents: Kpi;
   issues_by_status: Bucket[];
   issues_by_priority: Bucket[];
+  issues_by_on_behalf_of: TopActor[];
   timeline: DayBucket[];
   top_agents: TopActor[];
   top_members: TopActor[];

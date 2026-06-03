@@ -154,11 +154,13 @@ interface CommandItem {
 
 interface SearchResults {
   issues: SearchIssueResult[];
+  // CEREBRO-PATCH(typeahead-comments): FIR-2605 — issues matched via comment body, shown in their own section.
+  comments: SearchIssueResult[];
   projects: SearchProjectResult[];
   chatSessions: SearchChatSessionResult[];
 }
 
-const EMPTY_RESULTS: SearchResults = { issues: [], projects: [], chatSessions: [] };
+const EMPTY_RESULTS: SearchResults = { issues: [], comments: [], projects: [], chatSessions: [] };
 
 export function SearchCommand() {
   const { t } = useT("search");
@@ -350,6 +352,7 @@ export function SearchCommand() {
 
   const hasResults =
     results.issues.length > 0 ||
+    results.comments.length > 0 || // CEREBRO-PATCH(typeahead-comments): FIR-2605
     results.projects.length > 0 ||
     results.chatSessions.length > 0 ||
     filteredMembers.length > 0;
@@ -433,8 +436,12 @@ export function SearchCommand() {
           }).catch(() => ({ chat_sessions: [], total: 0 })),
         ]);
         if (!controller.signal.aborted) {
+          // CEREBRO-PATCH(typeahead-comments): FIR-2605 — split by match_source so comment hits get their own section.
+          const issueHits = issueRes.issues.filter((r) => r.match_source !== "comment");
+          const commentHits = issueRes.issues.filter((r) => r.match_source === "comment");
           setResults({
-            issues: issueRes.issues,
+            issues: issueHits,
+            comments: commentHits,
             projects: projectRes.projects,
             chatSessions: chatRes.chat_sessions,
           });
@@ -710,18 +717,48 @@ export function SearchCommand() {
                         {STATUS_CONFIG[issue.status].label}
                       </span>
                     </div>
-                    {issue.match_source === "comment" &&
-                      issue.matched_snippet && (
-                        <div className="flex items-start gap-2 pl-[26px]">
-                          <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
-                          <span className="text-xs text-muted-foreground truncate">
-                            <HighlightText
-                              text={issue.matched_snippet}
-                              query={query}
-                            />
-                          </span>
-                        </div>
-                      )}
+                    {/* CEREBRO-PATCH(typeahead-comments): FIR-2605 — description snippets only; comment matches moved to Comments group. */}
+                    {issue.match_source === "description" && issue.matched_snippet && (
+                      <div className="flex items-start gap-2 pl-[26px]">
+                        <span className="text-xs text-muted-foreground truncate">
+                          <HighlightText text={issue.matched_snippet} query={query} />
+                        </span>
+                      </div>
+                    )}
+                  </CommandPrimitive.Item>
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {/* CEREBRO-PATCH(typeahead-comments): FIR-2605 — Comments group: issues matched via comment body. */}
+            {!isLoading && results.comments.length > 0 && (
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.comments)}
+                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+              >
+                {results.comments.map((issue) => (
+                  <CommandPrimitive.Item
+                    key={`comment:${issue.id}`}
+                    value={issue.id}
+                    onSelect={handleSelect}
+                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {issue.identifier}
+                      </span>
+                      <span className="truncate">
+                        <HighlightText text={issue.title} query={query} />
+                      </span>
+                    </div>
+                    {issue.matched_snippet && (
+                      <div className="flex items-start gap-2 pl-[26px]">
+                        <span className="text-xs text-muted-foreground truncate">
+                          <HighlightText text={issue.matched_snippet} query={query} />
+                        </span>
+                      </div>
+                    )}
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>

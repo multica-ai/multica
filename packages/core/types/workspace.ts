@@ -63,6 +63,8 @@ export interface User {
   starter_content_state: string | null;
   /** Preferred UI language. null means "follow client/system". */
   language: string | null;
+  /** Preferred IANA timezone. null means "follow client/system". CEREBRO-PATCH(user-timezone-type): server emits timezone in UserResponse. */
+  timezone: string | null;
   /**
    * Free-form self-description (role, stack, preferences). Injected into
    * the agent brief so coding agents have cheap, durable context about

@@ -247,3 +247,16 @@ WHERE a.workspace_id = $1
   )
 ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC
 LIMIT $2;
+
+-- name: DashboardCountIssuesByOnBehalfOf :many
+-- Distribution of agent-created issues grouped by the human they were created
+-- on behalf of: issue.origin_type='agent_task' → agent_task_queue.original_user_id
+-- → user. Lets the dashboard show who is generating agent work (MUL-2553).
+SELECT u.id::uuid AS user_id, u.name AS name, COUNT(*)::int AS count
+FROM issue i
+JOIN agent_task_queue atq ON atq.id = i.origin_id
+JOIN "user" u ON u.id = atq.original_user_id
+WHERE i.workspace_id = $1 AND i.kind = 'issue' AND i.origin_type = 'agent_task'
+GROUP BY u.id, u.name
+ORDER BY COUNT(*) DESC
+LIMIT 20;

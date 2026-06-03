@@ -21,7 +21,8 @@ export type CostSavingKey =
   | "snapshot_prompt"
   | "bundled_read"
   | "model_routing"
-  | "prune_tool_results";
+  | "prune_tool_results"
+  | "context_duplication";
 
 /** The three states every saving can be in. */
 export type CostSavingMode = "off" | "shadow" | "on";
@@ -34,7 +35,8 @@ export type CostSavingMetric =
   | "platform_calls"
   | "input_tokens"
   | "model_cost"
-  | "context_tokens";
+  | "context_tokens"
+  | "tokens";
 
 /**
  * Which agent runtime a saving actually affects. Savings live in two runtimes:
@@ -97,6 +99,7 @@ export const COST_SAVING_DEFAULTS: Record<CostSavingKey, CostSavingMode> = {
   bundled_read: "off",
   model_routing: "off",
   prune_tool_results: "off",
+  context_duplication: "off",
 };
 
 /**
@@ -107,6 +110,53 @@ export const COST_SAVING_DEFAULTS: Record<CostSavingKey, CostSavingMode> = {
  */
 export function isDefaultMode(key: CostSavingKey, mode: CostSavingMode): boolean {
   return mode === COST_SAVING_DEFAULTS[key];
+}
+
+/**
+ * Default holdout share (percent of "on" runs deliberately withheld as the A/B
+ * control arm) shown when a workspace has no override. MUST mirror the server's
+ * `defaultCostSavingHoldoutPct` (server/internal/cerebro/runtime/cost_savings_holdout.go):
+ * the server stores only overrides, so a missing row resolves to this default
+ * for both display and the actual run. (FIR-2640)
+ */
+export const DEFAULT_COST_SAVING_HOLDOUT_PCT = 20;
+
+/**
+ * Clamp a holdout share to the valid 0-100 integer range. Non-finite input
+ * falls back to the registry default. Used to sanitize both server responses
+ * and user input before they reach the API.
+ */
+export function clampHoldoutPct(pct: number): number {
+  if (!Number.isFinite(pct)) return DEFAULT_COST_SAVING_HOLDOUT_PCT;
+  if (pct < 0) return 0;
+  if (pct > 100) return 100;
+  return Math.round(pct);
+}
+
+/**
+ * Whether a holdout share represents full rollout — every "on" run gets the
+ * saving, with no control arm held back. That is exactly holdout = 0%.
+ */
+export function isFullRollout(pct: number): boolean {
+  return pct <= 0;
+}
+
+/**
+ * Savings that actually have a runtime holdout arm, so a rollout/holdout control
+ * does something for them. Only the gateway savings the server can withhold per
+ * run qualify: model_routing (keep the run on the expensive model) and
+ * prune_tool_results (skip pruning). The others have no behavioral control arm,
+ * so showing them a holdout knob would be a dead control — we don't. MUST stay
+ * in sync with the runtime's heldOut logic in cost_savings_measure.go.
+ */
+const HOLDOUT_SAVINGS: ReadonlySet<CostSavingKey> = new Set<CostSavingKey>([
+  "model_routing",
+  "prune_tool_results",
+]);
+
+/** Whether a saving supports a per-saving rollout/holdout control. */
+export function savingSupportsHoldout(key: CostSavingKey): boolean {
+  return HOLDOUT_SAVINGS.has(key);
 }
 
 export interface CostSavingDefinition {
@@ -135,18 +185,18 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     label: "Snapshot in start prompt",
     description:
       "Put the issue and the latest comment thread directly into the run's start prompt, so the agent does not have to fetch the issue and its comments itself on every run.",
-    metric: "platform_calls",
+    metric: "tokens",
     runtimeScope: "both",
-    estimateNote: "Removes ~40% of platform calls per run.",
+    estimateNote: "Typically ~3,200 input tokens per run (issue + thread not fetched separately).",
   },
   {
     key: "bundled_read",
     label: "Bundled context read",
     description:
       "Serve a single combined \"issue context\" call (issue + comments + members + labels) instead of 4-5 separate calls.",
-    metric: "platform_calls",
+    metric: "tokens",
     runtimeScope: "both",
-    estimateNote: "Collapses 4-5 calls into 1 at run start.",
+    estimateNote: "Typically ~600 input tokens per run (four separate reads → one bundled payload).",
   },
   {
     key: "model_routing",
@@ -165,5 +215,14 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     metric: "context_tokens",
     runtimeScope: "gateway",
     estimateNote: "Trims superseded tool output from later turns.",
+  },
+  {
+    key: "context_duplication",
+    label: "Context duplication",
+    description:
+      "Measure how much of the composed agent brief repeats the same sentences across sections (workspace context, skills list, agent instructions, and similar).",
+    metric: "tokens",
+    runtimeScope: "both",
+    estimateNote: "Typical workspaces show 20–40% duplicate sentences before cleanup.",
   },
 ];

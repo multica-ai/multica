@@ -83,6 +83,7 @@ import {
   EMPTY_CHAT_PENDING_TASK,
   EMPTY_CHAT_SESSION_LIST,
   EMPTY_COMMENT,
+  EMPTY_FEATURE_FLAGS,
   EMPTY_INBOX_LIST,
   EMPTY_ISSUE_FALLBACK,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -98,6 +99,7 @@ import {
   EMPTY_SQUAD_LIST,
   EMPTY_USER,
   EMPTY_WORKSPACE_LIST,
+  FeatureFlagsResponseSchema,
   InboxListSchema,
   NotificationPreferenceResponseSchema,
   ListLabelsResponseSchema,
@@ -117,6 +119,7 @@ import {
   UserSchema,
   WorkspaceListSchema,
 } from "./schemas";
+import type { FeatureFlagsResponse } from "./schemas";
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
@@ -478,6 +481,50 @@ class ApiClient {
     return this.fetch<{ count: number }>("/api/inbox/archive-completed", {
       method: "POST",
     });
+  }
+
+  // Create a personal reminder that points at one specific comment (FIR-2641 /
+  // FIR-2644). The backend (server/internal/cerebro/inbox/handler.go
+  // CreateReminder) accepts comment_id, fixes the reminder's issue to the
+  // comment's own issue, and stores comment_id in details so a tap in the inbox
+  // deep-links straight to the comment. `text` may be empty — the server then
+  // auto-suggests a snippet from the comment body (the picker pre-fills the
+  // same suggestion via lib/suggest-reminder-text.ts). When the
+  // cerebro_comment_reminders flag is off the server replies 403; the caller
+  // surfaces that as an alert. No parseWithFallback (mirrors markInboxRead): the
+  // response is not rendered, we invalidate the inbox list on settle instead.
+  async createCommentReminder(params: {
+    commentId: string;
+    issueId: string;
+    text: string;
+    plannedAt: Date;
+  }): Promise<InboxItem> {
+    return this.fetch<InboxItem>("/api/inbox/reminders", {
+      method: "POST",
+      body: JSON.stringify({
+        comment_id: params.commentId,
+        issue_id: params.issueId,
+        text: params.text,
+        planned_at: params.plannedAt.toISOString(),
+      }),
+    });
+  }
+
+  // --- Feature flags (cerebro) ---
+  // GET /api/workspaces/{id}/feature-flags — the member's personal overrides,
+  // the owner-set workspace overrides, and the locked keys. Defaults are
+  // resolved client-side (see data/queries/feature-flags.ts), mirroring web's
+  // packages/cerebro-feature-flags resolution.
+  async listFeatureFlags(
+    workspaceId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<FeatureFlagsResponse> {
+    return this.fetchValidated(
+      `/api/workspaces/${workspaceId}/feature-flags`,
+      FeatureFlagsResponseSchema,
+      EMPTY_FEATURE_FLAGS,
+      { ...opts, endpoint: "listFeatureFlags" },
+    );
   }
 
   // --- Members & Agents (for actor name/avatar lookup) ---

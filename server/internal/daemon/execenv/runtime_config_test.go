@@ -1399,3 +1399,63 @@ func TestBundleContextHintSteersRuntimeReadStepsToIssueContext(t *testing.T) {
 		t.Errorf("bundled ON: issue_context Quick Start must point at `multica issue context`")
 	}
 }
+
+// FIR-2610 — the standing "never busy-wait" rule must appear in the brief for
+// both issue-bound trigger types (assignment + comment), because that is where
+// checkout → build → merge → deploy work happens, and busy-wait poll-loops on
+// CI/deploy were the single largest token bill in the error catalog (FIR-2396).
+// It must NOT appear for chat / quick-create / autopilot runs, which never do
+// that work and would only be diluted by the section.
+func TestNoBusyWaitRulePresentForIssueRunsOnly(t *testing.T) {
+	t.Parallel()
+	const heading = "## Long-running work — never busy-wait"
+
+	present := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{"assignment-triggered", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}},
+		{"comment-triggered", TaskContextForEnv{
+			IssueID:          "22222222-3333-4444-5555-666666666666",
+			TriggerCommentID: "33333333-4444-5555-6666-777777777777",
+		}},
+	}
+	for _, tc := range present {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if !strings.Contains(out, heading) {
+				t.Fatalf("[%s] expected the no-busy-wait section in brief", tc.name)
+			}
+			for _, want := range []string{
+				"gh pr merge --auto",
+				"do not need to stay alive for it",
+				"Do not loop until it goes green",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("[%s] no-busy-wait section missing %q", tc.name, want)
+				}
+			}
+		})
+	}
+
+	absent := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{"chat", TaskContextForEnv{ChatSessionID: "chat-1"}},
+		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "make me an issue"}},
+		{"autopilot", TaskContextForEnv{AutopilotRunID: "ap-run-1"}},
+	}
+	for _, tc := range absent {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if strings.Contains(out, heading) {
+				t.Errorf("[%s] no-busy-wait section must NOT appear for non-issue runs", tc.name)
+			}
+		})
+	}
+}

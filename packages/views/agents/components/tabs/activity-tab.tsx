@@ -6,7 +6,9 @@ import {
   ArrowUpRight,
   CircleHelp,
   Hash,
+  Loader2,
   MessageSquare,
+  RotateCcw,
   Workflow,
   X,
 } from "lucide-react";
@@ -355,6 +357,7 @@ function TaskRow({
   const timeAgo = useTimeAgo();
   const paths = useWorkspacePaths();
   const [cancelling, setCancelling] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const cfg = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
   const Icon = cfg.icon;
   const hasIssue = task.issue_id !== "";
@@ -370,6 +373,13 @@ function TaskRow({
     (task.status === "queued" ||
       task.status === "dispatched" ||
       task.status === "running");
+  // Retry only on terminal-but-not-success rows that belong to an issue —
+  // the rerun endpoint is issue-scoped, so chat / quick-create runs (no
+  // issue) have nothing to rerun against.
+  const showRetry =
+    timeMode === "completed" &&
+    hasIssue &&
+    (task.status === "failed" || task.status === "cancelled");
 
   const handleCancel = async () => {
     if (cancelling) return;
@@ -382,6 +392,28 @@ function TaskRow({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.activity.cancel_failed_toast));
       setCancelling(false);
+    }
+  };
+
+  // CEREBRO-PATCH(activity-tab-retry): surface a retry action on terminal
+  // failed/cancelled runs here in Recent Work, mirroring the issue
+  // execution-log retry. FIR-2592 acceptance criterion 1 ("man kan retry"
+  // where you see why a run failed) — QA found the run + reason here but no
+  // retry affordance, so users had to leave for the issue page. Reruns on
+  // the issue's current assignee (same endpoint as execution-log).
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await api.rerunIssue(task.issue_id);
+      // The rerun's queued/running WS events invalidate the per-agent task
+      // list, so the new run flows in without a manual refetch.
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.activity.retry_failed_toast));
+    } finally {
+      // Reset on both paths: this terminal row stays mounted (its task.id
+      // is unchanged), so leaving retrying=true would pin a permanent spinner.
+      setRetrying(false);
     }
   };
 
@@ -562,6 +594,30 @@ function TaskRow({
             </TooltipTrigger>
             <TooltipContent>
               {cancelling ? t(($) => $.tab_body.activity.cancelling_tooltip) : t(($) => $.tab_body.activity.cancel_task_tooltip)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {showRetry && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  disabled={retrying}
+                  aria-label={t(($) => $.tab_body.activity.retry_task_aria)}
+                />
+              }
+              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {retrying ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3.5 w-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>
+              {retrying ? t(($) => $.tab_body.activity.retrying_tooltip) : t(($) => $.tab_body.activity.retry_task_tooltip)}
             </TooltipContent>
           </Tooltip>
         )}

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/groupplacement"
 	"github.com/multica-ai/multica/server/internal/handler"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -39,18 +40,29 @@ var ErrInvalidRole = errors.New("invalid default_role")
 // has whitespace, or contains an '@'. Surfaced as 400.
 var ErrInvalidDomain = errors.New("invalid signup domain")
 
+// ErrInvalidDefaultGroup mirrors groupplacement.ErrInvalidDefaultGroup for handlers.
+var ErrInvalidDefaultGroup = groupplacement.ErrInvalidDefaultGroup
+
 // Get returns the saved settings for a workspace, or the empty default when
 // no row exists. The "empty default" path means the UI can render a clean
 // form on first visit without a separate create step.
 func (s *Service) Get(ctx context.Context, workspaceID pgtype.UUID) (AuthSettings, error) {
 	row, err := s.cerebro.GetCerebroWorkspaceAuthSettings(ctx, workspaceID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return defaultAuthSettings(uuidString(workspaceID)), nil
-		}
+	var out AuthSettings
+	switch {
+	case err == nil:
+		out = toAuthSettings(row)
+	case errors.Is(err, pgx.ErrNoRows):
+		out = defaultAuthSettings(uuidString(workspaceID))
+	default:
 		return AuthSettings{}, err
 	}
-	return toAuthSettings(row), nil
+	defaultGroupID, err := groupplacement.LoadDefaultGroupID(ctx, s.cerebro, workspaceID)
+	if err != nil {
+		return AuthSettings{}, err
+	}
+	out.DefaultGroupID = defaultGroupID
+	return out, nil
 }
 
 // Update upserts the workspace's settings. Caller authorization (owner/admin
@@ -73,22 +85,37 @@ func (s *Service) Update(
 		return AuthSettings{}, ErrInvalidRole
 	}
 	row, err := s.cerebro.UpsertCerebroWorkspaceAuthSettings(ctx, cerebrodb.UpsertCerebroWorkspaceAuthSettingsParams{
-		WorkspaceID:         workspaceID,
-		GoogleSignupDomains: domains,
-		DefaultRole:         role,
-		UpdatedByUserID:     actorID,
+		WorkspaceID:                workspaceID,
+		GoogleSignupDomains:        domains,
+		DefaultRole:                role,
+		GoogleWorkspaceSyncEnabled: req.GoogleWorkspaceSyncEnabled,
+		UpdatedByUserID:            actorID,
 	})
 	if err != nil {
 		return AuthSettings{}, err
 	}
-	return toAuthSettings(row), nil
+	if req.DefaultGroupID != nil {
+		if err := groupplacement.SetWorkspaceDefaultGroup(ctx, s.cerebro, workspaceID, *req.DefaultGroupID); err != nil {
+			return AuthSettings{}, err
+		}
+	}
+	out := toAuthSettings(row)
+	defaultGroupID, err := groupplacement.LoadDefaultGroupID(ctx, s.cerebro, workspaceID)
+	if err != nil {
+		return AuthSettings{}, err
+	}
+	out.DefaultGroupID = defaultGroupID
+	return out, nil
 }
 
-// ProvisionMembershipForNewUser is the upstream-seam method invoked from
-// findOrCreateUser. It looks up every workspace whose google_signup_domains
-// includes the user's email domain and creates a member row in each with the
-// per-workspace default role. Idempotent: an existing member row (race,
-// retried login) does not error.
+// ProvisionMembershipForNewUser is the upstream-seam method invoked from the
+// login path on EVERY successful login (not only first signup) so it doubles
+// as a self-heal: a user who logged in before their workspace was configured
+// gets reconciled on their next login. It looks up every workspace whose
+// google_signup_domains includes the user's email domain, ensures a member row
+// (with the per-workspace default role) AND places the user in that
+// workspace's configured default group. Idempotent throughout: an existing
+// member row or group membership (returning login) does not error.
 //
 // Best-effort: a per-workspace insert failure is logged via the error return
 // for the FIRST error encountered but the loop still tries every other
@@ -122,22 +149,42 @@ func (s *Service) ProvisionMembershipForNewUser(
 			// safest role rather than skipping the workspace.
 			role = "member"
 		}
+		// Ensure workspace membership. A unique-constraint violation means the
+		// user is already a member (a returning login re-running this path) —
+		// treat that as success so we still reconcile group placement below.
 		if _, err := s.upstream.CreateMember(ctx, db.CreateMemberParams{
 			WorkspaceID: m.WorkspaceID,
 			UserID:      user.ID,
 			Role:        role,
-		}); err != nil {
-			if isUniqueViolation(err) {
-				// Already a member — treat as success and record the workspace.
-				out.WorkspaceIDs = append(out.WorkspaceIDs, m.WorkspaceID)
-				continue
-			}
+		}); err != nil && !isUniqueViolation(err) {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("create member in workspace %s: %w", uuidString(m.WorkspaceID), err)
 			}
 			continue
 		}
 		out.WorkspaceIDs = append(out.WorkspaceIDs, m.WorkspaceID)
+
+		if err := groupplacement.PlaceUserInDefaultGroup(ctx, s.cerebro, m.WorkspaceID, user.ID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("place user in default group for workspace %s: %w", uuidString(m.WorkspaceID), err)
+			}
+			continue
+		}
+		if groupID, err := s.cerebro.GetCerebroDefaultGroupID(ctx, m.WorkspaceID); err == nil {
+			out.GroupIDs = append(out.GroupIDs, groupID)
+		}
+	}
+
+	// If the user was placed in at least one workspace, mark them onboarded so
+	// the post-login router sends them straight into the workspace instead of
+	// the first-run onboarding wall. This mirrors the invitation-accept path
+	// (handler/invitation.go), which holds the member<->onboarded_at invariant
+	// the desktop workspace layout depends on. Idempotent (MarkUserOnboarded
+	// COALESCEs onboarded_at, so a returning user keeps their original time).
+	if len(out.WorkspaceIDs) > 0 {
+		if _, err := s.upstream.MarkUserOnboarded(ctx, user.ID); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("mark user onboarded %s: %w", uuidString(user.ID), err)
+		}
 	}
 	return out, firstErr
 }

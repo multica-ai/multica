@@ -12,6 +12,14 @@ import type {
 // upstream status downgrades gracefully, and every object .passthrough()s
 // unknown fields rather than stripping them.
 
+const statusTriggersSchema = z
+  .object({
+    assign_to_id: z.string().optional(),
+    assign_to_type: z.enum(["member", "agent"]).optional(),
+    fire_agent_id: z.string().optional(),
+  })
+  .passthrough();
+
 const statusEntrySchema = z
   .object({
     key: z.string(),
@@ -19,6 +27,8 @@ const statusEntrySchema = z
     color: z.string().default(""),
     base_status: z.string(),
     position: z.number().default(0),
+    description: z.string().optional(),
+    triggers: statusTriggersSchema.optional(),
   })
   .passthrough();
 
@@ -30,6 +40,7 @@ export const statusModelSchema = z
     description: z.string().optional(),
     statuses: z.array(statusEntrySchema).default([]),
     project_count: z.number().default(0),
+    workspace_default: z.boolean().default(false),
     created_by_id: z.string(),
     created_by_type: z.string(),
     created_at: z.string(),
@@ -69,6 +80,7 @@ export const EMPTY_STATUS_MODEL: CerebroStatusModel = {
   name: "",
   statuses: [],
   project_count: 0,
+  workspace_default: false,
   created_by_id: "",
   created_by_type: "",
   created_at: "",
@@ -81,3 +93,20 @@ export const EMPTY_PROJECT_ASSIGNMENT: ProjectStatusAssignment = {
   created_at: "",
   updated_at: "",
 };
+
+// v2b: per-issue custom status pin schema (FIR-1550).
+export const issueCustomStatusSchema = z
+  .object({
+    issue_id: z.string(),
+    workspace_id: z.string(),
+    status_model_id: z.string(),
+    custom_status_key: z.string(),
+    base_status: z.string(),
+    set_by_id: z.string().default(""),
+    set_by_type: z.enum(["member", "agent", "system"]).default("system"),
+    label: z.string().optional(),
+    description: z.string().optional(),
+    created_at: z.string(),
+    updated_at: z.string(),
+  })
+  .passthrough();

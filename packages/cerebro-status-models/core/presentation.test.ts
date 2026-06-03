@@ -9,6 +9,7 @@ function model(statuses: CerebroStatusModel["statuses"]): CerebroStatusModel {
     name: "Plan-først",
     statuses,
     project_count: 0,
+    workspace_default: false,
     created_by_id: "",
     created_by_type: "",
     created_at: "",

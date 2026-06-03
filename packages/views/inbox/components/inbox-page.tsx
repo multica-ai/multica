@@ -48,6 +48,8 @@ import {
   sortInboxEntriesPinned,
   pinnedBucketizer, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — freeze open row's group
   type PinnedGroup, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — frozen-group ref type
+  useInboxPinnedMatcher, // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — "Pinned" view predicate
+  useInboxMessageRefresh, // CEREBRO-PATCH(inbox-message-refresh): FIR-2684 — always refetch opened message
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -115,6 +117,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
+// CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — workspace logo in the inbox (my-issues) breadcrumb.
+import { WorkspaceBreadcrumbLogo } from "../../workspace/workspace-avatar";
 import { ChannelListItem, InboxListItem, useTimeAgo } from "./inbox-list-item";
 import { AgentRunPip, taskStatusToRunState } from "../../common/agent-run-pip"; // CEREBRO-PATCH(inbox-run-state-pip): active vs queued indicator (JEH-1332)
 import { useTypeLabels } from "./inbox-detail-label";
@@ -141,7 +145,8 @@ function isGroupByMode(s: string | null): s is GroupByMode {
 
 export function InboxPage() {
   const { t } = useT("inbox");
-  const { searchParams, replace } = useNavigation();
+  // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 pull `push` to deep-link skill-CR items to the skill detail.
+  const { searchParams, replace, replaceSilent, push } = useNavigation(); // CEREBRO-PATCH(inbox-silent-select): FIR-2684 — silent URL update on select
   // ?chat=<id> selects a chat session (preferred). ?issue=<id> selects a
   // notification or issue. Both are also accepted as legacy aliases for
   // each other so old bookmarks of `?issue=<chat-id>` keep landing on the
@@ -334,18 +339,27 @@ export function InboxPage() {
   // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options when disabled,
   // and snap any persisted "channels"/"dms" view back to "all" when the user toggles off.
   const channelsEnabled = useFeatureFlag("cerebro_channels");
+  // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — gate the "Pinned" view option.
+  const pinnedFilterEnabled = useFeatureFlag("cerebro_inbox_pinned_filter");
   const inboxViewOptions = useMemo(
     () =>
-      channelsEnabled
-        ? INBOX_VIEW_OPTIONS
-        : INBOX_VIEW_OPTIONS.filter((o) => o.value !== "channels" && o.value !== "dms"),
-    [channelsEnabled],
+      INBOX_VIEW_OPTIONS.filter(
+        (o) =>
+          (channelsEnabled || (o.value !== "channels" && o.value !== "dms")) &&
+          // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — hide "Pinned" when off.
+          (pinnedFilterEnabled || o.value !== "pinned"),
+      ),
+    [channelsEnabled, pinnedFilterEnabled],
   );
   useEffect(() => {
     if (!channelsEnabled && (view === "channels" || view === "dms")) {
       setView("all");
     }
-  }, [channelsEnabled, view, setView]);
+    // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — snap persisted "pinned" back when off.
+    if (!pinnedFilterEnabled && view === "pinned") setView("all");
+  }, [channelsEnabled, pinnedFilterEnabled, view, setView]);
+  // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — predicate for the "Pinned" view.
+  const matchesPinnedView = useInboxPinnedMatcher(wsId, userId);
 
   const selectedChatSession =
     chatSessions.find((s) => s.id === selectedKey) ??
@@ -355,6 +369,8 @@ export function InboxPage() {
     ? null
     : items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
   const qc = useQueryClient();
+  // CEREBRO-PATCH(inbox-message-refresh): FIR-2684 — staleTime is Infinity, so re-opening a cached issue won't refetch; force-refresh the opened message so the latest comment is always present (without a full-page reload).
+  useInboxMessageRefresh(wsId, selected?.issue_id ?? null);
 
   const pendingChatIdRef = useRef<string | null>(null);
   // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — sort time of the open row, frozen at open
@@ -389,8 +405,9 @@ export function InboxPage() {
       : kind === "chat"
         ? `${inboxPath}?chat=${key}`
         : `${inboxPath}?issue=${key}`;
-    replace(url);
-  }, [replace, wsPaths]);
+    // CEREBRO-PATCH(inbox-silent-select): FIR-2684 — selection is client state; sync the URL silently (no RSC route nav) so opening an item doesn't reload the page. Falls back to `replace` (desktop).
+    (replaceSilent ?? replace)(url);
+  }, [replace, replaceSilent, wsPaths]);
 
   // CEREBRO-PATCH(inbox-page-archive-chat): FIR-1958 — soft-archive via
   // updateChatSession(status: "archived") instead of deleteChatSession so the
@@ -477,6 +494,20 @@ export function InboxPage() {
   }, [selectedId, selectedRead, markReadMutate, t]);
 
   const handleSelect = (item: InboxItem) => {
+    // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 — skill change-request
+    // items have no issue_id; deep-link to the skill detail with the proposal
+    // focused (?cr=) so "click the inbox message → see the proposal in the UI".
+    if (
+      (item.type === "skill_change_request_created" ||
+        item.type === "skill_change_request_reviewed") &&
+      item.details?.skill_id
+    ) {
+      const cr = item.details.change_request_id;
+      push(
+        `${wsPaths.skillDetail(item.details.skill_id)}${cr ? `?cr=${cr}` : ""}`,
+      );
+      return;
+    }
     setSelectedKey("issue", item.issue_id ?? item.id);
   };
 
@@ -624,6 +655,7 @@ export function InboxPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
         )}
+        <WorkspaceBreadcrumbLogo fallback={null} />
         <h1 className="truncate text-sm font-semibold">{headerTitle}</h1>
         {showViewSwitch && (
           <DropdownMenu>
@@ -823,8 +855,12 @@ export function InboxPage() {
   }, [chatSessions, items, channels, channelMap, selectedKey]); // CEREBRO-PATCH(inbox-pin-selected): re-pin on selection change
 
   const filteredEntries = useMemo<MergedEntry[]>(
-    () => mergedEntries.filter((entry) => matchesView(entry, view)),
-    [mergedEntries, view],
+    () =>
+      // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — "Pinned" needs pin/parent context.
+      view === "pinned"
+        ? mergedEntries.filter(matchesPinnedView)
+        : mergedEntries.filter((entry) => matchesView(entry, view)),
+    [mergedEntries, view, matchesPinnedView],
   );
 
   const renderEntry = (entry: MergedEntry) => {
@@ -1264,6 +1300,7 @@ export function InboxPage() {
       <IssueDetail
         key={selected.issue_id}
         issueId={selected.issue_id}
+        seedFromIssueList={false} // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684 — opening a message must not cold-load the board issue-list
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
         highlightCommentId={selected.details?.comment_id ?? undefined}
@@ -1545,5 +1582,8 @@ function matchesView(
     case "muted":
       // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — only notifs have muted_until.
       return entry.kind === "notif" && isMuted(entry.item.muted_until);
+    // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — handled in filteredEntries via the pin matcher.
+    case "pinned":
+      return false;
   }
 }

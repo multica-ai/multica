@@ -216,8 +216,8 @@ export function SettingsPage({
     }
     // CEREBRO-PATCH(settings-page-accounts-mobile): cerebro Konti tab in workspace group (JEH-999)
     workspaceItems.push({ value: ACCOUNTS_TAB_VALUE, label: "Konti", icon: KeyRound });
-    // CEREBRO-PATCH(settings-page-status-models): FIR-1550 mobile nav entry
-    if (statusModelsEnabled) workspaceItems.push({ value: STATUS_MODELS_TAB_VALUE, label: "Statusmodeller", icon: Workflow });
+    // CEREBRO-PATCH(settings-page-status-models): FIR-1550 mobile nav entry — English label
+    if (statusModelsEnabled) workspaceItems.push({ value: STATUS_MODELS_TAB_VALUE, label: "Status models", icon: Workflow });
     // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 mobile nav entry
     if (googleIdentityEnabled) workspaceItems.push({ value: AUTH_PERMISSIONS_TAB_VALUE, label: "Auth & Permissions", icon: KeyRound });
     const groups: CerebroMobileTabNavGroup[] = [
@@ -315,11 +315,11 @@ export function SettingsPage({
             <KeyRound className="h-4 w-4" />
             Konti
           </TabsTrigger>
-          {/* CEREBRO-PATCH(settings-page-status-models): FIR-1550 status models trigger */}
+          {/* CEREBRO-PATCH(settings-page-status-models): FIR-1550 status models trigger — English label */}
           {statusModelsEnabled && (
             <TabsTrigger value={STATUS_MODELS_TAB_VALUE}>
               <Workflow className="h-4 w-4" />
-              Statusmodeller
+              Status models
             </TabsTrigger>
           )}
           {/* CEREBRO-PATCH(settings-page-google-identity): FIR-2523 Auth & Permissions trigger */}

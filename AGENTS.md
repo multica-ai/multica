@@ -45,3 +45,11 @@ make check            # Full verification pipeline
 ```
 
 See CLAUDE.md for the complete command reference.
+
+### Agent documentation (`docs/agents/`)
+
+Authoritative agent-facing reference docs. In particular, read
+**`docs/agents/permission-system.md`** before touching anything that grants,
+denies, gates, or approves an agent action (tool access, credentials, repo
+checkout, web fetch, sandbox, mentions, group/autopilot scope, tool-policy
+chain). It maps what is enforced live today vs. what is off by default.

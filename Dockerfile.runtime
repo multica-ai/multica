@@ -1,0 +1,65 @@
+# --- Cloud runtime image ---
+# A headless Multica daemon ("runtime") that runs in a container instead of on a
+# developer Mac. It connects OUTBOUND to a Multica backend, polls for tasks, and
+# executes them with the Claude Code CLI. No inbound ports — the worker is
+# private with only outgoing traffic, so it needs no DNS, domain, or tunnel.
+#
+# See CLOUD_RUNTIME.md for the env vars, volumes, and deploy steps (Sliplane).
+
+# --- Build stage: compile the cerebro multica binary from source ---
+# We build from our fork (not the upstream GitHub release) so the daemon ships
+# with the cerebro patches.
+FROM golang:1.26-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /src
+# server/go.mod has `replace` directives pointing at ../packages/cerebro-persona-sdk
+# and ../packages/cerebro-pdf-text, so those module trees must be present before
+# `go mod download` runs.
+COPY server/go.mod server/go.sum ./server/
+COPY packages/cerebro-persona-sdk/ ./packages/cerebro-persona-sdk/
+COPY packages/cerebro-pdf-text/ ./packages/cerebro-pdf-text/
+RUN cd server && go mod download
+COPY server/ ./server/
+
+# The "Create with agent" flow gates on the CLI version the daemon reports at
+# registration (server/pkg/agent/version.go): it must parse as semver >= 0.2.20,
+# or match the git-describe dev shape (vX.Y.Z-N-gSHA). A binary built with
+# VERSION=dev reports "dev", which reads as "no version reported" and disables
+# Create with agent. So the default below is a real release baseline, never
+# "dev". CI / the runtime-deploy skill SHOULD override it with the exact source
+# version: --build-arg VERSION=$(git describe --tags --match 'v*' --always).
+ARG VERSION=v1.0.1
+ARG COMMIT=unknown
+RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
+
+# --- Runtime stage: Node base for the Claude Code CLI + git for repo checkouts ---
+FROM node:22-bookworm-slim
+
+# git: the daemon checks out repos into per-task worktrees.
+# ripgrep: Claude Code's search backend. curl/jq/ca-certificates: setup-token
+# exchange + TLS. tini: clean PID 1 signal handling for the long-running daemon.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git ripgrep curl jq ca-certificates tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI — the agent backend the daemon shells out to (`claude`).
+RUN npm install -g @anthropic-ai/claude-code && claude --version
+
+COPY --from=builder /src/server/bin/multica /usr/local/bin/multica
+COPY docker/runtime-entrypoint.sh /usr/local/bin/runtime-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/runtime-entrypoint.sh \
+    && chmod +x /usr/local/bin/runtime-entrypoint.sh
+
+# Run as a non-root user (container-hardening baseline, FIR-2105).
+RUN useradd --create-home --shell /bin/bash multica
+USER multica
+WORKDIR /home/multica
+
+ENV HOME=/home/multica \
+    MULTICA_WORKSPACES_ROOT=/home/multica/workspaces \
+    MULTICA_CLAUDE_PATH=/usr/local/bin/claude
+
+# No EXPOSE — the runtime makes only outbound connections.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/runtime-entrypoint.sh"]

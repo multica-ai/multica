@@ -2,11 +2,17 @@ package inbox
 
 // FIR-2385: the owner side of the private-agent run-request flow. The tagging
 // member only creates the request (see internal/cerebro/privateagentrun); the
-// agent owner accepts it here, which runs the agent on the comment that was
-// tagged — the exact enqueue the tag would otherwise have produced.
+// agent owner accepts it here.
+//
+// FIR-2409: approving no longer starts the agent directly. Instead it posts a
+// visible approval comment on the issue (authored by the owner, mentioning the
+// agent) and triggers the run with THAT comment as the trigger — so the
+// approval is recorded in the thread and the run goes through the same task
+// engine + pending-dedup as an ordinary tag.
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -102,9 +108,43 @@ func (h *Handler) RunPrivateAgentRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if _, err := h.Tasks.EnqueueTaskForMention(r.Context(), issue, agentID, commentID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start agent")
+	// FIR-2409: record the approval as a visible comment in the thread (a reply
+	// to the originally tagged comment), authored by the approving owner and
+	// mentioning the agent. This is what the run is triggered from, so the
+	// approval lives in the issue history instead of starting the agent silently.
+	ownerUUID, perr := util.ParseUUID(userID)
+	if perr != nil {
+		writeError(w, http.StatusInternalServerError, "invalid owner id")
 		return
+	}
+	approval, err := h.Upstream.CreateComment(r.Context(), db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: wsUUID,
+		AuthorType:  "member",
+		AuthorID:    ownerUUID,
+		Content: fmt.Sprintf(
+			"✅ Kør-anmodning godkendt — [@%s](mention://agent/%s) sættes i gang.",
+			agent.Name, util.UUIDToString(agentID),
+		),
+		Type:     "comment",
+		ParentID: commentID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to post approval comment")
+		return
+	}
+
+	// Trigger via the same task engine a tag uses, off the approval comment, and
+	// honour the same pending-dedup so a double approval can't double-run.
+	pending, perr := h.Upstream.HasPendingTaskForIssueAndAgent(r.Context(), db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issue.ID,
+		AgentID: agentID,
+	})
+	if perr == nil && !pending {
+		if _, err := h.Tasks.EnqueueTaskForMention(r.Context(), issue, agentID, approval.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start agent")
+			return
+		}
 	}
 
 	// The request is fulfilled — take it out of the active inbox.

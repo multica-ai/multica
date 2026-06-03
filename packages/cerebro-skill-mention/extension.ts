@@ -56,6 +56,11 @@ export function createSkillSuggestion(
   let activeCommand:
     | ((item: SkillMentionItem) => void)
     | null = null;
+  // Which side of the caret the popup ended up on, per floating-ui's resolved
+  // placement. The list aligns toward the caret (input) so it stays glued to
+  // where you type: bottom-aligned when the popup sits above the input (the
+  // mobile chat composer case), top-aligned when it drops below (FIR-2637).
+  let side: "top" | "bottom" = "bottom";
 
   function filterItems(
     skills: SkillSummary[] | undefined,
@@ -82,6 +87,7 @@ export function createSkillSuggestion(
     renderer?.updateProps({
       items: currentItems,
       selectedIndex,
+      side,
       onHover: (index: number) => {
         selectedIndex = index;
         rerender();
@@ -137,6 +143,7 @@ export function createSkillSuggestion(
             props: {
               items: currentItems,
               selectedIndex,
+              side,
               onHover: (index: number) => {
                 selectedIndex = index;
                 rerender();
@@ -219,9 +226,14 @@ export function createSkillSuggestion(
           placement: "bottom-start",
           strategy: "fixed",
           middleware: [offset(4), flip(), shift({ padding: 8 })],
-        }).then(({ x, y }) => {
+        }).then(({ x, y, placement }) => {
           el.style.left = `${x}px`;
           el.style.top = `${y}px`;
+          const resolvedSide = placement.startsWith("top") ? "top" : "bottom";
+          if (resolvedSide !== side) {
+            side = resolvedSide;
+            rerender();
+          }
         });
       }
 

@@ -5,12 +5,14 @@
   "_comment_1326": "CEREBRO-PATCH(search-page-1326): JEH-1326 — open_page key for full search page action",
   "open_page": "Open page",
   "_comment_chat_search": "CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — chat_sessions group heading for Cmd+K.",
+  "_comment_typeahead_comments": "CEREBRO-PATCH(typeahead-comments): FIR-2605 — comments group heading for Cmd+K.",
   "groups": {
     "pages": "페이지",
     "commands": "명령어",
     "members": "멤버",
     "projects": "프로젝트",
     "issues": "이슈",
+    "comments": "댓글",
     "chat_sessions": "Chat Sessions",
     "recent": "최근 항목"
   },

@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -239,6 +241,29 @@ func normalizeAnthropicSchemaNode(node any) any {
 	}
 }
 
+// GetGrantConfig returns the config_json bytes stored on this agent's
+// agent_tool_grant row for the named tool, or (nil, nil) when no row exists,
+// the grant is disabled, the registry has no pool (test contexts), or the
+// agentID is invalid. The bytes are the raw stored JSON — the caller decides
+// how to parse them. Returns (nil, err) only on a real DB failure.
+func (r *Registry) GetGrantConfig(ctx context.Context, agentID pgtype.UUID, toolName string) ([]byte, error) {
+	if r == nil || r.db == nil || !agentID.Valid {
+		return nil, nil
+	}
+	var config []byte
+	err := r.db.QueryRow(ctx,
+		`SELECT config_json FROM agent_tool_grant WHERE agent_id = $1 AND tool_name = $2 AND enabled = true`,
+		agentID, toolName,
+	).Scan(&config)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return config, nil
+}
+
 // GrantAgentTool upserts an agent_tool_grant row. Pass nil configJSON for no
 // configuration. If the grant already exists the enabled flag and config are
 // updated.
@@ -270,7 +295,7 @@ const (
 
 var legacyGatewayToolMeta = []ToolMeta{
 	{Name: "web_fetch", Description: "Fetch the text content of an allowlisted URL.", Status: ToolStatusImplemented},
-	{Name: "firtal_bq_query", Description: "Run a BigQuery SQL query via Firtal Data Registry.", Status: ToolStatusImplemented},
+	{Name: "firtal_registry", Description: "Query the Firtal Data Registry: discover data sources, fetch schema, and execute structured queries.", Status: ToolStatusImplemented},
 	{Name: "gogcli_sheets_write", Description: "Write data to a Google Sheets spreadsheet range.", Status: ToolStatusImplemented},
 }
 
@@ -331,6 +356,14 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "search_issues", Description: "Search issues by text query.", Status: ToolStatusExcluded},
 	{Name: "set_artifact_folder", Description: "Set an artifact's folder.", Status: ToolStatusExcluded},
 	{Name: "set_group_capability", Description: "Grant a capability to a group.", Status: ToolStatusExcluded},
+	{Name: "skill_fork", Description: "Fork a skill into a new owned copy.", Status: ToolStatusExcluded},
+	{Name: "skill_get", Description: "Fetch a skill's content, files, version, owner, and approvers.", Status: ToolStatusExcluded},
+	{Name: "skill_list", Description: "List skills in the current workspace.", Status: ToolStatusExcluded},
+	{Name: "skill_list_change_requests", Description: "List skill change requests (proposals).", Status: ToolStatusExcluded},
+	{Name: "skill_list_forks", Description: "List the forks of a skill.", Status: ToolStatusExcluded},
+	{Name: "skill_list_versions", Description: "List a skill's version history.", Status: ToolStatusExcluded},
+	{Name: "skill_propose_change", Description: "Propose a versioned change request to a skill.", Status: ToolStatusExcluded},
+	{Name: "skill_review_change_request", Description: "Approve or reject a skill change request.", Status: ToolStatusExcluded},
 	{Name: "update_artifact", Description: "Update artifact metadata or content.", Status: ToolStatusExcluded},
 	{Name: "update_artifact_folder", Description: "Update an artifact folder.", Status: ToolStatusExcluded},
 	{Name: "update_grant", Description: "Update an existing Persona grant.", Status: ToolStatusExcluded},
@@ -352,6 +385,7 @@ func AllBuiltinToolMeta() []ToolMeta {
 	out := make([]ToolMeta, 0, len(legacyGatewayToolMeta)+len(multicaMCPToolMatrix))
 	out = append(out, legacyGatewayToolMeta...)
 	out = append(out, multicaMCPToolMatrix...)
+	out = append(out, customerServiceMCPToolMeta()...)
 	return out
 }
 

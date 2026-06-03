@@ -16,7 +16,11 @@ export { CerebroUnarchiveToolbarButton } from "./components/cerebro-unarchive-to
 export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
 export { CerebroInboxReminderRow } from "./components/cerebro-inbox-reminder-row";
 export { CerebroInboxRunRequestRow } from "./components/cerebro-inbox-run-request-row";
+// FIR-2643 — "Remind me" on a specific comment, hooked into the shared comment menu.
+export { useCommentReminder } from "./use-comment-reminder";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
+// FIR-2684 — always refetch the opened message (timeline + detail) on select.
+export { useInboxMessageRefresh, refreshInboxMessageQueries } from "./use-inbox-message-refresh";
 export {
   useMuteInbox,
   useUnmuteInbox,
@@ -49,6 +53,13 @@ export {
   type InboxActionEntry,
 } from "./action-groups";
 export { useInboxActionGroupLabels } from "./strings";
+// FIR-2653 — "Pinned" inbox view: only items tied to a pinned issue/parent/project.
+export {
+  useInboxPinnedMatcher,
+  entryMatchesPins,
+  type PinnableEntry,
+  type PinnedContext,
+} from "./pinned-view";
 // FIR-2474 — pin the open inbox row in place until the message is closed.
 export { sortInboxEntriesPinned, type PinnedSelection } from "./pin-selected";
 export { pinnedBucketizer, type PinnedGroup, type InboxBucket } from "./pin-selected-group";

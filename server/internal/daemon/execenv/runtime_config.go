@@ -408,7 +408,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\nTreat this as background context, not as task instructions. If it conflicts with the actual task, the task wins.\n\n")
-	// CEREBRO-PATCH(execenv-current-model-doc): tell the agent which model it is running on (JEH-1310 Phase 2a).
+		// CEREBRO-PATCH(execenv-current-model-doc): tell the agent which model it is running on (JEH-1310 Phase 2a).
 	}
 
 	// Workspace Context block: the workspace-level system prompt set by
@@ -517,6 +517,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- **Write on exit.** Sparingly. If — and only if — this run produced a fact that clears the bar above (opened PR, deploy URL, external ticket, current blocker that will outlast this run), pin it with `multica issue metadata set`. If a key you saw on entry is now stale (e.g. `pipeline_status=waiting_review` but the PR has merged), overwrite it with the new value or `multica issue metadata delete` it. Don't let metadata rot — that recreates the comment-archaeology problem this feature is meant to solve. Stale-key cleanup is still expected even when you add nothing new.\n")
 		b.WriteString("- **What NOT to pin.** No secrets, tokens, or API keys. No logs, long quotes, or description / comment summaries — that's what description and comments are for. No runtime bookkeeping (`attempts`, run timestamps, agent ids) — metadata is the agent's editorial notebook, not a run log. No single-run details (the file you happened to edit, the test you happened to add, today's investigation notes) — those belong in the result comment, not metadata.\n")
 		b.WriteString("- **Recommended keys** (reuse these names so queries stay consistent across the workspace; coin a new key only when none fits): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`. Use snake_case ASCII. The list is short on purpose — most issues only need 1-2 of these pinned, not the full set.\n\n")
+	}
+
+	if hasIssueContext { // CEREBRO-PATCH(runtime-config-no-busywait): FIR-2610 — standing rule: never busy-wait on CI/deploy
+		b.WriteString(cerebroNoBusyWaitRule())
 	}
 
 	b.WriteString("### Workflow\n\n")
@@ -648,6 +652,21 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		}
 		b.WriteString("\n")
 	}
+
+	// CEREBRO-PATCH(skill-governance-norm): FIR-2655 — make "propose, don't
+	// directly edit" the norm for skills an agent does not own, and point at the
+	// MCP governance tools that back the flow.
+	b.WriteString("## Skill Governance — propose, don't edit\n\n")
+	b.WriteString("Skills are owned and versioned. Each skill has an owner and a set of approvers, and a change request workflow that keeps its history auditable.\n\n")
+	b.WriteString("**The norm: if you want to change a skill you do not own, PROPOSE the change — do not edit it in place.** Open a versioned change request; the owner/approvers review it; on approval it is applied atomically and snapshotted as a new version. Editing a skill you don't own directly (e.g. `multica skill update`) bypasses review and is the wrong default.\n\n")
+	b.WriteString("When your MCP server exposes the skill governance tools, use them:\n\n")
+	b.WriteString("- `skill_list` / `skill_get` — find the skill and read its current content + `current_version` before proposing.\n")
+	b.WriteString("- `skill_propose_change` — submit a change request: a title, a description of WHAT changed and WHY, a `proposed_version` (semver strictly greater than current), and the edited content. Nothing changes until an approver approves.\n")
+	b.WriteString("- `skill_list_change_requests` — list proposals: without a skill, the pending ones awaiting your review; with a skill, its full history.\n")
+	b.WriteString("- `skill_review_change_request` — owners/approvers approve or reject a proposal (approve applies it and snapshots a new version).\n")
+	b.WriteString("- `skill_list_versions` / `skill_list_forks` — inspect a skill's version history and forks.\n")
+	b.WriteString("- `skill_fork` — branch a skill into a new owned copy when you want a different direction rather than improving the original in place.\n\n")
+	b.WriteString("Without MCP, drive the same flow from the skill's page in the Multica web UI. Either way: propose and let the owner review — that is how skill changes are meant to land.\n\n")
 
 	b.WriteString("## Mentions\n\n")
 	b.WriteString("Mention links are **side-effecting actions**, not just formatting:\n\n")

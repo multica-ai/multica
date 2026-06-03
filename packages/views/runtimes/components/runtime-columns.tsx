@@ -16,7 +16,10 @@ import {
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
 // CEREBRO-PATCH(runtime-list-account-column): swap upstream CLI column for the cerebro Account column (FIR-2308).
-import { RuntimeAccountCell, formatPauseReason } from "@multica/cerebro-runtime/views";
+import {
+  RuntimeAccountCell,
+  formatPauseReason,
+} from "@multica/cerebro-runtime/views";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,

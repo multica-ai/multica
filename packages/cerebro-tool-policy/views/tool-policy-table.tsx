@@ -292,9 +292,12 @@ export function ToolPolicyTable({
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="font-normal">
-                        {row.category || "Uncategorised"}
-                      </Badge>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="font-normal">
+                          {row.category || "Uncategorised"}
+                        </Badge>
+                        {row.managed_externally && <ManagedExternallyTag />}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <SideEffectTag effect={classifySideEffect(row)} />
@@ -344,6 +347,7 @@ export function ToolPolicyTable({
                   <Badge variant="outline" className="font-normal">
                     {row.category || "Uncategorised"}
                   </Badge>
+                  {row.managed_externally && <ManagedExternallyTag />}
                   <SideEffectTag effect={classifySideEffect(row)} />
                   <OriginTag row={row} editLayer={editLayer} />
                 </div>
@@ -586,6 +590,22 @@ function SideEffectTag({ effect }: { effect: SideEffect }) {
   return (
     <Badge variant="secondary" className="font-normal">
       {SIDE_EFFECT_LABEL[effect]}
+    </Badge>
+  );
+}
+
+// ManagedExternallyTag marks a platform action whose access is decided by
+// another mechanism (membership ACL, daemon token, webhook secret), so its
+// Allow/Ask/Deny choice here is advisory rather than the enforcement point
+// (FIR-2594). Shown so an admin sees the platform exposes the action.
+function ManagedExternallyTag() {
+  return (
+    <Badge
+      variant="outline"
+      className="border-dashed font-normal text-muted-foreground"
+      title="Access is governed outside the tool-policy gate (membership, daemon token, or webhook secret). Listed for visibility."
+    >
+      Managed externally
     </Badge>
   );
 }

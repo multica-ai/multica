@@ -125,6 +125,13 @@ const desktopAPI = {
   setUnreadBadge: (count: number) =>
     ipcRenderer.send("badge:set", Math.max(0, Math.floor(count))),
   /**
+   * FIR-2580: set the dock / window icon to the active workspace's logo.
+   * Pass a data URL (PNG/JPEG/WebP) to apply it, or null to restore the
+   * bundled default icon. Best-effort and platform-guarded in main.
+   */
+  setWorkspaceIcon: (iconDataUrl: string | null) =>
+    ipcRenderer.send("workspace-icon:set", iconDataUrl),
+  /**
    * Subscribe to "open this inbox row" requests sent by the main process
    * when the user clicks an OS notification banner. Returns an unsubscribe
    * function. The payload echoes the `slug`, `itemId`, and `issueKey` that

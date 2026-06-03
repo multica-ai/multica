@@ -30,13 +30,21 @@ export function useFeatureFlagsQuery() {
   const data = query.data;
   useEffect(() => {
     if (!data) return;
-    // Narrow the server response (string keys) down to the registry keys.
-    const filtered: Partial<Record<CerebroFlagKey, boolean>> = {};
-    for (const key of Object.keys(CEREBRO_FLAG_DEFAULTS) as CerebroFlagKey[]) {
-      const value = data.overrides[key];
-      if (typeof value === "boolean") filtered[key] = value;
-    }
-    hydrate(filtered);
+    // Narrow each server map (string keys) down to the registry keys.
+    const narrow = (src: Record<string, boolean> | undefined) => {
+      const out: Partial<Record<CerebroFlagKey, boolean>> = {};
+      if (!src) return out;
+      for (const key of Object.keys(CEREBRO_FLAG_DEFAULTS) as CerebroFlagKey[]) {
+        const value = src[key];
+        if (typeof value === "boolean") out[key] = value;
+      }
+      return out;
+    };
+    hydrate({
+      overrides: narrow(data.overrides),
+      workspaceOverrides: narrow(data.workspace_overrides),
+      locked: narrow(data.locked),
+    });
   }, [data, hydrate]);
 
   return query;
@@ -64,6 +72,35 @@ export function useSetFeatureFlagMutation() {
       const store = useCerebroFeatureFlagsStore.getState();
       store.setFlag(key, context?.previous);
     },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: featureFlagKeys.all(wsId) });
+    },
+  });
+}
+
+/**
+ * Owner/admin action: force a flag on/off for the whole workspace, optionally
+ * locked so members cannot override it. Pass `enabled: null` to clear the
+ * workspace override entirely (revert members to personal/default). Not
+ * optimistic — it re-fetches on settle so every consumer re-resolves.
+ */
+export function useSetWorkspaceFeatureFlagMutation() {
+  const wsId = useWorkspaceId();
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      key,
+      enabled,
+      locked,
+    }: {
+      key: CerebroFlagKey;
+      enabled: boolean | null;
+      locked: boolean;
+    }) =>
+      enabled === null
+        ? api.clearWorkspaceFeatureFlag(wsId, key)
+        : api.setWorkspaceFeatureFlag(wsId, key, enabled, locked),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: featureFlagKeys.all(wsId) });
     },

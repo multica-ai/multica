@@ -15,7 +15,8 @@ export type InboxView =
   | "issues"
   | "channels"
   | "dms"
-  | "muted"; // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — view-only filter for muted rows
+  | "muted" // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — view-only filter for muted rows
+  | "pinned"; // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — only items whose issue/parent/project is pinned
 
 interface InboxViewState {
   view: InboxView;
@@ -50,4 +51,5 @@ export const INBOX_VIEW_OPTIONS: { value: InboxView; label: string }[] = [
   { value: "channels", label: "Channels only" },
   { value: "dms", label: "DMs only" },
   { value: "muted", label: "Muted" }, // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — view muted rows + their muted_until
+  { value: "pinned", label: "Pinned" }, // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — items tied to a pinned issue/parent/project
 ];

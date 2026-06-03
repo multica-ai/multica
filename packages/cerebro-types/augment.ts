@@ -5,8 +5,54 @@
 
 import type {} from "@multica/core/types/agent";
 import type {} from "@multica/core/types/autopilot";
+import type {} from "@multica/core/types/workspace";
+import type {} from "@multica/core/types/issue";
 
-// JEH-848 runtime pause/unpause fields on the upstream RuntimeDevice
+// FIR-2580: per-workspace logo. Server adds the column via
+// 9055_cerebro_workspace_avatar and surfaces it on WorkspaceResponse
+// (ListWorkspaces projection + GetWorkspace/UpdateWorkspace). Nullable
+// end-to-end — older servers omit it and every consumer falls back to the
+// letter avatar / default favicon when it is null/empty.
+declare module "@multica/core/types/workspace" {
+  interface Workspace {
+    avatar_url?: string | null;
+  }
+}
+
+// FIR-1550 v2b: per-issue custom_status pin joined onto the upstream Issue
+// response. Server returns it via the cerebro-issue-custom-status enricher;
+// older servers omit the field. Frontend pickers read this to show which
+// specific custom status is currently selected (vs. the base status alone).
+declare module "@multica/core/types/issue" {
+  interface IssueCustomStatus {
+    status_model_id: string;
+    custom_status_key: string;
+    base_status: string;
+    label?: string;
+    description?: string;
+  }
+  interface Issue {
+    custom_status?: IssueCustomStatus | null;
+  }
+}
+
+// MUL-2553: on-behalf-of provenance joined onto the upstream Issue response.
+// When an agent creates an issue while acting for a human (origin_type=
+// 'agent_task'), the server resolves agent_task_queue.original_user_id and
+// returns the member here so the sidebar can show "På vegne af [member]" and
+// every agent-created issue traces back to a human. Older servers omit it.
+declare module "@multica/core/types/issue" {
+  interface IssueOnBehalfOf {
+    user_id: string;
+    name: string;
+    avatar_url?: string | null;
+  }
+  interface Issue {
+    origin_type?: string | null;
+    origin_id?: string | null;
+    on_behalf_of?: IssueOnBehalfOf | null;
+  }
+}
 // interface. Server adds the columns via 9016_cerebro_runtime_pause and
 // surfaces them on AgentRuntimeResponse via the runtime-pause-response
 // patch. All three fields are optional on the wire — older clients

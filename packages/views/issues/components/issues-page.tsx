@@ -27,6 +27,8 @@ import { BatchActionToolbar } from "./batch-action-toolbar";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
+// CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — workspace logo in the issues breadcrumb.
+import { WorkspaceBreadcrumbLogo } from "../../workspace/workspace-avatar";
 
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
 
@@ -60,6 +62,8 @@ export function IssuesPage({
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const subIssueDisplay = useIssueViewStore((s) => s.subIssueDisplay);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of member filter.
+  const onBehalfOfFilters = useIssueViewStore((s) => s.onBehalfOfFilters);
   const referenceFilter = useMemo(
     () => parseReferenceFilter(navigation.searchParams.get("reference")),
     [navigation.searchParams],
@@ -103,15 +107,18 @@ export function IssuesPage({
       include_no_project: includeNoProject,
       label_ids: labelFilters,
       reference: referenceFilter,
+      // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 board view on-behalf-of filter.
+      on_behalf_of_ids: onBehalfOfFilters,
     };
     if (scope === "members") filter.assignee_types = ["member"];
     if (scope === "agents") filter.assignee_types = ["agent", "squad"];
     return filter;
-  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, referenceFilter, scope, statusFilters]);
+  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, onBehalfOfFilters, priorityFilters, projectFilters, referenceFilter, scope, statusFilters]);
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, sort);
   const statusIssuesQuery = useQuery({
-    ...issueListOptions(wsId, { reference: referenceFilter }, sort),
+    // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 list view on-behalf-of filter.
+    ...issueListOptions(wsId, { reference: referenceFilter, on_behalf_of_ids: onBehalfOfFilters }, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -236,7 +243,7 @@ export function IssuesPage({
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeader className="gap-2">
-        <ListTodo className="h-4 w-4 text-muted-foreground" />
+        <WorkspaceBreadcrumbLogo fallback={<ListTodo className="h-4 w-4 text-muted-foreground" />} />
         <h1 className="text-sm font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
       </PageHeader>
 

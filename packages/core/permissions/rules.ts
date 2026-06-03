@@ -82,12 +82,19 @@ export function canEditSkill(skill: Skill, ctx: PermissionContext): Decision {
     return deny("not_authenticated", "Sign in to edit this skill.");
   }
   if (isAdminLike(ctx.role)) return ALLOW;
-  if (skill.created_by !== null && skill.created_by === ctx.userId) {
+  // CEREBRO-PATCH(skill-ownership-edit-rights): JEH-216/FIR-2629 — owner + approvers edit directly; creator only when no owner is set. Mirrors backend isSkillManager.
+  if (skill.owner_id !== null && skill.owner_id === ctx.userId) return ALLOW;
+  if (skill.approver_ids.includes(ctx.userId)) return ALLOW;
+  if (
+    skill.owner_id === null &&
+    skill.created_by !== null &&
+    skill.created_by === ctx.userId
+  ) {
     return ALLOW;
   }
   return deny(
     "not_resource_owner",
-    "Only the creator and workspace admins can edit this skill.",
+    "Only the owner, an approver, or a workspace admin can edit this skill — open a change request instead.",
   );
 }
 

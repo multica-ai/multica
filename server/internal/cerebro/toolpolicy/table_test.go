@@ -226,10 +226,10 @@ func TestTable_RuntimeViewShowsOnlyThatRuntimesTools(t *testing.T) {
 
 	runtimeA, runtimeB := uuidByte(20), uuidByte(21)
 	addCap(t, s, "bash", "Bash", "tools", "runtime_report")
-	addCap(t, s, "firtal_bq_query", "firtal_bq_query", "tools", "scan")
+	addCap(t, s, "firtal_registry", "firtal_registry", "tools", "scan")
 	// runtimeA reported Bash; runtimeB reported the bq query tool.
 	addCapSubject(t, s, "bash", "runtime", runtimeA, "reporter")
-	addCapSubject(t, s, "firtal_bq_query", "runtime", runtimeB, "reporter")
+	addCapSubject(t, s, "firtal_registry", "runtime", runtimeB, "reporter")
 
 	rowsA, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, RuntimeID: runtimeA})
 	if err != nil {
@@ -238,7 +238,7 @@ func TestTable_RuntimeViewShowsOnlyThatRuntimesTools(t *testing.T) {
 	if _, ok := findRow(rowsA, "bash"); !ok {
 		t.Fatal("runtimeA page missing its own tool bash")
 	}
-	if _, leaked := findRow(rowsA, "firtal_bq_query"); leaked {
+	if _, leaked := findRow(rowsA, "firtal_registry"); leaked {
 		t.Fatalf("runtimeB's tool leaked onto runtimeA page: %d rows", len(rowsA))
 	}
 	if len(rowsA) != 1 {

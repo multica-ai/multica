@@ -1,6 +1,8 @@
 export interface NavigationAdapter {
   push(path: string): void;
   replace(path: string): void;
+  /** CEREBRO-PATCH(nav-replace-silent): FIR-2684 — update URL without an RSC route nav (web: History API; desktop falls back to `replace`). For inbox URL-as-state so opening an item does not reload the page. */
+  replaceSilent?(path: string): void;
   back(): void;
   pathname: string;
   searchParams: URLSearchParams;

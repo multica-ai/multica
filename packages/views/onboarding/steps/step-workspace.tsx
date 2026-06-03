@@ -438,7 +438,8 @@ function ExistingWorkspaceCard({
           : "hover:border-foreground/20 hover:bg-accent/30",
       )}
     >
-      <WorkspaceAvatar name={workspace.name} size="lg" />
+      {/* CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — show the logo in the onboarding workspace picker. */}
+      <WorkspaceAvatar name={workspace.name} size="lg" avatarUrl={workspace.avatar_url} />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="truncate text-[14.5px] font-medium text-foreground">
           {workspace.name}

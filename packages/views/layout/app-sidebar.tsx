@@ -609,7 +609,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   render={
                     <SidebarMenuButton>
                       <span className="relative">
-                        <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+                        {/* CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — show workspace logo in the sidebar switcher trigger. */}
+                        <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" avatarUrl={workspace?.avatar_url} />
                         {myInvitations.length > 0 && (
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
@@ -655,7 +656,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <AppLink href={paths.workspace(ws.slug).issues()} />
                         }
                       >
-                        <WorkspaceAvatar name={ws.name} size="sm" />
+                        {/* CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — show each workspace's logo in the switcher list. */}
+                        <WorkspaceAvatar name={ws.name} size="sm" avatarUrl={ws.avatar_url} />
                         <span className="flex-1 truncate">{ws.name}</span>
                         {ws.id === workspace?.id && (
                           <Check className="h-3.5 w-3.5 text-primary" />

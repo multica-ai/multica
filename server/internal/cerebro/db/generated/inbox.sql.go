@@ -196,6 +196,7 @@ WHERE workspace_id = $1
   AND (($3::uuid IS NULL AND issue_id IS NULL) OR issue_id = $3)
   AND title = $4
   AND COALESCE(body, '') = COALESCE($5, '')
+  AND COALESCE(details->>'comment_id', '') = $6::text
   AND muted_until IS NOT NULL
   AND muted_until > NOW()
 ORDER BY created_at DESC
@@ -208,6 +209,7 @@ type FindPendingReminderParams struct {
 	Column3     pgtype.UUID `json:"column_3"`
 	Title       string      `json:"title"`
 	Body        pgtype.Text `json:"body"`
+	Column6     string      `json:"column_6"`
 }
 
 // Dedupe guard for user-created reminders. A matching future reminder is
@@ -219,6 +221,7 @@ func (q *Queries) FindPendingReminder(ctx context.Context, arg FindPendingRemind
 		arg.Column3,
 		arg.Title,
 		arg.Body,
+		arg.Column6,
 	)
 	var i InboxItem
 	err := row.Scan(

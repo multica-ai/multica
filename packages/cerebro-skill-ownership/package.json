@@ -1,0 +1,35 @@
+{
+  "name": "@multica/cerebro-skill-ownership",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./core": "./core/index.ts",
+    "./views": "./views/index.ts",
+    "./views/skill-ownership-panel": "./views/components/skill-ownership-panel.tsx",
+    "./views/fork-skill-button": "./views/components/fork-skill-button.tsx"
+  },
+  "dependencies": {
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "sonner": "^2.0.7"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

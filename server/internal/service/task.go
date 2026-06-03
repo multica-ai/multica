@@ -823,11 +823,13 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	// any number of new messages that arrive while the prior turn is running.
 	// Race-safety is enforced by a partial unique index on
 	// (chat_session_id) WHERE status = 'queued' (migration 057).
+	// CEREBRO-PATCH(chat-task-original-user-id): chat session creator is the human principal for tool-grant cascade (JEH-1710).
 	task, err := s.Queries.CreateOrGetQueuedChatTask(ctx, db.CreateOrGetQueuedChatTaskParams{
-		AgentID:       chatSession.AgentID,
-		RuntimeID:     agent.RuntimeID,
-		Priority:      2, // medium priority for chat
-		ChatSessionID: chatSession.ID,
+		AgentID:        chatSession.AgentID,
+		RuntimeID:      agent.RuntimeID,
+		Priority:       2, // medium priority for chat
+		ChatSessionID:  chatSession.ID,
+		OriginalUserID: chatSession.CreatorID,
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -1640,7 +1642,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// fallback is just noise stacked on top of the real answer.
 	if errMsg != "" && task.IssueID.Valid && retried == nil && !autoPaused && s.shouldPostTimeoutFailureComment(ctx, task) { // CEREBRO-PATCH(auto-pause-on-failure)
 		if failureReason == "timeout" {
-			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, task, errMsg)), "comment", task.TriggerCommentID)
+			// CEREBRO-PATCH(suppress-serverside-timeout-blocked): FIR-2609 — skip BLOCKED for an unstarted serverside dispatch-timeout; see isUnstartedServersideTimeout.
+			if !isUnstartedServersideTimeout(task, errMsg) {
+				s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, task, errMsg)), "comment", task.TriggerCommentID)
+			}
 		} else {
 			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
 		}
@@ -1998,7 +2003,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			if t.Error.Valid && strings.TrimSpace(t.Error.String) != "" {
 				errMsg = t.Error.String
 			}
-			s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, t, errMsg)), "comment", t.TriggerCommentID)
+			// CEREBRO-PATCH(suppress-serverside-timeout-blocked): FIR-2609 — skip BLOCKED for an unstarted serverside dispatch-timeout; see FailTask path.
+			if !isUnstartedServersideTimeout(t, errMsg) {
+				s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, t, errMsg)), "comment", t.TriggerCommentID)
+			}
 		}
 		if workspaceID == "" {
 			workspaceID = s.ResolveTaskWorkspaceID(ctx, t)
@@ -2071,6 +2079,19 @@ func (s *TaskService) shouldPostTimeoutFailureComment(ctx context.Context, task 
 		return false
 	}
 	return true
+}
+
+// CEREBRO-PATCH(suppress-serverside-timeout-blocked): FIR-2609 — the
+// server-side stale-task sweeper (FailStaleTasks) sets error="task timed out"
+// for two situations: a still-'dispatched' task that a paused/offline/busy
+// runtime never started, and a 'running' task that started but stalled. Only
+// the first is bookkeeping noise (the runtime was simply away — the agent
+// never ran), identified by a missing started_at. Suppress BLOCKED for that
+// case; a genuinely started-then-stalled run still surfaces BLOCKED (subject
+// to the FIR-2395 already-replied gate), as do agent-internal timeouts
+// ("<agent> timed out after <dur>").
+func isUnstartedServersideTimeout(task db.AgentTaskQueue, errMsg string) bool {
+	return strings.TrimSpace(errMsg) == "task timed out" && !task.StartedAt.Valid
 }
 
 func (s *TaskService) timeoutFailureCommentBody(ctx context.Context, task db.AgentTaskQueue, errMsg string) string {

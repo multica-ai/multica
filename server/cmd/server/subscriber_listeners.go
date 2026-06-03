@@ -9,6 +9,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -28,6 +29,11 @@ var autoSubscribeDefaults = map[string]bool{
 	"assignee":  true,
 	"mentioned": false,
 	"commenter": false,
+	// MUL-2553 — when an agent creates an issue on a human's behalf the human
+	// who started the chain (agent_task_queue.original_user_id) is auto-
+	// subscribed by default. Without this, agent-created issues only have
+	// creator_type='agent' and silently disappear from the human's inbox.
+	"triggered_agent": true,
 }
 
 // registerSubscriberListeners wires up event bus listeners that auto-subscribe
@@ -60,6 +66,19 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		if issue.Description != nil && *issue.Description != "" {
 			for _, m := range parseMentions(*issue.Description) {
 				maybeAddSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
+			}
+		}
+
+		// MUL-2553 — agent created the issue on a human's behalf. Resolve the
+		// triggering human via agent_task_queue.original_user_id (carried as
+		// triggering_task_id on the event payload) and auto-subscribe them so
+		// the issue lands in their inbox instead of vanishing under
+		// creator_type='agent'.
+		if issue.CreatorType == "agent" {
+			if taskIDStr, _ := payload["triggering_task_id"].(string); taskIDStr != "" {
+				if memberID := lookupTriggeringMember(queries, taskIDStr); memberID != "" && memberID != issue.CreatorID {
+					maybeAddSubscriber(bus, queries, e.WorkspaceID, issue.ID, "member", memberID, "triggered_agent")
+				}
 			}
 		}
 	})
@@ -210,6 +229,28 @@ func extractIssueFields(v any) (handler.IssueResponse, bool) {
 		return handler.IssueResponse{}, false
 	}
 	return issue, true
+}
+
+// CEREBRO-PATCH(subscriber-triggered-agent): MUL-2553 — helper for the
+// triggered_agent auto-subscribe path. Resolves the human at the root of an
+// agent's task delegation chain. Given an agent_task_queue.id, it returns the
+// task's original_user_id (the member who started the chain) — empty string
+// if the lookup fails or the task has no recorded original user. The lookup
+// is best-effort: a missing/invalid task degrades to "no triggered_agent
+// subscription added", never to a hard error that would break issue creation.
+func lookupTriggeringMember(queries *db.Queries, taskIDStr string) string {
+	taskUUID, err := util.ParseUUID(taskIDStr)
+	if err != nil {
+		return ""
+	}
+	task, err := queries.GetAgentTask(context.Background(), taskUUID)
+	if err != nil {
+		return ""
+	}
+	if !task.OriginalUserID.Valid {
+		return ""
+	}
+	return util.UUIDToString(task.OriginalUserID)
 }
 
 // addSubscriber adds a user as an issue subscriber and publishes a

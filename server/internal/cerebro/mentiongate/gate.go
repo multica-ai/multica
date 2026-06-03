@@ -10,9 +10,18 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/channels"
 	"github.com/multica-ai/multica/server/internal/cerebro/grouppermissions"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// triggerOtherAgentKey is the platform-capability key (platformcatalog) that
+// governs "may you start an agent you do not own". FIR-2409 routes the mention
+// gate through the tool-policy chain for this key, so an admin can configure
+// the rule per workspace / group / member / agent from Settings instead of it
+// living hardcoded in this gate. Must stay in sync with the catalog entry of
+// the same name.
+const triggerOtherAgentKey = "trigger_other_agent"
 
 // Service centralises the group-permission allowlist used by trigger paths
 // that live outside the grouppermissions package.
@@ -60,6 +69,47 @@ func (s *Service) canTriggerAgent(ctx context.Context, workspaceID, userID, agen
 	if s == nil || s.Permissions == nil {
 		return true, nil
 	}
+	// Today's hardcoded rule (admin master key + group allowlist + owner-self)
+	// is the baseline. It still runs first and remains the default answer.
+	baseline, err := s.baselineCanTrigger(ctx, workspaceID, userID, agentID, ownerID)
+	if err != nil {
+		return false, err
+	}
+	// Triggering your OWN agent is never the "trigger someone else's agent"
+	// capability, so the configurable rule does not apply to the owner.
+	ownsAgent := ownerID.Valid && ownerID.Bytes == userID.Bytes
+	if ownsAgent || s.Permissions.Cerebro == nil {
+		return baseline, nil
+	}
+	// FIR-2409: layer the configurable rule on top. Resolve the
+	// trigger_other_agent capability through the unified tool-policy chain
+	// (workspace > group > member > agent — auto-loads the viewer's groups from
+	// UserID). When no admin has set a rule anywhere, DecidedBy is empty and we
+	// keep today's behavior 1:1. An explicit Deny removes the master key (even
+	// for an owner/admin); an explicit Allow grants a member who would
+	// otherwise be blocked. Base = Allow so an unconfigured workspace is fully
+	// governed by the baseline above.
+	eff, err := toolpolicy.NewStoreFromQueries(s.Permissions.Cerebro).Resolve(ctx, toolpolicy.Query{
+		WorkspaceID: workspaceID,
+		ToolKey:     triggerOtherAgentKey,
+		UserID:      userID,
+		AgentID:     agentID,
+		Base:        toolpolicy.SettingAllow,
+	})
+	if err != nil {
+		return false, err
+	}
+	if eff.DecidedBy == "" {
+		return baseline, nil
+	}
+	return eff.Setting == toolpolicy.SettingAllow, nil
+}
+
+// baselineCanTrigger is the original hardcoded trigger rule: owners/admins hold
+// a master key, members are limited to agents a group grants them or that they
+// own. It is the default that the configurable trigger_other_agent policy
+// (canTriggerAgent) layers on top of.
+func (s *Service) baselineCanTrigger(ctx context.Context, workspaceID, userID, agentID, ownerID pgtype.UUID) (bool, error) {
 	member, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      userID,
 		WorkspaceID: workspaceID,

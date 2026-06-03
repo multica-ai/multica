@@ -114,6 +114,7 @@ export function applyChatDoneToCache(
       task_id: payload.task_id,
       created_at: payload.created_at,
       elapsed_ms: payload.elapsed_ms ?? null,
+      responded_at: null,
     };
     qc.setQueryData<ChatMessage[]>(
       chatKeys.messages(payload.chat_session_id),

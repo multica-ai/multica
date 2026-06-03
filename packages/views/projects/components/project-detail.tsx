@@ -91,6 +91,9 @@ import {
 import { RestrictedLock, ProjectAccessTab } from "@multica/cerebro-access/views";
 // CEREBRO-PATCH(project-detail-group-access): JEH-1009 group-access section in Access tab.
 import { ProjectGroupAccessSection } from "@multica/cerebro-groups/views";
+// CEREBRO-PATCH(project-detail-sprints): FIR-2666 project sprint tab + feature flag gate.
+import { SprintsTab } from "@multica/cerebro-sprints/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useT } from "../../i18n";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -336,6 +339,8 @@ function ProjectIssuesSurface({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of filter on project pages.
+  const onBehalfOfFilters = useViewStore((s) => s.onBehalfOfFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
 
@@ -356,8 +361,10 @@ function ProjectIssuesSurface({
       include_no_assignee: includeNoAssignee,
       creator_filters: creatorFilters,
       label_ids: labelFilters,
+      // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 project board on-behalf-of filter.
+      on_behalf_of_ids: onBehalfOfFilters,
     }),
-    [assigneeFilters, creatorFilters, filter, includeNoAssignee, labelFilters, priorityFilters, statusFilters],
+    [assigneeFilters, creatorFilters, filter, includeNoAssignee, labelFilters, onBehalfOfFilters, priorityFilters, statusFilters],
   );
   const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
     wsId,
@@ -367,7 +374,8 @@ function ProjectIssuesSurface({
     sort,
   );
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter, undefined, sort),
+    // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 project list on-behalf-of filter.
+    ...myIssueListOptions(wsId, scope, { ...filter, on_behalf_of_ids: onBehalfOfFilters }, undefined, sort),
     enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
@@ -447,8 +455,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
-  // CEREBRO-PATCH(project-detail-tabs): tab state for Issues/Documents/Access tab switcher
-  const [projectTab, setProjectTab] = useState<"issues" | "documents" | "access">("issues");
+  // CEREBRO-PATCH(project-detail-tabs): tab state for Issues/Documents/Access tab switcher; FIR-2666 adds "sprints" gated on cerebro_sprints.
+  const sprintsFlag = useFeatureFlag("cerebro_sprints");
+  const [projectTab, setProjectTab] = useState<
+    "issues" | "documents" | "access" | "sprints"
+  >("issues");
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -911,7 +922,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           {/* CEREBRO-PATCH(project-detail-tabs): wraps upstream's single issues view in Issues/Documents/Access tab system */}
           <Tabs
               value={projectTab}
-              onValueChange={(v) => setProjectTab(v as "issues" | "documents" | "access")}
+              onValueChange={(v) =>
+                setProjectTab(v as "issues" | "documents" | "access" | "sprints")
+              }
               className="flex flex-1 flex-col"
             >
               <TabsList className="mx-4 mt-2 w-fit">
@@ -921,6 +934,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   {project.access === "restricted" && <RestrictedLock className="mr-1.5" />}
                   Access
                 </TabsTrigger>
+                {/* CEREBRO-PATCH(project-detail-sprints): FIR-2666 sprints tab gated on flag. */}
+                {sprintsFlag && <TabsTrigger value="sprints">Sprints</TabsTrigger>}
               </TabsList>
               <TabsContent value="issues" className="flex flex-1 flex-col">
                 <ViewStoreProvider store={projectViewStore}>
@@ -939,6 +954,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 {/* CEREBRO-PATCH(project-detail-group-access): JEH-1009 group-access list under the Access tab. */}
                 <div className="px-6 pb-6"><ProjectGroupAccessSection projectId={project.id} /></div>
               </TabsContent>
+              {/* CEREBRO-PATCH(project-detail-sprints): FIR-2666 sprint tab content. */}
+              {sprintsFlag && (
+                <TabsContent value="sprints" className="flex-1 overflow-auto">
+                  <SprintsTab workspaceId={project.workspace_id} projectId={project.id} />
+                </TabsContent>
+              )}
             </Tabs>
           </div>
         </ResizablePanel>

@@ -421,6 +421,10 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 
 	qtx := h.Queries.WithTx(tx)
 
+	// CEREBRO-PATCH(skill-version-autobump): remember pre-edit content to bump the
+	// cerebro version field only on a real content change (see skill_version_autobump.go).
+	prevContent := skill.Content
+
 	params := db.UpdateSkillParams{
 		ID: parseUUID(id),
 	}
@@ -473,6 +477,15 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		fileResps = make([]SkillFileResponse, len(files))
 		for i, f := range files {
 			fileResps[i] = skillFileToResponse(f)
+		}
+	}
+
+	// CEREBRO-PATCH(skill-version-autobump): a direct content edit advances the
+	// cerebro current_version + snapshots it, so the version isn't frozen at 1.0.0.
+	if req.Content != nil && *req.Content != prevContent {
+		if skill, err = h.autobumpSkillVersionOnEdit(r.Context(), qtx, skill, *req.Content, fileResps, requestUserID(r)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to bump skill version: "+err.Error())
+			return
 		}
 	}
 

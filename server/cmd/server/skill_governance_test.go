@@ -67,6 +67,84 @@ func TestSkillCreate_SetsOwnerAndSnapshotsBaseline(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(skill-version-autobump): integration coverage for FIR-2306 —
+// a direct owner/admin edit (PUT /api/skills/{id}) must advance current_version
+// and snapshot it, not leave it frozen at 1.0.0 the way it did before.
+
+// TestSkillUpdate_DirectEditAdoptsFrontmatterVersion is the exact reported bug:
+// the SKILL.md frontmatter declared a higher version than the stuck
+// current_version. After a direct edit, current_version follows the frontmatter
+// and a new snapshot is recorded.
+func TestSkillUpdate_DirectEditAdoptsFrontmatterVersion(t *testing.T) {
+	skillID, version := createSkillFor(t, uniqueSkillName(t))
+	if version != "1.0.0" {
+		t.Fatalf("expected baseline 1.0.0, got %s", version)
+	}
+
+	resp := authRequest(t, "PUT", "/api/skills/"+skillID, map[string]any{
+		"content": "---\nname: x\nversion: 1.9.0\n---\nupdated body",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("UpdateSkill: expected 200, got %d", resp.StatusCode)
+	}
+	var s map[string]any
+	readJSON(t, resp, &s)
+	if s["current_version"] != "1.9.0" {
+		t.Fatalf("expected current_version 1.9.0 (followed frontmatter), got %v", s["current_version"])
+	}
+
+	resp = authRequest(t, "GET", "/api/skills/"+skillID+"/versions", nil)
+	var versions []map[string]any
+	readJSON(t, resp, &versions)
+	if len(versions) != 2 {
+		t.Fatalf("expected 2 versions (1.0.0 + 1.9.0), got %d: %#v", len(versions), versions)
+	}
+}
+
+// TestSkillUpdate_DirectEditPatchBumpsWithoutFrontmatter covers the common case
+// where the author edits content but does not maintain a frontmatter version:
+// the patch component advances so the edit is never invisible.
+func TestSkillUpdate_DirectEditPatchBumpsWithoutFrontmatter(t *testing.T) {
+	skillID, _ := createSkillFor(t, uniqueSkillName(t))
+
+	resp := authRequest(t, "PUT", "/api/skills/"+skillID, map[string]any{
+		"content": "# v2 no frontmatter version",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("UpdateSkill: expected 200, got %d", resp.StatusCode)
+	}
+	var s map[string]any
+	readJSON(t, resp, &s)
+	if s["current_version"] != "1.0.1" {
+		t.Fatalf("expected current_version 1.0.1 (patch bump), got %v", s["current_version"])
+	}
+}
+
+// TestSkillUpdate_NoContentChangeKeepsVersion ensures a metadata-only edit (or a
+// re-save of identical content) does not inflate the version or the history.
+func TestSkillUpdate_NoContentChangeKeepsVersion(t *testing.T) {
+	skillID, _ := createSkillFor(t, uniqueSkillName(t))
+
+	resp := authRequest(t, "PUT", "/api/skills/"+skillID, map[string]any{
+		"description": "renamed description only",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("UpdateSkill: expected 200, got %d", resp.StatusCode)
+	}
+	var s map[string]any
+	readJSON(t, resp, &s)
+	if s["current_version"] != "1.0.0" {
+		t.Fatalf("expected current_version to stay 1.0.0 on metadata-only edit, got %v", s["current_version"])
+	}
+
+	resp = authRequest(t, "GET", "/api/skills/"+skillID+"/versions", nil)
+	var versions []map[string]any
+	readJSON(t, resp, &versions)
+	if len(versions) != 1 {
+		t.Fatalf("expected history to stay at 1 entry, got %d", len(versions))
+	}
+}
+
 // TestSkillChangeRequest_HappyPath exercises propose → approve → snapshot →
 // merged across the live HTTP stack.
 func TestSkillChangeRequest_HappyPath(t *testing.T) {

@@ -10,13 +10,26 @@ import {
   type CostSavingKey,
   type CostSavingMode,
 } from "../registry";
+import { parseAnalyticsIssuesResponse, parseAnalyticsRunsResponse, parseAnalyticsSummaryResponse } from "../analytics";
 import { parseDashboardResponse } from "../dashboard";
+import { parseHoldoutResponse, type HoldoutOverrides } from "../holdout";
+import { parsePromptInspectorResponse } from "../prompt-inspector";
 import { useCostOptimizationStore } from "../store";
 
 const costOptimizationKeys = {
   all: (wsId: string) => ["cerebro-cost-optimization", wsId] as const,
   dashboard: (wsId: string) =>
     ["cerebro-cost-optimization", wsId, "dashboard"] as const,
+  holdout: (wsId: string) =>
+    ["cerebro-cost-optimization", wsId, "holdout"] as const,
+  analyticsSummary: (wsId: string) =>
+    ["cerebro-cost-optimization", wsId, "analytics", "summary"] as const,
+  analyticsIssues: (wsId: string, key: CostSavingKey, days: number) =>
+    ["cerebro-cost-optimization", wsId, "analytics", key, "issues", days] as const,
+  analyticsRuns: (wsId: string, key: CostSavingKey, issueId: string) =>
+    ["cerebro-cost-optimization", wsId, "analytics", key, issueId, "runs"] as const,
+  promptInspector: (wsId: string, repoUrl: string | undefined) =>
+    ["cerebro-cost-optimization", wsId, "prompt-inspector", repoUrl ?? ""] as const,
 };
 
 /**
@@ -98,5 +111,118 @@ export function useSetSavingModeMutation() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: costOptimizationKeys.all(wsId) });
     },
+  });
+}
+
+/**
+ * Fetch the workspace's PER-SAVING holdout-share overrides (FIR-2640). The
+ * client returns the body as `unknown`; {@link parseHoldoutResponse} validates
+ * it so a drifted shape degrades to "no overrides" instead of throwing. The
+ * result lives only in the Query cache (no Zustand duplication).
+ */
+export function useCostOptimizationHoldoutQuery() {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.holdout(wsId),
+    queryFn: async (): Promise<HoldoutOverrides> =>
+      parseHoldoutResponse(await api.getCostOptimizationHoldout(wsId)),
+  });
+}
+
+/**
+ * Set a single saving's holdout share, or clear its override (revert to the
+ * server default) when `pct` is null. Optimistic: the cached map updates
+ * immediately and is rolled back on failure, then re-validated on settle.
+ */
+export function useSetHoldoutMutation() {
+  const wsId = useWorkspaceId();
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ key, pct }: { key: CostSavingKey; pct: number | null }) =>
+      pct === null
+        ? api.clearCostOptimizationHoldout(wsId, key)
+        : api.setCostOptimizationHoldout(wsId, key, pct),
+    onMutate: async ({ key, pct }) => {
+      const cacheKey = costOptimizationKeys.holdout(wsId);
+      await qc.cancelQueries({ queryKey: cacheKey });
+      const previous = qc.getQueryData<HoldoutOverrides>(cacheKey);
+      const next: HoldoutOverrides = { ...(previous ?? {}) };
+      if (pct === null) {
+        delete next[key];
+      } else {
+        next[key] = pct;
+      }
+      qc.setQueryData<HoldoutOverrides>(cacheKey, next);
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous !== undefined) {
+        qc.setQueryData(costOptimizationKeys.holdout(wsId), context.previous);
+      }
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({
+        queryKey: costOptimizationKeys.holdout(wsId),
+      });
+    },
+  });
+}
+
+export function useCostOptimizationAnalyticsSummaryQuery() {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.analyticsSummary(wsId),
+    queryFn: async () =>
+      parseAnalyticsSummaryResponse(
+        await api.getCostOptimizationAnalyticsSummary(wsId),
+      ),
+  });
+}
+
+export function useCostOptimizationAnalyticsIssuesQuery(
+  savingKey: CostSavingKey,
+  days = 30,
+) {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.analyticsIssues(wsId, savingKey, days),
+    queryFn: async () =>
+      parseAnalyticsIssuesResponse(
+        await api.getCostOptimizationAnalyticsIssues(wsId, savingKey, { days }),
+      ),
+    enabled: Boolean(savingKey),
+  });
+}
+
+export function useCostOptimizationAnalyticsRunsQuery(
+  savingKey: CostSavingKey,
+  issueId: string,
+  days = 90,
+) {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.analyticsRuns(wsId, savingKey, issueId),
+    queryFn: async () =>
+      parseAnalyticsRunsResponse(
+        await api.getCostOptimizationAnalyticsIssueRuns(
+          wsId,
+          savingKey,
+          issueId,
+          { days },
+        ),
+      ),
+    enabled: Boolean(savingKey && issueId),
+  });
+}
+
+export function useCostOptimizationPromptInspectorQuery(repoUrl?: string) {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.promptInspector(wsId, repoUrl),
+    queryFn: async () =>
+      parsePromptInspectorResponse(
+        await api.getCostOptimizationPromptInspector(wsId, repoUrl),
+      ),
   });
 }

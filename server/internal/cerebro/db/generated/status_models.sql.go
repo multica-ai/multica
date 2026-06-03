@@ -31,6 +31,7 @@ INSERT INTO cerebro_status_model (
 )
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, workspace_id, name, description, statuses,
+          workspace_default,
           created_by_id, created_by_type, created_at, updated_at
 `
 
@@ -59,12 +60,33 @@ func (q *Queries) CreateCerebroStatusModel(ctx context.Context, arg CreateCerebr
 		&i.Name,
 		&i.Description,
 		&i.Statuses,
+		&i.WorkspaceDefault,
 		&i.CreatedByID,
 		&i.CreatedByType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const deleteCerebroIssueStatus = `-- name: DeleteCerebroIssueStatus :exec
+DELETE FROM cerebro_issue_status
+WHERE issue_id = $1
+`
+
+func (q *Queries) DeleteCerebroIssueStatus(ctx context.Context, issueID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteCerebroIssueStatus, issueID)
+	return err
+}
+
+const deleteCerebroIssueStatusesByModel = `-- name: DeleteCerebroIssueStatusesByModel :exec
+DELETE FROM cerebro_issue_status
+WHERE status_model_id = $1
+`
+
+func (q *Queries) DeleteCerebroIssueStatusesByModel(ctx context.Context, statusModelID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteCerebroIssueStatusesByModel, statusModelID)
+	return err
 }
 
 const deleteCerebroStatusModel = `-- name: DeleteCerebroStatusModel :exec
@@ -87,8 +109,35 @@ func (q *Queries) DeleteProjectStatusModel(ctx context.Context, projectID pgtype
 	return err
 }
 
+const getCerebroIssueStatus = `-- name: GetCerebroIssueStatus :one
+
+SELECT issue_id, workspace_id, status_model_id, custom_status_key,
+       base_status, set_by_id, set_by_type, created_at, updated_at
+FROM cerebro_issue_status
+WHERE issue_id = $1
+`
+
+// v2b: per-issue custom status pin (FIR-1550).
+func (q *Queries) GetCerebroIssueStatus(ctx context.Context, issueID pgtype.UUID) (CerebroIssueStatus, error) {
+	row := q.db.QueryRow(ctx, getCerebroIssueStatus, issueID)
+	var i CerebroIssueStatus
+	err := row.Scan(
+		&i.IssueID,
+		&i.WorkspaceID,
+		&i.StatusModelID,
+		&i.CustomStatusKey,
+		&i.BaseStatus,
+		&i.SetByID,
+		&i.SetByType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCerebroStatusModel = `-- name: GetCerebroStatusModel :one
 SELECT id, workspace_id, name, description, statuses,
+       workspace_default,
        created_by_id, created_by_type, created_at, updated_at
 FROM cerebro_status_model
 WHERE id = $1
@@ -103,6 +152,35 @@ func (q *Queries) GetCerebroStatusModel(ctx context.Context, id pgtype.UUID) (Ce
 		&i.Name,
 		&i.Description,
 		&i.Statuses,
+		&i.WorkspaceDefault,
+		&i.CreatedByID,
+		&i.CreatedByType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getWorkspaceDefaultStatusModel = `-- name: GetWorkspaceDefaultStatusModel :one
+SELECT id, workspace_id, name, description, statuses,
+       workspace_default,
+       created_by_id, created_by_type, created_at, updated_at
+FROM cerebro_status_model
+WHERE workspace_id = $1 AND workspace_default = true
+`
+
+// FIR-2800: returns the model marked as workspace default, or pgx.ErrNoRows
+// when no default is configured for this workspace.
+func (q *Queries) GetWorkspaceDefaultStatusModel(ctx context.Context, workspaceID pgtype.UUID) (CerebroStatusModel, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceDefaultStatusModel, workspaceID)
+	var i CerebroStatusModel
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Statuses,
+		&i.WorkspaceDefault,
 		&i.CreatedByID,
 		&i.CreatedByType,
 		&i.CreatedAt,
@@ -133,9 +211,47 @@ func (q *Queries) GetProjectStatusModel(ctx context.Context, projectID pgtype.UU
 	return i, err
 }
 
+const listCerebroIssueStatusesByModel = `-- name: ListCerebroIssueStatusesByModel :many
+SELECT issue_id, workspace_id, status_model_id, custom_status_key,
+       base_status, set_by_id, set_by_type, created_at, updated_at
+FROM cerebro_issue_status
+WHERE status_model_id = $1
+`
+
+func (q *Queries) ListCerebroIssueStatusesByModel(ctx context.Context, statusModelID pgtype.UUID) ([]CerebroIssueStatus, error) {
+	rows, err := q.db.Query(ctx, listCerebroIssueStatusesByModel, statusModelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroIssueStatus{}
+	for rows.Next() {
+		var i CerebroIssueStatus
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.WorkspaceID,
+			&i.StatusModelID,
+			&i.CustomStatusKey,
+			&i.BaseStatus,
+			&i.SetByID,
+			&i.SetByType,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCerebroStatusModels = `-- name: ListCerebroStatusModels :many
 
 SELECT id, workspace_id, name, description, statuses,
+       workspace_default,
        created_by_id, created_by_type, created_at, updated_at
 FROM cerebro_status_model
 WHERE workspace_id = $1
@@ -159,6 +275,7 @@ func (q *Queries) ListCerebroStatusModels(ctx context.Context, workspaceID pgtyp
 			&i.Name,
 			&i.Description,
 			&i.Statuses,
+			&i.WorkspaceDefault,
 			&i.CreatedByID,
 			&i.CreatedByType,
 			&i.CreatedAt,
@@ -217,6 +334,7 @@ SET name = $2,
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, name, description, statuses,
+          workspace_default,
           created_by_id, created_by_type, created_at, updated_at
 `
 
@@ -241,8 +359,110 @@ func (q *Queries) UpdateCerebroStatusModel(ctx context.Context, arg UpdateCerebr
 		&i.Name,
 		&i.Description,
 		&i.Statuses,
+		&i.WorkspaceDefault,
 		&i.CreatedByID,
 		&i.CreatedByType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const clearWorkspaceDefaultStatusModel = `-- name: ClearWorkspaceDefaultStatusModel :exec
+UPDATE cerebro_status_model
+SET workspace_default = false,
+    updated_at = now()
+WHERE workspace_id = $1 AND workspace_default = true
+`
+
+// FIR-2800: clear the workspace_default flag on all models in the workspace.
+func (q *Queries) ClearWorkspaceDefaultStatusModel(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearWorkspaceDefaultStatusModel, workspaceID)
+	return err
+}
+
+const setWorkspaceDefaultStatusModel = `-- name: SetWorkspaceDefaultStatusModel :one
+UPDATE cerebro_status_model
+SET workspace_default = true,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, description, statuses,
+          workspace_default,
+          created_by_id, created_by_type, created_at, updated_at
+`
+
+type SetWorkspaceDefaultStatusModelParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// FIR-2800: mark the given model as the workspace default.
+// Always call ClearWorkspaceDefaultStatusModel first (in the same tx).
+func (q *Queries) SetWorkspaceDefaultStatusModel(ctx context.Context, arg SetWorkspaceDefaultStatusModelParams) (CerebroStatusModel, error) {
+	row := q.db.QueryRow(ctx, setWorkspaceDefaultStatusModel, arg.ID, arg.WorkspaceID)
+	var i CerebroStatusModel
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Statuses,
+		&i.WorkspaceDefault,
+		&i.CreatedByID,
+		&i.CreatedByType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertCerebroIssueStatus = `-- name: UpsertCerebroIssueStatus :one
+INSERT INTO cerebro_issue_status (
+    issue_id, workspace_id, status_model_id,
+    custom_status_key, base_status,
+    set_by_id, set_by_type
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (issue_id) DO UPDATE
+    SET status_model_id = EXCLUDED.status_model_id,
+        custom_status_key = EXCLUDED.custom_status_key,
+        base_status = EXCLUDED.base_status,
+        set_by_id = EXCLUDED.set_by_id,
+        set_by_type = EXCLUDED.set_by_type,
+        updated_at = now()
+RETURNING issue_id, workspace_id, status_model_id, custom_status_key,
+          base_status, set_by_id, set_by_type, created_at, updated_at
+`
+
+type UpsertCerebroIssueStatusParams struct {
+	IssueID         pgtype.UUID `json:"issue_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	StatusModelID   pgtype.UUID `json:"status_model_id"`
+	CustomStatusKey string      `json:"custom_status_key"`
+	BaseStatus      string      `json:"base_status"`
+	SetByID         pgtype.UUID `json:"set_by_id"`
+	SetByType       string      `json:"set_by_type"`
+}
+
+func (q *Queries) UpsertCerebroIssueStatus(ctx context.Context, arg UpsertCerebroIssueStatusParams) (CerebroIssueStatus, error) {
+	row := q.db.QueryRow(ctx, upsertCerebroIssueStatus,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.StatusModelID,
+		arg.CustomStatusKey,
+		arg.BaseStatus,
+		arg.SetByID,
+		arg.SetByType,
+	)
+	var i CerebroIssueStatus
+	err := row.Scan(
+		&i.IssueID,
+		&i.WorkspaceID,
+		&i.StatusModelID,
+		&i.CustomStatusKey,
+		&i.BaseStatus,
+		&i.SetByID,
+		&i.SetByType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

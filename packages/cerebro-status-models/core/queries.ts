@@ -2,13 +2,16 @@ import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query
 import {
   assignProjectStatusModel,
   clearProjectStatusModel,
+  clearWorkspaceDefaultStatusModel,
   createStatusModel,
   deleteStatusModel,
   fetchStatusModel,
   fetchStatusModelAssignments,
   fetchStatusModels,
+  setWorkspaceDefaultStatusModel,
   updateStatusModel,
 } from "./api";
+import { issueKeys } from "@multica/core/issues/queries";
 import type { StatusModelWriteInput } from "./types";
 
 export const cerebroStatusModelsKeys = {
@@ -85,11 +88,21 @@ export function useDeleteStatusModelMutation(wsId: string) {
 export function useAssignProjectStatusModelMutation(wsId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ projectId, statusModelId }: { projectId: string; statusModelId: string }) =>
-      assignProjectStatusModel(projectId, statusModelId),
+    mutationFn: ({
+      projectId,
+      statusModelId,
+      mapping,
+    }: {
+      projectId: string;
+      statusModelId: string;
+      mapping?: Record<string, string>;
+    }) => assignProjectStatusModel(projectId, statusModelId, mapping),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.assignments(wsId) });
       queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.list(wsId) });
+      // Existing issues were re-pinned server-side — refresh issue lists/boards
+      // so the new custom-status pins show without a manual reload.
+      queryClient.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }
@@ -100,6 +113,28 @@ export function useClearProjectStatusModelMutation(wsId: string) {
     mutationFn: (projectId: string) => clearProjectStatusModel(projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.assignments(wsId) });
+      queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.list(wsId) });
+    },
+  });
+}
+
+// FIR-2800: workspace default model mutations.
+
+export function useSetWorkspaceDefaultMutation(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => setWorkspaceDefaultStatusModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.list(wsId) });
+    },
+  });
+}
+
+export function useClearWorkspaceDefaultMutation(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => clearWorkspaceDefaultStatusModel(),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.list(wsId) });
     },
   });

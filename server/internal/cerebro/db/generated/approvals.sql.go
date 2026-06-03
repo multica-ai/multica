@@ -264,6 +264,78 @@ func (q *Queries) ExpireDueCerebroApprovalRequests(ctx context.Context) ([]Expir
 	return items, nil
 }
 
+const findReusableCerebroApprovalRequest = `-- name: FindReusableCerebroApprovalRequest :one
+SELECT
+    id, workspace_id,
+    requester_type, requester_id, agent_id,
+    capability, resource, reason, matched_grant_ids, context,
+    status,
+    decided_by_id, decided_at, decision_note,
+    delegated_to_type, delegated_to_id,
+    expires_at, created_at, updated_at
+FROM cerebro_approval_request
+WHERE workspace_id = $1
+  AND agent_id IS NOT DISTINCT FROM $2
+  AND capability = $3
+  AND resource = $4
+  AND status IN ('pending', 'approved')
+  AND (expires_at IS NULL OR expires_at > now())
+ORDER BY
+    (status = 'approved') DESC,
+    created_at DESC
+LIMIT 1
+`
+
+type FindReusableCerebroApprovalRequestParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	Capability  string      `json:"capability"`
+	Resource    string      `json:"resource"`
+}
+
+// Idempotency for poll-based callers (repo checkout, FIR-2586). A daemon repo
+// checkout that resolves to "Ask" cannot block the short-timeout HTTP request,
+// so it creates an ask, long-polls for a few minutes, then gives up and the
+// agent retries. Without dedup each retry would spawn a fresh inbox request,
+// and an ask approved after the poll budget would never be honoured. This finds
+// the most recent still-actionable approval for the same (agent, capability,
+// resource): a 'pending' row lets the retry rejoin the SAME ask; an 'approved'
+// row that has not expired lets the retry through. Approved wins over pending so
+// a granted checkout proceeds as soon as the human says yes. Negative-terminal
+// rows (rejected/expired/cancelled/delegated) are ignored so a fresh ask is
+// raised.
+func (q *Queries) FindReusableCerebroApprovalRequest(ctx context.Context, arg FindReusableCerebroApprovalRequestParams) (CerebroApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, findReusableCerebroApprovalRequest,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.Capability,
+		arg.Resource,
+	)
+	var i CerebroApprovalRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RequesterType,
+		&i.RequesterID,
+		&i.AgentID,
+		&i.Capability,
+		&i.Resource,
+		&i.Reason,
+		&i.MatchedGrantIds,
+		&i.Context,
+		&i.Status,
+		&i.DecidedByID,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.DelegatedToType,
+		&i.DelegatedToID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCerebroApprovalRequest = `-- name: GetCerebroApprovalRequest :one
 SELECT
     id, workspace_id,

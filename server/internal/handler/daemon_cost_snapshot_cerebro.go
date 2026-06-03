@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure" // CEREBRO-PATCH(cost-saving-tokens): switch metric to tokens (FIR-2786)
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 
@@ -28,8 +29,6 @@ const (
 	costSavingSnapshotKey   = "snapshot_prompt"
 	costSavingModeShadow    = "shadow"
 	costSavingModeOn        = "on"
-	costMetricPlatformCalls = "platform_calls"
-
 	// snapshotInlinedReads is how many platform reads the snapshot replaces per
 	// run: the `multica issue get` + `multica issue comment list` the agent
 	// would otherwise run at the start of every comment-/assignment-triggered
@@ -71,7 +70,8 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 		resp.IssueSnapshot = renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
 	}
 
-	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode)); err != nil {
+	snapshotChars := len(resp.IssueSnapshot)
+	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode, snapshotChars)); err != nil {
 		slog.Warn("snapshot cost-saving: record measurement failed", "error", err)
 	}
 }
@@ -93,10 +93,12 @@ func (h *Handler) snapshotSavingMode(ctx context.Context, workspaceID pgtype.UUI
 }
 
 // snapshotMeasurementParams builds the measurement row for one claim. Baseline
-// is the reads the snapshot removes (get + comment list); effective is 0 — there
-// is nothing left to fetch. The metric is platform_calls, not dollars: daemon
-// agents bill on a flat subscription, so the honest unit is calls saved, not $.
-func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+// is the input tokens the issue+thread payloads would have added; effective is
+// 0 — nothing left to fetch. snapshotChars is len(inlined snapshot); 0 on
+// shadow uses the typical estimate (FIR-2786).
+func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string, snapshotChars int) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+	baseline, effective := costmeasure.SnapshotTokensEstimate(snapshotChars)
+	savedTokens := baseline - effective
 	return cerebrodb.RecordCerebroCostOptimizationMeasurementParams{
 		WorkspaceID:     workspaceID,
 		TaskID:          taskID,
@@ -104,10 +106,10 @@ func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cer
 		Mode:            mode,
 		Applied:         mode == costSavingModeOn,
 		HeldOut:         false,
-		Metric:          costMetricPlatformCalls,
-		BaselineValue:   snapshotInlinedReads,
-		EffectiveValue:  0,
-		SavedCents:      0,
+		Metric:          costmeasure.MetricTokens,
+		BaselineValue:   baseline,
+		EffectiveValue:  effective,
+		SavedCents:      costmeasure.TokenSavingCentsAtReference(savedTokens),
 		ActualCostCents: 0,
 	}
 }

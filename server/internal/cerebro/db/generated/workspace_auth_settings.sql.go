@@ -22,7 +22,7 @@ func (q *Queries) DeleteCerebroWorkspaceAuthSettings(ctx context.Context, worksp
 }
 
 const getCerebroWorkspaceAuthSettings = `-- name: GetCerebroWorkspaceAuthSettings :one
-SELECT workspace_id, google_signup_domains, default_role, created_at, updated_at, updated_by_user_id FROM cerebro_workspace_auth_settings
+SELECT workspace_id, google_signup_domains, default_role, created_at, updated_at, updated_by_user_id, google_workspace_sync_enabled FROM cerebro_workspace_auth_settings
 WHERE workspace_id = $1
 `
 
@@ -36,12 +36,13 @@ func (q *Queries) GetCerebroWorkspaceAuthSettings(ctx context.Context, workspace
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
+		&i.GoogleWorkspaceSyncEnabled,
 	)
 	return i, err
 }
 
 const listCerebroWorkspaceAuthSettingsForDomain = `-- name: ListCerebroWorkspaceAuthSettingsForDomain :many
-SELECT workspace_id, google_signup_domains, default_role, created_at, updated_at, updated_by_user_id FROM cerebro_workspace_auth_settings
+SELECT workspace_id, google_signup_domains, default_role, created_at, updated_at, updated_by_user_id, google_workspace_sync_enabled FROM cerebro_workspace_auth_settings
 WHERE $1::text = ANY (google_signup_domains)
 `
 
@@ -70,6 +71,7 @@ func (q *Queries) ListCerebroWorkspaceAuthSettingsForDomain(ctx context.Context,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UpdatedByUserID,
+			&i.GoogleWorkspaceSyncEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -81,24 +83,54 @@ func (q *Queries) ListCerebroWorkspaceAuthSettingsForDomain(ctx context.Context,
 	return items, nil
 }
 
+const listWorkspacesWithGoogleWorkspaceSync = `-- name: ListWorkspacesWithGoogleWorkspaceSync :many
+SELECT workspace_id FROM cerebro_workspace_auth_settings
+WHERE google_workspace_sync_enabled = true
+`
+
+// Every workspace that has opted the BigQuery group sync ON. The sync worker
+// iterates this list once per tick.
+func (q *Queries) ListWorkspacesWithGoogleWorkspaceSync(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listWorkspacesWithGoogleWorkspaceSync)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var workspace_id pgtype.UUID
+		if err := rows.Scan(&workspace_id); err != nil {
+			return nil, err
+		}
+		items = append(items, workspace_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertCerebroWorkspaceAuthSettings = `-- name: UpsertCerebroWorkspaceAuthSettings :one
 INSERT INTO cerebro_workspace_auth_settings (
-    workspace_id, google_signup_domains, default_role, updated_by_user_id, updated_at
+    workspace_id, google_signup_domains, default_role,
+    google_workspace_sync_enabled, updated_by_user_id, updated_at
 )
-VALUES ($1, $2, $3, $4, NOW())
+VALUES ($1, $2, $3, $4, $5, NOW())
 ON CONFLICT (workspace_id) DO UPDATE
-SET google_signup_domains = EXCLUDED.google_signup_domains,
-    default_role          = EXCLUDED.default_role,
-    updated_by_user_id    = EXCLUDED.updated_by_user_id,
-    updated_at            = NOW()
-RETURNING workspace_id, google_signup_domains, default_role, created_at, updated_at, updated_by_user_id
+SET google_signup_domains         = EXCLUDED.google_signup_domains,
+    default_role                  = EXCLUDED.default_role,
+    google_workspace_sync_enabled = EXCLUDED.google_workspace_sync_enabled,
+    updated_by_user_id            = EXCLUDED.updated_by_user_id,
+    updated_at                    = NOW()
+RETURNING workspace_id, google_signup_domains, default_role, created_at, updated_at, updated_by_user_id, google_workspace_sync_enabled
 `
 
 type UpsertCerebroWorkspaceAuthSettingsParams struct {
-	WorkspaceID         pgtype.UUID `json:"workspace_id"`
-	GoogleSignupDomains []string    `json:"google_signup_domains"`
-	DefaultRole         string      `json:"default_role"`
-	UpdatedByUserID     pgtype.UUID `json:"updated_by_user_id"`
+	WorkspaceID                pgtype.UUID `json:"workspace_id"`
+	GoogleSignupDomains        []string    `json:"google_signup_domains"`
+	DefaultRole                string      `json:"default_role"`
+	GoogleWorkspaceSyncEnabled bool        `json:"google_workspace_sync_enabled"`
+	UpdatedByUserID            pgtype.UUID `json:"updated_by_user_id"`
 }
 
 func (q *Queries) UpsertCerebroWorkspaceAuthSettings(ctx context.Context, arg UpsertCerebroWorkspaceAuthSettingsParams) (CerebroWorkspaceAuthSetting, error) {
@@ -106,6 +138,7 @@ func (q *Queries) UpsertCerebroWorkspaceAuthSettings(ctx context.Context, arg Up
 		arg.WorkspaceID,
 		arg.GoogleSignupDomains,
 		arg.DefaultRole,
+		arg.GoogleWorkspaceSyncEnabled,
 		arg.UpdatedByUserID,
 	)
 	var i CerebroWorkspaceAuthSetting
@@ -116,6 +149,7 @@ func (q *Queries) UpsertCerebroWorkspaceAuthSettings(ctx context.Context, arg Up
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
+		&i.GoogleWorkspaceSyncEnabled,
 	)
 	return i, err
 }

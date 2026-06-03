@@ -22,11 +22,16 @@ var allowedRoles = map[string]struct{}{
 
 // AuthSettings is the API-facing view of cerebro_workspace_auth_settings.
 type AuthSettings struct {
-	WorkspaceID         string   `json:"workspace_id"`
-	GoogleSignupDomains []string `json:"google_signup_domains"`
-	DefaultRole         string   `json:"default_role"`
-	UpdatedAt           string   `json:"updated_at"`
-	UpdatedByUserID     *string  `json:"updated_by_user_id"`
+	WorkspaceID                string   `json:"workspace_id"`
+	GoogleSignupDomains        []string `json:"google_signup_domains"`
+	DefaultRole                string   `json:"default_role"`
+	// DefaultGroupID is the cerebro group every new workspace member is placed
+	// into (auto-signup, invitation accept, manual member add). Null when the
+	// workspace has not configured a fallback yet.
+	DefaultGroupID             *string  `json:"default_group_id"`
+	GoogleWorkspaceSyncEnabled bool     `json:"google_workspace_sync_enabled"`
+	UpdatedAt                  string   `json:"updated_at"`
+	UpdatedByUserID            *string  `json:"updated_by_user_id"`
 }
 
 // UpdateAuthSettingsRequest is the body for `PUT /api/cerebro/workspaces/
@@ -34,6 +39,13 @@ type AuthSettings struct {
 type UpdateAuthSettingsRequest struct {
 	GoogleSignupDomains []string `json:"google_signup_domains"`
 	DefaultRole         string   `json:"default_role"`
+	// DefaultGroupID sets which group new members are auto-assigned to. When
+	// non-nil, the pointer value must be a group UUID in this workspace.
+	DefaultGroupID *string `json:"default_group_id"`
+	// GoogleWorkspaceSyncEnabled turns the FIR-2596 BigQuery group sync on or
+	// off for this workspace. Default false: the sync worker never touches a
+	// workspace until an owner/admin opts in here.
+	GoogleWorkspaceSyncEnabled bool `json:"google_workspace_sync_enabled"`
 }
 
 func toAuthSettings(row cerebrodb.CerebroWorkspaceAuthSetting) AuthSettings {
@@ -42,10 +54,11 @@ func toAuthSettings(row cerebrodb.CerebroWorkspaceAuthSetting) AuthSettings {
 		domains = []string{}
 	}
 	out := AuthSettings{
-		WorkspaceID:         util.UUIDToString(row.WorkspaceID),
-		GoogleSignupDomains: domains,
-		DefaultRole:         row.DefaultRole,
-		UpdatedAt:           row.UpdatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
+		WorkspaceID:                util.UUIDToString(row.WorkspaceID),
+		GoogleSignupDomains:        domains,
+		DefaultRole:                row.DefaultRole,
+		GoogleWorkspaceSyncEnabled: row.GoogleWorkspaceSyncEnabled,
+		UpdatedAt:                  row.UpdatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if row.UpdatedByUserID.Valid {
 		s := util.UUIDToString(row.UpdatedByUserID)
