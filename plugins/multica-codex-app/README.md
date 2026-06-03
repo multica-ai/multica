@@ -23,6 +23,79 @@ root.
 - A logged-in Multica CLI profile. The plugin does not store Multica tokens.
 - Access to the target workspace and issue.
 
+## Install Script
+
+The repository includes a reusable installer at:
+
+```bash
+scripts/install_multica_codex_app.sh
+```
+
+From a development checkout, build the CLI first and then install the Codex App
+plugin:
+
+```bash
+make build
+scripts/install_multica_codex_app.sh
+```
+
+For a dry run:
+
+```bash
+scripts/install_multica_codex_app.sh --dry-run
+```
+
+If the user's Multica CLI is already installed and should not be replaced:
+
+```bash
+scripts/install_multica_codex_app.sh --skip-cli-install
+```
+
+The script expects this repository or distribution-package layout:
+
+```text
+.agents/plugins/marketplace.json
+cli/multica                         # optional with --skip-cli-install
+plugins/multica-codex-app/
+scripts/install_multica_codex_app.sh
+```
+
+It removes the previous Codex plugin install/cache, optionally backs up and
+replaces the local `multica` CLI, restarts `multica daemon`, rewrites the MCP
+and hook command paths to the installed CLI, then installs:
+
+```text
+multica-codex-app@multica-local
+```
+
+The installer supports both Codex CLI variants that expose plugin install as
+`codex plugin add` or `codex plugin a`.
+
+## Packaging
+
+Build a user-distributable package with the same layout expected by the
+installer. The package script builds the current-platform CLI for direct
+installation and full-platform CLI release artifacts for distribution:
+
+```bash
+scripts/package_multica_codex_app.sh ~/Downloads/multica --force
+```
+
+The output directory contains the directly runnable install layout and also
+versioned `.tar.gz` and `.zip` archives:
+
+```text
+~/Downloads/multica/
+~/Downloads/multica/cli/multica
+~/Downloads/multica/cli-artifacts/
+~/Downloads/multica/multica-codex-app-<version>.tar.gz
+~/Downloads/multica/multica-codex-app-<version>.zip
+```
+
+Set `MULTICA_SOURCE_BIN=/path/to/multica` to package a specific
+current-platform CLI binary. Full-platform CLI artifacts are still built unless
+`MULTICA_SKIP_CLI_BUILD=1` is set.
+
 ## Helper Commands
 
 Inspect the helper contract:
