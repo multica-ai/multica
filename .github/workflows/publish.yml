@@ -60,17 +60,18 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          # Mirror the reusable bake workflow's checkout so `git rev-parse
-          # HEAD` produces the same SHA the per-arch tags were built with.
-          ref: ${{ github.head_ref || github.ref_name }}
       - name: Set short git commit SHA
         id: sha
+        env:
+          # Use the workflow-trigger SHA, not `main` HEAD: by the time this
+          # merge job runs, sibling commit-to-gitops-* jobs from the same
+          # workflow may have already pushed image-tag bumps that advanced
+          # main past the per-arch jobs' build SHA. Checking out main and
+          # running `git rev-parse HEAD` here would yield a SHA the per-arch
+          # tags were never built with, breaking the manifest stitch.
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
-          REAL_COMMIT_SHA="$(git rev-parse HEAD)"
-          echo "short_sha=${REAL_COMMIT_SHA:0:8}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${WORKFLOW_SHA:0:8}" >> "$GITHUB_OUTPUT"
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:

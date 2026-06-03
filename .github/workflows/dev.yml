@@ -60,17 +60,17 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          # Mirror the reusable bake workflow's checkout so `git rev-parse
-          # HEAD` produces the same SHA the per-arch tags were built with.
-          ref: ${{ github.head_ref || github.ref_name }}
       - name: Set short git commit SHA
         id: sha
+        env:
+          # Keep dev.yml in sync with publish.yml: derive SHORT_SHA from the
+          # workflow-trigger SHA instead of checking out main + running
+          # `git rev-parse HEAD`. dev.yml has no commit-to-gitops jobs, so
+          # there is no live race here today, but the workflow-SHA pattern
+          # is the canonical one for manifest stitching.
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
-          REAL_COMMIT_SHA="$(git rev-parse HEAD)"
-          echo "short_sha=${REAL_COMMIT_SHA:0:8}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${WORKFLOW_SHA:0:8}" >> "$GITHUB_OUTPUT"
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
