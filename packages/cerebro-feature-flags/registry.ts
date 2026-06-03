@@ -63,7 +63,9 @@ export type CerebroFlagKey =
   // FIR-2674: reject agent comments that mention no target (person, agent, or issue).
   | "cerebro_comment_target_guard"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
-  | "cerebro_agent_trigger_permissions";
+  | "cerebro_agent_trigger_permissions"
+  // TECH-2880: collapsible Projects entry in the sidebar (with nested project tree).
+  | "cerebro_projects";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -168,6 +170,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_comment_target_guard: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
+  // TECH-2880: OFF by default — workspace opts in to surface the Projects
+  // collapsible (header + sub-items) in the sidebar.
+  cerebro_projects: false,
 };
 
 /**
@@ -553,6 +558,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Render uploaded PDFs in Documents and the attachment viewer using the browser's native PDF view (scroll, zoom, search) instead of dumping the extracted text. Off restores the extracted-text view. FIR-2661.",
+  },
+  {
+    key: "cerebro_projects",
+    label: "Projects sidebar entry",
+    group: "workspace",
+    description:
+      "Show the collapsible Projects entry in the workspace sidebar (project list, nested tree, and the 'New Project' shortcut). Off hides the entry entirely — projects can still be reached via direct URL and the Projects page. TECH-2880.",
   },
 ];
 
