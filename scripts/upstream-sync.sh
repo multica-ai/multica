@@ -37,6 +37,11 @@ BASE_BRANCH="main"
 UPSTREAM_REMOTE="upstream"
 ORIGIN_REMOTE="origin"
 PR_REVIEWER="${UPSTREAM_SYNC_REVIEWER:-tinetestsen}"
+# Tracking issue whose Tine "Resultat: PASS" comment gates the nightly
+# auto-deploy pass (scripts/upstream-sync-deploy.sh). Stamped into the PR body
+# as a `Tracking-Issue:` trailer so the deploy pass can find Tine's approval.
+# Defaults to the daily-status heartbeat issue (FIR-2196).
+TRACKING_ISSUE="${UPSTREAM_SYNC_TRACKING_ISSUE:-08225ab6-bb2d-404a-b8cf-ab27159a9d32}"
 MODE=""
 
 usage() {
@@ -296,8 +301,8 @@ push_and_open_pr() {
   local short_sha title body
   short_sha="$(echo "$upstream_sha" | cut -c1-12)"
   title="chore: sync upstream/main ($short_sha)"
-  body="$(printf 'Nightly upstream sync from \x60multica-ai/multica\x60.\n\n- Outcome: %s\n- Upstream HEAD: \x60%s\x60\n- Commits in batch: %s\n\nAuto-opened by the upstream-sync bot. Review and merge as part of normal QA.\n' \
-    "$outcome" "$upstream_sha" "$behind")"
+  body="$(printf 'Nightly upstream sync from \x60multica-ai/multica\x60.\n\n- Outcome: %s\n- Upstream HEAD: \x60%s\x60\n- Commits in batch: %s\n\nAuto-opened by the upstream-sync bot. Review and merge as part of normal QA.\n\nTracking-Issue: %s\n\nWhen Tine posts \x60Resultat: PASS\x60 referencing this PR on the tracking issue, the nightly deploy pass auto-merges and deploys it.\n' \
+    "$outcome" "$upstream_sha" "$behind" "$TRACKING_ISSUE")"
 
   local pr_url repo
   repo="$(origin_repo 2>/dev/null || true)"
