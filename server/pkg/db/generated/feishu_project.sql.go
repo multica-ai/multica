@@ -18,7 +18,7 @@ INSERT INTO feishu_project_attachment_binding (
 ) VALUES (
     $1, $2, $3, $4, $5, $6
 )
-ON CONFLICT (integration_id, external_attachment_id) DO UPDATE SET
+ON CONFLICT (integration_id, issue_id, external_attachment_id) DO UPDATE SET
     attachment_id = EXCLUDED.attachment_id,
     external_filename = EXCLUDED.external_filename
 RETURNING id, workspace_id, integration_id, issue_id, attachment_id, external_attachment_id, external_filename, created_at
