@@ -29,7 +29,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Trash2 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
@@ -208,6 +208,16 @@ function ReadonlyCodeBlock({ children }: { children: React.ReactNode }) {
           ) : (
             <Copy className="h-3.5 w-3.5" />
           )}
+        </button>
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          className="flex h-6 w-6 cursor-default items-center justify-center rounded text-muted-foreground opacity-60"
+          title="Delete"
+          aria-label="Delete"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
       <pre>{children}</pre>

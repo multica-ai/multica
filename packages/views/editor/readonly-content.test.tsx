@@ -322,7 +322,7 @@ describe("ReadonlyContent code styling", () => {
       value: { writeText },
     });
 
-    const { container, getByTitle, queryByTitle } = render(
+    const { container, getByTitle } = render(
       <ReadonlyContent
         content={["```ts", "const value = 1;", "```"].join("\n")}
       />,
@@ -336,7 +336,11 @@ describe("ReadonlyContent code styling", () => {
     );
     expect(wrapper?.querySelector("pre code.language-ts")).not.toBeNull();
     expect(wrapper?.textContent).toContain("ts");
-    expect(queryByTitle("Delete")).toBeNull();
+
+    const deleteButton = getByTitle("Delete");
+    expect(deleteButton).toBeDisabled();
+    expect(deleteButton).toHaveAttribute("aria-disabled", "true");
+    expect(deleteButton.className).toContain("cursor-default");
 
     fireEvent.click(getByTitle("Copy code"));
 
