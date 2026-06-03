@@ -63,12 +63,14 @@ import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, ChatMessage, ChatPendingTask, ChatSession } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 
 export function ChatWindow() {
   const { t } = useT("chat");
+  const { pathname } = useNavigation();
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -446,6 +448,8 @@ export function ChatWindow() {
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
   };
+
+  if (/^\/[^/]+\/channels(?:\/|$)?/.test(pathname)) return null;
 
   return (
     <motion.div

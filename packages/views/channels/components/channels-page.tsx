@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -93,6 +100,27 @@ interface ChannelsPageProps {
 
 type SidePanelMode = "replies" | "members";
 
+const SIDE_PANEL_DEFAULT_WIDTH = 360;
+const SIDE_PANEL_MIN_WIDTH = 320;
+const SIDE_PANEL_MAX_WIDTH = 520;
+const SIDE_PANEL_MAIN_MIN_WIDTH = 560;
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function getSidePanelBounds(containerWidth: number) {
+  const min = Math.min(
+    SIDE_PANEL_MIN_WIDTH,
+    Math.max(240, Math.floor(containerWidth * 0.45)),
+  );
+  const max = Math.max(
+    min,
+    Math.min(SIDE_PANEL_MAX_WIDTH, containerWidth - SIDE_PANEL_MAIN_MIN_WIDTH),
+  );
+  return { min, max };
+}
+
 function formatTime(ts?: string): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -126,7 +154,9 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [sidePanel, setSidePanel] = useState<SidePanelMode | null>(null);
+  const [sidePanelWidth, setSidePanelWidth] = useState(SIDE_PANEL_DEFAULT_WIDTH);
   const [replyMessageId, setReplyMessageId] = useState<string | null>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
   const sidePanelRef = useRef<HTMLDivElement>(null);
 
   const { data: channels, isLoading: loadingChannels } = useQuery(channelListOptions(wsId));
@@ -175,6 +205,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
       if (!target) return;
       if (sidePanelRef.current?.contains(target)) return;
       if ((target as HTMLElement).closest("[data-panel-trigger='channel-side-panel']")) return;
+      if ((target as HTMLElement).closest("[data-panel-resize-handle='channel-side-panel']")) return;
       if ((target as HTMLElement).closest("[data-slot='context-menu-content']")) return;
       if ((target as HTMLElement).closest("[data-slot='select-content']")) return;
       if ((target as HTMLElement).closest("[data-slot='mention-suggestion-content']")) return;
@@ -190,15 +221,54 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
 
   const showRightPanel = !!sidePanel && !!channelId && !!activeChannel;
 
+  useEffect(() => {
+    if (!showRightPanel) return;
+
+    const clampToContainer = () => {
+      const containerWidth = pageRef.current?.getBoundingClientRect().width;
+      if (!containerWidth) return;
+      const { min, max } = getSidePanelBounds(containerWidth);
+      setSidePanelWidth((width) => clampNumber(width, min, max));
+    };
+
+    clampToContainer();
+    window.addEventListener("resize", clampToContainer);
+    return () => window.removeEventListener("resize", clampToContainer);
+  }, [showRightPanel]);
+
+  const startSidePanelResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const containerRect = pageRef.current?.getBoundingClientRect();
+      if (!containerRect) return;
+      const { min, max } = getSidePanelBounds(containerRect.width);
+      setSidePanelWidth(clampNumber(containerRect.right - moveEvent.clientX, min, max));
+    };
+
+    const handlePointerUp = () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp);
+  }, []);
+
   return (
-    <div className="flex h-full min-h-0">
-      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+    <div ref={pageRef} className="flex h-full min-h-0 min-w-0 overflow-hidden">
+      <ResizablePanelGroup
+        key={showRightPanel ? "channel-main-with-side-panel" : "channel-main-full"}
+        orientation="horizontal"
+        className="min-h-0 min-w-0 flex-1"
+      >
         <ResizablePanel
           id="channel-list"
-          defaultSize={18}
-          minSize={14}
-          maxSize={30}
-          className="min-w-[176px]"
+          defaultSize={showRightPanel ? 26 : 18}
+          minSize={showRightPanel ? 22 : 14}
+          maxSize={showRightPanel ? 36 : 30}
+          className="min-w-0"
         >
           <ChannelList
             channels={channels ?? []}
@@ -208,8 +278,8 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
             onSelect={(id) => nav.push(paths.channelDetail(id))}
           />
         </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel id="channel-main" minSize={35}>
+        <ResizableHandle withHandle />
+        <ResizablePanel id="channel-main" minSize={35} className="min-w-0">
           {channelId && activeChannel ? (
             <div className="flex h-full min-w-0 flex-col">
               <ChannelHeader
@@ -236,44 +306,50 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
             </div>
           )}
         </ResizablePanel>
-        {showRightPanel && (
-          <>
-            <ResizableHandle />
-            <ResizablePanel
-              id="channel-side-panel"
-              defaultSize={28}
-              minSize={22}
-              maxSize={42}
-              className="min-w-[320px]"
-            >
-              <div ref={sidePanelRef} className="h-full">
-                {sidePanel === "replies" && replyMessageId ? (
-                  <RepliesPanel
-                    channelId={channelId}
-                    messageId={replyMessageId}
-                    data={threadQuery.data}
-                    loading={threadQuery.isLoading}
-                    wsId={wsId}
-                    memberIds={members.map((m) => m.user_id)}
-                    qc={qc}
-                    onClose={closeSidePanel}
-                  />
-                ) : (
-                  <ChannelMembersPanel
-                    channel={activeChannel}
-                    members={members}
-                    workspaceMembers={workspaceMembers}
-                    canManage={canManageChannel}
-                    wsId={wsId}
-                    qc={qc}
-                    onClose={closeSidePanel}
-                  />
-                )}
-              </div>
-            </ResizablePanel>
-          </>
-        )}
       </ResizablePanelGroup>
+      {showRightPanel && (
+        <>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整右侧面板宽度"
+            data-panel-resize-handle="channel-side-panel"
+            className="relative z-20 flex w-0 shrink-0 cursor-col-resize items-center justify-center before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:transition-colors hover:before:bg-foreground/15 after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2"
+            onPointerDown={startSidePanelResize}
+          >
+            <div className="z-10 flex h-6 w-1 shrink-0 rounded-lg bg-border" />
+          </div>
+          <div
+            ref={sidePanelRef}
+            data-channel-side-panel="true"
+            className="h-full shrink-0"
+            style={{ width: sidePanelWidth }}
+          >
+            {sidePanel === "replies" && replyMessageId ? (
+              <RepliesPanel
+                channelId={channelId}
+                messageId={replyMessageId}
+                data={threadQuery.data}
+                loading={threadQuery.isLoading}
+                wsId={wsId}
+                memberIds={members.map((m) => m.user_id)}
+                qc={qc}
+                onClose={closeSidePanel}
+              />
+            ) : (
+              <ChannelMembersPanel
+                channel={activeChannel}
+                members={members}
+                workspaceMembers={workspaceMembers}
+                canManage={canManageChannel}
+                wsId={wsId}
+                qc={qc}
+                onClose={closeSidePanel}
+              />
+            )}
+          </div>
+        </>
+      )}
 
       <CreateChannelDialog
         open={showCreateDialog}
