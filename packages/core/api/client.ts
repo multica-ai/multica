@@ -2673,7 +2673,8 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string }): Promise<Workspace> {
+  // CEREBRO-PATCH(workspace-avatar-update): FIR-2580 — accept avatar_url ("" clears the logo).
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -3680,5 +3681,21 @@ export class ApiClient {
   async generateAgentAvatar(agentName: string, customPrompt?: string): Promise<{ url: string }> {
     const body = JSON.stringify({ agent_name: agentName, custom_prompt: customPrompt });
     return this.fetch("/api/agents/generate-avatar", { method: "POST", body });
+  }
+
+  // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (up to 5 square icon variants).
+  async generateWorkspaceLogos(
+    workspaceId: string,
+    prompt: string,
+    count = 5,
+  ): Promise<{ urls: string[] }> {
+    const body = JSON.stringify({ prompt, count });
+    const res = await this.fetch<{ urls?: string[] }>(
+      `/api/workspaces/${workspaceId}/generate-logo`,
+      { method: "POST", body },
+    );
+    // Defensive: tolerate a malformed/empty body so the UI shows a clean
+    // "no images" state instead of throwing (API Response Compatibility).
+    return { urls: Array.isArray(res?.urls) ? res.urls.filter((u) => typeof u === "string") : [] };
   }
 }

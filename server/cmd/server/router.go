@@ -802,6 +802,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+					// CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (owner/admin).
+					r.Post("/generate-logo", cerebroAgentAvatarHandler.GenerateLogos)
 				})
 			})
 		})

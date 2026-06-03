@@ -51,8 +51,10 @@ type WorkspaceResponse struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix string  `json:"issue_prefix"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	// CEREBRO-PATCH(workspace-avatar-response): FIR-2580 — expose the workspace logo URL.
+	AvatarURL *string `json:"avatar_url"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
 }
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -80,8 +82,10 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Settings:    settings,
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
-		CreatedAt:   timestampToString(w.CreatedAt),
-		UpdatedAt:   timestampToString(w.UpdatedAt),
+		// CEREBRO-PATCH(workspace-avatar-response): FIR-2580 — map avatar_url onto the response.
+		AvatarURL: textToPtr(w.AvatarUrl),
+		CreatedAt: timestampToString(w.CreatedAt),
+		UpdatedAt: timestampToString(w.UpdatedAt),
 	}
 }
 
@@ -558,6 +562,8 @@ type UpdateWorkspaceRequest struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix *string `json:"issue_prefix"`
+	// CEREBRO-PATCH(workspace-avatar-update): FIR-2580 — accept the logo URL ("" clears it; omit to leave unchanged).
+	AvatarURL *string `json:"avatar_url"`
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -617,6 +623,10 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		if prefix != "" {
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
+	}
+	// CEREBRO-PATCH(workspace-avatar-update): FIR-2580 — persist the logo URL when present.
+	if req.AvatarURL != nil {
+		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)
@@ -795,9 +805,6 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create member")
 		return
 	}
-
-	// CEREBRO-PATCH(member-default-group-placement): FIR-2732 auto-assign default group.
-	h.placeMemberInDefaultGroup(r.Context(), requester.WorkspaceID, user.ID)
 
 	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
 	userID := requestUserID(r)

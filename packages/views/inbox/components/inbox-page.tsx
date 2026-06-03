@@ -117,6 +117,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
+// CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — workspace logo in the inbox (my-issues) breadcrumb.
+import { WorkspaceBreadcrumbLogo } from "../../workspace/workspace-avatar";
 import { ChannelListItem, InboxListItem, useTimeAgo } from "./inbox-list-item";
 import { AgentRunPip, taskStatusToRunState } from "../../common/agent-run-pip"; // CEREBRO-PATCH(inbox-run-state-pip): active vs queued indicator (JEH-1332)
 import { useTypeLabels } from "./inbox-detail-label";
@@ -653,6 +655,7 @@ export function InboxPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
         )}
+        <WorkspaceBreadcrumbLogo fallback={null} />
         <h1 className="truncate text-sm font-semibold">{headerTitle}</h1>
         {showViewSwitch && (
           <DropdownMenu>
