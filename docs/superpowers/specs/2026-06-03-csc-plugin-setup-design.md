@@ -1,81 +1,73 @@
-# CSC Plugin Setup Design
+# CSC Plugin 安装设计
 
-**Date:** 2026-06-03
-**Branch:** `feat/csc-cloud-cli-dga-bridge`
-**Status:** Draft
+**日期：** 2026-06-03
+**分支：** `feat/csc-cloud-cli-dga-bridge`
+**状态：** 草稿
 
-## Overview
+## 概述
 
-Bridge the CSC Cloud ↔ CSC CLI task dispatch pipeline by adding a plugin
-installation step to the Multica Daemon's task execution flow. When a CSC
-agent picks up a task, the Daemon installs required CSC plugins into the
-task's isolated working directory before spawning the agent process.
+通过在 Multica Daemon 的任务执行流程中增加 Plugin 安装步骤，打通 CSC Cloud ↔ CSC CLI 的任务下发链路。当 CSC Agent 领取任务时，Daemon 在启动 Agent 进程之前，将所需的 CSC Plugin 安装到任务的隔离工作目录中。
 
-This is the first phase: hardcoded plugin names and marketplace URL.
-Future phases will make these configurable and eventually server-driven.
+本次为第一阶段：Plugin 名称和 Marketplace URL 硬编码。
+后续阶段将改为可配置，最终由 Server 动态下发。
 
-## Requirements
+## 需求
 
-1. When `provider == "csc"`, the Daemon must install CSC plugins into the
-   task's working directory before the agent process starts.
-2. Installation runs two CSC CLI commands:
+1. 当 `provider == "csc"` 时，Daemon 必须在 Agent 进程启动前将 CSC Plugin 安装到任务的工作目录中。
+2. 安装过程执行两条 CSC CLI 命令：
    - `csc plugin marketplace add <marketplaceURL>`
    - `csc plugin install <pluginName>@<source> --dir <workdir>`
-3. If either command fails, the task fails immediately and the error is
-   reported back to the Multica Server via the existing `FailTask` mechanism.
-4. The `Reuse()` path skips plugin installation (the working directory is
-   already populated from a previous task).
-5. Changes are confined to `execenv/` and a small wiring change in
-   `daemon.go`. No Server-side or frontend changes required.
+3. 任一命令失败时，任务立即终止，错误通过现有 `FailTask` 机制上报到 Multica Server。
+4. `Reuse()` 路径跳过 Plugin 安装（工作目录已由前一次任务填充）。
+5. 改动限于 `execenv/` 包及 `daemon.go` 中的一处小对接。无需 Server 端或前端改动。
 
-## Architecture
+## 架构
 
-### Execution flow (before)
+### 执行流程（改动前）
 
 ```
 execenv.Prepare()
-  ├── Create directory structure
-  ├── writeContextFiles()        ← Skills, Issue context
+  ├── 创建目录结构
+  ├── writeContextFiles()        ← Skills、Issue 上下文
   ├── [codex]    setupCodexHome()
   └── [openclaw] setupOpenclawConfig()
 ```
 
-### Execution flow (after)
+### 执行流程（改动后）
 
 ```
 execenv.Prepare()
-  ├── Create directory structure
-  ├── writeContextFiles()        ← Skills, Issue context
+  ├── 创建目录结构
+  ├── writeContextFiles()        ← Skills、Issue 上下文
   ├── [codex]    setupCodexHome()
   ├── [openclaw] setupOpenclawConfig()
-  └── [csc]      setupCSCPlugins()   ← NEW
+  └── [csc]      setupCSCPlugins()   ← 新增
                      ├── exec("csc plugin marketplace add <url>")
                      └── exec("csc plugin install <name>@costrict-plugins --dir <workdir>")
 ```
 
-### Error propagation
+### 错误传播链路
 
 ```
-setupCSCPlugins() returns error
-  → execenv.Prepare() returns error
-    → daemon.runTask() returns (TaskResult{}, error)
-      → daemon.handleTask() calls FailTask(taskID, "csc plugin setup: ...", "", "", "agent_error")
-        → Server records failure, UI shows error to user
+setupCSCPlugins() 返回 error
+  → execenv.Prepare() 返回 error
+    → daemon.runTask() 返回 (TaskResult{}, error)
+      → daemon.handleTask() 调用 FailTask(taskID, "csc plugin setup: ...", "", "", "agent_error")
+        → Server 记录失败，UI 展示错误给用户
 ```
 
-## Files changed
+## 改动文件清单
 
-| File | Type | Description |
+| 文件 | 类型 | 说明 |
 |---|---|---|
-| `server/internal/daemon/execenv/execenv.go` | Modify | Add CSC branch in `Prepare()` and `ReuseParams` |
-| `server/internal/daemon/execenv/csc_plugins.go` | **New** | `setupCSCPlugins()` implementation |
-| `server/internal/daemon/execenv/csc_plugins_test.go` | **New** | Unit tests |
-| `server/internal/daemon/execenv/execenv.go` | Modify | Add `CSCBin` field to `PrepareParams` |
-| `server/internal/daemon/daemon.go` | Modify | Pass `CSCBin` from config to `PrepareParams` |
+| `server/internal/daemon/execenv/execenv.go` | 修改 | 在 `Prepare()` 中增加 CSC 分支，`PrepareParams` 增加 `CSCBin` 字段 |
+| `server/internal/daemon/execenv/csc_plugins.go` | **新增** | `setupCSCPlugins()` 实现 |
+| `server/internal/daemon/execenv/csc_plugins_test.go` | **新增** | 单元测试 |
+| `server/internal/daemon/daemon.go` | 修改 | 从配置取 `CSCBin` 传入 `PrepareParams` |
 
-**No changes to:** `agent/csc.go`, `agent/agent.go`, Server handlers, frontend.
+**不修改：** `agent/csc.go`、`agent/agent.go`、Server handler、前端。
 
-## Detailed design
+## 详细设计
 
 ### `execenv/csc_plugins.go`
 
@@ -138,20 +130,20 @@ func setupCSCPlugins(ctx context.Context, cscBin string, workDir string, logger 
 }
 ```
 
-### `execenv/execenv.go` — Prepare() changes
+### `execenv/execenv.go` — Prepare() 改动
 
-Add `CSCBin` to `PrepareParams`:
+`PrepareParams` 新增 `CSCBin` 字段：
 
 ```go
 type PrepareParams struct {
-    // ... existing fields ...
+    // ... 现有字段 ...
     OpenclawBin string  // resolved openclaw CLI path
     CSCBin      string  // resolved csc CLI path (empty = skip plugin setup)
     // ...
 }
 ```
 
-Add CSC branch at the end of `Prepare()`, alongside existing provider branches:
+在 `Prepare()` 尾部增加 CSC 分支，与现有 provider 分支平级：
 
 ```go
 if provider == "csc" && params.CSCBin != "" {
@@ -161,9 +153,9 @@ if provider == "csc" && params.CSCBin != "" {
 }
 ```
 
-### `daemon/daemon.go` — runTask() changes
+### `daemon/daemon.go` — runTask() 改动
 
-Extract CSC binary path (same pattern as `openclawBin`):
+提取 CSC 二进制路径（与 `openclawBin` 同模式）：
 
 ```go
 cscBin := ""
@@ -172,93 +164,90 @@ if provider == "csc" {
 }
 ```
 
-Pass to `PrepareParams`:
+传入 `PrepareParams`：
 
 ```go
 env, err = execenv.Prepare(execenv.PrepareParams{
-    // ... existing fields ...
+    // ... 现有字段 ...
     OpenclawBin:  openclawBin,
-    CSCBin:       cscBin,        // NEW
+    CSCBin:       cscBin,        // 新增
     // ...
 }, d.logger)
 ```
 
-Also pass `CSCBin` through `ReuseParams` when the `Reuse()` path is used
-(skip plugin setup on reuse — the directory is already populated):
+`Reuse()` 路径无需传递 `CSCBin`——复用时跳过 Plugin 安装，目录已经填充完毕：
 
 ```go
 env = execenv.Reuse(execenv.ReuseParams{
-    // ... existing fields ...
-    // No CSCBin needed — reuse skips plugin installation
+    // ... 现有字段 ...
+    // 无需 CSCBin — 复用路径跳过 Plugin 安装
 }, d.logger)
 ```
 
-## Error handling
+## 错误处理
 
-| Scenario | Handling | Reason |
+| 场景 | 处理方式 | 原因 |
 |---|---|---|
-| `cscBin == ""` | Skip setup entirely | CSC binary not available, no point trying |
-| marketplace add fails | Return error → FailTask → Server | Without marketplace, install cannot proceed |
-| plugin install fails | Return error → FailTask → Server | Without plugin, task execution is meaningless |
-| Command timeout (60s/120s) | Context cancel → return error → FailTask | Unresponsive CLI should not block indefinitely |
+| `cscBin == ""` | 跳过整个 setup | CSC 二进制不可用，无需尝试 |
+| marketplace add 失败 | 返回 error → FailTask → Server | 无 marketplace，install 无法执行 |
+| plugin install 失败 | 返回 error → FailTask → Server | 无 plugin，任务执行无意义 |
+| 命令超时（60s/120s） | context cancel → 返回 error → FailTask | 无响应的 CLI 不应无限阻塞 |
 
-Error messages sent to the server include the failing step and stderr output,
-e.g.:
+上报到 Server 的错误消息包含失败步骤和 stderr 输出，例如：
 - `csc plugin marketplace add https://github.com/.../marketplace.git: exit status 1 (stderr: ...)`
 - `csc plugin install cospower@costrict-plugins: timeout after 120s`
 
-## Testing
+## 测试
 
-### Unit tests (`csc_plugins_test.go`)
+### 单元测试（`csc_plugins_test.go`）
 
-| Test | Verifies |
+| 测试用例 | 验证内容 |
 |---|---|
-| `TestSetupCSCPlugins_Success` | Both commands execute with correct arguments, returns nil |
-| `TestSetupCSCPlugins_MarketplaceAddFails` | Returns error containing "marketplace add" |
-| `TestSetupCSCPlugins_InstallFails` | Returns error containing "plugin install" |
-| `TestSetupCSCPlugins_CSCBinEmpty` | Returns immediately, no commands executed |
-| `TestSetupCSCPlugins_Timeout` | Context cancellation returns error |
+| `TestSetupCSCPlugins_Success` | 两条命令均执行且参数正确，返回 nil |
+| `TestSetupCSCPlugins_MarketplaceAddFails` | 返回包含 "marketplace add" 的 error |
+| `TestSetupCSCPlugins_InstallFails` | 返回包含 "plugin install" 的 error |
+| `TestSetupCSCPlugins_CSCBinEmpty` | 直接返回，不执行任何命令 |
+| `TestSetupCSCPlugins_Timeout` | context 取消后返回 error |
 
-Tests use a fake executable (script that succeeds/fails on demand) via
-`ExecOptions.ExecutablePath`, following the pattern in `daemon_test.go`.
+测试使用伪造可执行文件（按需成功/失败的脚本），通过 `ExecutablePath` 传入，遵循 `daemon_test.go` 中的现有模式。
 
-### Integration test (manual)
+### 集成测试（手动）
 
-1. Ensure CSC CLI is on PATH with `csc plugin` subcommands available.
-2. Start Daemon with a CSC agent configured.
-3. Trigger a task assignment from the Multica UI.
-4. Verify:
-   - Plugin installed in task workdir.
-   - Task executes via CSC CLI with plugin available.
-   - On forced failure (e.g. bad marketplace URL), task shows failure in UI.
+1. 确保 CSC CLI 在 PATH 上且 `csc plugin` 子命令可用。
+2. 启动 Daemon 并配置 CSC Agent。
+3. 从 Multica UI 触发任务分配。
+4. 验证：
+   - Plugin 已安装到任务工作目录。
+   - 任务通过 CSC CLI 执行且 Plugin 可用。
+   - 强制失败时（如错误的 marketplace URL），UI 展示失败状态。
 
-## Future evolution
+## 后续演进
 
 ```
-Phase 1 (this PR)       Phase 2                Phase 3
-──────────────────      ──────────────────     ──────────────────
-Hardcoded constants     Config-driven params    Server-driven
-┌────────────────┐     ┌────────────────┐     ┌────────────────┐
-│ marketplaceURL │     │ marketplaceURL │     │ Task.PluginReqs
-│ pluginName    │ ──→ │ plugins []     │ ──→ │   {name, source
-│ (hardcoded)   │     │ (config file)  │     │    version}    │
-└────────────────┘     └────────────────┘     │ (Server sends) │
-                                              └────────────────┘
-Files: csc_plugins.go   Files: config.go       Files: handler/daemon.go
-No external changes     + PrepareParams        + Task type
-                                               + execenv reads
+第一阶段（本次 PR）    第二阶段                第三阶段
+──────────────────     ──────────────────     ──────────────────
+硬编码常量             配置文件驱动            Server 动态下发
+┌────────────────┐    ┌────────────────┐     ┌────────────────┐
+│ marketplaceURL │    │ marketplaceURL │     │ Task.PluginReqs
+│ pluginName    │ ──→│ plugins []     │ ──→ │   {name, source
+│ (硬编码)       │    │ (配置文件)     │     │    version}    │
+└────────────────┘    └────────────────┘     │ (Server 下发)  │
+                                             └────────────────┘
+涉及文件:              涉及文件:               涉及文件:
+csc_plugins.go        config.go              handler/daemon.go
+无外部改动            + PrepareParams         + Task 类型
+                                              + execenv 读取
 ```
 
-The function signature naturally evolves — hardcoded constants become
-parameters without structural changes:
+函数签名自然演进——硬编码常量变为参数，无需结构重构：
 
 ```go
-// Phase 1
+// 第一阶段
 setupCSCPlugins(ctx, cscBin, workDir, logger)
 
-// Phase 2 (add params from config)
+// 第二阶段（从配置文件读取参数）
 setupCSCPlugins(ctx, cscBin, workDir, marketplaceURL, plugins, logger)
 
-// Phase 3 (params from Task, passed via PrepareParams)
+// 第三阶段（参数来自 Task，通过 PrepareParams 传入）
 setupCSCPlugins(ctx, cscBin, workDir, params.PluginReqs, logger)
 ```
