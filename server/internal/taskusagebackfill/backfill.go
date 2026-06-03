@@ -57,11 +57,10 @@ const AdvisoryLockKey int64 = 4246
 // scan.
 const MaxLagThreshold = time.Hour
 
-// stampOffset matches the upper bound of the rollup window
-// (`now() - 5 minutes`). Stamping the watermark to this point means the
-// first rollup tick after the backfill covers only events newer than
-// the backfill horizon.
-const stampOffset = 5 * time.Minute
+// The watermark upper bound of `now() - 5 minutes` is encoded directly
+// in the SQL UPDATE in stampWatermark / stampWatermarkOnConn so the
+// math runs in the same session that does the write — no app-side
+// time.Now() participates. (MUL-2957 review: blocker #3.)
 
 // Result describes what a single backfill run did. Exposed so callers
 // (the migrate command and tests) can log or assert on it.
@@ -101,10 +100,6 @@ type HookOptions struct {
 	// pause. Mirrors the operator-facing flag on the standalone
 	// backfill command.
 	SleepBetweenSlices time.Duration
-
-	// Now lets tests inject a deterministic clock for the watermark
-	// stamp. Zero = time.Now.
-	Now func() time.Time
 }
 
 // Hook is the migration-time entrypoint. It checks whether the
@@ -142,10 +137,6 @@ func Hook(ctx context.Context, pool *pgxpool.Pool, opts HookOptions) (Result, er
 	if threshold <= 0 {
 		threshold = MaxLagThreshold
 	}
-	now := opts.Now
-	if now == nil {
-		now = time.Now
-	}
 
 	// Step 1: cheap precondition check — if the rollup state tables
 	// have not been created yet, this hook simply has nothing to do
@@ -177,12 +168,13 @@ func Hook(ctx context.Context, pool *pgxpool.Pool, opts HookOptions) (Result, er
 	if !usageRange.HasRows {
 		// Empty database. Stamp the watermark so migration 103's
 		// guard accepts the no-history path on a fresh upgrade and
-		// the rollup worker starts forward from the stamp.
-		if err := stampWatermark(ctx, pool, now()); err != nil {
+		// the rollup worker starts forward from the stamp. The DB's
+		// own clock is used so a clock-skewed app process cannot
+		// stamp the watermark into the DB's future.
+		if err := stampWatermark(ctx, pool); err != nil {
 			return Result{}, err
 		}
-		log.Info("task_usage hourly rollup hook: task_usage empty, watermark stamped",
-			"watermark_at", now().Add(-stampOffset).Format(time.RFC3339))
+		log.Info("task_usage hourly rollup hook: task_usage empty, watermark stamped from db now()")
 		return Result{Skipped: "task_usage_empty", WatermarkStamped: true}, nil
 	}
 
@@ -193,6 +185,8 @@ func Hook(ctx context.Context, pool *pgxpool.Pool, opts HookOptions) (Result, er
 		return Result{}, errors.New("task_usage_hourly_rollup_state row is missing or watermark is NULL; manual intervention required before migration 103")
 	}
 
+	// Lag is computed against the DB's max_event (already DB-time);
+	// comparing to the DB-time watermark avoids any app/DB skew.
 	maxEvent := usageRange.MaxEvent
 	lag := maxEvent.Sub(watermark.Time)
 	if lag <= threshold {
@@ -201,11 +195,11 @@ func Hook(ctx context.Context, pool *pgxpool.Pool, opts HookOptions) (Result, er
 			"max_event", maxEvent.UTC().Format(time.RFC3339),
 			"lag", lag.String(),
 			"threshold", threshold.String())
-		// Re-stamp to bring the value flush with the cron upper bound;
-		// the lag-based guard in migration 103 will pass either way,
-		// but stamping keeps the post-hook state consistent with the
-		// standalone backfill command.
-		if err := stampWatermark(ctx, pool, now()); err != nil {
+		// Re-stamp from DB now() to bring the value flush with the
+		// cron upper bound; the lag-based guard in migration 103 will
+		// pass either way, but stamping keeps the post-hook state
+		// consistent with the standalone backfill command.
+		if err := stampWatermark(ctx, pool); err != nil {
 			return Result{}, err
 		}
 		return Result{Skipped: "watermark_within_threshold", WatermarkStamped: true}, nil
@@ -275,7 +269,7 @@ func Hook(ctx context.Context, pool *pgxpool.Pool, opts HookOptions) (Result, er
 		}
 	}
 
-	if err := stampWatermarkOnConn(ctx, lockConn.Conn(), now()); err != nil {
+	if err := stampWatermarkOnConn(ctx, lockConn.Conn()); err != nil {
 		return res, err
 	}
 	res.WatermarkStamped = true
@@ -283,7 +277,7 @@ func Hook(ctx context.Context, pool *pgxpool.Pool, opts HookOptions) (Result, er
 	log.Info("task_usage hourly rollup hook: complete",
 		"slices", res.SlicesProcessed,
 		"total_rows_touched", res.RowsTouched,
-		"watermark_at", now().Add(-stampOffset).Format(time.RFC3339))
+		"watermark_source", "db_now")
 	return res, nil
 }
 
@@ -342,26 +336,29 @@ func rollupStateExists(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 }
 
 // stampWatermark moves the hourly rollup state watermark to
-// `now - 5 min`, matching the cron entry's upper bound. It runs on a
-// fresh background context so cancellation cannot skip the UPDATE.
-func stampWatermark(ctx context.Context, pool *pgxpool.Pool, now time.Time) error {
+// `now() - 5 min` using PostgreSQL's clock, NOT the app process clock.
+// This matches the cron entry's upper bound and — critically —
+// guarantees the watermark cannot be stamped into the DB's future
+// because of container clock drift. (MUL-2957 review: see张大彪's
+// blocker #3.)
+func stampWatermark(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err := pool.Exec(ctx, `
 		UPDATE task_usage_hourly_rollup_state
-		   SET watermark_at = $1
+		   SET watermark_at = now() - INTERVAL '5 minutes'
 		 WHERE id = 1
-	`, now.Add(-stampOffset))
+	`)
 	if err != nil {
 		return fmt.Errorf("stamp watermark: %w", err)
 	}
 	return nil
 }
 
-func stampWatermarkOnConn(ctx context.Context, conn *pgx.Conn, now time.Time) error {
+func stampWatermarkOnConn(ctx context.Context, conn *pgx.Conn) error {
 	_, err := conn.Exec(ctx, `
 		UPDATE task_usage_hourly_rollup_state
-		   SET watermark_at = $1
+		   SET watermark_at = now() - INTERVAL '5 minutes'
 		 WHERE id = 1
-	`, now.Add(-stampOffset))
+	`)
 	if err != nil {
 		return fmt.Errorf("stamp watermark: %w", err)
 	}

@@ -141,19 +141,36 @@ func (m *Manager) runJob(ctx context.Context, job *JobSpec, now time.Time) error
 		return fmt.Errorf("scheduler: scope provider for %q: %w", job.Name, err)
 	}
 
-	// Mark stale RUNNING rows as FAILED for jobs that do not allow
-	// stale reentry. This must happen before we plan, so a stuck row
-	// does not block the next plan_time from being claimed (or, in
-	// every_plan mode, it explicitly turns into a terminal failure
-	// audit row that operators can see).
-	if !job.AllowStaleReentry {
-		if affected, err := markStaleAsFailed(ctx, m.pool, job.Name, now); err != nil {
-			m.logger.Warn("scheduler: mark stale failed",
-				"job", job.Name, "error", err)
-		} else if affected > 0 {
-			m.logger.Warn("scheduler: stale RUNNING transitions to FAILED",
-				"job", job.Name, "rows", affected)
-		}
+	// Close out abandoned RUNNING leases before planning. We run this
+	// for EVERY job, regardless of AllowStaleReentry, because:
+	//
+	//   * Non-reentrant jobs (AllowStaleReentry=false) need the FAILED
+	//     audit row + alert; this was the original motivation.
+	//
+	//   * Reentrant jobs (AllowStaleReentry=true) running in
+	//     `latest_only` mode never re-claim historical plan_times, so
+	//     a stuck RUNNING row from a crashed pod would otherwise sit
+	//     in the table forever and pin
+	//     `scheduler_running_stale_total > 0`. Marking it FAILED keeps
+	//     the gauge truthful and (because tryClaim's
+	//     retry-from-FAILED branch is still eligible at the same
+	//     plan_time when attempts remain) preserves the retry path.
+	//
+	//   * Reentrant `every_plan` jobs would otherwise rely on the
+	//     stale-steal branch in tryClaim — but that only fires when
+	//     the same plan_time is being attempted again, which races
+	//     this sweep harmlessly: whichever wins, the row leaves
+	//     RUNNING.
+	//
+	// MUL-2957 review: see张大彪's blocker #1.
+	if affected, err := markStaleAsFailed(ctx, m.pool, job.Name, now); err != nil {
+		m.logger.Warn("scheduler: mark stale failed",
+			"job", job.Name, "error", err)
+	} else if affected > 0 {
+		m.logger.Warn("scheduler: closed out abandoned RUNNING leases",
+			"job", job.Name,
+			"rows", affected,
+			"reentrant", job.AllowStaleReentry)
 	}
 
 	for _, scope := range scopes {
@@ -293,12 +310,18 @@ func (m *Manager) runClaimed(
 	go m.runHeartbeats(hbCtx, hbDone, job, c, log)
 
 	start := time.Now()
-	res, handlerErr := func() (HandlerResult, error) {
+	res, handlerErr := func() (out HandlerResult, retErr error) {
+		// recover() inside the deferred closure assigns to the named
+		// return retErr so that a panicking handler is treated exactly
+		// like a returned error: classifyError records it as
+		// "handler_panic" and finishFailure writes the FAILED audit
+		// row. Without the named return the panic was being silently
+		// swallowed and the outer code wrote a SUCCESS row with
+		// rows_affected=0.
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("scheduler handler panic", "panic", r)
-				handlerPanic := fmt.Errorf("handler panic: %v", r)
-				_ = handlerPanic // captured below via the assigned err
+				retErr = fmt.Errorf("%w: %v", ErrHandlerPanic, r)
 			}
 		}()
 		return job.Handler(runCtx, HandlerInput{
@@ -403,7 +426,7 @@ func (m *Manager) runHeartbeats(
 // classifyError maps handler errors to short error_code strings stored
 // on the audit row. Unknown errors get a generic code; specific codes
 // are reserved for sentinels we recognise (context timeout, lease lost
-// before a terminal write, etc.).
+// before a terminal write, panic recovered by the scheduler, etc.).
 func classifyError(err error) string {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
@@ -412,7 +435,17 @@ func classifyError(err error) string {
 		return "canceled"
 	case errors.Is(err, ErrLeaseLost):
 		return "lease_lost"
+	case errors.Is(err, ErrHandlerPanic):
+		return "handler_panic"
 	default:
 		return "handler_error"
 	}
 }
+
+// ErrHandlerPanic wraps a panic value recovered from a job handler so
+// the scheduler can record it on the audit row and (if max_attempts
+// allows) retry. Production handlers should prefer returning errors,
+// but we treat panics as failures rather than letting them either
+// crash the process or — worse — be silently dropped into a SUCCESS
+// audit row.
+var ErrHandlerPanic = errors.New("scheduler: handler panic")
