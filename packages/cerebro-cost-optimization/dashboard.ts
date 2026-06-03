@@ -181,6 +181,10 @@ function savingValue(
     const tokens = `${units.toLocaleString("en-US")} ${metricUnitLabel(metric, units)}`;
     return cents > 0 ? `${tokens} (${formatUsd(cents)})` : tokens;
   }
+  if (metric === "platform_calls") {
+    const tokens = (units * 800).toLocaleString("en-US");
+    return `${tokens} tokens (est. from ${units.toLocaleString("en-US")} avoided calls)`;
+  }
   if (cents > 0) {
     return formatUsd(cents);
   }

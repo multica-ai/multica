@@ -38,7 +38,7 @@ func TestMeasureRun_SnapshotPromptCountsInlinedReads(t *testing.T) {
 	if m.Applied {
 		t.Errorf("shadow mode must not be applied")
 	}
-	if m.Metric != metricPlatformCalls || m.Baseline != 2 || m.Effective != 0 {
+	if m.Metric != metricInputTokens || m.Baseline != 1600 || m.Effective != 0 {
 		t.Errorf("unexpected snapshot measurement: %+v", m)
 	}
 }
@@ -58,7 +58,7 @@ func TestMeasureRun_BundledReadCollapsesToOneCall(t *testing.T) {
 	if !ok {
 		t.Fatalf("bundled_read measurement missing: %+v", got)
 	}
-	if !m.Applied || m.Metric != metricPlatformCalls || m.Baseline != 3 || m.Effective != 1 {
+	if !m.Applied || m.Metric != metricInputTokens || m.Baseline != 2250 || m.Effective != 2200 {
 		t.Errorf("unexpected bundled measurement: %+v", m)
 	}
 }

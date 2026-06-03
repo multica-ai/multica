@@ -11,6 +11,7 @@ import "testing"
 func TestBundledReadMeasurementParams(t *testing.T) {
 	t.Parallel()
 
+	// CEREBRO-PATCH(cost-optimization-token-metrics): bundled_read records token deltas.
 	ws := parseUUID("44444444-4444-4444-4444-444444444444")
 	task := parseUUID("55555555-5555-5555-5555-555555555555")
 
@@ -18,19 +19,21 @@ func TestBundledReadMeasurementParams(t *testing.T) {
 	if !on.Applied || on.HeldOut {
 		t.Fatalf("on mode must be applied and not held out, got applied=%v held=%v", on.Applied, on.HeldOut)
 	}
-	if on.SavingKey != costSavingBundledKey || on.Metric != costMetricPlatformCalls {
+	if on.SavingKey != costSavingBundledKey || on.Metric != costMetricInputTokens {
 		t.Fatalf("unexpected key/metric: %+v", on)
 	}
-	if on.BaselineValue != bundledReadBaseline || on.EffectiveValue != 1 {
-		t.Fatalf("expected baseline=%d effective=1, got baseline=%d effective=%d", bundledReadBaseline, on.BaselineValue, on.EffectiveValue)
+	wantBaseline := int64(bundledReadBaseline) * estimatedTokensPerSeparateRead
+	wantEffective := int64(estimatedTokensPerBundledCall)
+	if on.BaselineValue != wantBaseline || on.EffectiveValue != wantEffective {
+		t.Fatalf("expected baseline=%d effective=%d, got baseline=%d effective=%d", wantBaseline, wantEffective, on.BaselineValue, on.EffectiveValue)
 	}
 
 	shadow := bundledReadMeasurementParams(ws, task, costSavingModeShadow)
 	if shadow.Applied {
 		t.Fatalf("shadow mode must not be applied, got %+v", shadow)
 	}
-	if shadow.BaselineValue != bundledReadBaseline || shadow.EffectiveValue != 1 {
-		t.Fatalf("shadow would-save must share baseline=%d effective=1, got baseline=%d effective=%d", bundledReadBaseline, shadow.BaselineValue, shadow.EffectiveValue)
+	if shadow.BaselineValue != wantBaseline || shadow.EffectiveValue != wantEffective {
+		t.Fatalf("shadow would-save must share token baseline/effective, got baseline=%d effective=%d", shadow.BaselineValue, shadow.EffectiveValue)
 	}
 }
 

@@ -14,6 +14,8 @@ import (
 	"log/slog"
 	"strings"
 
+	// CEREBRO-PATCH(cost-optimization-token-metrics): estimate snapshot_prompt saved tokens.
+	"github.com/multica-ai/multica/server/internal/cerebro/contextduplication"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 
@@ -25,10 +27,10 @@ import (
 // server/internal/cerebro/runtime/cost_savings_measure.go. "off" is the absence
 // of an override row, so it never appears as a value here.
 const (
-	costSavingSnapshotKey   = "snapshot_prompt"
-	costSavingModeShadow    = "shadow"
-	costSavingModeOn        = "on"
-	costMetricPlatformCalls = "platform_calls"
+	costSavingSnapshotKey = "snapshot_prompt"
+	costSavingModeShadow  = "shadow"
+	costSavingModeOn      = "on"
+	costMetricInputTokens = "input_tokens"
 
 	// snapshotInlinedReads is how many platform reads the snapshot replaces per
 	// run: the `multica issue get` + `multica issue comment list` the agent
@@ -57,21 +59,21 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 		return
 	}
 
+	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Limit:       2000, // defensive cap; the renderer keeps only the most recent slice
+	})
+	if err != nil {
+		slog.Warn("snapshot cost-saving: list comments failed", "error", err)
+		return
+	}
+	snapshotText := renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
 	if mode == costSavingModeOn {
-		comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
-			IssueID:     issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			Limit:       2000, // defensive cap; the renderer keeps only the most recent slice
-		})
-		if err != nil {
-			// Could not load the thread — do NOT claim a saving we didn't apply.
-			slog.Warn("snapshot cost-saving: list comments failed", "error", err)
-			return
-		}
-		resp.IssueSnapshot = renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
+		resp.IssueSnapshot = snapshotText
 	}
 
-	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode)); err != nil {
+	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode, snapshotText)); err != nil {
 		slog.Warn("snapshot cost-saving: record measurement failed", "error", err)
 	}
 }
@@ -93,10 +95,14 @@ func (h *Handler) snapshotSavingMode(ctx context.Context, workspaceID pgtype.UUI
 }
 
 // snapshotMeasurementParams builds the measurement row for one claim. Baseline
-// is the reads the snapshot removes (get + comment list); effective is 0 — there
-// is nothing left to fetch. The metric is platform_calls, not dollars: daemon
-// agents bill on a flat subscription, so the honest unit is calls saved, not $.
-func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+// is the estimated tokens in the inlined snapshot; effective is 0 because the
+// agent no longer pays to fetch that context via separate tool calls.
+func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode, snapshotMarkdown string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+	baseline := contextduplication.EstimateTokens(snapshotMarkdown)
+	if baseline <= 0 {
+		// Fallback when the thread is empty — still two avoided reads.
+		baseline = snapshotInlinedReads * 800
+	}
 	return cerebrodb.RecordCerebroCostOptimizationMeasurementParams{
 		WorkspaceID:     workspaceID,
 		TaskID:          taskID,
@@ -104,8 +110,8 @@ func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cer
 		Mode:            mode,
 		Applied:         mode == costSavingModeOn,
 		HeldOut:         false,
-		Metric:          costMetricPlatformCalls,
-		BaselineValue:   snapshotInlinedReads,
+		Metric:          costMetricInputTokens,
+		BaselineValue:   baseline,
 		EffectiveValue:  0,
 		SavedCents:      0,
 		ActualCostCents: 0,

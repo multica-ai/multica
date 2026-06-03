@@ -185,7 +185,7 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     label: "Snapshot in start prompt",
     description:
       "Put the issue and the latest comment thread directly into the run's start prompt, so the agent does not have to fetch the issue and its comments itself on every run.",
-    metric: "platform_calls",
+    metric: "input_tokens",
     runtimeScope: "both",
     estimateNote: "Removes ~40% of platform calls per run.",
   },
@@ -194,7 +194,7 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     label: "Bundled context read",
     description:
       "Serve a single combined \"issue context\" call (issue + comments + members + labels) instead of 4-5 separate calls.",
-    metric: "platform_calls",
+    metric: "input_tokens",
     runtimeScope: "both",
     estimateNote: "Collapses 4-5 calls into 1 at run start.",
   },

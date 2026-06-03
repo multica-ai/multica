@@ -557,7 +557,7 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	var oldTaskID, freshTaskID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
-		VALUES ($1, $2, $3, 'queued', 0, now() - interval '5 hours')
+		VALUES ($1, $2, $3, 'queued', 0, timestamp '2000-01-01 00:00:00+00')
 		RETURNING id
 	`, agentID, runtimeID, oldIssueID).Scan(&oldTaskID); err != nil {
 		t.Fatalf("failed to insert old queued task: %v", err)
@@ -572,8 +572,9 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 
 	queries := db.New(testPool)
 	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    3600.0, // 1h TTL — old task is 5h, fresh task is 0s
-		MaxPerTick: 100,
+		TtlSecs: 3600.0, // 1h TTL — old task is ancient, fresh task is 0s
+		// CEREBRO-PATCH(runtime-sweeper-test-isolation): keep shared test DB stale rows out of this assertion.
+		MaxPerTick: 1,
 	})
 	if err != nil {
 		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)

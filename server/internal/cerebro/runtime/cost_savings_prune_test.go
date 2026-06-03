@@ -157,12 +157,9 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 		t.Fatalf("expected snapshot+bundled+prune all measured, got %+v", got)
 	}
 
-	// snapshot + bundled live on platform_calls; prune lives on context_tokens.
-	// Same metric across snapshot/bundled is the existing double-count situation
-	// FIR-2391 addressed at the daemon claim handler — gateway runs that opt
-	// into both still produce both rows here, and that is independent of prune.
-	if snap.Metric != metricPlatformCalls || bun.Metric != metricPlatformCalls {
-		t.Errorf("snapshot/bundled must measure platform_calls; got snap=%q bundled=%q", snap.Metric, bun.Metric)
+	// snapshot + bundled score avoided tool-fetch as input_tokens; prune on context_tokens.
+	if snap.Metric != metricInputTokens || bun.Metric != metricInputTokens {
+		t.Errorf("snapshot/bundled must measure input_tokens; got snap=%q bundled=%q", snap.Metric, bun.Metric)
 	}
 	if prune.Metric != metricContextTokens {
 		t.Errorf("prune must measure context_tokens, got %q (would imply overlap with snapshot/bundled)", prune.Metric)
@@ -177,12 +174,12 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 	}
 
 	// And snapshot/bundled must NOT see ToolResultChars — they are still keyed
-	// solely on InlinedContextReads (3 reads → snapshot effective=0, bundled
-	// effective=1).
-	if snap.Baseline != 3 || snap.Effective != 0 {
-		t.Errorf("snapshot baseline/effective = %d/%d, want 3/0", snap.Baseline, snap.Effective)
+	// solely on InlinedContextReads (3 reads → snapshot 3*800 effective=0,
+	// bundled 3*750 effective=2200).
+	if snap.Baseline != 2400 || snap.Effective != 0 {
+		t.Errorf("snapshot baseline/effective = %d/%d, want 2400/0", snap.Baseline, snap.Effective)
 	}
-	if bun.Baseline != 3 || bun.Effective != 1 {
-		t.Errorf("bundled baseline/effective = %d/%d, want 3/1", bun.Baseline, bun.Effective)
+	if bun.Baseline != 2250 || bun.Effective != 2200 {
+		t.Errorf("bundled baseline/effective = %d/%d, want 2250/2200", bun.Baseline, bun.Effective)
 	}
 }
