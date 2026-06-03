@@ -2,7 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -173,15 +178,19 @@ func seedPendingMobilePushDelivery(t *testing.T, cid string) (string, string) {
 }
 
 func seedPendingMobilePushDeliveryForIssue(t *testing.T, cid, issueID, commentID string) (string, string) {
+	return seedPendingMobilePushDeliveryForProvider(t, cid, "android", "getui", issueID, commentID)
+}
+
+func seedPendingMobilePushDeliveryForProvider(t *testing.T, providerClientID, platform, provider, issueID, commentID string) (string, string) {
 	t.Helper()
 
 	queries := db.New(testPool)
 	registration, err := queries.UpsertMobilePushRegistration(context.Background(), db.UpsertMobilePushRegistrationParams{
 		UserID:           util.MustParseUUID(testUserID),
-		InstallationID:   "dispatch-install-" + cid,
-		Platform:         "android",
-		Provider:         "getui",
-		ProviderClientID: cid,
+		InstallationID:   "dispatch-install-" + provider + "-" + providerClientID,
+		Platform:         platform,
+		Provider:         provider,
+		ProviderClientID: providerClientID,
 		AppVersion:       pgtype.Text{},
 	})
 	if err != nil {
@@ -200,8 +209,8 @@ func seedPendingMobilePushDeliveryForIssue(t *testing.T, cid, issueID, commentID
 	}
 	payloadSnapshot, err := json.Marshal(map[string]any{
 		"registration_id":    util.UUIDToString(registration.ID),
-		"provider":           "getui",
-		"provider_client_id": cid,
+		"provider":           provider,
+		"provider_client_id": providerClientID,
 		"notification_event": eventPayload,
 	})
 	if err != nil {
@@ -638,6 +647,189 @@ func TestDispatchPendingMobilePushDeliveries_UsesStableIssueNotifyID(t *testing.
 	}
 }
 
+func TestDispatchPendingMobilePushDeliveries_SendsAPNSWithCollapseID(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	issueA := createTestIssue(t, testWorkspaceID, testUserID)
+	issueB := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupNotificationDispatchData(t)
+		cleanupInboxForIssue(t, issueA)
+		cleanupInboxForIssue(t, issueB)
+		cleanupTestIssue(t, issueA)
+		cleanupTestIssue(t, issueB)
+	})
+
+	type capturedAPNSPush struct {
+		APNSID     string
+		CollapseID string
+		Topic      string
+		PushType   string
+		Auth       string
+		URL        string
+	}
+	pushesByToken := map[string]capturedAPNSPush{}
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/3/device/") {
+			http.NotFound(w, r)
+			return
+		}
+		token := strings.TrimPrefix(r.URL.Path, "/3/device/")
+		var body struct {
+			APS struct {
+				Alert struct {
+					Title string `json:"title"`
+					Body  string `json:"body"`
+				} `json:"alert"`
+				Sound string `json:"sound"`
+			} `json:"aps"`
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode apns body: %v", err)
+		}
+		if body.APS.Alert.Title != "OPE-20 · dispatcher issue" || body.APS.Alert.Body != "please review this change" || body.APS.Sound != "default" {
+			t.Fatalf("unexpected apns payload: %#v", body)
+		}
+		pushesByToken[token] = capturedAPNSPush{
+			APNSID:     r.Header.Get("apns-id"),
+			CollapseID: r.Header.Get("apns-collapse-id"),
+			Topic:      r.Header.Get("apns-topic"),
+			PushType:   r.Header.Get("apns-push-type"),
+			Auth:       r.Header.Get("authorization"),
+			URL:        body.URL,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(apiServer.Close)
+
+	t.Setenv("APNS_TEAM_ID", "TEAMID1234")
+	t.Setenv("APNS_KEY_ID", "KEYID1234")
+	t.Setenv("APNS_BUNDLE_ID", "com.wujieai.multica")
+	t.Setenv("APNS_AUTH_KEY_P8", testAPNSPrivateKeyPEMForDispatcher(t))
+	t.Setenv("APNS_BASE_URL", apiServer.URL)
+
+	seedPendingMobilePushDeliveryForProvider(t, "apns-token-a-1", "ios", "apns", issueA, "")
+	seedPendingMobilePushDeliveryForProvider(t, "apns-token-a-2", "ios", "apns", issueA, "")
+	seedPendingMobilePushDeliveryForProvider(t, "apns-token-b", "ios", "apns", issueB, "")
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, nil)
+
+	if len(pushesByToken) != 3 {
+		t.Fatalf("expected 3 apns pushes, got %d: %#v", len(pushesByToken), pushesByToken)
+	}
+	first := pushesByToken["apns-token-a-1"]
+	second := pushesByToken["apns-token-a-2"]
+	other := pushesByToken["apns-token-b"]
+	for token, push := range pushesByToken {
+		if !strings.HasPrefix(push.Auth, "bearer ") {
+			t.Fatalf("%s authorization should be bearer token, got %q", token, push.Auth)
+		}
+		if push.Topic != "com.wujieai.multica" || push.PushType != "alert" {
+			t.Fatalf("%s unexpected apns headers: %#v", token, push)
+		}
+		if push.APNSID == "" {
+			t.Fatalf("%s missing apns-id", token)
+		}
+		if push.URL == "" || !strings.HasPrefix(push.URL, "wujieai-multicam://issues/") {
+			t.Fatalf("%s unexpected url: %q", token, push.URL)
+		}
+	}
+	if first.CollapseID == "" || first.CollapseID != second.CollapseID {
+		t.Fatalf("same issue collapse id mismatch: first=%q second=%q", first.CollapseID, second.CollapseID)
+	}
+	if first.CollapseID == other.CollapseID {
+		t.Fatalf("different issues should have different collapse ids, got %q", first.CollapseID)
+	}
+	if first.APNSID == second.APNSID || first.APNSID == other.APNSID || second.APNSID == other.APNSID {
+		t.Fatalf("apns-id should be unique per delivery: %#v", pushesByToken)
+	}
+}
+
+func TestDispatchPendingMobilePushDeliveries_APNSInvalidTokenDisablesRegistration(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"reason":"Unregistered"}`))
+	}))
+	t.Cleanup(apiServer.Close)
+
+	t.Setenv("APNS_TEAM_ID", "TEAMID1234")
+	t.Setenv("APNS_KEY_ID", "KEYID1234")
+	t.Setenv("APNS_BUNDLE_ID", "com.wujieai.multica")
+	t.Setenv("APNS_AUTH_KEY_P8", testAPNSPrivateKeyPEMForDispatcher(t))
+	t.Setenv("APNS_BASE_URL", apiServer.URL)
+
+	eventID, _ := seedPendingMobilePushDeliveryForProvider(t, "apns-token-invalid", "ios", "apns", "", "")
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, nil)
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if delivery.Status != "cancelled" {
+		t.Fatalf("expected mobile push delivery status cancelled, got %q", delivery.Status)
+	}
+	if !delivery.LastError.Valid || !strings.Contains(delivery.LastError.String, "Unregistered") {
+		t.Fatalf("expected unregistered last_error, got %#v", delivery.LastError)
+	}
+	var enabled bool
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT enabled
+		FROM mobile_push_registration
+		WHERE user_id = $1 AND provider_client_id = 'apns-token-invalid'
+	`, testUserID).Scan(&enabled); err != nil {
+		t.Fatalf("query apns registration: %v", err)
+	}
+	if enabled {
+		t.Fatal("expected invalid apns registration to be disabled")
+	}
+}
+
+func TestDispatchPendingMobilePushDeliveries_APNSTemporaryErrorRequeues(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"reason":"InternalServerError"}`))
+	}))
+	t.Cleanup(apiServer.Close)
+
+	t.Setenv("APNS_TEAM_ID", "TEAMID1234")
+	t.Setenv("APNS_KEY_ID", "KEYID1234")
+	t.Setenv("APNS_BUNDLE_ID", "com.wujieai.multica")
+	t.Setenv("APNS_AUTH_KEY_P8", testAPNSPrivateKeyPEMForDispatcher(t))
+	t.Setenv("APNS_BASE_URL", apiServer.URL)
+
+	eventID, _ := seedPendingMobilePushDeliveryForProvider(t, "apns-token-retry", "ios", "apns", "", "")
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, nil)
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if delivery.Status != "pending" {
+		t.Fatalf("expected mobile push delivery status pending, got %q", delivery.Status)
+	}
+	if delivery.AttemptCount != 1 {
+		t.Fatalf("expected attempt_count 1, got %d", delivery.AttemptCount)
+	}
+	if !delivery.LastError.Valid || !strings.Contains(delivery.LastError.String, "InternalServerError") {
+		t.Fatalf("expected apns temporary last_error, got %#v", delivery.LastError)
+	}
+	var enabled bool
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT enabled
+		FROM mobile_push_registration
+		WHERE user_id = $1 AND provider_client_id = 'apns-token-retry'
+	`, testUserID).Scan(&enabled); err != nil {
+		t.Fatalf("query apns registration: %v", err)
+	}
+	if !enabled {
+		t.Fatal("temporary apns error should not disable registration")
+	}
+}
+
 func TestDispatchPendingMobilePushDeliveries_CancelsDisabledRegistration(t *testing.T) {
 	cleanupNotificationDispatchData(t)
 	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
@@ -673,6 +865,19 @@ func TestDispatchPendingMobilePushDeliveries_CancelsDisabledRegistration(t *test
 	if !delivery.LastError.Valid || !strings.Contains(delivery.LastError.String, "disabled") {
 		t.Fatalf("expected disabled last_error, got %#v", delivery.LastError)
 	}
+}
+
+func testAPNSPrivateKeyPEMForDispatcher(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("MarshalPKCS8PrivateKey: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
 }
 
 func TestDispatchPendingDingTalkDeliveries_RequeuesThenFails(t *testing.T) {

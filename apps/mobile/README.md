@@ -101,6 +101,26 @@ pnpm --filter @multica/mobile build:ios
 
 发布前仍然需要确认 `app.json` 中的 `version` 和 `runtimeVersion` 是否符合当前 release 预期。当前项目使用 bare workflow，`runtimeVersion` 需要手动维护为固定字符串；当 native runtime 发生不兼容变化时，应随新包一起递增。
 
+### iOS APNs 和 TestFlight
+
+iOS 远程推送使用 Go 服务端直连 APNs。移动端通过 `expo-notifications` 获取 APNs device token；APNs token auth 凭证只配置在服务端环境变量中，不提交到仓库。
+
+TestFlight 使用 production APNs。构建或提交 iOS production build 前确认：
+
+- Apple Developer 中 App ID `com.wujieai.multica` 已启用 Push Notifications capability。
+- EAS iOS credentials / provisioning profile 是在启用 Push capability 后生成或更新的。
+- `app.config.js` 已包含 `expo-notifications` config plugin；本项目不启用 background remote notifications，因为当前发送的是普通 alert push。
+- 后端已配置 APNs production token auth 环境变量：
+  - `APNS_TEAM_ID`
+  - `APNS_KEY_ID`
+  - `APNS_BUNDLE_ID=com.wujieai.multica`
+  - `APNS_AUTH_KEY_P8` 或 `APNS_AUTH_KEY_PATH`
+  - 可选：`APNS_BASE_URL` / `APNS_ENV`
+
+production/TestFlight 环境默认不设置 `APNS_BASE_URL`，也不设置 sandbox。`APNS_AUTH_KEY_P8` 应放在部署平台 Secret/Env 中；如果使用 `APNS_AUTH_KEY_PATH`，`.p8` 文件由部署环境挂载，不提交到仓库。
+
+真实验收需要安装 TestFlight 包并在真机登录。登录后服务端应看到 `provider=apns`、`platform=ios` 的 mobile push registration；模拟器不作为远程 APNs 推送验收目标。
+
 ### Android 本地正式构建
 
 需要在本机产出正式 APK 或 AAB 时，使用 EAS local build。它在本机执行 Gradle 构建，但仍会连接 Expo project，并使用 Expo 平台上配置的 remote credentials；不要把 Android credentials 改成本地文件，除非明确要脱离 Expo 凭证管理。

@@ -83,6 +83,13 @@ type mobilePushDeliveryPayload struct {
 	NotificationEvent json.RawMessage `json:"notification_event"`
 }
 
+type mobilePushDispatchConfig struct {
+	Getui      notifyutil.GetuiConfig
+	GetuiReady bool
+	APNS       notifyutil.APNSConfig
+	APNSReady  bool
+}
+
 func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService, daemonHub *daemonws.Hub) {
 	ticker := time.NewTicker(notificationDispatchInterval)
 	defer ticker.Stop()
@@ -116,6 +123,17 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 	if err != nil && !errors.Is(err, notifyutil.ErrGetuiNotConfigured) {
 		slog.Warn("notification dispatcher: failed to load getui config", "error", err)
 	}
+	apnsCfg, err := notifyutil.LoadAPNSConfig()
+	apnsReady := err == nil
+	if err != nil && !errors.Is(err, notifyutil.ErrAPNSNotConfigured) {
+		slog.Warn("notification dispatcher: failed to load apns config", "error", err)
+	}
+	mobilePushCfg := mobilePushDispatchConfig{
+		Getui:      getuiCfg,
+		GetuiReady: getuiReady,
+		APNS:       apnsCfg,
+		APNSReady:  apnsReady,
+	}
 
 	deliveries, err := queries.ListNotificationDeliveriesByStatus(ctx, "pending")
 	if err != nil {
@@ -145,11 +163,12 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 			dispatched++
 			processOpenclawWeixinDelivery(ctx, queries, daemonHub, delivery)
 		case "mobile_push":
-			if !getuiReady {
+			provider := mobilePushDeliveryProvider(ctx, queries, delivery)
+			if !mobilePushProviderReady(provider, mobilePushCfg) {
 				continue
 			}
 			dispatched++
-			processMobilePushDelivery(ctx, queries, getuiCfg, delivery)
+			processMobilePushDelivery(ctx, queries, mobilePushCfg, delivery)
 		}
 	}
 }
@@ -373,7 +392,7 @@ func processCustomWebhookDelivery(ctx context.Context, queries *db.Queries, deli
 	}
 }
 
-func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg notifyutil.GetuiConfig, delivery db.NotificationDelivery) {
+func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg mobilePushDispatchConfig, delivery db.NotificationDelivery) {
 	claimed, err := queries.ClaimNotificationDelivery(ctx, db.ClaimNotificationDeliveryParams{
 		ID:       delivery.ID,
 		Status:   "pending",
@@ -418,7 +437,7 @@ func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg not
 		finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
 		return
 	}
-	if !registration.Enabled || registration.Provider != "getui" || registration.Platform != "android" {
+	if !registration.Enabled {
 		cancelMobilePushDelivery(ctx, queries, claimed, "mobile push registration is disabled")
 		return
 	}
@@ -435,22 +454,62 @@ func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg not
 	title := buildMobilePushTitle(eventPayload)
 	body := buildMobilePushBody(eventPayload, title)
 	clickURL := buildMobilePushClickURL(eventPayload)
-	notifyID := mobilePushNotifyIDForIssue(eventPayload.IssueID)
-	requestID := strings.ReplaceAll(util.UUIDToString(claimed.ID), "-", "")
-	if len(requestID) > 32 {
-		requestID = requestID[:32]
-	}
 
-	if _, err := cfg.PushSingleByCID(ctx, notifyutil.GetuiPushMessage{
-		CID:       registration.ProviderClientID,
-		RequestID: requestID,
-		Title:     title,
-		Body:      body,
-		ClickURL:  clickURL,
-		NotifyID:  notifyID,
-		TTL:       int64(getuiPushTTL / time.Millisecond),
-	}); err != nil {
-		finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
+	switch {
+	case registration.Provider == "getui" && registration.Platform == "android":
+		if !cfg.GetuiReady {
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, notifyutil.ErrGetuiNotConfigured)
+			return
+		}
+		notifyID := mobilePushNotifyIDForIssue(eventPayload.IssueID)
+		requestID := strings.ReplaceAll(util.UUIDToString(claimed.ID), "-", "")
+		if len(requestID) > 32 {
+			requestID = requestID[:32]
+		}
+		if _, err := cfg.Getui.PushSingleByCID(ctx, notifyutil.GetuiPushMessage{
+			CID:       registration.ProviderClientID,
+			RequestID: requestID,
+			Title:     title,
+			Body:      body,
+			ClickURL:  clickURL,
+			NotifyID:  notifyID,
+			TTL:       int64(getuiPushTTL / time.Millisecond),
+		}); err != nil {
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
+			return
+		}
+	case registration.Provider == "apns" && registration.Platform == "ios":
+		if !cfg.APNSReady {
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, notifyutil.ErrAPNSNotConfigured)
+			return
+		}
+		if _, err := cfg.APNS.SendPush(ctx, notifyutil.APNSPushMessage{
+			DeviceToken: registration.ProviderClientID,
+			RequestID:   util.UUIDToString(claimed.ID),
+			Title:       title,
+			Body:        body,
+			ClickURL:    clickURL,
+			CollapseID:  mobilePushCollapseIDForIssue(eventPayload.IssueID),
+		}); err != nil {
+			if errors.Is(err, notifyutil.ErrAPNSDeviceTokenInvalid) {
+				if disableErr := queries.DisableMobilePushRegistration(ctx, db.DisableMobilePushRegistrationParams{
+					UserID:         registration.UserID,
+					InstallationID: registration.InstallationID,
+					Provider:       registration.Provider,
+				}); disableErr != nil {
+					slog.Warn("notification dispatcher: failed to disable invalid apns registration",
+						"mobile_push_registration_id", util.UUIDToString(registration.ID),
+						"error", disableErr,
+					)
+				}
+				cancelMobilePushDelivery(ctx, queries, claimed, err.Error())
+				return
+			}
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
+			return
+		}
+	default:
+		cancelMobilePushDelivery(ctx, queries, claimed, "unsupported mobile push registration")
 		return
 	}
 
@@ -652,6 +711,42 @@ func mobilePushNotifyIDForIssue(issueID string) *int {
 	_, _ = h.Write(issueUUID.Bytes[:])
 	notifyID := int(h.Sum32() & 0x7fffffff)
 	return &notifyID
+}
+
+func mobilePushCollapseIDForIssue(issueID string) string {
+	issueUUID, err := util.ParseUUID(strings.TrimSpace(issueID))
+	if err != nil {
+		return ""
+	}
+	return "issue-" + util.UUIDToString(issueUUID)
+}
+
+func mobilePushDeliveryProvider(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) string {
+	var payload mobilePushDeliveryPayload
+	if err := json.Unmarshal(delivery.PayloadSnapshot, &payload); err == nil {
+		if provider := strings.ToLower(strings.TrimSpace(payload.Provider)); provider != "" {
+			return provider
+		}
+	}
+	if delivery.TargetType != "mobile_push_registration" || !delivery.TargetID.Valid {
+		return ""
+	}
+	registration, err := queries.GetMobilePushRegistration(ctx, delivery.TargetID)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(registration.Provider))
+}
+
+func mobilePushProviderReady(provider string, cfg mobilePushDispatchConfig) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "getui":
+		return cfg.GetuiReady
+	case "apns":
+		return cfg.APNSReady
+	default:
+		return cfg.GetuiReady || cfg.APNSReady
+	}
 }
 
 func loadDingTalkDispatchContext(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) (dingtalkDeliveryPayload, notificationEventPayload, db.ExternalAccountBinding, error) {

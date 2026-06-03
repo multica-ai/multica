@@ -754,9 +754,11 @@ func recordMobilePushDeliveries(
 	}
 
 	registrations, err := queries.ListEnabledMobilePushRegistrationsByUser(ctx, db.ListEnabledMobilePushRegistrationsByUserParams{
-		UserID:   parseUUID(recipientID),
-		Provider: "getui",
-		Platform: "android",
+		UserID:     parseUUID(recipientID),
+		Provider:   "getui",
+		Platform:   "android",
+		Provider_2: "apns",
+		Platform_2: "ios",
 	})
 	if err != nil {
 		slog.Error("failed to load mobile push registrations",

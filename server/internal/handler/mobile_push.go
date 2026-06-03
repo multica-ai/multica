@@ -82,8 +82,14 @@ func validateMobilePushRegistrationRequest(req UpsertMobilePushRegistrationReque
 	if req.Platform != "android" && req.Platform != "ios" {
 		return req, "platform must be android or ios"
 	}
-	if req.Provider != "getui" {
+	if req.Provider != "getui" && req.Provider != "apns" {
 		return req, "unsupported mobile push provider"
+	}
+	if req.Platform == "android" && req.Provider != "getui" {
+		return req, "unsupported mobile push provider for platform"
+	}
+	if req.Platform == "ios" && req.Provider != "apns" {
+		return req, "unsupported mobile push provider for platform"
 	}
 	if req.ProviderClientID == "" {
 		return req, "provider_client_id is required"
@@ -149,7 +155,7 @@ func (h *Handler) DisableMyMobilePushRegistration(w http.ResponseWriter, r *http
 	}
 
 	provider := normalizeMobilePushProvider(r.URL.Query().Get("provider"))
-	if provider != "getui" {
+	if provider != "getui" && provider != "apns" {
 		writeError(w, http.StatusBadRequest, "unsupported mobile push provider")
 		return
 	}

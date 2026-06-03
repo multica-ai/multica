@@ -43,7 +43,9 @@ WHERE id = $1;
 SELECT *
 FROM mobile_push_registration
 WHERE user_id = $1
-  AND provider = $2
-  AND platform = $3
   AND enabled = true
+  AND (
+    (provider = $2 AND platform = $3)
+    OR (provider = $4 AND platform = $5)
+  )
 ORDER BY last_seen_at DESC;

@@ -38,9 +38,9 @@ import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
 import { WikiDetailScreen, WikiScreen } from "../screens/wiki/wiki-screen";
 import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
 import {
-  addGetuiNotificationUrlListener,
-  consumeGetuiPendingNotificationUrl,
-} from "../push/getui-push";
+  addMobilePushNotificationUrlListener,
+  consumeMobilePushPendingNotificationUrl,
+} from "../push/mobile-push-notifications";
 import { colors, spacing } from "../theme/tokens";
 import { linking } from "./linking";
 import { WorkspaceContext } from "./workspace-context";
@@ -142,10 +142,10 @@ function AuthenticatedNavigator() {
       navigateToNotificationUrl(navigationRef.current, url);
     }
 
-    void consumeGetuiPendingNotificationUrl().then((url) => {
+    void consumeMobilePushPendingNotificationUrl().then((url) => {
       if (url) openNotificationUrl(url);
     });
-    return addGetuiNotificationUrlListener(openNotificationUrl);
+    return addMobilePushNotificationUrlListener(openNotificationUrl);
   }, []);
 
   if (isLoading) return <LoadingState />;

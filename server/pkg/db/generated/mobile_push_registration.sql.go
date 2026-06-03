@@ -93,20 +93,30 @@ const listEnabledMobilePushRegistrationsByUser = `-- name: ListEnabledMobilePush
 SELECT id, user_id, installation_id, platform, provider, provider_client_id, app_version, enabled, last_seen_at, created_at, updated_at
 FROM mobile_push_registration
 WHERE user_id = $1
-  AND provider = $2
-  AND platform = $3
   AND enabled = true
+  AND (
+    (provider = $2 AND platform = $3)
+    OR (provider = $4 AND platform = $5)
+  )
 ORDER BY last_seen_at DESC
 `
 
 type ListEnabledMobilePushRegistrationsByUserParams struct {
-	UserID   pgtype.UUID `json:"user_id"`
-	Provider string      `json:"provider"`
-	Platform string      `json:"platform"`
+	UserID     pgtype.UUID `json:"user_id"`
+	Provider   string      `json:"provider"`
+	Platform   string      `json:"platform"`
+	Provider_2 string      `json:"provider_2"`
+	Platform_2 string      `json:"platform_2"`
 }
 
 func (q *Queries) ListEnabledMobilePushRegistrationsByUser(ctx context.Context, arg ListEnabledMobilePushRegistrationsByUserParams) ([]MobilePushRegistration, error) {
-	rows, err := q.db.Query(ctx, listEnabledMobilePushRegistrationsByUser, arg.UserID, arg.Provider, arg.Platform)
+	rows, err := q.db.Query(ctx, listEnabledMobilePushRegistrationsByUser,
+		arg.UserID,
+		arg.Provider,
+		arg.Platform,
+		arg.Provider_2,
+		arg.Platform_2,
+	)
 	if err != nil {
 		return nil, err
 	}

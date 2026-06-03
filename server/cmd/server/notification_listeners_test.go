@@ -1288,6 +1288,7 @@ func TestRecordMobilePushDeliveries(t *testing.T) {
 		expectedMobile int
 	}{
 		{name: "enabled android getui registration", platform: "android", provider: "getui", expectedMobile: 1},
+		{name: "enabled ios apns registration", platform: "ios", provider: "apns", expectedMobile: 1},
 		{name: "disabled registration", platform: "android", provider: "getui", disable: true, expectedMobile: 0},
 		{name: "non android registration", platform: "ios", provider: "getui", expectedMobile: 0},
 		{name: "non getui registration", platform: "android", provider: "apns", expectedMobile: 0},
@@ -1364,6 +1365,47 @@ func TestRecordMobilePushDeliveries(t *testing.T) {
 				t.Fatalf("expected %d mobile_push deliveries, got %d", tt.expectedMobile, mobileCount)
 			}
 		})
+	}
+}
+
+func TestRecordMobilePushDeliveries_CreatesGetuiAndAPNSTargets(t *testing.T) {
+	queries := db.New(testPool)
+	recipientEmail := "mobile-push-dual@multica.ai"
+	recipientID := createTestUser(t, recipientEmail)
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_delivery WHERE notification_event_id IN (SELECT id FROM notification_event WHERE issue_id = $1)`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_event WHERE issue_id = $1`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM mobile_push_registration WHERE user_id = $1`, recipientID)
+		cleanupTestIssue(t, issueID)
+		cleanupTestUser(t, recipientEmail)
+	})
+
+	commentID := "00000000-0000-0000-0000-151299000001"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", testUserID, "mobile push dual", "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	getuiRegistration := createMobilePushRegistrationForUser(t, recipientID, "dual-android", "android", "getui")
+	apnsRegistration := createMobilePushRegistrationForUser(t, recipientID, "dual-ios", "ios", "apns")
+	event := createNotificationEventForMobilePushTest(t, queries, recipientID, issueID, commentID, "mentioned")
+	payloadSnapshot := []byte(`{"type":"mentioned","title":"mobile push issue","body":"mobile push body"}`)
+
+	recordMobilePushDeliveries(context.Background(), queries, recipientID, event, payloadSnapshot)
+
+	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(event.ID))
+	targets := map[string]bool{}
+	for _, delivery := range deliveries {
+		if delivery.Channel == "mobile_push" && delivery.TargetID.Valid {
+			targets[util.UUIDToString(delivery.TargetID)] = true
+		}
+	}
+	if len(targets) != 2 || !targets[util.UUIDToString(getuiRegistration.ID)] || !targets[util.UUIDToString(apnsRegistration.ID)] {
+		t.Fatalf("expected getui and apns targets, got %#v", targets)
 	}
 }
 

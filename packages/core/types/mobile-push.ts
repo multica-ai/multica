@@ -1,5 +1,5 @@
 export type MobilePushPlatform = "android" | "ios";
-export type MobilePushProvider = "getui";
+export type MobilePushProvider = "getui" | "apns";
 
 export interface UpsertMobilePushRegistrationRequest {
   installation_id: string;
