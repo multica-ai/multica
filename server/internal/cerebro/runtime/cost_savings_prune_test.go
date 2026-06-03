@@ -130,8 +130,8 @@ func TestMeasureRun_PruneOnWritesZeroRowWhenNothingPruned(t *testing.T) {
 }
 
 // FIR-2404: prune_tool_results does not overlap with snapshot_prompt or
-// bundled_read. snapshot/bundled measure inlined context (input tokens saved
-// at start), prune measures
+// bundled_read. snapshot/bundled measure inlined context (context_tokens),
+// prune measures
 // PrunedToolResultChars/ToolResultChars (transcript characters dropped
 // mid-run). Different facts, different metrics, different lifecycle stage. A
 // single gateway run can be measured by all three simultaneously without any
@@ -147,6 +147,7 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 	}
 	facts := CostSavingRunFacts{
 		InlinedContextReads:          3,
+		InlinedContextChars:          12_000,
 		ToolResultChars:              400,
 		PrunedContextCharsCompounded: 200,
 	}
@@ -159,12 +160,9 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 		t.Fatalf("expected snapshot+bundled+prune all measured, got %+v", got)
 	}
 
-	// snapshot + bundled live on tokens; prune lives on context_tokens.
-	// Same metric across snapshot/bundled is the existing double-count situation
-	// FIR-2391 addressed at the daemon claim handler — gateway runs that opt
-	// into both still produce both rows here, and that is independent of prune.
-	if snap.Metric != costmeasure.MetricTokens || bun.Metric != costmeasure.MetricTokens {
-		t.Errorf("snapshot/bundled must measure tokens; got snap=%q bundled=%q", snap.Metric, bun.Metric)
+	// All three score saved context in context_tokens on the dashboard (FIR-2572).
+	if snap.Metric != metricContextTokens || bun.Metric != metricContextTokens {
+		t.Errorf("snapshot/bundled must measure context_tokens; got snap=%q bundled=%q", snap.Metric, bun.Metric)
 	}
 	if prune.Metric != metricContextTokens {
 		t.Errorf("prune must measure context_tokens, got %q (would imply overlap with snapshot/bundled)", prune.Metric)
@@ -178,14 +176,13 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 		t.Errorf("prune baseline/effective = %d/%d, want 50/0 (no contamination from InlinedContextReads)", prune.Baseline, prune.Effective)
 	}
 
-	// And snapshot/bundled must NOT see ToolResultChars — token estimates are
-	// independent of prune's tool-result surface.
-	snapBaseline, _ := costmeasure.SnapshotTokensEstimate(0)
-	bunBaseline, bunEffective := costmeasure.BundledTokensEstimate()
-	if snap.Baseline != snapBaseline || snap.Effective != 0 {
-		t.Errorf("snapshot baseline/effective = %d/%d, want %d/0", snap.Baseline, snap.Effective, snapBaseline)
+	// And snapshot/bundled must NOT see ToolResultChars.
+	wantSnap := snapshotSavedContextTokens(facts)
+	wantBun := bundledSavedContextTokens(facts.InlinedContextChars, facts)
+	if snap.Baseline != wantSnap || snap.Effective != 0 {
+		t.Errorf("snapshot baseline/effective = %d/%d, want %d/0", snap.Baseline, snap.Effective, wantSnap)
 	}
-	if bun.Baseline != bunBaseline || bun.Effective != bunEffective {
-		t.Errorf("bundled baseline/effective = %d/%d, want %d/%d", bun.Baseline, bun.Effective, bunBaseline, bunEffective)
+	if bun.Baseline != wantBun || bun.Effective != 0 {
+		t.Errorf("bundled baseline/effective = %d/%d, want %d/0", bun.Baseline, bun.Effective, wantBun)
 	}
 }

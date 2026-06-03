@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/pricing"
@@ -44,6 +43,12 @@ const (
 // context_tokens as an estimate, never a billing figure.
 const approxCharsPerToken = 4
 
+// estimatedTokensPerAvoidedPlatformRead is the conservative context-token
+// estimate for one avoided multica read when we know a read was removed but
+// not the payload size (daemon bundled shadow, gateway without char counts).
+// Keeps snapshot/bundled comparable to prune's context_tokens on the dashboard.
+const estimatedTokensPerAvoidedPlatformRead = 8000
+
 // promptTokensForRun is the denominator used to calibrate chars→tokens for a
 // single run: the provider's reported prompt tokens. Cache-read and cache-write
 // tokens are prompt tokens too (they correspond to characters that WERE sent in
@@ -74,6 +79,50 @@ func savedContextTokens(prunedChars int64, f CostSavingRunFacts) int64 {
 	return prunedChars / approxCharsPerToken
 }
 
+// estimatedContextTokens converts an inlined/avoided character count into saved
+// context tokens, preferring this run's calibrated chars/token ratio when the
+// gateway reported prompt usage (same helper as prune).
+func estimatedContextTokens(chars int64, f CostSavingRunFacts) int64 {
+	if chars <= 0 {
+		return 0
+	}
+	return savedContextTokens(chars, f)
+}
+
+// snapshotSavedContextTokens is the context the snapshot would have forced the
+// agent to pull in via separate platform reads.
+func snapshotSavedContextTokens(f CostSavingRunFacts) int64 {
+	if f.InlinedContextChars > 0 {
+		return estimatedContextTokens(f.InlinedContextChars, f)
+	}
+	if f.InlinedContextReads > 0 {
+		return int64(f.InlinedContextReads) * estimatedTokensPerAvoidedPlatformRead
+	}
+	return 0
+}
+
+// bundledSavedContextTokens is the context that separate reads would have
+// re-fetched compared to one bundled call carrying the same payload.
+func bundledSavedContextTokens(payloadChars int64, f CostSavingRunFacts) int64 {
+	if payloadChars > 0 {
+		// Four separate calls would each carry roughly a quarter of the bundle on
+		// average; one call carries it once → (baseline-1) × per-call payload.
+		perCall := payloadChars / bundledReadBaselineCalls
+		if perCall <= 0 {
+			perCall = payloadChars
+		}
+		avoided := perCall * (bundledReadBaselineCalls - 1)
+		return estimatedContextTokens(avoided, f)
+	}
+	if f.InlinedContextReads > 1 {
+		return int64(f.InlinedContextReads-1) * estimatedTokensPerAvoidedPlatformRead
+	}
+	return 0
+}
+
+// bundledReadBaselineCalls mirrors handler.bundledReadBaseline (4 separate reads).
+const bundledReadBaselineCalls = 4
+
 // CostSavingRunFacts is everything measured about a single completed run that a
 // cost saving can be scored against. All fields are real values observed during
 // the run — nothing here is a fixed guess.
@@ -91,8 +140,11 @@ type CostSavingRunFacts struct {
 	// comment, chat history) the server inlined into the start prompt this run —
 	// i.e. reads a daemon agent would otherwise have made itself.
 	InlinedContextReads int
-	// InlinedContextChars is the character count of inlined issue/thread context
-	// when known (0 → typical token estimate). FIR-2786.
+	// InlinedContextChars is the character volume of issue/thread context the
+	// runtime inlined into the start prompt (gateway) or snapshot block (daemon).
+	// Used to score snapshot_prompt / bundled_read in context_tokens so all four
+	// savings show a comparable "saved context" figure on the dashboard (FIR-2572).
+	// Also used by the costmeasure package for typical-token estimates. FIR-2786.
 	InlinedContextChars int64
 	// ToolResultChars is the total characters of tool-result content carried in
 	// the run transcript — the surface that prune_tool_results targets. Used as
@@ -209,28 +261,27 @@ func measureRun(modes map[string]string, f CostSavingRunFacts, cheapModel string
 		switch key {
 		case savingSnapshotPrompt:
 			// Putting the issue + thread in the start prompt removes the per-run
-			// reads the agent would otherwise make. Baseline = input tokens those
-			// payloads would have added; effective = 0 (none left to fetch).
-			if f.InlinedContextReads <= 0 {
+			// reads the agent would otherwise make. Score in context_tokens so the
+			// dashboard shows saved context like prune (FIR-2572).
+			savedTokens := snapshotSavedContextTokens(f)
+			if savedTokens <= 0 {
 				continue
 			}
-			baseline, effective := costmeasure.SnapshotTokensEstimate(int(f.InlinedContextChars))
 			m := base
-			m.Metric, m.Baseline, m.Effective = costmeasure.MetricTokens, baseline, effective
-			m.SavedCents = costmeasure.TokenSavingCentsAtReference(baseline - effective)
+			m.Metric, m.Baseline, m.Effective = metricContextTokens, savedTokens, 0
+			m.SavedCents = tokenSavingCents(f.EffectiveModel, f.RequestedModel, savedTokens)
 			out = append(out, m)
 
 		case savingBundledRead:
-			// Bundling collapses separate context reads into one call. Baseline =
-			// tokens from the separate payloads; effective = tokens from the
-			// single bundled response.
-			if f.InlinedContextReads <= 1 {
+			// Bundling collapses separate context reads into one call. Score the
+			// avoided re-fetched context in tokens (FIR-2572).
+			savedTokens := bundledSavedContextTokens(f.InlinedContextChars, f)
+			if savedTokens <= 0 {
 				continue
 			}
-			baseline, effective := costmeasure.BundledTokensEstimate()
 			m := base
-			m.Metric, m.Baseline, m.Effective = costmeasure.MetricTokens, baseline, effective
-			m.SavedCents = costmeasure.TokenSavingCentsAtReference(baseline - effective)
+			m.Metric, m.Baseline, m.Effective = metricContextTokens, savedTokens, 0
+			m.SavedCents = tokenSavingCents(f.EffectiveModel, f.RequestedModel, savedTokens)
 			out = append(out, m)
 
 		case savingModelRouting:

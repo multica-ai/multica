@@ -370,6 +370,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		Usage:                        pricing.Usage{InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens, CacheReadTokens: completion.Usage.CacheReadTokens, CacheWriteTokens: completion.Usage.CacheWriteTokens},
 		ActualCostCents:              completionCostCents(completion),
 		InlinedContextReads:          plan.inlinedContextReads,
+		InlinedContextChars:          gatewayInlinedContextChars(messages),
 		ToolResultChars:              completion.ToolResultChars,
 		PrunedToolResultChars:        completion.PrunedToolResultChars,
 		PrunedContextCharsCompounded: completion.PrunedContextCharsCompounded,
@@ -1393,6 +1394,19 @@ func buildGatewayIssueMessages(agent db.Agent, issue db.Issue, comments []db.Com
 		}
 	}
 	return out
+}
+
+// gatewayInlinedContextChars sums non-system message content the gateway
+// inlined so snapshot/bundled savings can score context_tokens (FIR-2572).
+func gatewayInlinedContextChars(messages []GatewayMessage) int64 {
+	var n int64
+	for _, m := range messages {
+		if m.Role == "system" {
+			continue
+		}
+		n += int64(len(m.Content))
+	}
+	return n
 }
 
 func formatIssueOpening(issue db.Issue) string {
