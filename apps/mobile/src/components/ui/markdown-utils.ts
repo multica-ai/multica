@@ -2,6 +2,10 @@ import {
   FILE_CARD_URL_PATTERN,
   isAllowedFileCardHref,
 } from "@multica/ui/markdown/file-cards";
+export {
+  parseMobileIssueLink,
+  type MobileIssueLinkTarget,
+} from "../../navigation/issue-links";
 
 const FILE_CARD_LINE_RE = new RegExp(
   `^!file\\[([^\\]]*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
@@ -20,12 +24,6 @@ const MOBILE_FILE_CARD_RE =
 export type MobileFileCard = {
   filename: string;
   href: string;
-};
-
-export type MobileIssueLinkTarget = {
-  commentId?: string;
-  issueId: string;
-  workspaceSlug: string;
 };
 
 export function preprocessMobileMarkdown(content: string): string {
@@ -108,41 +106,6 @@ export function getIssueMentionId(href: string): string | null {
   } catch {
     return match[1];
   }
-}
-
-export function parseMobileIssueLink(
-  href: string,
-  allowedBaseUrls: readonly (string | undefined)[],
-): MobileIssueLinkTarget | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(href);
-  } catch {
-    return null;
-  }
-
-  if (!/^https?:$/i.test(parsed.protocol)) return null;
-
-  const allowedOrigins = new Set<string>();
-  for (const baseUrl of allowedBaseUrls) {
-    if (!baseUrl) continue;
-    try {
-      allowedOrigins.add(new URL(baseUrl).origin);
-    } catch {
-      // Ignore invalid runtime config values.
-    }
-  }
-  if (!allowedOrigins.has(parsed.origin)) return null;
-
-  const parts = parsed.pathname.split("/").filter(Boolean);
-  if (parts.length !== 3 || parts[1] !== "issues") return null;
-
-  const workspaceSlug = safeDecodeURIComponent(parts[0] ?? "");
-  const issueId = safeDecodeURIComponent(parts[2] ?? "");
-  if (!workspaceSlug || !issueId) return null;
-
-  const commentId = parsed.searchParams.get("comment")?.trim() || undefined;
-  return { workspaceSlug, issueId, commentId };
 }
 
 export function isMentionHref(href: string): boolean {
@@ -245,12 +208,4 @@ function unescapeAttr(value: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, "&");
-}
-
-function safeDecodeURIComponent(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }
