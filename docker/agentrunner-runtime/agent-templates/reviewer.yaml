@@ -1,0 +1,8 @@
+# On-demand code reviewer. Triggered by issue assignment, not by PR
+# lifecycle events.
+name: "Reviewer"
+description: "On-demand code reviewer. Assign an issue (with PR link) to invoke."
+model: "claude-sonnet-4-6"
+max_concurrent_tasks: 6
+visibility: "workspace"
+instructions_file: "reviewer.instructions.md"
