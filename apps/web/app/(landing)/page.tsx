@@ -1,29 +1,12 @@
-import type { Metadata } from "next";
-import { MulticaLanding } from "@/features/landing/components/multica-landing";
-import { RedirectIfAuthenticated } from "@/features/landing/components/redirect-if-authenticated";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: {
-    absolute: "Multica — Project Management for Human + Agent Teams",
-  },
-  description:
-    "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
-  openGraph: {
-    title: "Multica — Project Management for Human + Agent Teams",
-    description:
-      "Manage your human + agent workforce in one place.",
-    url: "/",
-  },
-  alternates: {
-    canonical: "/",
-  },
-};
-
-export default function LandingPage() {
-  return (
-    <>
-      <RedirectIfAuthenticated />
-      <MulticaLanding />
-    </>
-  );
+/**
+ * 3J Tracker root redirect.
+ *
+ * The upstream Multica marketing landing page is replaced with a direct
+ * redirect to /login.  RedirectIfAuthenticated lives on the login page itself,
+ * so authenticated users are forwarded to their workspace automatically.
+ */
+export default function RootPage() {
+  redirect("/login");
 }

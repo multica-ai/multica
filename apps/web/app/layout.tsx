@@ -60,26 +60,26 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.multica.ai"),
+  metadataBase: new URL("https://tracker-v1.3jtech.app"),
   title: {
-    default: "Multica — Project Management for Human + Agent Teams",
-    template: "%s | Multica",
+    default: "3J Tracker",
+    template: "%s | 3J Tracker",
   },
   description:
-    "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
+    "3J Technologies internal project tracker — assign tasks, track progress, manage your team.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     shortcut: ["/favicon.svg"],
   },
   openGraph: {
     type: "website",
-    siteName: "Multica",
+    siteName: "3J Tracker",
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    site: "@multica_hq",
-    creator: "@multica_hq",
+    site: "@3jtechnologies",
+    creator: "@3jtechnologies",
   },
   alternates: {
     canonical: "/",
