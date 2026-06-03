@@ -453,6 +453,10 @@
       "gate": "via:POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/"
     },
     {
+      "id": "POST /api/cerebro/projects/{projectID}/sprint-sweep",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "POST /api/cerebro/projects/{projectID}/sprints/",
       "gate": "via:POST /api/cerebro/projects/{projectID}/sprints/"
     },

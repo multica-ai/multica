@@ -604,6 +604,7 @@ var catalog = []Capability{
 			"PUT /api/cerebro/projects/{projectID}/sprint-settings/",
 			"DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
 			"POST /api/cerebro/projects/{projectID}/sprints/",
+			"POST /api/cerebro/projects/{projectID}/sprint-sweep",
 			"POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
 			"PUT /api/cerebro/sprint-recurring-tasks/{id}/",
 			"DELETE /api/cerebro/sprint-recurring-tasks/{id}/",

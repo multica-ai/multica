@@ -269,6 +269,73 @@ func TestSweeperTick_RunsWhenFlagOn(t *testing.T) {
 	}
 }
 
+// TestSweeperSweepProject_ReportsCountersAndHonorsFlag covers the manual
+// sweep trigger added for FIR-2699 QA. It proves:
+//   1. The endpoint reports flag_enabled=false and does nothing when the
+//      workspace-level cerebro_sprints flag is OFF.
+//   2. With the flag ON + an active sprint within the lead-days window,
+//      SweepProject creates the next sprint, clones a recurring task, and
+//      reports both counts in the returned ProjectSweepResult.
+func TestSweeperSweepProject_ReportsCountersAndHonorsFlag(t *testing.T) {
+	if sweeperTestPool == nil {
+		t.Skip("no test database")
+	}
+	ctx := context.Background()
+	resetSweeperState(t, ctx)
+
+	q := cerebrodb.New(sweeperTestPool)
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	seedSettingsWithLeadDays(t, ctx, 2)
+	seedActiveSprintEndingOn(t, ctx, now)
+	if _, err := q.CreateCerebroSprintRecurringTask(ctx, cerebrodb.CreateCerebroSprintRecurringTaskParams{
+		WorkspaceID:  sweeperTestWorkspaceID,
+		ProjectID:    sweeperTestProjectID,
+		CadenceUnit:  UnitWeek,
+		CadenceCount: 2,
+		Title:        "Sweep-endpoint recurring",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatalf("create recurring task: %v", err)
+	}
+
+	sw := newSweeperForTest(t, now)
+
+	// Flag OFF: SweepProject returns a result with FlagEnabled=false and
+	// touches nothing.
+	off, err := sw.SweepProject(ctx, sweeperTestProjectID)
+	if err != nil {
+		t.Fatalf("sweep with flag off: %v", err)
+	}
+	if off.FlagEnabled {
+		t.Fatalf("flag_enabled = true with no override row, want false")
+	}
+	if off.NextSprintCreated.Valid || off.RecurringTasksCloned != 0 {
+		t.Fatalf("flag off must produce no changes, got %+v", off)
+	}
+
+	// Flag ON: SweepProject runs the full pipeline and reports counts.
+	if err := q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: sweeperTestWorkspaceID,
+		FlagKey:     "cerebro_sprints",
+		Enabled:     true,
+	}); err != nil {
+		t.Fatalf("enable flag: %v", err)
+	}
+	on, err := sw.SweepProject(ctx, sweeperTestProjectID)
+	if err != nil {
+		t.Fatalf("sweep with flag on: %v", err)
+	}
+	if !on.FlagEnabled {
+		t.Fatalf("flag_enabled = false after workspace override, want true")
+	}
+	if !on.NextSprintCreated.Valid {
+		t.Fatalf("next_sprint_created must be set when an active sprint is in the lead-days window, got %+v", on)
+	}
+	if on.RecurringTasksCloned != 1 {
+		t.Fatalf("recurring_tasks_cloned = %d, want 1", on.RecurringTasksCloned)
+	}
+}
+
 // TestSweeperTick_ClonesRecurringTaskWithWorkspaceOwnerCreator is the second
 // FIR-2699 regression. Before the fix, cloning a recurring task created an
 // issue with creator_id = '00000000-…' which violates issue.creator_id NOT

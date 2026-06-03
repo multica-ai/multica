@@ -400,7 +400,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler instance; FIR-2049 pass queries so avatar reads gateway creds from workspace settings
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler instance
-	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries)
+	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
 
 	r := chi.NewRouter()
 
@@ -1416,6 +1416,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", cerebroSprintsHandler.ListSprints)
 				r.Post("/", cerebroSprintsHandler.CreateSprint)
 			})
+			// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2699 manual sprint sweep trigger for ops + QA.
+			r.Post("/api/cerebro/projects/{projectID}/sprint-sweep", cerebroSprintsHandler.SweepProject)
 			r.Route("/api/cerebro/projects/{projectID}/sprint-recurring-tasks", func(r chi.Router) {
 				r.Get("/", cerebroSprintsHandler.ListRecurringTasks)
 				r.Post("/", cerebroSprintsHandler.CreateRecurringTask)
