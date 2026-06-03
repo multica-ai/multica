@@ -2328,6 +2328,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 
+	var accountTokens int64 // CEREBRO-PATCH(handler-daemon-account-token-usage): derive account load from authoritative task usage reports.
 	for _, u := range req.Usage {
 		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
 			TaskID:           parseUUID(taskID),
@@ -2343,14 +2344,35 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 		}
 
+		accountTokens += u.InputTokens + u.OutputTokens
+
 		// Per-(agent, workspace) live spend rollup. User scope is not yet
 		// wired — task initiator attribution is a separate change. Failures
 		// here are warnings, not 4xx, so the raw token usage above still
 		// lands even if the rollup hits a constraint or DB hiccup.
 		h.recordBudgetSpend(r.Context(), workspaceID, task, u)
 	}
+	h.recordCerebroAccountTokenUsage(r.Context(), task, accountTokens) // CEREBRO-PATCH(handler-daemon-account-token-usage): keep account rolling windows in lockstep with task usage.
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) recordCerebroAccountTokenUsage(ctx context.Context, task db.AgentTaskQueue, tokens int64) { // CEREBRO-PATCH(handler-daemon-account-token-usage): server-side account token events for JEH-1365.
+	if tokens <= 0 || h.DB == nil {
+		return
+	}
+	if _, err := h.DB.Exec(ctx, `
+		INSERT INTO cerebro_account_token_usage (account_id, workspace_id, tokens)
+		SELECT ar.current_account_id, ar.workspace_id, $2
+		FROM agent_runtime ar
+		WHERE ar.id = $1
+		  AND ar.current_account_id IS NOT NULL
+	`, task.RuntimeID, tokens); err != nil {
+		slog.Warn("record cerebro account token usage failed",
+			"runtime_id", uuidToString(task.RuntimeID),
+			"tokens", tokens,
+			"error", err)
+	}
 }
 
 // recordBudgetSpend converts a single (model, usage) report into cents and

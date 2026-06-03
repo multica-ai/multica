@@ -133,6 +133,90 @@ func TestReportTaskUsage_RollsUpBudgetState(t *testing.T) {
 	}
 }
 
+func TestReportTaskUsage_RecordsCerebroAccountTokens(t *testing.T) { // CEREBRO-PATCH(handler-daemon-account-token-usage): regression for JEH-1365 prod QA failure.
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var accountID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO cerebro_account (workspace_id, provider, login_identity)
+		VALUES ($1, 'claude', 'usage-account-tokens@firtal.dk')
+		RETURNING id
+	`, testWorkspaceID).Scan(&accountID); err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET current_account_id = $1 WHERE id = $2`, accountID, testRuntimeID); err != nil {
+		t.Fatalf("bind runtime account: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
+		VALUES ($1, 'account token report test', 'todo', 'none', 'member', $2, 99003, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'running', 0)
+		RETURNING id
+	`, agentID, testRuntimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM budget_state WHERE workspace_id = $1 AND scope_id IN ($2, $1)`, testWorkspaceID, agentID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `UPDATE agent_runtime SET current_account_id = NULL WHERE id = $1`, testRuntimeID)
+		testPool.Exec(ctx, `DELETE FROM cerebro_account_token_usage WHERE account_id = $1`, accountID)
+		testPool.Exec(ctx, `DELETE FROM cerebro_account WHERE id = $1`, accountID)
+	})
+
+	body := map[string]any{
+		"usage": []map[string]any{
+			{
+				"provider":      "claude",
+				"model":         "claude-sonnet-4-6",
+				"input_tokens":  1488,
+				"output_tokens": 23676,
+			},
+		},
+	}
+	req := newRequest("POST", "/api/daemon/tasks/"+taskID+"/usage", body)
+	req = req.WithContext(middleware.WithDaemonContext(req.Context(), testWorkspaceID, "account-token-test-daemon"))
+	req = withURLParam(req, "taskId", taskID)
+	w := httptest.NewRecorder()
+	testHandler.ReportTaskUsage(w, req)
+	if w.Code != 200 {
+		t.Fatalf("ReportTaskUsage: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var got int64
+	if err := testPool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(tokens), 0)
+		FROM cerebro_account_token_usage
+		WHERE account_id = $1
+	`, accountID).Scan(&got); err != nil {
+		t.Fatalf("read account token usage: %v", err)
+	}
+	if got != 25164 {
+		t.Fatalf("account token usage = %d, want 25164", got)
+	}
+}
+
 // TestReportTaskUsage_UnknownModelStillRollsUp ensures the worst-case Opus
 // fallback is applied (and budget_state still increments) when an unknown
 // model name flows through. Critical safety property: a misnamed model must
