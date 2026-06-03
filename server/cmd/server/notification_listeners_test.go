@@ -1194,6 +1194,12 @@ func createNotificationBindingForUser(t *testing.T, userID, provider string) str
 			user_id, provider, external_user_id, display_name, status, metadata
 		)
 		VALUES ($1, $2, $3, $4, 'active', '{}'::jsonb)
+		ON CONFLICT (user_id, provider)
+		DO UPDATE SET
+			external_user_id = EXCLUDED.external_user_id,
+			display_name = EXCLUDED.display_name,
+			status = EXCLUDED.status,
+			metadata = EXCLUDED.metadata
 		RETURNING id
 	`, userID, provider, provider+"-external-user", "Bound "+provider).Scan(&bindingID); err != nil {
 		t.Fatalf("createNotificationBindingForUser: %v", err)
@@ -2519,6 +2525,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 	allEvents := notificationEventsForRecipient(t, queries, recipientID)
 	weixinDeliveryCount := 0
 	for _, ne := range allEvents {
+		if util.UUIDToString(ne.IssueID) != issueID {
+			continue
+		}
 		deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
 		for _, d := range deliveries {
 			if d.Channel == "openclaw_weixin" {
@@ -2532,8 +2541,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 }
 
 // TestNotification_OpenclawWeixinDedup_TaskFailed verifies that task_failed subscriber
-// notification and the explicit IM delivery share the same comment_id, resulting in
-// only one openclaw_weixin delivery when the recipient is a subscriber.
+// notification and the explicit IM delivery still result in only one openclaw_weixin
+// delivery when the recipient is a subscriber.
 func TestNotification_OpenclawWeixinDedup_TaskFailed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
@@ -2553,7 +2562,8 @@ func TestNotification_OpenclawWeixinDedup_TaskFailed(t *testing.T) {
 	bindingID := createNotificationBindingForUser(t, testUserID, "openclaw_weixin")
 	enableNotificationPreferenceForUser(t, testUserID, "openclaw_weixin", "task_failed", bindingID)
 
-	// Insert a fake agent comment so lastAgentCommentID is found
+	// Insert a fake historical agent comment. The task event should not reuse it as
+	// a dedup anchor unless that comment was created by the current task run.
 	agentCommentID := "00000000-0000-0000-0000-de00de000002"
 	if _, err := testPool.Exec(context.Background(), `
 INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
@@ -2561,7 +2571,6 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 `, agentCommentID, issueID, testWorkspaceID, "agent", agentID, "agent result", "comment"); err != nil {
 		t.Fatalf("insert agent comment: %v", err)
 	}
-
 	bus.Publish(events.Event{
 		Type:        protocol.EventTaskFailed,
 		WorkspaceID: testWorkspaceID,
@@ -2585,6 +2594,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 	allEvents := notificationEventsForRecipient(t, queries, testUserID)
 	weixinDeliveryCount := 0
 	for _, ne := range allEvents {
+		if util.UUIDToString(ne.IssueID) != issueID {
+			continue
+		}
 		deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
 		for _, d := range deliveries {
 			if d.Channel == "openclaw_weixin" {
@@ -2594,5 +2606,113 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 	}
 	if weixinDeliveryCount != 1 {
 		t.Fatalf("expected exactly 1 openclaw_weixin delivery for task_failed (dedup), got %d", weixinDeliveryCount)
+	}
+}
+
+func TestNotification_OpenclawWeixinTaskCompletedIgnoresStaleAgentCommentDelivery(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id::text, runtime_id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	bindingID := createNotificationBindingForUser(t, testUserID, "openclaw_weixin")
+	enableNotificationPreferenceForUser(t, testUserID, "openclaw_weixin", "task_completed", bindingID)
+
+	staleAgentCommentID := "00000000-0000-0000-0000-de00de000003"
+	if _, err := testPool.Exec(context.Background(), `
+INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now() - interval '5 minutes')
+`, staleAgentCommentID, issueID, testWorkspaceID, "agent", agentID, "previous agent result", "comment"); err != nil {
+		t.Fatalf("insert stale agent comment: %v", err)
+	}
+
+	staleEvent, err := queries.CreateNotificationEvent(context.Background(), db.CreateNotificationEventParams{
+		WorkspaceID:     parseUUID(testWorkspaceID),
+		RecipientUserID: parseUUID(testUserID),
+		Type:            "task_completed",
+		Severity:        "info",
+		IssueID:         parseUUID(issueID),
+		CommentID:       parseUUID(staleAgentCommentID),
+		ActorType:       util.StrToText("agent"),
+		ActorID:         parseUUID(agentID),
+		Title:           "old task completed",
+		Body:            util.StrToText("old body"),
+		Link:            pgtype.Text{},
+		Details:         emptyDetails,
+	})
+	if err != nil {
+		t.Fatalf("CreateNotificationEvent stale: %v", err)
+	}
+	if _, err := queries.CreateNotificationDelivery(context.Background(), db.CreateNotificationDeliveryParams{
+		NotificationEventID: staleEvent.ID,
+		Channel:             "openclaw_weixin",
+		Status:              "sent",
+		AttemptCount:        1,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     emptyDetails,
+		SentAt:              pgtype.Timestamptz{},
+	}); err != nil {
+		t.Fatalf("CreateNotificationDelivery stale: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, started_at, completed_at, result)
+VALUES ($1, $2, $3, 'completed', now() - interval '1 minute', now(), '{"notification_summary":"fresh completion"}'::jsonb)
+RETURNING id::text
+`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskCompleted,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"task_id":  taskID,
+			"agent_id": agentID,
+			"issue_id": issueID,
+			"status":   "completed",
+		},
+	})
+
+	allEvents := notificationEventsForRecipient(t, queries, testUserID)
+	weixinDeliveryCount := 0
+	freshTaskCompletedWithComment := 0
+	for _, ne := range allEvents {
+		if util.UUIDToString(ne.IssueID) != issueID {
+			continue
+		}
+		deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
+		for _, d := range deliveries {
+			if d.Channel == "openclaw_weixin" {
+				weixinDeliveryCount++
+			}
+		}
+		if ne.Type == "task_completed" && ne.CommentID.Valid && util.UUIDToString(ne.CommentID) == staleAgentCommentID {
+			freshTaskCompletedWithComment++
+		}
+	}
+	if weixinDeliveryCount != 2 {
+		t.Fatalf("expected stale + fresh openclaw_weixin deliveries, got %d", weixinDeliveryCount)
+	}
+	if freshTaskCompletedWithComment != 1 {
+		t.Fatalf("expected only the stale event to use stale comment_id, got %d task_completed events with that comment_id", freshTaskCompletedWithComment)
 	}
 }

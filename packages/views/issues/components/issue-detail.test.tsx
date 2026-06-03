@@ -1571,5 +1571,72 @@ describe("IssueDetail (shared)", () => {
       );
     });
   });
+
+  describe("browser tab title", () => {
+    it("sets document.title to identifier and title when issue loads", async () => {
+      document.title = "Multica";
+      renderIssueDetail();
+
+      await waitFor(() => {
+        expect(document.title).toBe("TES-1 Implement authentication | Multica");
+      });
+    });
+
+    it("restores document.title to Multica on unmount", async () => {
+      document.title = "Some old title";
+      const { unmount } = renderIssueDetail();
+
+      await waitFor(() => {
+        expect(document.title).toBe("TES-1 Implement authentication | Multica");
+      });
+
+      unmount();
+
+      expect(document.title).toBe("Multica");
+    });
+
+    it("falls back gracefully when identifier is empty", async () => {
+      document.title = "Multica";
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        identifier: "",
+      });
+
+      renderIssueDetail();
+
+      await waitFor(() => {
+        expect(document.title).toBe("Implement authentication | Multica");
+      });
+    });
+
+    it("falls back gracefully when title is empty", async () => {
+      document.title = "Multica";
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        title: "",
+      });
+
+      renderIssueDetail();
+
+      await waitFor(() => {
+        expect(document.title).toBe("TES-1 | Multica");
+      });
+    });
+
+    it("falls back to Multica when both identifier and title are empty", async () => {
+      document.title = "Some old title";
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        identifier: "",
+        title: "",
+      });
+
+      renderIssueDetail();
+
+      await waitFor(() => {
+        expect(document.title).toBe("Multica");
+      });
+    });
+  });
 });
 });

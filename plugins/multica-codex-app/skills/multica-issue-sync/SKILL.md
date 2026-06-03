@@ -32,6 +32,14 @@ Use this skill when the user wants Codex App work recorded in a Multica issue.
 - `session_bind` creates a localrun issue comment thread with
   `comments_mode: "thread"`. Use that thread as the visible home for Codex App
   context.
+- When a Codex `session_id` is available, the helper normalizes
+  `session_bind` idempotency to that session instead of reusing an older
+  thread-level binding. If a binding response lacks `top_comment_id`, treat it
+  as unusable for visible hook sync and bind again with a current helper.
+- Automatic hook sync is isolated to the bound Codex chat session. The helper
+  only syncs `UserPromptSubmit` / `Stop` events whose hook `session_id` matches
+  the stored binding `codex_session_id`; it does not fall back to matching by
+  project folder or by the only local binding.
 - For normal progress noise, use `visibility: "timeline_only"`. For user
   prompts, proposed plans, and final results that should remain visible to
   issue readers, write them into the localrun thread.

@@ -802,6 +802,30 @@ func recordMobilePushDeliveries(
 	}
 }
 
+func latestAgentCommentForTask(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID string,
+	issueID string,
+	agentID string,
+	task db.AgentTaskQueue,
+	taskLoaded bool,
+) (string, string) {
+	if !taskLoaded || !task.StartedAt.Valid || issueID == "" || workspaceID == "" || agentID == "" {
+		return "", ""
+	}
+	comment, err := queries.GetLatestAgentCommentSince(ctx, db.GetLatestAgentCommentSinceParams{
+		IssueID:     parseUUID(issueID),
+		WorkspaceID: parseUUID(workspaceID),
+		AuthorID:    parseUUID(agentID),
+		CreatedAt:   task.StartedAt,
+	})
+	if err != nil {
+		return "", ""
+	}
+	return comment.Content, util.UUIDToString(comment.ID)
+}
+
 // parentBubbleNotifTypes is the allowlist of inbox notification types that
 // bubble up from a sub-issue to subscribers of its parent. Other event types
 // only notify subscribers of the sub-issue itself, to keep parent watchers'
@@ -1038,6 +1062,7 @@ func archiveStaleTaskFailedInbox(
 // If the issue has a parent and the notification type is in the bubble
 // allowlist, parent issue subscribers are also notified (deduplicated
 // against direct subscribers).
+// Returns the set of member IDs that were notified.
 func notifySubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -1053,14 +1078,14 @@ func notifySubscribers(
 	body string,
 	commentID string,
 	details []byte,
-) {
+) map[string]bool {
 	notified := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
 		notifType, severity, title, body, commentID, details)
 
 	// Only a small allowlist of event types bubbles to parent subscribers.
 	if !parentBubbleNotifTypes[notifType] {
-		return
+		return notified
 	}
 
 	// Also notify parent issue subscribers if this is a sub-issue.
@@ -1068,10 +1093,10 @@ func notifySubscribers(
 	if err != nil {
 		slog.Error("failed to get issue for parent notification",
 			"issue_id", issueID, "error", err)
-		return
+		return notified
 	}
 	if !issue.ParentIssueID.Valid {
-		return
+		return notified
 	}
 
 	// Merge already-notified IDs into exclude set for parent subscribers.
@@ -1086,9 +1111,13 @@ func notifySubscribers(
 	// Query subscribers from the parent issue, but the inbox item still
 	// points to the sub-issue so the user navigates to the actual change.
 	parentID := util.UUIDToString(issue.ParentIssueID)
-	notifyIssueSubscribers(ctx, queries, bus,
+	parentNotified := notifyIssueSubscribers(ctx, queries, bus,
 		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
 		notifType, severity, title, body, commentID, details)
+	for id := range parentNotified {
+		notified[id] = true
+	}
+	return notified
 }
 
 // notifyIssueSubscribers sends inbox notifications to subscribers of
@@ -1841,39 +1870,33 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
+		var task db.AgentTaskQueue
+		taskLoaded := false
+		if taskID != "" {
+			if loadedTask, err := queries.GetAgentTask(ctx, parseUUID(taskID)); err == nil {
+				task = loadedTask
+				taskLoaded = true
+			}
+		}
+
 		// Extract notification_summary: prefer event payload, fall back to task result
 		notificationSummary, _ := payload["notification_summary"].(string)
-		if notificationSummary == "" && taskID != "" {
-			if task, err := queries.GetAgentTask(ctx, parseUUID(taskID)); err == nil && len(task.Result) > 0 {
-				var taskResult map[string]any
-				if err := json.Unmarshal(task.Result, &taskResult); err == nil {
-					if s, ok := taskResult["notification_summary"].(string); ok {
-						notificationSummary = s
-					}
+		if notificationSummary == "" && taskLoaded && len(task.Result) > 0 {
+			var taskResult map[string]any
+			if err := json.Unmarshal(task.Result, &taskResult); err == nil {
+				if s, ok := taskResult["notification_summary"].(string); ok {
+					notificationSummary = s
 				}
 			}
 		}
 
-		// Get the last agent comment as notification body and record its ID
-		body := ""
-		lastAgentCommentID := ""
-		comments, err := queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
-			IssueID:     parseUUID(issueID),
-			WorkspaceID: parseUUID(e.WorkspaceID),
-			Limit:       100,
-		})
-		if err == nil {
-			for i := len(comments) - 1; i >= 0; i-- {
-				if comments[i].AuthorType == "agent" {
-					body = comments[i].Content
-					lastAgentCommentID = util.UUIDToString(comments[i].ID)
-					break
-				}
-			}
-		}
+		// Anchor task notifications only to comments created by this task run.
+		// Reusing the issue's historical last agent comment would make comment-level
+		// IM dedup suppress future task notifications indefinitely.
+		body, taskAgentCommentID := latestAgentCommentForTask(ctx, queries, e.WorkspaceID, issueID, agentID, task, taskLoaded)
 
 		// Build notification context with comment anchor when available
-		nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, lastAgentCommentID, "")
+		nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, taskAgentCommentID, "")
 
 		// If no explicit summary from task payload, extract from body
 		if notificationSummary == "" && body != "" {
@@ -1902,7 +1925,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			Type:            "task_completed",
 			Severity:        "info",
 			IssueID:         parseUUID(issueID),
-			CommentID:       optionalUUID(lastAgentCommentID),
+			CommentID:       optionalUUID(taskAgentCommentID),
 			ActorType:       util.StrToText("agent"),
 			ActorID:         parseUUID(agentID),
 			Title:           issue.Title,
@@ -1972,24 +1995,21 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			recipientID = util.UUIDToString(issue.CreatorID)
 		}
 
-		// Find last agent comment for comment anchor link (needed by both
-		// notifySubscribers for dedup and the explicit IM delivery below).
-		lastAgentCommentID := ""
-		taskComments, commentErr := queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
-			IssueID:     parseUUID(issueID),
-			WorkspaceID: parseUUID(e.WorkspaceID),
-			Limit:       100,
-		})
-		if commentErr == nil {
-			for i := len(taskComments) - 1; i >= 0; i-- {
-				if taskComments[i].AuthorType == "agent" {
-					lastAgentCommentID = util.UUIDToString(taskComments[i].ID)
-					break
-				}
+		var task db.AgentTaskQueue
+		taskLoaded := false
+		if taskID != "" {
+			if loadedTask, err := queries.GetAgentTask(ctx, parseUUID(taskID)); err == nil {
+				task = loadedTask
+				taskLoaded = true
 			}
 		}
 
-		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
+		// Find last agent comment for comment anchor link (needed by both
+		// notifySubscribers for dedup and the explicit IM delivery below), but
+		// only if this task actually created a new agent comment.
+		_, taskAgentCommentID := latestAgentCommentForTask(ctx, queries, e.WorkspaceID, issueID, agentID, task, taskLoaded)
+
+		notifiedSubscribers := notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
 			events.Event{
 				Type:        e.Type,
 				WorkspaceID: e.WorkspaceID,
@@ -1998,15 +2018,16 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			},
 			exclude, "task_failed", "action_required",
 			issue.Title, failureSummary,
-			lastAgentCommentID,
+			taskAgentCommentID,
 			emptyDetails)
 
 		// Deliver to openclaw_weixin and dingtalk for task_failed (same as task_completed).
-		// If the recipient is already a subscriber, recordOpenclawWeixinDelivery will
-		// dedup against the delivery created by notifySubscribers above (same comment_id).
+		// If the recipient was already notified via the subscriber path, skip only
+		// the explicit openclaw_weixin delivery; dingtalk task preferences are
+		// evaluated only on this explicit task event.
 		if recipientID != "" && recipientID != agentID {
 
-			nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, lastAgentCommentID, "")
+			nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, taskAgentCommentID, "")
 			payloadSnapshot, _ := json.Marshal(map[string]any{
 				"type":             "task_failed",
 				"severity":         "action_required",
@@ -2028,7 +2049,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				Type:            "task_failed",
 				Severity:        "action_required",
 				IssueID:         parseUUID(issueID),
-				CommentID:       optionalUUID(lastAgentCommentID),
+				CommentID:       optionalUUID(taskAgentCommentID),
 				ActorType:       util.StrToText("agent"),
 				ActorID:         parseUUID(agentID),
 				Title:           issue.Title,
@@ -2040,7 +2061,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				slog.Error("task:failed: failed to create notification event for IM delivery",
 					"issue_id", issueID, "recipient_id", recipientID, "error", err)
 			} else {
-				recordOpenclawWeixinDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+				if !notifiedSubscribers[recipientID] {
+					recordOpenclawWeixinDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+				}
 				recordDingTalkTaskDelivery(ctx, queries, recipientID, event, payloadSnapshot)
 				recordMobilePushDeliveries(ctx, queries, recipientID, event, payloadSnapshot)
 			}
