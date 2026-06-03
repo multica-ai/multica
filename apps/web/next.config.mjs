@@ -54,7 +54,17 @@ const nextConfig = {
     // outputFileTracingExcludes covers .next/**  (which are the tracer's
     // own starting-point files). Pinning it here guarantees it lands in
     // standalone/node_modules/ regardless of tracer behaviour.
-    "*": ["./node_modules/next/**/*"],
+    //
+    // @swc/helpers is a runtime dep of next: next/dist/shared/lib/constants.js
+    // does require("@swc/helpers/_/_interop_require_default"). nft cannot
+    // resolve that "./_/*" exports-subpath in the pnpm layout, so it gets
+    // dropped from the standalone trace and the container exits at start-up
+    // with "Cannot find module '@swc/helpers/_/_interop_require_default'".
+    // Pin the whole package so it always lands in standalone/node_modules/.
+    "*": [
+      "./node_modules/next/**/*",
+      "./node_modules/.pnpm/@swc+helpers@*/node_modules/@swc/helpers/**/*",
+    ],
   },
   outputFileTracingExcludes: {
     "*": [
