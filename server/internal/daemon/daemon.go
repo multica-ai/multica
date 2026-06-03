@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // ErrRepoNotConfigured is returned by ensureRepoReady when the requested repo
@@ -2141,7 +2142,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error"); failErr != nil {
+		startErrMsg := fmt.Sprintf("start task failed: %s", err.Error())
+		// MUL-2946: classify the wrapper error so the failure_reason
+		// column lands in the canonical refined taxonomy rather than
+		// the legacy coarse "agent_error" bucket. A start-task failure
+		// most commonly surfaces as ReasonAgentUnknown (no rule
+		// matches "start task failed: <…>"), but a future provider /
+		// network blip in the wrapper layer would still classify
+		// correctly without us touching this site.
+		if failErr := d.client.FailTask(ctx, task.ID, startErrMsg, "", "", taskfailure.Classify(startErrMsg).String()); failErr != nil {
 			taskLog.Error("fail task after start error", "error", failErr)
 		}
 		return
@@ -2196,7 +2205,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
+		// MUL-2946: route the bare error string through the canonical
+		// classifier so the failure_reason column reflects the actual
+		// shape of the failure (provider 5xx, network, process crash,
+		// …) rather than the coarse legacy "agent_error" bucket.
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -2387,16 +2400,35 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			return
 		}
 		taskLog.Error("complete task rejected by server, falling back to fail", "error", err)
-		if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
+		// MUL-2946: this fallback fires when a server-side complete
+		// callback was permanently rejected (4xx other than 408/429)
+		// — the agent itself succeeded, so the err here describes the
+		// server response rather than an agent failure. The classifier
+		// is unlikely to match anything in the server's error text and
+		// will land at ReasonAgentUnknown ("agent_error.unknown"),
+		// which is the canonical replacement for the legacy
+		// "agent_error" coarse bucket.
+		fallbackErrMsg := fmt.Sprintf("complete task failed: %s", err.Error())
+		if failErr := d.client.FailTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, taskfailure.Classify(fallbackErrMsg).String()); failErr != nil {
 			taskLog.Error("fail task fallback also failed", "error", failErr)
 		}
 	default:
 		failureReason := result.FailureReason
 		if failureReason == "" {
 			if result.Status == "cancelled" {
+				// "cancelled" is a deliberate non-failure terminal
+				// state masquerading as a failure_reason — preserved
+				// outside the canonical taxonomy so the UI can render
+				// it differently from a real failure.
 				failureReason = "cancelled"
 			} else {
-				failureReason = "agent_error"
+				// MUL-2946: classify the agent's comment text so the
+				// failure_reason lands in the refined taxonomy
+				// (provider_auth_or_access, context_overflow,
+				// process_failure, …) instead of the legacy coarse
+				// "agent_error" bucket. Empty comment lands in
+				// ReasonAgentUnknown.
+				failureReason = taskfailure.Classify(result.Comment).String()
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
@@ -3011,6 +3043,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			taskLog.Warn("agent failed with poisoned API error, classifying as blocked",
 				"failure_reason", failureReason,
 			)
+		} else {
+			// MUL-2946: classifyPoisonedError only matches the
+			// session-poisoning Anthropic 400 shape. Everything else
+			// falls through to taskfailure.Classify, which maps the
+			// raw error string to one of the 14 agent_error.*
+			// sub-reasons (provider auth, capacity, context overflow,
+			// runner crash, …) or to ReasonAgentUnknown. This keeps
+			// the failure_reason column in the canonical refined
+			// taxonomy at write time instead of waiting on the
+			// MUL-1949 offline backfill to re-classify after the
+			// fact.
+			failureReason = taskfailure.Classify(errMsg).String()
 		}
 		return TaskResult{
 			Status:        "blocked",
