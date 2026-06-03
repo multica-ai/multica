@@ -169,7 +169,7 @@
   "connect": {
     "title": "Add a computer",
     "description": "Run these two commands on the computer you want to add. We'll detect it the moment the daemon comes online.",
-    "step1_label": "Install the Multica CLI",
+    "step1_label": "Install the 3J Tracker CLI",
     "step2_label": "Start the daemon",
     "step2_hint": "Opens a browser to sign in, then keeps the daemon running in the background.",
     "live_listening": "Waiting for your computer",
@@ -232,7 +232,7 @@
     "cli_version_label": "CLI Version:",
     "version_unknown": "unknown",
     "managed_by_desktop": "Managed by Desktop",
-    "managed_by_desktop_title": "The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI.",
+    "managed_by_desktop_title": "The CLI binary is managed by 3J Tracker Desktop — update Desktop to upgrade the CLI.",
     "latest": "Latest",
     "available": "available",
     "action": "Update",

@@ -23,10 +23,10 @@ import { useT } from "../../i18n";
 // them would also translate the agent's instructions.
 type TemplateId =
   | "daily_news"
-  | "pr_review"
+  | "task_followup"
   | "bug_triage"
   | "weekly_progress"
-  | "dependency_audit"
+  | "compliance_check"
   | "documentation_check";
 
 interface AutopilotTemplate {
@@ -50,12 +50,11 @@ const TEMPLATES: AutopilotTemplate[] = [
     time: "09:00",
   },
   {
-    id: "pr_review",
-    prompt: `1. List all open pull requests in the repository
-2. Identify PRs that have been open for more than 24 hours without a review
-3. For each stale PR, note the author, age, and a one-line summary of the change
-4. Post a comment on this issue listing all stale PRs with links
-5. @mention the team to remind them to review`,
+    id: "task_followup",
+    prompt: `1. List all tasks that are overdue (past due date) or have been in the same status for more than 3 days
+2. For each stale task, note the assignee, age, and a one-line summary
+3. Post a comment on this issue listing all stale tasks with links
+4. @mention the relevant team members to prompt action`,
     icon: GitPullRequest,
     frequency: "weekdays",
     time: "10:00",
@@ -84,12 +83,11 @@ const TEMPLATES: AutopilotTemplate[] = [
     time: "17:00",
   },
   {
-    id: "dependency_audit",
-    prompt: `1. Run dependency audit tools on the project (npm audit, go vuln check, etc.)
-2. Identify any packages with known security vulnerabilities
-3. List outdated packages that are more than 2 major versions behind
-4. For each finding, note the severity, affected package, and recommended fix
-5. Post a summary report as a comment with actionable items`,
+    id: "compliance_check",
+    prompt: `1. Review tasks and activities completed in the past 7 days
+2. Check for any that did not follow the workspace's defined process or policy
+3. For each gap found, note the task, the policy that applies, and the deviation
+4. Post a summary report as a comment with recommended corrective actions`,
     icon: Shield,
     frequency: "weekly",
     time: "08:00",

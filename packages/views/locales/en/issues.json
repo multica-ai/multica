@@ -1,16 +1,16 @@
 {
   "page": {
-    "breadcrumb_title": "Issues",
+    "breadcrumb_title": "Tasks",
     "breadcrumb_workspace_fallback": "Workspace",
-    "empty_title": "No issues yet",
-    "empty_hint": "Create an issue to get started.",
+    "empty_title": "No tasks yet",
+    "empty_hint": "Create a task to get started.",
     "move_failed": "Failed to move issue"
   },
   "status": {
     "backlog": "Backlog",
     "todo": "Todo",
     "in_progress": "In Progress",
-    "in_review": "In Review",
+    "in_review": "Reviewing",
     "done": "Done",
     "blocked": "Blocked",
     "cancelled": "Cancelled"

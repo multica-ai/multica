@@ -36,25 +36,25 @@
       "title": "Daily news digest",
       "summary": "Search and summarize today's news for the team"
     },
-    "pr_review": {
-      "title": "PR review reminder",
-      "summary": "Flag stale pull requests that need review"
+    "task_followup": {
+      "title": "Task follow-up reminder",
+      "summary": "Flag overdue or stalled tasks that need attention"
     },
     "bug_triage": {
-      "title": "Bug triage",
-      "summary": "Assess and prioritize new bug reports"
+      "title": "Issue triage",
+      "summary": "Assess and prioritize new reported issues"
     },
     "weekly_progress": {
       "title": "Weekly progress report",
       "summary": "Compile a weekly summary of team progress"
     },
-    "dependency_audit": {
-      "title": "Dependency audit",
-      "summary": "Scan for security vulnerabilities and outdated packages"
+    "compliance_check": {
+      "title": "Compliance check",
+      "summary": "Review recent activity for policy or process gaps"
     },
     "documentation_check": {
       "title": "Documentation check",
-      "summary": "Review recent changes for documentation gaps"
+      "summary": "Review recent work for documentation gaps"
     }
   },
   "detail": {
@@ -206,7 +206,7 @@
     "type_webhook": "Webhook",
     "label_field": "Label (optional)",
     "label_placeholder": "e.g. Weekday morning",
-    "webhook_help": "Multica will generate a webhook URL after you save. POST any JSON to it to fire this autopilot.",
+    "webhook_help": "A webhook URL will be generated after you save. POST any JSON to it to fire this autopilot.",
     "submit": "Add trigger",
     "submitting": "Adding...",
     "toast_added_schedule": "Schedule trigger added",
@@ -252,7 +252,7 @@
     "trigger_kind_schedule": "Schedule",
     "trigger_kind_webhook": "Webhook",
     "section_webhook": "Webhook",
-    "webhook_help_create": "Multica will generate a webhook URL after this autopilot is created. POST any JSON to that URL to fire it.",
+    "webhook_help_create": "A webhook URL will be generated after this autopilot is created. POST any JSON to that URL to fire it.",
     "webhook_help_edit": "This autopilot is fired by webhook. Manage the URL (copy / rotate) on the autopilot's detail page.",
     "webhook_created_title": "Webhook autopilot ready",
     "webhook_created_description": "POST any JSON to the URL below and the autopilot will fire. Copy it now — you can also find and rotate it on the autopilot's detail page.",

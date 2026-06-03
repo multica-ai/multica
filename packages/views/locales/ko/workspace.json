@@ -17,13 +17,13 @@
   "new_page": {
     "back": "뒤로",
     "log_out": "로그아웃",
-    "title": "Multica에 오신 것을 환영합니다",
+    "title": "3J Tracker에 오신 것을 환영합니다",
     "description": "하나의 워크스페이스에서 사람과 AI 팀원이 같은 맥락을 공유하며 이슈를 맡고, 댓글을 남기고, 함께 작업합니다.",
     "invite_hint": "워크스페이스가 준비되면 팀원을 초대할 수 있습니다."
   },
   "creation_disabled": {
     "title": "워크스페이스 생성이 비활성화되었습니다",
-    "description": "이 Multica instance에서는 새 워크스페이스를 만들 수 없습니다. 관리자에게 기존 워크스페이스 초대를 요청하세요."
+    "description": "이 3J Tracker instance에서는 새 워크스페이스를 만들 수 없습니다. 관리자에게 기존 워크스페이스 초대를 요청하세요."
   },
   "no_access": {
     "title": "워크스페이스를 사용할 수 없습니다",

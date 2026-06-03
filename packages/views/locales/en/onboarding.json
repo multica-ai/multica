@@ -3,7 +3,7 @@
     "step_of": "Step {{current}} of {{total}}"
   },
   "welcome": {
-    "wordmark": "Welcome to Multica",
+    "wordmark": "Welcome to 3J Tracker",
     "headline_line1": "Your AI teammates,",
     "headline_line2": "in",
     "headline_emphasis": "one workspace.",
@@ -45,14 +45,14 @@
   },
   "source_backfill": {
     "eyebrow": "Quick question",
-    "lede": "We noticed you didn't pick this during signup — it helps us understand who finds Multica useful. One question, then you're back to your work.",
+    "lede": "We noticed you didn't pick this during signup — it helps us understand who finds 3J Tracker useful. One question, then you're back to your work.",
     "submit": "Submit",
     "hint_ready": "Looks good. Hit Submit when you're ready."
   },
   "questions": {
     "eyebrow_about_you": "About you",
     "source": {
-      "question": "How did you hear about Multica?",
+      "question": "How did you hear about 3J Tracker?",
       "friends_colleagues": "Friends or colleagues",
       "search": "Google / search",
       "social_x": "X / Twitter",
@@ -70,27 +70,27 @@
     },
     "role": {
       "question": "Which best describes you?",
-      "engineer": "Engineer / developer",
-      "product": "Product manager",
-      "designer": "Designer",
-      "founder": "Founder / exec",
-      "marketing": "Marketing / growth",
-      "writer": "Writer / content",
-      "research": "Researcher / analyst",
       "ops": "Operations / project mgmt",
+      "founder": "Founder / exec",
+      "product": "Product manager",
+      "marketing": "Marketing / growth",
+      "research": "Researcher / analyst",
+      "writer": "Writer / content",
+      "designer": "Designer",
       "student": "Student / personal use",
+      "engineer": "Engineer / developer",
       "other": "Other",
       "other_placeholder": "e.g. teacher, support lead"
     },
     "use_case": {
-      "question": "What do you want to use Multica for?",
-      "ship_code": "Ship code with AI agents",
+      "question": "What do you want to use 3J Tracker for?",
       "manage_team": "Manage tasks for my team",
       "personal_tasks": "Organize my own tasks",
       "plan_research": "Plan, brainstorm, research",
-      "write_publish": "Write, edit, publish",
       "automate_ops": "Automate ops & workflows",
+      "write_publish": "Write, edit, publish",
       "evaluate": "Just exploring",
+      "ship_code": "Ship code with AI agents",
       "other": "Other",
       "other_placeholder": "e.g. study group coordination"
     }
@@ -118,7 +118,7 @@
   "cli_install": {
     "copy_aria": "Copy",
     "intro": "You'll need an agent runtime on this computer (Claude Code, Codex, Cursor, …) for it to run your agent. Also works on servers and remote dev boxes.",
-    "step1_label": "Install the Multica CLI",
+    "step1_label": "Install the 3J Tracker CLI",
     "step2_label": "Start the daemon"
   },
   "cloud_waitlist": {
@@ -196,18 +196,18 @@
     "error_close": "Close",
     "user_context_heading": "About me",
     "user_context_role_label": "Role",
-    "user_context_use_case_label": "What I want to do with Multica",
+    "user_context_use_case_label": "What I want to do with 3J Tracker",
     "runtime": {
-      "greeting": "Hi, welcome to Multica",
+      "greeting": "Hi, welcome to 3J Tracker",
       "subtitle": "I'm your first Agent assistant.",
-      "capabilities": "Ask me anything about how to use Multica. You can also have me get things done in your workspace — create issues, set up cron tasks, build new agents…",
+      "capabilities": "Ask me anything about how to use 3J Tracker. You can also have me get things done in your workspace — create tasks, set up cron jobs, build new agents…",
       "section_label": "Pick one or more tasks to start with:",
       "assign_empty": "Pick one or more",
       "assign_count": "Assign {{count}} task to me →",
       "assign_count_plural": "Assign {{count}} tasks to me →",
       "cards": {
         "intro": {
-          "subtitle": "Let me explain in 1–2 paragraphs what Multica is and what it can do."
+          "subtitle": "Let me explain in 1–2 paragraphs what 3J Tracker is and what it can do."
         },
         "tour": {
           "subtitle": "I'll walk you through how issue, agent, squad, autopilot fit together."
@@ -226,7 +226,7 @@
     },
     "skip": {
       "loading": "Setting up your workspace…",
-      "title": "Welcome to Multica!",
+      "title": "Welcome to 3J Tracker!",
       "subtitle": "We've added two tasks to help you with the next step.",
       "got_it": "Got it",
       "status_in_progress": "In progress",
@@ -238,7 +238,7 @@
         },
         "create_agent": {
           "title": "Create your first agent",
-          "subtitle": "Once a runtime is online, build your first Multica agent."
+          "subtitle": "Once a runtime is online, build your first agent."
         }
       }
     }
@@ -285,7 +285,7 @@
     "perk_invite": "Invite teammates — they see only this workspace",
     "perk_switch": "Switch to other workspaces anytime from the top-left",
     "next_runtime": "Connect a computer so your agents have somewhere to run",
-    "next_agent": "Create Multica Helper from your connected runtime",
+    "next_agent": "Create a helper agent from your connected runtime",
     "next_starter": "Open one onboarding issue for your next step",
     "preview": {
       "inbox_label": "Inbox",
@@ -307,7 +307,7 @@
     },
     "creation_disabled_eyebrow": "Workspace creation is disabled",
     "creation_disabled_headline": "Ask your administrator for an invitation.",
-    "creation_disabled_lede": "This Multica instance does not allow new workspaces to be created. Once an administrator invites you to a workspace, accept the invitation and refresh to continue.",
+    "creation_disabled_lede": "This instance does not allow new workspaces to be created. Once an administrator invites you to a workspace, accept the invitation and refresh to continue.",
     "creation_disabled_logout": "Log out",
     "creation_disabled_eyebrow_resume": "Your workspace",
     "creation_disabled_headline_resume": "Continue with {{name}}.",
@@ -347,7 +347,7 @@
   "step_platform": {
     "eyebrow": "Connect a computer",
     "headline": "Connect a computer to run your agent.",
-    "lede": "Your agent runs on a real computer that you connect to Multica. Pick how you want to connect one.",
+    "lede": "Your agent runs on a real computer that you connect to 3J Tracker. Pick how you want to connect one.",
     "hint_default": "Pick a way to connect — or skip and connect a computer later.",
     "hint_downloaded": "Finish setup on the download page, then come back to this tab.",
     "download_title": "Use this computer",

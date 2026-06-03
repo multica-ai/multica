@@ -36,21 +36,21 @@
       "title": "日次ニュースダイジェスト",
       "summary": "今日のニュースを検索し、チーム向けに要約します"
     },
-    "pr_review": {
-      "title": "PR レビューのリマインダー",
-      "summary": "レビューが必要な滞留中の Pull request を表示します"
+    "task_followup": {
+      "title": "タスクフォローアップリマインダー",
+      "summary": "期限超過または停滞しているタスクを表示します"
     },
     "bug_triage": {
-      "title": "バグのトリアージ",
-      "summary": "新しいバグレポートを評価し、優先順位を付けます"
+      "title": "課題のトリアージ",
+      "summary": "新しく報告された課題を評価し、優先順位を付けます"
     },
     "weekly_progress": {
       "title": "週次進捗レポート",
       "summary": "チームの進捗を週次でまとめます"
     },
-    "dependency_audit": {
-      "title": "依存関係の監査",
-      "summary": "セキュリティ脆弱性と古いパッケージをスキャンします"
+    "compliance_check": {
+      "title": "コンプライアンス確認",
+      "summary": "最近の活動にプロセスまたはポリシーの差異がないか確認します"
     },
     "documentation_check": {
       "title": "ドキュメントの点検",

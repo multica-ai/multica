@@ -81,7 +81,7 @@
     },
     "system": {
       "title": "システム通知",
-      "description": "Multica がバックグラウンドにあるときに表示される OS のネイティブ通知バナーを制御します。",
+      "description": "3J Tracker がバックグラウンドにあるときに表示される OS のネイティブ通知バナーを制御します。",
       "label": "システム通知を表示",
       "hint": "アプリにフォーカスがないときに、新しいインボックス項目について OS のバナーを表示します。"
     }
@@ -181,7 +181,7 @@
     "manage_hint": "連携を管理できるのは admin と owner のみです。"
   },
   "github": {
-    "page_description": "GitHub App を接続し、Pull request が Multica 内でどう表示されるかを制御し、エージェントがコミット履歴に残す情報を設定します。",
+    "page_description": "GitHub App を接続し、Pull request が 3J Tracker 内でどう表示されるかを制御し、エージェントがコミット履歴に残す情報を設定します。",
     "section_master": "GitHub 機能を有効にする",
     "master_description_on": "オフにすると、すべての GitHub UI が非表示になり、新しい副作用が記録されなくなります。既存のデータはバックエンドに保持されます。開発チームではありませんか？ここでオフにできます。",
     "master_description_off": "GitHub 機能はオフです。PR サイドバー、Co-authored-by トレーラー、自動リンクが一時停止されています。バックエンドのデータは削除されません。",
@@ -198,7 +198,7 @@
     "disconnect": "接続解除",
     "disconnecting": "接続解除中…",
     "disconnect_confirm_title": "GitHub App の接続を解除",
-    "disconnect_confirm_description": "Multica はこのインストールの Webhook 受信を停止します。既存の PR ミラーとリンクは保持され、いつでも再接続して更新を再開できます。",
+    "disconnect_confirm_description": "3J Tracker はこのインストールの Webhook 受信を停止します。既存の PR ミラーとリンクは保持され、いつでも再接続して更新を再開できます。",
     "disconnect_confirm_cancel": "キャンセル",
     "disconnect_confirm_action": "接続解除",
     "not_configured": "このデプロイには GitHub 連携が設定されていません。運営者が次の値を設定する必要があります:",

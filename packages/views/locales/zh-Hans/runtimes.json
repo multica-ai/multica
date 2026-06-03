@@ -157,7 +157,7 @@
   "connect": {
     "title": "添加电脑",
     "description": "在要添加的电脑上运行这两条命令。守护进程一上线，这里就会自动识别。",
-    "step1_label": "安装 Multica CLI",
+    "step1_label": "安装 3J Tracker CLI",
     "step2_label": "启动守护进程",
     "step2_hint": "会打开浏览器登录，然后在后台保持守护进程运行。",
     "live_listening": "等待你的电脑上线",
@@ -220,7 +220,7 @@
     "cli_version_label": "CLI 版本：",
     "version_unknown": "未知",
     "managed_by_desktop": "由桌面端管理",
-    "managed_by_desktop_title": "CLI 二进制由 Multica 桌面端管理 —— 升级桌面端即可升级 CLI。",
+    "managed_by_desktop_title": "CLI 二进制由 3J Tracker 桌面端管理 —— 升级桌面端即可升级 CLI。",
     "latest": "最新",
     "available": "可用",
     "action": "更新",

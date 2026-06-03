@@ -1,8 +1,8 @@
 {
   "fab": {
-    "running": "Multica が作業中です...",
+    "running": "3J Tracker が作業中です...",
     "unread_other": "未読のチャット {{count}}件",
-    "default": "Multica に質問"
+    "default": "3J Tracker に質問"
   },
   "input": {
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
@@ -83,7 +83,7 @@
     "first_time_pillars_suffix": "。",
     "first_time_actions": "要約を頼んだり、今日の予定を立てたり、簡単なタスクを任せたりしてみましょう。",
     "returning_title_named": "こんにちは、{{name}} です",
-    "returning_title_default": "Multica へようこそ",
+    "returning_title_default": "3J Tracker へようこそ",
     "returning_subtitle": "こう聞いてみましょう"
   },
   "starter_prompts": {
@@ -92,15 +92,15 @@
     "plan_next": "次に取り組むことを計画して"
   },
   "context_anchor": {
-    "tooltip_disabled": "このページに Multica へ共有できる内容はありません",
-    "tooltip_off": "Multica に現在表示中の内容を知らせる",
-    "tooltip_on_issue": "Multica は {{label}} を表示中だと把握しています · クリックでオフ",
-    "tooltip_on_project": "Multica はプロジェクト \"{{label}}\" を表示中だと把握しています · クリックでオフ",
-    "card_tooltip_issue_with_subtitle": "Multica は {{label}} を表示中だと把握しています — {{subtitle}}",
-    "card_tooltip_issue": "Multica は {{label}} を表示中だと把握しています",
-    "card_tooltip_project": "Multica はプロジェクト \"{{label}}\" を表示中だと把握しています",
+    "tooltip_disabled": "このページに 3J Tracker へ共有できる内容はありません",
+    "tooltip_off": "3J Tracker に現在表示中の内容を知らせる",
+    "tooltip_on_issue": "3J Tracker は {{label}} を表示中だと把握しています · クリックでオフ",
+    "tooltip_on_project": "3J Tracker はプロジェクト \"{{label}}\" を表示中だと把握しています · クリックでオフ",
+    "card_tooltip_issue_with_subtitle": "3J Tracker は {{label}} を表示中だと把握しています — {{subtitle}}",
+    "card_tooltip_issue": "3J Tracker は {{label}} を表示中だと把握しています",
+    "card_tooltip_project": "3J Tracker はプロジェクト \"{{label}}\" を表示中だと把握しています",
     "aria_stop": "現在のページの共有を停止",
-    "aria_start": "現在のページを Multica に共有"
+    "aria_start": "現在のページを 3J Tracker に共有"
   },
   "no_agent_banner": "チャットを始めるにはエージェントが必要です。",
   "offline_banner": {

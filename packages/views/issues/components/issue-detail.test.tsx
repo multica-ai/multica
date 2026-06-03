@@ -238,7 +238,7 @@ vi.mock("@multica/core/issues/config", () => ({
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
-    in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
+    in_review: { label: "Reviewing", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
     done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
     blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -857,7 +857,7 @@ describe("IssueDetail (shared)", () => {
 
     // Only the 8 most recent entries (act-3..act-10) are rendered by default.
     // act-1 and act-2 are folded behind the show-more line.
-    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument(); // act-3
+    expect(screen.getByText(/from In Progress to Reviewing/i)).toBeInTheDocument(); // act-3
     expect(screen.getByText(/set due date to/i)).toBeInTheDocument(); // act-10
     expect(screen.queryByText(/from Todo to In Progress/i)).not.toBeInTheDocument(); // act-1
     expect(screen.queryByText(/from Low to Medium/i)).not.toBeInTheDocument(); // act-2
@@ -896,9 +896,9 @@ describe("IssueDetail (shared)", () => {
     // exactly within the limit, so no "Show N more activities" line appears.
     expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
     expect(screen.getByText(/from Low to High/i)).toBeInTheDocument();
-    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Progress to Reviewing/i)).toBeInTheDocument();
     expect(screen.getByText(/from High to Urgent/i)).toBeInTheDocument();
-    expect(screen.getByText(/from In Review to Done/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Reviewing to Done/i)).toBeInTheDocument();
     expect(screen.getByText(/from Urgent to Low/i)).toBeInTheDocument();
     expect(screen.getByText(/from Done to Blocked/i)).toBeInTheDocument();
     expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
@@ -951,9 +951,9 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText(/from No priority to Low/i)).toBeInTheDocument();
     expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
     expect(screen.getByText(/from Low to Medium/i)).toBeInTheDocument();
-    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Progress to Reviewing/i)).toBeInTheDocument();
     expect(screen.getByText(/from Medium to High/i)).toBeInTheDocument();
-    expect(screen.getByText(/from In Review to Done/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Reviewing to Done/i)).toBeInTheDocument();
     expect(screen.getByText(/from High to Urgent/i)).toBeInTheDocument();
     expect(screen.getByText(/from Done to Blocked/i)).toBeInTheDocument();
     expect(screen.getByText(/from Urgent to Low/i)).toBeInTheDocument();

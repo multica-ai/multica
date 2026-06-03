@@ -1,6 +1,6 @@
 {
   "title": "Billing (test page)",
-  "subtitle": "Direct passthrough to multica-cloud's /api/v1/billing/*. Not a finished UI — just every endpoint stuffed onto one page so we can verify the proxy + Stripe flow.",
+  "subtitle": "Direct passthrough to the cloud billing API. Not a finished UI — just every endpoint on one page for proxy + Stripe verification.",
   "endpoints": {
     "balance": "GET /api/cloud-billing/balance",
     "transactions": "GET /api/cloud-billing/transactions",

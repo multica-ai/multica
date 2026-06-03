@@ -1,9 +1,9 @@
 {
   "fab": {
-    "running": "Multica is working...",
+    "running": "3J Tracker is working...",
     "unread_one": "{{count}} unread chat",
     "unread_other": "{{count}} unread chats",
-    "default": "Ask Multica"
+    "default": "Ask your agent"
   },
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
@@ -82,11 +82,11 @@
   "empty_state": {
     "first_time_title": "Chat with your agents",
     "first_time_intro": "✨ They know your workspace —",
-    "first_time_pillars": "issues, projects, skills",
+    "first_time_pillars": "tasks, projects, skills",
     "first_time_pillars_suffix": ".",
     "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
     "returning_title_named": "Hi, I'm {{name}}",
-    "returning_title_default": "Welcome to Multica",
+    "returning_title_default": "Welcome to 3J Tracker",
     "returning_subtitle": "Try asking"
   },
   "starter_prompts": {
@@ -95,15 +95,15 @@
     "plan_next": "Plan what to work on next"
   },
   "context_anchor": {
-    "tooltip_disabled": "Nothing to share with Multica on this page",
-    "tooltip_off": "Let Multica know what you're viewing",
-    "tooltip_on_issue": "Multica knows you're viewing {{label}} · Click to turn off",
-    "tooltip_on_project": "Multica knows you're viewing project \"{{label}}\" · Click to turn off",
-    "card_tooltip_issue_with_subtitle": "Multica knows you're viewing {{label}} — {{subtitle}}",
-    "card_tooltip_issue": "Multica knows you're viewing {{label}}",
-    "card_tooltip_project": "Multica knows you're viewing project \"{{label}}\"",
-    "aria_stop": "Stop sharing current page",
-    "aria_start": "Share current page with Multica"
+    "tooltip_disabled": "Nothing to share with the agent on this page",
+    "tooltip_off": "Share with the agent what you're viewing",
+    "tooltip_on_issue": "The agent knows you're viewing {{label}} · Click to turn off",
+    "tooltip_on_project": "The agent knows you're viewing project \"{{label}}\" · Click to turn off",
+    "card_tooltip_issue_with_subtitle": "The agent knows you're viewing {{label}} — {{subtitle}}",
+    "card_tooltip_issue": "The agent knows you're viewing {{label}}",
+    "card_tooltip_project": "The agent knows you're viewing project \"{{label}}\"",
+    "aria_stop": "Stop sharing current page with agent",
+    "aria_start": "Share current page with the agent"
   },
   "no_agent_banner": "You need an agent to start chatting.",
   "offline_banner": {

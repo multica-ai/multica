@@ -159,7 +159,7 @@ describe("WelcomeAfterOnboarding", () => {
       mockListAgents.mockResolvedValueOnce([]);
       mockCreateAgent.mockResolvedValueOnce({
         id: "agent-1",
-        name: "Multica Helper",
+        name: "Helper",
         description: "Built-in workspace assistant.",
         avatar_url: null,
         visibility: "workspace",
@@ -175,33 +175,33 @@ describe("WelcomeAfterOnboarding", () => {
       expect(screen.getByText(/Preparing your Helper/i)).toBeInTheDocument();
 
       await waitFor(() => {
-        expect(screen.getByText(/welcome to Multica/i)).toBeInTheDocument();
+        expect(screen.getByText(/welcome to 3J Tracker/i)).toBeInTheDocument();
       });
 
       expect(mockCreateAgent).toHaveBeenCalledTimes(1);
       const [agentArgs] = mockCreateAgent.mock.calls[0]!;
       expect(agentArgs.runtime_id).toBe("rt-1");
-      expect(agentArgs.name).toBe("Multica Helper");
-      expect(agentArgs.instructions).toContain("Multica Helper");
+      expect(agentArgs.name).toBe("Helper");
+      expect(agentArgs.instructions).toContain("Helper");
 
       // 3 starter card titles come from HELPER_STARTER_PROMPTS (TS const,
       // EN under the test's en locale).
       expect(
-        screen.getByText("Introduce Multica to me"),
+        screen.getByText("Introduce 3J Tracker to me"),
       ).toBeInTheDocument();
       expect(
         screen.getByText("Walk me through the core features"),
       ).toBeInTheDocument();
       expect(
-        screen.getByText("Show me what Multica can do for me — as slides"),
+        screen.getByText("Show me what 3J Tracker can do for me — as slides"),
       ).toBeInTheDocument();
     });
 
-    it("reuses an existing Multica Helper agent instead of creating duplicates", async () => {
+    it("reuses an existing Helper agent instead of creating duplicates", async () => {
       mockListAgents.mockResolvedValueOnce([
         {
           id: "agent-existing",
-          name: "Multica Helper",
+          name: "Helper",
           description: "",
           avatar_url: null,
           visibility: "workspace",
@@ -216,7 +216,7 @@ describe("WelcomeAfterOnboarding", () => {
 
       renderWelcome();
       await waitFor(() => {
-        expect(screen.getByText(/welcome to Multica/i)).toBeInTheDocument();
+        expect(screen.getByText(/welcome to 3J Tracker/i)).toBeInTheDocument();
       });
 
       expect(mockCreateAgent).not.toHaveBeenCalled();
@@ -226,7 +226,7 @@ describe("WelcomeAfterOnboarding", () => {
       mockListAgents.mockResolvedValueOnce([]);
       mockCreateAgent.mockResolvedValueOnce({
         id: "agent-1",
-        name: "Multica Helper",
+        name: "Helper",
         description: "",
         avatar_url: null,
         visibility: "workspace",
@@ -252,7 +252,7 @@ describe("WelcomeAfterOnboarding", () => {
       renderWelcome();
       await waitFor(() =>
         expect(
-          screen.getByText("Introduce Multica to me"),
+          screen.getByText("Introduce 3J Tracker to me"),
         ).toBeInTheDocument(),
       );
 
@@ -261,9 +261,9 @@ describe("WelcomeAfterOnboarding", () => {
       expect(ctaEmpty).toBeDisabled();
 
       // Toggle two cards.
-      fireEvent.click(screen.getByText("Introduce Multica to me"));
+      fireEvent.click(screen.getByText("Introduce 3J Tracker to me"));
       fireEvent.click(
-        screen.getByText("Show me what Multica can do for me — as slides"),
+        screen.getByText("Show me what 3J Tracker can do for me — as slides"),
       );
 
       // CTA enables and reflects the count.
@@ -274,8 +274,8 @@ describe("WelcomeAfterOnboarding", () => {
       await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
       const titles = mockCreateIssue.mock.calls.map(([args]) => args.title);
       expect(titles).toEqual([
-        "Introduce Multica to me",
-        "Show me what Multica can do for me — as slides",
+        "Introduce 3J Tracker to me",
+        "Show me what 3J Tracker can do for me — as slides",
       ]);
       // Both assigned to the same Helper agent.
       mockCreateIssue.mock.calls.forEach(([args]) => {
@@ -302,7 +302,7 @@ describe("WelcomeAfterOnboarding", () => {
       mockListAgents.mockResolvedValueOnce([]);
       mockCreateAgent.mockResolvedValueOnce({
         id: "agent-1",
-        name: "Multica Helper",
+        name: "Helper",
         description: "",
         avatar_url: null,
         visibility: "workspace",
@@ -321,27 +321,27 @@ describe("WelcomeAfterOnboarding", () => {
 
       await waitFor(() =>
         expect(
-          screen.getByText("Multica를 간단히 소개해 주세요"),
+          screen.getByText("3J Tracker를 간단히 소개해 주세요"),
         ).toBeInTheDocument(),
       );
 
       expect(mockCreateAgent).toHaveBeenCalledTimes(1);
       const [agentArgs] = mockCreateAgent.mock.calls[0]!;
-      expect(agentArgs.description).toContain("Multica 사용 어시스턴트");
+      expect(agentArgs.description).toContain("워크스페이스 사용 어시스턴트");
       expect(agentArgs.instructions).toContain(
-        "당신은 이 Multica 워크스페이스에 내장된 AI 어시스턴트",
+        "당신은 이 워크스페이스에 내장된 AI 어시스턴트 Helper",
       );
 
-      fireEvent.click(screen.getByText("Multica를 간단히 소개해 주세요"));
+      fireEvent.click(screen.getByText("3J Tracker를 간단히 소개해 주세요"));
       fireEvent.click(
         await screen.findByRole("button", { name: /작업 1개를 나에게 할당/i }),
       );
 
       await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
       const [issueArgs] = mockCreateIssue.mock.calls[0]!;
-      expect(issueArgs.title).toBe("Multica를 간단히 소개해 주세요");
+      expect(issueArgs.title).toBe("3J Tracker를 간단히 소개해 주세요");
       expect(issueArgs.description).toContain(
-        "Multica를 1-2문단으로 간단히 소개해 주세요",
+        "3J Tracker를 1-2문단으로 간단히 소개해 주세요",
       );
     });
 
@@ -349,7 +349,7 @@ describe("WelcomeAfterOnboarding", () => {
       mockListAgents.mockResolvedValueOnce([]);
       mockCreateAgent.mockResolvedValueOnce({
         id: "agent-1",
-        name: "Multica Helper",
+        name: "Helper",
         description: "",
         avatar_url: null,
         visibility: "workspace",
@@ -368,18 +368,18 @@ describe("WelcomeAfterOnboarding", () => {
 
       await waitFor(() =>
         expect(
-          screen.getByText("Multica を簡単に紹介してください"),
+          screen.getByText("3J Tracker を簡単に紹介してください"),
         ).toBeInTheDocument(),
       );
 
       expect(mockCreateAgent).toHaveBeenCalledTimes(1);
       const [agentArgs] = mockCreateAgent.mock.calls[0]!;
-      expect(agentArgs.description).toContain("Multica の使い方アシスタント");
+      expect(agentArgs.description).toContain("ワークスペースの使い方アシスタント");
       expect(agentArgs.instructions).toContain(
-        "あなたは Multica Helper、この Multica ワークスペースに組み込まれた AI アシスタント",
+        "あなたは Helper、このワークスペースに組み込まれた AI アシスタント",
       );
 
-      fireEvent.click(screen.getByText("Multica を簡単に紹介してください"));
+      fireEvent.click(screen.getByText("3J Tracker を簡単に紹介してください"));
       fireEvent.click(
         await screen.findByRole("button", {
           name: /1 件のタスクを私に割り当てる/,
@@ -388,9 +388,9 @@ describe("WelcomeAfterOnboarding", () => {
 
       await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
       const [issueArgs] = mockCreateIssue.mock.calls[0]!;
-      expect(issueArgs.title).toBe("Multica を簡単に紹介してください");
+      expect(issueArgs.title).toBe("3J Tracker を簡単に紹介してください");
       expect(issueArgs.description).toContain(
-        "Multica を1〜2段落で簡単に紹介してください",
+        "3J Tracker を1〜2段落で簡単に紹介してください",
       );
     });
   });
@@ -427,7 +427,7 @@ describe("WelcomeAfterOnboarding", () => {
 
       // Modal appears once all 3 API calls succeed.
       await waitFor(() => {
-        expect(screen.getByText(/Welcome to Multica/i)).toBeInTheDocument();
+        expect(screen.getByText(/Welcome to 3J Tracker/i)).toBeInTheDocument();
       });
 
       expect(mockCreateIssue).toHaveBeenCalledTimes(2);
@@ -446,7 +446,7 @@ describe("WelcomeAfterOnboarding", () => {
       // install-runtime mention chip pointing at MUL-1 / issue-install.
       const [secondCall] = mockCreateIssue.mock.calls.slice(1);
       expect(secondCall![0].title).toBe(
-        "Step 2 — Create your first Multica Agent",
+        "Step 2 — Create your first agent",
       );
       expect(secondCall![0].status).toBe("todo");
       expect(secondCall![0].description).toContain(
@@ -475,7 +475,7 @@ describe("WelcomeAfterOnboarding", () => {
       await waitFor(() =>
         expect(useWelcomeStore.getState().dismissed).toBe(true),
       );
-      expect(screen.queryByText(/Welcome to Multica/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Welcome to 3J Tracker/i)).not.toBeInTheDocument();
     });
 
     it("uses Korean persisted skip-path issue and comment artifacts under ko locale", async () => {
@@ -500,7 +500,7 @@ describe("WelcomeAfterOnboarding", () => {
       renderWelcome({ locale: "ko" });
 
       await waitFor(() => {
-        expect(screen.getByText(/Multica에 오신 것을 환영합니다/i)).toBeInTheDocument();
+        expect(screen.getByText(/3J Tracker에 오신 것을 환영합니다/i)).toBeInTheDocument();
       });
 
       expect(mockCreateIssue).toHaveBeenCalledTimes(2);
@@ -509,10 +509,10 @@ describe("WelcomeAfterOnboarding", () => {
         "1단계 — agent를 사용하려면 runtime 연결하기",
       );
       expect(installCall![0].description).toContain(
-        "Multica에 오신 것을 환영합니다.",
+        "3J Tracker에 오신 것을 환영합니다.",
       );
       expect(guideCall![0].title).toBe(
-        "2단계 — 첫 Multica Agent 만들기",
+        "2단계 — 첫 Agent 만들기",
       );
       expect(guideCall![0].description).toContain(
         "runtime이 online 상태가 되면",
@@ -553,7 +553,7 @@ describe("WelcomeAfterOnboarding", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText(/Multica へようこそ/),
+          screen.getByText(/3J Tracker へようこそ/),
         ).toBeInTheDocument();
       });
 
@@ -562,9 +562,9 @@ describe("WelcomeAfterOnboarding", () => {
       expect(installCall![0].title).toBe(
         "ステップ1 — agent を使うために runtime を接続する",
       );
-      expect(installCall![0].description).toContain("Multica へようこそ。");
+      expect(installCall![0].description).toContain("3J Tracker へようこそ。");
       expect(guideCall![0].title).toBe(
-        "ステップ2 — 最初の Multica Agent を作成する",
+        "ステップ2 — 最初の Agent を作成する",
       );
       expect(guideCall![0].description).toContain("runtime が online になったら");
       expect(guideCall![0].description).toContain(

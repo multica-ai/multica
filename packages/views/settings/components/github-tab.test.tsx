@@ -202,7 +202,7 @@ describe("GitHubTab", () => {
     render(<GitHubTab />, { wrapper: I18nWrapper });
 
     await user.click(screen.getByRole("button", { name: /^Disconnect$/ }));
-    expect(screen.getByText(/Multica will stop receiving webhooks/i)).toBeTruthy();
+    expect(screen.getByText(/3J Tracker will stop receiving webhooks/i)).toBeTruthy();
     expect(mockDeleteInstallation).not.toHaveBeenCalled();
 
     const dialogConfirm = screen

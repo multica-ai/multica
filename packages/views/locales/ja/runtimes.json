@@ -157,7 +157,7 @@
   "connect": {
     "title": "コンピュータを追加",
     "description": "追加したいコンピュータで、この 2 つのコマンドを実行してください。デーモンがオンラインになった瞬間に検出します。",
-    "step1_label": "Multica CLI をインストール",
+    "step1_label": "3J Tracker CLI をインストール",
     "step2_label": "デーモンを起動",
     "step2_hint": "サインインのためにブラウザを開き、その後デーモンをバックグラウンドで実行し続けます。",
     "live_listening": "あなたのコンピュータを待っています",
@@ -220,7 +220,7 @@
     "cli_version_label": "CLI バージョン:",
     "version_unknown": "不明",
     "managed_by_desktop": "デスクトップで管理",
-    "managed_by_desktop_title": "CLI バイナリは Multica Desktop で管理されています。CLI をアップグレードするには Desktop を更新してください。",
+    "managed_by_desktop_title": "CLI バイナリは 3J Tracker Desktop で管理されています。CLI をアップグレードするには Desktop を更新してください。",
     "latest": "最新",
     "available": "利用可能",
     "action": "更新",

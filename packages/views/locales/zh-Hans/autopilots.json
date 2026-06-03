@@ -36,21 +36,21 @@
       "title": "每日新闻摘要",
       "summary": "搜索并汇总今天的新闻给团队"
     },
-    "pr_review": {
-      "title": "PR review 提醒",
-      "summary": "标记需要 review 的滞留 pull request"
+    "task_followup": {
+      "title": "任务跟进提醒",
+      "summary": "标记逾期或停滞、需要关注的任务"
     },
     "bug_triage": {
-      "title": "Bug 分诊",
-      "summary": "评估并安排新提交的 bug"
+      "title": "问题分诊",
+      "summary": "评估并安排新上报的问题"
     },
     "weekly_progress": {
       "title": "每周进度报告",
       "summary": "汇总团队本周进展"
     },
-    "dependency_audit": {
-      "title": "依赖审计",
-      "summary": "扫描安全漏洞和过时的依赖包"
+    "compliance_check": {
+      "title": "合规检查",
+      "summary": "检查近期活动中的流程或政策差距"
     },
     "documentation_check": {
       "title": "文档检查",

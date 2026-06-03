@@ -36,21 +36,21 @@
       "title": "일일 뉴스 요약",
       "summary": "오늘의 뉴스를 찾아 팀이 볼 수 있게 요약합니다"
     },
-    "pr_review": {
-      "title": "PR 리뷰 리마인더",
-      "summary": "리뷰가 필요한 오래된 Pull request를 표시합니다"
+    "task_followup": {
+      "title": "태스크 팔로업 리마인더",
+      "summary": "기한이 지났거나 정체된 태스크를 표시합니다"
     },
     "bug_triage": {
-      "title": "버그 분류",
-      "summary": "새 버그 리포트를 평가하고 우선순위를 정합니다"
+      "title": "이슈 분류",
+      "summary": "새로 보고된 이슈를 평가하고 우선순위를 정합니다"
     },
     "weekly_progress": {
       "title": "주간 진행 보고서",
       "summary": "팀 진행 상황을 주간 요약으로 정리합니다"
     },
-    "dependency_audit": {
-      "title": "의존성 감사",
-      "summary": "보안 취약점과 오래된 패키지를 점검합니다"
+    "compliance_check": {
+      "title": "컴플라이언스 확인",
+      "summary": "최근 활동에서 프로세스 또는 정책 차이를 검토합니다"
     },
     "documentation_check": {
       "title": "문서 점검",
