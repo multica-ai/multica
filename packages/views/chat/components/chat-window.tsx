@@ -643,24 +643,27 @@ function AgentDropdown({
   onSelect: (agent: Agent) => void;
 }) {
   const { t } = useT("chat");
-  // Split into the user's own agents and everyone else so the menu groups
-  // them — matches the old AgentSelector layout.
+  const [filter, setFilter] = useState("");
+
   const { mine, others } = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const match = (a: Agent) => !q || a.name.toLowerCase().includes(q);
     const mine: Agent[] = [];
     const others: Agent[] = [];
     for (const a of agents) {
+      if (!match(a)) continue;
       if (a.owner_id === userId) mine.push(a);
       else others.push(a);
     }
     return { mine, others };
-  }, [agents, userId]);
+  }, [agents, userId, filter]);
 
   if (!activeAgent) {
     return <span className="text-xs text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => { if (!open) setFilter(""); }}>
       <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
         <ActorAvatar
           actorType="agent"
@@ -673,6 +676,16 @@ function AgentDropdown({
         <ChevronDown className="size-3 text-muted-foreground shrink-0" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="max-h-80 w-auto max-w-64">
+        <div className="px-2 py-1.5 border-b">
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+            placeholder={t(($) => $.window.filter_placeholder)}
+            className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+          />
+        </div>
         {mine.length > 0 && (
           <DropdownMenuGroup>
             <DropdownMenuLabel>{t(($) => $.window.my_agents)}</DropdownMenuLabel>

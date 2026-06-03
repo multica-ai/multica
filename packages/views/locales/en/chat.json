@@ -77,6 +77,7 @@
     "my_agents": "My agents",
     "others": "Others",
     "no_agents": "No agents",
+    "filter_placeholder": "Filter agents...",
     "history_group": "Chat history"
   },
   "empty_state": {

@@ -77,6 +77,7 @@
     "my_agents": "내 에이전트",
     "others": "기타",
     "no_agents": "에이전트 없음",
+    "filter_placeholder": "에이전트 검색...",
     "history_group": "채팅 기록"
   },
   "empty_state": {

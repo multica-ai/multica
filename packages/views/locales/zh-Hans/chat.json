@@ -74,6 +74,7 @@
     "my_agents": "我的智能体",
     "others": "其他",
     "no_agents": "暂无智能体",
+    "filter_placeholder": "搜索智能体...",
     "history_group": "历史对话"
   },
   "empty_state": {

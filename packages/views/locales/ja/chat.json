@@ -74,6 +74,7 @@
     "my_agents": "マイエージェント",
     "others": "その他",
     "no_agents": "エージェントなし",
+    "filter_placeholder": "エージェントを検索...",
     "history_group": "チャット履歴"
   },
   "empty_state": {
