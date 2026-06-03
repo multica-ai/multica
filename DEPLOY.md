@@ -1,28 +1,28 @@
 # Deploy — firtal-cerebro
 
+## Miljøer
+
+| Miljø | URL | Gren | Platform |
+|---|---|---|---|
+| Staging | `https://Sara.firtal.com` | `main` | Mac mini (sara.local, launchd) |
+| Produktion | `https://Multica.firtal.com` | `production` | Sliplane (Docker-containers) |
+| Lokal dev | `http://localhost:3000` | din branch | — |
+
+- **`main`** deployer løbende til staging (`Sara.firtal.com`) via webhook på sara-serveren.
+- **`production`** deployer til produktion (`Multica.firtal.com`) via Sliplane — kræver godkendt release-issue.
+
 ## Hvad der trigger et deploy
 
-**Merge til `main` deployer IKKE direkte.** Live-deployet sker først når `main` flettes ind på grenen `production`, og den fletning kræver en `approve`-kommentar på et release-issue i Multicas "Deployments"-projekt.
+**Merge til `main` deployer til staging, ikke produktion.** Produktion opdateres først når `main` flettes ind på grenen `production`, og den fletning kræver en `approve`-kommentar på et release-issue i Multicas "Deployments"-projekt.
 
-Det automatiske flow (`auto-deploy-trigger` autopilot) opretter release-issuet for dig — du skal kun godkende. GitHub-webhook'en på `sara.tailbde0.ts.net` deployer fra `production` (ikke `main`).
+Det automatiske flow (`auto-deploy-trigger` autopilot) opretter release-issuet for dig — du skal kun godkende. Sliplane bygger og deployer automatisk når `production` modtager et push.
 
 ## Deploy-flowet — trin for trin
 
-1. PR flettes til `main` (sker løbende, hele dagen).
+1. PR flettes til `main` (sker løbende, hele dagen). Staging (`Sara.firtal.com`) opdateres automatisk.
 2. `auto-deploy-trigger`-autopiloten fyrer (GitHub-webhook ind i Multica, med en planlagt fallback der hver X. minut sammenligner `main` mod `production`). Den slår appen op i `registry.firtal.com`, kører `release-review`-tjeklisten på diffen `main..production`, og opretter ÉT release-issue i Deployments-projektet (`ecb4fb83-0995-48a5-97d2-3adce73aa800`) pr. ventende udgivelses-vindue. Næste push på samme vindue opdaterer SAMME issue (idempotent på repo + main-head-sha) — 5 PR'er på 10 min = 1 godkendelse, ikke 5.
 3. App-ejeren (eller Jesper) kommenterer `approve` + tagger agenten på release-issuet. Agenten fletter den stående `main → production`-PR via GitHub-API'en.
-4. Push til `origin/production` rammer webhook-listeneren på sara (`com.multica.webhook` på port 9000), som kører `.deploy/deploy.sh`.
-5. `.deploy/deploy.sh`:
-   1. `git fetch origin production` + `git reset --hard origin/production` — exit hvis ingen nye commits.
-   2. Bygger backend og kører migrationer.
-   3. Genstarter `com.multica.backend` og `com.multica.daemon` straks efter migrationer, så gamle binaries ikke serverer trafik mod nyt schema.
-   4. Bygger Next.js-frontend (`apps/web`) til `.next.new/` (sletter `.next` først pga. Next.js 16 stale client-reference-manifest).
-   5. Atomisk swap: `.next` → `.next.old`, `.next.new` → `.next`.
-   6. Genstarter `com.multica.frontend`.
-   7. Smoke-test: HTTP 200 på `/` og én chunk-route.
-   8. Fejler smoke-test → automatisk rollback til `.next.old`.
-
-Concurrent merges serialiseres via lock i `.deploy/logs/deploy.lock`. Se `JEH-628` for baggrunden (parallelle builds der SIGTERM'ede hinanden).
+4. Push til `origin/production` trigger Sliplane til at bygge nye Docker-containers og deploye til `Multica.firtal.com`.
 
 ## Hvem godkender?
 
@@ -38,39 +38,36 @@ Godkendelse sker som en `approve`-kommentar på release-issuet i Multica (Deploy
 
 ## Verificering efter deploy
 
-1. Åbn `https://sara.tailbde0.ts.net` og tjek at appen loader
+**Staging (`main` → `Sara.firtal.com`):**
+1. Åbn `https://Sara.firtal.com` og tjek at appen loader
 2. Tjek `.deploy/logs/deploy-latest.log` på sara-serveren for fejl
-3. Rollback sker automatisk ved smoke-test-fejl — men verificér manuelt hvis du er i tvivl
 
-## Miljøer
+**Produktion (`production` → `Multica.firtal.com`):**
+1. Åbn `https://Multica.firtal.com` og tjek at appen loader
+2. Tjek Sliplane's deploy-log for fejl
+3. Rollback via Sliplane hvis containeren fejler — eller revert commit på `production`-grenen
 
-| Miljø | URL | Gren |
-|---|---|---|
-| Produktion | `https://sara.tailbde0.ts.net` | `production` |
-| Arbejdsgren (ikke live) | — | `main` |
-| Lokal dev | `http://localhost:3000` | din branch |
+## Launchd-jobs (staging — på sara-serveren)
 
-Der er ikke et staging-miljø. Test lokalt eller på en feature-branch inden merge til `main`.
-
-## Launchd-jobs (på sara-serveren)
+Disse jobs kører staging-miljøet (`Sara.firtal.com`) fra `main`-grenen:
 
 - `com.multica.frontend` — Next.js web-app
 - `com.multica.backend` — Go API-server
 - `com.multica.daemon` — Multica daemon
-- `com.multica.webhook` — GitHub webhook-receiver (lytter på push til `production`)
+- `com.multica.webhook` — GitHub webhook-receiver (lytter på push til `main`)
 
-Genstartede automatisk af deploy-scriptet. Manuel genstart:
+Manuel genstart:
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.multica.frontend
 ```
 
-## Manuel fallback
+## Manuel fallback (staging)
 
-Hvis autopiloten ikke fyrer eller runneren har været offline:
+Hvis webhook-listeneren ikke fyrer eller serveren har været offline:
 
 ```bash
 ssh sara@<runner-host>
 bash ~/code/firtal-cerebro/.deploy/deploy.sh
 ```
 
-Det henter `origin/production` og kører hele deploy-flowet manuelt.
+Det henter `origin/main` (staging) og kører hele deploy-flowet manuelt.
