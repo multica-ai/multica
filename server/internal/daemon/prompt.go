@@ -9,11 +9,11 @@ import (
 
 // BuildPrompt constructs the task prompt for an agent CLI.
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
-// injected by execenv.InjectRuntimeConfig. The provider string is used by
-// comment-triggered tasks: Codex's per-turn reply template needs the
-// platform-aware "stdin or file" variant, every other provider gets a
-// lightweight inline template (or Windows file for any provider on
-// Windows).
+// injected by execenv.InjectRuntimeConfig. The provider string is threaded
+// through to comment-triggered tasks' per-turn reply template; that template
+// is provider-agnostic now (Linux/macOS → quoted-HEREDOC stdin, Windows →
+// file) because the shell-layer corruption it guards against is not specific
+// to any one provider (MUL-2904).
 func BuildPrompt(task Task, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
@@ -183,6 +183,37 @@ func buildChatPrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
+	if task.Agent != nil && len(task.Agent.Skills) > 0 {
+		refs := ExtractSlashSkills(task.ChatMessage)
+		if len(refs) > 0 {
+			agentSkills := make(map[string]string, len(task.Agent.Skills))
+			for _, s := range task.Agent.Skills {
+				agentSkills[s.ID] = s.Name
+			}
+
+			selected := make([]string, 0, len(refs))
+			seen := make(map[string]struct{}, len(refs))
+			for _, ref := range refs {
+				name, ok := agentSkills[ref.ID]
+				if !ok {
+					continue
+				}
+				if _, ok := seen[ref.ID]; ok {
+					continue
+				}
+				seen[ref.ID] = struct{}{}
+				selected = append(selected, name)
+			}
+
+			if len(selected) > 0 {
+				b.WriteString("Explicitly selected skills:\n")
+				for _, name := range selected {
+					fmt.Fprintf(&b, "- %s\n", name)
+				}
+				b.WriteString("\n")
+			}
+		}
+	}
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments

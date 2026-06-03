@@ -9,8 +9,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { ReactRenderer } from "@tiptap/react";
-import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
@@ -31,13 +29,15 @@ import { StatusIcon } from "../../issues/components/status-icon";
 import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { IssueStatus } from "@multica/core/types";
-import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
+import type { SuggestionOptions } from "@tiptap/suggestion";
+import { PluginKey } from "@tiptap/pm/state";
 import {
   getRecencyMap,
   recordMentionUsage,
   sortUserItemsByRecency,
 } from "./mention-recency";
 import { matchesPinyin } from "./pinyin-match";
+import { createSuggestionPopupRender } from "./suggestion-popup";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -375,10 +375,9 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
 > {
-  // Renderer/popup instances live in this closure so each ContentEditor owns
-  // its own TipTap suggestion popup lifecycle.
-  let renderer: ReactRenderer<MentionListRef> | null = null;
-  let popup: HTMLDivElement | null = null;
+  // The explicit key is passed into Tiptap Suggestion and reused by the
+  // shared popup controller when it dispatches exitSuggestion(view, pluginKey).
+  const pluginKey = new PluginKey("mentionSuggestion");
 
   function buildSyncItems(query: string): MentionItem[] {
     // Read workspace id imperatively because this runs in TipTap factory scope
@@ -454,78 +453,21 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
   }
 
   return {
+    pluginKey,
     items: ({ query }) => {
       const syncItems = buildSyncItems(query);
       return syncItems;
     },
 
-    render: () => {
-      return {
-        onStart: (props: SuggestionProps<MentionItem>) => {
-          renderer = new ReactRenderer(MentionList, {
-            props: {
-              items: props.items,
-              query: props.query,
-              command: props.command,
-            },
-            editor: props.editor,
-          });
-
-          popup = document.createElement("div");
-          popup.style.position = "fixed";
-          popup.style.zIndex = "50";
-          popup.appendChild(renderer.element);
-          document.body.appendChild(popup);
-
-          updatePosition(popup, props.clientRect);
-        },
-
-        onUpdate: (props: SuggestionProps<MentionItem>) => {
-          renderer?.updateProps({
-            items: props.items,
-            query: props.query,
-            command: props.command,
-          });
-          if (popup) updatePosition(popup, props.clientRect);
-        },
-
-        onKeyDown: (props: { event: KeyboardEvent }) => {
-          if (props.event.key === "Escape") {
-            cleanup();
-            return true;
-          }
-          return renderer?.ref?.onKeyDown(props) ?? false;
-        },
-
-        onExit: () => {
-          cleanup();
-        },
-      };
-
-      function updatePosition(
-        el: HTMLDivElement,
-        clientRect: (() => DOMRect | null) | null | undefined,
-      ) {
-        if (!clientRect) return;
-        const virtualEl = {
-          getBoundingClientRect: () => clientRect() ?? new DOMRect(),
-        };
-        computePosition(virtualEl, el, {
-          placement: "bottom-start",
-          strategy: "fixed",
-          middleware: [offset(4), flip(), shift({ padding: 8 })],
-        }).then(({ x, y }) => {
-          el.style.left = `${x}px`;
-          el.style.top = `${y}px`;
-        });
-      }
-
-      function cleanup() {
-        renderer?.destroy();
-        renderer = null;
-        popup?.remove();
-        popup = null;
-      }
-    },
+    render: createSuggestionPopupRender<MentionItem, MentionItem, MentionListRef, MentionListProps>({
+      pluginKey,
+      component: MentionList,
+      getProps: (props) => ({
+        items: props.items,
+        query: props.query,
+        command: props.command,
+      }),
+      onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
+    }),
   };
 }

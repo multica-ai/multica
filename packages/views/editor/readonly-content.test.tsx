@@ -126,6 +126,45 @@ describe("ReadonlyContent line breaks", () => {
   });
 });
 
+describe("ReadonlyContent highlight Markdown", () => {
+  // `==text==` is lowered to a raw <mark> by highlightToHtml; rehype-raw turns
+  // it into an element and the sanitize schema must whitelist <mark> or it gets
+  // stripped. These guard both halves of that contract.
+  it("renders ==text== as a <mark> element", () => {
+    const { container } = render(<ReadonlyContent content={"a ==hi== b"} />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    expect(mark?.textContent).toBe("hi");
+  });
+
+  it("keeps inner Markdown formatting inside a highlight", () => {
+    const { container } = render(<ReadonlyContent content={"==**bold**=="} />);
+    expect(container.querySelector("mark strong")).not.toBeNull();
+  });
+
+  it("does not highlight == inside inline code", () => {
+    const { container } = render(<ReadonlyContent content={"`a ==b== c`"} />);
+    expect(container.querySelector("mark")).toBeNull();
+    expect(container.querySelector("code")?.textContent).toBe("a ==b== c");
+  });
+
+  // Boundary regressions (Emacs review, PR #3661).
+
+  it("wraps the whole span when an inner == lives in inline code", () => {
+    const { container } = render(<ReadonlyContent content={"==a `b==c` d=="} />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    // inner `==` stays inside the code, not consumed as the closing fence
+    expect(mark?.querySelector("code")?.textContent).toBe("b==c");
+    expect(mark?.textContent).toBe("a b==c d");
+  });
+
+  it("does not highlight across a blank line", () => {
+    const { container } = render(<ReadonlyContent content={"==a\n\nb=="} />);
+    expect(container.querySelector("mark")).toBeNull();
+  });
+});
+
 describe("ReadonlyContent issue mention Markdown", () => {
   it("renders an issue mention inside a task list as an issue mention card", () => {
     const { container, getByTestId } = render(
@@ -384,5 +423,26 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     // AttachmentCard chrome surfaces the filename as visible text in a
     // <p class="truncate"> row. HtmlAttachmentPreview replaces it entirely.
     expect(queryByText("report.html")).toBeNull();
+  });
+});
+
+describe("ReadonlyContent slash command rendering", () => {
+  it("renders slash skill links as slash command pills", () => {
+    const { container } = render(
+      <ReadonlyContent content="[/deploy](slash://skill/abc-123)" />,
+    );
+
+    const pill = container.querySelector(".slash-command");
+    expect(pill).not.toBeNull();
+    expect(pill?.textContent).toBe("/deploy");
+  });
+
+  it("does not affect regular links", () => {
+    const { container } = render(
+      <ReadonlyContent content="[docs](https://example.com)" />,
+    );
+
+    expect(container.querySelector(".slash-command")).toBeNull();
+    expect(container.querySelector("a")).not.toBeNull();
   });
 });

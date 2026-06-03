@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -120,6 +122,8 @@ func init() {
 	skillCreateCmd.Flags().String("name", "", "Skill name (required)")
 	skillCreateCmd.Flags().String("description", "", "Skill description")
 	skillCreateCmd.Flags().String("content", "", "Skill content (SKILL.md body)")
+	skillCreateCmd.Flags().Bool("content-stdin", false, "Read skill content from stdin. Mutually exclusive with --content and --content-file.")
+	skillCreateCmd.Flags().String("content-file", "", "Read skill content from a UTF-8 file. Mutually exclusive with --content and --content-stdin.")
 	skillCreateCmd.Flags().String("config", "", "Skill config as JSON string")
 	skillCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -127,6 +131,8 @@ func init() {
 	skillUpdateCmd.Flags().String("name", "", "New name")
 	skillUpdateCmd.Flags().String("description", "", "New description")
 	skillUpdateCmd.Flags().String("content", "", "New content")
+	skillUpdateCmd.Flags().Bool("content-stdin", false, "Read new content from stdin. Mutually exclusive with --content and --content-file.")
+	skillUpdateCmd.Flags().String("content-file", "", "Read new content from a UTF-8 file. Mutually exclusive with --content and --content-stdin.")
 	skillUpdateCmd.Flags().String("config", "", "New config as JSON string")
 	skillUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -146,12 +152,68 @@ func init() {
 	// skill files upsert
 	skillFilesUpsertCmd.Flags().String("path", "", "File path within the skill (required)")
 	skillFilesUpsertCmd.Flags().String("content", "", "File content (required)")
+	skillFilesUpsertCmd.Flags().Bool("content-stdin", false, "Read file content from stdin. Mutually exclusive with --content and --content-file.")
+	skillFilesUpsertCmd.Flags().String("content-file", "", "Read file content from a UTF-8 file. Mutually exclusive with --content and --content-stdin.")
 	skillFilesUpsertCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
 // Skill commands
 // ---------------------------------------------------------------------------
+
+// resolveSkillContentFlag intentionally stays separate from resolveTextFlag.
+// Skill bodies are Markdown documents where byte-level preservation matters:
+// inline --content is not backslash-unescaped, and stdin/file input is not
+// trimmed, so agents can round-trip generated SKILL.md content exactly.
+func resolveSkillContentFlag(cmd *cobra.Command) (string, bool, error) {
+	useStdin, _ := cmd.Flags().GetBool("content-stdin")
+	inline, _ := cmd.Flags().GetString("content")
+	filePath, _ := cmd.Flags().GetString("content-file")
+	inlineSet := cmd.Flags().Changed("content")
+
+	sources := 0
+	if inlineSet {
+		sources++
+	}
+	if useStdin {
+		sources++
+	}
+	if filePath != "" {
+		sources++
+	}
+	if sources > 1 {
+		return "", false, fmt.Errorf("--content, --content-stdin, and --content-file are mutually exclusive")
+	}
+
+	if useStdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", false, fmt.Errorf("read stdin for --content-stdin: %w", err)
+		}
+		return skillContentBytesToString(data, "stdin content for --content-stdin")
+	}
+	if filePath != "" {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", false, fmt.Errorf("read file for --content-file: %w", err)
+		}
+		return skillContentBytesToString(data, "file content for --content-file")
+	}
+	if inlineSet {
+		return inline, true, nil
+	}
+	return "", false, nil
+}
+
+func skillContentBytesToString(data []byte, label string) (string, bool, error) {
+	if len(data) == 0 {
+		return "", false, fmt.Errorf("%s is empty", label)
+	}
+	if !utf8.Valid(data) {
+		return "", false, fmt.Errorf("%s must be valid UTF-8", label)
+	}
+	return string(data), true, nil
+}
 
 func runSkillList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -233,8 +295,12 @@ func runSkillCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
 	}
-	if v, _ := cmd.Flags().GetString("content"); v != "" {
-		body["content"] = v
+	content, hasContent, err := resolveSkillContentFlag(cmd)
+	if err != nil {
+		return err
+	}
+	if hasContent && content != "" {
+		body["content"] = content
 	}
 	if cmd.Flags().Changed("config") {
 		v, _ := cmd.Flags().GetString("config")
@@ -277,9 +343,12 @@ func runSkillUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
-	if cmd.Flags().Changed("content") {
-		v, _ := cmd.Flags().GetString("content")
-		body["content"] = v
+	content, hasContent, err := resolveSkillContentFlag(cmd)
+	if err != nil {
+		return err
+	}
+	if hasContent {
+		body["content"] = content
 	}
 	if cmd.Flags().Changed("config") {
 		v, _ := cmd.Flags().GetString("config")
@@ -487,8 +556,11 @@ func runSkillFilesUpsert(cmd *cobra.Command, args []string) error {
 	if filePath == "" {
 		return fmt.Errorf("--path is required")
 	}
-	content, _ := cmd.Flags().GetString("content")
-	if content == "" {
+	content, hasContent, err := resolveSkillContentFlag(cmd)
+	if err != nil {
+		return err
+	}
+	if !hasContent || content == "" {
 		return fmt.Errorf("--content is required")
 	}
 

@@ -249,6 +249,111 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+func TestBuildChatPromptSlashSkills(t *testing.T) {
+	t.Run("injects selected skills block", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "please [/deploy](slash://skill/abc-123) this",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "abc-123", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if !strings.Contains(out, "Explicitly selected skills:\n- deploy\n") {
+			t.Fatalf("expected selected skills block, got:\n%s", out)
+		}
+		if !strings.Contains(out, "User message:\nplease [/deploy](slash://skill/abc-123) this") {
+			t.Fatalf("expected raw user message preserved, got:\n%s", out)
+		}
+	})
+
+	t.Run("ignores skills not belonging to agent", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/hacker-skill](slash://skill/evil-id)",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "good-id", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("should not inject block for unknown skill ID, got:\n%s", out)
+		}
+	})
+
+	t.Run("validates by ID not label", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/deploy](slash://skill/wrong-id)",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "real-id", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("matching label with wrong ID must not pass, got:\n%s", out)
+		}
+	})
+
+	t.Run("uses canonical name not label", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/spoofed-name](slash://skill/real-id)",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "real-id", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if !strings.Contains(out, "- deploy\n") {
+			t.Fatalf("expected canonical name 'deploy', got:\n%s", out)
+		}
+		if strings.Contains(out, "- spoofed-name\n") {
+			t.Fatalf("selected skills block must not use spoofed label, got:\n%s", out)
+		}
+		if !strings.Contains(out, "User message:\n[/spoofed-name](slash://skill/real-id)") {
+			t.Fatalf("expected raw user message with spoofed label preserved, got:\n%s", out)
+		}
+	})
+
+	t.Run("deduplicates skills", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/deploy](slash://skill/a) and [/deploy](slash://skill/a) again",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "a", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if strings.Count(out, "- deploy") != 1 {
+			t.Fatalf("expected exactly 1 '- deploy', got:\n%s", out)
+		}
+	})
+
+	t.Run("omits block when no valid skills", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "just a normal message",
+			Agent:         &AgentData{Skills: []SkillData{{ID: "a", Name: "deploy"}}},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("should not inject block when no slash links, got:\n%s", out)
+		}
+	})
+
+	t.Run("omits block when agent has no skills", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/deploy](slash://skill/abc-123)",
+			Agent:         &AgentData{},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("should not inject block for agent with no skills, got:\n%s", out)
+		}
+	})
+}
+
 // TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
 // prompt (no trigger comment, no chat, no autopilot, no quick-create) also
 // teaches the agent about --recent as the long-issue-friendly alternative

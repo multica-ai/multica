@@ -32,8 +32,10 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 //   1. Agent avatar (no status dot — agent availability is not the
 //      story here; the row's right column carries the task status)
 //   2. Trigger description flexes and truncates
-//   3. Status is a normal shrink-0 right column; hover actions overlay that
-//      same right edge. Do not use masks/padding gymnastics here.
+//   3. Status is a normal shrink-0 right column; on hover it is replaced
+//      in place by the action buttons (status is removed, not covered).
+//      Left text keeps flex-1 so the row never shows a mid-row gap. Do
+//      not use masks/padding gymnastics here.
 //
 // One query (`listTasksByIssue`) drives both buckets — the back-end
 // returns every status, the front-end filters into active vs past on the
@@ -272,8 +274,14 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     <RowShell task={task}>
       <TriggerText text={trigger} />
       <RowStatus title={label}>
-        {task.status === "running" && <Loader2 className="h-3 w-3 animate-spin text-info" />}
-        <span className={`${tone} min-w-0 truncate`}>{label}</span>
+        {task.status === "running" ? (
+          <>
+            <Loader2 className="h-3 w-3 animate-spin text-info" />
+            <span className="sr-only">{label}</span>
+          </>
+        ) : (
+          <span className={`${tone} min-w-0 truncate`}>{label}</span>
+        )}
       </RowStatus>
       <RowActions>
         {showTranscript && (
@@ -401,10 +409,8 @@ function RowShell({
   task: AgentTask;
   children: React.ReactNode;
 }) {
-  // `relative` so the absolute-positioned RowActions slot anchors to this
-  // row instead of an outer container.
   return (
-    <div className="group/execution-log-row relative flex items-center gap-2 overflow-hidden rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
+    <div className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
       {task.agent_id ? (
         <ActorAvatar
           actorType="agent"
@@ -434,7 +440,7 @@ function RowStatus({
   return (
     <div
       title={title}
-      className="flex h-7 w-20 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-xs transition-opacity group-hover/execution-log-row:opacity-0 group-focus-within/execution-log-row:opacity-0"
+      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-xs group-hover/execution-log-row:hidden"
     >
       {children}
     </div>
@@ -454,21 +460,12 @@ function TaskStatusIcon({ status }: { status: AgentTask["status"] }) {
   }
 }
 
-// Hover-only action slot — absolute-positioned over the row's right edge.
-// It covers the normal right status column only on hover.
+// Action slot — hidden by default, replaces the status column in place on
+// hover. No absolute/gradient needed: the status is removed (not covered),
+// so nothing shows through underneath.
 function RowActions({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className={[
-        "pointer-events-none absolute inset-y-0 right-1 flex w-20 items-center justify-end gap-0.5 opacity-0 transition-opacity",
-        // The gradient backdrop blends the row's hover background (accent/40)
-        // from the right and fades to transparent on the left, so the
-        // status text underneath is dimmed gracefully rather than cut.
-        "bg-gradient-to-l from-accent/95 via-accent/80 to-transparent",
-        "group-hover/execution-log-row:pointer-events-auto group-hover/execution-log-row:opacity-100",
-        "group-focus-within/execution-log-row:pointer-events-auto group-focus-within/execution-log-row:opacity-100",
-      ].join(" ")}
-    >
+    <div className="hidden h-7 items-center gap-0.5 group-hover/execution-log-row:flex">
       {children}
     </div>
   );

@@ -587,10 +587,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         {/* Body: two columns (stacks on narrow screens via flex-wrap at container level) */}
         <div
           key={contentKey}
-          className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden"
+          className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden"
         >
           {/* Left: Runbook */}
-          <div className="flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
+          <div className="flex-none lg:flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
             <div className="px-6 pt-5 pb-3 shrink-0">
               <TitleEditor
                 autoFocus={isCreate}
@@ -611,8 +611,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               </span>
             </div>
 
-            <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col">
-              <div className="h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
+            <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col lg:h-full">
+              <div className="min-h-[200px] lg:min-h-0 lg:h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
                 <ContentEditor
                   defaultValue={initial.description ?? ""}
                   placeholder={t(($) => $.dialog.description_placeholder)}
@@ -625,7 +625,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           </div>
 
           {/* Right: Configuration */}
-          <aside className="w-full lg:w-[340px] shrink-0 overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
+          <aside className="w-full lg:w-[340px] shrink-0 overflow-visible lg:overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
             <AgentSection
               selectedType={assigneeType}
               selectedId={assigneeId}

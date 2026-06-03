@@ -811,12 +811,15 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	offset := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
 			limit = v
 		}
 	}
+	if limit > 100 {
+		limit = 100
+	}
 	if o := r.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
 			offset = v
 		}
 	}
@@ -2554,7 +2557,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// loops in PR #2918). The helper guards on transition + parent state and
 	// fails best-effort.
 	if statusChanged {
-		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2622,6 +2625,10 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		leader, err := h.Queries.GetAgent(ctx, squad.LeaderID)
 		if err != nil || leader.ArchivedAt.Valid {
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
+		}
+		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+		if !h.canAccessPrivateAgent(ctx, leader, actorType, actorID, workspaceID) {
+			return http.StatusForbidden, "cannot assign to squad with private leader"
 		}
 		return 0, ""
 	default:
@@ -3029,7 +3036,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Platform-driven parent notification, mirrored from UpdateIssue
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
-			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 		}
 
 		updated++

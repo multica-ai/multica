@@ -367,6 +367,9 @@ export function AgentsPage({
       online: 0,
       unstable: 0,
       offline: 0,
+      // Active-view scope excludes archived agents, so this bucket stays 0
+      // here; present only to satisfy the exhaustive availability Record.
+      archived: 0,
     };
     for (const a of inScopeOnMachine) {
       const detail = presenceMap.get(a.id);

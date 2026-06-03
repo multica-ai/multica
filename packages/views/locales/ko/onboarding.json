@@ -40,7 +40,14 @@
     "back": "뒤로",
     "continue": "계속",
     "skip": "건너뛰기",
-    "cancel": "취소"
+    "cancel": "취소",
+    "close": "닫기"
+  },
+  "source_backfill": {
+    "eyebrow": "간단한 질문 하나",
+    "lede": "가입할 때 선택하지 않으셨더라고요. 어떤 사용자에게 Multica가 유용한지 파악하는 데 도움이 됩니다. 답하시면 바로 작업으로 돌아가실 수 있어요.",
+    "submit": "제출",
+    "hint_ready": "좋습니다. 준비되면 제출을 눌러주세요."
   },
   "questions": {
     "eyebrow_about_you": "내 정보",

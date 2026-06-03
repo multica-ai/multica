@@ -25,7 +25,8 @@
     "all": "All",
     "online": "Online",
     "unstable": "Unstable",
-    "offline": "Offline"
+    "offline": "Offline",
+    "archived": "Archived"
   },
   "workload": {
     "working": "Working",

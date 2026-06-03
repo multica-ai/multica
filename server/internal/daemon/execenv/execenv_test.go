@@ -1259,22 +1259,16 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigAvailableCommandsIsNeutral pins that the core
-// Available Commands section lists comment input modes neutrally for every
-// non-Codex provider on every host OS, with no "MUST pipe via stdin" mandate.
-//
-// Background: #1795 / #1851 introduced "MUST pipe via stdin" /
-// `--description-stdin` directives in the global section to fix Codex's
-// habit of emitting literal `\n` inside `--content "..."` (MUL-1467).
-// That mandate landed in the all-provider section and ended up steering every
-// provider at stdin — which then broke non-ASCII bytes on Windows shells
-// (#2198 / #2236 / #2376). This rollback keeps the strong Codex-specific
-// mandate in the Codex-Specific section (pinned by
-// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin) and leaves the core global
-// command entry neutral.
+// TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic pins that the
+// "never inline --content for agent-authored comments" guardrail reaches EVERY
+// provider on every host OS — post-MUL-2904 the corruption is shell-driven, so
+// the directive is no longer Codex-scoped. The Available Commands entry still
+// lists all three input modes as available, and the legacy over-broad
+// `--description-stdin` / "MUST pipe via stdin" phrasings (#1795 / #1851, which
+// broke Windows non-ASCII) must NOT reappear.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
-func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
+func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	saved := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = saved })
 
@@ -1300,7 +1294,7 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 				}
 				s := string(data)
 
-				// Available Commands lists all three input modes as fact.
+				// Available Commands lists all three input modes as available.
 				for _, want := range []string{
 					"--content \"...\"",
 					"--content-stdin",
@@ -1311,16 +1305,28 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 					}
 				}
 
-				// "MUST pipe via stdin" must NOT appear in any non-Codex
-				// provider's runtime config: it was the over-spread of
-				// the Codex-specific fix.
+				// The provider-agnostic guardrail must now reach non-Codex
+				// providers too: a dedicated Comment Formatting section that
+				// bans inline `--content` for agent-authored comments.
+				for _, want := range []string{
+					"## Comment Formatting",
+					"Never use inline `--content` for agent-authored comments",
+				} {
+					if !strings.Contains(s, want) {
+						t.Errorf("%s missing provider-agnostic comment guardrail %q\n---\n%s", configFile, want, s)
+					}
+				}
+
+				// The legacy over-broad mandate (#1795 / #1851) must NOT
+				// reappear — it is what broke Windows non-ASCII for every
+				// provider.
 				for _, banned := range []string{
 					"MUST pipe via stdin",
 					"Agent-authored comments should always pipe content via stdin",
 					"use `--description-stdin` and pipe a HEREDOC",
 				} {
 					if strings.Contains(s, banned) {
-						t.Errorf("%s carries over-spread Codex mandate %q for non-Codex provider %s\n---\n%s", configFile, banned, provider, s)
+						t.Errorf("%s reintroduces over-broad legacy mandate %q for provider %s\n---\n%s", configFile, banned, provider, s)
 					}
 				}
 			})
@@ -1328,49 +1334,63 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin pins the
-// Codex-Specific Comment Formatting section's "MUST stdin" mandate on
-// non-Windows hosts. This is the MUL-1467 / #1795 / #1851 fix scoped
-// back to where it belongs.
+// TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin pins that the
+// "## Comment Formatting" section emits the quoted-HEREDOC stdin mandate on
+// non-Windows hosts for EVERY provider, not just Codex. Post-MUL-2904 the
+// guardrail is provider-agnostic because the corruption is shell-driven; the
+// quoted delimiter is what blocks backtick / `$()` substitution in the body.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
-func TestInjectRuntimeConfigCodexLinuxEmphasizesStdin(t *testing.T) {
+func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin(t *testing.T) {
 	saved := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = saved })
 	runtimeGOOS = "linux"
 
-	dir := t.TempDir()
-	if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{
-		IssueID:          "issue-1",
-		TriggerCommentID: "comment-1",
-	}); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("read AGENTS.md: %v", err)
-	}
-	s := string(data)
+	for _, provider := range []string{"codex", "claude", "opencode"} {
+		t.Run(provider, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := InjectRuntimeConfig(dir, provider, TaskContextForEnv{
+				IssueID:          "issue-1",
+				TriggerCommentID: "comment-1",
+			}); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+			fileName := "CLAUDE.md"
+			if provider != "claude" {
+				fileName = "AGENTS.md"
+			}
+			data, err := os.ReadFile(filepath.Join(dir, fileName))
+			if err != nil {
+				t.Fatalf("read %s: %v", fileName, err)
+			}
+			s := string(data)
 
-	for _, want := range []string{
-		"Codex-Specific Comment Formatting",
-		"always use `--content-stdin` with a HEREDOC",
-		"even for short single-line replies",
-		"Never use inline `--content` for agent-authored comments",
-		"Keep the same `--parent` value",
-		"do not rely on `\\n` escapes",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("AGENTS.md missing Codex multiline guidance %q\n---\n%s", want, s)
-		}
+			for _, want := range []string{
+				"## Comment Formatting",
+				"always use `--content-stdin` with a HEREDOC",
+				"even for short single-line replies",
+				"<<'COMMENT'",
+				"Never use inline `--content` for agent-authored comments",
+				"Keep the same `--parent` value",
+				"do not rely on `\\n` escapes",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing comment-formatting guidance %q\n---\n%s", fileName, want, s)
+				}
+			}
+			// The heading is no longer Codex-scoped.
+			if strings.Contains(s, "Codex-Specific Comment Formatting") {
+				t.Errorf("%s still carries the old Codex-scoped heading\n---\n%s", fileName, s)
+			}
+		})
 	}
 }
 
 // TestInjectRuntimeConfigCodexWindowsUsesContentFile pins that on Windows
-// the Codex-Specific section directs the agent at `--content-file` instead
-// of `--content-stdin`. PowerShell 5.1 / cmd.exe re-encode piped HEREDOC
-// bytes through the active console codepage and silently drop non-ASCII
-// as `?` before reaching `multica.exe` (#2198 / #2236 / #2376).
+// the Comment Formatting section directs the agent at `--content-file`
+// instead of `--content-stdin`. PowerShell 5.1 / cmd.exe re-encode piped
+// HEREDOC bytes through the active console codepage and silently drop
+// non-ASCII as `?` before reaching `multica.exe` (#2198 / #2236 / #2376).
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {

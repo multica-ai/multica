@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -133,5 +134,268 @@ func TestRunSkillSearchRequestsSearchEndpoint(t *testing.T) {
 	}
 	if gotPath == "" {
 		t.Fatal("expected search endpoint to be requested")
+	}
+}
+
+func newSkillCreateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().String("config", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newSkillUpdateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().String("config", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newSkillFilesUpsertTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "upsert"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("path", "", "")
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newSkillBodyCaptureServer(t *testing.T, wantMethod, wantPath string, body *map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != wantMethod {
+			t.Fatalf("method = %s, want %s", r.Method, wantMethod)
+		}
+		if r.URL.Path != wantPath {
+			t.Fatalf("path = %q, want %q", r.URL.Path, wantPath)
+		}
+		if err := json.NewDecoder(r.Body).Decode(body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":          "skill-123",
+			"name":        "skill-name",
+			"path":        "docs/SKILL.md",
+			"description": "desc",
+			"content":     (*body)["content"],
+		})
+	}))
+}
+
+func setSkillServerEnv(t *testing.T, serverURL string) {
+	t.Helper()
+	t.Setenv("MULTICA_SERVER_URL", serverURL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+}
+
+func TestRunSkillCreateReadsContentFileVerbatim(t *testing.T) {
+	var body map[string]any
+	srv := newSkillBodyCaptureServer(t, http.MethodPost, "/api/skills", &body)
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	content := "标题 / Заголовок\n\nBody with `code`, \"quotes\", and a literal \\n.\n"
+	path := t.TempDir() + string(os.PathSeparator) + "SKILL.md"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+
+	cmd := newSkillCreateTestCmd()
+	_ = cmd.Flags().Set("name", "skill-name")
+	_ = cmd.Flags().Set("content-file", path)
+	if _, err := captureStdout(t, func() error { return runSkillCreate(cmd, nil) }); err != nil {
+		t.Fatalf("runSkillCreate: %v", err)
+	}
+	if body["content"] != content {
+		t.Fatalf("content = %q, want verbatim %q", body["content"], content)
+	}
+}
+
+func TestRunSkillCreateKeepsInlineContentLiteral(t *testing.T) {
+	var body map[string]any
+	srv := newSkillBodyCaptureServer(t, http.MethodPost, "/api/skills", &body)
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	content := `regex \d and path C:\\new and literal \n done`
+	cmd := newSkillCreateTestCmd()
+	_ = cmd.Flags().Set("name", "skill-name")
+	_ = cmd.Flags().Set("content", content)
+	if _, err := captureStdout(t, func() error { return runSkillCreate(cmd, nil) }); err != nil {
+		t.Fatalf("runSkillCreate: %v", err)
+	}
+	if body["content"] != content {
+		t.Fatalf("content = %q, want literal inline %q", body["content"], content)
+	}
+}
+
+func TestRunSkillUpdateReadsContentStdinVerbatim(t *testing.T) {
+	var body map[string]any
+	srv := newSkillBodyCaptureServer(t, http.MethodPut, "/api/skills/skill-123", &body)
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	content := "first line\nsecond line with literal \\n\n"
+	cmd := newSkillUpdateTestCmd()
+	_ = cmd.Flags().Set("content-stdin", "true")
+	pipeStdin(t, content, func() {
+		if _, err := captureStdout(t, func() error { return runSkillUpdate(cmd, []string{"skill-123"}) }); err != nil {
+			t.Fatalf("runSkillUpdate: %v", err)
+		}
+	})
+	if body["content"] != content {
+		t.Fatalf("content = %q, want verbatim %q", body["content"], content)
+	}
+}
+
+func TestRunSkillFilesUpsertReadsContentFileVerbatim(t *testing.T) {
+	var body map[string]any
+	srv := newSkillBodyCaptureServer(t, http.MethodPut, "/api/skills/skill-123/files", &body)
+	defer srv.Close()
+	setSkillServerEnv(t, srv.URL)
+
+	content := "file asset body\n\n"
+	path := t.TempDir() + string(os.PathSeparator) + "asset.txt"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write content file: %v", err)
+	}
+
+	cmd := newSkillFilesUpsertTestCmd()
+	_ = cmd.Flags().Set("path", "docs/SKILL.md")
+	_ = cmd.Flags().Set("content-file", path)
+	if _, err := captureStdout(t, func() error { return runSkillFilesUpsert(cmd, []string{"skill-123"}) }); err != nil {
+		t.Fatalf("runSkillFilesUpsert: %v", err)
+	}
+	if body["path"] != "docs/SKILL.md" {
+		t.Fatalf("path = %v", body["path"])
+	}
+	if body["content"] != content {
+		t.Fatalf("content = %q, want verbatim %q", body["content"], content)
+	}
+}
+
+func TestRunSkillContentInputsAreMutuallyExclusive(t *testing.T) {
+	setSkillServerEnv(t, "http://127.0.0.1:1")
+
+	path := t.TempDir() + string(os.PathSeparator) + "SKILL.md"
+	if err := os.WriteFile(path, []byte("body"), 0o644); err != nil {
+		t.Fatalf("write tempfile: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		set  func(*cobra.Command)
+	}{
+		{name: "inline + stdin", set: func(cmd *cobra.Command) {
+			_ = cmd.Flags().Set("content", "inline")
+			_ = cmd.Flags().Set("content-stdin", "true")
+		}},
+		{name: "inline + file", set: func(cmd *cobra.Command) {
+			_ = cmd.Flags().Set("content", "inline")
+			_ = cmd.Flags().Set("content-file", path)
+		}},
+		{name: "stdin + file", set: func(cmd *cobra.Command) {
+			_ = cmd.Flags().Set("content-stdin", "true")
+			_ = cmd.Flags().Set("content-file", path)
+		}},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newSkillCreateTestCmd()
+			_ = cmd.Flags().Set("name", "skill-name")
+			tt.set(cmd)
+			err := runSkillCreate(cmd, nil)
+			if err == nil {
+				t.Fatalf("expected mutually-exclusive error")
+			}
+			if !strings.Contains(err.Error(), "mutually exclusive") {
+				t.Fatalf("error = %v, want mutually exclusive", err)
+			}
+		})
+	}
+}
+
+func TestRunSkillContentFileAndStdinRejectEmptyInput(t *testing.T) {
+	setSkillServerEnv(t, "http://127.0.0.1:1")
+
+	emptyPath := t.TempDir() + string(os.PathSeparator) + "empty.md"
+	if err := os.WriteFile(emptyPath, []byte(""), 0o644); err != nil {
+		t.Fatalf("write tempfile: %v", err)
+	}
+
+	cmd := newSkillCreateTestCmd()
+	_ = cmd.Flags().Set("name", "skill-name")
+	_ = cmd.Flags().Set("content-file", emptyPath)
+	if err := runSkillCreate(cmd, nil); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("empty content-file error = %v", err)
+	}
+
+	cmd = newSkillCreateTestCmd()
+	_ = cmd.Flags().Set("name", "skill-name")
+	_ = cmd.Flags().Set("content-stdin", "true")
+	pipeStdin(t, "", func() {
+		if err := runSkillCreate(cmd, nil); err == nil || !strings.Contains(err.Error(), "empty") {
+			t.Fatalf("empty content-stdin error = %v", err)
+		}
+	})
+}
+
+func TestRunSkillInlineEmptyContentKeepsExistingBehavior(t *testing.T) {
+	var createBody map[string]any
+	createSrv := newSkillBodyCaptureServer(t, http.MethodPost, "/api/skills", &createBody)
+	defer createSrv.Close()
+	setSkillServerEnv(t, createSrv.URL)
+
+	createCmd := newSkillCreateTestCmd()
+	_ = createCmd.Flags().Set("name", "skill-name")
+	_ = createCmd.Flags().Set("content", "")
+	if _, err := captureStdout(t, func() error { return runSkillCreate(createCmd, nil) }); err != nil {
+		t.Fatalf("runSkillCreate: %v", err)
+	}
+	if _, ok := createBody["content"]; ok {
+		t.Fatalf("create body unexpectedly included empty content: %#v", createBody)
+	}
+
+	var updateBody map[string]any
+	updateSrv := newSkillBodyCaptureServer(t, http.MethodPut, "/api/skills/skill-123", &updateBody)
+	defer updateSrv.Close()
+	setSkillServerEnv(t, updateSrv.URL)
+
+	updateCmd := newSkillUpdateTestCmd()
+	_ = updateCmd.Flags().Set("content", "")
+	if _, err := captureStdout(t, func() error { return runSkillUpdate(updateCmd, []string{"skill-123"}) }); err != nil {
+		t.Fatalf("runSkillUpdate: %v", err)
+	}
+	if updateBody["content"] != "" {
+		t.Fatalf("update content = %q, want empty string", updateBody["content"])
+	}
+
+	upsertCmd := newSkillFilesUpsertTestCmd()
+	_ = upsertCmd.Flags().Set("path", "docs/SKILL.md")
+	_ = upsertCmd.Flags().Set("content", "")
+	if err := runSkillFilesUpsert(upsertCmd, []string{"skill-123"}); err == nil || !strings.Contains(err.Error(), "--content is required") {
+		t.Fatalf("upsert inline empty error = %v", err)
 	}
 }

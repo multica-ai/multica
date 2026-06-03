@@ -22,7 +22,7 @@ Multica 内置支持 **12 款 AI 编程工具**。它们都实现了同一套接
 | **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/` （fallback）| 动态发现 |
 | **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | 动态发现 |
 | **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | 动态发现 |
-| **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | 动态发现 |
+| **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | 动态发现 + variant |
 | **OpenClaw** | 开源项目 | ✅ | ✅ | `.agent_context/skills/` （fallback）| 绑定在智能体上，不能在任务里切换 |
 | **Pi** | Inflection AI | ✅（session 为文件路径）| ❌ | `.pi/skills/` | 动态发现 |
 
@@ -66,7 +66,7 @@ Amazon 出品。通过 `kiro-cli acp` 使用 ACP stdio 协议。会话恢复走 
 
 ### OpenCode
 
-SST 出品，开源。动态发现可用模型（扫 CLI 的配置文件）。会话恢复真用，会消费智能体的 `mcp_config` 字段——Multica 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联注入，让智能体的 MCP server 直接到达 OpenCode，**不会去碰任务工作目录里的 `opencode.json`**（那个文件归智能体或用户所有）。**适合爱折腾、想自定义模型目录**的开发者。
+SST 出品，开源。动态发现可用模型和模型 variant（扫 CLI 的配置文件）。会话恢复真用，会消费智能体的 `mcp_config` 字段——Multica 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联注入，让智能体的 MCP server 直接到达 OpenCode，**不会去碰任务工作目录里的 `opencode.json`**（那个文件归智能体或用户所有）。当模型暴露 variant 时，Multica 会把它显示成智能体的思考强度选择，并通过 `opencode run --variant` 传给 OpenCode。**适合爱折腾、想自定义模型目录**的开发者。
 
 ### OpenClaw
 

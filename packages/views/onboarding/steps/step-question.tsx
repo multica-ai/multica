@@ -34,8 +34,8 @@ export interface QuestionOption {
  * third of the viewport, and a footer pinned to the page bottom left a
  * large dead zone between the options and the action buttons.
  *
- * Supports both single-select (`multiSelect=false`, the default — Role)
- * and multi-select (`multiSelect=true` — Source, Use case). The
+ * Supports both single-select (`multiSelect=false`, the default — Role
+ * and Source) and multi-select (`multiSelect=true` — Use case). The
  * contract is always an array of selected slugs and an `onAnswer(slug)`
  * callback fired when a card is clicked; the parent decides whether to
  * replace (single) or toggle (multi) the selection in its own state.
@@ -99,9 +99,9 @@ export function StepQuestion({
   // Continue is enabled when:
   //   - at least one non-Other option is selected, OR
   //   - Other is selected AND the free-text input has content.
-  // In multi-select Other can stack with regular picks; we treat the
-  // non-Other selections as sufficient to advance even if Other's
-  // text is empty.
+  // In multi-select (Use case) Other can stack with regular picks; we
+  // treat the non-Other selections as sufficient to advance even if
+  // Other's text is empty.
   const hasNonOtherSelection = selectedSlugs.some(
     (slug) => slug !== otherOption?.slug,
   );
@@ -114,8 +114,9 @@ export function StepQuestion({
   };
 
   // Footer label:
-  //   - single select: name the picked option ("hint_selected").
-  //   - multi-select with 1 pick: same.
+  //   - single select (Role / Source): name the picked option
+  //     ("hint_selected").
+  //   - multi-select (Use case) with 1 pick: same.
   //   - multi-select with >1 pick: show count via the existing
   //     "hint_continue" key (locale-friendly, doesn't grow a new key
   //     just for "N selected").

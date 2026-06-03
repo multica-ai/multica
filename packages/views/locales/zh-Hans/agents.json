@@ -25,7 +25,8 @@
     "all": "全部",
     "online": "在线",
     "unstable": "不稳定",
-    "offline": "离线"
+    "offline": "离线",
+    "archived": "已归档"
   },
   "workload": {
     "working": "处理中",

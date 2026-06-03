@@ -43,8 +43,7 @@
     "row_subtitle": {
       "working": "작업 중",
       "completed": "완료됨",
-      "new_reply": "새 답변",
-      "archived_label": "보관됨"
+      "new_reply": "새 답변"
     },
     "stop_dialog": {
       "title": "이 실행을 중지할까요?",
@@ -77,9 +76,7 @@
     "my_agents": "내 에이전트",
     "others": "기타",
     "no_agents": "에이전트 없음",
-    "active_group": "활성",
-    "archived_group_one": "보관된 채팅 {{count}}개",
-    "archived_group_other": "보관된 채팅 {{count}}개"
+    "history_group": "채팅 기록"
   },
   "empty_state": {
     "first_time_title": "에이전트와 채팅하기",

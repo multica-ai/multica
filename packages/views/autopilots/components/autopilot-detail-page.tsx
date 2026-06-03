@@ -695,7 +695,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 }
               />
               <span className={cn(
-                "text-xs font-medium",
+                "text-xs font-medium hidden sm:inline",
                 autopilot.status === "active" ? "text-emerald-500" :
                 autopilot.status === "paused" ? "text-amber-500" :
                 "text-muted-foreground",
@@ -707,15 +707,27 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         }
         actions={
           <>
-            <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
-              <Pencil className="h-3.5 w-3.5 mr-1" />
-              {t(($) => $.detail.edit)}
+            <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.edit)}>
+              <Pencil className="h-3.5 w-3.5 sm:mr-1" />
+              <span className="hidden sm:inline">{t(($) => $.detail.edit)}</span>
             </Button>
-            <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
-              <Play className="h-3.5 w-3.5 mr-1" />
-              {triggerAutopilot.isPending
-                ? t(($) => $.detail.running)
-                : t(($) => $.detail.run_now)}
+            <Button
+              size="sm"
+              onClick={handleRunNow}
+              disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+              className="px-2 sm:px-2.5"
+              aria-label={triggerAutopilot.isPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
+            >
+              {triggerAutopilot.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5 sm:mr-1" />
+              )}
+              <span className="hidden sm:inline">
+                {triggerAutopilot.isPending
+                  ? t(($) => $.detail.running)
+                  : t(($) => $.detail.run_now)}
+              </span>
             </Button>
           </>
         }
