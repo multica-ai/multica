@@ -183,8 +183,11 @@ funnel with "first time user does X" or a cohort on
 ### `runtime_registered`
 
 > **Prometheus-only — not shipped to PostHog** (see the note at the top of this
-> doc). The properties below are the Prometheus label set / event shape, not a
-> PostHog contract.
+> doc). The `analytics.Event` is still constructed so `metrics.IncForEvent` can
+> derive the Prometheus counter; the fields below are that **event** shape, not
+> a PostHog contract. Only the low-cardinality fields (`runtime_mode`,
+> `provider`) become Prometheus labels — ids like `runtime_id` / `daemon_id`
+> are not labels.
 
 Fires the first time a `(workspace_id, daemon_id, provider)` tuple is
 upserted. Heartbeats and repeat registrations never re-emit. First-time
@@ -274,50 +277,51 @@ is queued.
 | `agent_id` | string (UUID) | Chat agent. |
 | `source` | string | Always `chat`. |
 
-### `agent_task_queued` / `agent_task_dispatched` / `agent_task_started` / `agent_task_completed`
+### agent task lifecycle (Prometheus-only)
 
-> **Prometheus-only — not shipped to PostHog.** These are recorded straight to
-> Prometheus via the typed `BusinessMetrics.RecordTask*` methods
-> (`server/internal/service/task.go`); there is no `analytics.Event` for them.
-> The fields below describe the metric label set, not a PostHog contract.
+> **Not shipped to PostHog and has no `analytics.Event`.** The agent task
+> lifecycle is recorded directly to Prometheus by the typed
+> `BusinessMetrics.RecordTask*` methods in `server/internal/service/task.go`.
+> The old PostHog event names (`agent_task_queued` / `dispatched` / `started` /
+> `completed` / `failed` / `cancelled`) and their properties (`task_id`,
+> `agent_id`, `issue_id`, `chat_session_id`, `autopilot_run_id`, `duration_ms`,
+> `error_type`, `will_retry`) no longer exist anywhere — those high-cardinality
+> ids were never Prometheus labels and must not be used in dashboards or
+> reconciliation.
 
-Canonical task lifecycle events emitted from `agent_task_queue` state
-transitions. `agent_task_dispatched` fires when the backend claims a queued
-task for a runtime, before the daemon marks it running with
-`agent_task_started`. The activation funnel splits queue backlog from
-claim/start handoff via these counters in Grafana.
+The actual metrics (defined in `server/internal/metrics/business.go`; label
+sets in `server/internal/metrics/labels.go`):
 
-| Property | Type | Description |
+| Metric | Type | Labels |
 |---|---|---|
-| `task_id` | string (UUID) | `agent_task_queue.id`; required. |
-| `agent_id` | string (UUID) | Owning agent. |
-| `issue_id` | string (UUID) | Present for issue-linked tasks. |
-| `chat_session_id` | string (UUID) | Present for chat tasks. |
-| `autopilot_run_id` | string (UUID) | Present for run-only autopilot tasks. |
-| `source` | string | `manual`, `chat`, or `autopilot`. |
-| `runtime_mode` | string | `local` / `cloud`. |
-| `provider` | string | Runtime provider. |
-| `duration_ms` | int64 | Terminal events only; measured from `started_at` when available. |
+| `multica_agent_task_enqueued_total` | counter | `source`, `runtime_mode` |
+| `multica_agent_task_dispatched_total` | counter | `source`, `runtime_mode` |
+| `multica_agent_task_started_total` | counter | `source`, `runtime_mode`, `provider` |
+| `multica_agent_task_terminal_total` | counter | `source`, `runtime_mode`, `terminal_status` |
+| `multica_agent_task_failed_total` | counter | `source`, `runtime_mode`, `failure_reason` |
+| `multica_agent_task_queue_wait_seconds` | histogram | `source`, `runtime_mode` |
+| `multica_agent_task_run_seconds` | histogram | `source`, `runtime_mode`, `terminal_status` |
+| `multica_agent_task_total_seconds` | histogram | `source`, `runtime_mode`, `terminal_status` |
 
-### `agent_task_failed` / `agent_task_cancelled`
-
-> **Prometheus-only — not shipped to PostHog** (recorded via
-> `BusinessMetrics.RecordTask*`).
-
-Terminal task lifecycle events. They use the same join fields as
-`agent_task_completed`. `agent_task_failed` also carries:
-
-| Property | Type | Description |
-|---|---|---|
-| `failure_reason` | string | Stable reason from `agent_task_queue.failure_reason`, default `agent_error`. |
-| `error_type` | string | Stable coarse classifier, e.g. `runtime`, `timeout`, `agent_output`, `cancelled`, `agent_error`. |
-| `will_retry` | bool | Whether the backend auto-retry policy will create another task attempt. |
+- `terminal_status` is the task's final `agent_task_queue.status` —
+  `completed` / `failed` / `cancelled`. There is **no** separate
+  completed/cancelled metric: all three land on
+  `multica_agent_task_terminal_total{terminal_status=…}`. Failures
+  additionally increment `multica_agent_task_failed_total` carrying the coarse
+  `failure_reason` (`agent_task_queue.failure_reason`, default `agent_error`).
+- Task wall-clock lives in the `*_seconds` histograms (queue wait / run /
+  total), replacing the old `duration_ms` event property.
+- `source` / `runtime_mode` / `provider` are the normalized label values
+  (`NormalizeTaskSource` / `NormalizeRuntimeMode` / `NormalizeRuntimeProvider`).
 
 ### `autopilot_run_started` / `autopilot_run_completed` / `autopilot_run_failed`
 
 > **Prometheus-only — not shipped to PostHog.** The `analytics.*` constructors
-> are retained only to feed the Prometheus label set through
-> `metrics.IncForEvent`; `analytics.IsMetricsOnly` keeps them out of PostHog.
+> are retained only so `metrics.IncForEvent` can derive the Prometheus counter;
+> `analytics.IsMetricsOnly` keeps them out of PostHog. Only `cadence`,
+> `trigger_kind`, and `terminal_status` become Prometheus labels — the
+> `autopilot_id` / `autopilot_run_id` / `agent_id` fields below are event shape,
+> not labels.
 
 Fires from `autopilot_run` lifecycle changes. `source` is always
 `autopilot`; the trigger origin is carried in `trigger_source` (`manual`,

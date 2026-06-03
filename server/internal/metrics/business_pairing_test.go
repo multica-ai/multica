@@ -4,8 +4,10 @@ package metrics_test
 // server/internal/analytics/events.go has a paired Prometheus counter
 // reachable through metrics.RecordEvent — and that every
 // h.Analytics.Capture(analytics.<Helper>(...)) call site goes through
-// metrics.RecordEvent (no naked Capture allowed except for the AgentTask*
-// allow-list whose Prometheus side is handled by typed PR2 methods).
+// metrics.RecordEvent (no naked Capture allowed). The agent task lifecycle is
+// no longer an analytics.Event — it is recorded straight to Prometheus via the
+// typed BusinessMetrics.RecordTask* methods — so there is no longer an
+// AgentTask* allow-list here.
 
 import (
 	"go/ast"
