@@ -337,20 +337,23 @@ func (h *Handler) CreateSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 	}
 
 	// CEREBRO-PATCH(skill-change-request-session): FIR-2627 — accept optional
-	// work_session_id, validate it points at a real session in this workspace
-	// before persisting so the link in the inbox never resolves to a stranded id.
+	// work_session_id. When provided, attempt to validate it points at a real
+	// work_session in this workspace. If not found (e.g. the CLI forwards
+	// MULTICA_TASK_ID which is a task-run id, not a work_session id), store
+	// null silently rather than blocking the propose flow — the session link
+	// is optional context, not a hard requirement.
 	var sessionUUID pgtype.UUID
 	if req.WorkSessionID != nil && *req.WorkSessionID != "" {
 		parsed, ok := parseUUIDOrBadRequest(w, *req.WorkSessionID, "work_session_id")
 		if !ok {
 			return
 		}
+		// CEREBRO-PATCH(skill-change-request-session-soft): FIR-2753 — soft
+		// validation: unresolvable IDs (task IDs forwarded by CLI) store null.
 		session, err := h.Queries.GetWorkSession(r.Context(), parsed)
-		if err != nil || uuidToString(session.WorkspaceID) != uuidToString(skill.WorkspaceID) {
-			writeError(w, http.StatusBadRequest, "work_session_id not found in this workspace")
-			return
+		if err == nil && uuidToString(session.WorkspaceID) == uuidToString(skill.WorkspaceID) {
+			sessionUUID = parsed
 		}
-		sessionUUID = parsed
 	}
 
 	cr, err := h.Queries.CreateSkillChangeRequest(r.Context(), db.CreateSkillChangeRequestParams{
