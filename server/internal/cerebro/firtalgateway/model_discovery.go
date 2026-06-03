@@ -73,8 +73,8 @@ func ResolveModelList(ctx context.Context, requestID, runtimeID string, rawSetti
 	}
 
 	models, err := agent.DiscoverFirtalGatewayModels(ctx, map[string]string{
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL": cfg.BaseURL,
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY": cfg.APIKey,
+		"FIRTAL_REGISTRY_URL": cfg.BaseURL,
+		"FIRTAL_REGISTRY_KEY": cfg.APIKey,
 	})
 	if err != nil {
 		return fail(err.Error())
@@ -94,10 +94,15 @@ func ResolveModelList(ctx context.Context, requestID, runtimeID string, rawSetti
 	return resp
 }
 
+// DiscoveryConfig resolves the gateway config used for model discovery.
+//
+// FIR-2825: the canonical env var pair is the single source of truth and wins
+// over workspace settings. Legacy aliases (FIRTAL_AE_*, FIRTAL_DATA_REGISTRY_URL,
+// FIRTAL_DATA_REGISTRY_API_KEY) have been removed.
 func DiscoveryConfig(rawSettings []byte) (ModelDiscoveryConfig, bool, error) {
 	cfg := ModelDiscoveryConfig{
-		BaseURL: strings.TrimRight(firstNonEmptyOS("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "FIRTAL_AE_GATEWAY_URL", "FIRTAL_DATA_REGISTRY_URL"), "/"),
-		APIKey:  firstNonEmptyOS("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "FIRTAL_AE_GATEWAY_KEY", "FIRTAL_DATA_REGISTRY_API_KEY"),
+		BaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_URL")), "/"),
+		APIKey:  strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_KEY")),
 	}
 
 	var envelope workspaceSettingsEnvelope
@@ -106,23 +111,29 @@ func DiscoveryConfig(rawSettings []byte) (ModelDiscoveryConfig, bool, error) {
 			return cfg, false, fmt.Errorf("parse workspace gateway settings: %w", err)
 		}
 	}
+	envURLSet := cfg.BaseURL != ""
+	envKeySet := cfg.APIKey != ""
 	workspaceProvidedURL := false
 	if envelope.FirtalGateway != nil {
 		if !envelope.FirtalGateway.Enabled {
 			return cfg, false, nil
 		}
-		if gatewayURL := strings.TrimSpace(envelope.FirtalGateway.GatewayURL); gatewayURL != "" {
-			cfg.BaseURL = strings.TrimRight(gatewayURL, "/")
-			workspaceProvidedURL = true
+		if !envURLSet {
+			if gatewayURL := strings.TrimSpace(envelope.FirtalGateway.GatewayURL); gatewayURL != "" {
+				cfg.BaseURL = strings.TrimRight(gatewayURL, "/")
+				workspaceProvidedURL = true
+			}
 		}
-		if key := strings.TrimSpace(envelope.FirtalGateway.APIKey); key != "" {
-			cfg.APIKey = key
+		if !envKeySet {
+			if key := strings.TrimSpace(envelope.FirtalGateway.APIKey); key != "" {
+				cfg.APIKey = key
+			}
 		}
 	}
 	if cfg.BaseURL == "" || cfg.APIKey == "" {
 		return cfg, false, nil
 	}
-	// Untrusted workspace URLs validate strictly; the inherited operator env URL
+	// Untrusted workspace URLs validate strictly; an operator-supplied env URL
 	// honors the internal-address opt-in.
 	validate := ValidateTrustedBaseURL
 	if workspaceProvidedURL {
@@ -136,11 +147,3 @@ func DiscoveryConfig(rawSettings []byte) (ModelDiscoveryConfig, bool, error) {
 	return cfg, true, nil
 }
 
-func firstNonEmptyOS(keys ...string) string {
-	for _, key := range keys {
-		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-			return v
-		}
-	}
-	return ""
-}

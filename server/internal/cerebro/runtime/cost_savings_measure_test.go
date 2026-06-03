@@ -38,7 +38,7 @@ func TestMeasureRun_SnapshotPromptCountsInlinedReads(t *testing.T) {
 	if m.Applied {
 		t.Errorf("shadow mode must not be applied")
 	}
-	if m.Metric != metricInputTokens || m.Baseline != 1600 || m.Effective != 0 {
+	if m.Metric != metricContextTokens || m.Baseline != 2*estimatedTokensPerAvoidedPlatformRead || m.Effective != 0 {
 		t.Errorf("unexpected snapshot measurement: %+v", m)
 	}
 }
@@ -52,14 +52,16 @@ func TestMeasureRun_SnapshotPromptSkipsWhenNothingInlined(t *testing.T) {
 }
 
 func TestMeasureRun_BundledReadCollapsesToOneCall(t *testing.T) {
+	const payloadChars = 16000
 	got := measureRun(map[string]string{savingBundledRead: savingModeOn},
-		CostSavingRunFacts{InlinedContextReads: 3}, "")
+		CostSavingRunFacts{InlinedContextReads: 3, InlinedContextChars: payloadChars}, "")
 	m, ok := findMeasurement(got, savingBundledRead)
 	if !ok {
 		t.Fatalf("bundled_read measurement missing: %+v", got)
 	}
-	if !m.Applied || m.Metric != metricInputTokens || m.Baseline != 2250 || m.Effective != 2200 {
-		t.Errorf("unexpected bundled measurement: %+v", m)
+	wantTokens := bundledSavedContextTokens(payloadChars, CostSavingRunFacts{InlinedContextChars: payloadChars})
+	if !m.Applied || m.Metric != metricContextTokens || m.Baseline != wantTokens || m.Effective != 0 {
+		t.Errorf("unexpected bundled measurement: %+v (want baseline=%d)", m, wantTokens)
 	}
 }
 

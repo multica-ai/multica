@@ -128,8 +128,8 @@ func TestMeasureRun_PruneOnWritesZeroRowWhenNothingPruned(t *testing.T) {
 }
 
 // FIR-2404: prune_tool_results does not overlap with snapshot_prompt or
-// bundled_read. snapshot/bundled measure InlinedContextReads (platform calls
-// removed by inlining context at start), prune measures
+// bundled_read. snapshot/bundled measure inlined context (context_tokens),
+// prune measures
 // PrunedToolResultChars/ToolResultChars (transcript characters dropped
 // mid-run). Different facts, different metrics, different lifecycle stage. A
 // single gateway run can be measured by all three simultaneously without any
@@ -145,6 +145,7 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 	}
 	facts := CostSavingRunFacts{
 		InlinedContextReads:          3,
+		InlinedContextChars:          12_000,
 		ToolResultChars:              400,
 		PrunedContextCharsCompounded: 200,
 	}
@@ -157,9 +158,9 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 		t.Fatalf("expected snapshot+bundled+prune all measured, got %+v", got)
 	}
 
-	// snapshot + bundled score avoided tool-fetch as input_tokens; prune on context_tokens.
-	if snap.Metric != metricInputTokens || bun.Metric != metricInputTokens {
-		t.Errorf("snapshot/bundled must measure input_tokens; got snap=%q bundled=%q", snap.Metric, bun.Metric)
+	// All three score saved context in context_tokens on the dashboard (FIR-2572).
+	if snap.Metric != metricContextTokens || bun.Metric != metricContextTokens {
+		t.Errorf("snapshot/bundled must measure context_tokens; got snap=%q bundled=%q", snap.Metric, bun.Metric)
 	}
 	if prune.Metric != metricContextTokens {
 		t.Errorf("prune must measure context_tokens, got %q (would imply overlap with snapshot/bundled)", prune.Metric)
@@ -173,13 +174,13 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 		t.Errorf("prune baseline/effective = %d/%d, want 50/0 (no contamination from InlinedContextReads)", prune.Baseline, prune.Effective)
 	}
 
-	// And snapshot/bundled must NOT see ToolResultChars — they are still keyed
-	// solely on InlinedContextReads (3 reads → snapshot 3*800 effective=0,
-	// bundled 3*750 effective=2200).
-	if snap.Baseline != 2400 || snap.Effective != 0 {
-		t.Errorf("snapshot baseline/effective = %d/%d, want 2400/0", snap.Baseline, snap.Effective)
+	// And snapshot/bundled must NOT see ToolResultChars.
+	wantSnap := snapshotSavedContextTokens(facts)
+	wantBun := bundledSavedContextTokens(facts.InlinedContextChars, facts)
+	if snap.Baseline != wantSnap || snap.Effective != 0 {
+		t.Errorf("snapshot baseline/effective = %d/%d, want %d/0", snap.Baseline, snap.Effective, wantSnap)
 	}
-	if bun.Baseline != 2250 || bun.Effective != 2200 {
-		t.Errorf("bundled baseline/effective = %d/%d, want 2250/2200", bun.Baseline, bun.Effective)
+	if bun.Baseline != wantBun || bun.Effective != 0 {
+		t.Errorf("bundled baseline/effective = %d/%d, want %d/0", bun.Baseline, bun.Effective, wantBun)
 	}
 }

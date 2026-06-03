@@ -13,9 +13,9 @@ func uuidFromString(s string) (pgtype.UUID, error) {
 
 func TestLoadFirtalGatewayRuntimeConfig_AutoEnablesWithServerCredentials(t *testing.T) {
 	clearFirtalGatewayEnv(t)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_MODEL", "gpt-5.5")
+	t.Setenv("FIRTAL_REGISTRY_URL", "https://registry.example")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_MODEL", "gpt-5.5")
 	t.Setenv("MULTICA_SERVER_FIRTAL_GATEWAY_MAX_CONCURRENCY", "7")
 
 	cfg, err := LoadFirtalGatewayRuntimeConfig()
@@ -39,8 +39,8 @@ func TestLoadFirtalGatewayRuntimeConfig_AutoEnablesWithServerCredentials(t *test
 func TestLoadFirtalGatewayRuntimeConfig_ExplicitFalseDisables(t *testing.T) {
 	clearFirtalGatewayEnv(t)
 	t.Setenv("MULTICA_SERVER_FIRTAL_GATEWAY_ENABLED", "false")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", "https://registry.example")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	cfg, err := LoadFirtalGatewayRuntimeConfig()
 	if err != nil {
@@ -68,8 +68,8 @@ func TestLoadFirtalGatewayRuntimeConfig_EnablesWithoutServerCredentials(t *testi
 
 func TestLoadFirtalGatewayRuntimeConfig_RejectsUnsafeServerURL(t *testing.T) {
 	clearFirtalGatewayEnv(t)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://127.0.0.1")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", "https://127.0.0.1")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	if _, err := LoadFirtalGatewayRuntimeConfig(); err == nil {
 		t.Fatal("expected unsafe server gateway URL to fail")
@@ -78,9 +78,9 @@ func TestLoadFirtalGatewayRuntimeConfig_RejectsUnsafeServerURL(t *testing.T) {
 
 func TestLoadFirtalGatewayRuntimeConfig_AllowsInternalServerURLWhenOptedIn(t *testing.T) {
 	clearFirtalGatewayEnv(t)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "http://firtal-data-registry-private.internal:3000")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_ALLOW_INTERNAL", "true")
+	t.Setenv("FIRTAL_REGISTRY_URL", "http://firtal-data-registry-private.internal:3000")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_ALLOW_INTERNAL", "true")
 
 	cfg, err := LoadFirtalGatewayRuntimeConfig()
 	if err != nil {
@@ -93,8 +93,8 @@ func TestLoadFirtalGatewayRuntimeConfig_AllowsInternalServerURLWhenOptedIn(t *te
 
 func TestLoadFirtalGatewayRuntimeConfig_RejectsInternalServerURLWithoutOptIn(t *testing.T) {
 	clearFirtalGatewayEnv(t)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "http://firtal-data-registry-private.internal:3000")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", "http://firtal-data-registry-private.internal:3000")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	if _, err := LoadFirtalGatewayRuntimeConfig(); err == nil {
 		t.Fatal("expected internal server gateway URL without opt-in to fail")
@@ -104,15 +104,10 @@ func TestLoadFirtalGatewayRuntimeConfig_RejectsInternalServerURLWithoutOptIn(t *
 func clearFirtalGatewayEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_ALLOW_INTERNAL",
-		"FIRTAL_AE_GATEWAY_URL",
-		"FIRTAL_DATA_REGISTRY_URL",
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
-		"FIRTAL_AE_GATEWAY_KEY",
-		"FIRTAL_DATA_REGISTRY_API_KEY",
-		"FIRTAL_DATA_REGISTRY_AI_MODEL",
-		"FIRTAL_AE_GATEWAY_MODEL",
+		"FIRTAL_REGISTRY_URL",
+		"FIRTAL_REGISTRY_ALLOW_INTERNAL",
+		"FIRTAL_REGISTRY_KEY",
+		"FIRTAL_REGISTRY_MODEL",
 		"MULTICA_SERVER_FIRTAL_GATEWAY_ENABLED",
 		"MULTICA_FIRTAL_GATEWAY_CLOUD_ENABLED",
 		"MULTICA_SERVER_FIRTAL_GATEWAY_MAX_CONCURRENCY",
@@ -159,7 +154,10 @@ func TestLoadFirtalGatewayRuntimeConfig_RejectsInvalidToolsAgentsEnv(t *testing.
 	}
 }
 
-func TestFirtalGatewayConfigFromWorkspaceSettings_UsesOwnerSettings(t *testing.T) {
+// FIR-2825: when the operator env URL/key are set they are AUTHORITATIVE —
+// workspace URL/key are ignored so the operator owns the network path. The
+// workspace can still pick its own model.
+func TestFirtalGatewayConfigFromWorkspaceSettings_EnvWinsOverWorkspaceURLAndKey(t *testing.T) {
 	raw := []byte(`{"firtal_gateway":{"enabled":true,"gateway_url":"https://registry.example/","api_key":"rk_workspace","model":"gpt-5.5"}}`)
 
 	cfg, ok, err := FirtalGatewayConfigFromWorkspaceSettings(raw, FirtalGatewayRuntimeConfig{
@@ -174,8 +172,33 @@ func TestFirtalGatewayConfigFromWorkspaceSettings_UsesOwnerSettings(t *testing.T
 	if !ok {
 		t.Fatal("expected configured workspace")
 	}
-	if cfg.BaseURL != "https://registry.example" || cfg.APIKey != "rk_workspace" || cfg.Model != "gpt-5.5" {
-		t.Fatalf("workspace config not applied: %+v", cfg)
+	if cfg.BaseURL != "https://fallback.example" {
+		t.Fatalf("expected env URL to win, got %q", cfg.BaseURL)
+	}
+	if cfg.APIKey != "rk_fallback" {
+		t.Fatalf("expected env API key to win, got %q", cfg.APIKey)
+	}
+	if cfg.Model != "gpt-5.5" {
+		t.Fatalf("expected workspace model to apply (model is not operator-owned), got %q", cfg.Model)
+	}
+}
+
+// When the env URL is empty, the workspace URL is used as fallback — covers
+// self-host installs where the operator has not configured the runtime.
+func TestFirtalGatewayConfigFromWorkspaceSettings_UsesWorkspaceURLWhenEnvUnset(t *testing.T) {
+	raw := []byte(`{"firtal_gateway":{"enabled":true,"gateway_url":"https://registry.example/","api_key":"rk_workspace"}}`)
+
+	cfg, ok, err := FirtalGatewayConfigFromWorkspaceSettings(raw, FirtalGatewayRuntimeConfig{
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("FirtalGatewayConfigFromWorkspaceSettings() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workspace to configure the runtime")
+	}
+	if cfg.BaseURL != "https://registry.example" || cfg.APIKey != "rk_workspace" {
+		t.Fatalf("workspace fallback not applied: %+v", cfg)
 	}
 }
 

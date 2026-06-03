@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 // CEREBRO-PATCH(web-serwist): service-worker provider for installed PWA
 import { SerwistProvider } from "@serwist/next/react";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -123,6 +124,12 @@ export default async function RootLayout({
             <Toaster />
           </ThemeProvider>
         </SerwistProvider>
+        <Script
+          src="https://apps.firtal.com/bar.js"
+          data-apps-url="https://apps.firtal.com/api/apps"
+          data-home="https://apps.firtal.com"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );

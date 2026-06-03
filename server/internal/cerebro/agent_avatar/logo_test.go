@@ -54,8 +54,8 @@ func newLogoRequest(t *testing.T, body string) (*http.Request, *httptest.Respons
 func TestGenerateLogosReturnsRequestedCount(t *testing.T) {
 	gateway := logoGateway(t)
 	defer gateway.Close()
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", gateway.URL)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", gateway.URL)
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	h := New(&fakeStorage{}, nil)
 	req, w := newLogoRequest(t, `{"prompt":"a clever fox","count":5}`)
@@ -76,8 +76,8 @@ func TestGenerateLogosReturnsRequestedCount(t *testing.T) {
 func TestGenerateLogosClampsCount(t *testing.T) {
 	gateway := logoGateway(t)
 	defer gateway.Close()
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", gateway.URL)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", gateway.URL)
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	h := New(&fakeStorage{}, nil)
 	req, w := newLogoRequest(t, `{"prompt":"a fox","count":50}`)
@@ -91,8 +91,8 @@ func TestGenerateLogosClampsCount(t *testing.T) {
 }
 
 func TestGenerateLogosRejectsEmptyPrompt(t *testing.T) {
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://env.example.com")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_env")
+	t.Setenv("FIRTAL_REGISTRY_URL", "https://env.example.com")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_env")
 
 	h := New(&fakeStorage{}, nil)
 	req, w := newLogoRequest(t, `{"prompt":"   "}`)
@@ -104,8 +104,8 @@ func TestGenerateLogosRejectsEmptyPrompt(t *testing.T) {
 }
 
 func TestGenerateLogosUnconfiguredGateway(t *testing.T) {
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "")
+	t.Setenv("FIRTAL_REGISTRY_URL", "")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "")
 
 	h := New(&fakeStorage{}, nil)
 	req, w := newLogoRequest(t, `{"prompt":"a fox"}`)

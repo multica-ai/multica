@@ -33,7 +33,7 @@ Issue and autopilot tasks running on the cloud runtime have no tool access — t
 
 ## Dataflow
 
-1. The Multica server starts with `FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL` and `FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY`.
+1. The Multica server starts with `FIRTAL_REGISTRY_URL` and `FIRTAL_REGISTRY_KEY`.
 2. The server registers an online cloud runtime with provider `firtal-gateway` in each workspace, or only the workspaces listed in `MULTICA_SERVER_FIRTAL_GATEWAY_WORKSPACE_IDS`. The runtime advertises capabilities via `metadata.supports` (`["chat", "issue", "autopilot_run_only"]`).
 3. The server worker claims queued tasks for that runtime (see *Supported task kinds*). Per-(issue, agent) and per-chat-session serialization mirrors `ClaimAgentTask`, and the per-agent `max_concurrent_tasks` cap is enforced.
 4. The worker builds a chat-completion transcript from the task context (chat history, issue + comments, or autopilot title/description) and sends it with agent instructions to `POST /api/ai/proxy/v1/chat/completions`.
@@ -74,23 +74,23 @@ Configure the Multica server:
 
 ```bash
 MULTICA_SERVER_FIRTAL_GATEWAY_ENABLED=true
-FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL=https://<data-registry-host>
-FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY=rk_<key>
-FIRTAL_DATA_REGISTRY_AI_MODEL=claude-sonnet-4-6
+FIRTAL_REGISTRY_URL=https://<data-registry-host>
+FIRTAL_REGISTRY_KEY=rk_<key>
+FIRTAL_REGISTRY_MODEL=claude-sonnet-4-6
 ```
 
 Optional controls:
 
 ```bash
-FIRTAL_DATA_REGISTRY_AI_MAX_TOKENS=4096
-FIRTAL_DATA_REGISTRY_AI_TEMPERATURE=
+FIRTAL_REGISTRY_MAX_TOKENS=4096
+FIRTAL_REGISTRY_TEMPERATURE=
 MULTICA_SERVER_FIRTAL_GATEWAY_WORKSPACE_IDS= # optional comma-separated UUID allowlist
 MULTICA_SERVER_FIRTAL_GATEWAY_MAX_CONCURRENCY=4
 MULTICA_SERVER_FIRTAL_GATEWAY_POLL_INTERVAL=2s
 MULTICA_SERVER_FIRTAL_GATEWAY_SYNC_INTERVAL=30s
 ```
 
-Restart the server. It will register a runtime with provider `firtal-gateway`. Create or update a Multica agent to use that runtime. Existing daemon-side mode still exists for deployments that want a central daemon; set `MULTICA_RUNTIME_TYPE=firtal-registry` on that daemon host (together with `FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL` and `FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY`) — URL+key alone no longer triggers registration (FIR-2453).
+Restart the server. It will register a runtime with provider `firtal-gateway`. Create or update a Multica agent to use that runtime. Existing daemon-side mode still exists for deployments that want a central daemon; set `MULTICA_RUNTIME_TYPE=firtal-registry` on that daemon host (together with `FIRTAL_REGISTRY_URL` and `FIRTAL_REGISTRY_KEY`) — URL+key alone no longer triggers registration (FIR-2453).
 
 ## Known Risks
 

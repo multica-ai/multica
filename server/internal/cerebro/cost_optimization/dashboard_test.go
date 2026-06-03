@@ -141,29 +141,39 @@ func TestAggregateDashboard_PruneAt100PercentHasAppliedMeasurement(t *testing.T)
 	}
 }
 
-// TestAggregateDashboard_NonCostMetricHasNoMeasured confirms a platform_calls
-// saving never produces an A/B (only model_cost actual-cost reflects the saving).
-func TestAggregateDashboard_NonCostMetricHasNoMeasured(t *testing.T) {
+// TestAggregateDashboard_BundledTokensAt100PercentHasApplied confirms bundled_read
+// at full rollout exposes applied context_tokens like prune (FIR-2572).
+func TestAggregateDashboard_BundledTokensAt100PercentHasApplied(t *testing.T) {
 	rows := []cerebrodb.DashboardCerebroCostOptimizationRow{
-		{SavingKey: "bundled_read", Mode: "on", HeldOut: false, Metric: "platform_calls",
-			RunCount: 4, TotalSavedUnits: 12},
-		{SavingKey: "bundled_read", Mode: "shadow", HeldOut: false, Metric: "platform_calls",
-			RunCount: 3, TotalSavedUnits: 9},
+		{SavingKey: "bundled_read", Mode: "on", HeldOut: false, Metric: "context_tokens",
+			RunCount: 4, TotalSavedUnits: 12_000, TotalSavedCents: 600},
+		{SavingKey: "bundled_read", Mode: "shadow", HeldOut: false, Metric: "context_tokens",
+			RunCount: 3, TotalSavedUnits: 9_000},
 	}
 	d, _ := findSaving(aggregateDashboard(rows), "bundled_read")
 	if d.Measured != nil {
-		t.Errorf("platform_calls saving must not produce A/B, got %+v", d.Measured)
+		t.Errorf("no holdout → A/B must be nil, got %+v", d.Measured)
 	}
-	// Estimated is now the shadow (measure-only) arm; the applied arm carries the
-	// treatment units.
-	if d.EstimatedSavedUnits != 9 {
-		t.Errorf("estimated saved units = %d, want 9 (shadow only)", d.EstimatedSavedUnits)
+	if d.EstimatedSavedUnits != 9_000 {
+		t.Errorf("estimated saved units = %d, want 9000 (shadow only)", d.EstimatedSavedUnits)
 	}
-	if d.Applied == nil || d.Applied.SavedUnits != 12 {
-		t.Errorf("applied = %+v, want 12 units (treatment)", d.Applied)
+	if d.Applied == nil || d.Applied.SavedUnits != 12_000 {
+		t.Errorf("applied = %+v, want 12000 tokens (treatment)", d.Applied)
 	}
-	if d.ShadowRunCount != 3 || d.TreatmentRunCount != 4 {
-		t.Errorf("shadow/treatment runs = %d/%d, want 3/4", d.ShadowRunCount, d.TreatmentRunCount)
+}
+
+// TestAggregateDashboard_SnapshotTokensAt100PercentHasApplied mirrors prune/bundled.
+func TestAggregateDashboard_SnapshotTokensAt100PercentHasApplied(t *testing.T) {
+	rows := []cerebrodb.DashboardCerebroCostOptimizationRow{
+		{SavingKey: "snapshot_prompt", Mode: "on", HeldOut: false, Metric: "context_tokens",
+			RunCount: 10, TotalSavedUnits: 20_000, TotalSavedCents: 1000},
+	}
+	d, ok := findSaving(aggregateDashboard(rows), "snapshot_prompt")
+	if !ok {
+		t.Fatalf("snapshot_prompt missing")
+	}
+	if d.Applied == nil || d.Applied.SavedUnits != 20_000 {
+		t.Errorf("applied = %+v, want 20000 tokens", d.Applied)
 	}
 }
 

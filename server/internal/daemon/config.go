@@ -275,7 +275,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agents["firtal-gateway"] = entry
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent runtime found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy on PATH, or set MULTICA_RUNTIME_TYPE=%s together with FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", FirtalRegistryRuntimeType)
+		return Config{}, fmt.Errorf("no agent runtime found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy on PATH, or set MULTICA_RUNTIME_TYPE=%s together with FIRTAL_REGISTRY_URL and FIRTAL_REGISTRY_KEY", FirtalRegistryRuntimeType)
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -636,39 +636,20 @@ func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
 		return AgentEntry{}, false, nil
 	}
 
-	baseURL := firstNonEmptyEnv(
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
-		"FIRTAL_AE_GATEWAY_URL",
-		"FIRTAL_DATA_REGISTRY_URL",
-	)
-	apiKey := firstNonEmptyEnv(
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
-		"FIRTAL_AE_GATEWAY_KEY",
-		"FIRTAL_DATA_REGISTRY_API_KEY",
-	)
+	// CEREBRO-PATCH(daemon-config-firtal-gateway-single-source): FIR-2825 — one canonical URL+key env pair.
+	baseURL := strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_URL"))
+	apiKey := strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_KEY"))
 	if baseURL == "" {
-		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL is not set", FirtalRegistryRuntimeType)
+		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_REGISTRY_URL is not set", FirtalRegistryRuntimeType)
 	}
 	if apiKey == "" {
-		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY is not set", FirtalRegistryRuntimeType)
+		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_REGISTRY_KEY is not set", FirtalRegistryRuntimeType)
 	}
 
 	return AgentEntry{
-		Path: "",
-		Model: firstNonEmptyEnv(
-			"FIRTAL_DATA_REGISTRY_AI_MODEL",
-			"FIRTAL_AE_GATEWAY_MODEL",
-		),
+		Path:  "",
+		Model: strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_MODEL")),
 	}, true, nil
-}
-
-func firstNonEmptyEnv(keys ...string) string {
-	for _, key := range keys {
-		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func shellArgsFromEnv(name string) ([]string, error) {

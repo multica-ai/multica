@@ -1,6 +1,6 @@
 package agent
 
-// CEREBRO-PATCH(agent-firtal-gateway-tests): exercise managed gateway request, usage, cost, and model discovery.
+// CEREBRO-PATCH(agent-firtal-gateway-tests): exercise managed gateway request, usage, cost, and model discovery. FIR-2825 — env-var names renamed to FIRTAL_REGISTRY_*.
 
 import (
 	"context"
@@ -41,8 +41,8 @@ func TestFirtalGatewayExecuteCallsChatCompletions(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	backend := &firtalGatewayBackend{cfg: Config{Env: map[string]string{
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL": srv.URL,
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY": "rk_test",
+		"FIRTAL_REGISTRY_URL": srv.URL,
+		"FIRTAL_REGISTRY_KEY": "rk_test",
 		"MULTICA_TASK_ID":                     "task-1",
 		"MULTICA_AGENT_ID":                    "agent-1",
 	}}}
@@ -100,12 +100,8 @@ func TestFirtalGatewayExecuteCallsChatCompletions(t *testing.T) {
 func TestFirtalGatewayExecuteRequiresConfig(t *testing.T) {
 	// CEREBRO-PATCH(agent-firtal-gateway-tests): clear inherited env so the missing-config check is deterministic in CI.
 	for _, key := range []string{
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
-		"FIRTAL_AE_GATEWAY_URL",
-		"FIRTAL_DATA_REGISTRY_URL",
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
-		"FIRTAL_AE_GATEWAY_KEY",
-		"FIRTAL_DATA_REGISTRY_API_KEY",
+		"FIRTAL_REGISTRY_URL",
+		"FIRTAL_REGISTRY_KEY",
 	} {
 		t.Setenv(key, "")
 	}
@@ -121,13 +117,13 @@ func TestFirtalGatewayExecuteRequiresConfig(t *testing.T) {
 	if result.Status != "failed" {
 		t.Fatalf("status = %q", result.Status)
 	}
-	if !strings.Contains(result.Error, "FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL") {
+	if !strings.Contains(result.Error, "FIRTAL_REGISTRY_URL") {
 		t.Fatalf("error = %q", result.Error)
 	}
 }
 
 func TestDiscoverFirtalGatewayModels(t *testing.T) {
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/ai/proxy/v1/models" {
@@ -145,7 +141,7 @@ func TestDiscoverFirtalGatewayModels(t *testing.T) {
 		}`))
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", srv.URL)
+	t.Setenv("FIRTAL_REGISTRY_URL", srv.URL)
 
 	models, err := discoverFirtalGatewayModels(context.Background())
 	if err != nil {
@@ -164,34 +160,24 @@ func TestDiscoverFirtalGatewayModels(t *testing.T) {
 
 // CEREBRO-PATCH(agent-firtal-gateway-tests): exhaustive failure-mode coverage so we don't fall back to a stale static list.
 func TestDiscoverFirtalGatewayModelsFailureModes(t *testing.T) {
-	urlKeys := []string{
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
-		"FIRTAL_AE_GATEWAY_URL",
-		"FIRTAL_DATA_REGISTRY_URL",
-	}
-	keyKeys := []string{
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
-		"FIRTAL_AE_GATEWAY_KEY",
-		"FIRTAL_DATA_REGISTRY_API_KEY",
-	}
 	clearAll := func(t *testing.T) {
-		for _, k := range urlKeys {
-			t.Setenv(k, "")
-		}
-		for _, k := range keyKeys {
+		for _, k := range []string{
+			"FIRTAL_REGISTRY_URL",
+			"FIRTAL_REGISTRY_KEY",
+		} {
 			t.Setenv(k, "")
 		}
 	}
 
 	t.Run("missing URL", func(t *testing.T) {
 		clearAll(t)
-		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+		t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 		models, err := discoverFirtalGatewayModels(context.Background())
 		if err == nil {
 			t.Fatalf("expected error, got nil")
 		}
-		if !strings.Contains(err.Error(), "FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL") {
+		if !strings.Contains(err.Error(), "FIRTAL_REGISTRY_URL") {
 			t.Fatalf("error = %q", err)
 		}
 		if len(models) != 0 {
@@ -201,13 +187,13 @@ func TestDiscoverFirtalGatewayModelsFailureModes(t *testing.T) {
 
 	t.Run("missing key", func(t *testing.T) {
 		clearAll(t)
-		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://example.invalid")
+		t.Setenv("FIRTAL_REGISTRY_URL", "https://example.invalid")
 
 		models, err := discoverFirtalGatewayModels(context.Background())
 		if err == nil {
 			t.Fatalf("expected error, got nil")
 		}
-		if !strings.Contains(err.Error(), "FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY") {
+		if !strings.Contains(err.Error(), "FIRTAL_REGISTRY_KEY") {
 			t.Fatalf("error = %q", err)
 		}
 		if len(models) != 0 {
@@ -222,8 +208,8 @@ func TestDiscoverFirtalGatewayModelsFailureModes(t *testing.T) {
 			w.Write([]byte(`{"error": "boom"}`))
 		}))
 		t.Cleanup(srv.Close)
-		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", srv.URL)
-		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+		t.Setenv("FIRTAL_REGISTRY_URL", srv.URL)
+		t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 		models, err := discoverFirtalGatewayModels(context.Background())
 		if err == nil {
@@ -244,8 +230,8 @@ func TestDiscoverFirtalGatewayModelsFailureModes(t *testing.T) {
 			w.Write([]byte(`not json`))
 		}))
 		t.Cleanup(srv.Close)
-		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", srv.URL)
-		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+		t.Setenv("FIRTAL_REGISTRY_URL", srv.URL)
+		t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 		models, err := discoverFirtalGatewayModels(context.Background())
 		if err == nil {
@@ -265,8 +251,8 @@ func TestDiscoverFirtalGatewayModelsFailureModes(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 		baseURL := srv.URL
 		srv.Close()
-		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", baseURL)
-		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+		t.Setenv("FIRTAL_REGISTRY_URL", baseURL)
+		t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 		models, err := discoverFirtalGatewayModels(context.Background())
 		if err == nil {

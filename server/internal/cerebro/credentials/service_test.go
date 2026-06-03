@@ -456,6 +456,13 @@ func TestService_DeleteCascadesBindings(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("expected cascade to delete bindings; %d remain", n)
 	}
+	audit, err := svc.ListAudit(ctx, credentialsTestWorkspaceID, row.ID, 100)
+	if err != nil {
+		t.Fatalf("ListAudit after Delete: %v", err)
+	}
+	if !containsAction(audit, ActionDelete) {
+		t.Fatalf("audit missing delete after revoke: %+v", audit)
+	}
 }
 
 func TestService_PublishesEvents(t *testing.T) {
@@ -527,4 +534,3 @@ func containsAction(audit []cerebrodb.CerebroCredentialAudit, action Action) boo
 	}
 	return false
 }
-

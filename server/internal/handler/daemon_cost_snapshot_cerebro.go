@@ -7,6 +7,7 @@ package handler
 // `multica issue comment list` round-trip. Both the behaviour AND its
 // measurement live here, server-side at claim time — nothing in the daemon
 // runtime has to change, and no daemon→server reporting channel is needed.
+// CEREBRO-PATCH(cost-savings-context-tokens): FIR-2572 — measure snapshot_prompt in context_tokens.
 
 import (
 	"context"
@@ -14,8 +15,6 @@ import (
 	"log/slog"
 	"strings"
 
-	// CEREBRO-PATCH(cost-optimization-token-metrics): estimate snapshot_prompt saved tokens.
-	"github.com/multica-ai/multica/server/internal/cerebro/contextduplication"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 
@@ -27,11 +26,9 @@ import (
 // server/internal/cerebro/runtime/cost_savings_measure.go. "off" is the absence
 // of an override row, so it never appears as a value here.
 const (
-	costSavingSnapshotKey = "snapshot_prompt"
-	costSavingModeShadow  = "shadow"
-	costSavingModeOn      = "on"
-	costMetricInputTokens = "input_tokens"
-
+	costSavingSnapshotKey   = "snapshot_prompt"
+	costSavingModeShadow    = "shadow"
+	costSavingModeOn        = "on"
 	// snapshotInlinedReads is how many platform reads the snapshot replaces per
 	// run: the `multica issue get` + `multica issue comment list` the agent
 	// would otherwise run at the start of every comment-/assignment-triggered
@@ -59,21 +56,26 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 		return
 	}
 
-	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		Limit:       2000, // defensive cap; the renderer keeps only the most recent slice
-	})
-	if err != nil {
-		slog.Warn("snapshot cost-saving: list comments failed", "error", err)
-		return
-	}
-	snapshotText := renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
+	var snapshotChars int64
 	if mode == costSavingModeOn {
-		resp.IssueSnapshot = snapshotText
+		comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Limit:       2000, // defensive cap; the renderer keeps only the most recent slice
+		})
+		if err != nil {
+			// Could not load the thread — do NOT claim a saving we didn't apply.
+			slog.Warn("snapshot cost-saving: list comments failed", "error", err)
+			return
+		}
+		resp.IssueSnapshot = renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
+		snapshotChars = int64(len(resp.IssueSnapshot))
+	} else {
+		// Shadow: estimate the context volume we would have inlined.
+		snapshotChars = estimateSnapshotContextChars(issue, triggerCommentID)
 	}
 
-	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode, snapshotText)); err != nil {
+	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode, snapshotChars)); err != nil {
 		slog.Warn("snapshot cost-saving: record measurement failed", "error", err)
 	}
 }
@@ -95,13 +97,11 @@ func (h *Handler) snapshotSavingMode(ctx context.Context, workspaceID pgtype.UUI
 }
 
 // snapshotMeasurementParams builds the measurement row for one claim. Baseline
-// is the estimated tokens in the inlined snapshot; effective is 0 because the
-// agent no longer pays to fetch that context via separate tool calls.
-func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode, snapshotMarkdown string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
-	baseline := contextduplication.EstimateTokens(snapshotMarkdown)
-	if baseline <= 0 {
-		// Fallback when the thread is empty — still two avoided reads.
-		baseline = snapshotInlinedReads * 800
+// is the estimated context tokens the snapshot inlines (chars/4); effective is 0.
+func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string, contextChars int64) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+	savedTokens := contextChars / 4
+	if savedTokens <= 0 {
+		savedTokens = int64(snapshotInlinedReads) * 8000
 	}
 	return cerebrodb.RecordCerebroCostOptimizationMeasurementParams{
 		WorkspaceID:     workspaceID,
@@ -110,12 +110,28 @@ func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode, snapshotMa
 		Mode:            mode,
 		Applied:         mode == costSavingModeOn,
 		HeldOut:         false,
-		Metric:          costMetricInputTokens,
-		BaselineValue:   baseline,
+		Metric:          "context_tokens",
+		BaselineValue:   savedTokens,
 		EffectiveValue:  0,
 		SavedCents:      0,
 		ActualCostCents: 0,
 	}
+}
+
+// estimateSnapshotContextChars approximates the snapshot block size in shadow
+// mode when we do not render it into the prompt.
+func estimateSnapshotContextChars(issue db.Issue, triggerCommentID pgtype.UUID) int64 {
+	var n int64
+	n += int64(len(strings.TrimSpace(issue.Title)))
+	if issue.Description.Valid {
+		n += int64(len(strings.TrimSpace(issue.Description.String)))
+	}
+	// Conservative per-read allowance when we have not loaded the full thread.
+	n += int64(snapshotInlinedReads) * 4000
+	if triggerCommentID.Valid {
+		n += 2000
+	}
+	return n
 }
 
 // renderIssueSnapshot formats the issue core + its recent thread into the block
