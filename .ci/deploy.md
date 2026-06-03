@@ -103,16 +103,31 @@ FULL_SHA=$(git rev-parse HEAD)
 
 工作区如果有未提交变更，停止发布，不要自动 stash/reset。
 
-生成项目版本时要避免 nested git-describe tag。示例：
+生成项目版本时以当前已发布的 **git-describe-style release tag** 为基线，手动生成下一版，避免再次 `git describe` 时产生 nested tag。示例：
 
 ```bash
-PROJECT_VERSION=$(git describe --tags --long \
-  --match 'v[0-9]*' \
-  --exclude 'v[0-9]*-[0-9]*-g*' \
-  --exclude '*-k3s-*' \
-  --exclude '*-wj*' \
-  "$FULL_SHA")
+# 优先使用已经精确指向 FULL_SHA 的 release tag；否则基于最近的 release tag 手动累加 commit count。
+EXACT_RELEASE=$(git tag --points-at "$FULL_SHA" --list 'v[0-9]*.[0-9]*.[0-9]*-[0-9]*-g*' --sort=-v:refname | head -1)
+if [ -n "$EXACT_RELEASE" ]; then
+  PROJECT_VERSION="$EXACT_RELEASE"
+else
+  PREV_RELEASE=$(git tag --sort=-v:refname \
+    --list 'v[0-9]*.[0-9]*.[0-9]*-[0-9]*-g*' \
+    --merged "$FULL_SHA" | head -1)
+  if [ -z "$PREV_RELEASE" ]; then
+    echo "ERROR: no previous release tag found for $FULL_SHA"
+    exit 1
+  fi
+
+  BASE_VERSION=$(echo "$PREV_RELEASE" | sed -E 's/^v?([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+-g[0-9a-f]+$/\1/')
+  PREV_COUNT=$(echo "$PREV_RELEASE" | sed -E 's/^v?[0-9]+\.[0-9]+\.[0-9]+-([0-9]+)-g[0-9a-f]+$/\1/')
+  COMMITS_SINCE=$(git rev-list --count "$PREV_RELEASE..$FULL_SHA")
+  SHORT_SHA=$(git rev-parse --short=9 "$FULL_SHA")
+  PROJECT_VERSION="v${BASE_VERSION}-$((PREV_COUNT + COMMITS_SINCE))-g${SHORT_SHA}"
+fi
 ```
+
+例如当前最新 release tag 是 `v0.3.12-997-g911c9f8d3`，本次 `FULL_SHA` 在它之后新增 15 个 commit，则生成：`v0.3.12-1012-g<short-sha>`。
 
 规则：
 
@@ -133,21 +148,21 @@ test "$TAG_SHA" = "$FULL_SHA"
 ```
 
 - 禁止用 `git tag <tag> origin/main`、`git tag <tag> HEAD` 这类移动引用创建 release tag。必须显式使用已冻结的 `$FULL_SHA`。
-- 不要基于旧的 git-describe-style 发布 tag 再 describe 出嵌套版本，例如 `v0.3.2-...-100-gxxxx-1-gyyyy`。
+- 不要基于旧的 git-describe-style 发布 tag 再 describe 出嵌套版本，例如 `v0.3.2-...-100-gxxxx-1-gyyyy`；应按上方规则解析最近 release tag 并手动累加 commit count。
 
 #### 版本号倒退校验（强制 gate）
 
 ```bash
 # 提取 base version（v0.3.6-845-gb05b01d1c → 0.3.6）
-BASE_VERSION=$(echo "$PROJECT_VERSION" | grep -oP '^v?\K\d+\.\d+\.\d+')
+BASE_VERSION=$(echo "$PROJECT_VERSION" | sed -E 's/^v?([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+-g[0-9a-f]+$/\1/')
 PREV_RELEASE=$(git tag --sort=-v:refname \
   --list 'v[0-9]*.[0-9]*.[0-9]*-[0-9]*-g*' \
   --merged origin/main | head -1)
-PREV_BASE=$(echo "$PREV_RELEASE" | grep -oP '^v?\K\d+\.\d+\.\d+')
+PREV_BASE=$(echo "$PREV_RELEASE" | sed -E 's/^v?([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+-g[0-9a-f]+$/\1/')
 
 if [ -n "$PREV_BASE" ] && [ "$(printf '%s\n' "$PREV_BASE" "$BASE_VERSION" | sort -V | tail -1)" != "$BASE_VERSION" ]; then
   echo "ERROR: PROJECT_VERSION base ($BASE_VERSION) < previous release ($PREV_BASE). Version regression detected."
-  echo "This means git describe chose an older base tag. Check that --exclude patterns are applied."
+  echo "This means PROJECT_VERSION was generated from an older release baseline. Check release tag selection and commit-count calculation."
   exit 1
 fi
 ```
