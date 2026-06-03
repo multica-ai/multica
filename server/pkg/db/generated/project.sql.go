@@ -26,10 +26,10 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUI
 const createProject = `-- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority
+    lead_type, lead_id, priority, start_date, target_date
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, target_date
 `
 
 type CreateProjectParams struct {
@@ -41,6 +41,8 @@ type CreateProjectParams struct {
 	LeadType    pgtype.Text `json:"lead_type"`
 	LeadID      pgtype.UUID `json:"lead_id"`
 	Priority    string      `json:"priority"`
+	StartDate   pgtype.Date `json:"start_date"`
+	TargetDate  pgtype.Date `json:"target_date"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -53,6 +55,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.LeadType,
 		arg.LeadID,
 		arg.Priority,
+		arg.StartDate,
+		arg.TargetDate,
 	)
 	var i Project
 	err := row.Scan(
@@ -67,6 +71,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.StartDate,
+		&i.TargetDate,
 	)
 	return i, err
 }
@@ -86,8 +92,46 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 	return err
 }
 
+const getLatestUpdatesForProjects = `-- name: GetLatestUpdatesForProjects :many
+SELECT DISTINCT ON (project_id)
+    project_id,
+    health,
+    created_at AS last_update_at
+FROM project_update
+WHERE project_id = ANY($1::uuid[])
+ORDER BY project_id, created_at DESC
+`
+
+type GetLatestUpdatesForProjectsRow struct {
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	Health       string             `json:"health"`
+	LastUpdateAt pgtype.Timestamptz `json:"last_update_at"`
+}
+
+// One row per project that has at least one update: the most recent update's
+// health and created_at. Used to derive each project's current health in list/detail.
+func (q *Queries) GetLatestUpdatesForProjects(ctx context.Context, projectIds []pgtype.UUID) ([]GetLatestUpdatesForProjectsRow, error) {
+	rows, err := q.db.Query(ctx, getLatestUpdatesForProjects, projectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetLatestUpdatesForProjectsRow{}
+	for rows.Next() {
+		var i GetLatestUpdatesForProjectsRow
+		if err := rows.Scan(&i.ProjectID, &i.Health, &i.LastUpdateAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, target_date FROM project
 WHERE id = $1
 `
 
@@ -106,12 +150,14 @@ func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.StartDate,
+		&i.TargetDate,
 	)
 	return i, err
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, target_date FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -135,6 +181,8 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.StartDate,
+		&i.TargetDate,
 	)
 	return i, err
 }
@@ -175,7 +223,7 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, target_date FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -209,6 +257,8 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Priority,
+			&i.StartDate,
+			&i.TargetDate,
 		); err != nil {
 			return nil, err
 		}
@@ -229,9 +279,11 @@ UPDATE project SET
     priority = COALESCE($6, priority),
     lead_type = $7,
     lead_id = $8,
+    start_date = COALESCE($9, start_date),
+    target_date = COALESCE($10, target_date),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, target_date
 `
 
 type UpdateProjectParams struct {
@@ -243,6 +295,8 @@ type UpdateProjectParams struct {
 	Priority    pgtype.Text `json:"priority"`
 	LeadType    pgtype.Text `json:"lead_type"`
 	LeadID      pgtype.UUID `json:"lead_id"`
+	StartDate   pgtype.Date `json:"start_date"`
+	TargetDate  pgtype.Date `json:"target_date"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
@@ -255,6 +309,8 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.Priority,
 		arg.LeadType,
 		arg.LeadID,
+		arg.StartDate,
+		arg.TargetDate,
 	)
 	var i Project
 	err := row.Scan(
@@ -269,6 +325,8 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.StartDate,
+		&i.TargetDate,
 	)
 	return i, err
 }

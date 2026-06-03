@@ -40,6 +40,8 @@ import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { ProjectUpdatesTab } from "./project-updates-tab";
+import { HealthPill } from "./health-pill";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
@@ -87,6 +89,20 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 // ---------------------------------------------------------------------------
 // Property row — sidebar property display
 // ---------------------------------------------------------------------------
+
+function formatProjectDates(start: string | null, target: string | null): string {
+  const fmt = (d: string) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  if (start && target) {
+    const daysLeft = Math.ceil((new Date(target).getTime() - Date.now()) / 86_400_000);
+    const left = daysLeft >= 0 ? `${daysLeft}d left` : `${Math.abs(daysLeft)}d over`;
+    return `${fmt(start)} → ${fmt(target)} · ${left}`;
+  }
+  if (target) {
+    const daysLeft = Math.ceil((new Date(target).getTime() - Date.now()) / 86_400_000);
+    return `${fmt(target)} · ${daysLeft >= 0 ? `${daysLeft}d left` : `${Math.abs(daysLeft)}d over`}`;
+  }
+  return start ? `Started ${fmt(start)}` : "";
+}
 
 function PropRow({
   label,
@@ -293,6 +309,7 @@ function ProjectIssuesSurface({
   filter: MyIssuesFilter;
 }) {
   const wsId = useWorkspaceId();
+  const [contentTab, setContentTab] = useState<"issues" | "updates">("issues");
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
@@ -366,19 +383,46 @@ function ProjectIssuesSurface({
 
   return (
     <>
-      <IssuesHeader scopedIssues={projectIssues} allowGantt />
-      <ProjectIssuesContent
-        projectId={projectId}
-        projectIssues={projectIssues}
-        assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
-        assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
-        assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
-        scope={scope}
-        filter={filter}
-        sort={sort}
-        ganttIssues={ganttIssues}
-      />
-      <BatchActionToolbar />
+      <div className="flex items-center gap-1 border-b border-border px-3">
+        <button
+          type="button"
+          onClick={() => setContentTab("issues")}
+          className={cn(
+            "border-b-2 px-3 py-2 text-sm",
+            contentTab === "issues" ? "border-foreground text-foreground" : "border-transparent text-muted-foreground",
+          )}
+        >
+          Issues
+        </button>
+        <button
+          type="button"
+          onClick={() => setContentTab("updates")}
+          className={cn(
+            "border-b-2 px-3 py-2 text-sm",
+            contentTab === "updates" ? "border-foreground text-foreground" : "border-transparent text-muted-foreground",
+          )}
+        >
+          Updates
+        </button>
+      </div>
+      {contentTab === "issues" && (
+        <>
+          <IssuesHeader scopedIssues={projectIssues} allowGantt />
+          <ProjectIssuesContent
+            projectId={projectId}
+            projectIssues={projectIssues}
+            assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+            assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
+            assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
+            scope={scope}
+            filter={filter}
+            sort={sort}
+            ganttIssues={ganttIssues}
+          />
+          <BatchActionToolbar />
+        </>
+      )}
+      {contentTab === "updates" && <ProjectUpdatesTab wsId={wsId} projectId={projectId} />}
     </>
   );
 }
@@ -647,6 +691,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </PopoverContent>
             </Popover>
           </PropRow>
+          <PropRow label="Health">
+            <HealthPill health={project.health} />
+          </PropRow>
+          {(project.start_date || project.target_date) && (
+            <PropRow label="Timeline">
+              <span className="text-xs text-foreground">
+                {formatProjectDates(project.start_date, project.target_date)}
+              </span>
+            </PropRow>
+          )}
         </div>}
       </div>
 

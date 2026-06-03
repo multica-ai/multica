@@ -2,6 +2,8 @@ export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" |
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
 
+export type ProjectHealth = "on_track" | "at_risk" | "off_track";
+
 export interface Project {
   id: string;
   workspace_id: string;
@@ -12,6 +14,10 @@ export interface Project {
   priority: ProjectPriority;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
+  start_date: string | null;
+  target_date: string | null;
+  health: ProjectHealth | null;
+  last_update_at: string | null;
   created_at: string;
   updated_at: string;
   issue_count: number;
@@ -27,6 +33,8 @@ export interface CreateProjectRequest {
   priority?: ProjectPriority;
   lead_type?: "member" | "agent";
   lead_id?: string;
+  start_date?: string;
+  target_date?: string;
   // Resources to attach in the same transaction as the project. Server returns
   // 4xx (and rolls back) if any one is invalid or duplicate.
   resources?: CreateProjectResourceRequest[];
@@ -40,6 +48,37 @@ export interface UpdateProjectRequest {
   priority?: ProjectPriority;
   lead_type?: "member" | "agent" | null;
   lead_id?: string | null;
+  start_date?: string | null;
+  target_date?: string | null;
+}
+
+export interface ProjectUpdate {
+  id: string;
+  project_id: string;
+  workspace_id: string;
+  health: ProjectHealth;
+  body: string;
+  author_type: "member" | "agent";
+  author_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListProjectUpdatesResponse {
+  updates: ProjectUpdate[];
+  total: number;
+}
+
+export interface CreateProjectUpdateRequest {
+  health: ProjectHealth;
+  body: string;
+  author_type?: "member" | "agent";
+  author_id?: string;
+}
+
+export interface UpdateProjectUpdateRequest {
+  health?: ProjectHealth;
+  body?: string;
 }
 
 export interface ListProjectsResponse {

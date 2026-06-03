@@ -67,6 +67,10 @@ import type {
   Project,
   CreateProjectRequest,
   UpdateProjectRequest,
+  ProjectUpdate,
+  ListProjectUpdatesResponse,
+  CreateProjectUpdateRequest,
+  UpdateProjectUpdateRequest,
   ListProjectsResponse,
   ProjectResource,
   CreateProjectResourceRequest,
@@ -122,6 +126,10 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import {
+  EMPTY_PROJECT_UPDATES,
+  ListProjectUpdatesResponseSchema,
+} from "./projects-schema";
 import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
@@ -1733,6 +1741,46 @@ export class ApiClient {
     resourceId: string,
   ): Promise<void> {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Project updates
+  async listProjectUpdates(
+    projectId: string,
+  ): Promise<ListProjectUpdatesResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/updates`);
+    return parseWithFallback(raw, ListProjectUpdatesResponseSchema, EMPTY_PROJECT_UPDATES, {
+      endpoint: "GET /api/projects/{id}/updates",
+    });
+  }
+
+  async createProjectUpdate(
+    projectId: string,
+    data: CreateProjectUpdateRequest,
+  ): Promise<ProjectUpdate> {
+    return this.fetch(`/api/projects/${projectId}/updates`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProjectUpdate(
+    projectId: string,
+    updateId: string,
+    data: UpdateProjectUpdateRequest,
+  ): Promise<ProjectUpdate> {
+    return this.fetch(`/api/projects/${projectId}/updates/${updateId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProjectUpdate(
+    projectId: string,
+    updateId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/updates/${updateId}`, {
       method: "DELETE",
     });
   }
