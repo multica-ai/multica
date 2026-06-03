@@ -78,6 +78,23 @@ WHERE paused_at IS NOT NULL
   AND unpause_at IS NOT NULL
   AND unpause_at <= now();
 
+-- name: StampQueuedTasksRuntimePauseWaitReason :exec
+-- FIR-2717: explain queued waits on the task row instead of posting an issue
+-- comment. Only touches still-queued tasks on the paused runtime.
+UPDATE agent_task_queue
+SET wait_reason = $2
+WHERE runtime_id = $1
+  AND status = 'queued';
+
+-- name: ClearQueuedTasksRuntimePauseWaitReason :exec
+-- Clears the pause stamp when the runtime unpauses. Scoped to our prefix so
+-- unrelated wait_reason values (e.g. local_directory holds) are untouched.
+UPDATE agent_task_queue
+SET wait_reason = NULL
+WHERE runtime_id = $1
+  AND status = 'queued'
+  AND wait_reason LIKE 'runtime_paused|%';
+
 -- name: SuspendActiveTasksForRuntime :many
 -- Called when a runtime is paused: marks any in-flight (dispatched/running)
 -- task as failed with failure_reason='runtime_paused'. The matching

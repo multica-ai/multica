@@ -164,6 +164,13 @@ export interface AgentTask {
    */
   title?: string;
   /**
+   * CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717.
+   * When set on a queued task, explains why the task is waiting (e.g.
+   * `runtime_paused|rate_limit|2026-06-01T11:55:00Z` while the runtime is
+   * auto-paused).
+   */
+  wait_reason?: string;
+  /**
    * Server-computed source discriminator used by the activity row to label
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").

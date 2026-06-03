@@ -105,11 +105,11 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 		)
 	}
 
-	// Post a human-facing issue notice for each scheduled auto-resume pause,
-	// and exactly once when the circuit opens. Past the circuit limit the
-	// runtime is already paused/manual-only, so repeating the same notice
-	// would just bury the useful failure detail.
-	if !circuitOpen || count == autoPauseCircuitLimit {
+	// FIR-2717: only post the manual-intervention notice when the circuit
+	// opens. Routine auto-resume pauses surface on the queued task via
+	// wait_reason (stamped by PauseRuntime) instead of an issue comment that
+	// pollutes the agent context window.
+	if circuitOpen && count == autoPauseCircuitLimit {
 		s.notifyAutoPause(ctx, task, count, unpauseAt, circuitOpen)
 	}
 

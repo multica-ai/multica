@@ -142,7 +142,7 @@ func TestCircuitBreakerThreshold(t *testing.T) {
 				t.Errorf("count=%d: circuit should be closed", count)
 			}
 			if notifyOnce {
-				t.Errorf("count=%d: should not notify", count)
+				t.Errorf("count=%d: should not post issue comment", count)
 			}
 		case count == autoPauseCircuitLimit:
 			if !circuitOpen || !notifyOnce {

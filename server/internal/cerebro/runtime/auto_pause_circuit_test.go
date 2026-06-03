@@ -10,12 +10,12 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TestAutoPauseCircuitBreaker is the FIR-2476 regression: a runtime that keeps
-// hitting a usage cap (no parseable reset time) must back off with a growing
-// pause and post the retry time on the issue, then — after
+// TestAutoPauseCircuitBreaker is the FIR-2476 regression, updated for FIR-2717:
+// a runtime that keeps hitting a usage cap (no parseable reset time) must back
+// off with a growing pause WITHOUT posting routine-pause comments, then — after
 // autoPauseCircuitLimit consecutive auto-pauses without an intervening success
 // — stop auto-resuming (unpause_at NULL) and post the manual-intervention
-// notice once. A later success resets the counter.
+// notice exactly once. A later success resets the counter.
 func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if runtimeAccountTestPool == nil {
 		t.Skip("DATABASE_URL not configured; skipping circuit-breaker integration test")
@@ -120,8 +120,8 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 		if got < want-time.Minute || got > want+time.Minute {
 			t.Fatalf("cycle %d: backoff %s, want ≈%s", cycle, got, want)
 		}
-		if c := countComments(); c != int(cycle) {
-			t.Fatalf("cycle %d: expected %d pause notices, got %d", cycle, cycle, c)
+		if c := countComments(); c != 0 {
+			t.Fatalf("cycle %d: expected no issue comments, got %d", cycle, c)
 		}
 	}
 
@@ -140,8 +140,8 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if unpauseAt.Valid {
 		t.Fatal("trip cycle: unpause_at must be NULL once the circuit is open")
 	}
-	if c := countComments(); c != int(autoPauseCircuitLimit) {
-		t.Fatalf("trip cycle: expected %d notices, got %d", autoPauseCircuitLimit, c)
+	if c := countComments(); c != 1 {
+		t.Fatalf("trip cycle: expected 1 manual-intervention notice, got %d", c)
 	}
 
 	// Past the trip: circuit stays open, no duplicate notice.
@@ -155,7 +155,7 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if unpauseAt.Valid {
 		t.Fatal("post-trip: unpause_at must stay NULL")
 	}
-	if c := countComments(); c != int(autoPauseCircuitLimit) {
+	if c := countComments(); c != 1 {
 		t.Fatalf("post-trip: notice must not repeat, got %d", c)
 	}
 

@@ -26,6 +26,11 @@ import { AgentTranscriptDialog } from "../../common/task-transcript/agent-transc
 import { redactSecrets } from "../../common/task-transcript/redact";
 // CEREBRO-PATCH(agent-live-card-cerebro): import getToolSummary from cerebro-chat after Phase 6 relocation
 import { getToolSummary } from "@multica/cerebro-chat/views";
+// CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717 — render the runtime-pause detail on queued banners.
+import {
+  parseRuntimePauseWaitReason,
+  runtimePauseQueuedLabel,
+} from "@multica/cerebro-runtime/views";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
@@ -246,6 +251,11 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   useWSEvent("task:waiting_local_directory", handleTaskActive);
   useWSEvent("task:running", handleTaskActive);
 
+  // FIR-2717: refresh queued banners when a runtime pauses/unpauses so
+  // wait_reason on queued tasks is reflected without an issue comment.
+  useWSEvent("runtime:paused", reconcile);
+  useWSEvent("runtime:unpaused", reconcile);
+
   // Fire the actual cancel once the user confirms. The banner is dropped
   // optimistically by handleTaskEnd / reconcile when the task:cancelled
   // event lands, so `cancellingIds` only needs to gate the button between
@@ -422,6 +432,7 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
   }, [task.started_at, task.dispatched_at, task.created_at]);
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
+  const runtimePauseWait = parseRuntimePauseWaitReason(task.wait_reason);
 
   // Queued / waiting tasks render with a non-spinning Clock and dimmer
   // accent so the banner reads as "waiting" rather than "working" at a
@@ -445,6 +456,11 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
           <span className="font-medium text-foreground truncate">
             {isWaitingLocalDirectory
               ? t(($) => $.agent_live.is_waiting_local_directory, { name: agentName })
+              : isQueued && runtimePauseWait
+                ? t(($) => $.agent_live.is_queued_runtime_paused, {
+                    name: agentName,
+                    detail: runtimePauseQueuedLabel(runtimePauseWait),
+                  })
               : isQueued
                 ? t(($) => $.agent_live.is_queued, { name: agentName })
                 : t(($) => $.agent_live.is_working, { name: agentName })}
