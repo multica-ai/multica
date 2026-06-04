@@ -179,8 +179,8 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 		// without those, OpenCode walks from the daemon's inherited PWD and
 		// misses .opencode/skills + AGENTS.md entirely (MUL-2416).
 		skillsDir = filepath.Join(workDir, ".opencode", "skills")
-	case "openclaw":
-		// OpenClaw's native skill scanner reads <workspaceDir>/skills/. The
+	case "openclaw", "wujieclaw":
+		// OpenClaw-compatible native skill scanners read <workspaceDir>/skills/. The
 		// daemon pairs this with a per-task synthesized openclaw-config.json
 		// (see openclaw_config.go) that pins agents.defaults.workspace to
 		// workDir, so writing here is what the CLI actually scans. Before

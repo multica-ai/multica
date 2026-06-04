@@ -132,7 +132,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Codex:     writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
-// For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from {workDir}/skills/ via per-task openclaw-config.json that pins agents.defaults.workspace)
+// For OpenClaw/WujieClaw: writes {workDir}/AGENTS.md  (skills discovered natively from {workDir}/skills/ via per-task openclaw-config.json that pins agents.defaults.workspace)
 // For Hermes:   writes {workDir}/AGENTS.md  (skills fall back to .agent_context/skills/; AGENTS.md points there)
 // For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
 // For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from .pi/skills/)
@@ -163,7 +163,7 @@ func runtimeConfigPath(workDir, provider string) string {
 		return filepath.Join(workDir, "CLAUDE.md")
 	case "codebuddy":
 		return filepath.Join(workDir, "CODEBUDDY.md")
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity":
+	case "codex", "copilot", "opencode", "openclaw", "wujieclaw", "hermes", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity":
 		return filepath.Join(workDir, "AGENTS.md")
 	case "gemini":
 		return filepath.Join(workDir, "GEMINI.md")
@@ -757,10 +757,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			// Claude and CodeBuddy discover skills natively from
 			// .claude/skills/ resp. .codebuddy/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, DeepSeek,
-			// and Antigravity discover skills natively from their respective paths.
-			// For OpenClaw, the daemon also writes a per-task openclaw-config.json
+		case "codex", "copilot", "opencode", "openclaw", "wujieclaw", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity":
+			// Codex, Copilot, OpenCode, OpenClaw, WujieClaw, Pi, Cursor, Kimi, Kiro,
+			// DeepSeek, and Antigravity discover skills natively from their respective paths.
+			// For OpenClaw-compatible runtimes, the daemon also writes a per-task openclaw-config.json
 			// (exported via OPENCLAW_CONFIG_PATH) that pins agents.defaults.workspace
 			// to the task workdir so the CLI's scanner picks up {workDir}/skills/.
 			// Antigravity inherits Gemini CLI’s workspace skill layout —

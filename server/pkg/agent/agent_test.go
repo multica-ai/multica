@@ -49,6 +49,21 @@ func TestNewReturnsAntigravityBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsWujieClawBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("wujieclaw", Config{})
+	if err != nil {
+		t.Fatalf("New(wujieclaw) error: %v", err)
+	}
+	backend, ok := b.(*openclawBackend)
+	if !ok {
+		t.Fatalf("expected *openclawBackend, got %T", b)
+	}
+	if backend.cfg.ExecutablePath != "wujieclaw" {
+		t.Fatalf("ExecutablePath = %q, want wujieclaw", backend.cfg.ExecutablePath)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
@@ -83,7 +98,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor", "DeepSeek-TUI",
-		"gemini", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"gemini", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "wujieclaw",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {
@@ -103,7 +118,7 @@ func TestCapabilityRegistryCoversSupportedBackends(t *testing.T) {
 	t.Parallel()
 
 	supported := []string{
-		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes",
+		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "wujieclaw", "hermes",
 		"gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity",
 	}
 	for _, provider := range supported {

@@ -53,6 +53,10 @@ var capabilityRegistry = map[string]Capability{
 		ResumeSession:    true,
 		StructuredOutput: true,
 	},
+	"wujieclaw": {
+		ResumeSession:    true,
+		StructuredOutput: true,
+	},
 	"hermes": {
 		ResumeSession:    true,
 		StructuredOutput: true,
@@ -79,6 +83,9 @@ var capabilityRegistry = map[string]Capability{
 	},
 	"DeepSeek-TUI": {
 		StructuredOutput: true,
+	},
+	"antigravity": {
+		ResumeSession: true,
 	},
 }
 

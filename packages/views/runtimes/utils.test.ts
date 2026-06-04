@@ -9,6 +9,7 @@ import {
   collectUnmappedModels,
   computeCostInWindow,
   estimateCost,
+  formatProviderName,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -80,6 +81,16 @@ describe("isSelfHealingRuntime", () => {
         makeRuntime({ runtime_mode: "cloud", status: "offline" }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("formatProviderName", () => {
+  it("uses the branded WujieClaw casing", () => {
+    expect(formatProviderName("wujieclaw")).toBe("WujieClaw");
+  });
+
+  it("falls back to title-casing unknown providers", () => {
+    expect(formatProviderName("openclaw")).toBe("Openclaw");
   });
 });
 

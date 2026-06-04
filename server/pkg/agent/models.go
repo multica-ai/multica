@@ -88,7 +88,7 @@ const modelCacheTTL = 60 * time.Second
 // ListModels returns the models supported by the given agent provider.
 // For providers with a known static catalog it returns the baked-in
 // list; for providers with a CLI discovery mechanism (opencode, pi,
-// openclaw) it shells out with caching and falls back to the static
+// openclaw, wujieclaw) it shells out with caching and falls back to the static
 // list on failure.
 //
 // For claude and codex, the static catalog is augmented with per-model
@@ -152,9 +152,9 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverPiModels(ctx, executablePath)
 		})
-	case "openclaw":
+	case "openclaw", "wujieclaw":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverOpenclawAgents(ctx, executablePath)
+			return discoverOpenclawAgents(ctx, providerType, executablePath)
 		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
@@ -1008,7 +1008,7 @@ func parseCursorModels(output string) []Model {
 	return models
 }
 
-// discoverOpenclawAgents enumerates the pre-registered OpenClaw
+// discoverOpenclawAgents enumerates the pre-registered OpenClaw-compatible
 // agents (which is where model selection actually lives in the
 // OpenClaw world — each agent is bound to a model at `agents add`
 // time). It tries structured JSON output first, falling back to a
@@ -1016,9 +1016,9 @@ func parseCursorModels(output string) []Model {
 // headers. On any ambiguity we return an empty list and let the
 // creatable dropdown handle manual entry — a silently-wrong
 // enumeration would be worse than none.
-func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model, error) {
+func discoverOpenclawAgents(ctx context.Context, providerType, executablePath string) ([]Model, error) {
 	if executablePath == "" {
-		executablePath = "openclaw"
+		executablePath = providerType
 	}
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
@@ -1039,7 +1039,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 		if err != nil {
 			continue
 		}
-		if models, ok := parseOpenclawAgentsJSON(out); ok {
+		if models, ok := parseOpenclawAgentsJSON(out, providerType); ok {
 			return models, nil
 		}
 	}
@@ -1053,7 +1053,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	if err != nil {
 		return []Model{}, nil
 	}
-	return parseOpenclawAgents(string(out)), nil
+	return parseOpenclawAgents(string(out), providerType), nil
 }
 
 // openclawAgentEntry is the shape parseOpenclawAgentsJSON expects
@@ -1075,28 +1075,29 @@ type openclawAgentEntry struct {
 // output. It handles two common shapes: a top-level array, or an
 // object with an `agents` key whose value is an array. Returns
 // ok=false if the input isn't valid JSON in either shape.
-func parseOpenclawAgentsJSON(raw []byte) ([]Model, bool) {
+func parseOpenclawAgentsJSON(raw []byte, providerType ...string) ([]Model, bool) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
 		return nil, false
 	}
+	provider := openclawProviderName(providerType...)
 
 	var flat []openclawAgentEntry
 	if err := json.Unmarshal(raw, &flat); err == nil {
-		return openclawEntriesToModels(flat), true
+		return openclawEntriesToModels(flat, provider), true
 	}
 
 	var wrapped struct {
 		Agents []openclawAgentEntry `json:"agents"`
 	}
 	if err := json.Unmarshal(raw, &wrapped); err == nil && wrapped.Agents != nil {
-		return openclawEntriesToModels(wrapped.Agents), true
+		return openclawEntriesToModels(wrapped.Agents, provider), true
 	}
 
 	return nil, false
 }
 
-func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
+func openclawEntriesToModels(entries []openclawAgentEntry, provider string) []Model {
 	models := make([]Model, 0, len(entries))
 	seen := map[string]bool{}
 	for _, e := range entries {
@@ -1121,7 +1122,7 @@ func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
 		if e.Model != "" {
 			label = displayName + " (" + e.Model + ")"
 		}
-		models = append(models, Model{ID: id, Label: label, Provider: "openclaw"})
+		models = append(models, Model{ID: id, Label: label, Provider: provider})
 	}
 	return models
 }
@@ -1134,9 +1135,10 @@ func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
 // separated tokens, both made of safe identifier characters, and
 // neither ending in `:`. Anything else is discarded to avoid
 // surfacing "Identity:" or `◇` as selectable models.
-func parseOpenclawAgents(output string) []Model {
+func parseOpenclawAgents(output string, providerType ...string) []Model {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	provider := openclawProviderName(providerType...)
 	var models []Model
 	seen := map[string]bool{}
 	for scanner.Scan() {
@@ -1159,10 +1161,17 @@ func parseOpenclawAgents(output string) []Model {
 		models = append(models, Model{
 			ID:       name,
 			Label:    name + " (" + model + ")",
-			Provider: "openclaw",
+			Provider: provider,
 		})
 	}
 	return models
+}
+
+func openclawProviderName(providerType ...string) string {
+	if len(providerType) > 0 && strings.TrimSpace(providerType[0]) != "" {
+		return strings.TrimSpace(providerType[0])
+	}
+	return "openclaw"
 }
 
 // isOpenclawIdentifier reports whether s looks like a valid

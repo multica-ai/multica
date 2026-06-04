@@ -2552,11 +2552,15 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kiro", "kimi":
+	case "openclaw", "wujieclaw", "kiro", "kimi":
 		return true
 	default:
 		return false
 	}
+}
+
+func isOpenclawCompatibleProvider(provider string) bool {
+	return provider == "openclaw" || provider == "wujieclaw"
 }
 
 func effectiveTaskRunMode(provider, requestedRunMode string) string {
@@ -2731,7 +2735,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
 	openclawBin := ""
-	if provider == "openclaw" {
+	if isOpenclawCompatibleProvider(provider) {
 		openclawBin = entry.Path
 	}
 	// Resolve any local_directory assignment again here so runTask can plumb

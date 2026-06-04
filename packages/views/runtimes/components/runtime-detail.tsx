@@ -31,7 +31,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { formatLastSeen, isSelfHealingRuntime } from "../utils";
+import { formatLastSeen, formatProviderName, isSelfHealingRuntime } from "../utils";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
@@ -291,7 +291,7 @@ function HeroCard({
         <Fact label="Runtime">
           <span className="block truncate text-sm">
             {device?.runtime ?? (
-              <span className="capitalize">{runtime.provider}</span>
+              <span>{formatProviderName(runtime.provider)}</span>
             )}
           </span>
         </Fact>
