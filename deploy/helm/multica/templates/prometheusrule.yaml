@@ -1,5 +1,6 @@
 {{- if .Values.monitoring.prometheusRule.enabled }}
-{{- $samplerQueries := "active_users|active_workspaces|task_queued|task_running|task_stuck|runtime_online|runtime_heartbeat_age|workspace_total" -}}
+{{- $samplerQueryNames := "active_users|active_workspaces|task_queued|task_running|task_stuck|runtime_online|runtime_heartbeat_age|workspace_total" -}}
+{{- $samplerErrorNames := printf "acquire|%s" $samplerQueryNames -}}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -17,7 +18,7 @@ spec:
         - alert: MulticaBusinessSamplerQueryErrors
           expr: |
             sum by (name) (
-              rate(multica_business_sampler_query_errors_total{name=~"{{ $samplerQueries }}"}[10m])
+              rate(multica_business_sampler_query_errors_total{name=~"{{ $samplerErrorNames }}"}[10m])
             ) > 0
           for: {{ .Values.monitoring.prometheusRule.samplerQueryErrorsFor | quote }}
           labels:
@@ -30,7 +31,7 @@ spec:
             histogram_quantile(
               0.95,
               sum by (le, name) (
-                rate(multica_business_sampler_query_seconds_bucket{name=~"{{ $samplerQueries }}"}[10m])
+                rate(multica_business_sampler_query_seconds_bucket{name=~"{{ $samplerQueryNames }}"}[10m])
               )
             ) > 0.3
           for: {{ .Values.monitoring.prometheusRule.samplerQueryLatencyFor | quote }}
