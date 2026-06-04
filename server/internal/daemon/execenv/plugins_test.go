@@ -61,10 +61,19 @@ func readInvocations(t *testing.T, dir string) []string {
 	return lines
 }
 
-// testPlugins returns a standard set of plugin sources for testing.
-func testPlugins() []PluginSource {
-	return []PluginSource{
-		{MarketplaceURL: "https://github.com/example/marketplace.git", Plugin: "cospower"},
+// testPlugin returns a standard plugin for testing.
+func testPlugin() *AgentPlugin {
+	return &AgentPlugin{
+		ID:   "test-plugin-id",
+		Name: "cospower",
+		Install: &PluginInstall{
+			Method:              "plugin_marketplace",
+			Marketplace:         "example/marketplace",
+			PluginName:          "cospower",
+			MarketplaceName:     "marketplace",
+			MarketplaceRepo:     "https://github.com/example/marketplace.git",
+			MarketplaceVerified: true,
+		},
 	}
 }
 
@@ -79,7 +88,7 @@ func TestSetupPlugins_DispatchesToCSC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := setupPlugins(context.Background(), "csc", fakeBin, workDir, testPlugins(), slog.Default())
+	err := setupPlugins(context.Background(), "csc", fakeBin, workDir, testPlugin(), slog.Default())
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -97,7 +106,7 @@ func TestSetupPlugins_UnknownProviderSkips(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := setupPlugins(context.Background(), "claude", "/usr/bin/claude", workDir, testPlugins(), slog.Default())
+	err := setupPlugins(context.Background(), "claude", "/usr/bin/claude", workDir, testPlugin(), slog.Default())
 	if err != nil {
 		t.Fatalf("unknown provider should skip silently, got: %v", err)
 	}
@@ -123,7 +132,7 @@ func TestSetupPlugins_EmptyBinSkips(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := setupPlugins(context.Background(), "csc", "", workDir, testPlugins(), slog.Default())
+	err := setupPlugins(context.Background(), "csc", "", workDir, testPlugin(), slog.Default())
 	if err != nil {
 		t.Fatalf("empty bin should skip silently, got: %v", err)
 	}
@@ -140,7 +149,7 @@ func TestSetupCSCPlugins_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := setupCSCPlugins(context.Background(), fakeBin, workDir, testPlugins(), slog.Default())
+	err := setupCSCPlugins(context.Background(), fakeBin, workDir, testPlugin(), slog.Default())
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -187,7 +196,7 @@ func TestSetupCSCPlugins_MarketplaceAddFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := setupCSCPlugins(context.Background(), fakeBin, workDir, testPlugins(), slog.Default())
+	err := setupCSCPlugins(context.Background(), fakeBin, workDir, testPlugin(), slog.Default())
 	if err == nil {
 		t.Fatal("expected error when marketplace add fails")
 	}
@@ -207,7 +216,7 @@ func TestSetupCSCPlugins_UpdateFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := setupCSCPlugins(context.Background(), fakeBin, workDir, testPlugins(), slog.Default())
+	err := setupCSCPlugins(context.Background(), fakeBin, workDir, testPlugin(), slog.Default())
 	if err == nil {
 		t.Fatal("expected error when plugin update fails")
 	}
@@ -227,7 +236,7 @@ func TestSetupCSCPlugins_InstallFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := setupCSCPlugins(context.Background(), fakeBin, workDir, testPlugins(), slog.Default())
+	err := setupCSCPlugins(context.Background(), fakeBin, workDir, testPlugin(), slog.Default())
 	if err == nil {
 		t.Fatal("expected error when plugin install fails")
 	}
@@ -256,7 +265,7 @@ func TestSetupCSCPlugins_EmptyCSCBin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := setupCSCPlugins(context.Background(), "", workDir, testPlugins(), slog.Default())
+	err := setupCSCPlugins(context.Background(), "", workDir, testPlugin(), slog.Default())
 	if err != nil {
 		t.Fatalf("empty cscBin should succeed, got: %v", err)
 	}
@@ -280,7 +289,7 @@ func TestSetupCSCPlugins_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	err := setupCSCPlugins(ctx, fakeBin, workDir, testPlugins(), slog.Default())
+	err := setupCSCPlugins(ctx, fakeBin, workDir, testPlugin(), slog.Default())
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -297,59 +306,12 @@ func TestSetupCSCPlugins_ErrorMessageContainsURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plugins := testPlugins()
-	err := setupCSCPlugins(context.Background(), fakeBin, workDir, plugins, slog.Default())
+	plugin := testPlugin()
+	err := setupCSCPlugins(context.Background(), fakeBin, workDir, plugin, slog.Default())
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), plugins[0].MarketplaceURL) {
-		t.Errorf("error should contain marketplace URL %q, got: %v", plugins[0].MarketplaceURL, err)
-	}
-}
-
-func TestSetupCSCPlugins_MultiplePlugins(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fake not supported on windows")
-	}
-	dir := t.TempDir()
-	fakeBin := writeFakeCSC(t, dir, nil)
-	workDir := filepath.Join(dir, "work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	plugins := []PluginSource{
-		{MarketplaceURL: "https://github.com/example/marketplace.git", Plugin: "plugin-a"},
-		{MarketplaceURL: "https://github.com/example/marketplace.git", Plugin: "plugin-b"},
-	}
-
-	err := setupCSCPlugins(context.Background(), fakeBin, workDir, plugins, slog.Default())
-	if err != nil {
-		t.Fatalf("expected nil error, got: %v", err)
-	}
-
-	invocations := readInvocations(t, dir)
-	// Expected: 2 * (marketplace add + update + install) = 6 invocations
-	if len(invocations) != 6 {
-		t.Fatalf("expected 6 invocations, got %d: %v", len(invocations), invocations)
-	}
-
-	if !strings.Contains(invocations[0], "plugin marketplace add") {
-		t.Errorf("invocation 0 should be marketplace add, got: %s", invocations[0])
-	}
-	if !strings.Contains(invocations[1], "plugin update plugin-a") {
-		t.Errorf("invocation 1 should update plugin-a, got: %s", invocations[1])
-	}
-	if !strings.Contains(invocations[2], "plugin install plugin-a") {
-		t.Errorf("invocation 2 should install plugin-a, got: %s", invocations[2])
-	}
-	if !strings.Contains(invocations[3], "plugin marketplace add") {
-		t.Errorf("invocation 3 should be marketplace add, got: %s", invocations[3])
-	}
-	if !strings.Contains(invocations[4], "plugin update plugin-b") {
-		t.Errorf("invocation 4 should update plugin-b, got: %s", invocations[4])
-	}
-	if !strings.Contains(invocations[5], "plugin install plugin-b") {
-		t.Errorf("invocation 5 should install plugin-b, got: %s", invocations[5])
+	if !strings.Contains(err.Error(), plugin.Install.MarketplaceRepo) {
+		t.Errorf("error should contain marketplace repo %q, got: %v", plugin.Install.MarketplaceRepo, err)
 	}
 }

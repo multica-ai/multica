@@ -64,7 +64,7 @@ type TaskContextForEnv struct {
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	IsSquadLeader           bool            // true when the agent is acting as a squad leader (may exit silently on no_action)
-	Plugins                 []PluginSource  // plugin marketplaces and names to install before running the task
+	Plugin                  *AgentPlugin // plugin bound to the agent; nil = no plugin
 	// RequestingUserName + RequestingUserProfileDescription describe the
 	// human the agent is acting on behalf of. v1 sources them from the
 	// runtime owner (the user who registered the daemon). Rendered into the
@@ -198,7 +198,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// Fail closed: if plugins are specified but installation fails, the task
 	// cannot run meaningfully.
 	if params.Provider == "csc" && params.CSCBin != "" {
-		if err := setupPlugins(context.Background(), params.Provider, params.CSCBin, env.WorkDir, params.Task.Plugins, logger); err != nil {
+		if err := setupPlugins(context.Background(), params.Provider, params.CSCBin, env.WorkDir, params.Task.Plugin, logger); err != nil {
 			return nil, fmt.Errorf("plugin setup: %w", err)
 		}
 	}

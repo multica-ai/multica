@@ -3509,8 +3509,16 @@ func TestPrepare_CSCPluginSetup(t *testing.T) {
 		Provider:       "csc",
 		CSCBin:         fakeBin,
 		Task: TaskContextForEnv{
-			Plugins: []PluginSource{
-				{MarketplaceURL: "https://github.com/example/marketplace.git", Plugin: "cospower"},
+			Plugin: &AgentPlugin{
+				Name: "cospower",
+				Install: &PluginInstall{
+					Method:              "plugin_marketplace",
+					Marketplace:         "example/marketplace",
+					PluginName:          "cospower",
+					MarketplaceName:     "marketplace",
+					MarketplaceRepo:     "https://github.com/example/marketplace.git",
+					MarketplaceVerified: true,
+				},
 			},
 		},
 	}, testLogger())
@@ -3563,8 +3571,16 @@ func TestPrepare_CSCPluginSetupFailure(t *testing.T) {
 		Provider:       "csc",
 		CSCBin:         fakeBin,
 		Task: TaskContextForEnv{
-			Plugins: []PluginSource{
-				{MarketplaceURL: "https://github.com/example/marketplace.git", Plugin: "cospower"},
+			Plugin: &AgentPlugin{
+				Name: "cospower",
+				Install: &PluginInstall{
+					Method:              "plugin_marketplace",
+					Marketplace:         "example/marketplace",
+					PluginName:          "cospower",
+					MarketplaceName:     "marketplace",
+					MarketplaceRepo:     "https://github.com/example/marketplace.git",
+					MarketplaceVerified: true,
+				},
 			},
 		},
 	}, testLogger())
