@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mockGetAgentToolConfig = vi.hoisted(() => vi.fn());
@@ -47,14 +46,13 @@ describe("FirtalRegistryConfigDialog", () => {
   });
 
   it("toggles allow-all and saves allowed_data_sources_all", async () => {
-    const user = userEvent.setup();
     renderDialog();
 
     await screen.findByText("Source A");
     const allowAll = screen.getByRole("switch", { name: /Tillad alle data sources/i });
-    await user.click(allowAll);
+    fireEvent.click(allowAll);
 
-    await user.click(screen.getByRole("button", { name: "Gem" }));
+    fireEvent.click(screen.getByRole("button", { name: "Gem" }));
 
     await waitFor(() => {
       expect(mockSetAgentToolConfig).toHaveBeenCalledWith(
@@ -66,14 +64,13 @@ describe("FirtalRegistryConfigDialog", () => {
   });
 
   it("saves selected data source ids when allow-all is off", async () => {
-    const user = userEvent.setup();
     renderDialog();
 
     await screen.findByText("Source B");
     const checkbox = screen.getByRole("checkbox", { name: /Source B/i });
-    await user.click(checkbox);
+    fireEvent.click(checkbox);
 
-    await user.click(screen.getByRole("button", { name: "Gem" }));
+    fireEvent.click(screen.getByRole("button", { name: "Gem" }));
 
     await waitFor(() => {
       expect(mockSetAgentToolConfig).toHaveBeenCalledWith(

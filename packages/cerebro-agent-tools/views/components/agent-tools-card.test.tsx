@@ -1,7 +1,6 @@
 import type React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
 import type {
@@ -11,6 +10,14 @@ import type {
 
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => false,
+}));
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -213,7 +220,6 @@ describe("AgentToolsCard", () => {
   });
 
   it("calls setAgentToolOverride when the admin picks Tving på", async () => {
-    const user = userEvent.setup();
     mockCerebroRequest.mockResolvedValue([]);
 
     renderWithClient(
@@ -227,17 +233,17 @@ describe("AgentToolsCard", () => {
     expect(selects.length).toBe(3);
 
     // Pick "Tving fra" on the first row (firtal_bq_query, runtime-on).
-    await user.selectOptions(selects[0]!, "force_off");
+    fireEvent.change(selects[0]!, { target: { value: "force_off" } });
 
-    expect(mockCerebroRequest).toHaveBeenCalledWith(
-      "/api/agents/agent-1/tool-overrides/firtal_bq_query",
-      { method: "PUT", body: JSON.stringify({ enabled: false }) },
-    );
+    await waitFor(() => {
+      expect(mockCerebroRequest).toHaveBeenCalledWith(
+        "/api/agents/agent-1/tool-overrides/firtal_bq_query",
+        { method: "PUT", body: JSON.stringify({ enabled: false }) },
+      );
+    });
   });
 
   it("calls clearAgentToolOverride when the admin picks Arv runtime on an override row", async () => {
-    const user = userEvent.setup();
-
     renderWithClient(
       <AgentToolsCard agent={agent} canEdit={true} runtimeName="sara-mac-mini" />,
       { tools: runtimeTools, overrides },
@@ -254,12 +260,14 @@ describe("AgentToolsCard", () => {
     ) as HTMLSelectElement;
     expect(selectInRow.value).toBe("force_off");
 
-    await user.selectOptions(selectInRow, "inherit");
+    fireEvent.change(selectInRow, { target: { value: "inherit" } });
 
-    expect(mockCerebroRequest).toHaveBeenCalledWith(
-      "/api/agents/agent-1/tool-overrides/github_create_issue",
-      { method: "DELETE" },
-    );
+    await waitFor(() => {
+      expect(mockCerebroRequest).toHaveBeenCalledWith(
+        "/api/agents/agent-1/tool-overrides/github_create_issue",
+        { method: "DELETE" },
+      );
+    });
   });
 
   it("falls back to an explicit empty banner when the runtime has no tools yet", () => {
