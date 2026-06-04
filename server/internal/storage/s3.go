@@ -174,16 +174,24 @@ func (s *S3Storage) GetReader(ctx context.Context, key string) (io.ReadCloser, e
 }
 
 func (s *S3Storage) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	return s.PresignGetWithContentDisposition(ctx, key, ttl, "")
+}
+
+func (s *S3Storage) PresignGetWithContentDisposition(ctx context.Context, key string, ttl time.Duration, contentDisposition string) (string, error) {
 	if key == "" {
 		return "", fmt.Errorf("s3 PresignGet: empty key")
 	}
 	if ttl <= 0 {
 		ttl = 30 * time.Minute
 	}
-	out, err := s3.NewPresignClient(s.client).PresignGetObject(ctx, &s3.GetObjectInput{
+	input := &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
-	}, func(opts *s3.PresignOptions) {
+	}
+	if contentDisposition != "" {
+		input.ResponseContentDisposition = aws.String(contentDisposition)
+	}
+	out, err := s3.NewPresignClient(s.client).PresignGetObject(ctx, input, func(opts *s3.PresignOptions) {
 		opts.Expires = ttl
 	})
 	if err != nil {

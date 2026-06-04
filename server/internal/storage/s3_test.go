@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,36 @@ func TestS3StoragePresignGet(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("presigned URL %q does not contain %q", got, want)
 		}
+	}
+}
+
+func TestS3StoragePresignGetWithContentDisposition(t *testing.T) {
+	store := &S3Storage{
+		client: s3.New(s3.Options{
+			Region:      "us-east-1",
+			Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
+		}),
+		bucket: "test-bucket",
+	}
+
+	got, err := store.PresignGetWithContentDisposition(
+		context.Background(),
+		"uploads/abc/file.txt",
+		5*time.Minute,
+		`attachment; filename="report.txt"`,
+	)
+	if err != nil {
+		t.Fatalf("PresignGetWithContentDisposition: %v", err)
+	}
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse presigned URL: %v", err)
+	}
+	if got := u.Query().Get("response-content-disposition"); got != `attachment; filename="report.txt"` {
+		t.Fatalf("response-content-disposition = %q", got)
+	}
+	if sig := u.Query().Get("X-Amz-Signature"); sig == "" {
+		t.Fatalf("missing X-Amz-Signature in %q", got)
 	}
 }
 

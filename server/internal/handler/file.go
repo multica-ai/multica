@@ -442,14 +442,28 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "cloudfront attachment downloads are not configured")
 			return
 		}
-		http.Redirect(w, r, h.CFSigner.SignedURL(att.Url, time.Now().Add(h.attachmentDownloadURLTTL())), http.StatusFound)
+		http.Redirect(
+			w,
+			r,
+			h.CFSigner.SignedURLWithContentDisposition(
+				att.Url,
+				storage.AttachmentContentDisposition(att.Filename),
+				time.Now().Add(h.attachmentDownloadURLTTL()),
+			),
+			http.StatusFound,
+		)
 	case attachmentDownloadModePresign:
-		presigner, ok := h.Storage.(storage.Presigner)
+		presigner, ok := h.Storage.(storage.DownloadPresigner)
 		if !ok {
 			writeError(w, http.StatusInternalServerError, "attachment storage does not support presigned downloads")
 			return
 		}
-		signedURL, err := presigner.PresignGet(r.Context(), key, h.attachmentDownloadURLTTL())
+		signedURL, err := presigner.PresignGetWithContentDisposition(
+			r.Context(),
+			key,
+			h.attachmentDownloadURLTTL(),
+			storage.AttachmentContentDisposition(att.Filename),
+		)
 		if err != nil {
 			slog.Error("failed to presign attachment download", "id", uuidToString(att.ID), "key", key, "error", err)
 			writeError(w, http.StatusBadGateway, "failed to create download URL")
@@ -478,7 +492,7 @@ func (h *Handler) resolveAttachmentDownloadMode(rawURL string) attachmentDownloa
 	if shouldProxyAttachmentURL(rawURL) {
 		return attachmentDownloadModeProxy
 	}
-	if _, ok := h.Storage.(storage.Presigner); ok {
+	if _, ok := h.Storage.(storage.DownloadPresigner); ok {
 		return attachmentDownloadModePresign
 	}
 	return attachmentDownloadModeProxy
@@ -547,8 +561,9 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 // Exists to (a) bypass CloudFront CORS (not configured) and (b) bypass
 // Content-Disposition: attachment which Chromium honors for iframe document
 // loads. Media types (image/video/audio/pdf) intentionally use download_url
-// instead; /download signs or streams them with Content-Disposition: inline
-// using the same media-type policy as storage uploads.
+// instead. Metadata download_url keeps CloudFront/S3's media preview behavior;
+// the explicit /download route signs redirects as attachment downloads and
+// proxy mode streams with the same media-type policy as storage uploads.
 //
 // Hard cap: 2 MB. Larger files return 413. Anything outside the text
 // whitelist returns 415.

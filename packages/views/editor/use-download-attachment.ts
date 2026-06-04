@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
+import { useWorkspaceSlug } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../i18n";
 
@@ -10,9 +11,14 @@ interface DesktopBridge {
   downloadURL?: (u: string) => Promise<void> | void;
 }
 
-function attachmentDownloadEndpoint(attachmentId: string): string {
+function attachmentDownloadEndpoint(
+  attachmentId: string,
+  workspaceSlug: string,
+): string {
+  const params = new URLSearchParams({ workspace_slug: workspaceSlug });
   const path = `/api/attachments/${encodeURIComponent(attachmentId)}/download`;
-  return resolvePublicFileUrl(path) ?? path;
+  const endpoint = `${path}?${params.toString()}`;
+  return resolvePublicFileUrl(endpoint) ?? endpoint;
 }
 
 function triggerBrowserDownload(url: string): void {
@@ -21,9 +27,9 @@ function triggerBrowserDownload(url: string): void {
   // Keep the click in the current browsing context. For same-origin API
   // downloads this hint lets Chromium/Safari use Content-Disposition's
   // filename without opening a blank tab. If the endpoint later 302s to
-  // CloudFront/S3, the object metadata / signed response still controls the
-  // final Content-Disposition; the browser follows that redirect natively
-  // without buffering the file into JS memory.
+  // CloudFront/S3, the server signs that redirect with an attachment
+  // disposition; the browser follows it natively without buffering the file
+  // into JS memory.
   anchor.download = "";
   anchor.rel = "noopener";
   anchor.style.display = "none";
@@ -50,9 +56,10 @@ function hasDesktopDownloadBridge(): boolean {
  *
  * - **Web**: first refreshes attachment metadata for the existing error
  *   feedback path, then clicks a temporary same-origin
- *   `/api/attachments/{id}/download` anchor. The backend endpoint owns
- *   CloudFront / S3 presign / proxy selection and Content-Disposition, so
- *   large files stay in the browser's native download pipeline.
+ *   `/api/attachments/{id}/download?workspace_slug=...` anchor. The backend
+ *   endpoint owns CloudFront / S3 presign / proxy selection and download
+ *   Content-Disposition, so large files stay in the browser's native download
+ *   pipeline.
  *
  * - **Desktop**: uses `desktopAPI.downloadURL()` which invokes Electron's
  *   native `webContents.downloadURL()`, showing a save dialog and saving
@@ -62,6 +69,7 @@ function hasDesktopDownloadBridge(): boolean {
  */
 export function useDownloadAttachment(): (attachmentId: string) => Promise<void> {
   const { t } = useT("editor");
+  const workspaceSlug = useWorkspaceSlug();
   return useCallback(
     async (attachmentId: string) => {
       const failed = () => toast.error(t(($) => $.attachment.download_failed));
@@ -103,11 +111,17 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
           failed();
           return;
         }
-        triggerBrowserDownload(attachmentDownloadEndpoint(attachmentId));
+        if (!workspaceSlug) {
+          failed();
+          return;
+        }
+        triggerBrowserDownload(
+          attachmentDownloadEndpoint(attachmentId, workspaceSlug),
+        );
       } catch {
         failed();
       }
     },
-    [t],
+    [t, workspaceSlug],
   );
 }

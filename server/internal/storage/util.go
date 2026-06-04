@@ -27,6 +27,10 @@ func ContentDisposition(contentType, filename string) string {
 	return disposition + `; filename="` + sanitizeFilename(filename) + `"`
 }
 
+func AttachmentContentDisposition(filename string) string {
+	return `attachment; filename="` + sanitizeFilename(filename) + `"`
+}
+
 // isInlineContentType returns true for media types that browsers should
 // display inline (images, video, audio, PDF). Everything else triggers a
 // download via Content-Disposition: attachment.

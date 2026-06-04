@@ -22,3 +22,7 @@ type Storage interface {
 type Presigner interface {
 	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
 }
+
+type DownloadPresigner interface {
+	PresignGetWithContentDisposition(ctx context.Context, key string, ttl time.Duration, contentDisposition string) (string, error)
+}

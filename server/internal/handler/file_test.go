@@ -3,18 +3,26 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -43,9 +51,10 @@ func createHandlerTestChatSession(t *testing.T, agentID string) string {
 // strips the synthetic CDN host so consumers can pass either the URL or the
 // raw key.
 type mockStorage struct {
-	mu           sync.Mutex
-	files        map[string][]byte
-	presignCalls []string
+	mu                  sync.Mutex
+	files               map[string][]byte
+	presignCalls        []string
+	presignDispositions []string
 }
 
 func (m *mockStorage) Upload(_ context.Context, key string, data []byte, _ string, _ string) (string, error) {
@@ -90,6 +99,24 @@ func (m *mockStorage) PresignGet(_ context.Context, key string, _ time.Duration)
 	defer m.mu.Unlock()
 	m.presignCalls = append(m.presignCalls, key)
 	return "https://signed.example.com/" + key + "?X-Amz-Signature=mock", nil
+}
+func (m *mockStorage) PresignGetWithContentDisposition(_ context.Context, key string, _ time.Duration, contentDisposition string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.presignCalls = append(m.presignCalls, key)
+	m.presignDispositions = append(m.presignDispositions, contentDisposition)
+	u := url.URL{
+		Scheme: "https",
+		Host:   "signed.example.com",
+		Path:   "/" + key,
+	}
+	q := u.Query()
+	q.Set("X-Amz-Signature", "mock")
+	if contentDisposition != "" {
+		q.Set("response-content-disposition", contentDisposition)
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 func (m *mockStorage) put(key string, data []byte) {
 	m.mu.Lock()
@@ -407,6 +434,35 @@ func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.R
 	return req, httptest.NewRecorder()
 }
 
+func newDownloadRouter() http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.RequireWorkspaceMember(testHandler.Queries))
+	r.Get("/api/attachments/{id}/download", testHandler.DownloadAttachment)
+	return r
+}
+
+func testCloudFrontSigner(t *testing.T) *auth.CloudFrontSigner {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate CloudFront test key: %v", err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	t.Setenv("CLOUDFRONT_KEY_PAIR_ID", "KTEST")
+	t.Setenv("CLOUDFRONT_DOMAIN", "static.example.test")
+	t.Setenv("COOKIE_DOMAIN", ".example.test")
+	t.Setenv("CLOUDFRONT_PRIVATE_KEY", base64.StdEncoding.EncodeToString(pemBytes))
+	t.Setenv("CLOUDFRONT_PRIVATE_KEY_SECRET", "")
+	signer := auth.NewCloudFrontSignerFromEnv()
+	if signer == nil {
+		t.Fatal("expected CloudFront signer")
+	}
+	return signer
+}
+
 func TestAttachmentToResponse_NonCloudFrontUsesDownloadEndpoint(t *testing.T) {
 	origSigner := testHandler.CFSigner
 	testHandler.CFSigner = nil
@@ -427,6 +483,94 @@ func TestAttachmentToResponse_NonCloudFrontUsesDownloadEndpoint(t *testing.T) {
 	}
 	if resp.DownloadURL != "/api/attachments/"+id+"/download" {
 		t.Fatalf("download_url = %q, want unified endpoint", resp.DownloadURL)
+	}
+}
+
+func TestDownloadAttachment_CloudFrontRedirectSignsAttachmentDisposition(t *testing.T) {
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = &mockStorage{}
+	testHandler.cfg.AttachmentDownloadMode = "cloudfront"
+	testHandler.CFSigner = testCloudFrontSigner(t)
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	id := seedAttachmentURL(t, "https://static.example.test/downloads/cloudfront.md", "cloud front.md", "text/markdown", 10)
+
+	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	testHandler.DownloadAttachment(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", w.Code, w.Body.String())
+	}
+	loc := w.Header().Get("Location")
+	parsed, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if got := parsed.Query().Get("response-content-disposition"); got != `attachment; filename="cloud front.md"` {
+		t.Fatalf("response-content-disposition = %q", got)
+	}
+	if got := parsed.Query().Get("Key-Pair-Id"); got != "KTEST" {
+		t.Fatalf("Key-Pair-Id = %q", got)
+	}
+}
+
+func TestDownloadAttachment_BareNavigationWithWorkspaceSlugQueryPassesMiddleware(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "proxy"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	key := "downloads/bare-nav.txt"
+	body := []byte("download body")
+	store.put(key, body)
+	id := seedAttachmentURL(t, "https://s3.example.com/test-bucket/"+key, "bare-nav.txt", "text/plain", int64(len(body)))
+
+	req := httptest.NewRequest("GET", "/api/attachments/"+id+"/download?workspace_slug="+url.QueryEscape(handlerTestWorkspaceSlug), nil)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+
+	newDownloadRouter().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != string(body) {
+		t.Fatalf("body = %q, want %q", got, body)
+	}
+	if req.Header.Get("X-Workspace-ID") != "" || req.Header.Get("X-Workspace-Slug") != "" {
+		t.Fatalf("bare navigation test must not set custom workspace headers")
+	}
+}
+
+func TestDownloadAttachment_BareNavigationWithoutWorkspaceQueryFailsMiddleware(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/attachments/00000000-0000-0000-0000-000000000001/download", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+
+	newDownloadRouter().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "workspace_id or workspace_slug is required") {
+		t.Fatalf("body = %q, want workspace identifier error", w.Body.String())
+	}
+	if req.Header.Get("X-Workspace-ID") != "" || req.Header.Get("X-Workspace-Slug") != "" {
+		t.Fatalf("bare navigation test must not set custom workspace headers")
 	}
 }
 
@@ -502,8 +646,18 @@ func TestDownloadAttachment_AutoPublicEndpointPresigns(t *testing.T) {
 	if !strings.Contains(loc, "X-Amz-Signature=mock") {
 		t.Fatalf("Location = %q, want fake S3 signature", loc)
 	}
+	parsed, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if got := parsed.Query().Get("response-content-disposition"); got != `attachment; filename="public.txt"` {
+		t.Fatalf("response-content-disposition = %q", got)
+	}
 	if len(store.presignCalls) != 1 || store.presignCalls[0] != key {
 		t.Fatalf("presign calls = %v, want [%s]", store.presignCalls, key)
+	}
+	if len(store.presignDispositions) != 1 || store.presignDispositions[0] != `attachment; filename="public.txt"` {
+		t.Fatalf("presign dispositions = %v", store.presignDispositions)
 	}
 }
 
