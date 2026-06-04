@@ -50,19 +50,24 @@ func NewEmailService() *EmailService {
 	smtpPassword := os.Getenv("SMTP_PASSWORD")
 	smtpTLSInsecure := os.Getenv("SMTP_TLS_INSECURE") == "true"
 
-	// EHLO/HELO name. net/smtp defaults to "localhost", which strict relays
-	// (e.g. smtp-relay.gmail.com) reject from a public source. Fall back to the
-	// machine hostname when SMTP_EHLO_NAME is unset.
-	smtpEHLOName := strings.TrimSpace(os.Getenv("SMTP_EHLO_NAME"))
-	if smtpEHLOName == "" {
-		hostname, hostErr := os.Hostname()
-		if hostErr != nil {
-			// Empty name makes sendSMTP skip Hello() and fall back to net/smtp's
-			// lazy "localhost" — which strict relays reject. Surface it so operators
-			// know to set SMTP_EHLO_NAME explicitly.
-			fmt.Printf("EmailService: os.Hostname() failed (%v); SMTP EHLO falls back to \"localhost\" — set SMTP_EHLO_NAME for strict relays\n", hostErr)
+	// EHLO/HELO name, only relevant on the SMTP relay send path. net/smtp defaults
+	// to "localhost", which strict relays (e.g. smtp-relay.gmail.com) reject from a
+	// public source. Fall back to the machine hostname when SMTP_EHLO_NAME is unset.
+	// Resolved only in SMTP mode so the Resend/DEV paths never touch os.Hostname()
+	// or emit its failure log.
+	var smtpEHLOName string
+	if smtpHost != "" {
+		smtpEHLOName = strings.TrimSpace(os.Getenv("SMTP_EHLO_NAME"))
+		if smtpEHLOName == "" {
+			hostname, hostErr := os.Hostname()
+			if hostErr != nil {
+				// Empty name makes sendSMTP skip Hello() and fall back to net/smtp's
+				// lazy "localhost" — which strict relays reject. Surface it so operators
+				// know to set SMTP_EHLO_NAME explicitly.
+				fmt.Printf("EmailService: os.Hostname() failed (%v); SMTP EHLO falls back to \"localhost\" — set SMTP_EHLO_NAME for strict relays\n", hostErr)
+			}
+			smtpEHLOName = hostname
 		}
-		smtpEHLOName = hostname
 	}
 
 	// SMTP_TLS=implicit forces an immediate TLS handshake on connect (SMTPS).

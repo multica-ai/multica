@@ -105,6 +105,15 @@ SMTP_TLS_INSECURE=false        # set true only for private CA / self-signed
 RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
+**厳格な公開 relay（例: Google Workspace `smtp-relay.gmail.com`）** が公開 IP からのデフォルトの `localhost` 挨拶を拒否する場合は、`SMTP_EHLO_NAME` を relay が期待する FQDN に設定してください — そうしないと接続が切断され、後続のコマンドで不明瞭な `EOF` として表面化します。デフォルトはコンテナのホスト名で、これは通常は有効な FQDN ではありません。
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
 その後、再起動します: `docker compose -f docker-compose.selfhost.yml restart backend`。再起動時、バックエンドはどのプロバイダーを選んだかを出力します（`EmailService: SMTP relay …` / `Resend API` / `DEV mode`）— 認証情報は決してログに残らないため、この行はヘルプを求めるときに共有しても安全です。
 
 追加の認証構成（OAuth、サインアップの許可リスト）と SMTP 変数の完全なリファレンスは、[認証設定](/auth-setup)と[環境変数 → メール](/environment-variables#email-configuration)を参照してください。

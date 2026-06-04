@@ -116,6 +116,15 @@ SMTP_TLS=implicit              # 465 上可省略；非标准 SMTPS 端口上必
 RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
+对于**拒绝来自公网 IP 的默认 `localhost` 问候的严格公网 relay（例如 Google Workspace `smtp-relay.gmail.com`）**，把 `SMTP_EHLO_NAME` 设成 relay 期望的 FQDN——否则连接会被直接断开，并在后续某条命令上表现为一个不知所云的 `EOF`。它默认取容器主机名，而后者通常不是合法的 FQDN：
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # relay 接受的 FQDN；默认取（非 FQDN 的）容器主机名
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
 之后重启：`docker compose -f docker-compose.selfhost.yml restart backend`。重启时 backend 会打印当前选择的 provider 和协商出的 TLS 模式（`EmailService: SMTP relay <host>:<port> (starttls|implicit-tls) from=…` / `Resend API` / `DEV mode`），密码不会被记录，所以这行截图给同事是安全的。
 
 更多 auth 配置（OAuth、注册白名单）以及完整的 SMTP 变量说明见 [登录与注册配置](/auth-setup) 和 [环境变量](/environment-variables)。

@@ -54,6 +54,7 @@ Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合
 | `SMTP_PASSWORD` | 空 | SMTP 密码 |
 | `SMTP_TLS` | `starttls` | TLS 模式。`implicit`（别名 `smtps`、`ssl`）在连接时立即进行 TLS 握手（SMTPS）；`465` 端口会自动启用。未设置 / `starttls` 则在连接后通过 STARTTLS 升级 |
 | `SMTP_TLS_INSECURE` | `false` | 设为 `true` 跳过 TLS 证书校验（仅限私有 CA / 自签证书）|
+| `SMTP_EHLO_NAME` | 机器主机名 | 向 relay 通告的 EHLO/HELO 名称。当严格的 relay（例如 Google Workspace `smtp-relay.gmail.com`）拒绝来自公网 IP 的默认问候时，填一个真实的 FQDN——否则 relay 会直接断开连接，并在后续某条命令上表现为一个不知所云的 `EOF` |
 
 服务端 advertise STARTTLS 时会自动升级。dial 超时 10s，整个 SMTP 会话有 30s deadline，避免 relay 黑洞把 auth handler 挂死。
 
