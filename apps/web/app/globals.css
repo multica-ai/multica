@@ -37,3 +37,16 @@ body[data-firtal-bar="on"] [data-slot="sidebar-container"] {
   top: 3rem;
   height: calc(100svh - 3rem);
 }
+
+/*
+ * TECH-2911: the sidebar-wrapper (SidebarProvider root) is h-svh, but body
+ * has pt-12 (48px) when the portal bar is active. This pushes the wrapper
+ * 48px below the viewport bottom, which drags SidebarInset — and any
+ * absolutely-positioned children like the chat input bar — off-screen.
+ * Constrain the wrapper to the visible area so the chat input bar stays
+ * within the viewport.
+ */
+body[data-firtal-bar="on"] [data-slot="sidebar-wrapper"] {
+  height: calc(100svh - 3rem);
+  min-height: calc(100svh - 3rem);
+}
