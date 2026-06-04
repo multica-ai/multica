@@ -51,6 +51,16 @@ function toFileCardHtml(filename: string, url: string): string {
 }
 
 /**
+ * Wrap an HTML block with blank lines so the markdown HTML-block rule treats it
+ * as a standalone block. Without a trailing blank line the <div> swallows the
+ * following line (e.g. an adjacent `![img](…)`), which is exactly how synced
+ * Feishu descriptions like "!file[log]\n![shot.png]" lost the inline image.
+ */
+function blankSeparate(html: string): string {
+  return `\n${html}\n`
+}
+
+/**
  * Check if a URL points to our upload CDN.
  *
  * Uses exact hostname match against `cdnDomain` (e.g. "multica-static.copilothub.ai"),
@@ -95,7 +105,7 @@ export function preprocessFileCards(markdown: string, cdnDomain: string): string
       // New syntax: !file[name](url) — always a file card, no hostname check needed.
       const newMatch = trimmed.match(NEW_FILE_CARD_RE)
       if (newMatch) {
-        return toFileCardHtml(newMatch[1]!, newMatch[2]!)
+        return blankSeparate(toFileCardHtml(newMatch[1]!, newMatch[2]!))
       }
 
       // Legacy: [name](cdnUrl) on its own line — CDN hostname matching.
@@ -104,7 +114,7 @@ export function preprocessFileCards(markdown: string, cdnDomain: string): string
       const filename = match[1]!
       const url = match[2]!
       if (!isFileCardUrl(url, cdnDomain)) return line
-      return toFileCardHtml(filename, url)
+      return blankSeparate(toFileCardHtml(filename, url))
     })
     .join('\n')
 }

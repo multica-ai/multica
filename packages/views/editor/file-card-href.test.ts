@@ -89,4 +89,24 @@ describe("preprocessFileCards (integration)", () => {
     const out = preprocessFileCards("!file[name](/api/internal/x)", cdn);
     expect(out).not.toContain('data-type="fileCard"');
   });
+
+  // A file-card emits an HTML <div> block. Without a trailing blank line the
+  // markdown HTML-block rule swallows the next line, so a synced description
+  // like "!file[log]\n![shot.png]" loses the image. The div must be blank-line
+  // separated from adjacent content.
+  it("blank-line separates the file-card div from an adjacent image", () => {
+    const md =
+      "!file[log.log](/api/attachments/a/content?workspace_id=w)\n" +
+      "![shot.png](/api/attachments/b/content?workspace_id=w)";
+    const out = preprocessFileCards(md, cdn);
+    expect(out).toContain("![shot.png]"); // image line preserved untouched
+    expect(out).toContain("</div>\n\n![shot.png]"); // blank line before the image
+  });
+
+  it("blank-line separates two consecutive file-cards", () => {
+    const md =
+      "!file[a.log](/uploads/a.log)\n!file[b.log](/uploads/b.log)";
+    const out = preprocessFileCards(md, cdn);
+    expect(out).toMatch(/<\/div>\n{2,}<div/); // at least one blank line between cards
+  });
 });
