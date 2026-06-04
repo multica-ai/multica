@@ -4,10 +4,13 @@ set -euo pipefail
 # ── Mandatory env ─────────────────────────────────────────────────────────────
 : "${MULTICA_PAT:?MULTICA_PAT required}"
 : "${AGENTFARM_WORKSPACE_ID:?AGENTFARM_WORKSPACE_ID required}"
-: "${LITELLM_API_KEY:?LITELLM_API_KEY required}"
+: "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY required}"
+: "${OPENAI_API_KEY:?OPENAI_API_KEY required}"
 : "${WORKSPACE_SLUG:?WORKSPACE_SLUG required (Downward API: metadata.namespace)}"
 
 # ── GitHub credential helper ──────────────────────────────────────────────────
+# gandalf writes the PAT as GITHUB_PAT; gh reads GH_TOKEN, so bridge the two.
+export GH_TOKEN="${GH_TOKEN:-${GITHUB_PAT:-}}"
 if [ -n "${GH_TOKEN:-}" ]; then
   if gh auth setup-git --hostname github.com; then
     git config --global --unset-all url."https://github.com/".insteadOf 2>/dev/null || true

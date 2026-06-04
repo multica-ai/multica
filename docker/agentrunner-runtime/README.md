@@ -16,15 +16,16 @@ netcat-openbsd, the agentfarm bootstrap, agent templates, and opencode config.
 | Var                    | Notes                                                                      |
 |------------------------|----------------------------------------------------------------------------|
 | `MULTICA_PAT`          | Agentfarm service account PAT. Used by `agentfarm-bootstrap.sh` to log in the multica daemon and register the claude runtime. |
-| `AGENTFARM_WORKSPACE_ID` | UUID of the target agentfarm workspace.                                    |
-| `LITELLM_API_KEY`      | LiteLLM virtual key. Written to `auth.json` for opencode and passed to agent templates as the Anthropic/OpenAI key. |
+| `AGENTFARM_WORKSPACE_ID` | UUID of the target agentfarm workspace.                                  |
+| `ANTHROPIC_API_KEY`    | LiteLLM virtual key for the Anthropic route. Passed to agent templates as the Anthropic key; `agentfarm-bootstrap.sh` injects the base URL. |
+| `OPENAI_API_KEY`       | LiteLLM virtual key for the OpenAI route. Passed to agent templates as the OpenAI key; `agentfarm-bootstrap.sh` injects the base URL. |
 | `WORKSPACE_SLUG`       | Kubernetes namespace (`metadata.namespace`) — injected via Downward API. Used to name the multica daemon device. |
 
 ### Optional
 
 | Var                    | Default                         | Notes                                                                      |
 |------------------------|---------------------------------|----------------------------------------------------------------------------|
-| `GH_TOKEN`             | (empty)                         | GitHub PAT. When present, wires `gh` as the git credential helper for HTTPS clones against private repos. |
+| `GITHUB_PAT`           | (empty)                         | GitHub PAT (written by gandalf). When present, exported as `GH_TOKEN` and wires `gh` as the git credential helper for HTTPS clones against private repos. |
 | `GIT_USER_NAME`        | (empty)                         | Git identity (`user.name`).                                                |
 | `GIT_USER_EMAIL`       | (empty)                         | Git identity (`user.email`). Together with `JIRA_PAT`, triggers `acli jira auth login`. |
 | `JIRA_PAT`             | (empty)                         | Atlassian API token. Together with `GIT_USER_EMAIL`, authenticates acli. Piped via stdin — never on argv. |
@@ -48,7 +49,8 @@ docker run --rm -d --name agentrunner-smoke \
   -p 4096:4096 \
   -e MULTICA_PAT=... \
   -e AGENTFARM_WORKSPACE_ID=... \
-  -e LITELLM_API_KEY=... \
+  -e ANTHROPIC_API_KEY=... \
+  -e OPENAI_API_KEY=... \
   -e WORKSPACE_SLUG=smoke-test \
   ghcr.io/g2crowd/agentrunner-runtime:dev
 

@@ -150,7 +150,7 @@ SSM /agentfarm/tools/agentrunner/<workspace_id>   ← enabled flag (value=any)
          ▼
   Namespace: agentrunner-<slug>
     ├── ExternalSecret agentrunner-secrets → Secret (per-ws keys + shared keys fused:
-    │     AGENTFARM_WORKSPACE_ID, LITELLM_API_KEY, MULTICA_PAT, etc.)
+    │     AGENTFARM_WORKSPACE_ID, ANTHROPIC_API_KEY, OPENAI_API_KEY, MULTICA_PAT, etc.)
     └── Deployment agentrunner (ghcr.io/g2crowd/agentrunner-runtime, single opencode container;
           ATLASSIAN_SITE set as static env var)
 ```
@@ -165,7 +165,8 @@ All SSM parameters live in AWS account `637423279283`, region `us-east-1`.
 | `/agentfarm/development/agentrunner/shared/MULTICA_PAT` | SecureString | one-shot bootstrap | Bot PAT shared across all workspace runners; swept into `agentrunner-secrets` by the shared `dataFrom.find` entry |
 | `/agentfarm/tools/agentrunner/<slug>` | String | gandalf (PLA-383) | Registry entry — existence = workspace enabled |
 | `/agentfarm/development/agentrunner/<slug>/AGENTFARM_WORKSPACE_ID` | SecureString | gandalf (PLA-383) | Workspace UUID — written by gandalf at workspace-create time; flows into the pod via `agentrunner-secrets` ESO + `envFrom` |
-| `/agentfarm/development/agentrunner/<slug>/LITELLM_API_KEY` | SecureString | gandalf (PLA-383) | LiteLLM API key for this workspace |
+| `/agentfarm/development/agentrunner/<slug>/ANTHROPIC_API_KEY` | SecureString | gandalf (PLA-383) | LiteLLM virtual key for the Anthropic route for this workspace |
+| `/agentfarm/development/agentrunner/<slug>/OPENAI_API_KEY` | SecureString | gandalf (PLA-383) | LiteLLM virtual key for the OpenAI route for this workspace |
 | `/agentfarm/development/agentrunner/<slug>/GIT_USER_EMAIL` | String (optional) | gandalf (PLA-383) | Git user email; triggers acli Jira auth when paired with JIRA_PAT |
 | `/agentfarm/development/agentrunner/<slug>/JIRA_PAT` | SecureString (optional) | gandalf (PLA-383) | Jira PAT; triggers acli auth when paired with GIT_USER_EMAIL |
 
@@ -190,7 +191,11 @@ aws ssm put-parameter --profile $AWS_PROFILE --region $AWS_REGION \
   --type SecureString --value "$WORKSPACE_UUID" --overwrite
 
 aws ssm put-parameter --profile $AWS_PROFILE --region $AWS_REGION \
-  --name "/agentfarm/development/agentrunner/$SLUG/LITELLM_API_KEY" \
+  --name "/agentfarm/development/agentrunner/$SLUG/ANTHROPIC_API_KEY" \
+  --type SecureString --value "<test-key>" --overwrite
+
+aws ssm put-parameter --profile $AWS_PROFILE --region $AWS_REGION \
+  --name "/agentfarm/development/agentrunner/$SLUG/OPENAI_API_KEY" \
   --type SecureString --value "<test-key>" --overwrite
 
 # 3. Wait ~2 minutes for ArgoCD to reconcile, then verify
@@ -219,7 +224,8 @@ aws ssm delete-parameter --profile tools --region $AWS_REGION \
 aws ssm delete-parameters --profile $AWS_PROFILE --region $AWS_REGION \
   --names \
     "/agentfarm/development/agentrunner/$SLUG/AGENTFARM_WORKSPACE_ID" \
-    "/agentfarm/development/agentrunner/$SLUG/LITELLM_API_KEY"
+    "/agentfarm/development/agentrunner/$SLUG/ANTHROPIC_API_KEY" \
+    "/agentfarm/development/agentrunner/$SLUG/OPENAI_API_KEY"
 # Application and namespace are pruned by ArgoCD within ~2 minutes.
 ```
 
@@ -248,7 +254,7 @@ kubectl -n "agentrunner-$SLUG" logs deploy/agentrunner --previous
 # - Missing MULTICA_PAT or AGENTFARM_WORKSPACE_ID: check agentrunner-secrets ESO
 #   (AGENTFARM_WORKSPACE_ID written by gandalf to /agentfarm/development/agentrunner/<slug>/AGENTFARM_WORKSPACE_ID;
 #    MULTICA_PAT from /agentfarm/development/agentrunner/shared/MULTICA_PAT — both fused into agentrunner-secrets)
-# - Missing LITELLM_API_KEY: check agentrunner-secrets ESO
+# - Missing ANTHROPIC_API_KEY or OPENAI_API_KEY: check agentrunner-secrets ESO
 #   (written by gandalf to /agentfarm/development/agentrunner/<slug>/*)
 ```
 
@@ -281,7 +287,8 @@ aws ssm delete-parameter --profile tools --region us-east-1 \
 aws ssm delete-parameters --profile development --region us-east-1 \
   --names \
     "/agentfarm/development/agentrunner/$SLUG/AGENTFARM_WORKSPACE_ID" \
-    "/agentfarm/development/agentrunner/$SLUG/LITELLM_API_KEY" \
+    "/agentfarm/development/agentrunner/$SLUG/ANTHROPIC_API_KEY" \
+    "/agentfarm/development/agentrunner/$SLUG/OPENAI_API_KEY" \
     "/agentfarm/development/agentrunner/$SLUG/GIT_USER_EMAIL" \
     "/agentfarm/development/agentrunner/$SLUG/JIRA_PAT"
 ```

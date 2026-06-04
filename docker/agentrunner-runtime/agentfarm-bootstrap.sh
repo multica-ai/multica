@@ -5,7 +5,7 @@
 # and the daemon is started in the foreground. Waits for the daemon to register
 # its claude runtime, then flips visibility and creates agents from templates.
 #
-# Reads from secret bag (env):   MULTICA_PAT, AGENTFARM_WORKSPACE_ID, LITELLM_API_KEY
+# Reads from secret bag (env):   MULTICA_PAT, AGENTFARM_WORKSPACE_ID, ANTHROPIC_API_KEY, OPENAI_API_KEY
 # Reads from Downward API (env): WORKSPACE_SLUG (set from metadata.namespace)
 # Optional from secret bag:      GIT_USER_EMAIL, JIRA_PAT
 #                                (both together trigger acli auth; either missing skips)
@@ -22,7 +22,8 @@ readonly LITELLM_BASE_URL="https://llmproxy.g2.com"
 # ── 0. Sanity-check required env. Fail loud over silent partial provisioning. ─
 : "${MULTICA_PAT:?MULTICA_PAT missing from secret bag}"
 : "${AGENTFARM_WORKSPACE_ID:?AGENTFARM_WORKSPACE_ID missing from secret bag}"
-: "${LITELLM_API_KEY:?LITELLM_API_KEY missing from secret bag}"
+: "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY missing from secret bag}"
+: "${OPENAI_API_KEY:?OPENAI_API_KEY missing from secret bag}"
 : "${WORKSPACE_SLUG:?WORKSPACE_SLUG missing — must be injected via Downward API (fieldRef: metadata.namespace)}"
 
 # Trim agentrunner- prefix: namespace is "agentrunner-<slug>", device name must match.
@@ -94,7 +95,9 @@ done < <(multica runtime list --output json \
       '.[] | select(.device_info | startswith($name)) | .id')
 
 # ── 5. Build the provider env matrix (Anthropic + OpenAI only). ─────────────
-#    Both providers route through the same litellm virtual key.
+#    gandalf writes ANTHROPIC_API_KEY and OPENAI_API_KEY into the secret bag (both
+#    are the same litellm virtual key today); we consume them as-is and only inject
+#    the workspace-invariant base URLs here.
 #    - Anthropic at root, OpenAI at /v1 — matches SDK suffix conventions baked
 #      into agent-runtime-base/Dockerfile:174-175.
 #    - GEMINI_API_KEY deliberately omitted: bundled templates pin
@@ -103,9 +106,9 @@ CUSTOM_ENV_FILE="$(mktemp)"
 chmod 600 "${CUSTOM_ENV_FILE}"
 jq -n \
   --arg anthropic_url "${LITELLM_BASE_URL}" \
-  --arg anthropic_key "${LITELLM_API_KEY}" \
+  --arg anthropic_key "${ANTHROPIC_API_KEY}" \
   --arg openai_url "${LITELLM_BASE_URL}/v1" \
-  --arg openai_key "${LITELLM_API_KEY}" \
+  --arg openai_key "${OPENAI_API_KEY}" \
   '{
     ANTHROPIC_BASE_URL: $anthropic_url,
     ANTHROPIC_API_KEY:  $anthropic_key,
