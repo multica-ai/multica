@@ -29,8 +29,9 @@ RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/backfill_task_us
 FROM alpine:3.21
 
 # git is required by the FIR-2656 skill archive sync worker (no-op unless
-# CEREBRO_SKILLS_SYNC_REPO/_TOKEN are set).
-RUN apk add --no-cache ca-certificates tzdata git
+# CEREBRO_SKILLS_SYNC_REPO/_TOKEN are set). su-exec lets the entrypoint
+# fix volume ownership as root, then drop to the unprivileged app user.
+RUN apk add --no-cache ca-certificates tzdata git su-exec
 
 WORKDIR /app
 
@@ -42,10 +43,13 @@ COPY server/migrations/ ./migrations/
 COPY docker/entrypoint.sh .
 RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
-# Run as a non-root user. The server listens on 8080 (>1024) and writes
-# nothing under /app at runtime, so an unprivileged user is sufficient.
-RUN addgroup -S app && adduser -S -G app app && chown -R app:app /app
-USER app
+# Create the unprivileged app user and pre-create the local-storage upload
+# dir so a fresh Docker named volume mounted at /app/data/uploads inherits
+# app:app ownership from the image. The entrypoint still chowns at runtime
+# to fix volumes created before this change (where the dir is root:root).
+RUN addgroup -S app && adduser -S -G app app \
+    && mkdir -p /app/data/uploads \
+    && chown -R app:app /app
 
 EXPOSE 8080
 
