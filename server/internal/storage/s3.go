@@ -3,9 +3,11 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 
@@ -16,8 +18,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
+// s3Client abstracts *s3.Client for testing.
+type s3Client interface {
+	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
+	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
+	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
+}
+
 type S3Storage struct {
-	client      *s3.Client
+	client      s3Client
 	bucket      string
 	region      string // used to construct virtual-hosted-style public URLs when no CDN/endpoint is set
 	cdnDomain   string // if set, returned URLs use this instead of bucket name
@@ -193,6 +202,69 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 	}
 }
 
+// ServeFile proxies a GET /uploads/* request to S3/COS.
+// It extracts the key from the URL path, fetches the object from storage,
+// and streams it to the client with appropriate headers.
+func (s *S3Storage) ServeFile(w http.ResponseWriter, r *http.Request, key string) {
+	if key == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	obj, err := s.client.GetObject(r.Context(), &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		var noSuchKey *types.NoSuchKey
+		if errors.As(err, &noSuchKey) {
+			http.NotFound(w, r)
+			return
+		}
+		slog.Error("s3 proxy GetObject failed", "key", key, "error", err)
+		http.Error(w, "Bad Gateway", http.StatusBadGateway)
+		return
+	}
+	defer obj.Body.Close()
+
+	// Handle conditional GET (If-None-Match)
+	if obj.ETag != nil && r.Header.Get("If-None-Match") == *obj.ETag {
+		w.Header().Set("ETag", *obj.ETag)
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	// Set content-type if provided by S3
+	if obj.ContentType != nil {
+		w.Header().Set("Content-Type", *obj.ContentType)
+	}
+
+	// Set content-length if known
+	if obj.ContentLength != nil {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", *obj.ContentLength))
+	}
+
+	// Set content-disposition if provided
+	if obj.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", *obj.ContentDisposition)
+	}
+
+	// Forward ETag for client-side caching
+	if obj.ETag != nil {
+		w.Header().Set("ETag", *obj.ETag)
+	}
+
+	// Set cache headers - uploads are immutable. Using private (not public) since
+	// /uploads/* is an unauthenticated route and uploads may contain semi-sensitive
+	// content like screenshots. Matches the upload-side max-age (5 days).
+	w.Header().Set("Cache-Control", "private, max-age=31536000")
+
+	w.WriteHeader(http.StatusOK)
+	if _, err := io.Copy(w, obj.Body); err != nil {
+		slog.Warn("s3 proxy io.Copy failed", "key", key, "error", err)
+	}
+}
+
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	safe := sanitizeFilename(filename)
 	disposition := "attachment"
@@ -205,7 +277,7 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		Body:               bytes.NewReader(data),
 		ContentType:        aws.String(contentType),
 		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
-		CacheControl:       aws.String("max-age=432000,public"),
+		CacheControl:       aws.String("private, max-age=31536000"),
 		StorageClass:       s.storageClass(),
 	})
 	if err != nil {
@@ -215,26 +287,14 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 }
 
 // uploadedURL returns the URL stored for client consumption after an upload.
-// Priority: CDN domain > custom endpoint > AWS S3 region-qualified host. The CDN
-// domain wins even when a custom endpoint is set so S3-compatible backends
-// (MinIO, R2, B2, Wasabi, etc.) can be paired with a separate public-read
-// domain — writes still go through the SDK with the custom endpoint; only the
-// reader-facing URL changes.
-//
-// For the default AWS S3 case, virtual-hosted-style is preferred:
-// https://<bucket>.s3.<region>.amazonaws.com/<key>. When the bucket name
-// contains dots, the AWS-issued wildcard TLS certificate (`*.s3.amazonaws.com`)
-// fails to validate the host, so we fall back to path-style:
-// https://s3.<region>.amazonaws.com/<bucket>/<key>.
+// Priority: CDN domain > relative proxy path. When cdnDomain is set, the full
+// absolute URL is returned so the CDN handles serving. When cdnDomain is empty,
+// a relative /uploads/<key> path is returned so the browser routes through the
+// app's proxy endpoint — this is the same semantics as LocalStorage and is
+// required for the /uploads/* proxy route to be hit.
 func (s *S3Storage) uploadedURL(key string) string {
 	if s.cdnDomain != "" {
 		return fmt.Sprintf("https://%s/%s", s.cdnDomain, key)
 	}
-	if s.endpointURL != "" {
-		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
-	}
-	if strings.Contains(s.bucket, ".") {
-		return fmt.Sprintf("https://s3.%s.amazonaws.com/%s/%s", s.region, s.bucket, key)
-	}
-	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
+	return fmt.Sprintf("/uploads/%s", key)
 }
