@@ -1,11 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 // CEREBRO-PATCH(web-serwist): service-worker provider for installed PWA
 import { SerwistProvider } from "@serwist/next/react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
+import { CerebroFirtalPortalBar } from "@/components/cerebro-firtal-portal-bar";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { CEREBRO_AGENT_AVATAR_RESOURCES } from "@multica/cerebro-agent-avatar/locales";
@@ -110,7 +110,8 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full")}
     >
-      <body className="h-full overflow-hidden">
+      {/* CEREBRO-PATCH(web-firtal-bar-reserve): pt-12 reserves 48px for the Firtal portal top bar so it can never overlay app content (TECH-2903). */}
+      <body className="h-full overflow-hidden pt-12">
         {/* CEREBRO-PATCH(web-serwist): wrap with SerwistProvider for service worker */}
         <SerwistProvider
           swUrl="/sw.js"
@@ -124,12 +125,7 @@ export default async function RootLayout({
             <Toaster />
           </ThemeProvider>
         </SerwistProvider>
-        <Script
-          src="https://apps.firtal.com/bar.js"
-          data-apps-url="https://apps.firtal.com/api/apps"
-          data-home="https://apps.firtal.com"
-          strategy="afterInteractive"
-        />
+        <CerebroFirtalPortalBar />
       </body>
     </html>
   );

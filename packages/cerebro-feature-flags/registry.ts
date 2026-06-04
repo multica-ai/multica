@@ -69,7 +69,11 @@ export type CerebroFlagKey =
   // FIR-2660: restrict channel creation to workspace owners/admins. Default off
   // preserves today's behavior (any member can create); turn on to require
   // owner/admin role for POST /api/channels (kind='channel'; DMs always open).
-  | "cerebro_channel_create_restricted";
+  | "cerebro_channel_create_restricted"
+  // TECH-2903: Firtal portal top bar (apps.firtal.com/bar.js). Default ON.
+  // When on, the bar loads on every page and the body reserves 48px so it
+  // never overlays app content. Off removes both.
+  | "cerebro_firtal_portal_bar";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -181,6 +185,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // is restricted to workspace owners/admins (members get 403). DMs are never
   // gated. Off restores today's behaviour (any member or agent may create).
   cerebro_channel_create_restricted: false,
+  // TECH-2903: ON by default. Loads the Firtal portal top bar
+  // (apps.firtal.com/bar.js) and reserves 48px at the top of the body so the
+  // bar can never overlay app content. Off removes the bar and reclaims the
+  // space.
+  cerebro_firtal_portal_bar: true,
 };
 
 /**
@@ -580,6 +589,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "When on, creating a named channel (POST /api/channels with kind='channel') requires workspace owner or admin role; members get 403. DMs are never gated. Off restores today's behaviour where any workspace member or agent can create a channel. FIR-2660.",
+  },
+  {
+    key: "cerebro_firtal_portal_bar",
+    label: "Firtal portal top bar",
+    group: "workspace",
+    description:
+      "Show the slim Firtal portal top bar (app switcher + signed-in user) on every page, loaded from apps.firtal.com/bar.js. The 48px top space is reserved server-side so the bar can never overlay app content. Off removes the bar and reclaims the space. TECH-2903.",
   },
 ];
 
