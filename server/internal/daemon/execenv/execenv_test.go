@@ -3508,7 +3508,11 @@ func TestPrepare_CSCPluginSetup(t *testing.T) {
 		AgentName:      "test-agent",
 		Provider:       "csc",
 		CSCBin:         fakeBin,
-		Task:           TaskContextForEnv{},
+		Task: TaskContextForEnv{
+			Plugins: []PluginSource{
+				{MarketplaceURL: "https://github.com/example/marketplace.git", Plugin: "cospower"},
+			},
+		},
 	}, testLogger())
 	if err != nil {
 		t.Fatalf("Prepare failed: %v", err)
@@ -3520,14 +3524,20 @@ func TestPrepare_CSCPluginSetup(t *testing.T) {
 	// Verify plugin commands were invoked
 	data, err := os.ReadFile(filepath.Join(dir, "invocations.log"))
 	if err != nil {
-		t.Fatal("expected invocations.log to exist - setupCSCPlugins was not called")
+		t.Fatal("expected invocations.log to exist - setupPlugins was not called")
 	}
 	log := string(data)
 	if !strings.Contains(log, "plugin marketplace add") {
 		t.Errorf("expected marketplace add invocation, got:\n%s", log)
 	}
+	if !strings.Contains(log, "plugin update") {
+		t.Errorf("expected plugin update invocation, got:\n%s", log)
+	}
 	if !strings.Contains(log, "plugin install") {
 		t.Errorf("expected plugin install invocation, got:\n%s", log)
+	}
+	if !strings.Contains(log, "-s project") {
+		t.Errorf("expected -s project scope in install, got:\n%s", log)
 	}
 }
 
@@ -3552,13 +3562,17 @@ func TestPrepare_CSCPluginSetupFailure(t *testing.T) {
 		AgentName:      "test-agent",
 		Provider:       "csc",
 		CSCBin:         fakeBin,
-		Task:           TaskContextForEnv{},
+		Task: TaskContextForEnv{
+			Plugins: []PluginSource{
+				{MarketplaceURL: "https://github.com/example/marketplace.git", Plugin: "cospower"},
+			},
+		},
 	}, testLogger())
 	if err == nil {
 		t.Fatal("expected Prepare to fail when CSC plugin setup fails")
 	}
-	if !strings.Contains(err.Error(), "csc plugin setup") {
-		t.Errorf("error should mention csc plugin setup, got: %v", err)
+	if !strings.Contains(err.Error(), "plugin setup") {
+		t.Errorf("error should mention plugin setup, got: %v", err)
 	}
 }
 
