@@ -87,6 +87,7 @@ vi.mock("@multica/views/chat", () => ({
 
 vi.mock("@multica/cerebro-chat/views", () => ({
   ChatStatusLine: () => null,
+  SessionCostChip: () => null,
 }));
 
 vi.mock("@multica/ui/components/ui/avatar", () => ({
