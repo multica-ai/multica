@@ -40,13 +40,18 @@
   },
   "leaderboard": {
     "title": "Leaderboard",
+    "tab_agent": "Agent ranking",
+    "tab_member": "Member ranking",
     "caption": "{{count}} agents",
+    "caption_member": "{{count}} members",
     "header_agent": "Agent",
+    "header_member": "Member",
     "header_tokens": "Tokens",
     "header_cost": "Cost",
     "header_time": "Time",
     "header_tasks": "Tasks",
-    "no_data": "No agent activity in this window."
+    "no_data": "No agent activity in this window.",
+    "system_group": "System"
   },
   "empty": {
     "title": "No usage yet",
