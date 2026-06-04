@@ -73,7 +73,9 @@ export type CerebroFlagKey =
   // TECH-2903: Firtal portal top bar (apps.firtal.com/bar.js). Default ON.
   // When on, the bar loads on every page and the body reserves 48px so it
   // never overlays app content. Off removes both.
-  | "cerebro_firtal_portal_bar";
+  | "cerebro_firtal_portal_bar"
+  // TECH-2925: admin UI for firtal_registry data source allowlist on agents.
+  | "cerebro_firtal_registry_allowlist_ui";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -190,6 +192,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // bar can never overlay app content. Off removes the bar and reclaims the
   // space.
   cerebro_firtal_portal_bar: true,
+  // TECH-2925: OFF by default until QA on staging; hides Konfigurer on firtal_registry.
+  cerebro_firtal_registry_allowlist_ui: false,
 };
 
 /**
@@ -596,6 +600,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Show the slim Firtal portal top bar (app switcher + signed-in user) on every page, loaded from apps.firtal.com/bar.js. The 48px top space is reserved server-side so the bar can never overlay app content. Off removes the bar and reclaims the space. TECH-2903.",
+  },
+  {
+    key: "cerebro_firtal_registry_allowlist_ui",
+    label: "firtal_registry allowlist UI",
+    group: "agents",
+    description:
+      "Show Konfigurer on the agent Tools tab for firtal_registry so admins can pick which data sources the agent may access. TECH-2925.",
   },
 ];
 
