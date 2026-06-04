@@ -3641,21 +3641,22 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			// A single tool call exceeded MaxToolCallDuration. Re-tag the
 			// SIGKILL-induced "aborted" as "tool_timeout" so runTask routes
 			// it through a dedicated failure_reason instead of the generic
-			// agent_error bucket.
+			// agent_error bucket. CEREBRO-PATCH(daemon-per-tool-call-timeout):
+			// always overwrite Error — the backend's post-cancel message is
+			// just ctx.Err() ("context canceled"), which hides the actual
+			// reason (the cap).
 			result.Status = "tool_timeout"
-			if result.Error == "" {
-				result.Error = maxToolCallReason(maxToolWindow)
-			}
+			result.Error = maxToolCallReason(maxToolWindow)
 		} else if idleWatchdogFired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
 			// Re-tag it as "idle_watchdog" so runTask routes the
 			// disposition through a dedicated failure_reason, not the
 			// generic "agent_error" bucket the aborted path falls into.
+			// CEREBRO-PATCH(daemon-per-tool-call-timeout): always overwrite
+			// Error for the same reason as the tool_timeout branch above.
 			result.Status = "idle_watchdog"
-			if result.Error == "" {
-				result.Error = idleWatchdogReason(idleWindow)
-			}
+			result.Error = idleWatchdogReason(idleWindow)
 		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
