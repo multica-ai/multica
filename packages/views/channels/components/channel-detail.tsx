@@ -3,7 +3,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Archive, Hash, MessageSquare, Pin, PinOff } from "lucide-react";
+import { Archive, Hash, MessageSquare, Pencil, Pin, PinOff } from "lucide-react"; // CEREBRO-PATCH(channel-detail-edit-icon): FIR-2660 edit-channel button.
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
@@ -38,6 +38,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useChannelDisplay } from "./use-channel-display";
 import { ParticipantsPanel } from "./participants-panel";
+// CEREBRO-PATCH(channel-detail-edit-dialog-import): FIR-2660 edit-channel modal (name + description in one round-trip).
+import { EditChannelDialog } from "./edit-channel-dialog";
 // CEREBRO-PATCH(channel-detail-listeners): JEH-699 — listeners popover.
 import { ChannelListenersPanel } from "./channel-listeners-panel";
 // CEREBRO-PATCH(channel-agent-inline-row): JEH-698 inline "agent is working" row mounted between the comment stream and CommentInput.
@@ -143,6 +145,7 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   const deletePin = useDeletePin();
 
   const [participantsOpen, setParticipantsOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false); // CEREBRO-PATCH(channel-detail-edit-state): FIR-2660 edit-channel dialog state.
 
   // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — pin DM/Channel
   // scroll to bottom on open; surface "Ny besked"-pille when scrolled up.
@@ -216,6 +219,24 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
           )}
           <div className="ml-auto flex items-center gap-1">
             <ChannelListenersPanel channel={channel} />
+            {display.isChannel && (
+              // CEREBRO-PATCH(channel-detail-edit-button): FIR-2660 edit-channel modal (name + description).
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      onClick={() => setEditOpen(true)}
+                      aria-label="Edit channel"
+                      className="inline-flex size-7 items-center justify-center rounded border text-muted-foreground hover:bg-accent hover:text-foreground"
+                    />
+                  }
+                >
+                  <Pencil className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Edit channel</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -356,6 +377,14 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
         open={participantsOpen}
         onOpenChange={setParticipantsOpen}
       />
+      {/* CEREBRO-PATCH(channel-detail-edit-dialog-mount): FIR-2660 edit-channel modal (name + description). */}
+      {display.isChannel && (
+        <EditChannelDialog
+          channel={channel}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+        />
+      )}
     </div>
   );
 }
