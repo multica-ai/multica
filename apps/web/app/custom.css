@@ -43,3 +43,144 @@
     --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
     --scrollbar-track: transparent;
 }
+
+/* newhome value #1 board demo: a card softly "lands" when it advances a
+ * column, so the auto-play reads as movement rather than a teleport. */
+@keyframes newhome-card-land {
+    from {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+.newhome-card-land {
+    animation: newhome-card-land 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+    .newhome-card-land {
+        animation: none;
+    }
+}
+
+/* newhome "this is live, try it" hint: the arrow draws itself in once, then the
+ * whole annotation gently floats to draw the eye. Respects reduced-motion. */
+@keyframes newhome-hint-bob {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-7px);
+    }
+}
+.newhome-hint {
+    animation: newhome-hint-bob 2.8s ease-in-out infinite;
+}
+@keyframes newhome-hint-draw {
+    from {
+        stroke-dashoffset: 90;
+    }
+    to {
+        stroke-dashoffset: 0;
+    }
+}
+.newhome-hint-arrow path {
+    stroke-dasharray: 90;
+    animation: newhome-hint-draw 0.9s ease-out 0.25s both;
+}
+@media (prefers-reduced-motion: reduce) {
+    .newhome-hint {
+        animation: none;
+    }
+    .newhome-hint-arrow path {
+        animation: none;
+        stroke-dashoffset: 0;
+    }
+}
+
+/* newhome demo: darken --brand so the selected "working" chip (white text on
+ * bg-brand) has readable contrast. Scoped to the embedded product demo only. */
+.landing-demo {
+    --brand: oklch(0.46 0.17 256);
+}
+
+/* Hide every scrollbar inside the embedded product demo — on a marketing page
+ * native scrollbars read as jarring. Scroll/drag still works; only the bar is
+ * hidden. Scoped to the demo so the rest of the site keeps its scrollbars. */
+.landing-demo,
+.landing-demo * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.landing-demo::-webkit-scrollbar,
+.landing-demo *::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+}
+
+/* Suppress the board's "Hidden columns" side panel in the demo. We hide the
+ * backlog/blocked columns via the status allowlist, which would otherwise list
+ * them in this panel (w-[240px] is unique to that panel — columns use an inline
+ * width). Keeps the demo board to a clean four columns. */
+.landing-demo [class~="w-[240px]"] {
+    display: none;
+}
+
+/* Popups (menus, dialogs, hover cards, tooltips) portal INTO the scaled demo
+ * box (see PortalContainerProvider) so they inherit the demo's zoom instead of
+ * rendering at 1:1 over the page. Full-screen modals like the transcript are
+ * sized in viewport units (100vh/100vw), which overflow the small demo window;
+ * cap them to the window (their fixed containing block is the transformed box)
+ * so the header/footer stay visible. Auto-height modals stay smaller than the
+ * cap, so they are unaffected.
+ *
+ * Scoped into @layer utilities so this wins the cascade against Tailwind's own
+ * `!`-important sizing utilities (e.g. the transcript's !h-[calc(100vh-4rem)]):
+ * same layer + higher specificity. Height is the only axis that overflows the
+ * window; width already fits, so leave each modal's own max-width intact. */
+@layer utilities {
+    .landing-demo [data-slot="dialog-content"] {
+        max-height: calc(100% - 1.5rem) !important;
+    }
+}
+
+/* newhome (Landing V2 sandbox) — auto-scrolling agent marquee. Pure CSS, no
+ * motion library: the track holds two identical groups and slides left by one
+ * group width for a seamless loop. The wrapper is overflow-hidden, so there is
+ * no horizontal scrollbar. Pauses on hover; respects reduced-motion. */
+@keyframes newhome-marquee {
+    to {
+        transform: translateX(-50%);
+    }
+}
+.newhome-marquee {
+    -webkit-mask-image: linear-gradient(
+        to right,
+        transparent,
+        #000 6%,
+        #000 94%,
+        transparent
+    );
+    mask-image: linear-gradient(
+        to right,
+        transparent,
+        #000 6%,
+        #000 94%,
+        transparent
+    );
+}
+.newhome-marquee-track {
+    animation: newhome-marquee 45s linear infinite;
+}
+.newhome-marquee:hover .newhome-marquee-track {
+    animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+    .newhome-marquee-track {
+        animation: none;
+    }
+}
