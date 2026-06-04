@@ -76,7 +76,11 @@ export type CerebroFlagKey =
   // never overlays app content. Off removes both.
   | "cerebro_firtal_portal_bar"
   // TECH-2925: admin UI for firtal_registry data source allowlist on agents.
-  | "cerebro_firtal_registry_allowlist_ui";
+  | "cerebro_firtal_registry_allowlist_ui"
+  // FIR-33 (sub of FIR-18): auto-switch the "Create with agent" modal to manual
+  // create when the picked agent's daemon CLI is below the quick-create gate,
+  // instead of leaving the user on a warning banner with Create disabled.
+  | "cerebro_quick_create_version_autoswitch";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -196,6 +200,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_firtal_portal_bar: true,
   // TECH-2925: OFF by default until QA on staging; hides Konfigurer on firtal_registry.
   cerebro_firtal_registry_allowlist_ui: false,
+  // FIR-33 (sub of FIR-18): ON by default. When the agent picked in the Quick
+  // Create modal runs a daemon CLI below the quick-create gate, the modal flips
+  // to manual create (carrying the typed prompt/project/parent) instead of
+  // stranding the user on a warning banner. Off restores the warning-only
+  // behaviour.
+  cerebro_quick_create_version_autoswitch: true,
 };
 
 /**
@@ -616,6 +626,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Show Konfigurer on the agent Tools tab for firtal_registry so admins can pick which data sources the agent may access. TECH-2925.",
+  },
+  {
+    key: "cerebro_quick_create_version_autoswitch",
+    label: "Auto-switch to manual on stale agent CLI",
+    group: "issues",
+    description:
+      "In the \"Create with agent\" modal, when the picked agent's daemon runs a multica CLI below the quick-create minimum, automatically switch to manual create (carrying the typed prompt, project, and parent over) instead of leaving the user on a warning banner with Create disabled. Off restores the warning-only behaviour. FIR-33.",
   },
 ];
 
