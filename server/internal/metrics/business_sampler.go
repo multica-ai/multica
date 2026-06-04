@@ -29,12 +29,12 @@ const (
 	defaultSamplerQueryTimeout = 500 * time.Millisecond
 	samplerRowLimit            = 100
 
-	// Active-user / active-workspace windows. The label set is fixed —
-	// new windows must be added explicitly here so cardinality stays
-	// bounded under all input.
+	// Active-user / active-workspace DB windows. Keep this DB-sampled path
+	// to the short window only: PR2's counters do not carry user/workspace
+	// IDs, so PromQL cannot derive distinct 1h/24h active estimates without
+	// adding high-cardinality labels. Long-window actives need a separate
+	// counter-derived aggregation, not expanding this sampler over history.
 	windowFiveMinutes = "5m"
-	windowOneHour     = "1h"
-	windowOneDay      = "24h"
 
 	// Runtime is considered online if its last_seen_at is within this
 	// many seconds of `now()`. 60s matches the daemon heartbeat cadence
@@ -54,8 +54,6 @@ var samplerWindows = []struct {
 	d     time.Duration
 }{
 	{windowFiveMinutes, 5 * time.Minute},
-	{windowOneHour, time.Hour},
-	{windowOneDay, 24 * time.Hour},
 }
 
 // BusinessSamplerOptions configures the BusinessSamplerCollector. A nil

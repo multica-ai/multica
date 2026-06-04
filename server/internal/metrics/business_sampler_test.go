@@ -42,11 +42,7 @@ func newTestSampler(t *testing.T, refresh func(ctx context.Context, now time.Tim
 func filledSnapshot(now time.Time) *samplerSnapshot {
 	snap := newSamplerSnapshot(now)
 	snap.activeUsers[windowFiveMinutes] = 7
-	snap.activeUsers[windowOneHour] = 42
-	snap.activeUsers[windowOneDay] = 100
 	snap.activeWorkspaces[windowFiveMinutes] = 3
-	snap.activeWorkspaces[windowOneHour] = 11
-	snap.activeWorkspaces[windowOneDay] = 25
 
 	snap.taskQueued["chat"] = 5
 	snap.taskQueued["issue"] = 2
@@ -110,8 +106,6 @@ func TestBusinessSamplerCollectorEmitsExpectedMetrics(t *testing.T) {
 
 	wantSubstrings := []string{
 		`multica_active_users{window="5m"} 7`,
-		`multica_active_users{window="1h"} 42`,
-		`multica_active_users{window="24h"} 100`,
 		`multica_active_workspaces{window="5m"} 3`,
 		`multica_agent_task_queued{source="chat"} 5`,
 		`multica_agent_task_queued{source="issue"} 2`,
@@ -130,6 +124,16 @@ func TestBusinessSamplerCollectorEmitsExpectedMetrics(t *testing.T) {
 	for _, want := range wantSubstrings {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics body missing %q\nbody:\n%s", want, body)
+		}
+	}
+	for _, removed := range []string{
+		`multica_active_users{window="1h"}`,
+		`multica_active_users{window="24h"}`,
+		`multica_active_workspaces{window="1h"}`,
+		`multica_active_workspaces{window="24h"}`,
+	} {
+		if strings.Contains(body, removed) {
+			t.Errorf("metrics body still exposes removed long DB window %q\nbody:\n%s", removed, body)
 		}
 	}
 }
