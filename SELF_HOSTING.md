@@ -391,6 +391,35 @@ On a database with years of data this can scan tens of millions of rows; `--slee
 
 After upgrading, re-run `migrate up` (or restart the backend container — migrations run automatically on startup) to apply migration `103` cleanly.
 
+## GitHub Projects v2 Sync (optional)
+
+The backend can mirror a GitHub Projects v2 board into one Multica workspace and push local status / comment changes back to the board. It is **disabled by default** — the connector starts no goroutine and makes no network calls unless `MULTICA_GITHUB_TOKEN` is set.
+
+**What syncs**
+
+- **Inbound (poll):** every project item becomes a Multica issue. Board `Status`/`Priority` map to the Multica enums; `Area`/`Pod`/`Intent Ref`/`type:*` are carried over as labels + issue metadata; parent/sub-issue links become Multica parent issues.
+- **Outbound (event-driven):** a Multica status change writes the matching board `Status` single-select option; a new user comment is posted on the backing repo issue. A loop guard records the last value pushed/observed in each direction so an imported change never bounces straight back.
+
+GitHub Projects v2 has no realtime push for project fields, so the inbound side polls (default every 60s).
+
+**Setup**
+
+1. Mint a GitHub token with the `project`, `repo`, and `read:org` scopes (classic or fine-grained PAT both work).
+2. Find the board owner + number from its URL: `github.com/orgs/<owner>/projects/<number>`.
+3. Get the target workspace UUID (Workspace settings, or the `X-Workspace-ID` the web app sends).
+4. Set the env vars and restart the backend:
+
+```bash
+MULTICA_GITHUB_TOKEN=ghp_xxx
+MULTICA_GITHUB_PROJECT_OWNER=your-org
+MULTICA_GITHUB_PROJECT_NUMBER=16
+MULTICA_GITHUB_WORKSPACE_ID=00000000-0000-0000-0000-000000000000
+# optional, Go duration; values under the 10s floor are ignored (default 60s)
+MULTICA_GITHUB_POLL_INTERVAL=60s
+```
+
+When the token is set, the three companion vars are **required** — the server logs a misconfiguration error and refuses to start the connector if any is missing. On startup the backend logs `github projects sync enabled` and `github installation ready`; one workspace binds to at most one board.
+
 ## Stopping Services
 
 If you installed via the install script:

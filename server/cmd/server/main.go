@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	githubsync "github.com/multica-ai/multica/server/internal/integrations/github"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -358,6 +359,23 @@ func main() {
 	// workers, AFTER the HTTP server has drained.
 	if h.LarkHub != nil {
 		go h.LarkHub.Run(sweepCtx)
+	}
+
+	// GitHub Projects v2 sync: mirrors a GitHub project board into a Multica
+	// workspace and pushes status/comment changes back out. Disabled (no
+	// goroutine cost) unless MULTICA_GITHUB_TOKEN is set. Lifecycle bound to
+	// sweepCtx so it winds down with the other long-running workers.
+	if ghCfg, enabled, cfgErr := githubsync.ConfigFromEnv(); cfgErr != nil {
+		slog.Error("github sync misconfigured; not starting", "error", cfgErr)
+	} else if enabled {
+		ghSync := githubsync.New(ghCfg, pool, queries, h.IssueService)
+		githubsync.NewPatcher(ghSync).Register(bus)
+		go ghSync.Run(sweepCtx)
+		slog.Info("github projects sync enabled",
+			"org", ghCfg.Org, "project", ghCfg.ProjectNumber,
+			"workspace_id", ghCfg.WorkspaceID, "poll", ghCfg.PollInterval.String())
+	} else {
+		slog.Info("github integration disabled (MULTICA_GITHUB_TOKEN not set)")
 	}
 
 	if metricsServer != nil {
