@@ -292,6 +292,34 @@ export function NewMessageModal({
               className="h-9 pl-8 text-sm"
             />
           </div>
+          {/* CEREBRO-PATCH(new-message-modal-add-all-members): FIR-2660 — one-click "Add everyone" so #general can start with the full workspace as participants. Members only; agents stay opt-in so we don't trigger every agent on every channel message. Hidden in DM mode and once every member is already picked. */}
+          {groupMode && (() => {
+            const allMembers = allActors.filter((a) => a.type === "member");
+            const allMembersPicked =
+              allMembers.length > 0 &&
+              allMembers.every((m) => isPicked(m));
+            if (allMembersPicked || allMembers.length === 0) return null;
+            return (
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const existing = new Set(
+                      selected.map((s) => `${s.type}:${s.id}`),
+                    );
+                    const additions = allMembers.filter(
+                      (m) => !existing.has(`${m.type}:${m.id}`),
+                    );
+                    setSelected([...selected, ...additions]);
+                  }}
+                  className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  aria-label="Add all workspace members"
+                >
+                  Add everyone ({allMembers.length})
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto py-1 md:flex-none md:max-h-[min(60vh,24rem)]">

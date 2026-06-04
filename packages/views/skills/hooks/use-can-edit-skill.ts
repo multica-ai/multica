@@ -38,8 +38,9 @@ export function canEditSkill(
   opts: { userId: string | null; role: MemberRole | null },
 ): boolean {
   if (opts.role === "admin" || opts.role === "owner") return true;
-  // CEREBRO-PATCH(skill-ownership-gate): FIR-2629 — skill owner and approvers can edit directly
+  // CEREBRO-PATCH(skill-ownership-gate): FIR-2629 — skill owner and approvers can edit directly; the creator fallback only applies when no owner has been designated, otherwise an explicit owner transfer is silently bypassed.
   if (opts.userId && skill.owner_id === opts.userId) return true;
   if (opts.userId && (skill.approver_ids ?? []).includes(opts.userId)) return true;
-  return skill.created_by === opts.userId;
+  if (skill.owner_id == null) return skill.created_by === opts.userId;
+  return false;
 }

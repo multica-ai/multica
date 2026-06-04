@@ -113,7 +113,7 @@ export function PauseBanner({ runtime }: PauseBannerProps) {
 export function formatPauseReason(reason?: string | null): string {
   switch (reason) {
     case "rate_limit":
-      return "usage or rate limit";
+      return "rate limit or usage limit";
     case "auth_error":
       return "authentication failed";
     case "auto":
@@ -148,18 +148,3 @@ function formatRemaining(until: string, nowMs: number): string {
   return remHours ? `${days}d ${remHours}h` : `${days}d`;
 }
 
-export function formatPauseReason(reason: string | null | undefined): string {
-  switch (reason) {
-    case "rate_limit":
-      return "rate limit or usage limit";
-    case "auto":
-      return "automatic pause";
-    case "manual":
-    case "":
-    case null:
-    case undefined:
-      return "manual pause";
-    default:
-      return reason.replaceAll("_", " ");
-  }
-}

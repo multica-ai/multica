@@ -65,7 +65,11 @@ export type CerebroFlagKey =
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions"
   // TECH-2880: collapsible Projects entry in the sidebar (with nested project tree).
-  | "cerebro_projects";
+  | "cerebro_projects"
+  // FIR-2660: restrict channel creation to workspace owners/admins. Default off
+  // preserves today's behavior (any member can create); turn on to require
+  // owner/admin role for POST /api/channels (kind='channel'; DMs always open).
+  | "cerebro_channel_create_restricted";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -173,6 +177,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-2880: OFF by default — workspace opts in to surface the Projects
   // collapsible (header + sub-items) in the sidebar.
   cerebro_projects: false,
+  // FIR-2660: OFF by default. When on, POST /api/channels with kind='channel'
+  // is restricted to workspace owners/admins (members get 403). DMs are never
+  // gated. Off restores today's behaviour (any member or agent may create).
+  cerebro_channel_create_restricted: false,
 };
 
 /**
@@ -565,6 +573,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Show the collapsible Projects entry in the workspace sidebar (project list, nested tree, and the 'New Project' shortcut). Off hides the entry entirely — projects can still be reached via direct URL and the Projects page. TECH-2880.",
+  },
+  {
+    key: "cerebro_channel_create_restricted",
+    label: "Restrict who can create channels",
+    group: "permissions",
+    description:
+      "When on, creating a named channel (POST /api/channels with kind='channel') requires workspace owner or admin role; members get 403. DMs are never gated. Off restores today's behaviour where any workspace member or agent can create a channel. FIR-2660.",
   },
 ];
 
