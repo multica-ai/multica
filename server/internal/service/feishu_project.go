@@ -37,7 +37,7 @@ const (
 	feishuProjectManualLookback    = 30 * 24 * time.Hour
 	feishuProjectIncrementalReplay = 10 * time.Minute
 	feishuProjectSyncMaxPages      = 1000
-	feishuProjectAttachmentMaxSize = 5 << 20
+	feishuProjectAttachmentMaxSize = 20 << 20
 	// Tolerance before a Feishu updated_at that exceeds our clock is treated as
 	// bad data and logged. Absorbs normal multica/Feishu clock skew so the
 	// warning only fires on genuinely future-dated items. The watermark value
@@ -122,6 +122,11 @@ type FeishuProjectSyncOptions struct {
 	// AND updated_at). The orphan reconcile sweep uses this to ask Feishu which
 	// of a binding batch still exist. Takes precedence over WorkItemID.
 	WorkItemIDs []string
+
+	// ForceRefresh bypasses the per-binding external updated_at short-circuit.
+	// Use it when the caller needs to re-apply Feishu-authoritative state even
+	// if the Feishu work item itself has not changed since the last sync.
+	ForceRefresh bool
 
 	// SinceUnixMilli, if > 0, overrides the `updated_at >=` lookback start
 	// passed to Feishu's /work_item/filter call. Sync entry computes this
@@ -272,6 +277,7 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 	if opts.SinceUnixMilli == 0 {
 		opts.SinceUnixMilli = feishuProjectSinceUnixMilliForTrigger(cfg, trigger, time.Now())
 	}
+	forceRefresh := opts.ForceRefresh || strings.TrimSpace(opts.WorkItemID) != "" || len(opts.WorkItemIDs) > 0
 	// Tracks max(item.updated_at) across all goroutines so the watermark is
 	// pinned to Feishu's clock, not ours.
 	var maxObservedUpdatedAtMs atomic.Int64
@@ -299,7 +305,7 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 						if ctx.Err() != nil {
 							continue
 						}
-						result, attachErrs, err := s.syncWorkItem(ctx, cfg, item)
+						result, attachErrs, err := s.syncWorkItem(ctx, cfg, item, forceRefresh)
 						if err == nil && !item.UpdatedAt.IsZero() {
 							ms := item.UpdatedAt.UnixMilli()
 							for {
@@ -348,6 +354,15 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 			summary.Errors++
 			syncErr = err
 			continue
+		}
+	}
+	if syncErr == nil {
+		driftFixed, driftErr := s.reconcileLocalStatusDrift(ctx, cfg)
+		if driftErr != nil {
+			summary.Errors++
+			syncErr = driftErr
+		} else {
+			summary.Updated += driftFixed
 		}
 	}
 
@@ -442,7 +457,7 @@ func enabledFeishuProjectTypes(cfg db.FeishuProjectIntegration) []string {
 	return out
 }
 
-func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem) (result string, attachErrs int, retErr error) {
+func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, forceRefresh bool) (result string, attachErrs int, retErr error) {
 	started := time.Now()
 	timing := &feishuProjectSyncTiming{}
 	defer func() {
@@ -537,7 +552,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		// item manual full-sync from minutes to ~30s when most items are quiet.
 		// The label-sync fields are derived from item.fields too, so they also
 		// bump item.UpdatedAt; safe to skip them here.
-		if !item.UpdatedAt.IsZero() && binding.LastExternalUpdatedAt.Valid &&
+		if !forceRefresh && !item.UpdatedAt.IsZero() && binding.LastExternalUpdatedAt.Valid &&
 			!item.UpdatedAt.After(binding.LastExternalUpdatedAt.Time) {
 			return "skipped", 0, nil
 		}
@@ -693,6 +708,62 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	}
 	s.reconcileSyncedIssueTasks(ctx, issue)
 	return "created", 0, nil
+}
+
+func (s *FeishuProjectSyncService) reconcileLocalStatusDrift(ctx context.Context, cfg db.FeishuProjectIntegration) (int, error) {
+	cursor := pgtype.UUID{Valid: true}
+	updated := 0
+	for {
+		bindings, err := s.Queries.ListFeishuProjectIssueBindingsByIntegration(ctx, db.ListFeishuProjectIssueBindingsByIntegrationParams{
+			IntegrationID: cfg.ID,
+			ID:            cursor,
+			Limit:         feishuProjectOrphanBindingPageSize,
+		})
+		if err != nil {
+			return updated, fmt.Errorf("list feishu bindings for status drift reconcile: %w", err)
+		}
+		if len(bindings) == 0 {
+			return updated, nil
+		}
+
+		for _, binding := range bindings {
+			if !binding.ExternalStatusLabel.Valid {
+				continue
+			}
+			targetStatus := mapFeishuStatus(cfg.StatusMapping, binding.WorkItemType, binding.ExternalStatusLabel.String)
+			if targetStatus == "" {
+				continue
+			}
+			issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+				ID:          binding.IssueID,
+				WorkspaceID: cfg.WorkspaceID,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return updated, fmt.Errorf("load issue for status drift reconcile: %w", err)
+			}
+			if issue.Status == targetStatus {
+				continue
+			}
+			next, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ID:          issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+				Status:      targetStatus,
+			})
+			if err != nil {
+				return updated, fmt.Errorf("update issue status from feishu binding: %w", err)
+			}
+			updated++
+			s.reconcileSyncedIssueTasks(ctx, next)
+		}
+
+		cursor = bindings[len(bindings)-1].ID
+		if len(bindings) < feishuProjectOrphanBindingPageSize {
+			return updated, nil
+		}
+	}
 }
 
 func (s *FeishuProjectSyncService) syncIssueLabels(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, issueID pgtype.UUID) (bool, error) {

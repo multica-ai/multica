@@ -547,11 +547,11 @@ func TestFeishuProjectOpenAPIFieldAttachmentsExtractsMultiFileUID(t *testing.T) 
 }
 
 func TestFeishuProjectAttachmentTooLarge(t *testing.T) {
-	if feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "small.log", SizeBytes: 5 << 20}) {
-		t.Fatal("5MB attachment should be allowed")
+	if feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "small.log", SizeBytes: 20 << 20}) {
+		t.Fatal("20MB attachment should be allowed")
 	}
-	if !feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "large.log", SizeBytes: (5 << 20) + 1}) {
-		t.Fatal("attachment larger than 5MB should be skipped")
+	if !feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "large.log", SizeBytes: (20 << 20) + 1}) {
+		t.Fatal("attachment larger than 20MB should be skipped")
 	}
 }
 
