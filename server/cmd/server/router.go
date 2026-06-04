@@ -148,13 +148,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
 		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 		// Casdoor SSO — enabled when CASDOOR_ENDPOINT is set.
-		CasdoorEndpoint:       strings.TrimRight(os.Getenv("CASDOOR_ENDPOINT"), "/"),
-		CasdoorPublicEndpoint: strings.TrimRight(os.Getenv("CASDOOR_PUBLIC_ENDPOINT"), "/"),
-		CasdoorClientID:       os.Getenv("CASDOOR_CLIENT_ID"),
-		CasdoorClientSecret:   os.Getenv("CASDOOR_CLIENT_SECRET"),
-		CasdoorRedirectURI:    os.Getenv("CASDOOR_REDIRECT_URI"),
-		CasdoorOrgName:      os.Getenv("CASDOOR_ORG_NAME"),
-		CasdoorAppName:      os.Getenv("CASDOOR_APP_NAME"),
+		CasdoorEndpoint:         strings.TrimRight(os.Getenv("CASDOOR_ENDPOINT"), "/"),
+		CasdoorPublicEndpoint:   strings.TrimRight(os.Getenv("CASDOOR_PUBLIC_ENDPOINT"), "/"),
+		CasdoorClientID:         os.Getenv("CASDOOR_CLIENT_ID"),
+		CasdoorClientSecret:     os.Getenv("CASDOOR_CLIENT_SECRET"),
+		CasdoorRedirectURI:      os.Getenv("CASDOOR_REDIRECT_URI"),
+		CasdoorOrgName:          os.Getenv("CASDOOR_ORG_NAME"),
+		CasdoorAppName:          os.Getenv("CASDOOR_APP_NAME"),
 		BuiltinPluginAPIBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("BUILTIN_PLUGIN_API_BASE_URL")), "/"),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
@@ -604,8 +604,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
-					r.Post("/promote-builtin", h.PromoteAgentToBuiltin)
-					r.Post("/demote-builtin", h.DemoteAgentFromBuiltin)
+					// r.Post("/promote-builtin", h.PromoteAgentToBuiltin)
+					// r.Post("/demote-builtin", h.DemoteAgentFromBuiltin)
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
