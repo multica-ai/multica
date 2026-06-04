@@ -814,7 +814,8 @@ export const WorkflowAdminsResponseSchema = z.object({
 export const EMPTY_WORKFLOW_ADMINS_RESPONSE = { admins: [] };
 
 // ---------------------------------------------------------------------------
-// External Plugin API (NEXT_PUBLIC_BUILTIN_PLUGIN_API_BASE_URL)
+// External Plugin API (proxied through the Multica backend;
+// the base URL is read from BUILTIN_PLUGIN_API_BASE_URL at runtime by the server).
 // ---------------------------------------------------------------------------
 
 export const BuiltinPluginSchema = z.object({

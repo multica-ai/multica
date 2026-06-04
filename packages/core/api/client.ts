@@ -791,6 +791,14 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
   }
 
+  async promoteAgentToBuiltin(id: string): Promise<Agent> {
+    return this.fetch(`/api/agents/${id}/promote-builtin`, { method: "POST" });
+  }
+
+  async demoteAgentFromBuiltin(id: string): Promise<Agent> {
+    return this.fetch(`/api/agents/${id}/demote-builtin`, { method: "POST" });
+  }
+
   async restoreAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
   }
@@ -804,38 +812,25 @@ export class ApiClient {
   }
 
   /**
-   * Fetch the list of builtin plugins from the external plugin catalog API.
-   * Uses bare fetch() — no auth headers, no workspace context — because
-   * this is a public third-party endpoint. Returns an empty list on any
+   * Fetch the list of builtin plugins via the Multica backend, which proxies
+   * the external plugin catalog API. The base URL is read from the server's
+   * runtime config (BUILTIN_PLUGIN_API_BASE_URL). Returns an empty list on any
    * failure so the UI gracefully degrades.
    */
   async listBuiltinPlugins(): Promise<BuiltinPluginListResponse> {
-    const baseUrl = (
-      typeof process !== "undefined" &&
-      process.env?.NEXT_PUBLIC_BUILTIN_PLUGIN_API_BASE_URL
-    ) || "";
-    if (!baseUrl) return EMPTY_BUILTIN_PLUGIN_LIST;
-
-    try {
-      const url = `${baseUrl}/api/plugins/builtin`;
-      const res = await fetch(url);
-      if (!res.ok) {
-        this.logger.warn(`Plugin API returned ${res.status}`, { endpoint: url });
-        return EMPTY_BUILTIN_PLUGIN_LIST;
-      }
-      const raw = (await res.json()) as unknown;
-      return parseWithFallback(
+    return this.fetch("/api/plugins/builtin").then((raw) =>
+      parseWithFallback(
         raw,
         BuiltinPluginListResponseSchema,
         EMPTY_BUILTIN_PLUGIN_LIST,
         { endpoint: "GET /api/plugins/builtin" },
-      );
-    } catch (err) {
+      ),
+    ).catch((err) => {
       this.logger.warn("Plugin API unavailable", {
         error: err instanceof Error ? err.message : "unknown error",
       });
       return EMPTY_BUILTIN_PLUGIN_LIST;
-    }
+    });
   }
 
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {

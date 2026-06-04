@@ -155,7 +155,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		CasdoorRedirectURI:    os.Getenv("CASDOOR_REDIRECT_URI"),
 		CasdoorOrgName:      os.Getenv("CASDOOR_ORG_NAME"),
 		CasdoorAppName:      os.Getenv("CASDOOR_APP_NAME"),
-		BuiltinPluginAPIBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("NEXT_PUBLIC_BUILTIN_PLUGIN_API_BASE_URL")), "/"),
+		BuiltinPluginAPIBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("BUILTIN_PLUGIN_API_BASE_URL")), "/"),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -278,6 +278,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
+	r.Get("/api/plugins/builtin", h.ListBuiltinPlugins)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
 
 	// Webhook ingress for autopilots. Outside the authenticated group on
@@ -603,6 +604,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
+					r.Post("/promote-builtin", h.PromoteAgentToBuiltin)
+					r.Post("/demote-builtin", h.DemoteAgentFromBuiltin)
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)

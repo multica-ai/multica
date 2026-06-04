@@ -76,6 +76,68 @@ func fetchPluginData(ctx context.Context, baseURL string, pluginID string) *plug
 	return nil
 }
 
+// ListBuiltinPlugins proxies the external builtin plugin catalog API so the
+// frontend doesn't need build-time env vars to reach it. The base URL is read
+// from the server's runtime config (BUILTIN_PLUGIN_API_BASE_URL).
+func (h *Handler) ListBuiltinPlugins(w http.ResponseWriter, r *http.Request) {
+	baseURL := h.cfg.BuiltinPluginAPIBaseURL
+	if baseURL == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items":    []any{},
+			"total":    0,
+			"page":     1,
+			"pageSize": 100,
+			"hasMore":  false,
+		})
+		return
+	}
+
+	url := fmt.Sprintf("%s/api/plugins/builtin?page=1&pageSize=100", baseURL)
+	req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	if err != nil {
+		slog.Warn("plugin: failed to build proxy request", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to build proxy request")
+		return
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Warn("plugin: proxy API unreachable", "url", url, "error", err)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items":    []any{},
+			"total":    0,
+			"page":     1,
+			"pageSize": 100,
+			"hasMore":  false,
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Warn("plugin: proxy API returned non-200", "status", resp.StatusCode)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items":    []any{},
+			"total":    0,
+			"page":     1,
+			"pageSize": 100,
+			"hasMore":  false,
+		})
+		return
+	}
+
+	// Pass through the raw response body so we don't drop any fields.
+	var body any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		slog.Warn("plugin: failed to decode proxy response", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to decode proxy response")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, body)
+}
+
 func fetchPluginList(ctx context.Context, baseURL string) (*builtinPluginListResponse, bool) {
 	if baseURL == "" {
 		return nil, false
