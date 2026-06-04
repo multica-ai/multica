@@ -238,44 +238,52 @@ install_cli() {
   if command_exists multica; then
     local current_ver
     # `multica version` outputs "multica v0.1.13 (commit: abc1234)" — extract just the version
-    current_ver=$(multica version 2>/dev/null | awk '{print $2}' || echo "unknown")
+    current_ver=$(multica version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
 
-    local latest_ver
-    latest_ver=$(get_latest_version)
-
-    # Normalize: strip leading 'v' for comparison
-    local current_cmp="${current_ver#v}"
-    local latest_cmp="${latest_ver#v}"
-
-    if [ -z "$latest_ver" ]; then
-      warn "Could not check latest release from GitHub. Will attempt to re-install anyway..."
-      install_cli_binary
-      return 0
-    fi
-
-    if [ "$current_cmp" = "$latest_cmp" ]; then
-      ok "Multica CLI is up to date ($current_ver)"
-      return 0
-    fi
-
-    info "Multica CLI $current_ver installed, latest is $latest_ver — upgrading..."
-    if command_exists brew && brew list "$BREW_PACKAGE" >/dev/null 2>&1; then
-      upgrade_cli_brew
+    # Interactive prompt when a terminal is available.
+    if [ -t 0 ]; then
+      printf "${BOLD}${YELLOW}⚠ Multica CLI (%s) is already installed. Overwrite? [y/N] ${RESET}" "$current_ver"
+      read -r answer
+      case "$answer" in
+        [yY]|[yY][eE][sS])
+          info "Removing existing multica..."
+          rm -f "$(command -v multica)"
+          ;;
+        *)
+          info "Installation cancelled."
+          exit 0
+          ;;
+      esac
     else
+      # Non-interactive (piped/CI): keep existing behaviour — attempt upgrade.
+      local latest_ver
+      latest_ver=$(get_latest_version)
+
+      local current_cmp="${current_ver#v}"
+      local latest_cmp="${latest_ver#v}"
+
+      if [ -z "$latest_ver" ]; then
+        warn "Could not check latest release from GitHub. Will attempt to re-install anyway..."
+        install_cli_binary
+        return 0
+      fi
+
+      if [ "$current_cmp" = "$latest_cmp" ]; then
+        ok "Multica CLI is up to date ($current_ver)"
+        return 0
+      fi
+
+      info "Multica CLI $current_ver installed, latest is $latest_ver — upgrading..."
       install_cli_binary
+
+      local new_ver
+      new_ver=$(multica version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
+      ok "Multica CLI upgraded ($current_ver → $new_ver)"
+      return 0
     fi
-
-    local new_ver
-    new_ver=$(multica version 2>/dev/null | awk '{print $2}' || echo "unknown")
-    ok "Multica CLI upgraded ($current_ver → $new_ver)"
-    return 0
   fi
 
-  if command_exists brew; then
-    install_cli_brew || install_cli_binary
-  else
-    install_cli_binary
-  fi
+  install_cli_binary
 
   # Verify
   if ! command_exists multica; then
@@ -397,9 +405,11 @@ run_default() {
   printf "\n"
   printf "  ${BOLD}Next: configure your environment${RESET}\n"
   printf "\n"
-  printf "     ${CYAN}multica setup${RESET}                # Connect to Multica Cloud (multica.ai)\n"
-  printf "     ${CYAN}multica setup self-host${RESET}       # Connect to a self-hosted server\n"
+  printf "     ${CYAN}multica config set server_url <YOUR_SERVER_URL>${RESET}\n"
+  printf "     ${CYAN}multica login --token <YOUR_TOKEN>${RESET}\n"
+  printf "     ${CYAN}multica daemon start${RESET}\n"
   printf "\n"
+  printf "  ${BOLD}Get your token:${RESET} open the web dashboard → Settings → Tokens\n"
   printf "  ${BOLD}Self-hosting?${RESET} Install the server first:\n"
   printf "     curl -fsSL https://raw.githubusercontent.com/Askhz/multica/main/scripts/install.sh | bash -s -- --with-server\n"
   printf "\n"
