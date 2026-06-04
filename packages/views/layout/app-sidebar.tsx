@@ -498,6 +498,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   });
   // CEREBRO-PATCH(channels-flag-gate): filter channel/dm pins when feature is disabled
   const channelsEnabled = useFeatureFlag("cerebro_channels");
+  // CEREBRO-PATCH(projects-flag-gate): TECH-2880 hide Projects sidebar entry when flag is OFF
+  const projectsEnabled = useFeatureFlag("cerebro_projects");
   const pinnedItems = React.useMemo(
     () =>
       channelsEnabled
@@ -850,7 +852,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <ApprovalsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 cerebro agent-passes entry in workspace group */}
                 <AgentPassesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
-                {/* Projects — collapsible nav item with sub-items */}
+                {/* CEREBRO-PATCH(projects-flag-gate): TECH-2880 wrap Projects collapsible in cerebro_projects gate */}
+                {projectsEnabled && (
                 <Collapsible defaultOpen>
                   <SidebarMenuItem>
                     <CollapsibleTrigger
@@ -946,6 +949,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </CollapsibleContent>
                   </SidebarMenuItem>
                 </Collapsible>
+                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
