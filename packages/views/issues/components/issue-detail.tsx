@@ -50,7 +50,7 @@ import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
-import { CommentCard } from "./comment-card";
+import { AttachmentList, CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
@@ -1798,6 +1798,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               debounceMs={1500}
               currentIssueId={id}
               attachments={descEditorAttachments}
+            />
+            <AttachmentList
+              attachments={issueAttachments}
+              content={issue.description || ""}
+              className="mt-3"
             />
 
             <div className="flex items-center gap-1 mt-3">

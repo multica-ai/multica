@@ -128,6 +128,19 @@ vi.mock("../../editor", () => ({
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
+  AttachmentDownloadProvider: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
+  Attachment: ({ attachment }: any) => {
+    const record = attachment.kind === "record"
+      ? attachment.attachment
+      : { filename: attachment.filename, url: attachment.url };
+    return (
+      <div data-testid="attachment-renderer">
+        {record.filename || record.url}
+      </div>
+    );
+  },
   ContentEditor: forwardRef(function MockContentEditor(
     { defaultValue, onUpdate, placeholder }: any,
     ref: any,
@@ -502,6 +515,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listAttachments.mockResolvedValue([]);
     mockApiObj.listMembers.mockResolvedValue([
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
@@ -529,6 +543,34 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+  });
+
+  it("renders issue-level image attachments that are not embedded in the description", async () => {
+    mockApiObj.listAttachments.mockResolvedValue([
+      {
+        id: "att-1",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: null,
+        chat_session_id: null,
+        chat_message_id: null,
+        uploader_type: "member",
+        uploader_id: "user-1",
+        filename: "screenshot.png",
+        url: "https://cdn.example.test/screenshot.png",
+        download_url: "/api/attachments/att-1/content?workspace_id=ws-1",
+        content_url: "/api/attachments/att-1/content?workspace_id=ws-1",
+        content_type: "image/png",
+        size_bytes: 1234,
+        created_at: "2026-06-04T00:00:00Z",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("attachment-renderer")).toHaveTextContent("screenshot.png");
+    });
   });
 
   it("renders workspace name as breadcrumb link", async () => {

@@ -85,4 +85,26 @@ describe("AttachmentList — standalone HTML attachment routes through Attachmen
     // HtmlAttachmentPreview replaces the row entirely.
     expect(screen.queryByText("report.html")).toBeNull();
   });
+
+  it("does not duplicate an attachment already referenced by relative content URL", () => {
+    const attachment = {
+      id: "att-1",
+      url: "https://api.example.test/uploads/screenshot.png",
+      download_url: "https://api.example.test/api/attachments/att-1/content?workspace_id=ws-1",
+      content_url: "https://api.example.test/api/attachments/att-1/content?workspace_id=ws-1",
+      filename: "screenshot.png",
+      content_type: "image/png",
+      size_bytes: 1234,
+    } as any;
+
+    renderWithQuery(
+      <AttachmentList
+        attachments={[attachment]}
+        content="![screenshot.png](/api/attachments/att-1/content?workspace_id=ws-1)"
+      />,
+    );
+
+    expect(document.querySelector("img")).toBeNull();
+    expect(screen.queryByText("screenshot.png")).toBeNull();
+  });
 });
