@@ -63,7 +63,8 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
-	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	IsSquadLeader           bool            // true when the agent is acting as a squad leader (may exit silently on no_action)
+	Plugins                 []PluginSource  // plugin marketplaces and names to install before running the task
 	// RequestingUserName + RequestingUserProfileDescription describe the
 	// human the agent is acting on behalf of. v1 sources them from the
 	// runtime owner (the user who registered the daemon). Rendered into the
@@ -192,12 +193,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.OpenclawIncludeRoot = result.IncludeRoot
 	}
 
-	// For CSC, install plugins into the task working directory. The plugins
-	// provide the runtime with the tools it needs to execute the dispatched
-	// task. Fail closed: without plugins, the task cannot run meaningfully.
+	// Install plugins into the task working directory. The plugins provide
+	// the runtime with the tools it needs to execute the dispatched task.
+	// Fail closed: if plugins are specified but installation fails, the task
+	// cannot run meaningfully.
 	if params.Provider == "csc" && params.CSCBin != "" {
-		if err := setupCSCPlugins(context.Background(), params.CSCBin, env.WorkDir, logger); err != nil {
-			return nil, fmt.Errorf("csc plugin setup: %w", err)
+		if err := setupPlugins(context.Background(), params.Provider, params.CSCBin, env.WorkDir, params.Task.Plugins, logger); err != nil {
+			return nil, fmt.Errorf("plugin setup: %w", err)
 		}
 	}
 
