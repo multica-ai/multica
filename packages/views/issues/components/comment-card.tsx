@@ -137,7 +137,7 @@ export function AttachmentList({
   // and duplicates of the same file (same name/type/size) that are referenced.
   const standalone = content
     ? attachments.filter((a) => {
-        if (content.includes(a.url)) return false;
+        if (attachmentReferencedInContent(content, a)) return false;
         // Dedup: if another attachment with the same file identity is already
         // inline in the content, this is a duplicate upload — skip it.
         const hasSiblingInContent = attachments.some(
@@ -146,7 +146,7 @@ export function AttachmentList({
             other.filename === a.filename &&
             other.content_type === a.content_type &&
             other.size_bytes === a.size_bytes &&
-            content.includes(other.url),
+            attachmentReferencedInContent(content, other),
         );
         if (hasSiblingInContent) return false;
         return true;
@@ -170,6 +170,31 @@ export function AttachmentList({
   );
 }
 
+function comparableAttachmentUrl(raw: string): string | null {
+  if (!raw) return null;
+  try {
+    const url = raw.startsWith("/")
+      ? new URL(raw, "https://multica.local")
+      : new URL(raw);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function attachmentReferencedInContent(content: string, attachment: Attachment): boolean {
+  const candidates = [
+    attachment.url,
+    attachment.content_url,
+    attachment.download_url,
+  ].filter(Boolean);
+  if (candidates.some((candidate) => content.includes(candidate))) return true;
+  const comparable = candidates
+    .map(comparableAttachmentUrl)
+    .filter((value): value is string => Boolean(value));
+  return comparable.some((value) => content.includes(value));
+}
+
 function collectActiveAttachmentIds(
   content: string,
   attachments: Attachment[],
@@ -177,7 +202,7 @@ function collectActiveAttachmentIds(
 ): string[] {
   const ids = new Set<string>();
   for (const attachment of attachments) {
-    if (content.includes(attachment.url)) ids.add(attachment.id);
+    if (attachmentReferencedInContent(content, attachment)) ids.add(attachment.id);
   }
   for (const id of retainedStandaloneIds ?? []) ids.add(id);
   return [...ids];
