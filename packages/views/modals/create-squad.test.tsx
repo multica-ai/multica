@@ -209,6 +209,7 @@ function makeAgent(overrides: Partial<Agent> & { id: string; name: string; owner
     status: "idle",
     max_concurrent_tasks: 1,
     model: "",
+    plugin_id: null,
     skills: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

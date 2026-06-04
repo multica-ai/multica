@@ -44,6 +44,7 @@ type MulticaAgent struct {
 	McpConfig          []byte             `json:"mcp_config"`
 	Model              pgtype.Text        `json:"model"`
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
+	PluginID           pgtype.Text        `json:"plugin_id"`
 }
 
 type MulticaAgentAuditLog struct {

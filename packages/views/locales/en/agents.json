@@ -128,6 +128,16 @@
     "section_properties": "Properties",
     "section_details": "Details",
     "section_skills": "Skills",
+    "section_plugin": "Plugin",
+    "plugin_none": "None",
+    "plugin_attach": "Attach",
+    "plugin_attach_aria": "Attach a plugin",
+    "plugin_change_aria": "Change plugin",
+    "plugin_clear": "Remove plugin",
+    "plugin_list_empty": "No plugins available",
+    "plugin_unavailable": "Unavailable",
+    "plugin_removed_hint": "This plugin has been removed from the catalog. Remove the binding or select a different plugin.",
+    "plugin_unavailable_chip": "Unavailable ({{id}})",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
     "prop_thinking": "Thinking",
@@ -193,6 +203,7 @@
     "tasks": "Tasks",
     "instructions": "Instructions",
     "skills": "Skills",
+    "plugin": "Plugin",
     "environment": "Environment",
     "custom_args": "Custom Args",
     "discard_dialog_title": "Discard unsaved changes?",
@@ -243,6 +254,12 @@
       "list_empty_default": "No skills available.",
       "list_no_match": "No skills match.",
       "search_placeholder": "Search skills…"
+    },
+    "plugin_section": {
+      "label": "Plugin",
+      "placeholder": "Select a plugin...",
+      "collapse": "Collapse",
+      "search": "Search plugins..."
     },
     "avatar": {
       "change_aria": "Change avatar",
@@ -305,6 +322,14 @@
       "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
+    },
+    "plugin": {
+      "intro": "Assign a built-in plugin from the plugin marketplace. The plugin extends this agent with additional capabilities.",
+      "info_hint": "Plugins are maintained by the community. Check the plugin description before installing.",
+      "change_action": "Change",
+      "select_action": "Select plugin",
+      "empty_title": "No plugin selected",
+      "empty_hint": "Choose a plugin from the marketplace to extend this agent's capabilities."
     },
     "activity": {
       "section_now": "Now",

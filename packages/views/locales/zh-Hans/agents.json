@@ -124,6 +124,16 @@
     "section_properties": "属性",
     "section_details": "详情",
     "section_skills": "skill",
+    "section_plugin": "插件",
+    "plugin_none": "无",
+    "plugin_attach": "附加",
+    "plugin_attach_aria": "附加插件",
+    "plugin_change_aria": "更换插件",
+    "plugin_clear": "移除插件",
+    "plugin_list_empty": "暂无可用插件",
+    "plugin_unavailable": "已失效",
+    "plugin_removed_hint": "该插件已从市场中移除，请解除绑定或选择其他插件。",
+    "plugin_unavailable_chip": "已失效（{{id}}）",
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_thinking": "思考",
@@ -189,6 +199,7 @@
     "tasks": "task",
     "instructions": "指令",
     "skills": "skill",
+    "plugin": "plugin",
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "discard_dialog_title": "放弃未保存的修改？",
@@ -238,6 +249,12 @@
       "list_empty_default": "暂无 skill。",
       "list_no_match": "没有匹配的 skill。",
       "search_placeholder": "搜索 skill…"
+    },
+    "plugin_section": {
+      "label": "插件",
+      "placeholder": "选择插件...",
+      "collapse": "收起",
+      "search": "搜索插件..."
     },
     "avatar": {
       "change_aria": "更换头像",
@@ -299,6 +316,14 @@
       "add_dialog_confirm_other": "添加 {{count}} 个 skill",
       "add_dialog_cancel": "取消",
       "add_failed_toast": "添加 skill 失败"
+    },
+    "plugin": {
+      "intro": "从插件市场为智能体分配一个内置插件。插件会为该智能体扩展额外的能力。",
+      "info_hint": "插件由社区维护。安装前请查看插件说明。",
+      "change_action": "切换",
+      "select_action": "选择插件",
+      "empty_title": "未选择插件",
+      "empty_hint": "从市场中选择一个插件来扩展该智能体的能力。"
     },
     "activity": {
       "section_now": "当前",

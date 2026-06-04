@@ -20,8 +20,8 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO multica_agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, thinking_level
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    instructions, custom_env, custom_args, mcp_config, model, thinking_level, plugin_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -41,6 +41,7 @@ UPDATE multica_agent SET
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
+    plugin_id = COALESCE(sqlc.narg('plugin_id'), plugin_id),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -575,4 +576,12 @@ SET status = CASE WHEN EXISTS (
 ) THEN 'working' ELSE 'idle' END,
     updated_at = now()
 WHERE a.id = $1
+RETURNING *;
+
+-- name: ClearAgentPluginId :one
+-- Explicit NULL-clear for plugin_id. COALESCE-based UpdateAgent cannot
+-- set the column back to NULL, so the API layer routes "user removed plugin"
+-- through this dedicated query.
+UPDATE multica_agent SET plugin_id = NULL, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
 RETURNING *;

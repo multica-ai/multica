@@ -812,3 +812,37 @@ export const WorkflowAdminsResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_WORKFLOW_ADMINS_RESPONSE = { admins: [] };
+
+// ---------------------------------------------------------------------------
+// External Plugin API (NEXT_PUBLIC_BUILTIN_PLUGIN_API_BASE_URL)
+// ---------------------------------------------------------------------------
+
+export const BuiltinPluginSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  slug: z.string(),
+  version: z.string(),
+  category: z.string(),
+});
+
+export type BuiltinPlugin = z.infer<typeof BuiltinPluginSchema>;
+
+export const BuiltinPluginListResponseSchema = z.object({
+  items: z.array(BuiltinPluginSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+  hasMore: z.boolean(),
+});
+
+/** Empty list returned when the external API is unreachable or malformed. */
+export const EMPTY_BUILTIN_PLUGIN_LIST: BuiltinPluginListResponse = {
+  items: [],
+  total: 0,
+  page: 1,
+  pageSize: 100,
+  hasMore: false,
+};
+
+export type BuiltinPluginListResponse = z.infer<typeof BuiltinPluginListResponseSchema>;

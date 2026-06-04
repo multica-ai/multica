@@ -7,6 +7,7 @@ import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
+import { PluginSelect } from "./plugin-select";
 import { AvatarPicker } from "./avatar-picker";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -92,6 +93,7 @@ export function CreateAgentDialog({
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
     () => new Set(template?.skills.map((s) => s.id) ?? []),
   );
+  const [pluginId, setPluginId] = useState(template?.plugin_id ?? "");
   const [creating, setCreating] = useState(false);
 
   // Duplicate-mode pre-fill: clone lands on the source agent's runtime so
@@ -162,6 +164,7 @@ export function CreateAgentDialog({
         model: model.trim() || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
+        plugin_id: pluginId.trim() || undefined,
       };
       if (template) {
         // Duplicate path: forward the hidden config fields the source
@@ -355,6 +358,11 @@ export function CreateAgentDialog({
                   ? t(($) => $.create_dialog.instructions.placeholder_duplicate)
                   : t(($) => $.create_dialog.instructions.placeholder_blank)
               }
+            />
+
+            <PluginSelect
+              value={pluginId}
+              onChange={setPluginId}
             />
 
             <SkillMultiSelect

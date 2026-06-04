@@ -68,6 +68,7 @@ export const mockAgents: Agent[] = [
     visibility: "workspace",
     max_concurrent_tasks: 3,
     model: "",
+    plugin_id: null,
     owner_id: null,
     skills: [],
     created_at: "2026-01-01T00:00:00Z",

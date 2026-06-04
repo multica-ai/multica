@@ -142,6 +142,8 @@ export interface Agent {
    * (MUL-2339).
    */
   thinking_level?: string;
+  /** External plugin bound to this agent. NULL when no plugin is set. */
+  plugin_id: string | null;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   created_at: string;
@@ -177,6 +179,8 @@ export interface CreateAgentRequest {
   model?: string;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
   thinking_level?: string;
+  /** Optional external plugin ID. Omitted/undefined = skip. */
+  plugin_id?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
@@ -274,6 +278,13 @@ export interface UpdateAgentRequest {
    *     runtime's provider enum, rejected with 400 if not recognised
    */
   thinking_level?: string;
+  /**
+   * External plugin binding. Tri-state:
+   *   - omitted → no change
+   *   - "" → clear plugin
+   *   - non-empty → set to this ID
+   */
+  plugin_id?: string | null;
 }
 
 // Skills

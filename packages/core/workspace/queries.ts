@@ -1,6 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
+import { EMPTY_BUILTIN_PLUGIN_LIST } from "../api/schemas";
 import type { Agent, Squad, Workspace } from "../types";
+import type { BuiltinPluginListResponse } from "../api/schemas";
 
 export const workspaceKeys = {
   all: (wsId: string) => ["workspaces", wsId] as const,
@@ -132,5 +134,22 @@ export function assigneeFrequencyOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.assigneeFrequency(wsId),
     queryFn: () => api.getAssigneeFrequency(),
+  });
+}
+
+// Plugin catalog (global, not workspace-scoped — external API)
+export const pluginKeys = {
+  all: ["plugins"] as const,
+  builtin: () => [...pluginKeys.all, "builtin"] as const,
+};
+
+export function builtinPluginListOptions() {
+  return queryOptions<BuiltinPluginListResponse>({
+    queryKey: pluginKeys.builtin(),
+    queryFn: () => api.listBuiltinPlugins(),
+    // Builtin plugin catalog changes very infrequently — cache for 30 min.
+    staleTime: 30 * 60 * 1000,
+    // Start with empty list while loading.
+    placeholderData: EMPTY_BUILTIN_PLUGIN_LIST,
   });
 }

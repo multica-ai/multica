@@ -51,6 +51,7 @@ type AgentResponse struct {
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
 	ThinkingLevel string              `json:"thinking_level"`
+	PluginID      *string             `json:"plugin_id"`
 	OwnerID       *string             `json:"owner_id"`
 	Skills        []AgentSkillSummary `json:"skills"`
 	CreatedAt     string              `json:"created_at"`
@@ -111,6 +112,7 @@ func agentToResponse(a db.MulticaAgent) AgentResponse {
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
 		ThinkingLevel:      a.ThinkingLevel.String,
+		PluginID:           textToPtr(a.PluginID),
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -218,6 +220,7 @@ type TaskAgentData struct {
 	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
 	Model         string                   `json:"model,omitempty"`
 	ThinkingLevel string                   `json:"thinking_level,omitempty"`
+	Plugin        *PluginInfo              `json:"plugin,omitempty"`
 }
 
 func taskToResponse(t db.MulticaAgentTaskQueue) AgentTaskResponse {
@@ -439,6 +442,7 @@ type CreateAgentRequest struct {
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
 	ThinkingLevel      string            `json:"thinking_level"`
+	PluginID           *string           `json:"plugin_id"`
 	// Template records which template slug was used to seed this agent
 	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
 	// the caller didn't come from a template picker — the `agent_created`
@@ -585,6 +589,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		PluginID:           ptrToText(req.PluginID),
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -643,6 +648,13 @@ type UpdateAgentRequest struct {
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
 	ThinkingLevel *string `json:"thinking_level"`
+	// PluginID links this agent to an external plugin definition for
+	// skill, tool, and model configuration. Tri-state semantics match
+	// ThinkingLevel:
+	//   - field omitted → no change (leave existing value alone)
+	//   - field present with "" → explicit clear (remove plugin link)
+	//   - field present with non-empty value → set
+	PluginID *string `json:"plugin_id"`
 }
 
 // workspaceAlwaysRedactEnv checks whether the workspace has opted into
@@ -812,6 +824,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
+	shouldClearPluginId := false
+	if req.PluginID != nil {
+		if *req.PluginID == "" {
+			shouldClearPluginId = true
+		} else {
+			params.PluginID = pgtype.Text{String: *req.PluginID, Valid: true}
+		}
+	}
 
 	// thinking_level handling (MUL-2339). Tri-state semantics:
 	//   - field omitted  → leave column alone (COALESCE narg), but if a
@@ -874,7 +894,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// mcp_config / thinking_level: null/empty in the request means explicitly
+	// mcp_config / thinking_level / plugin_id: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL,
 	// so we use dedicated clear queries.
 	if shouldClearMcpConfig {
@@ -890,6 +910,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
+			return
+		}
+	}
+	if shouldClearPluginId {
+		updated, err = h.Queries.ClearAgentPluginId(r.Context(), db.ClearAgentPluginIdParams{
+			ID:          updated.ID,
+			WorkspaceID: existing.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("clear agent plugin_id failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear plugin_id: "+err.Error())
 			return
 		}
 	}

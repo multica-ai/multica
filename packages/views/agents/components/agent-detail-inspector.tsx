@@ -43,6 +43,7 @@ import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
+import { PluginAttach } from "./inspector/plugin-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
 
@@ -180,6 +181,22 @@ export function AgentDetailInspector({
           </span>
         </PropRow>
       </Section>
+
+      {/* Plugin */}
+      <div className="flex flex-col border-b px-5 py-4">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            {t(($) => $.inspector.section_plugin)}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          <PluginAttach
+            agent={agent}
+            canEdit={canEdit}
+            onChange={(pluginId) => update({ plugin_id: pluginId || "" })}
+          />
+        </div>
+      </div>
 
       {/* Skills */}
       <div className="flex flex-col border-b px-5 py-4">

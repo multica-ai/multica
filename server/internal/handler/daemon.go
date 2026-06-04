@@ -1124,6 +1124,20 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
 		}
+
+			// Populate plugin metadata and inject plugin content into
+			// agent instructions. Best-effort -- failures must not block
+			// task startup.
+			pd := fetchPluginData(r.Context(), h.cfg.BuiltinPluginAPIBaseURL, agent.PluginID.String)
+			if pd != nil {
+				resp.Agent.Plugin = pd.Info
+				if pd.Content != "" {
+					if resp.Agent.Instructions != "" {
+						resp.Agent.Instructions += "\n\n"
+					}
+					resp.Agent.Instructions += "You must follow these instructions:\n\n" + pd.Content
+				}
+			}
 	}
 
 	// Resolve the runtime owner's profile description so the daemon can

@@ -7,6 +7,7 @@ import {
   FileText,
   KeyRound,
   ListTodo,
+  Puzzle,
   Terminal,
 } from "lucide-react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -23,6 +24,7 @@ import {
 import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
+import { PluginTab } from "./tabs/plugin-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
@@ -33,14 +35,16 @@ type DetailTab =
   | "tasks"
   | "instructions"
   | "skills"
+  | "plugin"
   | "env"
   | "custom_args";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "plugin" | "environment" | "custom_args"> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
   skills: "skills",
+  plugin: "plugin",
   env: "environment",
   custom_args: "custom_args",
 };
@@ -53,6 +57,7 @@ const detailTabs: {
   { id: "tasks", icon: ListTodo },
   { id: "instructions", icon: FileText },
   { id: "skills", icon: BookOpenText },
+  { id: "plugin", icon: Puzzle },
   { id: "env", icon: KeyRound },
   { id: "custom_args", icon: Terminal },
 ];
@@ -165,6 +170,11 @@ export function AgentOverviewPane({
         {activeTab === "skills" && (
           <TabContent>
             <SkillsTab agent={agent} />
+          </TabContent>
+        )}
+        {activeTab === "plugin" && (
+          <TabContent>
+            <PluginTab agent={agent} />
           </TabContent>
         )}
         {activeTab === "env" && (

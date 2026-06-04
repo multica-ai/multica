@@ -155,6 +155,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		CasdoorRedirectURI:    os.Getenv("CASDOOR_REDIRECT_URI"),
 		CasdoorOrgName:      os.Getenv("CASDOOR_ORG_NAME"),
 		CasdoorAppName:      os.Getenv("CASDOOR_APP_NAME"),
+		BuiltinPluginAPIBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("NEXT_PUBLIC_BUILTIN_PLUGIN_API_BASE_URL")), "/"),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {

@@ -178,7 +178,10 @@ import {
   EMPTY_MY_WORKFLOW_TASKS_RESPONSE,
   WorkflowAdminsResponseSchema,
   EMPTY_WORKFLOW_ADMINS_RESPONSE,
+  BuiltinPluginListResponseSchema,
+  EMPTY_BUILTIN_PLUGIN_LIST,
 } from "./schemas";
+import type { BuiltinPluginListResponse } from "./schemas";
 
 /** Identifies the calling client to the server.
  *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
@@ -798,6 +801,41 @@ export class ApiClient {
   // surfaces can clear their live cards.
   async cancelAgentTasks(id: string): Promise<{ cancelled: number }> {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
+  }
+
+  /**
+   * Fetch the list of builtin plugins from the external plugin catalog API.
+   * Uses bare fetch() — no auth headers, no workspace context — because
+   * this is a public third-party endpoint. Returns an empty list on any
+   * failure so the UI gracefully degrades.
+   */
+  async listBuiltinPlugins(): Promise<BuiltinPluginListResponse> {
+    const baseUrl = (
+      typeof process !== "undefined" &&
+      process.env?.NEXT_PUBLIC_BUILTIN_PLUGIN_API_BASE_URL
+    ) || "";
+    if (!baseUrl) return EMPTY_BUILTIN_PLUGIN_LIST;
+
+    try {
+      const url = `${baseUrl}/api/plugins/builtin`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        this.logger.warn(`Plugin API returned ${res.status}`, { endpoint: url });
+        return EMPTY_BUILTIN_PLUGIN_LIST;
+      }
+      const raw = (await res.json()) as unknown;
+      return parseWithFallback(
+        raw,
+        BuiltinPluginListResponseSchema,
+        EMPTY_BUILTIN_PLUGIN_LIST,
+        { endpoint: "GET /api/plugins/builtin" },
+      );
+    } catch (err) {
+      this.logger.warn("Plugin API unavailable", {
+        error: err instanceof Error ? err.message : "unknown error",
+      });
+      return EMPTY_BUILTIN_PLUGIN_LIST;
+    }
   }
 
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
