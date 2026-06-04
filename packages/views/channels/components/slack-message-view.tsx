@@ -437,12 +437,14 @@ const MessageRow = memo(function MessageRow({
         </AlertDialogContent>
       </AlertDialog>
       {/* CEREBRO-PATCH(channels-create-issue-from-message): TECH-2909 */}
-      <CreateIssueFromMessageDialog
-        open={createIssueOpen}
-        onClose={() => setCreateIssueOpen(false)}
-        channelId={channelId}
-        entry={entry}
-      />
+      {createIssueOpen && (
+        <CreateIssueFromMessageDialog
+          open
+          onClose={() => setCreateIssueOpen(false)}
+          channelId={channelId}
+          entry={entry}
+        />
+      )}
     </div>
   );
 });

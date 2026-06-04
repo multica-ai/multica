@@ -3,7 +3,7 @@
 // content and posts a thread reply with a mention link once the issue is created.
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { ListPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
@@ -40,15 +40,6 @@ export function CreateIssueFromMessageDialog({
   const [title, setTitle] = useState(() => defaultTitle(entry.content ?? ""));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const createIssue = useCreateIssue();
-
-  // Reset form state each time the dialog opens so stale title/isSubmitting don't persist.
-  useEffect(() => {
-    if (open) {
-      setTitle(defaultTitle(entry.content ?? ""));
-      setIsSubmitting(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
   const { mutateAsync: createComment } = useCreateComment(channelId);
 
   const handleCreate = async () => {
