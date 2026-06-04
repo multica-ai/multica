@@ -5,7 +5,7 @@
 # and the daemon is started in the foreground. Waits for the daemon to register
 # its claude runtime, then flips visibility and creates agents from templates.
 #
-# Reads from secret bag (env):   MULTICA_PAT, MULTICA_WORKSPACE_ID, LITELLM_API_KEY
+# Reads from secret bag (env):   MULTICA_PAT, AGENTFARM_WORKSPACE_ID, LITELLM_API_KEY
 # Reads from Downward API (env): WORKSPACE_SLUG (set from metadata.namespace)
 # Optional from secret bag:      GIT_USER_EMAIL, JIRA_PAT
 #                                (both together trigger acli auth; either missing skips)
@@ -21,7 +21,7 @@ readonly LITELLM_BASE_URL="https://llmproxy.g2.com"
 
 # ── 0. Sanity-check required env. Fail loud over silent partial provisioning. ─
 : "${MULTICA_PAT:?MULTICA_PAT missing from secret bag}"
-: "${MULTICA_WORKSPACE_ID:?MULTICA_WORKSPACE_ID missing from secret bag}"
+: "${AGENTFARM_WORKSPACE_ID:?AGENTFARM_WORKSPACE_ID missing from secret bag}"
 : "${LITELLM_API_KEY:?LITELLM_API_KEY missing from secret bag}"
 : "${WORKSPACE_SLUG:?WORKSPACE_SLUG missing — must be injected via Downward API (fieldRef: metadata.namespace)}"
 
@@ -40,7 +40,7 @@ cat > "${config_dir}/config.json" <<JSON
   "server_url": "${MULTICA_SERVER_URL}",
   "app_url": "${MULTICA_SERVER_URL}",
   "token": "${MULTICA_PAT}",
-  "workspace_id": "${MULTICA_WORKSPACE_ID}"
+  "workspace_id": "${AGENTFARM_WORKSPACE_ID}"
 }
 JSON
 
@@ -85,7 +85,7 @@ echo "agentfarm-bootstrap: claude runtime registered: ${CLAUDE_RUNTIME_ID}"
 while IFS= read -r _rid; do
   curl -fsS -X PATCH "${MULTICA_SERVER_URL}/api/runtimes/${_rid}" \
     -H "Authorization: Bearer ${MULTICA_PAT}" \
-    -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}" \
+    -H "X-Workspace-ID: ${AGENTFARM_WORKSPACE_ID}" \
     -H "Content-Type: application/json" \
     -d '{"visibility":"public"}'
   echo "agentfarm-bootstrap: runtime ${_rid} set to public"

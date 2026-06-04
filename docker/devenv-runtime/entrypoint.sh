@@ -127,7 +127,7 @@ fi
 
 # ── Agentfarm mode ───────────────────────────────────────────────────────────
 if [ -n "${MULTICA_PAT:-}" ] \
-  && [ -n "${MULTICA_WORKSPACE_ID:-}" ] \
+  && [ -n "${AGENTFARM_WORKSPACE_ID:-}" ] \
   && [ -n "${LITELLM_API_KEY:-}" ] \
   && [ -n "${WORKSPACE_SLUG:-}" ]; then
   echo "devenv: agentfarm mode — running agentfarm-bootstrap.sh"

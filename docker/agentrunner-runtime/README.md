@@ -16,7 +16,7 @@ netcat-openbsd, the agentfarm bootstrap, agent templates, and opencode config.
 | Var                    | Notes                                                                      |
 |------------------------|----------------------------------------------------------------------------|
 | `MULTICA_PAT`          | Agentfarm service account PAT. Used by `agentfarm-bootstrap.sh` to log in the multica daemon and register the claude runtime. |
-| `MULTICA_WORKSPACE_ID` | UUID of the target agentfarm workspace.                                    |
+| `AGENTFARM_WORKSPACE_ID` | UUID of the target agentfarm workspace.                                    |
 | `LITELLM_API_KEY`      | LiteLLM virtual key. Written to `auth.json` for opencode and passed to agent templates as the Anthropic/OpenAI key. |
 | `WORKSPACE_SLUG`       | Kubernetes namespace (`metadata.namespace`) — injected via Downward API. Used to name the multica daemon device. |
 
@@ -47,7 +47,7 @@ docker run --rm --entrypoint sh ghcr.io/g2crowd/agentrunner-runtime:dev \
 docker run --rm -d --name agentrunner-smoke \
   -p 4096:4096 \
   -e MULTICA_PAT=... \
-  -e MULTICA_WORKSPACE_ID=... \
+  -e AGENTFARM_WORKSPACE_ID=... \
   -e LITELLM_API_KEY=... \
   -e WORKSPACE_SLUG=smoke-test \
   ghcr.io/g2crowd/agentrunner-runtime:dev

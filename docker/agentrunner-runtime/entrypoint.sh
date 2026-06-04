@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ── Mandatory env ─────────────────────────────────────────────────────────────
 : "${MULTICA_PAT:?MULTICA_PAT required}"
-: "${MULTICA_WORKSPACE_ID:?MULTICA_WORKSPACE_ID required}"
+: "${AGENTFARM_WORKSPACE_ID:?AGENTFARM_WORKSPACE_ID required}"
 : "${LITELLM_API_KEY:?LITELLM_API_KEY required}"
 : "${WORKSPACE_SLUG:?WORKSPACE_SLUG required (Downward API: metadata.namespace)}"
 
@@ -41,7 +41,7 @@ cat > "${config_dir}/config.json" <<JSON
   "server_url": "${MULTICA_SERVER_URL}",
   "app_url": "${MULTICA_SERVER_URL}",
   "token": "${MULTICA_PAT}",
-  "workspace_id": "${MULTICA_WORKSPACE_ID}"
+  "workspace_id": "${AGENTFARM_WORKSPACE_ID}"
 }
 JSON
 
