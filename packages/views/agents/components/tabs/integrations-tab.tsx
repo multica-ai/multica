@@ -47,6 +47,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage =
     currentMember?.role === "owner" || currentMember?.role === "admin";
+  const hasActiveInstall =
+    listing?.installations.some(
+      (inst) => inst.agent_id === agent.id && inst.status === "active",
+    ) ?? false;
 
   return (
     <div className="space-y-6">
@@ -74,24 +78,31 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             <p className="text-xs text-muted-foreground">
               {ts(($) => $.lark.not_enabled_title)}
             </p>
-          ) : !installSupported ? (
+          ) : !canManage ? (
+            // The backend gates install / manage on workspace owner/admin.
+            // Members can still view connected bots in the (member-visible)
+            // Settings listing, so point them there rather than show a dead
+            // button.
+            <p className="text-xs text-muted-foreground">
+              {t(($) => $.tab_body.integrations.members_note)}
+            </p>
+          ) : !installSupported && !hasActiveInstall ? (
             // Key is set but the device-flow transport isn't wired in this
-            // build — scanning would fail at the post-poll bot-info step, so
-            // we surface the "coming soon" notice instead of a broken CTA.
+            // build — a fresh scan would fail at the post-poll bot-info step,
+            // so we surface the "coming soon" notice instead of a broken CTA.
+            // An agent that is ALREADY bound is exempt: install_supported only
+            // governs NEW installs, so the bound state must still render below
+            // (server/internal/handler/lark.go).
             <div className="space-y-1">
               <p className="text-xs font-medium">{ts(($) => $.lark.preview_title)}</p>
               <p className="text-xs text-muted-foreground">
                 {ts(($) => $.lark.preview_description)}
               </p>
             </div>
-          ) : !canManage ? (
-            // The backend gates install on workspace owner/admin. Members
-            // can still view connected bots in the (member-visible) Settings
-            // listing, so point them there rather than show a dead button.
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.tab_body.integrations.members_note)}
-            </p>
           ) : (
+            // Owner/admin with either a supported transport or an existing
+            // bot: the shared button renders the scan-to-bind CTA or the
+            // already-connected "Manage in Lark" badge.
             <LarkAgentBindButton agentId={agent.id} agentName={agent.name} />
           )}
         </div>

@@ -272,6 +272,38 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     expect(screen.getByRole("button", { name: /Bind to Lark/i })).toBeTruthy();
   });
 
+  it("keeps the Connected + Manage badge for an already-installed agent even when new installs are unavailable (install_supported=false)", () => {
+    // install_supported governs only NEW scan-installs — an already-installed
+    // bot stays manageable when the device-flow transport is unwired
+    // (server/internal/handler/lark.go: "already-installed bots still appear
+    // and remain manageable"). Regression: the install_supported gate used to
+    // run before the existing-installation check and hid the bound state.
+    installationsRef.current.install_supported = false;
+    installationsRef.current.installations = [
+      {
+        id: "inst-1",
+        workspace_id: "ws-1",
+        agent_id: "agent-1",
+        app_id: "cli_existing_app",
+        bot_open_id: "ou_existing_bot",
+        installer_user_id: "user-1",
+        status: "active",
+        installed_at: "2026-06-03T00:00:00Z",
+        created_at: "2026-06-03T00:00:00Z",
+        updated_at: "2026-06-03T00:00:00Z",
+      },
+    ];
+    const { container } = render(
+      <LarkAgentBindButton agentId="agent-1" agentName="Bot" />,
+      { wrapper: I18nWrapper },
+    );
+    expect(container.querySelector("button")).toBeNull();
+    expect(screen.getByText(/Connected to Lark/i)).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /Manage in Lark/i }),
+    ).toBeTruthy();
+  });
+
   it("still shows the bind CTA when this agent's only installation is revoked (treat as not-installed for re-bind)", () => {
     installationsRef.current.installations = [
       {

@@ -259,17 +259,24 @@ function InstallationRow({
 // detail page. The Settings panel above is the management view; this
 // button is the entry point.
 //
-// The button hides itself when either:
-//   (a) the device-flow install path is not wired on the server
-//       (install_supported == false on the listing endpoint), or
-//   (b) the current viewer is not a workspace owner/admin — the backend
-//       gates `POST /lark/install/begin` and the status poll on those
-//       roles (see server/cmd/server/router.go:478-487), and
-//       `canEditAgent` lets agent owners through even when they're not
-//       workspace admins, so the parent's `canEdit` gate alone would
-//       expose a CTA that's guaranteed to 403.
-// This is the "don't expose a flow that's guaranteed to fail"
-// guarantee — both halves matter.
+// Visibility rules, in order:
+//   1. Non-owner/admin viewers see nothing — the backend gates
+//      `POST /lark/install/begin`, the status poll, AND disconnect on
+//      those roles (see server/cmd/server/router.go), and `canEditAgent`
+//      lets agent owners through even when they're not workspace admins,
+//      so the parent's `canEdit` gate alone would expose controls that
+//      are guaranteed to 403.
+//   2. If this agent ALREADY has an active installation, owner/admins see
+//      the "Connected + Manage in Lark" badge — regardless of
+//      install_supported. install_supported governs only whether NEW
+//      scan-installs can complete; already-installed bots stay manageable
+//      when the device-flow transport is unwired (see
+//      server/internal/handler/lark.go — "already-installed bots still
+//      appear and remain manageable"). Gating the badge on it would hide a
+//      bound agent's connected state the moment the transport went away.
+//   3. Otherwise the Bind CTA shows only when install_supported is true —
+//      a fresh scan against a stub transport would fail at the post-poll
+//      bot-info step, so we don't surface a flow that's guaranteed to fail.
 export function LarkAgentBindButton({
   agentId,
   agentName,
@@ -298,16 +305,15 @@ export function LarkAgentBindButton({
   const canManage =
     currentMember?.role === "owner" || currentMember?.role === "admin";
 
-  if (!installSupported || !canManage) return null;
+  if (!canManage) return null;
 
-  // Re-scanning the same agent overwrites the existing installation row
-  // (lark_installation upserts on the (workspace_id, agent_id) UNIQUE)
-  // and leaves the previously-created PersonalAgent dangling on Lark's
-  // side as a zombie bot — users were getting trapped re-scanning when
-  // they wanted to manage scopes. When this agent already has an
-  // ACTIVE installation, we close the install entry point and surface
-  // a link to the Bot's Lark app page instead, where scopes / display
-  // name / additional permissions are managed.
+  // Existing-installation check runs BEFORE the install_supported gate:
+  // already-installed bots stay manageable even when new scan-installs are
+  // unavailable (server/internal/handler/lark.go). Surfacing the badge here
+  // also closes the re-scan zombie-bot trap — re-scanning the same agent
+  // upserts the row and orphans the previously-created PersonalAgent, so we
+  // close the install entry point and link to the Bot's Lark app page where
+  // scopes / display name / additional permissions are actually managed.
   const existing = listing?.installations.find(
     (inst) => inst.agent_id === agentId && inst.status === "active",
   );
@@ -316,6 +322,10 @@ export function LarkAgentBindButton({
       <LarkAgentBotConnectedBadge installation={existing} className={className} />
     );
   }
+
+  // No existing bot and the device-flow transport isn't wired end-to-end:
+  // a fresh scan would fail at the post-poll bot-info step, so hide the CTA.
+  if (!installSupported) return null;
 
   return (
     <>

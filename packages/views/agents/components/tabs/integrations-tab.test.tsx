@@ -155,4 +155,18 @@ describe("IntegrationsTab", () => {
     ).toBeTruthy();
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
   });
+
+  it("renders the bind entry (not coming-soon) when installs are unavailable but the agent is already bound", () => {
+    // install_supported governs only NEW installs; an already-bound agent
+    // must still surface its connected state instead of "coming soon"
+    // (regression for the must-fix on MUL-2988).
+    installationsRef.current = {
+      installations: [{ agent_id: "agent-1", status: "active" }],
+      configured: true,
+      install_supported: false,
+    };
+    renderTab(<IntegrationsTab agent={agent} />);
+    expect(screen.getByTestId("lark-bind-button")).toBeTruthy();
+    expect(screen.queryByText(/installation coming soon/i)).toBeNull();
+  });
 });
