@@ -29,7 +29,7 @@ import type { AgentAvailability } from "@multica/core/agents";
 import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 // CEREBRO-PATCH(chat-message-list-cerebro): import from cerebro-chat after Phase 6 relocation
-import { getToolSummary } from "@multica/cerebro-chat/views";
+import { getToolSummary, MessageCostBadge } from "@multica/cerebro-chat/views";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
@@ -283,6 +283,8 @@ function MessageFooter({
       {message.elapsed_ms != null && (
         <ElapsedCaption variant="replied" elapsedMs={message.elapsed_ms} />
       )}
+      {/* CEREBRO-PATCH(chat-message-cost): FIR-31 per-reply cost badge. */}
+      <MessageCostBadge sessionId={message.chat_session_id} taskId={message.task_id} />
       {showCopy && <MessageCopyButton message={message} timeline={timeline} />}
     </div>
   );

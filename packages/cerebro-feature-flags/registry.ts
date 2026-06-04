@@ -12,6 +12,7 @@ export type CerebroFlagKey =
   | "cerebro_sandbox_ui"
   | "cerebro_mcp_guide"
   | "cerebro_channels"
+  | "cerebro_chat_message_cost"
   | "cerebro_web_push"
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
@@ -91,6 +92,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_sandbox_ui: true,
   cerebro_mcp_guide: true,
   cerebro_channels: true,
+  cerebro_chat_message_cost: true,
   cerebro_web_push: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
@@ -305,6 +307,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable channel-style conversations (kind=channel issues, /channels/{id} route, channel list in inbox).",
+  },
+  {
+    key: "cerebro_chat_message_cost",
+    label: "Per-reply chat cost",
+    group: "workspace",
+    description:
+      "Show the spend ($) of each assistant reply in the chat footer, next to \"Replied in …\". Hover for the token/model breakdown. Off hides the per-reply badge (the session-total chip in the header stays).",
   },
   {
     key: "cerebro_web_push",

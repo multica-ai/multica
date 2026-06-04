@@ -1313,6 +1313,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Post("/read", h.MarkChatSessionRead)
 					r.Get("/usage", h.GetChatSessionUsage)
+					// CEREBRO-PATCH(chat-message-cost-route): FIR-31 per-reply cost badge.
+					r.Get("/message-costs", h.GetChatSessionMessageCosts)
 				})
 			})
 			r.Get("/api/chat/messages/{messageId}/attachments", h.ListChatMessageAttachments)

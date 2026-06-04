@@ -25,6 +25,14 @@ export const chatKeys = {
   taskMessages: (taskId: string) => ["task-messages", taskId] as const,
   /** Aggregate token + cost spend for a chat session — JEH-736. */
   usage: (sessionId: string) => ["chat", "usage", sessionId] as const,
+  // CEREBRO-PATCH(chat-message-cost): FIR-31 per-reply cost badge query key.
+  /**
+   * Per-task spend within a session — FIR-31 per-reply cost badge. Keyed as a
+   * child of messages() on purpose: every existing messages() invalidation
+   * (chat:done / task:completed) already refreshes it, so the badge fills in
+   * the moment a reply finishes with no extra realtime wiring.
+   */
+  costs: (sessionId: string) => ["chat", "messages", sessionId, "costs"] as const,
 };
 
 export function chatSessionsOptions(wsId: string) {
@@ -116,6 +124,21 @@ export function chatSessionUsageOptions(sessionId: string) {
   return queryOptions({
     queryKey: chatKeys.usage(sessionId),
     queryFn: () => api.getChatSessionUsage(sessionId),
+    enabled: !!sessionId,
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * FIR-31 — per-task spend for one chat session, fetched once and looked up by
+ * the per-reply cost badge under each assistant message. Keyed under
+ * messages() so the existing chat:done / task:completed invalidation refreshes
+ * it; staleTime: Infinity keeps it from refetching on its own between events.
+ */
+export function chatSessionMessageCostsOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: chatKeys.costs(sessionId),
+    queryFn: () => api.getChatSessionMessageCosts(sessionId),
     enabled: !!sessionId,
     staleTime: Infinity,
   });
