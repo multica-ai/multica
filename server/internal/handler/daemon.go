@@ -1104,6 +1104,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if failed, ferr := h.failAutopilotClaimWhenExecutionIdentityUnresolved(r.Context(), runtime, *task); failed {
+		if ferr != nil {
+			outcome = "error_execution_identity"
+			writeError(w, http.StatusInternalServerError, "failed to close out task execution identity failure")
+			return
+		}
+		outcome = "execution_identity_unresolved"
+		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		return
+	}
+
 	outcome = "claimed"
 	buildStart = time.Now()
 
@@ -1636,6 +1647,56 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func (h *Handler) failAutopilotClaimWhenExecutionIdentityUnresolved(ctx context.Context, runtime db.AgentRuntime, task db.AgentTaskQueue) (bool, error) {
+	reason := h.autopilotClaimExecutionIdentityFailureReason(ctx, runtime, task)
+	if reason == "" {
+		return false, nil
+	}
+	failed, err := h.TaskService.FailTask(ctx, task.ID, reason, "", "", "execution_identity_unresolved")
+	if err != nil {
+		slog.Warn("task claim: failed to close out unresolved autopilot execution identity",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", uuidToString(runtime.ID),
+			"error", err,
+		)
+		return true, err
+	}
+	slog.Warn("task claim: autopilot execution identity unresolved; task failed before start",
+		"task_id", uuidToString(failed.ID),
+		"issue_id", uuidToString(failed.IssueID),
+		"runtime_id", uuidToString(runtime.ID),
+		"reason", reason,
+	)
+	return true, nil
+}
+
+func (h *Handler) autopilotClaimExecutionIdentityFailureReason(ctx context.Context, runtime db.AgentRuntime, task db.AgentTaskQueue) string {
+	if !task.IssueID.Valid {
+		return ""
+	}
+
+	issue, err := h.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return ""
+	}
+	if issue.WorkspaceID != runtime.WorkspaceID {
+		return ""
+	}
+	if !issue.OriginType.Valid || issue.OriginType.String != "autopilot" || issue.CreatorType != "agent" {
+		return ""
+	}
+	if !runtime.OwnerID.Valid {
+		return "current_user_id could not be determined uniquely: task-bound runtime has no owner_id; bind a runtime owner workspace member before rerunning this autopilot issue"
+	}
+	if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      runtime.OwnerID,
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		return "current_user_id could not be determined uniquely: task-bound runtime owner is not a workspace member; restore membership or bind a deterministic execution owner before rerunning this autopilot issue"
+	}
+	return ""
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.

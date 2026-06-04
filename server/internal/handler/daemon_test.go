@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -219,6 +220,143 @@ func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	}
 	if !refreshed {
 		t.Fatal("expected reclaimed task to refresh dispatched_at")
+	}
+}
+
+func TestClaimTaskByRuntime_AutopilotCreateIssueExecutionIdentityUnresolvedBlocksIssue(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	queries := db.New(testPool)
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Autopilot unresolved identity runtime")
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'autopilot-unresolved-identity-agent', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3)
+		RETURNING id::text
+	`, testWorkspaceID, runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Autopilot unresolved identity",
+		Description:        pgtype.Text{String: "MAG-307 execution identity regression", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{},
+		CreatedByType:      "agent",
+		CreatedByID:        parseUUID(agentID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if !run.IssueID.Valid {
+		t.Fatal("create_issue dispatch did not link an issue")
+	}
+	issueID := uuidToString(run.IssueID)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	createdIssue, err := queries.GetIssue(ctx, run.IssueID)
+	if err != nil {
+		t.Fatalf("GetIssue before claim: %v", err)
+	}
+	if createdIssue.CreatorType != "agent" || uuidToString(createdIssue.CreatorID) != agentID {
+		t.Fatalf("creator = %s/%s, want agent/%s", createdIssue.CreatorType, uuidToString(createdIssue.CreatorID), agentID)
+	}
+
+	var queuedTaskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, agentID).Scan(&queuedTaskID); err != nil {
+		t.Fatalf("load queued autopilot task: %v", err)
+	}
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task != nil {
+		t.Fatalf("claim should fail closed before returning a runnable task, got %s body=%s", task.ID, body)
+	}
+
+	var taskStatus string
+	var taskStartedAt pgtype.Timestamptz
+	var failureReason string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, started_at, failure_reason
+		FROM agent_task_queue
+		WHERE id = $1
+	`, queuedTaskID).Scan(&taskStatus, &taskStartedAt, &failureReason); err != nil {
+		t.Fatalf("load failed task: %v", err)
+	}
+	if taskStatus != "failed" {
+		t.Fatalf("task status = %q, want failed", taskStatus)
+	}
+	if taskStartedAt.Valid {
+		t.Fatalf("task should not have started, started_at=%v", taskStartedAt.Time)
+	}
+	if failureReason != "execution_identity_unresolved" {
+		t.Fatalf("failure_reason = %q, want execution_identity_unresolved", failureReason)
+	}
+
+	updatedIssue, err := queries.GetIssue(ctx, run.IssueID)
+	if err != nil {
+		t.Fatalf("GetIssue after claim: %v", err)
+	}
+	if updatedIssue.Status != "blocked" {
+		t.Fatalf("issue status = %q, want blocked", updatedIssue.Status)
+	}
+
+	var comment string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM comment
+		WHERE issue_id = $1 AND type = 'system'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&comment); err != nil {
+		t.Fatalf("load close-out comment: %v", err)
+	}
+	for _, want := range []string{
+		"failure_reason: execution_identity_unresolved",
+		"current_user_id could not be determined uniquely",
+		"bind a deterministic execution member/runtime owner",
+	} {
+		if !strings.Contains(comment, want) {
+			t.Fatalf("close-out comment missing %q:\n%s", want, comment)
+		}
+	}
+
+	updatedRun, err := queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if updatedRun.Status != "failed" {
+		t.Fatalf("run status = %q, want failed", updatedRun.Status)
+	}
+	if !updatedRun.FailureReason.Valid || updatedRun.FailureReason.String != "execution_identity_unresolved" {
+		t.Fatalf("run failure_reason = %+v, want execution_identity_unresolved", updatedRun.FailureReason)
 	}
 }
 

@@ -268,6 +268,176 @@ func TestAutopilotCreateIssueBatchFailureBlocksIssueWithResultComment(t *testing
 	}
 }
 
+func TestAutopilotCreateIssueBatchFailureLinksContinuationIssue(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	registerAutopilotListeners(bus, autopilotSvc)
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text, runtime_id::text
+		FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("load fixture agent/runtime: %v", err)
+	}
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Continuation-link autopilot {{date}}",
+		Description:        pgtype.Text{String: "MAG-307 continuation regression", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: "Continuation-link autopilot {{date}}", Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	oldNumber, err := queries.IncrementIssueCounter(ctx, parseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("IncrementIssueCounter old: %v", err)
+	}
+	nextNumber, err := queries.IncrementIssueCounter(ctx, parseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("IncrementIssueCounter next: %v", err)
+	}
+
+	var oldIssueID, continuationIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority,
+			creator_type, creator_id, assignee_type, assignee_id,
+			origin_type, origin_id, number, position, created_at
+		)
+		VALUES ($1, 'Continuation old window', 'in_progress', 'none',
+			'agent', $2, 'agent', $2, 'autopilot', $3, $4, 0, now() - interval '2 hours')
+		RETURNING id::text
+	`, testWorkspaceID, agentID, ap.ID, oldNumber).Scan(&oldIssueID); err != nil {
+		t.Fatalf("create old autopilot issue: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority,
+			creator_type, creator_id, assignee_type, assignee_id,
+			origin_type, origin_id, number, position, created_at
+		)
+		VALUES ($1, 'Continuation follow-up window', 'in_progress', 'none',
+			'agent', $2, 'agent', $2, 'autopilot', $3, $4, 0, now() - interval '1 hour')
+		RETURNING id::text
+	`, testWorkspaceID, agentID, ap.ID, nextNumber).Scan(&continuationIssueID); err != nil {
+		t.Fatalf("create continuation autopilot issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`, oldIssueID, continuationIssueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id IN ($1, $2)`, oldIssueID, continuationIssueID)
+	})
+
+	oldRun, err := queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID: ap.ID,
+		Source:      "schedule",
+		Status:      "issue_created",
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilotRun old: %v", err)
+	}
+	oldRun, err = queries.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+		ID:      oldRun.ID,
+		IssueID: parseUUID(oldIssueID),
+	})
+	if err != nil {
+		t.Fatalf("UpdateAutopilotRunIssueCreated old: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE autopilot_run
+		SET created_at = now() - interval '2 hours',
+		    triggered_at = now() - interval '2 hours'
+		WHERE id = $1
+	`, oldRun.ID); err != nil {
+		t.Fatalf("backdate old run: %v", err)
+	}
+
+	nextRun, err := queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID: ap.ID,
+		Source:      "schedule",
+		Status:      "issue_created",
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilotRun next: %v", err)
+	}
+	nextRun, err = queries.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+		ID:      nextRun.ID,
+		IssueID: parseUUID(continuationIssueID),
+	})
+	if err != nil {
+		t.Fatalf("UpdateAutopilotRunIssueCreated next: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE autopilot_run
+		SET created_at = now() - interval '1 hour',
+		    triggered_at = now() - interval '1 hour'
+		WHERE id = $1
+	`, nextRun.ID); err != nil {
+		t.Fatalf("backdate next run: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			dispatched_at, started_at, completed_at,
+			error, failure_reason, attempt, max_attempts
+		)
+		VALUES ($1, $2, $3, 'failed', 0,
+			now() - interval '3 minutes',
+			now() - interval '2 minutes',
+			now(),
+			'runtime went offline while task was running',
+			'runtime_offline',
+			2, 2)
+		RETURNING id::text
+	`, agentID, runtimeID, oldIssueID).Scan(&taskID); err != nil {
+		t.Fatalf("create failed task: %v", err)
+	}
+
+	task, err := queries.GetAgentTask(ctx, parseUUID(taskID))
+	if err != nil {
+		t.Fatalf("GetAgentTask: %v", err)
+	}
+	if got := taskSvc.HandleFailedTasks(ctx, []db.AgentTaskQueue{task}); got != 0 {
+		t.Fatalf("HandleFailedTasks retried %d tasks, want 0", got)
+	}
+
+	var comment string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM comment
+		WHERE issue_id = $1 AND type = 'system'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, oldIssueID).Scan(&comment); err != nil {
+		t.Fatalf("load result comment: %v", err)
+	}
+	if !strings.Contains(comment, "continuation_issue:") ||
+		!strings.Contains(comment, "mention://issue/"+continuationIssueID) {
+		t.Fatalf("result comment missing continuation link to %s:\n%s", continuationIssueID, comment)
+	}
+	if strings.Contains(comment, "No continuation issue was identified automatically") {
+		t.Fatalf("result comment should not claim no continuation when one exists:\n%s", comment)
+	}
+}
+
 // TestAutopilotDispatchSkipsWhenRuntimeOffline locks in the MUL-1899
 // admission gate: when the assignee agent's runtime is not online we must
 // record a `skipped` autopilot_run with a failure_reason and NOT enqueue an

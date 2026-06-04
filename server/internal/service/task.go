@@ -1758,17 +1758,21 @@ func formatTaskFailureUUID(id pgtype.UUID, empty string) string {
 	return util.UUIDToString(id)
 }
 
-func buildAutopilotIssueFailureComment(task db.AgentTaskQueue, failureReason, errMsg string) string {
+func buildAutopilotIssueFailureComment(task db.AgentTaskQueue, failureReason, errMsg, continuationIssue string) string {
 	var b strings.Builder
 	b.WriteString("Autopilot run failed and this issue was moved to blocked.\n\n")
 	b.WriteString("- failure_reason: ")
 	b.WriteString(failureReason)
-	b.WriteString("\n- attempts: ")
-	b.WriteString(strconv.Itoa(int(task.Attempt)))
-	b.WriteString("/")
-	b.WriteString(strconv.Itoa(int(task.MaxAttempts)))
+	if task.ID.Valid {
+		b.WriteString("\n- attempts: ")
+		b.WriteString(strconv.Itoa(int(task.Attempt)))
+		b.WriteString("/")
+		b.WriteString(strconv.Itoa(int(task.MaxAttempts)))
+	} else {
+		b.WriteString("\n- attempts: not started")
+	}
 	b.WriteString("\n- task_id: ")
-	b.WriteString(util.UUIDToString(task.ID))
+	b.WriteString(formatTaskFailureUUID(task.ID, "not enqueued"))
 	b.WriteString("\n- runtime_id: ")
 	b.WriteString(formatTaskFailureUUID(task.RuntimeID, "none"))
 	b.WriteString("\n- last_started_at: ")
@@ -1779,13 +1783,79 @@ func buildAutopilotIssueFailureComment(task db.AgentTaskQueue, failureReason, er
 		b.WriteString("\n- error: ")
 		b.WriteString(truncateForSummary(errMsg, 600))
 	}
+	if continuationIssue != "" {
+		b.WriteString("\n- continuation_issue: ")
+		b.WriteString(continuationIssue)
+	}
 	b.WriteString("\n\n")
-	if failureReason == "execution_identity_unresolved" {
+	if continuationIssue != "" {
+		b.WriteString("Next step: follow the continuation issue linked above; this failed issue has been blocked so radar does not need to re-read run messages.")
+	} else if failureReason == "execution_identity_unresolved" {
 		b.WriteString("Next step: bind a deterministic execution member/runtime owner for the task-bound agent identity, then rerun this issue. The issue creator remains the agent for audit purposes.")
 	} else {
 		b.WriteString("Next step: fix the runtime or task failure and rerun this issue. No continuation issue was identified automatically; link a follow-up issue if this reporting window was superseded.")
 	}
 	return b.String()
+}
+
+func autopilotRunWindowKey(run db.AutopilotRun) string {
+	return autopilotRunTriggeredAt(run).UTC().Format("2006-01-02")
+}
+
+func (s *TaskService) formatIssueMention(ctx context.Context, issue db.Issue) string {
+	label := "#" + strconv.Itoa(int(issue.Number))
+	if ws, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID); err == nil && strings.TrimSpace(ws.IssuePrefix) != "" {
+		label = ws.IssuePrefix + "-" + strconv.Itoa(int(issue.Number))
+	}
+	return "[" + label + "](mention://issue/" + util.UUIDToString(issue.ID) + ")"
+}
+
+func (s *TaskService) findAutopilotContinuationIssue(ctx context.Context, failedIssue db.Issue, failedRun db.AutopilotRun) string {
+	if !failedRun.AutopilotID.Valid || !failedIssue.ID.Valid {
+		return ""
+	}
+	failedWindow := autopilotRunWindowKey(failedRun)
+	failedAt := autopilotRunTriggeredAt(failedRun)
+
+	runs, err := s.Queries.ListAutopilotRuns(ctx, db.ListAutopilotRunsParams{
+		AutopilotID: failedRun.AutopilotID,
+		Limit:       50,
+		Offset:      0,
+	})
+	if err != nil {
+		slog.Warn("autopilot issue close-out: failed to scan continuation runs",
+			"issue_id", util.UUIDToString(failedIssue.ID),
+			"autopilot_id", util.UUIDToString(failedRun.AutopilotID),
+			"error", err,
+		)
+		return ""
+	}
+
+	for _, candidateRun := range runs {
+		if !candidateRun.IssueID.Valid || candidateRun.IssueID == failedIssue.ID {
+			continue
+		}
+		if autopilotRunWindowKey(candidateRun) != failedWindow {
+			continue
+		}
+		if !autopilotRunTriggeredAt(candidateRun).After(failedAt) && !candidateRun.CreatedAt.Time.After(failedRun.CreatedAt.Time) {
+			continue
+		}
+		candidateIssue, err := s.Queries.GetIssue(ctx, candidateRun.IssueID)
+		if err != nil {
+			slog.Warn("autopilot issue close-out: failed to load continuation issue",
+				"issue_id", util.UUIDToString(candidateRun.IssueID),
+				"failed_issue_id", util.UUIDToString(failedIssue.ID),
+				"error", err,
+			)
+			continue
+		}
+		if candidateIssue.WorkspaceID != failedIssue.WorkspaceID || candidateIssue.Status == "cancelled" {
+			continue
+		}
+		return s.formatIssueMention(ctx, candidateIssue)
+	}
+	return ""
 }
 
 func (s *TaskService) closeOutAutopilotIssueFailure(ctx context.Context, task db.AgentTaskQueue, issue db.Issue, failureReason, errMsg string) bool {
@@ -1797,10 +1867,13 @@ func (s *TaskService) closeOutAutopilotIssueFailure(ctx context.Context, task db
 	}
 
 	reason := normalizeAutopilotIssueFailureReason(failureReason, errMsg)
-	body := buildAutopilotIssueFailureComment(task, reason, errMsg)
-	s.createAgentComment(ctx, issue.ID, task.AgentID, redact.Text(body), "system", task.TriggerCommentID)
+	continuationIssue := ""
 
 	if run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID); err == nil {
+		continuationIssue = s.findAutopilotContinuationIssue(ctx, issue, run)
+		body := buildAutopilotIssueFailureComment(task, reason, errMsg, continuationIssue)
+		s.createAgentComment(ctx, issue.ID, task.AgentID, redact.Text(body), "system", task.TriggerCommentID)
+
 		updatedRun, updateErr := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
 			ID:            run.ID,
 			FailureReason: pgtype.Text{String: reason, Valid: true},
@@ -1828,6 +1901,11 @@ func (s *TaskService) closeOutAutopilotIssueFailure(ctx context.Context, task db
 			"issue_id", util.UUIDToString(issue.ID),
 			"error", err,
 		)
+		body := buildAutopilotIssueFailureComment(task, reason, errMsg, continuationIssue)
+		s.createAgentComment(ctx, issue.ID, task.AgentID, redact.Text(body), "system", task.TriggerCommentID)
+	} else {
+		body := buildAutopilotIssueFailureComment(task, reason, errMsg, continuationIssue)
+		s.createAgentComment(ctx, issue.ID, task.AgentID, redact.Text(body), "system", task.TriggerCommentID)
 	}
 
 	updatedIssue, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
