@@ -1,5 +1,6 @@
 import * as Linking from "expo-linking";
-import { MOBILE_ENV } from "../runtime/env";
+import { getMobileIssueLinkBaseUrls, MOBILE_ENV } from "../runtime/env";
+import { parseMobileIssueLink } from "./issue-links";
 
 export const linking = {
   prefixes: [
@@ -7,6 +8,7 @@ export const linking = {
     `${MOBILE_ENV.appScheme}://`,
     "wujieai-multicam://",
   ],
+  filter: (url: string) => !parseMobileIssueLink(url, getMobileIssueLinkBaseUrls()),
   config: {
     screens: {
       Main: {

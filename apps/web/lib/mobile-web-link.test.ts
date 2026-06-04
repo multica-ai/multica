@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildIssueWebHref, isMobileUserAgent, type HeaderReader } from "./mobile-web-link";
+import {
+  buildIssueMobileAppHref,
+  buildIssueWebHref,
+  isMobileUserAgent,
+  isWeChatUserAgent,
+  type HeaderReader,
+} from "./mobile-web-link";
 
 function headers(values: Record<string, string>): HeaderReader {
   return {
@@ -31,6 +37,19 @@ describe("mobile web links", () => {
     expect(isMobileUserAgent(null)).toBe(false);
   });
 
+  it("detects WeChat embedded browser user agents", () => {
+    expect(isWeChatUserAgent(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.49",
+    )).toBe(true);
+    expect(isWeChatUserAgent(
+      "Mozilla/5.0 (Linux; Android 15; 24018RPACC) AppleWebKit/537.36 Mobile Safari/537.36 MicroMessenger/8.0.50",
+    )).toBe(true);
+    expect(isWeChatUserAgent(
+      "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/125.0 Mobile Safari/537.36",
+    )).toBe(false);
+    expect(isWeChatUserAgent(null)).toBe(false);
+  });
+
   it("builds an absolute issue href with forwarded production headers", () => {
     expect(buildIssueWebHref({
       headers: headers({
@@ -52,5 +71,15 @@ describe("mobile web links", () => {
       issueId: "TES-1",
       searchParams: { label: ["bug", "mobile"], empty: undefined },
     })).toBe("http://127.0.0.1:3000/test/issues/TES-1?label=bug&label=mobile");
+  });
+
+  it("builds a mobile app issue href for the Web fallback banner", () => {
+    expect(buildIssueMobileAppHref({
+      workspaceSlug: "openharness",
+      issueId: "OPE-2151",
+      searchParams: { comment: "9441bec9-0a96-40dc-ab14-0547423fdb4f" },
+    })).toBe(
+      "wujieai-multicam://openharness/issues/OPE-2151?comment=9441bec9-0a96-40dc-ab14-0547423fdb4f",
+    );
   });
 });

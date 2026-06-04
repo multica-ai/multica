@@ -16,7 +16,7 @@
     ],
     "android": {
       "package": "com.wujieai.multica",
-      "versionCode": 8,
+      "versionCode": 11,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon-android.png",
         "backgroundColor": "#000000"
