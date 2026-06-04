@@ -16,6 +16,16 @@ import { useCerebroInboxStrings } from "../strings";
  * Returns null for every other inbox type, so non run-request rows keep their
  * original height. The Run button stops propagation so clicking it doesn't also
  * navigate the row to the issue.
+ *
+ * FIR-37 — on the mobile PWA the row also mounts CerebroInboxRowActions, whose
+ * swipe surface is a transparent `absolute inset-0` overlay rendered AFTER this
+ * row in the DOM. Without a stacking offset that overlay paints on top of the
+ * Run button and swallows the tap, so "Run" was untappable on mobile (desktop
+ * is unaffected — the overlay is `sm:hidden`). `relative z-10` (scoped to
+ * mobile via `sm:z-auto`, since the overlay only exists below `sm`) lifts this
+ * row above the overlay so the tap reaches the button; on desktop it stays
+ * `z-auto` so the hover action icons keep painting above it. The swipe overlay
+ * still covers the rest of the row, so swipe-to-archive keeps working.
  */
 export function CerebroInboxRunRequestRow({ item }: { item: InboxItem }) {
   const strings = useCerebroInboxStrings();
@@ -28,7 +38,7 @@ export function CerebroInboxRunRequestRow({ item }: { item: InboxItem }) {
   const requester = requesterId ? getActorName("member", requesterId) : "";
 
   return (
-    <div className="mt-1 flex items-center justify-between gap-2">
+    <div className="relative z-10 mt-1 flex items-center justify-between gap-2 sm:z-auto">
       <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
         <span className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-normal text-brand">
           <Bot className="size-3" aria-hidden />
