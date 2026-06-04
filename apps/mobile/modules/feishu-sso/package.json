@@ -1,0 +1,8 @@
+{
+  "name": "feishu-sso",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Local Expo Native Module wrapping LarkSSOSDK for in-house Feishu OAuth on iOS.",
+  "main": "index.ts",
+  "types": "index.ts"
+}

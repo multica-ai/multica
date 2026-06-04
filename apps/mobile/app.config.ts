@@ -1,6 +1,7 @@
 import type { ExpoConfig, ConfigContext } from "expo/config";
 import {
   withDangerousMod,
+  withInfoPlist,
   withXcodeProject,
   type ConfigPlugin,
 } from "@expo/config-plugins";
@@ -87,6 +88,198 @@ const withVariantEnvInXcodeEnv: ConfigPlugin = (config) =>
       return cfg;
     },
   ]);
+
+/**
+ * Wire LarkSSOSDK (Feishu mobile SSO) into the iOS app at prebuild time.
+ *
+ * The SDK requires three coordinated pieces that Expo's stock prebuild
+ * doesn't know about:
+ *
+ *   1. A CFBundleURLTypes entry whose CFBundleURLSchemes lists the URL
+ *      scheme `cli<appId-without-underscores>` so iOS routes Feishu's
+ *      OAuth-completion callback back into Multica via openURL.
+ *   2. `lark` in LSApplicationQueriesSchemes so the SDK can probe
+ *      `canOpenURL("lark://")` to decide app-jump vs H5 fallback. Without
+ *      this, iOS 9+ returns false unconditionally for any unlisted scheme
+ *      and the SDK silently picks H5 even on devices with Feishu
+ *      installed — which is exactly the "professional app jump" UX this
+ *      whole detour exists to deliver.
+ *   3. The `LarkSSOSDK` pod from the volcengine spec repo, plus a
+ *      LarkSSO.handleURL(url) call inside AppDelegate's
+ *      application(open url:options:) so the SDK gets to inspect every
+ *      URL the app receives before standard deep-link routing.
+ *
+ * App ID is read from EXPO_PUBLIC_FEISHU_APP_ID (NOT hardcoded) — it lives
+ * in apps/mobile/.env.staging.local, which is gitignored, so the value
+ * never lands in version control. The staging scripts load that file via
+ * dotenv before invoking expo, so process.env carries it through prebuild.
+ * When the var is absent (e.g. a bare `expo prebuild` with no env, or a
+ * contributor without the local file) the plugin no-ops with a warning:
+ * Feishu login is simply disabled and the rest of the app builds normally.
+ * The URL scheme is derived from the app id by stripping the underscore,
+ * as the LarkSSOSDK iOS docs specify.
+ */
+const FEISHU_APP_ID = process.env.EXPO_PUBLIC_FEISHU_APP_ID ?? "";
+const FEISHU_URL_SCHEME = FEISHU_APP_ID.replace(/_/g, "");
+
+const withFeishuSSO: ConfigPlugin = (config) => {
+  if (!FEISHU_APP_ID) {
+    console.warn(
+      "[app.config] EXPO_PUBLIC_FEISHU_APP_ID not set — skipping Feishu SSO " +
+        "native wiring (Info.plist scheme / Podfile / AppDelegate). Set it in " +
+        "apps/mobile/.env.staging.local to enable Feishu login.",
+    );
+    return config;
+  }
+  // ── 1. Info.plist: URL scheme + queries scheme ──────────────────────
+  config = withInfoPlist(config, (cfg) => {
+    const plist = cfg.modResults as Record<string, unknown>;
+    const queries = (plist.LSApplicationQueriesSchemes as string[]) ?? [];
+    if (!queries.includes("lark")) {
+      plist.LSApplicationQueriesSchemes = [...queries, "lark"];
+    }
+    const urlTypes =
+      (plist.CFBundleURLTypes as {
+        CFBundleURLName?: string;
+        CFBundleURLSchemes?: string[];
+      }[]) ?? [];
+    const alreadyHas = urlTypes.some((entry) =>
+      entry.CFBundleURLSchemes?.includes(FEISHU_URL_SCHEME),
+    );
+    if (!alreadyHas) {
+      plist.CFBundleURLTypes = [
+        ...urlTypes,
+        {
+          CFBundleURLName: "feishu-sso",
+          CFBundleURLSchemes: [FEISHU_URL_SCHEME],
+        },
+      ];
+    }
+    return cfg;
+  });
+
+  // ── 2. Podfile: LarkSSOSDK pod + custom CocoaPods spec source ──────
+  config = withDangerousMod(config, [
+    "ios",
+    async (cfg) => {
+      const podfilePath = join(
+        cfg.modRequest.platformProjectRoot,
+        "Podfile",
+      );
+      let content = await readFile(podfilePath, "utf8");
+      if (content.includes("LarkSSOSDK")) return cfg;
+      // The SDK lives on a custom spec repo, not the default CDN. The
+      // moment a Podfile declares ANY explicit `source`, CocoaPods stops
+      // implicitly including the CDN — so every React Native dependency
+      // resolved from the CDN (SocketRocket, etc.) suddenly can't be
+      // found. Declare BOTH the CDN and the volcengine repo, CDN first,
+      // so existing pods keep resolving and LarkSSOSDK resolves from the
+      // custom repo.
+      const cdnSource = "source 'https://cdn.cocoapods.org/'";
+      const customSource =
+        "source 'https://github.com/volcengine/volcengine-specs.git'";
+      const sourcesBlock = `${cdnSource}\n${customSource}\n`;
+      if (!content.includes(customSource)) {
+        content = `${sourcesBlock}${content}`;
+      }
+      // Inject inside the first `target '<App>' do … end` block — Expo's
+      // generated Podfile has exactly one such block for the app target.
+      // Append just before the `end` of that block so the pod is scoped
+      // to the app target (not test targets or post_install hooks).
+      const podLine =
+        "  pod 'LarkSSOSDK', '1.2.0', :source => 'https://github.com/volcengine/volcengine-specs.git'";
+      const targetMatch = content.match(/(target ['"][^'"]+['"] do[\s\S]*?\n)(end\n)/);
+      if (targetMatch && targetMatch.index !== undefined) {
+        const insertAt =
+          targetMatch.index + targetMatch[1].length;
+        content = `${content.slice(0, insertAt)}${podLine}\n${content.slice(insertAt)}`;
+      } else {
+        // Couldn't find an obvious target block — fail loudly rather than
+        // silently producing a Podfile that doesn't include the SDK.
+        throw new Error(
+          "withFeishuSSO: could not locate `target '<App>' do … end` block in Podfile",
+        );
+      }
+      await writeFile(podfilePath, content);
+      return cfg;
+    },
+  ]);
+
+  // ── 3. AppDelegate.swift: import + handleURL injection ──────────────
+  config = withDangerousMod(config, [
+    "ios",
+    async (cfg) => {
+      // The Expo template emits the AppDelegate at
+      // ios/<ProjectName>/AppDelegate.swift — but the project name varies
+      // per scheme (MulticaStaging vs MulticaDev). Glob it instead of
+      // hard-coding the path.
+      const iosRoot = cfg.modRequest.platformProjectRoot;
+      const { readdir } = await import("node:fs/promises");
+      const entries = await readdir(iosRoot, { withFileTypes: true });
+      let appDelegatePath: string | null = null;
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const candidate = join(iosRoot, entry.name, "AppDelegate.swift");
+        try {
+          await readFile(candidate, "utf8");
+          appDelegatePath = candidate;
+          break;
+        } catch {
+          // not here, keep looking
+        }
+      }
+      if (!appDelegatePath) {
+        throw new Error(
+          "withFeishuSSO: could not find AppDelegate.swift under ios/",
+        );
+      }
+      let content = await readFile(appDelegatePath, "utf8");
+      if (content.includes("LarkSSO.handleURL")) return cfg;
+
+      // Insert `import LarkSSOSDK`. The Expo SDK 55 template's first import
+      // is `internal import Expo` (note the `internal` access modifier and
+      // no trailing module list), so anchor on whichever Expo import form
+      // is present and append our import on the next line.
+      const importAnchor = /^((?:internal )?import Expo)$/m;
+      if (!content.includes("import LarkSSOSDK")) {
+        const importedContent = content.replace(
+          importAnchor,
+          "$1\nimport LarkSSOSDK",
+        );
+        if (importedContent === content) {
+          throw new Error(
+            "withFeishuSSO: could not find an `import Expo` line in AppDelegate.swift to anchor the LarkSSOSDK import — Expo template may have changed.",
+          );
+        }
+        content = importedContent;
+      }
+
+      // Patch the Linking openURL handler. The Expo SDK 55 template body is:
+      //   return super.application(app, open: url, options: options) || RCTLinkingManager.application(app, open: url, options: options)
+      // Prepend `LarkSSO.handleURL(url) ||` so the SDK inspects Feishu
+      // OAuth-callback URLs FIRST. Swift `||` short-circuits: if the SDK
+      // consumes the URL we return true immediately; otherwise the existing
+      // super + RCTLinkingManager chain runs unchanged. Anchored on the
+      // exact `return super.application(app, open: url` prefix (param name
+      // is `app`, not `application`, in this overload).
+      const openUrlAnchor = /return (super\.application\(app, open: url, options: options\))/;
+      const replaced = content.replace(
+        openUrlAnchor,
+        "return LarkSSO.handleURL(url) || $1",
+      );
+      if (replaced === content) {
+        throw new Error(
+          "withFeishuSSO: could not find the expected `return super.application(app, open: url, options: options)` line in AppDelegate.swift — Expo template may have changed and the patch needs updating.",
+        );
+      }
+      content = replaced;
+      await writeFile(appDelegatePath, content);
+      return cfg;
+    },
+  ]);
+
+  return config;
+};
 
 const withDisableUserScriptSandboxing: ConfigPlugin = (config) =>
   withXcodeProject(config, (cfg) => {
@@ -190,6 +383,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // separate file just to satisfy the type.
       withDisableUserScriptSandboxing as unknown as string,
       withVariantEnvInXcodeEnv as unknown as string,
+      withFeishuSSO as unknown as string,
     ],
     extra: { APP_ENV: env },
   };

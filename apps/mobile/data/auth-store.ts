@@ -21,6 +21,10 @@ interface AuthState {
   initialize: () => Promise<void>;
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
+  /** Exchange a Feishu OAuth code (from lib/feishu-sso → startFeishuLogin)
+   *  for a Multica session. Token + in-memory user follow the same path
+   *  as verifyCode — keep the two in sync if either changes. */
+  loginWithFeishuCode: (code: string, redirectUri: string) => Promise<User>;
   logout: () => Promise<void>;
   /** Overwrite the in-memory user — call after PATCH /api/me so name/avatar
    *  edits land without a refetch. Server response is the source of truth. */
@@ -63,6 +67,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   verifyCode: async (email, code) => {
     const { token, user } = await api.verifyCode(email, code);
+    await setToken(token);
+    api.setToken(token);
+    set({ user });
+    return user;
+  },
+
+  loginWithFeishuCode: async (code, redirectUri) => {
+    const { token, user } = await api.feishuLogin(code, redirectUri);
     await setToken(token);
     api.setToken(token);
     set({ user });
