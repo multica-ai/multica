@@ -11,6 +11,11 @@ import type {
 
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
+const mockUseFeatureFlag = vi.hoisted(() => vi.fn(() => false));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: mockUseFeatureFlag,
+}));
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -133,6 +138,7 @@ beforeEach(() => {
   mockListRuntimeTools.mockReset();
   mockCerebroRequest.mockReset();
   mockCerebroRequest.mockResolvedValue(overrides);
+  mockUseFeatureFlag.mockReturnValue(false);
 });
 
 describe("AgentToolsCard", () => {

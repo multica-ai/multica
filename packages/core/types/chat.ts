@@ -103,3 +103,22 @@ export interface ChatSessionUsage {
   task_count: number;
   cost_cents: number;
 }
+
+// CEREBRO-PATCH(chat-message-cost-types): FIR-31 per-reply cost badge. Spend
+// for a single chat task (= one assistant reply), keyed by task_id. The chat
+// footer looks up its own message.task_id; numbers sum to ChatSessionUsage.
+export interface ChatMessageCost {
+  task_id: string;
+  /** Single model used, or "" when the task spanned multiple models. */
+  model: string;
+  cost_cents: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
+// CEREBRO-PATCH(chat-message-cost-types): FIR-31 — GET /message-costs response.
+export interface ChatSessionMessageCosts {
+  costs: ChatMessageCost[];
+}

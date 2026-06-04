@@ -1,5 +1,5 @@
 {
-  "name": "@multica/cerebro-chat",
+  "name": "@multica/cerebro-quick-create",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,14 +12,9 @@
     "./views": "./views/index.ts"
   },
   "dependencies": {
-    "@multica/core": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
-    "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*",
-    "@tanstack/react-query": "catalog:",
-    "lucide-react": "catalog:",
-    "react-i18next": "catalog:",
-    "sonner": "^2.0.7"
+    "@multica/core": "workspace:*",
+    "@tanstack/react-query": "catalog:"
   },
   "peerDependencies": {
     "react": "catalog:"

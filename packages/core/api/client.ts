@@ -90,6 +90,7 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatSessionUsage,
+  ChatSessionMessageCosts, // CEREBRO-PATCH(chat-message-cost-client): FIR-31
   PendingChatTasksResponse,
   SendChatMessageResponse,
   Channel,
@@ -3048,6 +3049,11 @@ export class ApiClient {
 
   async getChatSessionUsage(sessionId: string): Promise<ChatSessionUsage> {
     return this.fetch(`/api/chat/sessions/${sessionId}/usage`);
+  }
+
+  // CEREBRO-PATCH(chat-message-cost-client): FIR-31 per-reply cost badge.
+  async getChatSessionMessageCosts(sessionId: string): Promise<ChatSessionMessageCosts> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/message-costs`);
   }
 
   async getPendingChatTask(sessionId: string): Promise<ChatPendingTask> {

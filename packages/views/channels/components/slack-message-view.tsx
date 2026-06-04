@@ -7,7 +7,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { Copy, MessageSquare, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Copy, ListPlus, MessageSquare, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -47,6 +47,8 @@ import {
   FileDropOverlay,
 } from "../../editor";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(channels-create-issue-from-message): TECH-2909
+import { CreateIssueFromMessageDialog } from "./cerebro-create-issue-from-message";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
@@ -142,6 +144,7 @@ const MessageRow = memo(function MessageRow({
   const { getActorName } = useActorName();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [createIssueOpen, setCreateIssueOpen] = useState(false); // CEREBRO-PATCH(channels-create-issue-from-message): TECH-2909
   const editorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
   const { uploadWithToast } = useFileUpload(api);
@@ -186,6 +189,7 @@ const MessageRow = memo(function MessageRow({
     <div
       className={cn(
         "group/msg relative flex gap-2.5 px-4 py-0.5 hover:bg-accent/30 transition-colors",
+        "before:absolute before:inset-x-0 before:-top-3 before:h-3 before:content-['']", // CEREBRO-PATCH(channels-msg-hover-gap-fix): TECH-2909
         continuation ? "pt-0" : "pt-2",
         isTemp && "opacity-60",
         isThreadOpen && "bg-accent/40",
@@ -376,6 +380,13 @@ const MessageRow = memo(function MessageRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {/* CEREBRO-PATCH(channels-create-issue-from-message): TECH-2909 */}
+              {!isTemp && (
+                <DropdownMenuItem onClick={() => setCreateIssueOpen(true)}>
+                  <ListPlus className="h-3.5 w-3.5" />
+                  Opret issue
+                </DropdownMenuItem>
+              )}
               {(canEdit || canDelete) && (
                 <>
                   <DropdownMenuSeparator />
@@ -425,6 +436,15 @@ const MessageRow = memo(function MessageRow({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* CEREBRO-PATCH(channels-create-issue-from-message): TECH-2909 */}
+      {createIssueOpen && (
+        <CreateIssueFromMessageDialog
+          open
+          onClose={() => setCreateIssueOpen(false)}
+          channelId={channelId}
+          entry={entry}
+        />
+      )}
     </div>
   );
 });

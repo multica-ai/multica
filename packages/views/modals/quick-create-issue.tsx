@@ -56,6 +56,10 @@ import { DuplicateCheckPanel } from "@multica/cerebro-duplicate-check/views";
 import type { DuplicateMatch } from "@multica/cerebro-duplicate-check/core";
 import { useNavigation } from "../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
+// CEREBRO-PATCH(quick-create-version-autoswitch-import): FIR-33. Cerebro-zone
+// hook that auto-switches the modal to manual create when the picked agent's
+// daemon CLI is below the quick-create gate (instead of warning-only).
+import { useQuickCreateVersionAutoSwitch } from "@multica/cerebro-quick-create/views";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -431,6 +435,10 @@ export function AgentCreatePanel({
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
+
+  // CEREBRO-PATCH(quick-create-version-autoswitch-call): FIR-33. Flip to manual
+  // create when the picked agent's daemon CLI is too old; banner stays as backstop.
+  useQuickCreateVersionAutoSwitch({ workspaceId: wsId, selectedAgent, onSwitchToManual: switchToManual });
 
   return (
     <>

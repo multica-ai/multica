@@ -104,6 +104,8 @@ export type {
   ListArtifactsParams,
 } from "./artifact";
 export type { ChatSession, ChatMessage, ChatPendingTask, ChatSessionUsage, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
+// CEREBRO-PATCH(chat-message-cost-types): FIR-31 per-reply cost badge response types.
+export type { ChatMessageCost, ChatSessionMessageCosts } from "./chat";
 // CEREBRO-PATCH(core-types-index-channel-listen): JEH-699 — re-export
 // listen-mode types alongside the upstream channel types.
 export type {

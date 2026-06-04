@@ -1123,6 +1123,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Route("/tools/{name}", func(r chi.Router) {
 						r.Put("/", h.UpsertAgentTool)
 					})
+					r.Get("/firtal-registry/data-sources", h.ListFirtalRegistryDataSources) // CEREBRO-PATCH(firtal-registry-data-sources-route): TECH-2925 FDR catalog for allowlist UI.
 					// CEREBRO-PATCH(agent-tool-overrides-routes): JEH-1710 per-agent
 					// override of the runtime tool default.
 					r.Get("/tool-overrides", h.ListAgentToolOverrides)
@@ -1312,6 +1313,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Post("/read", h.MarkChatSessionRead)
 					r.Get("/usage", h.GetChatSessionUsage)
+					// CEREBRO-PATCH(chat-message-cost-route): FIR-31 per-reply cost badge.
+					r.Get("/message-costs", h.GetChatSessionMessageCosts)
 				})
 			})
 			r.Get("/api/chat/messages/{messageId}/attachments", h.ListChatMessageAttachments)

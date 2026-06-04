@@ -12,6 +12,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   AlertCircle,
   Check,
@@ -36,6 +37,7 @@ import {
   listAgentToolOverrides,
   setAgentToolOverride,
 } from "../../api";
+import { FirtalRegistryConfigDialog } from "./firtal-registry-config-dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -68,6 +70,10 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<RowFilter>("all");
+  const [registryDialogOpen, setRegistryDialogOpen] = useState(false);
+  const firtalRegistryAllowlistUI = useFeatureFlag(
+    "cerebro_firtal_registry_allowlist_ui",
+  );
 
   const runtimeId = agent.runtime_id;
 
@@ -189,6 +195,10 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
         rows={rows}
         filteredRows={filteredRows}
         canEdit={canEdit}
+        firtalRegistryAllowlistUI={firtalRegistryAllowlistUI}
+        onConfigureFirtalRegistry={
+          firtalRegistryAllowlistUI ? () => setRegistryDialogOpen(true) : undefined
+        }
         onSetOverride={(toolName, enabled) =>
           setOverrideMutation.mutate({ toolName, enabled })
         }
@@ -197,6 +207,14 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
         }
         mutating={setOverrideMutation.isPending || clearOverrideMutation.isPending}
       />
+
+      {firtalRegistryAllowlistUI && (
+        <FirtalRegistryConfigDialog
+          agentId={agent.id}
+          open={registryDialogOpen}
+          onOpenChange={setRegistryDialogOpen}
+        />
+      )}
 
       <Legend />
     </div>
@@ -275,6 +293,8 @@ interface AgentToolsBodyProps {
   rows: ToolRowData[];
   filteredRows: ToolRowData[];
   canEdit: boolean;
+  firtalRegistryAllowlistUI: boolean;
+  onConfigureFirtalRegistry?: () => void;
   onSetOverride: (toolName: string, enabled: boolean) => void;
   onClearOverride: (toolName: string) => void;
   mutating: boolean;
@@ -285,6 +305,8 @@ function AgentToolsBody({
   rows,
   filteredRows,
   canEdit,
+  firtalRegistryAllowlistUI,
+  onConfigureFirtalRegistry,
   onSetOverride,
   onClearOverride,
   mutating,
@@ -360,6 +382,8 @@ function AgentToolsBody({
               key={row.tool.name}
               row={row}
               canEdit={canEdit}
+              firtalRegistryAllowlistUI={firtalRegistryAllowlistUI}
+              onConfigureFirtalRegistry={onConfigureFirtalRegistry}
               mutating={mutating}
               onSetOverride={onSetOverride}
               onClearOverride={onClearOverride}
@@ -374,12 +398,16 @@ function AgentToolsBody({
 function AgentToolRow({
   row,
   canEdit,
+  firtalRegistryAllowlistUI,
+  onConfigureFirtalRegistry,
   mutating,
   onSetOverride,
   onClearOverride,
 }: {
   row: ToolRowData;
   canEdit: boolean;
+  firtalRegistryAllowlistUI: boolean;
+  onConfigureFirtalRegistry?: () => void;
   mutating: boolean;
   onSetOverride: (toolName: string, enabled: boolean) => void;
   onClearOverride: (toolName: string) => void;
@@ -417,17 +445,33 @@ function AgentToolRow({
         <EffectiveState effective={effective} />
       </td>
       <td className="px-2 py-3 align-top">
-        {canEdit && (
-          <OverrideSelect
-            mode={overrideMode}
-            disabled={mutating}
-            onChange={(next) => {
-              if (next === "inherit") onClearOverride(tool.name);
-              else onSetOverride(tool.name, next === "force_on");
-            }}
-            highlight={isOverride}
-          />
-        )}
+        <div className="flex flex-col items-end gap-1">
+          {canEdit && (
+            <OverrideSelect
+              mode={overrideMode}
+              disabled={mutating}
+              onChange={(next) => {
+                if (next === "inherit") onClearOverride(tool.name);
+                else onSetOverride(tool.name, next === "force_on");
+              }}
+              highlight={isOverride}
+            />
+          )}
+          {canEdit &&
+            firtalRegistryAllowlistUI &&
+            tool.name === "firtal_registry" &&
+            onConfigureFirtalRegistry && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={onConfigureFirtalRegistry}
+              >
+                Konfigurer
+              </Button>
+            )}
+        </div>
       </td>
     </tr>
   );
