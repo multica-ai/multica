@@ -4,7 +4,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { useInboxList } from "@multica/core/inbox";
-import { BookOpen, Bot, Inbox, Server, Settings, Users } from "lucide-react-native";
+import { BookOpen, Bot, Inbox, Server, Settings, Users, Zap } from "lucide-react-native";
 import { Screen } from "../../components/ui/primitives";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
@@ -18,10 +18,11 @@ const readOnlyEntries = [
   { labelKey: "mine.squads", route: "Squads", icon: Users },
   { labelKey: "mine.inbox", route: "Inbox", icon: Inbox },
   { labelKey: "mine.wiki", route: "Wiki", icon: BookOpen },
+  { labelKey: "mine.autopilots", route: "Autopilots", icon: Zap },
   { labelKey: "mine.setting", route: "Setting", icon: Settings },
 ] as const satisfies ReadonlyArray<{
   labelKey: string;
-  route: keyof Pick<RootStackParamList, "Runtimes" | "Agents" | "Squads" | "Inbox" | "Wiki" | "Setting">;
+  route: keyof Pick<RootStackParamList, "Runtimes" | "Agents" | "Squads" | "Inbox" | "Wiki" | "Autopilots" | "Setting">;
   icon: typeof Server;
 }>;
 

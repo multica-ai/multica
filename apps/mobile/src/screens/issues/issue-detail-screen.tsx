@@ -71,7 +71,7 @@ import type {
 } from "@multica/core/types";
 import { Button, EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { MarkdownText } from "../../components/ui/markdown";
-import { parseMobileIssueLink } from "../../components/ui/markdown-utils";
+import { isSafeHttpUrl, parseMobileIssueLink } from "../../components/ui/markdown-utils";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
@@ -478,10 +478,18 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       MOBILE_ENV.webBaseUrl,
       MOBILE_ENV.apiBaseUrl,
     ]);
-    if (!target) return false;
+    if (!target) {
+      if (!isSafeHttpUrl(href)) return false;
+      navigation.navigate("ExternalWeb", { url: href });
+      return true;
+    }
 
     const targetWorkspace = workspaces.find((item) => item.slug === target.workspaceSlug);
-    if (!targetWorkspace) return false;
+    if (!targetWorkspace) {
+      if (!isSafeHttpUrl(href)) return false;
+      navigation.navigate("ExternalWeb", { url: href });
+      return true;
+    }
 
     if (targetWorkspace.id === workspace.id) {
       openIssueDetail(target.issueId, target.commentId);
@@ -506,6 +514,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     return true;
   }, [
     openIssueDetail,
+    navigation,
     switchWorkspaceAndOpenIssue,
     t,
     workspace.id,
