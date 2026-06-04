@@ -72,13 +72,13 @@ import type {
 import { Button, EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { MarkdownText } from "../../components/ui/markdown";
 import { isSafeHttpUrl, parseMobileIssueLink } from "../../components/ui/markdown-utils";
+import { ImagePreviewModal, type PreviewImageItem } from "../../components/ui/image-preview-modal";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { uploadMobileAsset, type MobileUploadAsset } from "../../platform/upload";
 import { colors, radii, spacing } from "../../theme/tokens";
 import { MOBILE_ENV } from "../../runtime/env";
-import { ImagePreviewModal } from "./image-preview-modal";
 import {
   createDraftCommentAttachment,
   type DraftCommentAttachment,
@@ -796,19 +796,19 @@ export function IssueDetailScreen({ navigation, route }: Props) {
               ) : null}
             </View>
           ) : null}
-          <Pressable
-            accessibilityHint={t("issues.edit_description_hint")}
-            accessibilityRole="button"
-            onPress={openDescriptionEditor}
-            style={({ pressed }) => [
-              styles.editableDescription,
-              pressed && styles.buttonPressed,
-            ]}
-          >
-            <View style={styles.descriptionHeader}>
+          <View style={styles.editableDescription}>
+            <Pressable
+              accessibilityHint={t("issues.edit_description_hint")}
+              accessibilityRole="button"
+              onPress={openDescriptionEditor}
+              style={({ pressed }) => [
+                styles.descriptionHeader,
+                pressed && styles.buttonPressed,
+              ]}
+            >
               <Text style={styles.descriptionLabel}>{t("issues.description")}</Text>
               <Text style={styles.editHintText}>{t("issues.tap_to_edit")}</Text>
-            </View>
+            </Pressable>
             {issue.description ? (
               <MarkdownText
                 content={issue.description}
@@ -820,7 +820,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             ) : (
               <Text style={styles.emptyText}>{t("issues.no_description")}</Text>
             )}
-          </Pressable>
+          </View>
           <View style={styles.issueEngagementRow}>
             <Pressable
               accessibilityRole="button"
@@ -2395,11 +2395,15 @@ function AttachmentPreviewModal({
   const imageAttachments = useMemo(() => (
     preview?.imageAttachments?.length ? preview.imageAttachments : attachment && canPreviewImage ? [attachment] : []
   ), [attachment, canPreviewImage, preview?.imageAttachments]);
+  const previewImages = useMemo(
+    () => imageAttachments.map(attachmentToPreviewImage),
+    [imageAttachments],
+  );
 
   if (canPreviewImage) {
     return (
       <ImagePreviewModal
-        imageAttachments={imageAttachments}
+        images={previewImages}
         initialIndex={preview?.imageIndex ?? 0}
         onClose={onClose}
         open={open}
@@ -2645,6 +2649,15 @@ function formatBytes(bytes: number) {
 function isImageAttachment(attachment: Attachment) {
   const contentType = attachment.content_type.toLowerCase();
   return contentType.startsWith("image/") || /\.(avif|gif|heic|heif|jpe?g|png|webp)$/i.test(attachment.filename);
+}
+
+function attachmentToPreviewImage(attachment: Attachment): PreviewImageItem {
+  return {
+    contentType: attachment.content_type,
+    filename: attachment.filename,
+    id: attachment.id,
+    uri: attachment.download_url || attachment.url,
+  };
 }
 
 function isTextPreviewAttachment(attachment: Attachment) {
