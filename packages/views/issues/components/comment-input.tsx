@@ -26,6 +26,8 @@ import { useT } from "../../i18n";
 // shows the same "who will be triggered" bar as the reply composer so the
 // indicator follows the trigger logic everywhere.
 import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
+// CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — confirm before waking a foreign private agent.
+import { usePrivateAgentSendConfirm } from "@multica/cerebro-access/views";
 
 interface CommentInputProps {
   issueId: string;
@@ -60,6 +62,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
   const [isExpanded, setIsExpanded] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
+  // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — gate send on a foreign-private-agent confirm.
+  const { confirmBeforeSend, confirmDialog } = usePrivateAgentSendConfirm({ triggerAgentId });
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -80,6 +84,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
+    // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — stop here if the user cancels the confirm.
+    if (!(await confirmBeforeSend(content))) return;
     // Only send attachment IDs for uploads still present in the content.
     const activeIds: string[] = [];
     for (const [url, id] of uploadMapRef.current) {
@@ -115,6 +121,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
 
   return (
     <div ref={anchorRef}>
+      {/* CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — portals itself; renders nothing until a send needs confirming. */}
+      {confirmDialog}
       {isPinned && (
         <div className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-xs text-muted-foreground">
           <span className="truncate">{t(($) => $.comment.pinned_placeholder)}</span>

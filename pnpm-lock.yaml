@@ -841,6 +841,9 @@ importers:
 
   packages/cerebro-access:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
       '@multica/core':
         specifier: workspace:*
         version: link:../core

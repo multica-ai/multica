@@ -26,6 +26,8 @@ import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 import { PinButton, useFloatPosition, useInputPin } from "@multica/cerebro-pin-input";
 import { useT } from "../../i18n";
 import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
+// CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — confirm before waking a foreign private agent.
+import { usePrivateAgentSendConfirm } from "@multica/cerebro-access/views";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,6 +75,8 @@ function ReplyInput({
   const [submitting, setSubmitting] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
+  // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — gate send on a foreign-private-agent confirm.
+  const { confirmBeforeSend, confirmDialog } = usePrivateAgentSendConfirm({ triggerAgentId });
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -94,6 +98,8 @@ function ReplyInput({
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
+    // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — stop here if the user cancels the confirm.
+    if (!(await confirmBeforeSend(content))) return;
     // Only send attachment IDs for uploads still present in the content.
     const activeIds: string[] = [];
     for (const [url, id] of uploadMapRef.current) {
@@ -135,6 +141,8 @@ function ReplyInput({
 
   return (
     <div ref={anchorRef}>
+      {/* CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — portals itself; renders nothing until a send needs confirming. */}
+      {confirmDialog}
       {/* While the input is floating its natural slot is empty; reserve the
           same height with a hidden spacer so the thread layout does not jump
           (which would also break the sticky measurement and trigger a flicker
