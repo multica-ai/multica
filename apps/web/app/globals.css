@@ -23,3 +23,17 @@
 @source "../../../packages/core/**/*.{ts,tsx}";
 @source "../../../packages/views/**/*.{ts,tsx}";
 @source "../../../packages/cerebro-*/**/*.{ts,tsx}";
+
+/*
+ * TECH-2903: the workspace sidebar is `position: fixed; inset-y-0`, so body
+ * padding-top does not push it down. When the Firtal portal top bar is on,
+ * shift the fixed sidebar (and its drawer/sheet variants) below the 48px
+ * reserved space so the bar can never cover the workspace switcher at the
+ * sidebar's top edge. The body[data-firtal-bar="on"] attribute is owned by
+ * the CerebroFirtalPortalBar component — set server-side, cleared client-side
+ * when the flag is off.
+ */
+body[data-firtal-bar="on"] [data-slot="sidebar-container"] {
+  top: 3rem;
+  height: calc(100svh - 3rem);
+}

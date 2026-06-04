@@ -24,8 +24,12 @@ export function CerebroFirtalPortalBar() {
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    if (enabled) return;
+    if (enabled) {
+      document.body.dataset.firtalBar = "on";
+      return;
+    }
     document.body.style.paddingTop = "0";
+    delete document.body.dataset.firtalBar;
     document.getElementById("firtal-bar-host")?.remove();
   }, [enabled]);
 
