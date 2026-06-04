@@ -19,6 +19,17 @@
       "browser_suffix": " (브라우저)",
       "hint": "대시보드, 차트, 사용자에게 표시되는 '오늘' 레이블에 사용됩니다. 모든 워크스페이스에 적용되는 개인 설정입니다.",
       "sync_failed": "시간대 설정을 저장하지 못했습니다."
+    },
+    "comment_fold": {
+      "title": "이슈 댓글 스레드",
+      "description": "토론 스레드가 길어지면 GitHub처럼 중간 답글을 \"숨겨진 답글 표시\" 컨트롤 뒤에 접습니다. 웹과 데스크톱에 적용됩니다.",
+      "enabled_label": "긴 스레드 접기",
+      "enabled_hint": "처음과 마지막 몇 개 답글은 계속 표시하고, 그 사이의 답글을 접습니다.",
+      "threshold_label": "접기 시작 기준",
+      "threshold_suffix": "개 답글",
+      "head_label": "상단 답글",
+      "tail_label": "하단 답글",
+      "reset_action": "기본값으로 재설정"
     }
   },
   "page": {
