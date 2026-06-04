@@ -288,6 +288,64 @@ func TestLocalStorage_ServeFile_ContentDispositionFromSidecar(t *testing.T) {
 	}
 }
 
+// TestLocalStorage_ServeFile_ContentTypeFromSidecar guards CAR-711: vendor
+// MIME types like application/vnd.excalidraw+json must round-trip through
+// ServeFile. http.ServeFile alone falls back to mime.TypeByExtension (empty
+// for .excalidraw) and then sniffs the body (text/plain for JSON-looking
+// bytes), so the uploader-sniffed content_type from the sidecar has to win.
+func TestLocalStorage_ServeFile_ContentTypeFromSidecar(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	cases := []struct {
+		name        string
+		key         string
+		contentType string
+		filename    string
+		body        []byte
+	}{
+		{
+			name:        "excalidraw vendor type",
+			key:         "workspaces/ws-1/diagram.excalidraw",
+			contentType: "application/vnd.excalidraw+json",
+			filename:    "system-flow.excalidraw",
+			body:        []byte(`{"type":"excalidraw","version":2,"elements":[]}`),
+		},
+		{
+			name:        "spreadsheet vendor type",
+			key:         "workspaces/ws-1/sheet.xlsx",
+			contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			filename:    "report.xlsx",
+			body:        []byte("PK\x03\x04binary-bytes"),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			if _, err := store.Upload(ctx, tc.key, tc.body, tc.contentType, tc.filename); err != nil {
+				t.Fatalf("Upload failed: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/uploads/"+tc.key, nil)
+			rec := httptest.NewRecorder()
+			store.ServeFile(rec, req, tc.key)
+
+			if got := rec.Header().Get("Content-Type"); got != tc.contentType {
+				t.Errorf("Content-Type = %q, want %q", got, tc.contentType)
+			}
+			if got := rec.Body.Bytes(); string(got) != string(tc.body) {
+				t.Errorf("body bytes mismatch: got %q, want %q", got, tc.body)
+			}
+		})
+	}
+}
+
 // TestLocalStorage_ServeFile_NoSidecarFallback documents the graceful
 // degradation path: files uploaded before the sidecar landed (or written
 // out-of-band) have no .meta.json on disk and ServeFile must not set
