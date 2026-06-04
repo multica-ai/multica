@@ -53,7 +53,9 @@
     "private_agent_run_request": "Run request",
     "_comment_cerebro_patch_date_reminders": "CEREBRO-PATCH(issue-date-reminders): FIR-2412 start/due date reminder labels",
     "due_date_reminder": "Due date reminder",
-    "start_date_reminder": "Start date reminder"
+    "start_date_reminder": "Start date reminder",
+    "_comment_cerebro_patch_runtime_pause": "CEREBRO-PATCH(inbox-types-locale-en): FIR-2611 runtime_auto_paused label",
+    "runtime_auto_paused": "Runtime paused"
   },
   "labels": {
     "set_status_to": "Set status to",

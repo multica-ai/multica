@@ -31,7 +31,9 @@ export type InboxItemType =
   | "private_agent_run_request"
   // CEREBRO-PATCH(inbox-skill-change-request): FIR-2627/FIR-2629 — a skill change request was opened (owner/approvers notified) or reviewed (proposer notified). Clicking deep-links to the skill detail with the proposal focused.
   | "skill_change_request_created"
-  | "skill_change_request_reviewed";
+  | "skill_change_request_reviewed"
+  // CEREBRO-PATCH(core-types-inbox): FIR-2611 — one aggregated card per runtime/day when a runtime auto-pauses on expired login / hit quota.
+  | "runtime_auto_paused";
 
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of

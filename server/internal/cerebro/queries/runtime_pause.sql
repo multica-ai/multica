@@ -171,6 +171,14 @@ SET failure_reason = 'rate_limit'
 WHERE id = $1
   AND failure_reason = 'agent_error';
 
+-- name: GetRuntimeOwnerForInbox :one
+-- Resolves the human recipient + display name for a runtime so the auto-pause
+-- aggregated inbox card (FIR-2611) can be addressed to a member. owner_id is
+-- nullable; the caller skips the card when it is NULL (no one to notify).
+SELECT id, name, workspace_id, owner_id
+FROM agent_runtime
+WHERE id = $1;
+
 -- name: CreateResumeFromPauseTask :one
 -- Like CreateRetryTask but resets the attempt counter to 1. Used when
 -- the unpause sweeper resumes work that died during a rate-limit pause —

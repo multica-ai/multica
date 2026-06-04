@@ -15,11 +15,22 @@ import (
 // rate-limit response but contains no parseable reset time.
 const DefaultBackoff = 5 * time.Minute
 
+// rateLimitDetectorRe decides whether a free-form provider error means "the
+// agent cannot work right now" — rate limits, quota caps, AND expired/invalid
+// auth. All three keep failing identically until a reset passes or a human
+// swaps the credential, so all three must auto-pause the runtime rather than
+// bounce-loop a failed run every 5 minutes (FIR-2611). The auth/credential and
+// capacity patterns on the last three lines were the classifier gap that left
+// ~360 such failures mis-labelled as generic agent_error.
 var rateLimitDetectorRe = regexp.MustCompile(
 	`rate[ -]?limit(?:ed|ing)?|ratelimit|limiting requests|\b429\b|` +
 		`quota exceeded|insufficient_quota|monthly usage limit|` +
 		`org's monthly usage|out of tokens|out of extra usage|401 invalid authentication|` +
-		`hit your usage limit|usage limit reached|usage limit has been reached|reached your usage limit`,
+		`hit your usage limit|usage limit reached|usage limit has been reached|reached your usage limit|` +
+		`refresh token (?:was )?(?:already used|revoked|expired)|token (?:was )?(?:already used|revoked)|` +
+		`invalid api key|incorrect api key|invalid x-api-key|` +
+		`not logged in|please (?:run )?/?login|please run codex login|run codex login|` +
+		`exhausted your (?:current )?capacity|capacity exhausted`,
 )
 
 // ParseReset extracts a runtime-unpause timestamp from a free-form

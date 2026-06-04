@@ -69,6 +69,7 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   private_agent_run_request: "Private agent request",
   skill_change_request_created: "Skill change requested",
   skill_change_request_reviewed: "Skill change reviewed",
+  runtime_auto_paused: "Runtime paused", // FIR-2611: aggregated auth/quota auto-pause card.
 };
 
 function shortDate(dateStr: string): string {
