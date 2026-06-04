@@ -38,6 +38,7 @@ import {
 } from "@multica/core/agents";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
+import { SKILLS_ENABLED } from "@multica/core/feature-flags";
 
 export function CreateAgentDialog({
   runtimes,
@@ -365,10 +366,12 @@ export function CreateAgentDialog({
               onChange={setPluginId}
             />
 
-            <SkillMultiSelect
-              selectedIds={selectedSkillIds}
-              onChange={setSelectedSkillIds}
-            />
+            {SKILLS_ENABLED && (
+              <SkillMultiSelect
+                selectedIds={selectedSkillIds}
+                onChange={setSelectedSkillIds}
+              />
+            )}
           </div>
         </div>
 

@@ -29,6 +29,7 @@ import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
+import { SKILLS_ENABLED } from "@multica/core/feature-flags";
 
 type DetailTab =
   | "activity"
@@ -56,7 +57,7 @@ const detailTabs: {
   { id: "activity", icon: Activity },
   { id: "tasks", icon: ListTodo },
   { id: "instructions", icon: FileText },
-  { id: "skills", icon: BookOpenText },
+  ...(SKILLS_ENABLED ? [{ id: "skills" as DetailTab, icon: BookOpenText }] : []),
   { id: "plugin", icon: Puzzle },
   { id: "env", icon: KeyRound },
   { id: "custom_args", icon: Terminal },
@@ -167,7 +168,7 @@ export function AgentOverviewPane({
             />
           </TabContent>
         )}
-        {activeTab === "skills" && (
+        {SKILLS_ENABLED && activeTab === "skills" && (
           <TabContent>
             <SkillsTab agent={agent} />
           </TabContent>

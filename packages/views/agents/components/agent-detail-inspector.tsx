@@ -46,6 +46,7 @@ import { SkillAttach } from "./inspector/skill-attach";
 import { PluginAttach } from "./inspector/plugin-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
+import { SKILLS_ENABLED } from "@multica/core/feature-flags";
 
 interface InspectorProps {
   agent: Agent;
@@ -199,27 +200,29 @@ export function AgentDetailInspector({
       </div>
 
       {/* Skills */}
-      <div className="flex flex-col border-b px-5 py-4">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            {t(($) => $.inspector.section_skills)}
-          </span>
-          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-            {agent.skills.length}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {agent.skills.map((s) => (
-            <span
-              key={s.id}
-              className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
-            >
-              {s.name}
+      {SKILLS_ENABLED && (
+        <div className="flex flex-col border-b px-5 py-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {t(($) => $.inspector.section_skills)}
             </span>
-          ))}
-          <SkillAttach agent={agent} canEdit={canEdit} />
+            <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+              {agent.skills.length}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {agent.skills.map((s) => (
+              <span
+                key={s.id}
+                className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
+              >
+                {s.name}
+              </span>
+            ))}
+            <SkillAttach agent={agent} canEdit={canEdit} />
+          </div>
         </div>
-      </div>
+      )}
     </aside>
   );
 }
