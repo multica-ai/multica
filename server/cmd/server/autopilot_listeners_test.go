@@ -122,6 +122,152 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 	}
 }
 
+func TestAutopilotCreateIssueBatchFailureBlocksIssueWithResultComment(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	registerAutopilotListeners(bus, autopilotSvc)
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text, runtime_id::text
+		FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("load fixture agent/runtime: %v", err)
+	}
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Batch failure create_issue autopilot",
+		Description:        pgtype.Text{String: "MAG-307 regression", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	issueNumber, err := queries.IncrementIssueCounter(ctx, parseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("IncrementIssueCounter: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority,
+			creator_type, creator_id, assignee_type, assignee_id,
+			origin_type, origin_id, number, position
+		)
+		VALUES ($1, 'MAG-307 autopilot failure fixture', 'in_progress', 'none',
+			'agent', $2, 'agent', $2, 'autopilot', $3, $4, 0)
+		RETURNING id::text
+	`, testWorkspaceID, agentID, ap.ID, issueNumber).Scan(&issueID); err != nil {
+		t.Fatalf("create autopilot issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	run, err := queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID: ap.ID,
+		Source:      "schedule",
+		Status:      "issue_created",
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilotRun: %v", err)
+	}
+	run, err = queries.UpdateAutopilotRunIssueCreated(ctx, db.UpdateAutopilotRunIssueCreatedParams{
+		ID:      run.ID,
+		IssueID: parseUUID(issueID),
+	})
+	if err != nil {
+		t.Fatalf("UpdateAutopilotRunIssueCreated: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			dispatched_at, started_at, completed_at,
+			error, failure_reason, attempt, max_attempts
+		)
+		VALUES ($1, $2, $3, 'failed', 0,
+			now() - interval '3 minutes',
+			now() - interval '2 minutes',
+			now(),
+			'runtime went offline while task was running',
+			'runtime_offline',
+			2, 2)
+		RETURNING id::text
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create failed task: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	task, err := queries.GetAgentTask(ctx, parseUUID(taskID))
+	if err != nil {
+		t.Fatalf("GetAgentTask: %v", err)
+	}
+	if got := taskSvc.HandleFailedTasks(ctx, []db.AgentTaskQueue{task}); got != 0 {
+		t.Fatalf("HandleFailedTasks retried %d tasks, want 0", got)
+	}
+
+	updatedIssue, err := queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if updatedIssue.Status != "blocked" {
+		t.Fatalf("issue status = %q, want blocked", updatedIssue.Status)
+	}
+
+	var comment string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM comment
+		WHERE issue_id = $1 AND type = 'system'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&comment); err != nil {
+		t.Fatalf("load result comment: %v", err)
+	}
+	for _, want := range []string{
+		"failure_reason: runtime_offline",
+		"attempts: 2/2",
+		"runtime_id: " + runtimeID,
+		"No continuation issue was identified automatically",
+	} {
+		if !strings.Contains(comment, want) {
+			t.Fatalf("result comment missing %q:\n%s", want, comment)
+		}
+	}
+
+	updatedRun, err := queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if updatedRun.Status != "failed" {
+		t.Fatalf("run status = %q, want failed", updatedRun.Status)
+	}
+	if !updatedRun.FailureReason.Valid || updatedRun.FailureReason.String != "runtime_offline" {
+		t.Fatalf("run failure_reason = %+v, want runtime_offline", updatedRun.FailureReason)
+	}
+}
+
 // TestAutopilotDispatchSkipsWhenRuntimeOffline locks in the MUL-1899
 // admission gate: when the assignee agent's runtime is not online we must
 // record a `skipped` autopilot_run with a failure_reason and NOT enqueue an

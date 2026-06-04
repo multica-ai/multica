@@ -1352,8 +1352,23 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
-	// daemon hiccup.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
+	// daemon hiccup. Autopilot-created issues get a stronger terminal
+	// close-out below: structured result comment + blocked status.
+	closedAutopilotIssue := false
+	if task.IssueID.Valid && retried == nil {
+		if issue, loadErr := s.Queries.GetIssue(ctx, task.IssueID); loadErr == nil {
+			hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+			if checkErr != nil {
+				slog.Warn("fail task: active check failed before autopilot issue close-out",
+					"issue_id", util.UUIDToString(task.IssueID),
+					"error", checkErr,
+				)
+			} else if !hasActive {
+				closedAutopilotIssue = s.closeOutAutopilotIssueFailure(ctx, task, issue, failureReason, errMsg)
+			}
+		}
+	}
+	if errMsg != "" && task.IssueID.Valid && retried == nil && !closedAutopilotIssue {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
 	}
 
@@ -1646,8 +1661,11 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
 				// Reset stuck in_progress issues only when no other active
 				// task exists for the issue and no retry was just enqueued.
+				// Autopilot-created issues are terminal deliverables: when the
+				// final attempt fails, close them out as blocked with a result
+				// comment instead of silently putting them back in todo.
 				issueKey := util.UUIDToString(t.IssueID)
-				if issue.Status == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				if !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
@@ -1656,15 +1674,21 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							"error", checkErr,
 						)
 					} else if !hasActive {
-						if _, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							ID:          t.IssueID,
-							Status:      "todo",
-							WorkspaceID: issue.WorkspaceID,
-						}); updateErr != nil {
-							slog.Warn("handle failed tasks: reset stuck issue failed",
-								"issue_id", issueKey,
-								"error", updateErr,
-							)
+						errMsg := ""
+						if t.Error.Valid {
+							errMsg = t.Error.String
+						}
+						if !s.closeOutAutopilotIssueFailure(ctx, t, issue, failureReason, errMsg) && issue.Status == "in_progress" {
+							if _, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+								ID:          t.IssueID,
+								Status:      "todo",
+								WorkspaceID: issue.WorkspaceID,
+							}); updateErr != nil {
+								slog.Warn("handle failed tasks: reset stuck issue failed",
+									"issue_id", issueKey,
+									"error", updateErr,
+								)
+							}
 						}
 					}
 				}
@@ -1696,6 +1720,132 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
 	return retried
+}
+
+func isOpenAutopilotIssue(issue db.Issue) bool {
+	if !issue.OriginType.Valid || issue.OriginType.String != "autopilot" || !issue.OriginID.Valid {
+		return false
+	}
+	return issue.Status == "todo" || issue.Status == "in_progress" || issue.Status == "blocked"
+}
+
+func normalizeAutopilotIssueFailureReason(failureReason, errMsg string) string {
+	combined := strings.ToLower(failureReason + " " + errMsg)
+	if strings.Contains(combined, "execution_identity_unresolved") ||
+		strings.Contains(combined, "current_user_id could not be determined uniquely") {
+		return "execution_identity_unresolved"
+	}
+	if strings.TrimSpace(failureReason) != "" {
+		return strings.TrimSpace(failureReason)
+	}
+	if strings.TrimSpace(errMsg) != "" {
+		return taskfailure.Classify(errMsg).String()
+	}
+	return "agent_error"
+}
+
+func formatTaskFailureTime(ts pgtype.Timestamptz, empty string) string {
+	if !ts.Valid {
+		return empty
+	}
+	return ts.Time.UTC().Format(time.RFC3339)
+}
+
+func formatTaskFailureUUID(id pgtype.UUID, empty string) string {
+	if !id.Valid {
+		return empty
+	}
+	return util.UUIDToString(id)
+}
+
+func buildAutopilotIssueFailureComment(task db.AgentTaskQueue, failureReason, errMsg string) string {
+	var b strings.Builder
+	b.WriteString("Autopilot run failed and this issue was moved to blocked.\n\n")
+	b.WriteString("- failure_reason: ")
+	b.WriteString(failureReason)
+	b.WriteString("\n- attempts: ")
+	b.WriteString(strconv.Itoa(int(task.Attempt)))
+	b.WriteString("/")
+	b.WriteString(strconv.Itoa(int(task.MaxAttempts)))
+	b.WriteString("\n- task_id: ")
+	b.WriteString(util.UUIDToString(task.ID))
+	b.WriteString("\n- runtime_id: ")
+	b.WriteString(formatTaskFailureUUID(task.RuntimeID, "none"))
+	b.WriteString("\n- last_started_at: ")
+	b.WriteString(formatTaskFailureTime(task.StartedAt, "not started"))
+	b.WriteString("\n- last_completed_at: ")
+	b.WriteString(formatTaskFailureTime(task.CompletedAt, "not completed"))
+	if strings.TrimSpace(errMsg) != "" {
+		b.WriteString("\n- error: ")
+		b.WriteString(truncateForSummary(errMsg, 600))
+	}
+	b.WriteString("\n\n")
+	if failureReason == "execution_identity_unresolved" {
+		b.WriteString("Next step: bind a deterministic execution member/runtime owner for the task-bound agent identity, then rerun this issue. The issue creator remains the agent for audit purposes.")
+	} else {
+		b.WriteString("Next step: fix the runtime or task failure and rerun this issue. No continuation issue was identified automatically; link a follow-up issue if this reporting window was superseded.")
+	}
+	return b.String()
+}
+
+func (s *TaskService) closeOutAutopilotIssueFailure(ctx context.Context, task db.AgentTaskQueue, issue db.Issue, failureReason, errMsg string) bool {
+	if !isOpenAutopilotIssue(issue) {
+		return false
+	}
+	if issue.Status == "blocked" {
+		return true
+	}
+
+	reason := normalizeAutopilotIssueFailureReason(failureReason, errMsg)
+	body := buildAutopilotIssueFailureComment(task, reason, errMsg)
+	s.createAgentComment(ctx, issue.ID, task.AgentID, redact.Text(body), "system", task.TriggerCommentID)
+
+	if run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID); err == nil {
+		updatedRun, updateErr := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+			ID:            run.ID,
+			FailureReason: pgtype.Text{String: reason, Valid: true},
+		})
+		if updateErr != nil {
+			slog.Warn("autopilot issue close-out: failed to mark run failed",
+				"run_id", util.UUIDToString(run.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"error", updateErr,
+			)
+		} else if s.Bus != nil {
+			s.Bus.Publish(events.Event{
+				Type:        protocol.EventAutopilotRunDone,
+				WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+				ActorType:   "system",
+				Payload: map[string]any{
+					"run_id":       util.UUIDToString(updatedRun.ID),
+					"autopilot_id": util.UUIDToString(updatedRun.AutopilotID),
+					"status":       "failed",
+				},
+			})
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("autopilot issue close-out: failed to load linked run",
+			"issue_id", util.UUIDToString(issue.ID),
+			"error", err,
+		)
+	}
+
+	updatedIssue, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issue.ID,
+		Status:      "blocked",
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("autopilot issue close-out: failed to block issue",
+			"issue_id", util.UUIDToString(issue.ID),
+			"error", err,
+		)
+		return true
+	}
+	if s.Bus != nil {
+		s.broadcastIssueUpdated(updatedIssue)
+	}
+	return true
 }
 
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
