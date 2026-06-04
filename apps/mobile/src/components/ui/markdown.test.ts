@@ -7,6 +7,7 @@ import {
   preprocessMobileMarkdown,
   resolveMobileFileCardUrl,
 } from "./markdown-utils";
+import { buildMobileIssueWebHref } from "../../navigation/issue-links";
 
 describe("mobile markdown preprocessing", () => {
   it("recognizes upload file cards", () => {
@@ -102,6 +103,17 @@ describe("mobile markdown preprocessing", () => {
       issueId: "OPE-744",
       commentId: "27a21862-583c-4680-a736-ae29f97f5e38",
     });
+  });
+
+  it("builds mobile issue web links with encoded comment params", () => {
+    expect(
+      buildMobileIssueWebHref({
+        baseUrl: "https://multica.wujieai.com/",
+        workspaceSlug: "open harness",
+        issueId: "OPE-744",
+        commentId: "comment id",
+      }),
+    ).toBe("https://multica.wujieai.com/open%20harness/issues/OPE-744?comment=comment%20id");
   });
 
   it.each([

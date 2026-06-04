@@ -4,6 +4,7 @@ import { useNavigation, useRoute, type RouteProp } from "@react-navigation/nativ
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTranslation } from "react-i18next";
 import { buildWikiTree, useWikiPageDetail, useWikiPageList, type WikiPageTreeNode } from "@multica/core/wiki";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { BookOpen, ChevronRight, FileText } from "lucide-react-native";
 import { EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { MarkdownText } from "../../components/ui/markdown";
@@ -67,6 +68,7 @@ export function WikiDetailScreen() {
   const navigation = useNavigation<WikiNavigation>();
   const route = useRoute<WikiDetailRoute>();
   const { workspace } = useMobileWorkspace();
+  const { getActorName } = useActorName();
   const {
     data: page,
     isError,
@@ -74,10 +76,6 @@ export function WikiDetailScreen() {
     isRefetching,
     refetch,
   } = useWikiPageDetail(workspace.id, route.params.pageId);
-  const updatedAt = useMemo(
-    () => (page ? formatUpdatedAt(page.updated_at) : null),
-    [page],
-  );
   const openIssueMention = useCallback(
     (issueId: string) => {
       navigation.navigate("IssueDetail", { issueId });
@@ -112,9 +110,13 @@ export function WikiDetailScreen() {
           </View>
           <View style={styles.detailTitleWrap}>
             <Text style={styles.detailTitle}>{page.title || t("wiki.untitled")}</Text>
-            {updatedAt ? (
-              <Text style={styles.detailMeta}>{t("wiki.updated_at", { date: updatedAt })}</Text>
-            ) : null}
+            <WikiPageMeta
+              createdAt={page.created_at}
+              createdBy={page.created_by}
+              getActorName={getActorName}
+              updatedAt={page.updated_at}
+              updatedBy={page.updated_by}
+            />
           </View>
         </View>
         {page.content.trim() ? (
@@ -162,6 +164,52 @@ function WikiPageRow({
   );
 }
 
+function WikiPageMeta({
+  createdAt,
+  createdBy,
+  getActorName,
+  updatedAt,
+  updatedBy,
+}: {
+  createdAt: string;
+  createdBy: string | null;
+  getActorName: (type: string, id: string) => string;
+  updatedAt: string;
+  updatedBy: string | null;
+}) {
+  const { t } = useTranslation();
+  const creatorName = resolveMemberName(createdBy, getActorName, t);
+  const updaterName = resolveMemberName(updatedBy, getActorName, t);
+  const showUpdated = createdAt !== updatedAt;
+
+  return (
+    <View style={styles.detailMetaGroup}>
+      <Text style={styles.detailMeta}>
+        {t("wiki.created_by", { name: creatorName })}
+        <Text style={styles.detailMetaSeparator}> · </Text>
+        {formatWikiRelativeTime(t, createdAt)}
+      </Text>
+      {showUpdated ? (
+        <Text style={styles.detailMeta}>
+          {t("wiki.updated_by", { name: updaterName })}
+          <Text style={styles.detailMetaSeparator}> · </Text>
+          {formatWikiRelativeTime(t, updatedAt)}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function resolveMemberName(
+  userId: string | null,
+  getActorName: (type: string, id: string) => string,
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
+  if (!userId) return t("wiki.unknown_author");
+  const name = getActorName("member", userId);
+  return name === "Unknown" ? t("wiki.unknown_author") : name;
+}
+
 function flattenTreeWithDepth(nodes: WikiPageTreeNode[]): WikiListItem[] {
   const out: WikiListItem[] = [];
   const visit = (node: WikiPageTreeNode, depth: number) => {
@@ -172,9 +220,20 @@ function flattenTreeWithDepth(nodes: WikiPageTreeNode[]): WikiListItem[] {
   return out;
 }
 
-function formatUpdatedAt(value: string) {
+function formatWikiRelativeTime(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  value: string,
+) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return t("wiki.just_now");
+  if (diffMin < 60) return t("wiki.minutes_ago", { count: diffMin });
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return t("wiki.hours_ago", { count: diffHours });
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return t("wiki.days_ago", { count: diffDays });
   return date.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
@@ -257,7 +316,14 @@ const styles = StyleSheet.create({
   detailMeta: {
     color: colors.mutedForeground,
     fontSize: 13,
+    lineHeight: 18,
+  },
+  detailMetaGroup: {
+    gap: 2,
     marginTop: spacing.xs,
+  },
+  detailMetaSeparator: {
+    color: colors.mutedForeground,
   },
   noContent: {
     backgroundColor: colors.card,

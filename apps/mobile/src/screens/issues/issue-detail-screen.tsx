@@ -71,10 +71,11 @@ import type {
 } from "@multica/core/types";
 import { Button, EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { MarkdownText } from "../../components/ui/markdown";
-import { isSafeHttpUrl, parseMobileIssueLink } from "../../components/ui/markdown-utils";
+import { isSafeHttpUrl } from "../../components/ui/markdown-utils";
 import { ImagePreviewModal, type PreviewImageItem } from "../../components/ui/image-preview-modal";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import type { RootStackParamList } from "../../navigation/root-navigator";
+import { buildMobileIssueWebHref, parseMobileIssueLink } from "../../navigation/issue-links";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { uploadMobileAsset, type MobileUploadAsset } from "../../platform/upload";
 import { colors, radii, spacing } from "../../theme/tokens";
@@ -210,13 +211,16 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const [issueMenuOpen, setIssueMenuOpen] = useState(false);
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
   const [liveTaskError, setLiveTaskError] = useState<string | null>(null);
+  const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
+  const copyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didScrollToCommentRef = useRef<string | null>(null);
 
   useEffect(() => () => {
     previewAbortRef.current?.abort();
+    if (copyToastTimerRef.current) clearTimeout(copyToastTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -452,6 +456,46 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     void copyCommentContent(content);
   }, [copyCommentContent]);
 
+  const showCopyToast = useCallback((message: string) => {
+    if (copyToastTimerRef.current) clearTimeout(copyToastTimerRef.current);
+    setCopyToastMessage(message);
+    copyToastTimerRef.current = setTimeout(() => {
+      setCopyToastMessage(null);
+      copyToastTimerRef.current = null;
+    }, 1800);
+  }, []);
+
+  const copyLinkToClipboard = useCallback((href: string) => {
+    try {
+      Clipboard.setString(href);
+      showCopyToast(t("issues.link_copied"));
+    } catch {
+      showCopyToast(t("issues.unable_to_copy_link"));
+    }
+  }, [showCopyToast, t]);
+
+  const buildIssueHref = useCallback((targetCommentId?: string) => {
+    if (!issue) return null;
+    return buildMobileIssueWebHref({
+      baseUrl: MOBILE_ENV.webBaseUrl,
+      commentId: targetCommentId,
+      issueId: issue.identifier || issue.id,
+      workspaceSlug: workspace.slug,
+    });
+  }, [issue, workspace.slug]);
+
+  const copyIssueLink = useCallback(() => {
+    const href = buildIssueHref();
+    if (!href) return;
+    copyLinkToClipboard(href);
+  }, [buildIssueHref, copyLinkToClipboard]);
+
+  const copyCommentLinkById = useCallback((targetCommentId: string) => {
+    const href = buildIssueHref(targetCommentId);
+    if (!href) return;
+    copyLinkToClipboard(href);
+  }, [buildIssueHref, copyLinkToClipboard]);
+
   const openIssueDetail = useCallback((targetIssueId: string, targetCommentId?: string) => {
     navigation.push("IssueDetail", {
       issueId: targetIssueId,
@@ -685,6 +729,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           onSaveEdit={saveCommentEditById}
           onStartEdit={startCommentEdit}
           onCopyComment={copyCommentByContent}
+          onCopyCommentLink={copyCommentLinkById}
           onIssueMentionPress={openIssueMention}
           onLinkPress={handleMarkdownLinkPress}
           resolveActorName={getActorName}
@@ -712,6 +757,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     openReplyComposer,
     cancelCommentEdit,
     copyCommentByContent,
+    copyCommentLinkById,
     deleteCommentById,
     openIssueMention,
     saveCommentEditById,
@@ -1030,6 +1076,10 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       parentIssueIdentifier: issue.identifier,
     });
   }, [issue, navigation]);
+  const copyIssueLinkFromMenu = useCallback(() => {
+    setIssueMenuOpen(false);
+    copyIssueLink();
+  }, [copyIssueLink]);
 
   if (isLoading) return <LoadingState />;
   if (isError || !issue) return <EmptyState title={t("issues.unable_to_load")} />;
@@ -1051,6 +1101,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       />
       <IssueActionsMenu
         onClose={() => setIssueMenuOpen(false)}
+        onCopyIssueLink={copyIssueLinkFromMenu}
         onCreateChildIssue={openCreateChildIssue}
         onOpenProperties={openIssueProperties}
         open={issueMenuOpen}
@@ -1144,6 +1195,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         open={Boolean(attachmentPreview)}
         preview={attachmentPreview}
       />
+      <CopyToast bottomInset={insets.bottom} message={copyToastMessage} />
     </Screen>
   );
 }
@@ -1215,12 +1267,14 @@ export function IssueTaskRunsScreen({ navigation, route }: TaskRunsProps) {
 
 function IssueActionsMenu({
   onClose,
+  onCopyIssueLink,
   onCreateChildIssue,
   onOpenProperties,
   open,
   topInset,
 }: {
   onClose: () => void;
+  onCopyIssueLink: () => void;
   onCreateChildIssue: () => void;
   onOpenProperties: () => void;
   open: boolean;
@@ -1237,6 +1291,7 @@ function IssueActionsMenu({
           styles.issueActionsDropdown,
           { top: Math.max(topInset, spacing.sm) + 44 },
         ]}>
+          <DropdownItem label={t("issues.copy_link")} onPress={onCopyIssueLink} />
           <DropdownItem label={t("issues.action_properties")} onPress={onOpenProperties} />
           <DropdownItem label={t("issues.create_child_action")} onPress={onCreateChildIssue} />
         </View>
@@ -1952,6 +2007,7 @@ const TimelineItem = memo(function TimelineItem({
   onCancelEdit,
   onChangeEdit,
   onCopyComment,
+  onCopyCommentLink,
   onDelete,
   onExpandComment,
   onOpenAttachment,
@@ -1974,6 +2030,7 @@ const TimelineItem = memo(function TimelineItem({
   onCancelEdit?: () => void;
   onChangeEdit?: (content: string) => void;
   onCopyComment?: (content: string) => void;
+  onCopyCommentLink?: (commentId: string) => void;
   onDelete?: (commentId: string) => void;
   onExpandComment?: (commentId: string) => void;
   onOpenAttachment?: (attachment: Attachment, attachmentGroup: Attachment[]) => void;
@@ -2010,15 +2067,6 @@ const TimelineItem = memo(function TimelineItem({
     [commentContent, isCommentCollapsed],
   );
 
-  function openActionsMenuAtPress(event: GestureResponderEvent) {
-    if (!isComment || isEditing || !hasCommentActions) return;
-    setActionsMenuAnchor({
-      x: event.nativeEvent.pageX,
-      y: event.nativeEvent.pageY,
-    });
-    setOpenMenu("actions");
-  }
-
   function closeActionsMenu() {
     setOpenMenu(null);
     setActionsMenuAnchor(null);
@@ -2040,6 +2088,13 @@ const TimelineItem = memo(function TimelineItem({
           label={t("issues.copy")}
           onPress={() => {
             onCopyComment?.(entry.content ?? "");
+            closeActionsMenu();
+          }}
+        />
+        <DropdownItem
+          label={t("issues.copy_link")}
+          onPress={() => {
+            onCopyCommentLink?.(entry.id);
             closeActionsMenu();
           }}
         />
@@ -2069,7 +2124,7 @@ const TimelineItem = memo(function TimelineItem({
   function renderActionsMenuModal() {
     if (openMenu !== "actions" || !actionsMenuAnchor) return null;
     const menuWidth = 132;
-    const menuHeight = 44 + (onReply ? 44 : 0) + (isOwnComment ? 72 : 0);
+    const menuHeight = 80 + (onReply ? 44 : 0) + (isOwnComment ? 72 : 0);
     const left = Math.max(spacing.md, Math.min(actionsMenuAnchor.x - menuWidth / 2, windowWidth - menuWidth - spacing.md));
     const top = Math.max(spacing.md, Math.min(actionsMenuAnchor.y + spacing.xs, windowHeight - menuHeight - spacing.md));
 
@@ -2181,9 +2236,7 @@ const TimelineItem = memo(function TimelineItem({
   );
 
   return (
-    <Pressable
-      delayLongPress={320}
-      onLongPress={isComment && !isEditing ? openActionsMenuAtPress : undefined}
+    <View
       style={[
         styles.timelineItem,
         variant === "threadRoot" && styles.timelineItemThreadRoot,
@@ -2201,9 +2254,30 @@ const TimelineItem = memo(function TimelineItem({
           {content}
         </View>
       ) : content}
-    </Pressable>
+    </View>
   );
 });
+
+function CopyToast({
+  bottomInset,
+  message,
+}: {
+  bottomInset: number;
+  message: string | null;
+}) {
+  if (!message) return null;
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.copyToast,
+        { bottom: Math.max(bottomInset, spacing.lg) + spacing.xl },
+      ]}
+    >
+      <Text style={styles.copyToastText}>{message}</Text>
+    </View>
+  );
+}
 
 function HeaderIconButton({
   children,
@@ -3495,6 +3569,28 @@ const styles = StyleSheet.create({
   },
   menuModalOverlay: {
     flex: 1,
+  },
+  copyToast: {
+    alignSelf: "center",
+    backgroundColor: colors.foreground,
+    borderRadius: radii.md,
+    elevation: 4,
+    left: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    position: "absolute",
+    right: spacing.lg,
+    shadowColor: "#000000",
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.14,
+    shadowRadius: 8,
+  },
+  copyToastText: {
+    color: colors.primaryForeground,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+    textAlign: "center",
   },
   dropdownItem: {
     minHeight: 36,

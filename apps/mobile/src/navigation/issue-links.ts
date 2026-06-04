@@ -4,6 +4,23 @@ export type MobileIssueLinkTarget = {
   workspaceSlug: string;
 };
 
+export function buildMobileIssueWebHref({
+  baseUrl,
+  commentId,
+  issueId,
+  workspaceSlug,
+}: {
+  baseUrl: string;
+  commentId?: string;
+  issueId: string;
+  workspaceSlug: string;
+}): string {
+  const base = baseUrl.replace(/\/$/, "");
+  const path = `/${encodeURIComponent(workspaceSlug)}/issues/${encodeURIComponent(issueId)}`;
+  if (!commentId) return `${base}${path}`;
+  return `${base}${path}?comment=${encodeURIComponent(commentId)}`;
+}
+
 export function parseMobileIssueLink(
   href: string,
   allowedBaseUrls: readonly (string | undefined)[],
