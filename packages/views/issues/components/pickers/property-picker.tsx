@@ -217,7 +217,7 @@ export function PickerItem({
       data-picker-item
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
+      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
     >
       {/* min-w-0 lets long children (like truncated label names) shrink
           inside the flex row instead of pushing the selected checkmark off

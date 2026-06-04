@@ -109,6 +109,18 @@ describe("AgentDropdown", () => {
     expect(screen.queryByText("Others")).not.toBeInTheDocument();
   });
 
+  it("left-aligns agent picker rows", async () => {
+    renderDropdown();
+
+    const dialog = await screen.findByRole("dialog");
+    const alphaRow = Array.from(
+      dialog.querySelectorAll<HTMLButtonElement>("button[data-picker-item]"),
+    ).find((row) => row.textContent?.includes("Alpha"));
+
+    expect(alphaRow).toBeDefined();
+    expect(alphaRow).toHaveClass("text-left");
+  });
+
   it("keeps the current agent marked and selects another agent", async () => {
     const { onSelect } = renderDropdown();
 
