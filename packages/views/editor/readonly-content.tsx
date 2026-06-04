@@ -155,12 +155,13 @@ function CodeBlockHeader({ language, code }: { language?: string; code: string }
     setTimeout(() => setCopied(false), 2000);
   }, [code]);
   return (
-    <div className="flex items-center justify-between rounded-t-md border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+    <div className="code-block-header flex select-none items-center justify-between rounded-t-md border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
       <span>{language || "code"}</span>
       <button
         type="button"
+        onMouseDown={(e) => e.preventDefault()}
         onClick={handleCopy}
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
+        className="pointer-events-auto flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
         title="Copy code"
       >
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
@@ -291,9 +292,9 @@ function buildComponents(): Partial<Components> {
       const langClass = classNames.find((cls: string) => cls.startsWith("language-"));
       const language = langClass?.replace("language-", "");
       return (
-        <div className="rounded-md border border-border overflow-hidden my-2">
+        <div className="code-block-wrapper my-2 overflow-hidden rounded-md border border-border select-text">
           {codeText && <CodeBlockHeader language={language} code={codeText} />}
-          <pre className="!mt-0 !rounded-t-none !border-0">{children}</pre>
+          <pre className="!mt-0 !rounded-t-none !border-0 select-text">{children}</pre>
         </div>
       );
     },
