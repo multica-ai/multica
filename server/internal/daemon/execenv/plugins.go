@@ -10,17 +10,18 @@ import (
 )
 
 // PluginSource describes a single plugin to install from a specific marketplace.
-// Each entry is self-contained — one plugin, one marketplace URL.
+// Each entry is self-contained — one plugin, one marketplace URL and name.
 type PluginSource struct {
-	MarketplaceURL string `json:"marketplace_url"`
-	Plugin         string `json:"plugin"`
+	MarketplaceURL  string `json:"marketplace_url"`
+	MarketplaceName string `json:"marketplace_name"`
+	Plugin          string `json:"plugin"`
 }
 
 // setupPlugins is a provider-aware plugin installer dispatcher.
 // It routes to the correct implementation based on the provider string.
-// Returns nil immediately when plugins is empty or bin is empty.
+// Returns nil immediately when bin is empty.
 func setupPlugins(ctx context.Context, provider, bin, workDir string, plugins []PluginSource, logger *slog.Logger) error {
-	if len(plugins) == 0 || bin == "" {
+	if bin == "" {
 		return nil
 	}
 	switch provider {
@@ -34,67 +35,68 @@ func setupPlugins(ctx context.Context, provider, bin, workDir string, plugins []
 // setupCSCPlugins installs CSC plugins into the task's working directory.
 // For each PluginSource it runs:
 //
-//	1. csc plugin marketplace add <marketplaceURL>
-//	2. csc plugin update <plugin>
-//	3. csc plugin install <plugin> -s project
+//	1. csc plugin marketplace add <marketplaceURL>        (non-fatal)
+//	2. csc plugin marketplace update <marketplaceName>
+//	3. csc plugin install <plugin>@<marketplaceName> -s local
+//	4. csc plugin update <plugin>
 //
 // All commands run with cmd.Dir set to workDir (CSC uses cwd + scope, not --dir).
+// marketplace add failure is non-fatal: the marketplace may already be registered.
+// When plugins is empty, hardcoded defaults are used (remove in Phase 2).
 func setupCSCPlugins(ctx context.Context, cscBin string, workDir string, plugins []PluginSource, logger *slog.Logger) error {
-	if cscBin == "" || len(plugins) == 0 {
+	if cscBin == "" {
 		return nil
 	}
-	for _, p := range plugins {
-		// Step 1: marketplace add
-		addCtx, addCancel := context.WithTimeout(ctx, 60*time.Second)
-		addCmd := exec.CommandContext(addCtx, cscBin, "plugin", "marketplace", "add", p.MarketplaceURL)
-		addCmd.Dir = workDir
-		var addStderr strings.Builder
-		addCmd.Stderr = &addStderr
-		if err := addCmd.Run(); err != nil {
-			addCancel()
-			stderrMsg := strings.TrimSpace(addStderr.String())
-			if stderrMsg != "" {
-				return fmt.Errorf("csc plugin marketplace add %s: %w (stderr: %s)", p.MarketplaceURL, err, stderrMsg)
-			}
-			return fmt.Errorf("csc plugin marketplace add %s: %w", p.MarketplaceURL, err)
+	// TODO(Phase 2): remove this fallback once the server populates Task.Plugins.
+	if len(plugins) == 0 {
+		plugins = []PluginSource{
+			{
+				MarketplaceURL:  "https://github.com/costrict-plugins-repo/marketplace.git",
+				MarketplaceName: "costrict-plugins",
+				Plugin:          "cospowers-requirements",
+			},
 		}
-		addCancel()
-		logger.Info("execenv: csc plugin marketplace add ok", "url", p.MarketplaceURL)
+		logger.Info("execenv: using hardcoded CSC plugin defaults (server did not provide plugins)")
+	}
+	for _, p := range plugins {
+		// Step 1: marketplace add (non-fatal — may already be registered)
+		if err := runCSCCmd(ctx, cscBin, workDir, "plugin", "marketplace", "add", p.MarketplaceURL); err != nil {
+			logger.Error("execenv: csc plugin marketplace add failed", "url", p.MarketplaceURL, "error", err)
+		}
 
-		// Step 2: update
-		updateCtx, updateCancel := context.WithTimeout(ctx, 60*time.Second)
-		updateCmd := exec.CommandContext(updateCtx, cscBin, "plugin", "update", p.Plugin)
-		updateCmd.Dir = workDir
-		var updateStderr strings.Builder
-		updateCmd.Stderr = &updateStderr
-		if err := updateCmd.Run(); err != nil {
-			updateCancel()
-			stderrMsg := strings.TrimSpace(updateStderr.String())
-			if stderrMsg != "" {
-				return fmt.Errorf("csc plugin update %s: %w (stderr: %s)", p.Plugin, err, stderrMsg)
-			}
+		// Step 2: marketplace update
+		if err := runCSCCmd(ctx, cscBin, workDir, "plugin", "marketplace", "update", p.MarketplaceName); err != nil {
+			return fmt.Errorf("csc plugin marketplace update %s: %w", p.MarketplaceName, err)
+		}
+
+		// Step 3: install with local scope
+		spec := p.Plugin
+		if p.MarketplaceName != "" {
+			spec = p.Plugin + "@" + p.MarketplaceName
+		}
+		if err := runCSCCmd(ctx, cscBin, workDir, "plugin", "install", spec, "-s", "local"); err != nil {
+			return fmt.Errorf("csc plugin install %s: %w", spec, err)
+		}
+
+		// Step 4: update installed plugin
+		if err := runCSCCmd(ctx, cscBin, workDir, "plugin", "update", p.Plugin); err != nil {
 			return fmt.Errorf("csc plugin update %s: %w", p.Plugin, err)
 		}
-		updateCancel()
-		logger.Info("execenv: csc plugin update ok", "plugin", p.Plugin)
-
-		// Step 3: install with project scope
-		installCtx, installCancel := context.WithTimeout(ctx, 120*time.Second)
-		installCmd := exec.CommandContext(installCtx, cscBin, "plugin", "install", p.Plugin, "-s", "project")
-		installCmd.Dir = workDir
-		var installStderr strings.Builder
-		installCmd.Stderr = &installStderr
-		if err := installCmd.Run(); err != nil {
-			installCancel()
-			stderrMsg := strings.TrimSpace(installStderr.String())
-			if stderrMsg != "" {
-				return fmt.Errorf("csc plugin install %s: %w (stderr: %s)", p.Plugin, err, stderrMsg)
-			}
-			return fmt.Errorf("csc plugin install %s: %w", p.Plugin, err)
-		}
-		installCancel()
-		logger.Info("execenv: csc plugin install ok", "plugin", p.Plugin, "scope", "project")
 	}
 
+	return nil
+}
+
+// runCSCCmd executes a csc CLI command with the given arguments.
+func runCSCCmd(ctx context.Context, cscBin, workDir string, args ...string) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, cscBin, args...)
+	cmd.Dir = workDir
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
 	return nil
 }
