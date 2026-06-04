@@ -3,11 +3,11 @@
     "name": "Multicam",
     "slug": "multicam",
     "scheme": "wujieai-multicam",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "orientation": "portrait",
     "icon": "./assets/icon-android.png",
     "userInterfaceStyle": "light",
-    "runtimeVersion": "0.1.2",
+    "runtimeVersion": "0.1.3",
     "updates": {
       "url": "https://u.expo.dev/a4140277-7ff1-4282-b21e-5fc2fd9e5eea"
     },
@@ -16,7 +16,7 @@
     ],
     "android": {
       "package": "com.wujieai.multica",
-      "versionCode": 5,
+      "versionCode": 8,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon-android.png",
         "backgroundColor": "#000000"
