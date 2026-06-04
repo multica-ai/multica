@@ -70,6 +70,16 @@ function useNativeNavigationGestures() {
   }, [goBack, goForward]);
 }
 
+// Cmd/Ctrl+W closes the active tab. The main process owns the keystroke (it
+// must swallow the OS "Close Window" accelerator) and forwards it here.
+function useCloseActiveTabShortcut() {
+  useEffect(() => {
+    return window.desktopAPI.onCloseActiveTab(() => {
+      useTabStore.getState().closeActiveTab();
+    });
+  }, []);
+}
+
 // The main area's top bar doubles as a window drag region. When the sidebar
 // is not occupying main-flow width — either user-collapsed (offcanvas) or
 // auto-hidden in mobile mode (<768px, becomes a sheet drawer) — we pad the
@@ -149,6 +159,7 @@ export function DesktopShell() {
   useInternalLinkHandler();
   useActiveTitleSync();
   useNativeNavigationGestures();
+  useCloseActiveTabShortcut();
 
   // Reactive read of current workspace slug from the platform singleton.
   // On first mount, slug is null until WorkspaceRouteLayout (inside the tab

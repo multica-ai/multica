@@ -13,6 +13,14 @@ export type ShortcutInput = {
 // Subset of WebContents the zoom handler needs. Keeps the test mock tiny.
 export type ZoomTarget = Pick<WebContents, "getZoomLevel" | "setZoomLevel">;
 
+// Side effects the shortcut handler dispatches into the renderer. Passed in
+// (rather than reached for via `webContents.send`) so the handler stays a
+// pure, unit-testable function with no Electron dependency.
+export type ShortcutActions = {
+  /** Cmd/Ctrl+W → close the active tab instead of the window. */
+  closeActiveTab: () => void;
+};
+
 // Match Electron's built-in zoomIn/zoomOut roles (Chromium default of 0.5
 // per step). Clamp to a range that keeps the UI legible — values outside
 // this band turn the workspace into either confetti or a microfiche.
@@ -33,11 +41,17 @@ const ZOOM_MAX = 4.5;
  * layouts (issue MUL-2354 — Cmd+= zooms in but Cmd+- doesn't undo it).
  * Handling the shortcuts here gives identical behavior on every platform
  * and every layout.
+ *
+ * Cmd/Ctrl+W is handled here for the same reason: the OS application menu
+ * binds it to "Close Window" by default, which would tear down the whole
+ * window (and every tab in it). We swallow it and ask the renderer to close
+ * just the active tab instead (MUL-2987).
  */
 export function handleAppShortcut(
   input: ShortcutInput,
   webContents: ZoomTarget,
   platform: NodeJS.Platform = process.platform,
+  actions?: ShortcutActions,
 ): boolean {
   if (input.type !== "keyDown") return false;
   const cmdOrCtrl = platform === "darwin" ? input.meta : input.control;
@@ -49,6 +63,15 @@ export function handleAppShortcut(
   }
 
   if (!cmdOrCtrl) return false;
+
+  // Cmd/Ctrl + W → close the active tab, never the window. Swallow it even
+  // when no action is wired (the renderer hasn't mounted the tab shell yet,
+  // e.g. on the login screen) so the menu's Close Window accelerator can't
+  // fire and kill the only window.
+  if (input.key.toLowerCase() === "w") {
+    actions?.closeActiveTab();
+    return true;
+  }
 
   // Cmd/Ctrl + "=" (unshifted) or "+" (Shift+=) → zoom in.
   if (input.key === "=" || input.key === "+") {

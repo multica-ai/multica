@@ -143,6 +143,44 @@ describe("handleAppShortcut — reset zoom", () => {
   });
 });
 
+describe("handleAppShortcut — close active tab (MUL-2987)", () => {
+  it("closes the active tab on Cmd+W (macOS) and swallows the event", () => {
+    const wc = makeWc();
+    const closeActiveTab = vi.fn();
+    expect(
+      handleAppShortcut(key("w", { meta: true }), wc, "darwin", { closeActiveTab }),
+    ).toBe(true);
+    expect(closeActiveTab).toHaveBeenCalledTimes(1);
+    expect(wc.setZoomLevel).not.toHaveBeenCalled();
+  });
+
+  it("closes the active tab on Ctrl+W (Linux/Windows)", () => {
+    const wc = makeWc();
+    const closeActiveTab = vi.fn();
+    expect(
+      handleAppShortcut(key("w", { control: true }), wc, "linux", { closeActiveTab }),
+    ).toBe(true);
+    expect(
+      handleAppShortcut(key("W", { control: true }), wc, "win32", { closeActiveTab }),
+    ).toBe(true);
+    expect(closeActiveTab).toHaveBeenCalledTimes(2);
+  });
+
+  it("still swallows Cmd+W with no action wired, so the window can't close", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("w", { meta: true }), wc, "darwin")).toBe(true);
+  });
+
+  it("ignores plain W without Cmd/Ctrl", () => {
+    const wc = makeWc();
+    const closeActiveTab = vi.fn();
+    expect(
+      handleAppShortcut(key("w"), wc, "darwin", { closeActiveTab }),
+    ).toBe(false);
+    expect(closeActiveTab).not.toHaveBeenCalled();
+  });
+});
+
 describe("handleAppShortcut — unrelated keys pass through", () => {
   it("does not capture plain letters", () => {
     const wc = makeWc();

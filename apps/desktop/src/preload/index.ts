@@ -6,6 +6,7 @@ import {
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
 } from "../shared/navigation-gestures";
+import { CLOSE_ACTIVE_TAB_CHANNEL } from "../shared/window-shortcuts";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -154,6 +155,14 @@ const desktopAPI = {
     ipcRenderer.on(NAVIGATION_GESTURE_CHANNEL, handler);
     return () => {
       ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
+    };
+  },
+  /** Listen for Cmd/Ctrl+W → close the active tab. Returns an unsubscribe function. */
+  onCloseActiveTab: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on(CLOSE_ACTIVE_TAB_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(CLOSE_ACTIVE_TAB_CHANNEL, handler);
     };
   },
   /** Open the OS folder picker and return the chosen absolute path. */

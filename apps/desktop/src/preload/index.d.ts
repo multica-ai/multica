@@ -45,6 +45,8 @@ interface DesktopAPI {
   ) => () => void;
   /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
+  /** Listen for Cmd/Ctrl+W → close the active tab. Returns an unsubscribe function. */
+  onCloseActiveTab: (callback: () => void) => () => void;
   /** Open the OS folder picker and return the chosen absolute path.
    *  Used by the Project settings "Add local directory" flow. */
   pickDirectory: (

@@ -10,6 +10,7 @@ import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
+import { CLOSE_ACTIVE_TAB_CHANNEL } from "../shared/window-shortcuts";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -202,7 +203,12 @@ function createWindow(): void {
   // anything we own here (reload-block, zoom) is the sole handler for
   // that combination — no double-fire with the macOS default View menu.
   mainWindow.webContents.on("before-input-event", (event, input) => {
-    if (handleAppShortcut(input, mainWindow!.webContents)) {
+    if (
+      handleAppShortcut(input, mainWindow!.webContents, process.platform, {
+        closeActiveTab: () =>
+          mainWindow?.webContents.send(CLOSE_ACTIVE_TAB_CHANNEL),
+      })
+    ) {
       event.preventDefault();
     }
   });
