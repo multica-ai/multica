@@ -27,6 +27,7 @@ import { colors, radii, spacing } from "../../theme/tokens";
 import { ImagePreviewModal, type PreviewImageItem } from "./image-preview-modal";
 import { ScreenTitleBar } from "./screen-title-bar";
 import {
+  fillTableColumnWidths,
   getIssueMentionId,
   isInlineFileLinkTitle,
   isMentionHref,
@@ -343,7 +344,7 @@ function MarkdownTable({
     previewLandscape ? 120 : 96,
     Math.min(previewLandscape ? 220 : 180, Math.floor(previewViewportWidth / visibleColumnCount)),
   );
-  const previewCellWidths = useMemo(
+  const intrinsicPreviewCellWidths = useMemo(
     () => getTableColumnWidths({
       columnCount,
       fallbackWidth: fallbackPreviewCellWidth,
@@ -355,7 +356,21 @@ function MarkdownTable({
     }),
     [columnCount, fallbackPreviewCellWidth, header, previewLandscape, rows],
   );
-  const previewTableWidth = previewCellWidths.reduce((total, next) => total + next, 0);
+  const previewMaxColumnWidth = previewLandscape
+    ? TABLE_PREVIEW_LANDSCAPE_MAX_COLUMN_WIDTH
+    : TABLE_PREVIEW_PORTRAIT_MAX_COLUMN_WIDTH;
+  const previewCellWidths = useMemo(
+    () => fillTableColumnWidths({
+      maxWidth: previewMaxColumnWidth,
+      viewportWidth: previewViewportWidth,
+      widths: intrinsicPreviewCellWidths,
+    }),
+    [intrinsicPreviewCellWidths, previewMaxColumnWidth, previewViewportWidth],
+  );
+  const previewTableWidth = Math.max(
+    previewViewportWidth,
+    previewCellWidths.reduce((total, next) => total + next, 0),
+  );
   const nextOrientation = previewLandscape ? "portrait" : "landscape";
 
   function openPreview(event: GestureResponderEvent) {

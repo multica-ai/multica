@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  fillTableColumnWidths,
   getIssueMentionId,
   parseMobileIssueLink,
   parseFileCardLine,
@@ -8,6 +9,37 @@ import {
   resolveMobileFileCardUrl,
 } from "./markdown-utils";
 import { buildMobileIssueWebHref } from "../../navigation/issue-links";
+
+describe("mobile markdown table preview widths", () => {
+  it("expands narrow columns to fill the viewport", () => {
+    expect(fillTableColumnWidths({ maxWidth: 200, viewportWidth: 300, widths: [60, 90] })).toEqual([
+      135,
+      165,
+    ]);
+  });
+
+  it("does not shrink tables that are already wider than the viewport", () => {
+    expect(fillTableColumnWidths({ maxWidth: 300, viewportWidth: 300, widths: [180, 180] })).toEqual([
+      180,
+      180,
+    ]);
+  });
+
+  it("respects max column width while expanding", () => {
+    expect(fillTableColumnWidths({ maxWidth: 120, viewportWidth: 300, widths: [100, 80] })).toEqual([
+      120,
+      120,
+    ]);
+  });
+
+  it("handles empty columns and invalid viewport widths", () => {
+    expect(fillTableColumnWidths({ maxWidth: 200, viewportWidth: 300, widths: [] })).toEqual([]);
+    expect(fillTableColumnWidths({ maxWidth: 200, viewportWidth: 0, widths: [80, 80] })).toEqual([
+      80,
+      80,
+    ]);
+  });
+});
 
 describe("mobile markdown preprocessing", () => {
   it("recognizes upload file cards", () => {
