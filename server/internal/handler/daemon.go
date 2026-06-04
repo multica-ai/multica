@@ -92,6 +92,28 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 	return rt, true
 }
 
+// requireDaemonRuntimeIdentityAccess verifies the caller is bound to the
+// specific runtime, not merely to the runtime's workspace. Bound daemon tokens
+// can only operate the daemon_id they were minted for; PAT/JWT fallback is
+// accepted only for the runtime owner. Legacy runtimes without owner/daemon_id
+// keep the existing workspace-scoped fallback until they are backfilled.
+func (h *Handler) requireDaemonRuntimeIdentityAccess(w http.ResponseWriter, r *http.Request, rt db.AgentRuntime) bool {
+	if h.verifyDaemonRuntimeIdentityAccess(r, rt) {
+		return true
+	}
+	writeError(w, http.StatusNotFound, "runtime not found")
+	return false
+}
+
+func (h *Handler) verifyDaemonRuntimeIdentityAccess(r *http.Request, rt db.AgentRuntime) bool {
+	if daemonID := middleware.DaemonIDFromContext(r.Context()); daemonID != "" {
+		return !rt.DaemonID.Valid || rt.DaemonID.String == daemonID
+	}
+
+	userID := requestUserID(r)
+	return userID != "" && (!rt.OwnerID.Valid || uuidToString(rt.OwnerID) == userID)
+}
+
 // requireDaemonTaskAccess looks up a task and verifies the caller owns its workspace.
 func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request, taskID string) (db.AgentTaskQueue, bool) {
 	task, _, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
@@ -1083,6 +1105,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// runtime_id (defense-in-depth against upstream routing bugs).
 	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
 	if !ok {
+		return
+	}
+	if !h.requireDaemonRuntimeIdentityAccess(w, r, runtime) {
+		outcome = "runtime_identity_denied"
 		return
 	}
 	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
