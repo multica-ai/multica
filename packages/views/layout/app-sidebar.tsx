@@ -379,6 +379,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   // write (our own optimistic update, or a WS refetch) cannot reorder the
   // DOM under dnd-kit while its drop animation is still interpolating.
   const [localPinned, setLocalPinned] = useState<PinnedItem[]>(pinnedItems);
+  // When the current path matches a pinned item exactly, the pin owns the
+  // sidebar highlight — suppress the workspace-group tab (Issues / Projects)
+  // so two rows don't appear active at once. Non-pinned detail pages still
+  // light up their parent tab via isNavActive's prefix match.
+  const pathMatchesPin = localPinned.some((pin) => {
+    const pinHref = pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id);
+    return pathname === pinHref;
+  });
   const isDraggingRef = useRef(false);
   useEffect(() => {
     if (!isDraggingRef.current) {
@@ -680,7 +688,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <SidebarMenu className="gap-0.5">
                 {workspaceNav.map((item) => {
                   const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
+                  const isActive = !pathMatchesPin && isNavActive(pathname, href);
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton

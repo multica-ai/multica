@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, pins } = vi.hoisted(() => ({
+const { detail, deletePin, pins, nav } = vi.hoisted(() => ({
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
   pins: {
@@ -19,6 +19,7 @@ const { detail, deletePin, pins } = vi.hoisted(() => ({
       },
     ],
   },
+  nav: { pathname: "/acme/issues" },
 }));
 
 vi.mock("@dnd-kit/core", () => ({
@@ -43,7 +44,9 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarMenuButton: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+  SidebarMenuButton: ({ children, isActive }: { children: React.ReactNode; isActive?: boolean }) => (
+    <button type="button" data-active={isActive ? "true" : undefined}>{children}</button>
+  ),
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
 }));
@@ -71,7 +74,7 @@ vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
 vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../navigation", () => ({
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
-  useNavigation: () => ({ pathname: "/acme/issues", push: vi.fn() }),
+  useNavigation: () => ({ pathname: nav.pathname, push: vi.fn() }),
 }));
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
 vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /> }));
@@ -141,6 +144,7 @@ describe("PinRow", () => {
   beforeEach(() => {
     deletePin.mockReset();
     detail.current = { isPending: false, isError: false, data: null, error: null };
+    nav.pathname = "/acme/issues";
   });
 
   it("unpins missing details", async () => {
@@ -159,5 +163,25 @@ describe("PinRow", () => {
     detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
     render(<AppSidebar />);
     expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
+  });
+
+  it("does not activate parent tab when on a pinned item's path", async () => {
+    detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
+    nav.pathname = "/acme/issues/issue-1";
+    const { container } = render(<AppSidebar />);
+    const issuesTab = container.querySelector(".lucide-list-todo")?.closest("button");
+    expect(issuesTab).not.toBeNull();
+    expect(issuesTab).not.toHaveAttribute("data-active");
+    const pinButton = screen.getByText("MUL-123 Keep this pin").closest("button");
+    expect(pinButton).toHaveAttribute("data-active", "true");
+  });
+
+  it("still activates parent tab on a non-pinned item path", async () => {
+    detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
+    nav.pathname = "/acme/issues/issue-999";
+    const { container } = render(<AppSidebar />);
+    const issuesTab = container.querySelector(".lucide-list-todo")?.closest("button");
+    expect(issuesTab).not.toBeNull();
+    expect(issuesTab).toHaveAttribute("data-active", "true");
   });
 });
