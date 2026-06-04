@@ -62,7 +62,7 @@ export function ThinkingPropRow({
   );
 }
 
-function pickModelEntry(
+export function pickModelEntry(
   models: RuntimeModel[],
   model: string,
 ): RuntimeModel | undefined {

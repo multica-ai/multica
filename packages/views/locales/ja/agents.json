@@ -196,7 +196,6 @@
     "environment": "環境",
     "custom_args": "カスタム引数",
     "mcp_config": "MCP",
-    "integrations": "連携",
     "discard_dialog_title": "保存していない変更を破棄しますか？",
     "discard_dialog_description": "このタブに保存していない変更があります。今移動すると変更は破棄されます。",
     "discard_keep": "編集を続ける",
@@ -227,6 +226,8 @@
     "create_failed_toast": "エージェントを作成できませんでした",
     "skill_attach_failed_toast": "エージェントは作成されましたが、スキルを追加できませんでした: {{error}}",
     "squad_join_failed_toast": "エージェント \"{{name}}\" は作成されましたが、スクワッドに参加できませんでした: {{error}}。メンバーから手動で追加できます。",
+    "thinking_label": "思考",
+    "thinking_help": "このエージェントの推論レベルをオーバーライドします",
     "instructions": {
       "label": "指示",
       "placeholder_blank": "クリックして指示を作成...",
@@ -323,10 +324,6 @@
       "add_dialog_confirm_other": "スキル {{count}} 件を追加",
       "add_dialog_cancel": "キャンセル",
       "add_failed_toast": "スキルを追加できませんでした"
-    },
-    "integrations": {
-      "intro": "このエージェントを外部のチャットプラットフォームに接続し、普段使っているツールから直接やり取りできるようにします。",
-      "members_note": "エージェントに Lark Bot を紐付けできるのはワークスペースのオーナーと管理者のみです。接続済みの Bot は「設定 → 連携」で確認できます。"
     },
     "activity": {
       "section_now": "現在",

@@ -209,7 +209,6 @@
     "environment": "환경",
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",
-    "integrations": "연동",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -240,6 +239,8 @@
     "create_failed_toast": "에이전트를 만들지 못했습니다",
     "skill_attach_failed_toast": "에이전트는 만들었지만 스킬을 연결하지 못했습니다: {{error}}",
     "squad_join_failed_toast": "에이전트 \"{{name}}\"은(는) 만들었지만 스쿼드에 참가하지 못했습니다: {{error}}. 멤버에서 직접 추가할 수 있습니다.",
+    "thinking_label": "사고",
+    "thinking_help": "이 에이전트의 추론 수준을 오버라이드합니다",
     "instructions": {
       "label": "지침",
       "placeholder_blank": "클릭해서 지침 작성...",
@@ -339,10 +340,6 @@
       "add_dialog_confirm_other": "스킬 {{count}}개 추가",
       "add_dialog_cancel": "취소",
       "add_failed_toast": "스킬을 추가하지 못했습니다"
-    },
-    "integrations": {
-      "intro": "이 에이전트를 외부 채팅 플랫폼에 연결해 팀원이 평소 사용하는 도구에서 바로 함께 작업할 수 있도록 합니다.",
-      "members_note": "에이전트에 Lark 봇을 연결할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
     },
     "activity": {
       "section_now": "현재",
