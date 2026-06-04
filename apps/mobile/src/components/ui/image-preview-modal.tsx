@@ -27,20 +27,26 @@ import { scheduleOnRN } from "react-native-worklets";
 import Svg, { Path } from "react-native-svg";
 import { Gallery, type VerticalPullOptions } from "react-native-zoom-toolkit";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { Attachment } from "@multica/core/types";
 import { spacing } from "../../theme/tokens";
+
+export type PreviewImageItem = {
+  contentType?: string;
+  filename?: string;
+  id: string;
+  uri: string;
+};
 
 const FullscreenStatusBar = NativeModules.FullscreenStatusBar as
   | { hide?: () => void; show?: () => void }
   | undefined;
 
 export function ImagePreviewModal({
-  imageAttachments,
+  images,
   initialIndex,
   onClose,
   open,
 }: {
-  imageAttachments: Attachment[];
+  images: PreviewImageItem[];
   initialIndex: number;
   onClose: () => void;
   open: boolean;
@@ -64,8 +70,8 @@ export function ImagePreviewModal({
   });
 
   const safeInitialIndex = useMemo(
-    () => Math.max(0, Math.min(initialIndex, Math.max(0, imageAttachments.length - 1))),
-    [imageAttachments.length, initialIndex],
+    () => Math.max(0, Math.min(initialIndex, Math.max(0, images.length - 1))),
+    [images.length, initialIndex],
   );
 
   useEffect(() => {
@@ -96,8 +102,8 @@ export function ImagePreviewModal({
   }, [open]);
 
   async function saveImage(imageIndex = currentImageIndex) {
-    const imageAttachment = imageAttachments[imageIndex];
-    if (!imageAttachment || saveState === "saving") return;
+    const image = images[imageIndex];
+    if (!image || saveState === "saving") return;
     setSaveState("saving");
     try {
       const permission = await MediaLibrary.requestPermissionsAsync();
@@ -105,10 +111,9 @@ export function ImagePreviewModal({
         Alert.alert(t("issues.save_image_permission_title"), t("issues.save_image_permission_body"));
         return;
       }
-      const imageUrl = imageAttachment.download_url || imageAttachment.url;
-      const extension = getAttachmentFileExtension(imageAttachment) || "jpg";
-      const localUri = `${FileSystem.cacheDirectory ?? ""}${imageAttachment.id}.${extension}`;
-      const result = await FileSystem.downloadAsync(imageUrl, localUri);
+      const extension = getImageFileExtension(image) || "jpg";
+      const localUri = `${FileSystem.cacheDirectory ?? ""}${image.id}.${extension}`;
+      const result = await FileSystem.downloadAsync(image.uri, localUri);
       await MediaLibrary.saveToLibraryAsync(result.uri);
       Alert.alert(t("issues.save_image_success_title"), t("issues.save_image_success_body"));
     } catch (err) {
@@ -146,7 +151,7 @@ export function ImagePreviewModal({
       <GestureHandlerRootView style={styles.root}>
         <Animated.View style={[styles.gallery, pullStyle]}>
           <Gallery
-            data={imageAttachments}
+            data={images}
             gap={24}
             initialIndex={safeInitialIndex}
             keyExtractor={(item) => item.id}
@@ -159,7 +164,7 @@ export function ImagePreviewModal({
               <View style={{ height: windowHeight, width: windowWidth }}>
                 <Image
                   resizeMode="contain"
-                  source={{ uri: item.download_url || item.url }}
+                  source={{ uri: item.uri }}
                   style={styles.image}
                 />
               </View>
@@ -214,10 +219,10 @@ function DownloadIcon() {
   );
 }
 
-function getAttachmentFileExtension(attachment: Attachment) {
-  const filenameExtension = attachment.filename.match(/\.([a-z0-9]+)$/i)?.[1];
+function getImageFileExtension(image: PreviewImageItem) {
+  const filenameExtension = image.filename?.match(/\.([a-z0-9]+)$/i)?.[1];
   if (filenameExtension) return filenameExtension.toLowerCase();
-  return attachment.content_type.split("/")[1]?.split(";")[0]?.toLowerCase() ?? "";
+  return image.contentType?.split("/")[1]?.split(";")[0]?.toLowerCase() ?? "";
 }
 
 const styles = StyleSheet.create({
