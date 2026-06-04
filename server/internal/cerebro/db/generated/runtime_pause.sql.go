@@ -194,6 +194,34 @@ func (q *Queries) GetAgentRuntimePauseSnapshot(ctx context.Context, id pgtype.UU
 	return i, err
 }
 
+const getRuntimeOwnerForInbox = `-- name: GetRuntimeOwnerForInbox :one
+SELECT id, name, workspace_id, owner_id
+FROM agent_runtime
+WHERE id = $1
+`
+
+type GetRuntimeOwnerForInboxRow struct {
+	ID          pgtype.UUID `json:"id"`
+	Name        string      `json:"name"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+// Resolves the human recipient + display name for a runtime so the auto-pause
+// aggregated inbox card (FIR-2611) can be addressed to a member. owner_id is
+// nullable; the caller skips the card when it is NULL (no one to notify).
+func (q *Queries) GetRuntimeOwnerForInbox(ctx context.Context, id pgtype.UUID) (GetRuntimeOwnerForInboxRow, error) {
+	row := q.db.QueryRow(ctx, getRuntimeOwnerForInbox, id)
+	var i GetRuntimeOwnerForInboxRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.WorkspaceID,
+		&i.OwnerID,
+	)
+	return i, err
+}
+
 const incrementAutoPauseCount = `-- name: IncrementAutoPauseCount :one
 UPDATE agent_runtime
 SET auto_pause_count = auto_pause_count + 1,

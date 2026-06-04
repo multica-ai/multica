@@ -59,6 +59,21 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 		return false
 	}
 
+	// Re-classify the triggering task on EVERY pause-worthy failure (FIR-2611),
+	// before — and independent of — the pause attempt below. The daemon sends an
+	// empty failure_reason for generic errors, which defaults to 'agent_error';
+	// that value is excluded from ListResumableTasksForRuntime's Category-2
+	// resume set and shows up as a generic failed run rather than a rate-limit.
+	// Reclassifying every auth/cap failure (not only the ones whose pause call
+	// happens to succeed) is what stops ~83 monthly-cap failures from being
+	// stranded as agent_error. The SQL WHERE guard keeps it idempotent.
+	if err := s.Cerebro.ReclassifyAsRateLimit(ctx, task.ID); err != nil {
+		slog.Warn("auto-pause on failure: reclassify task failed",
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+	}
+
 	// Bump the consecutive auto-pause counter first; its value decides the
 	// backoff length and whether the circuit breaker trips. On a counter
 	// read/write error fall back to count=1 (flat default backoff) — never
@@ -108,6 +123,13 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 			"error", err,
 		)
 	}
+
+	// Collapse the runtime's auth/quota bounce-loop into ONE aggregated inbox
+	// card per (runtime, day) for the runtime owner (FIR-2611), instead of the
+	// long list of failed-run rows the user used to see. Bumped on every pause
+	// cycle so the card carries an accurate failed-run count and the latest
+	// reset time. Best-effort: a card failure never blocks the pause.
+	s.upsertRuntimePauseCard(ctx, task.RuntimeID, count, unpauseAt, circuitOpen)
 
 	s.notifyAutoPauseFailure(ctx, task, decision, unpauseAt, circuitOpen, count)
 

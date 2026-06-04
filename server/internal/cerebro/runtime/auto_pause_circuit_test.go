@@ -46,6 +46,10 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 		_, _ = pool.Exec(bg, `DELETE FROM issue WHERE id = $1`, issueID)
 		_, _ = pool.Exec(bg, `DELETE FROM agent WHERE id = $1`, agentID)
 		_, _ = pool.Exec(bg, `UPDATE agent_runtime SET paused_at = NULL, unpause_at = NULL, pause_reason = NULL, auto_pause_count = 0 WHERE id = $1`, runtimeID)
+		// MaybeAutoPauseOnFailure calls upsertRuntimePauseCard for the shared
+		// recipient; wipe the aggregated card so siblings (TestUpsertRuntimePauseCard)
+		// see an empty inbox.
+		_, _ = pool.Exec(bg, `DELETE FROM inbox_item WHERE recipient_id = $1 AND type = 'runtime_auto_paused'`, runtimeAccountTestUserID)
 	})
 	// Start from a clean counter — the shared runtime fixture may carry state
 	// from a sibling test in this package.

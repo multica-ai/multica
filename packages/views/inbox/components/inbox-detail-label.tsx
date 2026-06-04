@@ -39,6 +39,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 inline Danish labels (cerebro feature) — keeps en/ko/zh-Hans parity untouched.
     skill_change_request_created: "Foreslået ændring til skill",
     skill_change_request_reviewed: "Dit skill-forslag er behandlet",
+    runtime_auto_paused: t(($) => $.types.runtime_auto_paused), // CEREBRO-PATCH(inbox-runtime-pause-label): FIR-2611.
   };
 }
 
@@ -122,6 +123,8 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "reminder": // CEREBRO-PATCH(inbox-reminders-label): show reminder body in detail labels.
       return <span>{item.body || details.text || typeLabels[item.type]}</span>;
+    case "runtime_auto_paused": // CEREBRO-PATCH(inbox-runtime-pause-label): FIR-2611 — show resume/manual line.
+      return <span>{item.body || typeLabels[item.type]}</span>;
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;
   }
