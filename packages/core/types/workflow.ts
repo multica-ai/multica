@@ -1,6 +1,22 @@
 export type WorkflowStatus = "draft" | "active" | "paused" | "archived";
 export type WorkerType = "human" | "agent" | "squad";
 export type CriticType = "human" | "agent" | "squad" | "api";
+export type NodeShape = "rectangle" | "diamond" | "pill" | "hexagon";
+
+export const NODE_SHAPES: NodeShape[] = ["rectangle", "diamond", "pill", "hexagon"];
+
+export function parseNodeShape(formatSchema: unknown): NodeShape {
+  if (
+    formatSchema &&
+    typeof formatSchema === "object" &&
+    "shape" in (formatSchema as Record<string, unknown>) &&
+    typeof (formatSchema as Record<string, unknown>).shape === "string" &&
+    NODE_SHAPES.includes((formatSchema as Record<string, unknown>).shape as NodeShape)
+  ) {
+    return (formatSchema as Record<string, unknown>).shape as NodeShape;
+  }
+  return "rectangle";
+}
 export type NodeRunStatus =
   | "pending" | "format_checking" | "format_ok" | "format_failed"
   | "worker_assigned" | "working" | "awaiting_critic"
@@ -18,8 +34,6 @@ export interface Workflow {
   created_by_type: string;
   created_by_id: string;
   node_count: number;
-  is_template: boolean;
-  source_template_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -94,7 +108,7 @@ export interface WorkflowNodeRun {
 export interface CreateWorkflowRequest {
   title: string;
   description?: string;
-  template_id?: string;
+  template?: string;
 }
 
 export interface UpdateWorkflowRequest {
@@ -163,19 +177,4 @@ export interface ListWorkflowRunsResponse {
 export interface MyWorkflowTaskResponse {
   node_runs: WorkflowNodeRun[];
   total: number;
-}
-
-export interface ToggleTemplateRequest {
-  is_template: boolean;
-}
-
-export interface WorkflowAdmin {
-  id: string;
-  name: string;
-  email: string;
-  can_manage_workflows: boolean;
-}
-
-export interface UpdateWorkflowAdminsRequest {
-  user_ids: string[];
 }

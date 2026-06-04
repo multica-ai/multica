@@ -1,526 +1,554 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  MarkerType,
+  ConnectionMode,
+  applyNodeChanges,
+  applyEdgeChanges,
+  useReactFlow,
+  type Node,
+  type Edge,
+  type Connection,
+  type OnNodesChange,
+  type OnEdgesChange,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
-import type { WorkflowNode, WorkflowEdge } from "@multica/core/types";
-import { cn } from "@multica/ui/lib/utils";
+import type { WorkflowNode as WorkflowNodeType, WorkflowEdge as WorkflowEdgeType } from "@multica/core/types";
+import { parseNodeShape } from "@multica/core/types";
+import {
+  WorkflowNode,
+  AnnotationNode,
+  WorkflowEdge as WorkflowEdgeComponent,
+  AnnotationConnectorEdge,
+  ANNO_WIDTH,
+  ANNO_HEIGHT,
+  NODE_WIDTH,
+  NODE_HEIGHT,
+  DIAMOND_SIZE,
+  HEXAGON_SIZE,
+  type WorkflowNodeData,
+} from "./reactflow-nodes";
+import { computeAlignmentSnap, type AlignmentGuide } from "./alignment-snap";
 
-const NODE_WIDTH = 180;
-const NODE_HEIGHT = 64;
+function parseNodeFormat(formatSchema: unknown): {
+  shape: ReturnType<typeof parseNodeShape>;
+  nodeColor: string | undefined;
+  fontSize: number | undefined;
+  nodeWidth: number | undefined;
+  nodeHeight: number | undefined;
+} {
+  const shape = parseNodeShape(formatSchema);
+  let nodeColor: string | undefined;
+  let fontSize: number | undefined;
+  let nodeWidth: number | undefined;
+  let nodeHeight: number | undefined;
+  if (formatSchema && typeof formatSchema === "object" && formatSchema !== null) {
+    const obj = formatSchema as Record<string, unknown>;
+    if (typeof obj.color === "string" && obj.color !== "") nodeColor = obj.color;
+    if (typeof obj.fontSize === "number") fontSize = obj.fontSize;
+    if (typeof obj.width === "number") nodeWidth = obj.width;
+    if (typeof obj.height === "number") nodeHeight = obj.height;
+  }
+  return { shape, nodeColor, fontSize, nodeWidth, nodeHeight };
+}
 
-interface DAGCanvasProps {
-  nodes: WorkflowNode[];
-  edges: WorkflowEdge[];
-  onNodeMoved?: (nodeId: string, x: number, y: number) => void;
-  onNodeDragEnd?: (nodeId: string, x: number, y: number) => void;
+const nodeTypes = { workflow: WorkflowNode, annotation: AnnotationNode };
+const edgeTypes = { workflow: WorkflowEdgeComponent, annotation: AnnotationConnectorEdge };
+
+export interface WorkflowCanvasProps {
+  nodes: WorkflowNodeType[];
+  edges: WorkflowEdgeType[];
+  onNodeDragStop?: (nodeId: string, x: number, y: number) => void;
   onEdgeCreate?: (sourceNodeId: string, targetNodeId: string) => void;
   onEdgeDelete?: (edgeId: string) => void;
   onNodeClick?: (nodeId: string) => void;
-  onNodeDoubleClick?: (nodeId: string) => void;
-  onAutoLayout?: () => void;
+  onNodeCreate?: (type: string, x: number, y: number, color?: string) => void;
   nodeStatusColors?: Record<string, string>;
   nodeStatuses?: Record<string, { status: string; isRunning: boolean }>;
-  initialScale?: number;
-  initialOffset?: { x: number; y: number };
 }
 
-interface NodeRect {
-  id: string;
-  title: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-function getNodeRect(node: WorkflowNode, h?: number): NodeRect {
-  return {
-    id: node.id,
-    title: node.title,
-    x: node.position_x,
-    y: node.position_y,
-    w: NODE_WIDTH,
-    h: h ?? NODE_HEIGHT,
-  };
-}
-
-function nodeCenter(rect: NodeRect): { cx: number; cy: number } {
-  return { cx: rect.x + rect.w / 2, cy: rect.y + rect.h / 2 };
-}
-
-export function DAGCanvas({
+export function WorkflowCanvas({
   nodes,
   edges,
-  onNodeMoved,
-  onNodeDragEnd,
+  onNodeDragStop,
   onEdgeCreate,
   onEdgeDelete,
   onNodeClick,
-  onNodeDoubleClick,
+  onNodeCreate,
   nodeStatusColors,
   nodeStatuses,
-  initialScale,
-  initialOffset,
-}: DAGCanvasProps) {
-  const selectedNodeId = useWorkflowEditorStore((s) => s.selectedNodeId);
+}: WorkflowCanvasProps) {
   const mode = useWorkflowEditorStore((s) => s.mode);
-  const pendingEdgeSource = useWorkflowEditorStore((s) => s.pendingEdgeSource);
-  const setPendingEdgeSource = useWorkflowEditorStore((s) => s.setPendingEdgeSource);
   const selectNode = useWorkflowEditorStore((s) => s.selectNode);
+  const selectEdge = useWorkflowEditorStore((s) => s.selectEdge);
+  const setSelectedNodeIds = useWorkflowEditorStore((s) => s.setSelectedNodeIds);
+  const cacheNodeDelete = useWorkflowEditorStore((s) => s.cacheNodeDelete);
+  const deletedNodeIds = useWorkflowEditorStore((s) => s.deletedNodeIds);
+  const canvasColorMode = useWorkflowEditorStore((s) => s.canvasColorMode);
+  const { screenToFlowPosition } = useReactFlow();
 
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [dragging, setDragging] = useState<{ nodeId: string; startX: number; startY: number; nodeStartX: number; nodeStartY: number } | null>(null);
-  const [panning, setPanning] = useState<{ startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
-  const pannedRef = useRef(false);
-  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [scale, setScale] = useState(initialScale ?? 1.5);
-  const [offset, setOffset] = useState(initialOffset ?? { x: 0, y: 0 });
-  const scaleRef = useRef(scale);
-  const offsetRef = useRef(offset);
-  scaleRef.current = scale;
-  offsetRef.current = offset;
+  const cacheNodeEdit = useWorkflowEditorStore((s) => s.cacheNodeEdits);
 
-  const ANCHOR_R = 5;
-  const isEdgeMode = mode === "edit" || mode === "connect";
-  const showAnchors = isEdgeMode && !pendingEdgeSource;
-
-  const rects = nodes.map((n) => getNodeRect(n, nodeStatuses?.[n.id] ? NODE_HEIGHT + 20 : undefined));
-  const rectMap = new Map(rects.map((r) => [r.id, r]));
-
-  const svgToLocal = useCallback((clientX: number, clientY: number) => {
-    const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
-    const pt = svg.createSVGPoint();
-    pt.x = clientX;
-    pt.y = clientY;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return { x: 0, y: 0 };
-    const local = pt.matrixTransform(ctm.inverse());
-    return { x: local.x, y: local.y };
+  const handleNodeSelect = useCallback((nodeId: string) => {
+    useWorkflowEditorStore.setState({ selectedNodeId: nodeId, selectedEdgeId: null });
   }, []);
 
-  // Convert screen coords into the inner <g> coordinate space (after zoom+pan).
-  const screenToGroup = useCallback((clientX: number, clientY: number) => {
-    const local = svgToLocal(clientX, clientY);
-    return {
-      x: (local.x - offset.x) / scale,
-      y: (local.y - offset.y) / scale,
-    };
-  }, [svgToLocal, offset, scale]);
+  // Persist node dimensions after resize ends
+  const handleNodeResizeStart = useCallback(() => {
+    resizingRef.current = true;
+  }, []);
 
-  const handleMouseDown = (e: React.MouseEvent, nodeId: string) => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-    e.preventDefault();
+  const handleNodeResize = useCallback(
+    (nodeId: string, width: number, height: number) => {
+      resizingRef.current = false;
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      const parsed = node.format_schema && typeof node.format_schema === "object" && !Array.isArray(node.format_schema)
+        ? { ...(node.format_schema as Record<string, unknown>) }
+        : {};
+      parsed.width = Math.round(width);
+      parsed.height = Math.round(height);
+      cacheNodeEdit(nodeId, { format_schema: parsed });
+    },
+    [nodes, cacheNodeEdit],
+  );
 
-    const isEdgeMode = mode === "edit" || mode === "connect";
-    if (isEdgeMode && pendingEdgeSource) {
-      if (pendingEdgeSource !== nodeId) {
-        onEdgeCreate?.(pendingEdgeSource, nodeId);
-        setPendingEdgeSource(null);
-      }
-      return;
+  // Check if a node is an annotation by its format_schema
+  function isAnnotationNode(fs: unknown): boolean {
+    if (fs && typeof fs === "object" && !Array.isArray(fs)) {
+      return (fs as Record<string, unknown>).type === "annotation";
     }
+    return false;
+  }
 
-    // In edit/connect mode, first click sets pending edge source (Shift+click to connect).
-    if (mode === "edit" && e.shiftKey) {
-      if (!pendingEdgeSource) {
-        setPendingEdgeSource(nodeId);
-      }
-      return;
+  // Build ReactFlow nodes from props — positions frozen in a ref so they
+  // only change when the caller explicitly updates nodes (not during drag).
+  // Also filters out nodes that have been marked for deletion.
+  const propNodes: Node<WorkflowNodeData>[] = useMemo(
+    () => {
+      return nodes
+        .filter((n) => !deletedNodeIds.includes(n.id))
+        .filter((n) => !isAnnotationNode(n.format_schema))
+        .map((n) => {
+          const annotation = isAnnotationNode(n.format_schema);
+          const { shape, nodeColor, fontSize, nodeWidth, nodeHeight } = parseNodeFormat(n.format_schema);
+
+          return {
+            id: n.id,
+            type: annotation ? "annotation" : "workflow",
+            position: { x: n.position_x, y: n.position_y },
+            zIndex: annotation ? -1 : 0,
+            width: annotation ? ANNO_WIDTH : (nodeWidth ?? (shape === "diamond" ? DIAMOND_SIZE : shape === "hexagon" ? HEXAGON_SIZE : NODE_WIDTH)),
+            height: annotation ? ANNO_HEIGHT : (nodeHeight ?? (shape === "diamond" || shape === "hexagon" ? (shape === "diamond" ? DIAMOND_SIZE : HEXAGON_SIZE) : NODE_HEIGHT)),
+            data: {
+              title: n.title,
+              statusColor: nodeStatusColors?.[n.id],
+              statusLabel: nodeStatuses?.[n.id]?.status,
+              isRunning: nodeStatuses?.[n.id]?.isRunning ?? false,
+              isEditing: mode !== "view",
+              shape,
+              nodeColor,
+              fontSize,
+              onNodeSelect: handleNodeSelect,
+              onNodeResizeStart: handleNodeResizeStart,
+              onNodeResizeEnd: handleNodeResize,
+            },
+          };
+        });
+    },
+    [nodes, nodeStatusColors, nodeStatuses, deletedNodeIds, mode, handleNodeSelect, handleNodeResizeStart, handleNodeResize],
+  );
+
+  // Fit only on initial mount to prevent viewport jumps on mode switch.
+  const [shouldFitView, setShouldFitView] = useState(true);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShouldFitView(false));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  // Local state drives ReactFlow rendering so that applyNodeChanges
+  // produces immediate visual updates during drag.
+  const [rfNodes, setRfNodes] = useState(propNodes);
+  const draggingRef = useRef(false);
+  const resizingRef = useRef(false);
+  const rfNodesRef = useRef(rfNodes);
+  rfNodesRef.current = rfNodes;
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+
+  // Sync from props when the data layer changes, but NOT while the user
+  // is actively dragging or resizing (otherwise ReactFlow resets the position/dimensions).
+  useEffect(() => {
+    if (!draggingRef.current && !resizingRef.current) {
+      setRfNodes(propNodes);
     }
-    if (mode === "connect") {
-      if (!pendingEdgeSource) {
-        setPendingEdgeSource(nodeId);
-        selectNode(null);
-      }
-      return;
-    }
+  }, [propNodes]);
 
-    selectNode(nodeId);
-    onNodeClick?.(nodeId);
+  // Resolve the best handle pair for each edge based on node positions.
+  // Nodes with larger horizontal gap → Right source, Left target.
+  // Nodes with larger vertical gap   → Bottom source, Top target.
+  const handlePairs = useMemo(() => {
+    const posMap = new Map(nodes.map((n) => [n.id, { x: n.position_x, y: n.position_y }]));
+    return new Map<string, { sourceHandle: string; targetHandle: string }>(
+      edges.map((e) => {
+        const src = posMap.get(e.source_node_id);
+        const tgt = posMap.get(e.target_node_id);
+        if (!src || !tgt) return [e.id, { sourceHandle: "bottom", targetHandle: "top" }];
+        const dx = tgt.x - src.x;
+        const dy = tgt.y - src.y;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          return [e.id, { sourceHandle: "right", targetHandle: "left" }];
+        }
+        return [e.id, { sourceHandle: "bottom", targetHandle: "top" }];
+      }),
+    );
+  }, [nodes, edges]);
 
-    const rect = rectMap.get(nodeId);
-    if (rect && mode === "edit") {
-      const local = screenToGroup(e.clientX, e.clientY);
-      setDragging({
-        nodeId,
-        startX: local.x,
-        startY: local.y,
-        nodeStartX: rect.x,
-        nodeStartY: rect.y,
+  const propEdges: Edge[] = useMemo(() => {
+    const base = edges
+      .map((e) => ({
+        id: e.id,
+        type: "workflow",
+        source: e.source_node_id,
+        target: e.target_node_id,
+        sourceHandle: handlePairs.get(e.id)?.sourceHandle ?? "bottom",
+        targetHandle: handlePairs.get(e.id)?.targetHandle ?? "top",
+        data: { onEdgeDelete },
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#64748b" },
+        interactionWidth: 20,
+      }));
+
+    // Generate annotation → target connector edges (dashed, no arrow)
+    const annoEdges: Edge[] = [];
+    for (const n of nodes) {
+      if (!isAnnotationNode(n.format_schema)) continue;
+      const fs = n.format_schema as Record<string, unknown> | null;
+      const targetId = fs?.annotation_target_node_id as string | undefined;
+      if (!targetId) continue;
+      const target = nodes.find((t) => t.id === targetId && !isAnnotationNode(t.format_schema));
+      if (!target) continue;
+      annoEdges.push({
+        id: `anno-link-${n.id}`,
+        type: "annotation",
+        source: n.id,
+        target: targetId,
+        sourceHandle: "anno-right",
+        targetHandle: "left",
+        hidden: false,
       });
     }
-  };
 
-  // Use window-level listeners during drag/connect/pan so movement tracks
-  // smoothly even when the cursor leaves the SVG.
+    return [...base, ...annoEdges];
+  }, [edges, onEdgeDelete, handlePairs, nodes]);
+
+  // Local state drives ReactFlow rendering so that applyEdgeChanges
+  // produces immediate visual updates when edges are removed.
+  const [rfEdges, setRfEdges] = useState(propEdges);
+
+  // Sync from props when the data layer changes.
   useEffect(() => {
-    if (!dragging && !pendingEdgeSource && !panning) return;
+    setRfEdges((currentEdges) => {
+      // Preserve ReactFlow's internal state (selected, etc.) when merging new props.
+      // When propEdges recomputes due to a parent re-render (e.g. after a store
+      // update), we must carry over the selected flag so ReactFlow doesn't lose
+      // the user's current edge selection.
+      const stateByKey = new Map(
+        currentEdges.map((e) => [e.id, { selected: e.selected }] as const),
+      );
+      return propEdges.map((e) => {
+        const existing = stateByKey.get(e.id);
+        return existing ? { ...e, selected: existing.selected } : e;
+      });
+    });
+  }, [propEdges]);
 
-    const handleWindowMove = (e: MouseEvent) => {
-      if (panning) {
-        const local = svgToLocal(e.clientX, e.clientY);
-        const dx = local.x - panning.startX;
-        const dy = local.y - panning.startY;
-        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) pannedRef.current = true;
-        setOffset({ x: panning.startOffsetX + dx, y: panning.startOffsetY + dy });
-        return;
-      }
-      const local = screenToGroup(e.clientX, e.clientY);
-      if (dragging) {
-        const dx = local.x - dragging.startX;
-        const dy = local.y - dragging.startY;
-        onNodeMoved?.(dragging.nodeId, Math.round(dragging.nodeStartX + dx), Math.round(dragging.nodeStartY + dy));
-      }
-      if (pendingEdgeSource) {
-        setMousePos(local);
-      }
-    };
+  const handleNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      if (mode !== "edit") return;
+      selectNode(node.id);
+      selectEdge(null);
+      onNodeClick?.(node.id);
+    },
+    [selectNode, selectEdge, onNodeClick, mode],
+  );
 
-    const handleWindowUp = () => {
-      if (dragging && onNodeDragEnd) {
-        const rect = rectMap.get(dragging.nodeId);
-        if (rect) {
-          onNodeDragEnd(dragging.nodeId, rect.x, rect.y);
+  // Sync ReactFlow's internal selection to the Zustand store so batch
+  // operations (move, delete) know which nodes are currently selected.
+  const handleSelectionChange = useCallback(
+    ({ nodes: selectedNodes }: { nodes: Node[] }) => {
+      if (mode !== "edit") return;
+      setSelectedNodeIds(selectedNodes.map((n) => n.id));
+    },
+    [setSelectedNodeIds, mode],
+  );
+
+  const handleNodeDragStart = useCallback(() => {
+    draggingRef.current = true;
+  }, []);
+
+  const handleNodeDragStop = useCallback(
+    (_: MouseEvent | TouchEvent, node: Node) => {
+      draggingRef.current = false;
+      setAlignmentGuides([]);
+      // ReactFlow only fires onNodeDragStop once (for the primary node)
+      // during multi-select drag. Save positions for ALL selected nodes
+      // so the batch move is fully persisted.
+      const ids = useWorkflowEditorStore.getState().selectedNodeIds;
+      if (ids.length > 1) {
+        for (const id of ids) {
+          const current = rfNodesRef.current.find((n) => n.id === id);
+          if (current) {
+            onNodeDragStop?.(id, Math.round(current.position.x), Math.round(current.position.y));
+          }
+        }
+      } else {
+        const current = rfNodesRef.current.find((n) => n.id === node.id);
+        const x = Math.round(current?.position.x ?? node.position.x);
+        const y = Math.round(current?.position.y ?? node.position.y);
+        onNodeDragStop?.(node.id, x, y);
+      }
+    },
+    [onNodeDragStop],
+  );
+
+  const handleNodesChange: OnNodesChange = useCallback(
+    (changes) => {
+      let guides: AlignmentGuide[] = [];
+
+      for (const change of changes) {
+        if (change.type === "remove") {
+          cacheNodeDelete(change.id);
         }
       }
-      setDragging(null);
-      setPanning(null);
-    };
 
-    window.addEventListener("mousemove", handleWindowMove);
-    window.addEventListener("mouseup", handleWindowUp);
-    return () => {
-      window.removeEventListener("mousemove", handleWindowMove);
-      window.removeEventListener("mouseup", handleWindowUp);
-    };
-  }, [dragging, pendingEdgeSource, panning, screenToGroup, svgToLocal, onNodeMoved]);
+      // For multi-node drags, snap the first dragged node and apply the
+      // same delta to all others so the group preserves its relative layout.
+      let snapDeltaX = 0;
+      let snapDeltaY = 0;
+      let firstSnapped = false;
 
-  const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    // Nodes call stopPropagation so this only fires on background.
-    if (e.button !== 0) return;
-    pannedRef.current = false;
-    const local = svgToLocal(e.clientX, e.clientY);
-    setPanning({ startX: local.x, startY: local.y, startOffsetX: offset.x, startOffsetY: offset.y });
-  };
-
-  const handleCanvasClick = () => {
-    setSelectedEdgeId(null);
-    if (mode === "connect" && pendingEdgeSource) {
-      setPendingEdgeSource(null);
-    } else if (!pannedRef.current) {
-      selectNode(null);
-    }
-  };
-
-  const handleAnchorClick = (e: React.MouseEvent, nodeId: string) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (!pendingEdgeSource) {
-      setPendingEdgeSource(nodeId);
-      selectNode(null);
-    } else if (pendingEdgeSource !== nodeId) {
-      onEdgeCreate?.(pendingEdgeSource, nodeId);
-      setPendingEdgeSource(null);
-    }
-  };
-
-  // Mouse wheel zoom (centered on cursor)
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const s = scaleRef.current;
-      const o = offsetRef.current;
-      const local = svgToLocal(e.clientX, e.clientY);
-      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      const newScale = Math.max(0.15, Math.min(5, s * factor));
-      const ratio = newScale / s;
-      setScale(newScale);
-      setOffset({
-        x: local.x - (local.x - o.x) * ratio,
-        y: local.y - (local.y - o.y) * ratio,
+      const snappedChanges = changes.map((change) => {
+        if (change.type === "position" && change.dragging && change.position) {
+          if (!firstSnapped) {
+            const result = computeAlignmentSnap(change.id, change.position.x, change.position.y, rfNodesRef.current);
+            guides.push(...result.guides);
+            snapDeltaX = result.x - change.position.x;
+            snapDeltaY = result.y - change.position.y;
+            firstSnapped = true;
+            return { ...change, position: { x: result.x, y: result.y } };
+          }
+          return {
+            ...change,
+            position: {
+              x: change.position.x + snapDeltaX,
+              y: change.position.y + snapDeltaY,
+            },
+          };
+        }
+        return change;
       });
+
+      setAlignmentGuides(guides);
+      setRfNodes((nds) => {
+        const next = applyNodeChanges(snappedChanges, nds) as Node<WorkflowNodeData>[];
+        // Sync the ref synchronously so handleNodeDragStop (which fires
+        // in the same event tick) reads the snapped positions, not the
+        // pre-snap values from the previous render.
+        rfNodesRef.current = next;
+        return next;
+      });
+    },
+    [cacheNodeDelete],
+  );
+
+  const handleEdgesChange: OnEdgesChange = useCallback(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === "remove" && mode !== "view") {
+          onEdgeDelete?.(change.id);
+        }
+      }
+      setRfEdges((eds) => applyEdgeChanges(changes, eds));
+    },
+    [onEdgeDelete, mode],
+  );
+
+  const handleNodesDelete = useCallback(
+    (deletedNodes: Node[]) => {
+      for (const node of deletedNodes) {
+        cacheNodeDelete(node.id);
+      }
+      setRfNodes((nds) => nds.filter((n) => !deletedNodes.some((d) => d.id === n.id)));
+    },
+    [cacheNodeDelete],
+  );
+
+  // Handle Backspace and undo/redo at the document level because ReactFlow's deleteKeyCode
+  // only works when its container has focus, but clicking nodes often moves
+  // focus to BODY.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (mode !== "edit") return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      const editable = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target as HTMLElement)?.isContentEditable;
+
+      // Ctrl+Z / Cmd+Z → undo
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === "z") {
+        if (editable) return;
+        e.preventDefault();
+        useWorkflowEditorStore.getState().undo();
+        return;
+      }
+
+      // Ctrl+Shift+Z / Cmd+Shift+Z → redo
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "z") {
+        if (editable) return;
+        e.preventDefault();
+        useWorkflowEditorStore.getState().redo();
+        return;
+      }
+
+      if (e.key === "Backspace") {
+        if (editable) return;
+        const store = useWorkflowEditorStore.getState();
+        const nodeIds = store.selectedNodeIds.length > 0 ? store.selectedNodeIds : store.selectedNodeId ? [store.selectedNodeId] : [];
+        if (nodeIds.length > 0) {
+          e.preventDefault();
+          for (const nodeId of nodeIds) {
+            cacheNodeDelete(nodeId);
+          }
+          store.setSelectedNodeIds([]);
+          store.selectNode(null);
+          setRfNodes((nds) => nds.filter((n) => !nodeIds.includes(n.id)));
+        } else if (store.selectedEdgeId) {
+          e.preventDefault();
+          const edgeId = store.selectedEdgeId;
+          store.selectEdge(null);
+          onEdgeDelete?.(edgeId);
+        }
+      }
     };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [mode, cacheNodeDelete, onEdgeDelete]);
 
-    svg.addEventListener("wheel", handleWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", handleWheel);
-  }, [svgToLocal]);
+  const handleConnect = useCallback(
+    (conn: Connection) => {
+      if (conn.source && conn.target) {
+        onEdgeCreate?.(conn.source, conn.target);
+      }
+    },
+    [onEdgeCreate],
+  );
 
-  const handleDoubleClick = (e: React.MouseEvent, nodeId: string) => {
-    e.stopPropagation();
-    onNodeDoubleClick?.(nodeId);
-  };
+  const handleEdgeClick = useCallback(
+    (_: React.MouseEvent, edge: Edge) => {
+      selectEdge(edge.id);
+    },
+    [selectEdge],
+  );
+
+  const handlePaneClick = useCallback(() => {
+    selectNode(null);
+    selectEdge(null);
+    setSelectedNodeIds([]);
+  }, [selectNode, selectEdge, setSelectedNodeIds]);
+
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      const dragType = event.dataTransfer.getData("application/x-multica-shape");
+      if (!dragType) return;
+      const color = event.dataTransfer.getData("application/x-multica-color") || undefined;
+      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      onNodeCreate?.(dragType, position.x, position.y, color);
+    },
+    [screenToFlowPosition, onNodeCreate],
+  );
+
+  // Build a nodeId -> color map for the MiniMap preview
+  const miniMapNodeColors = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const n of nodes) {
+      const { nodeColor } = parseNodeFormat(n.format_schema);
+      if (nodeColor) map[n.id] = nodeColor;
+    }
+    return map;
+  }, [nodes]);
 
   return (
-    <svg
-      ref={svgRef}
-      className="w-full h-full cursor-grab active:cursor-grabbing"
-      onMouseDown={handleCanvasMouseDown}
-      onClick={handleCanvasClick}
-      viewBox="0 0 2000 1400"
+    <ReactFlow
+      nodes={rfNodes}
+      edges={rfEdges}
+      nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
+      onNodeClick={handleNodeClick}
+      onNodeDragStart={handleNodeDragStart}
+      onNodeDragStop={handleNodeDragStop}
+      onNodesChange={handleNodesChange}
+      onConnect={handleConnect}
+      onEdgeClick={handleEdgeClick}
+      onEdgesChange={handleEdgesChange}
+      onPaneClick={handlePaneClick}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      onNodesDelete={handleNodesDelete}
+      onSelectionChange={handleSelectionChange}
+      selectionOnDrag={mode !== "view"}
+      multiSelectionKeyCode="Shift"
+      deleteKeyCode={mode !== "view" ? "Backspace" : null}
+      connectionMode={ConnectionMode.Loose}
+      nodesDraggable={mode !== "view"}
+      nodesConnectable={mode !== "view"}
+      nodesFocusable={mode !== "view"}
+      elementsSelectable
+      fitView={shouldFitView}
+      colorMode={canvasColorMode}
     >
-      <defs>
-        <marker
-          id="arrowhead"
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="10"
-          markerHeight="10"
-          orient="auto"
-          overflow="visible"
+      <Background />
+      <Controls />
+      <MiniMap nodeColor={(node) => miniMapNodeColors[node.id] ?? "#e2e8f0"} />
+      {alignmentGuides.length > 0 && (
+        <svg
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            overflow: "visible",
+            pointerEvents: "none",
+            zIndex: 10,
+          }}
         >
-          <polygon points="0,0 10,5 0,10" fill="#94a3b8" />
-        </marker>
-      </defs>
-
-      <g transform={`translate(${offset.x} ${offset.y}) scale(${scale})`}>
-      {/* Edges */}
-      {edges.map((edge) => {
-        const source = rectMap.get(edge.source_node_id);
-        const target = rectMap.get(edge.target_node_id);
-        if (!source || !target) return null;
-
-        const s = nodeCenter(source);
-        const t = nodeCenter(target);
-
-		const isNodeSelected = selectedNodeId === edge.id;
-
-		// Orthogonal edge: source right -> midX -> target left
-		const esx = source.x + source.w;
-		const esy = s.cy;
-		const etx = target.x;
-		const ety = t.cy;
-		const midX = (esx + etx) / 2;
-
-	        // Midpoint for delete button
-	        const isSelected = selectedEdgeId === edge.id;
-
-	        return (
-	          <g key={edge.id}>
-            <polyline
-	              points={`${esx},${esy} ${midX},${esy} ${midX},${ety} ${etx},${ety}`}
-              stroke="transparent" strokeWidth={12}
-              fill="none"
-	              className="cursor-pointer"
-	              onClick={(e) => { e.stopPropagation(); setSelectedEdgeId(isSelected ? null : edge.id); }}
-	            />
-	            <path
-	              d={`M ${esx},${esy} L ${midX},${esy} L ${midX},${ety} L ${etx},${ety}`}
-	              stroke="#64748b"
-	              fill="none"
-	              className={cn(isNodeSelected && "stroke-primary")}
-	              strokeWidth={isSelected ? 2 : 1.5}
-	            />
-	            <polygon
-	              points={`${etx},${ety} ${etx - 8},${ety - 4} ${etx - 8},${ety + 4}`}
-	              fill="#64748b"
-	              className={cn(isNodeSelected && "fill-primary")}
-	            />
-	            {isSelected && isEdgeMode && onEdgeDelete && (
-	              <g
-	                className="cursor-pointer"
-	                onClick={(e) => { e.stopPropagation(); onEdgeDelete(edge.id); setSelectedEdgeId(null); }}
-	              >
-	                <circle cx={midX} cy={(esy + ety) / 2} r={10} fill="white" stroke="currentColor" className="text-destructive stroke-[2]" />
-                <line x1={midX - 4} y1={(esy + ety) / 2 - 4} x2={midX + 4} y2={(esy + ety) / 2 + 4} stroke="currentColor" className="text-destructive" strokeWidth="1.5" />
-                <line x1={midX + 4} y1={(esy + ety) / 2 - 4} x2={midX - 4} y2={(esy + ety) / 2 + 4} stroke="currentColor" className="text-destructive" strokeWidth="1.5" />
-	              </g>
-	            )}
-	          </g>
-	        );
-      })}
-
-      {/* Pending edge (connect mode) */}
-      {pendingEdgeSource && mousePos && (() => {
-        const source = rectMap.get(pendingEdgeSource);
-        if (!source) return null;
-        const s = nodeCenter(source);
-        return (
-            <polyline
-            x1={s.cx}
-            y1={s.cy}
-            x2={mousePos.x}
-            y2={mousePos.y}
-            stroke="currentColor"
-            className="text-primary/60"
-            strokeWidth={1.5}
-            strokeDasharray="6 4"
-          />
-        );
-      })()}
-
-      {/* Nodes */}
-      {rects.map((rect) => {
-        const isSelected = selectedNodeId === rect.id;
-        const statusColor = nodeStatusColors?.[rect.id];
-        const statusInfo = nodeStatuses?.[rect.id];
-        const isRunning = statusInfo?.isRunning ?? false;
-        const h = statusInfo ? NODE_HEIGHT + 20 : NODE_HEIGHT;
-
-        return (
-          <g
-            key={rect.id}
-            className={cn("cursor-pointer", mode === "connect" && pendingEdgeSource !== rect.id && "cursor-crosshair")}
-            onMouseDown={(e) => handleMouseDown(e, rect.id)}
-            onDoubleClick={(e) => handleDoubleClick(e, rect.id)}
-            onClick={(e) => e.stopPropagation()}
-            onMouseEnter={() => setHoveredNodeId(rect.id)}
-            onMouseLeave={() => setHoveredNodeId(null)}
-          >
-            <rect
-              x={rect.x}
-              y={rect.y}
-              width={rect.w}
-              height={h}
-              rx={8}
-              fill={statusColor ?? "currentColor"}
-              className={cn(
-                "text-card",
-                (isSelected || pendingEdgeSource === rect.id) && "stroke-primary stroke-[2]",
-                !isSelected && pendingEdgeSource !== rect.id && "stroke-border"
-              )}
+          {alignmentGuides.map((g, i) => (
+            <line
+              key={i}
+              x1={g.orientation === "vertical" ? g.position : g.start}
+              y1={g.orientation === "vertical" ? g.start : g.position}
+              x2={g.orientation === "vertical" ? g.position : g.end}
+              y2={g.orientation === "vertical" ? g.end : g.position}
+              stroke="#3b82f6"
               strokeWidth={1}
+              strokeDasharray="4 2"
             />
-            <foreignObject
-              x={rect.x + 4}
-              y={rect.y + 4}
-              width={rect.w - 8}
-              height={h - 8}
-            >
-              <div className="flex flex-col justify-center h-full text-sm text-center px-2 overflow-hidden">
-                <div className="flex items-center justify-center gap-1">
-                  {isRunning && (
-                    <svg className="animate-spin shrink-0" width="12" height="12" viewBox="0 0 12 12">
-                      <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18 8" className="text-primary" />
-                    </svg>
-                  )}
-                  <span className="truncate font-medium text-foreground">{rect.title}</span>
-                </div>
-                {statusInfo && (
-                  <span className="text-[10px] text-muted-foreground truncate mt-0.5">{statusInfo.status}</span>
-                )}
-              </div>
-            </foreignObject>
-            {/* Anchor points — shown on hover in edit/connect mode */}
-            {showAnchors && hoveredNodeId === rect.id && [
-              { cx: rect.x + rect.w / 2, cy: rect.y },
-              { cx: rect.x + rect.w, cy: rect.y + h / 2 },
-              { cx: rect.x + rect.w / 2, cy: rect.y + h },
-              { cx: rect.x, cy: rect.y + h / 2 },
-            ].map((a, i) => (
-              <circle
-                key={i}
-                cx={a.cx}
-                cy={a.cy}
-                r={ANCHOR_R}
-                fill="white"
-                stroke="currentColor"
-                className="text-primary stroke-[2] cursor-crosshair"
-                onClick={(e) => handleAnchorClick(e, rect.id)}
-              />
-            ))}
-          </g>
-        );
-      })}
-      </g>
-    </svg>
+          ))}
+        </svg>
+      )}
+    </ReactFlow>
   );
 }
 
-// ── Auto-layout helpers ──────────────────────────────────────────────────────
-
-interface LayoutResult {
-  nodeId: string;
-  x: number;
-  y: number;
-}
-
-const LAYER_SPACING_X = 280;
-const NODE_SPACING_Y = 100;
-
-export function computeAutoLayout(
-  nodes: WorkflowNode[],
-  edges: WorkflowEdge[],
-): LayoutResult[] {
-  if (nodes.length === 0) return [];
-
-  // Build adjacency and in-degree maps
-  const children = new Map<string, string[]>();
-  const indegree = new Map<string, number>();
-  for (const n of nodes) {
-    children.set(n.id, []);
-    indegree.set(n.id, 0);
-  }
-  for (const e of edges) {
-    children.get(e.source_node_id)?.push(e.target_node_id);
-    indegree.set(e.target_node_id, (indegree.get(e.target_node_id) ?? 0) + 1);
-  }
-
-  // Topological sort + layer assignment (BFS from roots)
-  const layer = new Map<string, number>();
-  const queue: string[] = [];
-  for (const n of nodes) {
-    if ((indegree.get(n.id) ?? 0) === 0) {
-      layer.set(n.id, 0);
-      queue.push(n.id);
-    }
-  }
-  // Handle disconnected nodes
-  if (queue.length === 0 && nodes.length > 0) {
-    const first = nodes[0]!;
-    queue.push(first.id);
-    layer.set(first.id, 0);
-  }
-
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    const curLayer = layer.get(cur) ?? 0;
-    for (const childId of children.get(cur) ?? []) {
-      const newLayer = curLayer + 1;
-      if (!layer.has(childId) || (layer.get(childId) ?? 0) < newLayer) {
-        layer.set(childId, newLayer);
-      }
-      const deg = (indegree.get(childId) ?? 1) - 1;
-      indegree.set(childId, deg);
-      if (deg === 0) queue.push(childId);
-    }
-  }
-
-  // Assign layer to any remaining nodes
-  for (const n of nodes) {
-    if (!layer.has(n.id)) layer.set(n.id, 0);
-  }
-
-  // Group nodes by layer
-  const layerGroups = new Map<number, string[]>();
-  for (const n of nodes) {
-    const l = layer.get(n.id) ?? 0;
-    if (!layerGroups.has(l)) layerGroups.set(l, []);
-    layerGroups.get(l)!.push(n.id);
-  }
-
-  // Position nodes
-  const results: LayoutResult[] = [];
-  const sortedLayers = [...layerGroups.keys()].sort((a, b) => a - b);
-  for (const l of sortedLayers) {
-    const ids = layerGroups.get(l)!;
-    const totalHeight = (ids.length - 1) * NODE_SPACING_Y;
-    const startY = -totalHeight / 2;
-    ids.forEach((id, i) => {
-      results.push({
-        nodeId: id,
-        x: 100 + l * LAYER_SPACING_X,
-        y: 300 + startY + i * NODE_SPACING_Y,
-      });
-    });
-  }
-
-  return results;
-}
+/** @deprecated Use WorkflowCanvas instead */
+export const DAGCanvas = WorkflowCanvas;

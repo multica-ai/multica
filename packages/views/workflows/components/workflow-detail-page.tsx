@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Wand, Trash2, Power, ArrowLeft } from "lucide-react";
+import { Plus, Wand, Trash2, Power, ArrowLeft, Undo2, Redo2, Sun, Moon, Monitor } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   workflowDetailOptions,
@@ -15,8 +15,7 @@ import {
   useUpdateWorkflow,
   useDeleteWorkflow,
   useDeleteEdge,
-  useToggleWorkflowTemplate,
-  useWorkflowAdmins,
+  useDeleteNode,
 } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { useNavigation } from "../../navigation";
@@ -26,10 +25,11 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { useT } from "../../i18n";
-import { useAuthStore } from "@multica/core/auth";
+import { ReactFlowProvider } from "@xyflow/react";
 import { DAGCanvas } from "./dag-canvas";
 import { NodeConfigPanel } from "./node-config-panel";
-import { computeAutoLayout } from "./dag-canvas";
+import { NodePalette } from "./node-palette";
+import { computeAutoLayout } from "./layout";
 import type { WorkflowStatus } from "@multica/core/types";
 
 interface WorkflowDetailPageProps {
@@ -42,15 +42,54 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const wsPaths = useWorkspacePaths();
   const navigation = useNavigation();
 
-  const selectedNodeId = useWorkflowEditorStore((s) => s.selectedNodeId);
+  const selectedNodeIds = useWorkflowEditorStore((s) => s.selectedNodeIds);
   const mode = useWorkflowEditorStore((s) => s.mode);
   const setMode = useWorkflowEditorStore((s) => s.setMode);
   const nodeEdits = useWorkflowEditorStore((s) => s.nodeEdits);
   const clearNodeEdits = useWorkflowEditorStore((s) => s.clearNodeEdits);
+  const deletedNodeIds = useWorkflowEditorStore((s) => s.deletedNodeIds);
+  const clearNodeDelete = useWorkflowEditorStore((s) => s.clearNodeDelete);
+  const undoStack = useWorkflowEditorStore((s) => s.undoStack);
+  const redoStack = useWorkflowEditorStore((s) => s.redoStack);
+  const undo = useWorkflowEditorStore((s) => s.undo);
+  const redo = useWorkflowEditorStore((s) => s.redo);
+  const reverseAction = useWorkflowEditorStore((s) => s._reverseAction);
+  const clearReverseAction = useWorkflowEditorStore((s) => s.clearReverseAction);
+
+  const canvasColorMode = useWorkflowEditorStore((s) => s.canvasColorMode);
+  const cycleCanvasColorMode = useWorkflowEditorStore((s) => s.cycleCanvasColorMode);
 
   useEffect(() => {
     useWorkflowEditorStore.getState().reset();
   }, [id]);
+
+  // Handle reversal of server actions when undo/redo is triggered
+  useEffect(() => {
+    if (!reverseAction) return;
+    const action = reverseAction;
+    clearReverseAction();
+
+    (async () => {
+      try {
+        if (action.type === "create-edge") {
+          // Undo edge create → delete the edge
+          await deleteEdgeMutation.mutateAsync(action.edgeId!);
+        } else if (action.type === "delete-edge") {
+          // Undo edge delete → re-create the edge
+          await createEdgeMutation.mutateAsync({
+            source_node_id: action.sourceNodeId!,
+            target_node_id: action.targetNodeId!,
+          });
+        } else if (action.type === "create-node") {
+          // Undo node create → delete the node
+          await deleteNodeMutation.mutateAsync(action.nodeId!);
+        }
+      } catch {
+        // silent — the snapshot restore already happened
+      }
+    })();
+  }, [reverseAction]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 
   const { data: workflow, isLoading } = useQuery(workflowDetailOptions(wsId, id!));
   const { data: nodes = [] } = useQuery(workflowNodesOptions(wsId, id!));
@@ -60,37 +99,44 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const updateNodeMutation = useUpdateNode(wsId, id!);
   const createEdgeMutation = useCreateEdge(wsId, id!);
   const deleteEdgeMutation = useDeleteEdge(wsId, id!);
+  const deleteNodeMutation = useDeleteNode(wsId, id!);
   const updateWorkflowMutation = useUpdateWorkflow(wsId);
   const deleteWorkflowMutation = useDeleteWorkflow(wsId);
-  const toggleTemplate = useToggleWorkflowTemplate(wsId!);
-  const { data: workflowAdmins = [] } = useWorkflowAdmins();
-  const userId = useAuthStore((s) => s.user?.id ?? null);
-  const isWorkflowAdmin = userId ? workflowAdmins.some((a) => a.id === userId) : false;
 
-  // Merge cached edits into nodes for instant visual feedback
-  const displayNodes = nodes.map((n) => {
-    const edits = nodeEdits[n.id];
-    return edits ? { ...n, ...edits } : n;
-  });
+  // Merge cached edits into nodes for instant visual feedback.
+  // Memoized to keep the array reference stable across re-renders triggered
+  // by WebSocket status pushes — prevents ReactFlow from resetting drag positions.
+  // Also filters out nodes that have been marked for deletion.
+  const displayNodes = useMemo(
+    () =>
+      nodes
+        .filter((n) => !deletedNodeIds.includes(n.id))
+        .map((n) => {
+          const edits = nodeEdits[n.id];
+          return edits ? { ...n, ...edits } : n;
+        }),
+    [nodes, nodeEdits, deletedNodeIds],
+  );
 
-  const selectedNode = displayNodes.find((n) => n.id === selectedNodeId) ?? null;
+  // Only show config panel when exactly 1 node is selected
+  const selectedNode = selectedNodeIds.length === 1
+    ? (displayNodes.find((n) => n.id === selectedNodeIds[0]) ?? null)
+    : null;
 
   const queryClient = useQueryClient();
 
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const handleNodeMoved = useCallback((nodeId: string, x: number, y: number) => {
-    queryClient.setQueryData<typeof nodes>(workflowNodesOptions(wsId, id!).queryKey, (old) => {
-      if (!old) return old;
-      return old.map((n) => n.id === nodeId ? { ...n, position_x: x, position_y: y } : n);
-    });
     useWorkflowEditorStore.getState().cacheNodeEdits(nodeId, { position_x: x, position_y: y });
-  }, [wsId, id, queryClient]);
+  }, []);
 
   const handleEdgeCreate = useCallback(async (sourceNodeId: string, targetNodeId: string) => {
     try {
-      await createEdgeMutation.mutateAsync({ source_node_id: sourceNodeId, target_node_id: targetNodeId });
+      const result = await createEdgeMutation.mutateAsync({ source_node_id: sourceNodeId, target_node_id: targetNodeId });
+      useWorkflowEditorStore.getState().pushServerAction({ type: "create-edge", edgeId: result.id });
       toast.success(t(($) => $.edge.toast_created));
     } catch {
       toast.error(t(($) => $.edge.toast_create_failed));
@@ -98,18 +144,32 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   }, [createEdgeMutation, t]);
 
   const handleEdgeDelete = useCallback((edgeId: string) => {
+    const edge = edges.find((e) => e.id === edgeId);
+    useWorkflowEditorStore.getState().pushServerAction({
+      type: "delete-edge",
+      edgeId,
+      sourceNodeId: edge?.source_node_id ?? "",
+      targetNodeId: edge?.target_node_id ?? "",
+    });
     deleteEdgeMutation.mutate(edgeId);
-  }, [deleteEdgeMutation]);
+  }, [deleteEdgeMutation.mutate, edges]);
 
-  const handleAddNode = async () => {
+  const handleAddNode = async (type: string, x: number, y: number, color?: string) => {
     try {
-      await createNodeMutation.mutateAsync({
-        title: "New Node",
+      const isAnnotation = type === "annotation";
+      const formatSchema: Record<string, unknown> = isAnnotation
+        ? { type: "annotation" }
+        : { shape: type };
+      if (color) formatSchema.color = color;
+      const result = await createNodeMutation.mutateAsync({
+        title: isAnnotation ? "Note" : "New Node",
         worker_type: "human",
         critic_type: "human",
-        position_x: 200 + Math.random() * 200,
-        position_y: 200 + Math.random() * 200,
+        position_x: Math.round(x),
+        position_y: Math.round(y),
+        format_schema: formatSchema,
       });
+      useWorkflowEditorStore.getState().pushServerAction({ type: "create-node", nodeId: result.id });
     } catch {
       // silent
     }
@@ -122,8 +182,17 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
       // Save all pending node edits
       for (const [nodeId, edits] of Object.entries(nodeEdits)) {
         updateNodeMutation.mutate({ nodeId, ...edits });
-        clearNodeEdits(nodeId);
       }
+      // Delete nodes marked for removal
+      for (const nodeId of deletedNodeIds) {
+        deleteNodeMutation.mutate(nodeId);
+      }
+      // Clear undo/redo — saved changes are committed, not undoable.
+      // Node edits and deleted markers are intentionally NOT cleared here:
+      // keeping them ensures displayNodes = nodes + edits always shows
+      // the user's latest positions, preventing a flash of the pre-edit
+      // layout while server mutations are in flight.
+      useWorkflowEditorStore.setState({ undoStack: [], redoStack: [] });
       toast.success(t(($) => $.detail.toast_saved));
     } catch {
       toast.error(t(($) => $.detail.toast_save_failed));
@@ -195,13 +264,14 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             size="icon"
             className="h-7 w-7 shrink-0"
             onClick={async () => {
-              const hasEdits = Object.keys(nodeEdits).length > 0;
+              const hasEdits = Object.keys(nodeEdits).length > 0 || deletedNodeIds.length > 0;
               if (hasEdits && mode === "edit") {
                 const save = confirm("You have unsaved changes. Save before leaving?");
                 if (save) {
                   await handleSave();
                 } else {
                   for (const k of Object.keys(nodeEdits)) clearNodeEdits(k);
+                  for (const nid of deletedNodeIds) clearNodeDelete(nid);
                 }
               }
               useWorkflowEditorStore.getState().reset();
@@ -237,56 +307,85 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               {workflow.title}
             </h1>
           )}
-          {workflow?.is_template && (
-            <Badge variant="outline" className="text-[10px] px-1.5 h-4 shrink-0">模板</Badge>
-          )}
           <Badge variant="secondary" className="text-[10px] px-1.5 h-4 shrink-0">
             {t(($) => ($.status as Record<string, string>)[workflow.status as WorkflowStatus] ?? workflow.status)}
           </Badge>
         </div>
         <div className="flex items-center gap-1">
-          {isWorkflowAdmin && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={async () => {
-                const newIsTemplate = !workflow.is_template;
-                const action = newIsTemplate ? "设为模板" : "取消模板";
-                if (!confirm(`${action}？`)) return;
-                await toggleTemplate.mutateAsync({
-                  id: id,
-                  isTemplate: newIsTemplate,
-                });
-              }}
-              disabled={toggleTemplate.isPending}
-            >
-              {workflow.is_template ? "取消模板" : "设为模板"}
-            </Button>
-          )}
           <Button
             variant={mode === "view" ? "outline" : "secondary"}
             size="sm"
             className="h-8 text-sm px-3"
             onClick={async () => {
-              if (mode === "edit") await handleSave();
+              if (mode === "edit") {
+                setSaving(true);
+                try {
+                  await handleSave();
+                  useWorkflowEditorStore.setState({ selectedNodeId: null, selectedNodeIds: [], selectedEdgeId: null });
+                } finally {
+                  setSaving(false);
+                }
+              }
               setMode(mode === "view" ? "edit" : "view");
             }}
           >
             {mode === "view" ? t(($) => $.detail.toolbar.edit) : "Done"}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleAutoLayout}
+            className="gap-1"
+            title="Auto layout"
+          >
+            <Wand className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleDeleteWorkflow} className="text-destructive hover:text-destructive">
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={cycleCanvasColorMode}
+            className="h-8 w-8 p-0"
+            title={
+              canvasColorMode === "system"
+                ? t(($) => $.detail.canvas_theme_system)
+                : canvasColorMode === "light"
+                  ? t(($) => $.detail.canvas_theme_light)
+                  : t(($) => $.detail.canvas_theme_dark)
+            }
+          >
+            {canvasColorMode === "system" ? (
+              <Monitor className="h-3.5 w-3.5" />
+            ) : canvasColorMode === "light" ? (
+              <Sun className="h-3.5 w-3.5" />
+            ) : (
+              <Moon className="h-3.5 w-3.5" />
+            )}
+          </Button>
+
           {mode === "edit" && (
             <>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={handleAutoLayout}
-                className="gap-1"
-                title="Auto layout"
+                onClick={undo}
+                disabled={undoStack.length === 0}
+                className="h-8 w-8 p-0"
+                title="Undo (Ctrl+Z)"
               >
-                <Wand className="h-3.5 w-3.5" />
+                <Undo2 className="h-3.5 w-3.5" />
               </Button>
-              <Button size="sm" variant="outline" onClick={handleDeleteWorkflow} className="text-destructive hover:text-destructive">
-                <Trash2 className="h-3.5 w-3.5" />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={redo}
+                disabled={redoStack.length === 0}
+                className="h-8 w-8 p-0"
+                title="Redo (Ctrl+Shift+Z)"
+              >
+                <Redo2 className="h-3.5 w-3.5" />
               </Button>
             </>
           )}
@@ -294,7 +393,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             size="sm"
             variant={workflow?.status === "active" ? "secondary" : "default"}
             onClick={handleActivateWorkflow}
-            disabled={updateWorkflowMutation.isPending || workflow?.is_template}
+            disabled={updateWorkflowMutation.isPending}
           >
             <Power className="h-3.5 w-3.5 mr-1" />
             {workflow?.status === "active" ? t(($) => $.detail.deactivate) : t(($) => $.detail.activate)}
@@ -303,48 +402,52 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
       </PageHeader>
 
       {/* Main content area */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 relative">
         {/* DAG canvas */}
         <div className="flex-1 relative bg-muted/20">
+          {saving && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-3">
+                <svg className="animate-spin h-8 w-8 text-primary" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="40 60" />
+                </svg>
+                <span className="text-sm text-muted-foreground">Saving...</span>
+              </div>
+            </div>
+          )}
           {nodes.length === 0 ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
               <p className="text-sm text-muted-foreground">{t(($) => $.detail.no_nodes)}</p>
-              {mode === "edit" && <Button size="sm" variant="outline" onClick={handleAddNode}>
+              {mode === "edit" && <Button size="sm" variant="outline" onClick={() => handleAddNode("rectangle", 200, 200)}>
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 {t(($) => $.detail.add_node)}
               </Button>}
             </div>
           ) : (
-            <DAGCanvas
-              nodes={displayNodes}
-              edges={edges}
-              onNodeMoved={handleNodeMoved}
-              onEdgeCreate={handleEdgeCreate}
-              onEdgeDelete={handleEdgeDelete}
-              onNodeDoubleClick={() => {
-                setMode("edit");
-              }}
-            />
+            <ReactFlowProvider>
+              <DAGCanvas
+                nodes={displayNodes}
+                edges={edges}
+                onNodeDragStop={handleNodeMoved}
+                onEdgeCreate={handleEdgeCreate}
+                onEdgeDelete={handleEdgeDelete}
+                onNodeCreate={handleAddNode}
+              />
+            </ReactFlowProvider>
           )}
-          {/* Add node button (floating) */}
+          {/* Node palette (floating, top-left) */}
           {nodes.length > 0 && mode === "edit" && (
-            <Button
-              size="icon"
-              variant="outline"
-              className="absolute top-3 left-3 h-7 w-7 rounded-full shadow"
-              onClick={handleAddNode}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
+            <NodePalette className="absolute top-3 left-3" />
           )}
         </div>
 
-        {/* Right sidebar: config panel (absolute overlay — don't resize DAG) */}
+        {/* Right sidebar: config panel */}
         {selectedNode && (
-          <div className="absolute right-0 top-0 bottom-0 w-96 z-10 h-full">
+          <div className="w-96 shrink-0">
             <NodeConfigPanel
               node={selectedNode}
               workflowId={id!}
+              nodes={displayNodes}
               onClose={() => useWorkflowEditorStore.getState().selectNode(null)}
             />
           </div>

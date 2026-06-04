@@ -34,6 +34,10 @@ catalog:
   remark-math: "^6.0.0"
   mermaid: "^11.14.0"
 
+  # Flowchart
+  "@xyflow/react": "^12.8.0"
+  "@dagrejs/dagre": "^1.1.5"
+
   # Icons
   lucide-react: "^1.0.1"
 

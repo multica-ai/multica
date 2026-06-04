@@ -19,8 +19,7 @@
       "active": "Active",
       "draft": "Draft",
       "paused": "Paused",
-      "archived": "Archived",
-      "template": "Templates"
+      "archived": "Archived"
     }
   },
   "status": {
@@ -74,7 +73,10 @@
       "creating": "Creating..."
     },
     "section_danger": "Danger Zone",
-    "delete_button": "Delete workflow"
+    "delete_button": "Delete workflow",
+    "canvas_theme_system": "System theme",
+    "canvas_theme_light": "Light theme",
+    "canvas_theme_dark": "Dark theme"
   },
   "node": {
     "title": "Title",
@@ -109,7 +111,9 @@
     "toast_saved": "Node saved",
     "toast_save_failed": "Failed to save node",
     "toast_deleted": "Node deleted",
-    "toast_delete_failed": "Failed to delete node"
+    "toast_delete_failed": "Failed to delete node",
+    "label_color": "Color",
+    "label_font_size": "Font Size"
   },
   "edge": {
     "toast_created": "Edge created",
