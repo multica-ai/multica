@@ -50,3 +50,25 @@ body[data-firtal-bar="on"] [data-slot="sidebar-wrapper"] {
   height: calc(100svh - 3rem);
   min-height: calc(100svh - 3rem);
 }
+
+/*
+ * TECH-2911 follow-up: belt-and-braces for the portal-bar-OFF state.
+ *
+ * The body has the `pt-12` Tailwind class statically. When the portal bar
+ * flag is off, CerebroFirtalPortalBar's useEffect sets `style.paddingTop=0`
+ * inline to reclaim those 48px. That JS reset has two known windows where it
+ * can be too late or wrong:
+ *
+ *   1. SSR + first paint: the server always renders `data-firtal-bar="on"`,
+ *      so initially the pt-12 padding is real even if the user has the flag
+ *      off. The useEffect hasn't fired yet.
+ *   2. bar.js may have set `body.style.paddingTop="48px"` inline during a
+ *      previous "on" session; on toggle-off the host element is removed but
+ *      that inline padding can outlast a re-render in rare orderings.
+ *
+ * When the attribute is not "on", the portal bar must reserve nothing.
+ * Force it. !important is what lets this rule beat any stale inline padding.
+ */
+body:not([data-firtal-bar="on"]) {
+  padding-top: 0 !important;
+}
