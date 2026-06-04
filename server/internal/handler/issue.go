@@ -365,7 +365,7 @@ type searchResult struct {
 // It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, includeArchived bool) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -434,6 +434,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	if !includeClosed {
 		whereClause += " AND i.status NOT IN ('done', 'cancelled')"
+	}
+	if !includeArchived {
+		whereClause += " AND i.archived_at IS NULL"
 	}
 
 	// --- ORDER BY clause ---
@@ -605,6 +608,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
@@ -613,7 +617,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	terms := splitSearchTerms(q)
 	queryNum, hasNum := parseQueryNumber(q)
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, includeArchived)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit

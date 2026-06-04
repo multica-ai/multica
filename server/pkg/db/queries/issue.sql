@@ -506,3 +506,15 @@ WHERE i.workspace_id = $1
     )
   )
   AND (sqlc.narg('archived_by')::uuid IS NULL OR i.archived_by = sqlc.narg('archived_by'));
+
+-- name: SelectAutoArchiveCandidates :many
+-- Find terminal-state issues (done, cancelled) that have not been updated for
+-- more than 30 days and are not yet archived. Used by the background
+-- auto-archive sweeper.
+SELECT id, workspace_id, number
+FROM issue
+WHERE status IN ('done', 'cancelled')
+  AND archived_at IS NULL
+  AND updated_at < now() - interval '30 days'
+ORDER BY updated_at ASC
+LIMIT @max_per_tick;

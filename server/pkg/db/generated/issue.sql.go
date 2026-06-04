@@ -1507,6 +1507,45 @@ func (q *Queries) MarkIssueFirstExecuted(ctx context.Context, id pgtype.UUID) (M
 	return i, err
 }
 
+const selectAutoArchiveCandidates = `-- name: SelectAutoArchiveCandidates :many
+SELECT id, workspace_id, number
+FROM issue
+WHERE status IN ('done', 'cancelled')
+  AND archived_at IS NULL
+  AND updated_at < now() - interval '30 days'
+ORDER BY updated_at ASC
+LIMIT $1
+`
+
+type SelectAutoArchiveCandidatesRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Number      int32       `json:"number"`
+}
+
+// Find terminal-state issues (done, cancelled) that have not been updated for
+// more than 30 days and are not yet archived. Used by the background
+// auto-archive sweeper.
+func (q *Queries) SelectAutoArchiveCandidates(ctx context.Context, maxPerTick int32) ([]SelectAutoArchiveCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, selectAutoArchiveCandidates, maxPerTick)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SelectAutoArchiveCandidatesRow{}
+	for rows.Next() {
+		var i SelectAutoArchiveCandidatesRow
+		if err := rows.Scan(&i.ID, &i.WorkspaceID, &i.Number); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setIssueMetadataKey = `-- name: SetIssueMetadataKey :one
 
 UPDATE issue SET

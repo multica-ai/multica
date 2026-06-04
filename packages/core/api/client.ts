@@ -815,11 +815,12 @@ export class ApiClient {
     });
   }
 
-  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
+  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; include_archived?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     return this.fetch(`/api/issues/search?${search}`, params.signal ? { signal: params.signal } : undefined);
   }
 
