@@ -10,6 +10,7 @@ import {
   computeCostInWindow,
   estimateCost,
   formatProviderName,
+  formatRuntimeName,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -91,6 +92,21 @@ describe("formatProviderName", () => {
 
   it("falls back to title-casing unknown providers", () => {
     expect(formatProviderName("openclaw")).toBe("Openclaw");
+  });
+});
+
+describe("formatRuntimeName", () => {
+  it("normalizes legacy WujieClaw default runtime names", () => {
+    expect(formatRuntimeName("Wujieclaw", "wujieclaw")).toBe("WujieClaw");
+    expect(formatRuntimeName("Wujieclaw (qa-host)", "wujieclaw")).toBe(
+      "WujieClaw (qa-host)",
+    );
+  });
+
+  it("preserves custom runtime names", () => {
+    expect(formatRuntimeName("ops-wujieclaw", "wujieclaw")).toBe(
+      "ops-wujieclaw",
+    );
   });
 });
 

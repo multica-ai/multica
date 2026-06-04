@@ -18,6 +18,26 @@ export function formatProviderName(provider: string): string {
   return `${provider.slice(0, 1).toUpperCase()}${provider.slice(1)}`;
 }
 
+export function formatRuntimeName(name: string, provider: string): string {
+  const brandedProvider = formatProviderName(provider);
+  if (brandedProvider === provider) return name;
+
+  const defaultProviderName = formatProviderNameFallback(provider);
+  if (name === provider || name === defaultProviderName) return brandedProvider;
+
+  const defaultPrefix = `${defaultProviderName} (`;
+  if (name.startsWith(defaultPrefix) && name.endsWith(")")) {
+    return `${brandedProvider}${name.slice(defaultProviderName.length)}`;
+  }
+
+  return name;
+}
+
+function formatProviderNameFallback(provider: string): string {
+  if (!provider) return "Runtime";
+  return `${provider.slice(0, 1).toUpperCase()}${provider.slice(1)}`;
+}
+
 // A live local daemon re-registers itself within seconds of a server-side
 // delete (daemon self-heal, #2404), so deleting an online local runtime from
 // the UI has no lasting effect. Both the detail page and the list row menu

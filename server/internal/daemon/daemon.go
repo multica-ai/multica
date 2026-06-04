@@ -778,7 +778,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		}
 		d.setAgentVersion(name, version)
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
-		displayName := strings.ToUpper(name[:1]) + name[1:]
+		displayName := runtimeDisplayName(name)
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
@@ -814,6 +814,18 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
 	return resp, nil
+}
+
+func runtimeDisplayName(provider string) string {
+	switch provider {
+	case "wujieclaw":
+		return "WujieClaw"
+	default:
+		if provider == "" {
+			return "Runtime"
+		}
+		return strings.ToUpper(provider[:1]) + provider[1:]
+	}
 }
 
 // detectLocalTimezone returns an IANA zone name for the daemon host.
