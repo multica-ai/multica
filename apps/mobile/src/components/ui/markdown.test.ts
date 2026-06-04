@@ -137,6 +137,19 @@ describe("mobile markdown preprocessing", () => {
     });
   });
 
+  it("parses workspace-aware mobile scheme issue links", () => {
+    expect(
+      parseMobileIssueLink(
+        "wujieai-multicam://openharness/issues/OPE-744?comment=27a21862-583c-4680-a736-ae29f97f5e38",
+        ["https://multica.wujieai.com"],
+      ),
+    ).toEqual({
+      workspaceSlug: "openharness",
+      issueId: "OPE-744",
+      commentId: "27a21862-583c-4680-a736-ae29f97f5e38",
+    });
+  });
+
   it("builds mobile issue web links with encoded comment params", () => {
     expect(
       buildMobileIssueWebHref({
@@ -152,6 +165,7 @@ describe("mobile markdown preprocessing", () => {
     "https://example.com/openharness/issues/OPE-744",
     "https://multica.wujieai.com/issues/OPE-744",
     "https://multica.wujieai.com/openharness/issues/OPE-744/properties",
+    "wujieai-multicam://issues/issue-1?commentId=comment-1",
     "multica://openharness/issues/OPE-744",
   ])("does not parse untrusted or unsupported issue links: %s", (href) => {
     expect(parseMobileIssueLink(href, ["https://multica.wujieai.com"])).toBeNull();
