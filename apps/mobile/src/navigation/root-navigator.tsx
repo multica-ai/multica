@@ -17,6 +17,9 @@ import type { Workspace } from "@multica/core/types";
 import { CircleUserRound, ListTodo } from "lucide-react-native";
 import { useMobileLogout } from "../auth/use-mobile-logout";
 import { Button, EmptyState, LoadingState, Screen } from "../components/ui/primitives";
+import { AutopilotDetailScreen } from "../screens/autopilots/autopilot-detail-screen";
+import { AutopilotFormScreen } from "../screens/autopilots/autopilot-form-screen";
+import { AutopilotsScreen } from "../screens/autopilots/autopilots-screen";
 import { LoginScreen } from "../screens/auth/login-screen";
 import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
 import {
@@ -35,6 +38,7 @@ import { MineScreen } from "../screens/mine/mine-screen";
 import { SettingScreen } from "../screens/mine/setting-screen";
 import { SquadsScreen } from "../screens/mine/squads-screen";
 import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
+import { ExternalWebScreen } from "../screens/web/external-web-screen";
 import { WikiDetailScreen, WikiScreen } from "../screens/wiki/wiki-screen";
 import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
 import {
@@ -63,6 +67,10 @@ export type RootStackParamList = {
   InboxDetail: { inboxItemId: string };
   Wiki: undefined;
   WikiDetail: { pageId: string };
+  Autopilots: undefined;
+  AutopilotDetail: { autopilotId: string };
+  AutopilotForm: { autopilotId?: string } | undefined;
+  ExternalWeb: { title?: string; url: string };
   Setting: undefined;
 };
 
@@ -195,6 +203,10 @@ function AuthenticatedNavigator() {
             <Stack.Screen component={InboxDetailScreen} name="InboxDetail" />
             <Stack.Screen component={WikiScreen} name="Wiki" />
             <Stack.Screen component={WikiDetailScreen} name="WikiDetail" />
+            <Stack.Screen component={AutopilotsScreen} name="Autopilots" />
+            <Stack.Screen component={AutopilotDetailScreen} name="AutopilotDetail" />
+            <Stack.Screen component={AutopilotFormScreen} name="AutopilotForm" />
+            <Stack.Screen component={ExternalWebScreen} name="ExternalWeb" />
             <Stack.Screen component={SettingScreen} name="Setting" />
           </Stack.Navigator>
         </WorkspaceGate>
