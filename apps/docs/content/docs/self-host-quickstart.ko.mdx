@@ -81,7 +81,7 @@ make selfhost
 
 **옵션 B — SMTP relay(내부 네트워크 / 온프레미스):**
 
-배포 환경이 `api.resend.com`에 접근할 수 없거나, 이미 내부 메일 릴레이(Microsoft Exchange, Postfix, 온프레미스 SendGrid 등)가 있는 경우에 사용하세요. 둘 다 설정된 경우 `SMTP_HOST`가 Resend보다 우선하므로, 인증 및 초대 메일이 내부 릴레이에 머무릅니다. 465 포트(SMTPS / 암묵적 TLS)는 현재 지원하지 않습니다 — 25 또는 587을 사용하세요.
+배포 환경이 `api.resend.com`에 접근할 수 없거나, 이미 내부 메일 릴레이(Microsoft Exchange, Postfix, 온프레미스 SendGrid 등)가 있는 경우에 사용하세요. 둘 다 설정된 경우 `SMTP_HOST`가 Resend보다 우선하므로, 인증 및 초대 메일이 내부 릴레이에 머무릅니다. STARTTLS는 광고될 때 자동으로 업그레이드됩니다. `465` 포트(SMTPS / 암묵적 TLS)는 연결 직후의 TLS 핸드셰이크를 자동으로 활성화하며, `SMTP_TLS=implicit`(별칭: `smtps`, `ssl`)는 비표준 SMTPS 포트에서 강제로 활성화합니다.
 
 **익명 Exchange 내부 릴레이(포트 25)** — 호스트가 IP로 신뢰되며 자격 증명 없이 제출하는 경우:
 
@@ -102,6 +102,17 @@ SMTP_PORT=587
 SMTP_USERNAME=multica
 SMTP_PASSWORD=...
 SMTP_TLS_INSECURE=false        # 비공개 CA / 자체 서명 인증서일 때만 true로 설정
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**암묵적 TLS / SMTPS(포트 465)** — STARTTLS를 광고하지 않는 알리바바 클라우드 / 텐센트 기업 메일 같은 제공자용. 포트 `465`는 암묵적 TLS를 자동으로 활성화하므로, 여기서 `SMTP_TLS`는 생략할 수 있습니다:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
 RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
