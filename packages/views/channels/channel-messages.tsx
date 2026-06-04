@@ -16,6 +16,10 @@ import {
 } from "@multica/ui/components/ui/collapsible";
 import { Markdown } from "@multica/views/common/markdown";
 import { splitTimeline } from "../chat/lib/copy-text";
+import type { ChannelPendingTask } from "@multica/core/channels";
+
+// Stable empty array to avoid infinite re-renders from Zustand selector.
+const EMPTY_TASKS: ChannelPendingTask[] = [];
 
 // ─── Timeline components (mirror chat's TimelineView, scoped to channel) ─────
 
@@ -354,8 +358,9 @@ export function ChannelMessages({ channelId }: { channelId: string }) {
   );
   const { data: members = [] } = useQuery(channelMembersOptions(wsId, channelId));
 
-  // In-flight task for THIS channel (if any agent is currently responding).
-  const pendingTask = useChannelStore((s) => s.pendingTasks[channelId]);
+  // In-flight tasks for THIS channel (multiple agents may be responding concurrently).
+  // Use a stable empty array reference to avoid infinite re-renders when no tasks exist.
+  const pendingTasks = useChannelStore((s) => s.pendingTasks[channelId]) ?? EMPTY_TASKS;
 
   // Resolve member names from the members list.
   const nameMap = new Map<string, { name: string; type: "user" | "agent" }>();
@@ -363,10 +368,10 @@ export function ChannelMessages({ channelId }: { channelId: string }) {
     nameMap.set(m.member_id, { name: m.name || m.member_id, type: m.member_type });
   }
 
-  // Auto-scroll to bottom when new messages arrive or pending task changes.
+  // Auto-scroll to bottom when new messages arrive or pending tasks change.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [(messages as ChannelMessage[]).length, !!pendingTask]);
+  }, [(messages as ChannelMessage[]).length, pendingTasks.length]);
 
   if (isLoading) {
     return (
@@ -376,7 +381,7 @@ export function ChannelMessages({ channelId }: { channelId: string }) {
     );
   }
 
-  if (messages.length === 0 && !pendingTask) {
+  if (messages.length === 0 && pendingTasks.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
         暂无消息，发送第一条消息开始讨论。
@@ -394,14 +399,15 @@ export function ChannelMessages({ channelId }: { channelId: string }) {
         );
       })}
 
-      {/* Live agent activity bubble — shown while the task is running */}
-      {pendingTask && (
+      {/* Live agent activity bubbles — shown while tasks are running */}
+      {pendingTasks.map((task) => (
         <AgentThinkingBubble
-          taskId={pendingTask.task_id}
-          agentName={nameMap.get(pendingTask.agent_id)?.name ?? "Agent"}
-          status={pendingTask.status}
+          key={task.task_id}
+          taskId={task.task_id}
+          agentName={nameMap.get(task.agent_id)?.name ?? "Agent"}
+          status={task.status}
         />
-      )}
+      ))}
 
       <div ref={bottomRef} />
     </div>

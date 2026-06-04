@@ -123,7 +123,7 @@ export function ChannelComposer({ channelId }: { channelId: string }) {
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleSend();
     }
@@ -168,7 +168,7 @@ export function ChannelComposer({ channelId }: { channelId: string }) {
           <textarea
             ref={textareaRef}
             className="w-full min-h-[40px] max-h-[120px] rounded-md border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="输入消息... (Enter 发送, Shift+Enter 换行, @ 提及成员)"
+            placeholder="输入消息... (Ctrl+Enter 发送, @ 提及成员)"
             value={content}
             onChange={handleChange}
             onKeyDown={handleKeyDown}

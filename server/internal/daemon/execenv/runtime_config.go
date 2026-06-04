@@ -597,7 +597,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "4. **Post your reply — this step is mandatory**: `multica channel send %s --content \"<your response>\"`\n\n", ctx.ChannelID)
 		b.WriteString("Hard rules:\n\n")
 		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` — there is no issue for this task.\n")
-		b.WriteString("- Do NOT @mention other agents unless the message explicitly asks you to loop them in (to avoid trigger loops).\n")
+		b.WriteString("- You MAY @mention another agent in your reply if you need their input or expertise to continue the discussion. Only do this when you have a specific question or need for them — do NOT @mention just to be polite or acknowledge.\n")
 		b.WriteString("- If you have nothing meaningful to add, exit without sending.\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying

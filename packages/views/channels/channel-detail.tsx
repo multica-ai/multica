@@ -103,7 +103,7 @@ function ManageMembersDialog({
                       size="sm"
                       className="h-6 text-xs text-destructive hover:text-destructive"
                       onClick={() =>
-                        removeMember.mutate(m.member_id)
+                        removeMember.mutate({ memberId: m.member_id, memberType: m.member_type })
                       }
                       disabled={removeMember.isPending}
                     >

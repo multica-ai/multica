@@ -21,19 +21,20 @@ export interface ChannelUIState {
   /** Whether the channel sidebar is open. */
   sidebarOpen: boolean;
   /**
-   * In-flight tasks keyed by channel_id. At most one active task per channel
-   * (agents process messages sequentially). Cleared on task:completed/failed/cancelled.
+   * In-flight tasks keyed by channel_id. Multiple agents can run concurrently
+   * for the same channel (e.g. when multiple agents are @mentioned).
+   * Cleared individually on task:completed/failed/cancelled.
    */
-  pendingTasks: Record<string, ChannelPendingTask>;
+  pendingTasks: Record<string, ChannelPendingTask[]>;
   /** Set the active channel. */
   setActiveChannel: (id: string | null) => void;
   /** Toggle sidebar visibility. */
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
-  /** Upsert a pending task for a channel. */
+  /** Add or update a pending task for a channel (by task_id). */
   setPendingTask: (channelId: string, task: ChannelPendingTask) => void;
-  /** Remove the pending task for a channel (on completion/failure/cancel). */
-  clearPendingTask: (channelId: string) => void;
+  /** Remove a specific pending task by task_id. Removes the channel key when empty. */
+  clearPendingTask: (channelId: string, taskId?: string) => void;
 }
 
 export const useChannelStore = create<ChannelUIState>((set) => ({
@@ -44,11 +45,31 @@ export const useChannelStore = create<ChannelUIState>((set) => ({
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setPendingTask: (channelId, task) =>
-    set((s) => ({ pendingTasks: { ...s.pendingTasks, [channelId]: task } })),
-  clearPendingTask: (channelId) =>
     set((s) => {
-      const next = { ...s.pendingTasks };
-      delete next[channelId];
-      return { pendingTasks: next };
+      const existing = s.pendingTasks[channelId] ?? [];
+      // Update existing task or append new one
+      const idx = existing.findIndex((t) => t.task_id === task.task_id);
+      const next = idx >= 0
+        ? existing.map((t, i) => (i === idx ? task : t))
+        : [...existing, task];
+      return { pendingTasks: { ...s.pendingTasks, [channelId]: next } };
+    }),
+  clearPendingTask: (channelId, taskId) =>
+    set((s) => {
+      const existing = s.pendingTasks[channelId];
+      if (!existing) return s;
+      if (!taskId) {
+        // Legacy: clear all tasks for this channel
+        const next = { ...s.pendingTasks };
+        delete next[channelId];
+        return { pendingTasks: next };
+      }
+      const filtered = existing.filter((t) => t.task_id !== taskId);
+      if (filtered.length === 0) {
+        const next = { ...s.pendingTasks };
+        delete next[channelId];
+        return { pendingTasks: next };
+      }
+      return { pendingTasks: { ...s.pendingTasks, [channelId]: filtered } };
     }),
 }));

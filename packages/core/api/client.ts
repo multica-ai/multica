@@ -1599,7 +1599,7 @@ export class ApiClient {
 	async deleteChannel(id: string): Promise<void> { return this.fetch(`/api/channels/${id}`, { method: "DELETE" }); }
 	async listChannelMembers(channelId: string): Promise<any> { return this.fetch(`/api/channels/${channelId}/members`); }
 	async addChannelMember(channelId: string, data: any): Promise<any> { return this.fetch(`/api/channels/${channelId}/members`, { method: "POST", body: JSON.stringify(data) }); }
-	async removeChannelMember(channelId: string, memberId: string): Promise<void> { return this.fetch(`/api/channels/${channelId}/members/${memberId}`, { method: "DELETE" }); }
+	async removeChannelMember(channelId: string, memberId: string, memberType?: string): Promise<void> { return this.fetch(`/api/channels/${channelId}/members/${memberId}${memberType ? `?type=${memberType}` : ""}`, { method: "DELETE" }); }
 	async listChannelMessages(channelId: string): Promise<any> { return this.fetch(`/api/channels/${channelId}/messages`); }
 	async sendChannelMessage(channelId: string, data: any): Promise<any> { return this.fetch(`/api/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify(data) }); }
 	async markChannelRead(channelId: string, messageId: string): Promise<void> { return this.fetch(`/api/channels/${channelId}/read`, { method: "POST", body: JSON.stringify({ last_read_message_id: messageId }) }); }

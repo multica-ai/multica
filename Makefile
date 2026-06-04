@@ -247,18 +247,43 @@ setup: ## Prepare the current checkout from its env file: install deps, ensure D
 	@echo ""
 	@echo "✓ Setup complete! Run 'make start' to launch the app."
 
-start: ## Start backend and frontend for the current checkout and run migrations first
+start: ## Start backend, frontend, and daemon for the current checkout (runs migrations first)
 	$(REQUIRE_ENV)
 	@echo "Using env file: $(ENV_FILE)"
-	@echo "Backend: http://localhost:$(PORT)"
+	@echo "Backend:  http://localhost:$(PORT)"
 	@echo "Frontend: http://localhost:$(FRONTEND_PORT)"
+	@echo "Daemon:   agent runtime"
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	@echo "Building Go binaries..."
+	cd server && go build -o bin/server ./cmd/server
+	cd server && go build -o bin/multica ./cmd/multica
+	cd server && go build -o bin/migrate ./cmd/migrate
 	@echo "Running migrations..."
-	cd server && go run ./cmd/migrate up
-	@echo "Starting backend and frontend..."
-	@trap 'kill 0' EXIT; \
-		(cd server && go run ./cmd/server) & \
-		pnpm dev:web & \
+	server/bin/migrate up
+	@if [ "$${DEV_FRONTEND:-}" != "1" ]; then \
+		echo "Building frontend (production)..."; \
+		REMOTE_API_URL=http://localhost:$(PORT) pnpm --filter @multica/web build; \
+	fi
+	@echo "Starting backend, frontend, and daemon..."
+	@export REMOTE_API_URL=http://localhost:$(PORT); \
+	trap 'kill 0' EXIT; \
+		server/bin/server & \
+		if [ "$${DEV_FRONTEND:-}" = "1" ]; then \
+			pnpm dev:web & \
+		else \
+			(cd apps/web && npx next start -p $(FRONTEND_PORT)) & \
+		fi; \
+		echo "Waiting for backend..."; \
+		for i in $$(seq 1 30); do \
+			curl -sf http://localhost:$(PORT)/health > /dev/null 2>&1 && break; \
+			sleep 1; \
+		done; \
+		if curl -sf http://localhost:$(PORT)/health > /dev/null 2>&1; then \
+			echo "Starting daemon..."; \
+			server/bin/multica daemon start --foreground & \
+		else \
+			echo "⚠ Backend not ready — start daemon manually: ./server/bin/multica daemon start --foreground"; \
+		fi; \
 		wait
 
 stop: ## Stop backend and frontend processes for the current checkout

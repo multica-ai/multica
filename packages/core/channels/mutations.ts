@@ -63,8 +63,8 @@ export function useRemoveChannelMember(
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async (memberId: string) => {
-      await api.removeChannelMember(channelId, memberId);
+    mutationFn: async ({ memberId, memberType }: { memberId: string; memberType?: string }) => {
+      await api.removeChannelMember(channelId, memberId, memberType);
     },
     onSuccess: () => {
       qc.invalidateQueries({

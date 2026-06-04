@@ -330,6 +330,7 @@ func buildChannelMessagePrompt(task Task) string {
 	b.WriteString("- Reuse IDs from the conversation history instead of re-fetching when you already know them.\n")
 	b.WriteString("- Keep replies concise. If you created or updated something, confirm with the issue number.\n")
 	b.WriteString("- If you have nothing meaningful to add, exit without sending.\n")
+	b.WriteString("- You MAY @mention another agent (e.g. `@Designer`) in your reply if you need their specific input or expertise. This will trigger them to respond. Only @mention when you have a concrete question or need — never as a greeting or acknowledgment.\n")
 	b.WriteString("- For more channel history: `multica channel messages " + task.ChannelID + " --limit 50 --output json`\n")
 	return b.String()
 }

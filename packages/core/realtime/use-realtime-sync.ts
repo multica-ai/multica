@@ -830,8 +830,9 @@ export function useRealtimeSync(
       // Channel task: update status to running.
       if (payload.channel_id) {
         const channelStore = useChannelStore.getState();
-        const current = channelStore.pendingTasks[payload.channel_id];
-        if (current && current.task_id === payload.task_id) {
+        const tasks = channelStore.pendingTasks[payload.channel_id] ?? [];
+        const current = tasks.find((t) => t.task_id === payload.task_id);
+        if (current) {
           channelStore.setPendingTask(payload.channel_id, { ...current, status: "running" });
         }
       }
@@ -891,7 +892,7 @@ export function useRealtimeSync(
       const payload = p as TaskCancelledPayload;
       // Channel task: clear pending state and refresh messages.
       if (payload.channel_id) {
-        useChannelStore.getState().clearPendingTask(payload.channel_id);
+        useChannelStore.getState().clearPendingTask(payload.channel_id, payload.task_id);
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: channelKeys.messages(wsId, payload.channel_id) });
       }
@@ -911,7 +912,7 @@ export function useRealtimeSync(
       const payload = p as TaskCompletedPayload;
       // Channel task: clear pending state and refresh messages so the reply appears.
       if (payload.channel_id) {
-        useChannelStore.getState().clearPendingTask(payload.channel_id);
+        useChannelStore.getState().clearPendingTask(payload.channel_id, payload.task_id);
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: channelKeys.messages(wsId, payload.channel_id) });
       }
@@ -936,7 +937,7 @@ export function useRealtimeSync(
       const payload = p as TaskFailedPayload;
       // Channel task: clear pending state on failure too.
       if (payload.channel_id) {
-        useChannelStore.getState().clearPendingTask(payload.channel_id);
+        useChannelStore.getState().clearPendingTask(payload.channel_id, payload.task_id);
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: channelKeys.messages(wsId, payload.channel_id) });
       }
