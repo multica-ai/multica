@@ -15,6 +15,8 @@
 
 **Merge til `main` deployer til staging, ikke produktion.** Produktion opdateres først når `main` flettes ind på grenen `production`, og den fletning kræver en `approve`-kommentar på et release-issue i Multicas "Deployments"-projekt.
 
+**Stående regel:** Merge til `main` så snart CI er grøn — vent ikke. Staging opdateres automatisk, og deploy-godkendelse til produktion kræver alligevel et separat skridt (release-issue).
+
 Det automatiske flow (`auto-deploy-trigger` autopilot) opretter release-issuet for dig — du skal kun godkende. Sliplane bygger og deployer automatisk når `production` modtager et push.
 
 ## Deploy-flowet — trin for trin
