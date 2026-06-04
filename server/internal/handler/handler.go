@@ -141,6 +141,8 @@ type Handler struct {
 	MentionTriggerGate MentionTriggerGateInvoker
 	// CEREBRO-PATCH(handler-comment-target-guard): FIR-2674 reject agent comments with no target.
 	CommentTargetGuard CommentTargetGuardInvoker
+	// CEREBRO-PATCH(handler-channel-create-guard): FIR-2660 restrict channel creation to owners/admins.
+	ChannelCreateGuard ChannelCreateGuardInvoker
 	// CEREBRO-PATCH(handler-private-agent-run-request): FIR-2385 — turns a member's
 	// tag of an unowned private agent into a run-request in the owner's inbox.
 	PrivateAgentRunRequester PrivateAgentRunRequesterInvoker
@@ -269,6 +271,17 @@ type MentionTriggerGateInvoker interface {
 // CEREBRO-PATCH(handler-comment-target-guard-iface): seam for FIR-2674.
 type CommentTargetGuardInvoker interface {
 	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, content string) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 feature-flag-gated, workspace-scoped.
+}
+
+// ChannelCreateGuardInvoker is the upstream-side seam for Cerebro's
+// "restrict channel creation" gate (FIR-2660). RejectCreate returns
+// (message, ok=false) when the caller may not create a kind='channel' for the
+// workspace and the request must be rejected with 403; ok=true means it
+// passes. A nil invoker disables the guard. DMs are never gated.
+//
+// CEREBRO-PATCH(handler-channel-create-guard-iface): seam for FIR-2660.
+type ChannelCreateGuardInvoker interface {
+	RejectCreate(ctx context.Context, workspaceID pgtype.UUID, callerType, callerID, kind string) (string, bool) // CEREBRO-PATCH(handler-channel-create-guard-iface): FIR-2660 feature-flag-gated, workspace-scoped.
 }
 
 // PrivateAgentRunRequesterInvoker is the upstream-side seam for FIR-2385. It is

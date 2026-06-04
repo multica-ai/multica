@@ -101,6 +101,14 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaceID := h.resolveWorkspaceID(r)
 
+	if h.ChannelCreateGuard != nil { // CEREBRO-PATCH(channel-create-guard-hook): FIR-2660 gate kind='channel' behind cerebro_channel_create_restricted; resolve caller as the same actor used for writes; reject with 403 before any DB work.
+		callerType, callerID := h.resolveActor(r, userID, workspaceID)
+		if msg, allow := h.ChannelCreateGuard.RejectCreate(r.Context(), parseUUID(workspaceID), callerType, callerID, req.Kind); !allow {
+			writeError(w, http.StatusForbidden, msg)
+			return
+		}
+	}
+
 	if req.Kind == ChannelKindDM {
 		if len(req.MemberIDs) != 1 || len(req.AgentIDs) > 0 {
 			writeError(w, http.StatusBadRequest, "DM requires exactly one member peer and no agents")
