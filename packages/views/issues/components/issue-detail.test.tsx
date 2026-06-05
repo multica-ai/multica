@@ -125,6 +125,11 @@ vi.mock("../../editor", () => ({
     modal: null,
   }),
   isPreviewable: () => false,
+  AttachmentDownloadProvider: ({ children }: any) => <>{children}</>,
+  Attachment: ({ attachment }: any) => {
+    const record = attachment?.kind === "record" ? attachment.attachment : attachment;
+    return <div data-testid="attachment-card">{record?.filename}</div>;
+  },
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
@@ -502,6 +507,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listAttachments.mockResolvedValue([]);
     mockApiObj.listMembers.mockResolvedValue([
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
@@ -529,6 +535,69 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+  });
+
+  it("renders issue-level attachments below the description", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      description: "Inline attachment: /uploads/inline.md",
+    });
+    mockApiObj.listAttachments.mockResolvedValue([
+      {
+        id: "issue-att-1",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: null,
+        chat_session_id: null,
+        chat_message_id: null,
+        uploader_type: "member",
+        uploader_id: "user-1",
+        filename: "child-task.md",
+        url: "/uploads/child-task.md",
+        download_url: "/api/attachments/issue-att-1/download",
+        content_type: "text/markdown",
+        size_bytes: 10,
+        created_at: "2026-01-16T00:00:00Z",
+      },
+      {
+        id: "issue-att-2",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: null,
+        chat_session_id: null,
+        chat_message_id: null,
+        uploader_type: "member",
+        uploader_id: "user-1",
+        filename: "inline.md",
+        url: "/uploads/inline.md",
+        download_url: "/api/attachments/issue-att-2/download",
+        content_type: "text/markdown",
+        size_bytes: 10,
+        created_at: "2026-01-16T00:00:00Z",
+      },
+      {
+        id: "comment-att-1",
+        workspace_id: "ws-1",
+        issue_id: "issue-1",
+        comment_id: "comment-1",
+        chat_session_id: null,
+        chat_message_id: null,
+        uploader_type: "member",
+        uploader_id: "user-1",
+        filename: "dev-handoff.md",
+        url: "/uploads/dev-handoff.md",
+        download_url: "/api/attachments/comment-att-1/download",
+        content_type: "text/markdown",
+        size_bytes: 10,
+        created_at: "2026-01-16T00:00:00Z",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("child-task.md")).toBeInTheDocument();
+    expect(screen.queryByText("inline.md")).not.toBeInTheDocument();
+    expect(screen.queryByText("dev-handoff.md")).not.toBeInTheDocument();
   });
 
   it("renders the issue title leaf as a link to the issue detail page", async () => {
