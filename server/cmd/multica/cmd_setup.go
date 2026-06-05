@@ -190,25 +190,25 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	cfg := cli.CLIConfig{
-		ServerURL: serverURL,
-		AppURL:    appURL,
-	}
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	// Probe before persisting anything. A failed setup must never overwrite a
+	// working config or wipe the saved token: persistSelfHostConfigIfReachable
+	// writes only when the server answers, so an unreachable host leaves the
+	// existing config untouched and the user stays logged in.
+	reachable, err := persistSelfHostConfigIfReachable(serverURL, appURL, profile, probeServer)
+	if err != nil {
 		return fmt.Errorf("save config: %w", err)
+	}
+	if !reachable {
+		fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
+		fmt.Fprintln(os.Stderr, "  Your existing configuration was left unchanged.")
+		fmt.Fprintln(os.Stderr, "  Verify the URL, then re-run 'multica setup self-host' once it's reachable.")
+		return nil
 	}
 
 	fmt.Fprintln(os.Stderr, "Configured for self-hosted server.")
-	fmt.Fprintf(os.Stderr, "  server_url: %s\n", cfg.ServerURL)
-	fmt.Fprintf(os.Stderr, "  app_url:    %s\n", cfg.AppURL)
+	fmt.Fprintf(os.Stderr, "  server_url: %s\n", serverURL)
+	fmt.Fprintf(os.Stderr, "  app_url:    %s\n", appURL)
 	printConfigLocation(profile)
-
-	// Check if the server is reachable.
-	if !probeServer(serverURL) {
-		fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
-		fmt.Fprintln(os.Stderr, "  Make sure the server is running, then run 'multica login'.")
-		return nil
-	}
 
 	// Authenticate.
 	fmt.Fprintln(os.Stderr, "")
@@ -223,6 +223,27 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 
 	return nil
+}
+
+// persistSelfHostConfigIfReachable probes serverURL and, only when it answers,
+// overwrites the profile config with the given self-host URLs. When the server
+// is unreachable it leaves any existing config — and its auth token — untouched
+// and returns false, so a failed `setup self-host` never logs the user out or
+// clobbers a working config (the original ordering saved first, then probed,
+// then bailed — wiping the token on every failed probe). The prober is injected
+// so tests can exercise both branches without real network I/O.
+func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, probe func(string) bool) (bool, error) {
+	if !probe(serverURL) {
+		return false, nil
+	}
+	cfg := cli.CLIConfig{
+		ServerURL: serverURL,
+		AppURL:    appURL,
+	}
+	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // serverHostIsLocal reports whether serverURL points at the same machine as
