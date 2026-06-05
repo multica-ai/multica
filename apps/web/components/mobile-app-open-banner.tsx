@@ -26,6 +26,8 @@ const COPY = {
     title: "Have Multica installed?",
     description: "Open this issue in the mobile app.",
     action: "Open App",
+    wechatTitle: "Open in your browser",
+    wechatDescription: "Use the menu in the top right to open this page in your browser, then open the app.",
   },
 } satisfies Record<Locale, {
   action: string;
