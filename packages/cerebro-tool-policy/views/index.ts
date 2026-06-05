@@ -22,3 +22,8 @@ export {
   AgentTriggerTab,
   useCerebroAgentTriggerSettingsTabs,
 } from "./agent-trigger-tab";
+export { FirtalRegistryConfigDialog } from "./firtal-registry-config-dialog";
+export {
+  FirtalRegistryRowConfigure,
+  FIRTAL_REGISTRY_TOOL_KEY,
+} from "./firtal-registry-row-configure";

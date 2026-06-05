@@ -17,11 +17,11 @@ import {
 import { Label } from "@multica/ui/components/ui/label";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
-  getAgentToolConfig,
+  getFirtalRegistryGrantConfig,
   listFirtalRegistryDataSources,
-  setAgentToolConfig,
+  setFirtalRegistryGrantConfig,
   type FirtalRegistryGrantConfig,
-} from "../../api";
+} from "../api";
 
 const agentToolsKey = (agentId: string) =>
   ["cerebro", "agent-tools", agentId] as const;
@@ -29,9 +29,10 @@ const agentToolsKey = (agentId: string) =>
 const dataSourcesKey = (agentId: string) =>
   ["cerebro", "firtal-registry-data-sources", agentId] as const;
 
-function parseGrantConfig(
-  raw: FirtalRegistryGrantConfig,
-): { allowAll: boolean; selected: Set<string> } {
+function parseGrantConfig(raw: FirtalRegistryGrantConfig): {
+  allowAll: boolean;
+  selected: Set<string>;
+} {
   if (raw.allowed_data_sources_all) {
     return { allowAll: true, selected: new Set() };
   }
@@ -57,7 +58,7 @@ export function FirtalRegistryConfigDialog({
 
   const configQuery = useQuery({
     queryKey: [...agentToolsKey(agentId), "firtal_registry-config"],
-    queryFn: () => getAgentToolConfig(agentId, "firtal_registry"),
+    queryFn: () => getFirtalRegistryGrantConfig(agentId),
     enabled: open,
   });
 
@@ -80,7 +81,7 @@ export function FirtalRegistryConfigDialog({
       const config: FirtalRegistryGrantConfig = allowAll
         ? { allowed_data_sources_all: true }
         : { allowed_data_sources: Array.from(selected) };
-      await setAgentToolConfig(agentId, "firtal_registry", config);
+      await setFirtalRegistryGrantConfig(agentId, config);
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: agentToolsKey(agentId) });
