@@ -67,6 +67,7 @@ import type {
   WorkspaceExportManifest,
   WorkspaceImportPayload,
   WorkspaceImportResult,
+  TranscriptionResponse,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -919,6 +920,36 @@ export class ApiClient {
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
     return res.json() as Promise<Attachment>;
+  }
+
+  async transcribeAudio(file: File): Promise<TranscriptionResponse> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const rid = crypto.randomUUID().slice(0, 8);
+    const start = Date.now();
+    this.logger.info("→ POST /api/transcriptions", { rid });
+
+    const res = await fetch(`${this.baseUrl}/api/transcriptions`, {
+      method: "POST",
+      headers: {
+        "X-Request-ID": rid,
+        ...this.authHeaders(),
+      },
+      body: formData,
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized();
+      const payload = await this.parseErrorPayload(res);
+      const message = payload?.error ?? `Transcription failed: ${res.status}`;
+      this.logger.error(`← ${res.status} /api/transcriptions`, { rid, duration: `${Date.now() - start}ms`, error: message });
+      throw new Error(message);
+    }
+
+    this.logger.info(`← ${res.status} /api/transcriptions`, { rid, duration: `${Date.now() - start}ms` });
+    return res.json() as Promise<TranscriptionResponse>;
   }
 
   async listAttachments(issueId: string): Promise<Attachment[]> {

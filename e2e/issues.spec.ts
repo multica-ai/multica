@@ -61,6 +61,174 @@ test.describe("Issues", () => {
     await expect(page.getByText(title).first()).toBeVisible({ timeout: 10000 });
   });
 
+  test("can create an issue from mocked voice capture", async ({ page }) => {
+    const transcript = `E2E Voice Capture ${Date.now()}. Details from mocked recording.`;
+    let uploadBody = "";
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: {
+          getUserMedia: async () => ({
+            getTracks: () => [{ stop: () => undefined }],
+          }),
+        },
+      });
+
+      class MockMediaRecorder {
+        static isTypeSupported() {
+          return true;
+        }
+
+        mimeType = "audio/webm";
+        state = "inactive";
+        ondataavailable: ((event: { data: Blob }) => void) | null = null;
+        onstop: (() => void) | null = null;
+
+        start() {
+          this.state = "recording";
+        }
+
+        stop() {
+          this.state = "inactive";
+          this.ondataavailable?.({ data: new Blob(["mock audio"], { type: this.mimeType }) });
+          this.onstop?.();
+        }
+      }
+
+      Object.defineProperty(window, "MediaRecorder", {
+        configurable: true,
+        value: MockMediaRecorder,
+      });
+    });
+
+    await page.route("**/api/transcriptions", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          text: transcript,
+          provider: "cloudflare",
+          model: "@cf/openai/whisper-large-v3-turbo",
+        }),
+      });
+    });
+    await page.route("**/api/upload-file", async (route) => {
+      uploadBody = route.request().postData() ?? "";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: crypto.randomUUID(),
+          issue_id: null,
+          comment_id: null,
+          filename: "voice.webm",
+          url: "http://localhost/mock/voice.webm",
+          content_type: "audio/webm",
+          size_bytes: 10,
+          created_at: new Date().toISOString(),
+        }),
+      });
+    });
+
+    await page.getByRole("button", { name: "New issue" }).click();
+    await page.getByRole("button", { name: "Record voice" }).click();
+    await expect(page.getByText("Recording")).toBeVisible();
+    await page.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(page.getByLabel("Voice transcript")).toHaveValue(transcript);
+    await page.getByLabel("Keep original recording").check();
+    await page.getByRole("button", { name: "Insert" }).click();
+
+    await expect(page.getByLabel("Issue title")).toContainText(transcript.split(".")[0]);
+    await page.getByRole("button", { name: "Create Issue" }).click();
+    await expect(page.getByText(transcript.split(".")[0]).first()).toBeVisible({ timeout: 10000 });
+    await expect.poll(() => uploadBody).toContain("issue_id");
+
+    const created = await api.listIssues({ search: transcript.split(".")[0] });
+    for (const issue of created.issues ?? []) {
+      if (issue.title === transcript.split(".")[0]) {
+        await api.deleteIssue(issue.id);
+      }
+    }
+  });
+
+  test("keeps issue creation when voice attachment upload fails", async ({ page }) => {
+    const transcript = `E2E Voice Upload Failure ${Date.now()}. Details from mocked recording.`;
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: {
+          getUserMedia: async () => ({
+            getTracks: () => [{ stop: () => undefined }],
+          }),
+        },
+      });
+
+      class MockMediaRecorder {
+        static isTypeSupported() {
+          return true;
+        }
+
+        mimeType = "audio/webm";
+        state = "inactive";
+        ondataavailable: ((event: { data: Blob }) => void) | null = null;
+        onstop: (() => void) | null = null;
+
+        start() {
+          this.state = "recording";
+        }
+
+        stop() {
+          this.state = "inactive";
+          this.ondataavailable?.({ data: new Blob(["mock audio"], { type: this.mimeType }) });
+          this.onstop?.();
+        }
+      }
+
+      Object.defineProperty(window, "MediaRecorder", {
+        configurable: true,
+        value: MockMediaRecorder,
+      });
+    });
+
+    await page.route("**/api/transcriptions", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          text: transcript,
+          provider: "cloudflare",
+          model: "@cf/openai/whisper-large-v3-turbo",
+        }),
+      });
+    });
+    await page.route("**/api/upload-file", async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "mock upload failure" }),
+      });
+    });
+
+    await page.getByRole("button", { name: "New issue" }).click();
+    await page.getByRole("button", { name: "Record voice" }).click();
+    await page.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(page.getByLabel("Voice transcript")).toHaveValue(transcript);
+    await page.getByLabel("Keep original recording").check();
+    await page.getByRole("button", { name: "Insert" }).click();
+
+    const expectedTitle = transcript.split(".")[0];
+    await page.getByRole("button", { name: "Create Issue" }).click();
+    await expect(page.getByText(expectedTitle).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Issue created, but the voice recording was not preserved")).toBeVisible();
+
+    const created = await api.listIssues({ search: expectedTitle });
+    for (const issue of created.issues ?? []) {
+      if (issue.title === expectedTitle) {
+        await api.deleteIssue(issue.id);
+      }
+    }
+  });
+
   test("backlog today and upcoming routes render derived issue views", async ({ page }) => {
     const today = new Date();
     today.setHours(12, 0, 0, 0);

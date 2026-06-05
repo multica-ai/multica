@@ -26,6 +26,7 @@ interface TitleEditorProps {
 
 interface TitleEditorRef {
   getText: () => string;
+  setText: (value: string) => void;
   focus: () => void;
 }
 
@@ -129,6 +130,10 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
 
     useImperativeHandle(ref, () => ({
       getText: () => editor?.getText() ?? "",
+      setText: (value: string) => {
+        editor?.commands.setContent(`<p>${value}</p>`);
+        onChangeRef.current?.(value);
+      },
       focus: () => {
         editor?.commands.focus("end");
       },
