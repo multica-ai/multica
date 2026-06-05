@@ -23,9 +23,11 @@ type stubAPIClientWithRecorder struct {
 	bindingCalls   []BindingPromptParams
 	interactiveOut []SendCardParams
 	textOut        []SendTextParams
+	reactions      []AddReactionParams
 	sendErr        error
 	textErr        error
 	bindingErr     error
+	reactionErr    error
 }
 
 func (s *stubAPIClientWithRecorder) IsConfigured() bool { return s.configured }
@@ -65,6 +67,16 @@ func (s *stubAPIClientWithRecorder) SendBindingPromptCard(ctx context.Context, p
 		return s.bindingErr
 	}
 	s.bindingCalls = append(s.bindingCalls, p)
+	return nil
+}
+
+func (s *stubAPIClientWithRecorder) AddMessageReaction(ctx context.Context, p AddReactionParams) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reactionErr != nil {
+		return s.reactionErr
+	}
+	s.reactions = append(s.reactions, p)
 	return nil
 }
 
@@ -219,10 +231,7 @@ func TestLarkOutcomeReplierAgentArchivedSendsCard(t *testing.T) {
 	}
 }
 
-// TestLarkOutcomeReplierIngestedAndDroppedAreSilent asserts that the
-// replier does NOT call the APIClient on outcomes owned elsewhere
-// (Patcher handles Ingested; Dropped is informational only).
-func TestLarkOutcomeReplierIngestedAndDroppedAreSilent(t *testing.T) {
+func TestLarkOutcomeReplierIngestedAddsProcessingReaction(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	stub := &stubAPIClientWithRecorder{configured: true}
@@ -234,11 +243,19 @@ func TestLarkOutcomeReplierIngestedAndDroppedAreSilent(t *testing.T) {
 		PublicURL:   "https://multica.test",
 		Logger:      log,
 	})
-	msg := InboundMessage{ChatID: "oc_x"}
+	msg := InboundMessage{ChatID: "oc_x", MessageID: "om_user_1"}
 	rep.Reply(context.Background(), db.LarkInstallation{}, msg, DispatchResult{Outcome: OutcomeIngested})
 	rep.Reply(context.Background(), db.LarkInstallation{}, msg, DispatchResult{Outcome: OutcomeDropped, DropReason: DropReasonDuplicate})
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.reactions) != 1 {
+		t.Fatalf("ingested message should get one processing reaction; got %d", len(stub.reactions))
+	}
+	if got := stub.reactions[0]; got.MessageID != "om_user_1" || got.EmojiType != processingReactionEmoji {
+		t.Fatalf("reaction = %+v, want message om_user_1 emoji %s", got, processingReactionEmoji)
+	}
 	if len(stub.interactiveOut) != 0 || len(stub.bindingCalls) != 0 {
-		t.Errorf("Ingested/Dropped should not trigger any APIClient call; got interactive=%d binding=%d",
+		t.Errorf("Ingested/Dropped should not trigger card/binding calls; got interactive=%d binding=%d",
 			len(stub.interactiveOut), len(stub.bindingCalls))
 	}
 }
@@ -301,6 +318,7 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 	inst := db.LarkInstallation{AppID: "cli_x"}
 	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
 	msg := InboundMessage{ChatID: "oc_chat_42", SenderOpenID: "ou_user"}
+	msg.MessageID = "om_issue_cmd"
 	rep.Reply(context.Background(), inst, msg, DispatchResult{
 		Outcome:         OutcomeIngested,
 		IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
@@ -313,6 +331,12 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 	defer stub.mu.Unlock()
 	if len(stub.textOut) != 1 {
 		t.Fatalf("expected one SendTextMessage call, got %d", len(stub.textOut))
+	}
+	if len(stub.reactions) != 1 {
+		t.Fatalf("expected one AddMessageReaction call, got %d", len(stub.reactions))
+	}
+	if got := stub.reactions[0]; got.MessageID != "om_issue_cmd" || got.EmojiType != processingReactionEmoji {
+		t.Fatalf("reaction = %+v, want message om_issue_cmd emoji %s", got, processingReactionEmoji)
 	}
 	got := stub.textOut[0]
 	if got.ChatID != "oc_chat_42" {
@@ -334,12 +358,11 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 	}
 }
 
-// TestLarkOutcomeReplierOutcomeIngestedSilentWithoutIssue pins the
-// silent-by-default behaviour for plain chat messages. The "Created"
-// text is gated on IssueID.Valid; a chat that didn't include /issue
-// must NOT trigger an outbound from the OutcomeReplier (the agent's
-// reply is delivered separately by the Patcher on EventChatDone).
-func TestLarkOutcomeReplierOutcomeIngestedSilentWithoutIssue(t *testing.T) {
+// TestLarkOutcomeReplierOutcomeIngestedWithoutIssueDoesNotSendMessage
+// pins the low-noise plain-chat behaviour: the bot acknowledges with a
+// reaction, while the actual answer is delivered later by the Patcher
+// on EventChatDone.
+func TestLarkOutcomeReplierOutcomeIngestedWithoutIssueDoesNotSendMessage(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	stub := &stubAPIClientWithRecorder{configured: true}
@@ -352,14 +375,46 @@ func TestLarkOutcomeReplierOutcomeIngestedSilentWithoutIssue(t *testing.T) {
 		Logger:      log,
 	})
 
-	rep.Reply(context.Background(), db.LarkInstallation{}, InboundMessage{ChatID: "oc"},
+	rep.Reply(context.Background(), db.LarkInstallation{}, InboundMessage{ChatID: "oc", MessageID: "om_plain"},
 		DispatchResult{Outcome: OutcomeIngested}) // no IssueID
 
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
 	if len(stub.textOut) != 0 || len(stub.interactiveOut) != 0 {
-		t.Errorf("plain chat ingest must be silent at the replier; got text=%d cards=%d",
+		t.Errorf("plain chat ingest must not send messages at the replier; got text=%d cards=%d",
 			len(stub.textOut), len(stub.interactiveOut))
+	}
+	if len(stub.reactions) != 1 {
+		t.Fatalf("plain chat ingest should add a reaction; got %d", len(stub.reactions))
+	}
+}
+
+func TestLarkOutcomeReplierReactionFailureDoesNotBlockIssueConfirmation(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true, reactionErr: errors.New("missing reaction scope")}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		PublicURL:   "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), db.LarkInstallation{}, InboundMessage{ChatID: "oc", MessageID: "om"},
+		DispatchResult{
+			Outcome:         OutcomeIngested,
+			IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
+			IssueNumber:     42,
+			IssueIdentifier: "MUL-42",
+			IssueTitle:      "fix login bug",
+		})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.textOut) != 1 {
+		t.Fatalf("issue confirmation must still send when reaction fails; got %d text sends", len(stub.textOut))
 	}
 }
 

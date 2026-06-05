@@ -13,6 +13,8 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+const processingReactionEmoji = "OnIt"
+
 // OutcomeReplier reacts to the Dispatcher's verdict by posting the
 // appropriate Lark-side reply card. This is the outbound half of the
 // `EventEmitter` contract in hub.go: NeedsBinding sends the binding
@@ -172,6 +174,14 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst db.LarkInstallation
 			)
 		}
 	case OutcomeIngested:
+		if err := r.addProcessingReaction(ctx, inst, msg); err != nil {
+			r.log.Warn("lark outcome replier: processing reaction failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"message_id", msg.MessageID,
+				"err", err.Error(),
+			)
+		}
 		// The agent's chat reply itself goes through the Patcher (text
 		// message on ChatDone). But /issue does NOT block on the
 		// agent — the user expects an immediate "Created [MUL-42]"
@@ -194,6 +204,21 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst db.LarkInstallation
 	case OutcomeDropped:
 		// OutcomeDropped is informational; no user-visible reply.
 	}
+}
+
+func (r *LarkOutcomeReplier) addProcessingReaction(ctx context.Context, inst db.LarkInstallation, msg InboundMessage) error {
+	if msg.MessageID == "" {
+		return errors.New("missing message_id")
+	}
+	creds, err := r.installationCredentials(inst)
+	if err != nil {
+		return err
+	}
+	return r.client.AddMessageReaction(ctx, AddReactionParams{
+		InstallationID: creds,
+		MessageID:      msg.MessageID,
+		EmojiType:      processingReactionEmoji,
+	})
 }
 
 func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst db.LarkInstallation, res DispatchResult) error {

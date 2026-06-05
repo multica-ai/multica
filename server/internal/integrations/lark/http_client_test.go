@@ -27,6 +27,7 @@ type larkFakeServer struct {
 	sendN   atomic.Int32
 	patchN  atomic.Int32
 	bindN   atomic.Int32
+	reactN  atomic.Int32
 	authObs atomic.Value // last Authorization header seen across all paths
 }
 
@@ -125,6 +126,31 @@ func (f *larkFakeServer) stubPatch(resp map[string]any, verify func(r *http.Requ
 		}
 		if verify != nil {
 			verify(r, id, body)
+		}
+		writeJSON(w, resp)
+	})
+}
+
+func (f *larkFakeServer) stubReaction(resp map[string]any, verify func(r *http.Request, id string, body map[string]any)) {
+	const suffix = "/reactions"
+	f.mux.HandleFunc("/open-apis/im/v1/messages/", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, suffix) {
+			f.t.Errorf("reaction: unexpected path %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			f.t.Errorf("reaction: want POST, got %s", r.Method)
+		}
+		f.reactN.Add(1)
+		rawID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/open-apis/im/v1/messages/"), suffix)
+		if rawID == "" {
+			f.t.Errorf("reaction: missing message id")
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			f.t.Errorf("reaction: decode body: %v", err)
+		}
+		if verify != nil {
+			verify(r, rawID, body)
 		}
 		writeJSON(w, resp)
 	})
@@ -353,6 +379,38 @@ func TestHTTPClient_SendTextMessage_HappyPath(t *testing.T) {
 	}
 	if got := fake.lastAuth(); got != "Bearer tok_text" {
 		t.Errorf("Authorization header: got %q want Bearer tok_text", got)
+	}
+}
+
+func TestHTTPClient_AddMessageReaction_HappyPath(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_react", 7200)
+	fake.stubReaction(map[string]any{"code": 0, "msg": "success"}, func(r *http.Request, id string, body map[string]any) {
+		if id != "om_user_msg_1" {
+			t.Errorf("message id: got %q want om_user_msg_1", id)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer tok_react" {
+			t.Errorf("Authorization=%q want Bearer tok_react", got)
+		}
+		reactionType, ok := body["reaction_type"].(map[string]any)
+		if !ok {
+			t.Fatalf("reaction_type missing or wrong shape: %v", body)
+		}
+		if got := reactionType["emoji_type"]; got != "OnIt" {
+			t.Errorf("emoji_type=%v want OnIt", got)
+		}
+	})
+
+	c := newTestClient(fake, time.Now)
+	if err := c.AddMessageReaction(context.Background(), AddReactionParams{
+		InstallationID: testCreds(),
+		MessageID:      "om_user_msg_1",
+		EmojiType:      "OnIt",
+	}); err != nil {
+		t.Fatalf("AddMessageReaction: %v", err)
+	}
+	if got := fake.reactN.Load(); got != 1 {
+		t.Fatalf("reaction endpoint calls=%d want 1", got)
 	}
 }
 
@@ -818,8 +876,8 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 			"code": 0,
 			"msg":  "ok",
 			"bot": map[string]any{
-				"open_id":   "ou_bot_42",
-				"app_name":  "PersonalAgent",
+				"open_id":    "ou_bot_42",
+				"app_name":   "PersonalAgent",
 				"avatar_url": "https://example/avatar.png",
 			},
 		})
