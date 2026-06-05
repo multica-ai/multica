@@ -620,6 +620,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Serve health before the (potentially slow) preflight so the CLI's
+	// `daemon start` readiness probe succeeds promptly. preflightAuth's
+	// initial workspace sync detects every configured agent's version by
+	// exec'ing it, which on a cold cache with many agents takes ~20s —
+	// longer than the CLI's readiness deadline, which made a healthy daemon
+	// report "may not have started successfully". resolveAuth has already
+	// run, so a missing token still fails fast before we begin serving.
+	go d.serveHealth(ctx, healthLn, time.Now())
+
 	// Renew the PAT before the first API call, then do the initial
 	// workspace sync. Both steps live in preflightAuth so the ordering
 	// invariant (renew first) is enforced at one site instead of
@@ -641,8 +650,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
-	go d.serveHealth(ctx, healthLn, time.Now())
-	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal, health)")
+	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health already serving")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
 	return err
