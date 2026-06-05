@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
+const mockGetAgentTools = vi.hoisted(() => vi.fn());
+const mockUpdateAgentTool = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -11,7 +13,11 @@ vi.mock("@multica/core/api", async () => {
   );
   return {
     ...actual,
-    api: { cerebroRequest: mockCerebroRequest },
+    api: {
+      cerebroRequest: mockCerebroRequest,
+      getAgentTools: mockGetAgentTools,
+      updateAgentTool: mockUpdateAgentTool,
+    },
   };
 });
 
@@ -86,6 +92,10 @@ function renderTable() {
 beforeEach(() => {
   mockCerebroRequest.mockReset();
   mockCerebroRequest.mockResolvedValue(TABLE);
+  mockGetAgentTools.mockReset();
+  mockGetAgentTools.mockResolvedValue([]);
+  mockUpdateAgentTool.mockReset();
+  mockUpdateAgentTool.mockResolvedValue(undefined);
   mockUseFeatureFlag.mockReset();
   mockUseFeatureFlag.mockReturnValue(false);
 });
@@ -210,6 +220,66 @@ describe("SimpleToolPolicyTable", () => {
     expect(
       within(fdrRow).getByTestId("firtal-registry-configure"),
     ).toBeInTheDocument();
+  });
+
+  it("summarises 'Alle data sources' on the firtal_registry button when allow-all is set", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
+    });
+    mockGetAgentTools.mockResolvedValue([
+      {
+        name: "firtal_registry",
+        enabled: true,
+        config: { allowed_data_sources_all: true },
+      },
+    ]);
+    mockUseFeatureFlag.mockImplementation(
+      (key) => key === "cerebro_firtal_registry_allowlist_ui",
+    );
+    renderTable();
+    const fdrRow = await screen.findByTestId("tool-row-firtal_registry");
+    await waitFor(() => {
+      expect(
+        within(fdrRow).getByTestId("firtal-registry-configure"),
+      ).toHaveTextContent("Alle data sources");
+    });
+  });
+
+  it("summarises 'N af M data sources' when an explicit allowlist is set", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
+    });
+    mockGetAgentTools.mockResolvedValue([
+      {
+        name: "firtal_registry",
+        enabled: true,
+        config: { allowed_data_sources: ["ds-1", "ds-2"] },
+      },
+    ]);
+    // Sources fetch goes through api.cerebroRequest for FDR proxy — mock it via
+    // mockCerebroRequest by returning the source list for the data-sources path.
+    mockCerebroRequest.mockImplementation(async (path: string) => {
+      if (typeof path === "string" && path.endsWith("/firtal-registry/data-sources")) {
+        return [
+          { id: "ds-1", name: "DS One" },
+          { id: "ds-2", name: "DS Two" },
+          { id: "ds-3", name: "DS Three" },
+        ];
+      }
+      return {
+        tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
+      };
+    });
+    mockUseFeatureFlag.mockImplementation(
+      (key) => key === "cerebro_firtal_registry_allowlist_ui",
+    );
+    renderTable();
+    const fdrRow = await screen.findByTestId("tool-row-firtal_registry");
+    await waitFor(() => {
+      expect(
+        within(fdrRow).getByTestId("firtal-registry-configure"),
+      ).toHaveTextContent("2 af 3 data sources");
+    });
   });
 
   it("hides the Konfigurer button when the flag is off", async () => {
