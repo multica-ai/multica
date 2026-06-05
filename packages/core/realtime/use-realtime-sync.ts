@@ -49,6 +49,7 @@ import type {
   IssueLabelsChangedPayload,
   IssueMetadataChangedPayload,
   InboxNewPayload,
+  InboxItem,
   CommentCreatedPayload,
   CommentUpdatedPayload,
   CommentDeletedPayload,
@@ -195,6 +196,80 @@ export async function resolveInboxSourceSlug(
     // link-less notification rather than guessing a slug.
     return null;
   }
+}
+
+/**
+ * Handles an `inbox:new` event end-to-end: inbox cache invalidation, the
+ * focus / mute checks, and the native OS banner. Exported so the handler
+ * behavior (not just slug resolution) is testable.
+ *
+ * Every workspace-scoped read here keys on the ITEM's workspace
+ * (`item.workspace_id`), never the currently active one (#3766): the cache
+ * invalidation must refresh the source workspace's inbox list / unread
+ * count / dock badge, the mute check must honor the source workspace's
+ * preference, and the deep link must carry the source workspace's slug.
+ */
+export async function handleInboxNew(
+  qc: QueryClient,
+  item: InboxItem,
+): Promise<void> {
+  const sourceWsId = item.workspace_id;
+  if (sourceWsId) onInboxNew(qc, sourceWsId, item);
+  // Fire a native OS notification only when the app isn't focused. When
+  // the user is already looking at Multica, the inbox sidebar's unread
+  // styling is enough — no need to interrupt with a banner. `desktopAPI`
+  // is injected by the preload script; its absence (web app) skips silently.
+  if (typeof document !== "undefined" && document.hasFocus()) return;
+  // Respect the SOURCE workspace's system-notification preference. The
+  // Settings page owns the only `useQuery` for this resource, so the cache
+  // may be cold for a workspace whose Settings page was never visited —
+  // `ensureQueryData` resolves from cache when present and otherwise
+  // fetches once. Keying this on the active workspace would let a banner
+  // fire for a muted workspace (and vice-versa). On network failure we
+  // fall through to the default ("all") rather than swallow the banner.
+  if (sourceWsId) {
+    try {
+      const prefData = await qc.ensureQueryData(
+        notificationPreferenceOptions(sourceWsId),
+      );
+      if (prefData?.preferences?.system_notifications === "muted") return;
+    } catch {
+      // Fall through with default behavior.
+    }
+  }
+  // Route the click to the workspace the inbox item BELONGS to — not the
+  // currently active one. Reading `getCurrentSlug()` here was the source
+  // of wrong-workspace routing (#3766): an `inbox:new` from workspace A
+  // arriving while workspace B is active emitted a notification carrying
+  // B's slug and A's issue id, deep-linking to an issue B doesn't have.
+  const slug = await resolveInboxSourceSlug(qc, sourceWsId);
+  const desktopAPI = (
+    globalThis as unknown as {
+      desktopAPI?: {
+        showNotification?: (payload: {
+          slug: string;
+          itemId: string;
+          issueKey: string;
+          title: string;
+          body: string;
+        }) => void;
+      };
+    }
+  ).desktopAPI;
+  // `issueKey` matches the inbox page's URL selector (issue id when the
+  // item is attached to an issue, otherwise the inbox item id). `itemId`
+  // is the inbox row's own id, needed to fire markInboxRead on click.
+  // A null slug (workspace list unavailable / item from a workspace this
+  // client can't see) still shows the banner — the user should learn about
+  // the inbox item — but with an empty slug so the click is a no-op
+  // (DesktopInboxBridge ignores empty slugs) instead of routing wrong.
+  desktopAPI?.showNotification?.({
+    slug: slug ?? "",
+    itemId: item.id,
+    issueKey: item.issue_id ?? item.id,
+    title: item.title,
+    body: item.body ?? "",
+  });
 }
 
 /**
@@ -499,62 +574,7 @@ export function useRealtimeSync(
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
       if (!item) return;
-      const wsId = getCurrentWsId();
-      if (wsId) onInboxNew(qc, wsId, item);
-      // Fire a native OS notification only when the app isn't focused. When
-      // the user is already looking at Multica, the inbox sidebar's unread
-      // styling is enough — no need to interrupt with a banner. `desktopAPI`
-      // is injected by the preload script; its absence (web app) skips silently.
-      if (typeof document !== "undefined" && document.hasFocus()) return;
-      // Respect the user's system-notification preference. The Settings page
-      // owns the only `useQuery` for this resource, so on a fresh app start
-      // (or any session that hasn't visited Settings) the React Query cache
-      // is empty — using `getQueryData` would silently default to "all" and
-      // ignore the user's saved choice. `ensureQueryData` resolves to the
-      // cached value if present and otherwise fetches once, populating the
-      // cache for subsequent events. On network failure we fall through to
-      // the default ("all") rather than swallow the banner entirely.
-      if (wsId) {
-        try {
-          const prefData = await qc.ensureQueryData(notificationPreferenceOptions(wsId));
-          if (prefData?.preferences?.system_notifications === "muted") return;
-        } catch {
-          // Fall through with default behavior.
-        }
-      }
-      // Route the click to the workspace the inbox item BELONGS to — not the
-      // currently active one. Reading `getCurrentSlug()` here was the source
-      // of wrong-workspace routing (#3766): an `inbox:new` from workspace A
-      // arriving while workspace B is active emitted a notification carrying
-      // B's slug and A's issue id, deep-linking to an issue B doesn't have.
-      const slug = await resolveInboxSourceSlug(qc, item.workspace_id);
-      const desktopAPI = (
-        window as unknown as {
-          desktopAPI?: {
-            showNotification?: (payload: {
-              slug: string;
-              itemId: string;
-              issueKey: string;
-              title: string;
-              body: string;
-            }) => void;
-          };
-        }
-      ).desktopAPI;
-      // `issueKey` matches the inbox page's URL selector (issue id when the
-      // item is attached to an issue, otherwise the inbox item id). `itemId`
-      // is the inbox row's own id, needed to fire markInboxRead on click.
-      // A null slug (workspace list unavailable / item from a workspace this
-      // client can't see) still shows the banner — the user should learn about
-      // the inbox item — but with an empty slug so the click is a no-op
-      // (DesktopInboxBridge ignores empty slugs) instead of routing wrong.
-      desktopAPI?.showNotification?.({
-        slug: slug ?? "",
-        itemId: item.id,
-        issueKey: item.issue_id ?? item.id,
-        title: item.title,
-        body: item.body ?? "",
-      });
+      await handleInboxNew(qc, item);
     });
 
     // --- Timeline event handlers (global fallback) ---

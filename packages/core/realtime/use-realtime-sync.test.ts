@@ -1,18 +1,22 @@
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatKeys } from "../chat/queries";
+import { inboxKeys } from "../inbox/queries";
 import { issueKeys } from "../issues/queries";
+import { notificationPreferenceKeys } from "../notification-preferences/queries";
 import { workspaceKeys } from "../workspace/queries";
 import type {
   ChatDonePayload,
   ChatMessage,
   ChatPendingTask,
   ChatMessagesPage,
+  InboxItem,
   Workspace,
 } from "../types";
 import {
   applyChatDoneToCache,
   applyWorkspaceUpdatedToCache,
+  handleInboxNew,
   resolveInboxSourceSlug,
 } from "./use-realtime-sync";
 
@@ -286,5 +290,113 @@ describe("resolveInboxSourceSlug", () => {
     vi.spyOn(qc, "ensureQueryData").mockRejectedValueOnce(new Error("network down"));
 
     await expect(resolveInboxSourceSlug(qc, "ws-a")).resolves.toBeNull();
+  });
+});
+
+describe("handleInboxNew", () => {
+  function workspace(overrides: Partial<Workspace> = {}): Workspace {
+    return {
+      id: "ws-a",
+      name: "Workspace A",
+      slug: "workspace-a",
+      description: null,
+      context: null,
+      settings: {},
+      repos: [],
+      issue_prefix: "WSA",
+      avatar_url: null,
+      created_at: "2026-05-18T00:00:00Z",
+      updated_at: "2026-05-18T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  function inboxItem(overrides: Partial<InboxItem> = {}): InboxItem {
+    return {
+      id: "item-1",
+      workspace_id: "ws-a",
+      recipient_type: "member",
+      recipient_id: "member-1",
+      actor_type: "member",
+      actor_id: "member-2",
+      type: "mentioned",
+      severity: "info",
+      issue_id: "issue-1",
+      title: "Mentioned you",
+      body: "in a comment",
+      issue_status: null,
+      read: false,
+      archived: false,
+      created_at: "2026-05-18T00:00:00Z",
+      details: null,
+      ...overrides,
+    };
+  }
+
+  function stubDesktopAPI() {
+    const showNotification = vi.fn();
+    (globalThis as Record<string, unknown>).desktopAPI = { showNotification };
+    return showNotification;
+  }
+
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).desktopAPI;
+  });
+
+  it("still shows the banner when the slug can't be resolved, with an empty slug so the click is a no-op", async () => {
+    const qc = createQueryClient();
+    // Workspace list is cached but doesn't contain the item's workspace.
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [
+      workspace({ id: "ws-b", slug: "workspace-b" }),
+    ]);
+    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+      preferences: { system_notifications: "all" },
+    });
+    const showNotification = stubDesktopAPI();
+
+    await handleInboxNew(qc, inboxItem());
+
+    expect(showNotification).toHaveBeenCalledWith({
+      slug: "",
+      itemId: "item-1",
+      issueKey: "issue-1",
+      title: "Mentioned you",
+      body: "in a comment",
+    });
+  });
+
+  it("invalidates the ITEM's workspace inbox cache and resolves its slug, not the active workspace's", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [
+      workspace({ id: "ws-b", slug: "workspace-b" }),
+      workspace(),
+    ]);
+    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+      preferences: { system_notifications: "all" },
+    });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const showNotification = stubDesktopAPI();
+
+    await handleInboxNew(qc, inboxItem());
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxKeys.list("ws-a"),
+    });
+    expect(showNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: "workspace-a" }),
+    );
+  });
+
+  it("honors the SOURCE workspace's mute preference", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
+    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+      preferences: { system_notifications: "muted" },
+    });
+    const showNotification = stubDesktopAPI();
+
+    await handleInboxNew(qc, inboxItem());
+
+    expect(showNotification).not.toHaveBeenCalled();
   });
 });
