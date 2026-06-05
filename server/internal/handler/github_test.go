@@ -2124,12 +2124,20 @@ func TestSignGitHubAppJWT_ClaimsAndSignature(t *testing.T) {
 		t.Fatal("expected non-empty token when fully configured")
 	}
 
-	parsed, err := jwt.Parse(tok, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return &key.PublicKey, nil
-	})
+	// Inject the same `now` into the parser's clock so default exp/nbf
+	// validation is anchored to the test-time, not real wall clock —
+	// otherwise the test becomes a time bomb that fails for real once
+	// the real time crosses the token's exp (now + 9m).
+	parsed, err := jwt.Parse(
+		tok,
+		func(token *jwt.Token) (any, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return &key.PublicKey, nil
+		},
+		jwt.WithTimeFunc(func() time.Time { return now }),
+	)
 	if err != nil || !parsed.Valid {
 		t.Fatalf("verify token: err=%v valid=%v", err, parsed != nil && parsed.Valid)
 	}

@@ -371,9 +371,11 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 // placeholder. The next `installation` webhook delivery from GitHub will
 // upsert the row with the real account info — see handleInstallationEvent.
 //
-// We deliberately do NOT block the setup callback on this call. The
-// frontend re-queries on the realtime broadcast, so even if the
-// authoritative login is only filled in by the webhook, the UI converges
+// The HTTP call is synchronous (no independent timeout — that's a pre-
+// existing wart of the install path), but we deliberately do NOT let a
+// failure abort the setup callback: a network blip here just leaves the
+// "unknown" placeholder in place, and the frontend re-queries on the
+// realtime broadcast emitted by the webhook handler, so the UI converges
 // without a manual refresh.
 func fetchInstallationAccount(ctx context.Context, installationID int64) (login, accountType string, avatar *string) {
 	login = "unknown"
