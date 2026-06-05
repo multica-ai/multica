@@ -4,7 +4,16 @@ export type DaemonState =
   | "starting"
   | "stopping"
   | "installing_cli"
-  | "cli_not_found";
+  | "cli_not_found"
+  // The daemon can't start because the server rejected its credentials (the
+  // cached PAT expired / was revoked, or the session token is dead). Without
+  // this, an auth failure silently sticks at "starting" forever — see #3512.
+  | "auth_expired"
+  // The daemon was spawned but crashed before it could serve /health. The
+  // startError field carries the last few lines of daemon.log so the user
+  // can see what went wrong. Covers non-auth failures (network, config,
+  // missing dependencies, process crash, etc.) — see LUM-319.
+  | "start_error";
 
 export interface DaemonStatus {
   state: DaemonState;
@@ -18,6 +27,8 @@ export interface DaemonStatus {
   profile?: string;
   /** Backend URL the daemon connects to. */
   serverUrl?: string;
+  /** Last few lines of daemon.log when state is start_error. */
+  startError?: string;
 }
 
 export interface DaemonPrefs {
@@ -32,6 +43,8 @@ export const DAEMON_STATE_COLORS: Record<DaemonState, string> = {
   stopping: "bg-amber-500 animate-pulse",
   installing_cli: "bg-sky-500 animate-pulse",
   cli_not_found: "bg-red-500",
+  auth_expired: "bg-red-500",
+  start_error: "bg-red-500",
 };
 
 export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
@@ -41,6 +54,8 @@ export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
   stopping: "Stopping…",
   installing_cli: "Setting up…",
   cli_not_found: "Setup Failed",
+  auth_expired: "Sign-in required",
+  start_error: "Start Failed",
 };
 
 export function formatUptime(uptime?: string): string {
@@ -81,5 +96,9 @@ export function daemonStateDescription(state: DaemonState, runtimeCount: number)
       return "Setting up the runtime for the first time. Only happens once.";
     case "cli_not_found":
       return "Setup failed · couldn't download the runtime. Check your network.";
+    case "auth_expired":
+      return "Sign-in expired · sign in again to bring this device back online.";
+    case "start_error":
+      return "Daemon failed to start. Check the logs for details.";
   }
 }
