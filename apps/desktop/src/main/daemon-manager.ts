@@ -17,7 +17,11 @@ import {
 import { join } from "path";
 import { homedir, hostname } from "os";
 import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
-import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
+import {
+  ensureAgentAccessibleCli,
+  ensureManagedCli,
+  managedCliPath,
+} from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import {
   classifyAuthProbe,
@@ -770,8 +774,23 @@ function profileArgs(active: ActiveProfile): string[] {
 // hide CLI self-update UI. Computed lazily so it picks up the PATH fix
 // applied by fix-path in main/index.ts — as a top-level const it would
 // snapshot process.env at import time, before that block runs.
-function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+//
+// `MULTICA_CLI_PATH` tells the daemon which `multica` binary the agent
+// subprocess should reach for via PATH. On Windows the bundled binary lives
+// inside `app.asar.unpacked/` which the agent has been observed to be unable
+// to enumerate (#2672 / MUL-2285); pointing at a mirrored copy in
+// `managedCliPath()` (under userData) sidesteps the ACL/sandbox quirk
+// without forcing the daemon to copy itself into every task workdir.
+async function desktopSpawnEnv(
+  daemonBin: string,
+): Promise<NodeJS.ProcessEnv> {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    MULTICA_LAUNCHED_BY: "desktop",
+  };
+  const agentCli = await ensureAgentAccessibleCli(daemonBin);
+  if (agentCli) env.MULTICA_CLI_PATH = agentCli;
+  return env;
 }
 
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {
@@ -794,11 +813,12 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
 
   const args = ["daemon", "start", ...profileArgs(active)];
 
+  const spawnEnv = await desktopSpawnEnv(bin);
   return new Promise((resolve) => {
     execFile(
       bin,
       args,
-      { timeout: 20_000, env: desktopSpawnEnv() },
+      { timeout: 20_000, env: spawnEnv },
       (err) => {
         if (err) {
           currentState = "stopped";

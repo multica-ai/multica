@@ -1,8 +1,13 @@
 import { app } from "electron";
 import { execFile } from "child_process";
 import { createHash } from "crypto";
-import { createReadStream, createWriteStream, existsSync } from "fs";
-import { chmod, mkdir, rename, rm } from "fs/promises";
+import {
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  statSync,
+} from "fs";
+import { chmod, copyFile, mkdir, rename, rm } from "fs/promises";
 import { join, dirname } from "path";
 import { pipeline } from "stream/promises";
 import { tmpdir } from "os";
@@ -154,4 +159,73 @@ export async function ensureManagedCli(
   const target = managedCliPath();
   if (existsSync(target) && !options.forceInstall) return target;
   return installFresh();
+}
+
+/**
+ * Returns a CLI path the agent subprocess can reliably read and execute.
+ *
+ * On Windows, the bundled CLI lives under
+ * `%LOCALAPPDATA%\Programs\<install dir>\resources\app.asar.unpacked\resources\bin\multica.exe`.
+ * Agent subprocesses spawned by the daemon have been observed to fail listing
+ * or invoking that directory (#2672 / MUL-2285) — `multica` simply doesn't
+ * resolve, every `multica issue …` call dies, and the agent loops on errors.
+ *
+ * Mirror the bundled binary into the user-writable Electron `userData/bin/`
+ * (same path `managedCliPath()` returns) so the daemon can prepend that dir
+ * to the agent's PATH instead of the unpacked resources path. The mirror is
+ * keyed by size: a re-copy fires when the bundled binary's size differs from
+ * the managed copy (typically because Desktop auto-updated to a new build).
+ *
+ * On macOS/Linux the bundled path is reachable, so we just return it.
+ *
+ * Returns `null` only when neither bundled nor managed is usable; the daemon
+ * will then fall back to its own executable directory.
+ */
+export async function ensureAgentAccessibleCli(
+  bundledPath: string,
+): Promise<string | null> {
+  if (process.platform !== "win32") {
+    return existsSync(bundledPath) ? bundledPath : null;
+  }
+
+  const managed = managedCliPath();
+  const bundledExists = existsSync(bundledPath);
+
+  if (bundledExists) {
+    let needsCopy = !existsSync(managed);
+    if (!needsCopy) {
+      try {
+        const a = statSync(bundledPath);
+        const b = statSync(managed);
+        needsCopy = a.size !== b.size;
+      } catch {
+        needsCopy = true;
+      }
+    }
+    if (needsCopy) {
+      try {
+        await mkdir(dirname(managed), { recursive: true });
+        // Atomic-ish replace: copy → chmod → rename. Windows can't rename
+        // over a running executable, but the agent never holds the managed
+        // copy open at this point — daemon is still starting up.
+        const tmp = `${managed}.tmp-${process.pid}-${Date.now()}`;
+        await copyFile(bundledPath, tmp);
+        await chmod(tmp, 0o755);
+        await rm(managed, { force: true }).catch(() => {});
+        await rename(tmp, managed);
+        console.log(
+          `[cli-bootstrap] mirrored bundled CLI → ${managed} for agent PATH`,
+        );
+      } catch (err) {
+        console.warn(
+          "[cli-bootstrap] mirror to managed location failed:",
+          err,
+        );
+        return existsSync(managed) ? managed : bundledPath;
+      }
+    }
+    return managed;
+  }
+
+  return existsSync(managed) ? managed : null;
 }
