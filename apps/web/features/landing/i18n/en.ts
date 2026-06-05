@@ -310,6 +310,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Pageview analytics are cleaner and focus on meaningful site sections instead of noisy URL variations",
           "Self-hosting docs now lead with the built-in usage scheduler and keep older cron-based paths as compatibility notes",
           "Assignment workflows now preserve the assigned agent identity more consistently",
+          "Issue comment and reply composers are cleaner, auto-growing as you type without extra expand controls",
         ],
         fixes: [
           "Image uploads keep the cursor in the right place and no longer grow when markdown is edited repeatedly",
