@@ -61,6 +61,13 @@ export type AttachmentInput =
       /** Editor in-flight state. Renders a loader placeholder. */
       uploading?: boolean;
       /**
+       * Intrinsic pixel dimensions. Rendered as `<img width height>` so the
+       * browser reserves the box before the image decodes — prevents the
+       * layout shift that would otherwise push the caret out of view on paste.
+       */
+      width?: number;
+      height?: number;
+      /**
        * Structural hint from the call site: "this slot is definitionally an
        * image / file / ...". Bypasses `getPreviewKind` autodetect, which
        * needs a filename or content-type and falls back to the file-card
@@ -90,6 +97,8 @@ interface Normalized {
   attachmentId?: string;
   record?: AttachmentRecord;
   uploading: boolean;
+  width?: number;
+  height?: number;
 }
 
 function normalize(
@@ -114,6 +123,8 @@ function normalize(
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
+    width: input.width,
+    height: input.height,
   };
 }
 
@@ -170,6 +181,8 @@ export function Attachment({
           src={state.url}
           alt={state.filename}
           uploading={state.uploading}
+          width={state.width}
+          height={state.height}
           editable={editable}
           selected={selected}
           onView={openPreview}
@@ -228,6 +241,8 @@ interface ImageAttachmentViewProps {
   src: string;
   alt: string;
   uploading: boolean;
+  width?: number;
+  height?: number;
   editable?: boolean;
   selected?: boolean;
   onView: () => void;
@@ -240,6 +255,8 @@ function ImageAttachmentView({
   src,
   alt,
   uploading,
+  width,
+  height,
   editable,
   selected,
   onView,
@@ -284,6 +301,8 @@ function ImageAttachmentView({
         <img
           src={src || undefined}
           alt={alt}
+          width={width}
+          height={height}
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
         />

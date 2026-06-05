@@ -66,6 +66,50 @@ function removeImageBySrc(editor: any, src: string) {
   editor.view.dispatch(tr);
 }
 
+/**
+ * Read an image's intrinsic pixel dimensions off-thread. Returns null when the
+ * decode fails or the API is unavailable (e.g. jsdom in tests, where
+ * `createImageBitmap` is undefined) — callers degrade to no reserved box.
+ */
+async function readImageDimensions(
+  file: File,
+): Promise<{ width: number; height: number } | null> {
+  if (typeof createImageBitmap !== "function") return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const dims = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return dims.width > 0 && dims.height > 0 ? dims : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Measure the file's intrinsic size and write it onto the freshly-inserted
+ * image node so the browser reserves the box before decode (no layout shift).
+ * Fire-and-forget after insert: keyed on the blob `src`, so if the upload swap
+ * already replaced it we simply skip — the swap preserves any width/height we
+ * managed to set via `...imageNode.attrs`.
+ */
+async function applyImageDimensions(editor: any, file: File, src: string) {
+  const dims = await readImageDimensions(file);
+  if (!dims) return;
+
+  const imagePos = findImagePosBySrc(editor, src);
+  if (imagePos === null) return;
+
+  const imageNode = editor.state.doc.nodeAt(imagePos);
+  if (!imageNode || imageNode.attrs.width) return;
+
+  const tr = editor.state.tr.setNodeMarkup(imagePos, undefined, {
+    ...imageNode.attrs,
+    width: dims.width,
+    height: dims.height,
+  });
+  editor.view.dispatch(tr);
+}
+
 function moveSelectionToParagraphAfterImage(editor: any, src: string) {
   const imagePos = findImagePosBySrc(editor, src);
   if (imagePos === null) return;
@@ -106,6 +150,11 @@ export async function uploadAndInsertFile(
       editor.chain().focus().setImage(imgAttrs).run();
       moveSelectionToParagraphAfterImage(editor, blobUrl);
     }
+
+    // Reserve the image box ASAP so the async decode doesn't shift layout.
+    // Fire-and-forget: must not delay the handler() call below, which the
+    // synchronous-insert contract (instant preview) depends on.
+    void applyImageDimensions(editor, file, blobUrl);
 
     try {
       const result = await handler(file);

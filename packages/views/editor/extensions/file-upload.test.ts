@@ -99,6 +99,19 @@ afterEach(() => {
   }
 });
 
+function firstImageAttrs(editor: Editor): Record<string, unknown> | null {
+  let attrs: Record<string, unknown> | null = null;
+  editor.state.doc.descendants((node) => {
+    if (attrs) return false;
+    if (node.type.name === "image") {
+      attrs = node.attrs;
+      return false;
+    }
+    return undefined;
+  });
+  return attrs;
+}
+
 describe("uploadAndInsertFile", () => {
   it("lets typing continue in the trailing paragraph after pasted image upload preview", async () => {
     const editor = makeEditor();
@@ -127,5 +140,50 @@ describe("uploadAndInsertFile", () => {
     const reparsed = makeEditor();
     reparsed.commands.setContent(saved, { contentType: "markdown" });
     expect(reparsed.getMarkdown().trimEnd()).toBe(saved);
+  });
+
+  it("reserves the image box by capturing intrinsic dimensions, kept through the URL swap", async () => {
+    const close = vi.fn();
+    const createImageBitmap = vi.fn(async () => ({
+      width: 800,
+      height: 600,
+      close,
+    }));
+    vi.stubGlobal("createImageBitmap", createImageBitmap);
+
+    try {
+      const editor = makeEditor();
+      const upload = deferred<UploadResult | null>();
+      const handler = vi.fn(() => upload.promise);
+      const file = new File(["image"], "photo.png", { type: "image/png" });
+
+      const uploadTask = uploadAndInsertFile(editor, file, handler);
+
+      // Dimensions are measured off-thread and patched onto the node before the
+      // upload resolves, so the blob preview already reserves its box.
+      await vi.waitFor(() => {
+        const attrs = firstImageAttrs(editor);
+        expect(attrs?.width).toBe(800);
+        expect(attrs?.height).toBe(600);
+      });
+      expect(createImageBitmap).toHaveBeenCalledWith(file);
+      expect(close).toHaveBeenCalled();
+
+      upload.resolve(
+        makeUpload({ id: "attachment-1", link: FINAL_URL, filename: "photo.png" }),
+      );
+      await uploadTask;
+
+      // The src swap preserves width/height (spread of existing attrs).
+      const finalAttrs = firstImageAttrs(editor);
+      expect(finalAttrs?.src).toBe(FINAL_URL);
+      expect(finalAttrs?.width).toBe(800);
+      expect(finalAttrs?.height).toBe(600);
+
+      // width/height are render-only — they never reach the markdown.
+      expect(editor.getMarkdown().trimEnd()).toBe(`![photo.png](${FINAL_URL})`);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
