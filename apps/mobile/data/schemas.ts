@@ -17,6 +17,7 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatSession,
+  ChatSessionUsage,
   Comment,
   InboxItem,
   IssueLabelsResponse,
@@ -287,6 +288,28 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
+
+// FIR-31 — accumulated session cost (GET /api/chat/sessions/:id/usage). Mirrors
+// web's ChatSessionUsage (packages/core/types/chat.ts); cost_cents comes from
+// the gateway / pricing table server-side. All numeric fields default to 0 so a
+// drifted/empty body collapses to "no spend yet" rather than crashing.
+export const ChatSessionUsageSchema: z.ZodType<ChatSessionUsage> = z.object({
+  total_input_tokens: z.number().default(0),
+  total_output_tokens: z.number().default(0),
+  total_cache_read_tokens: z.number().default(0),
+  total_cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+  cost_cents: z.number().default(0),
+}).loose();
+
+export const EMPTY_CHAT_SESSION_USAGE: ChatSessionUsage = {
+  total_input_tokens: 0,
+  total_output_tokens: 0,
+  total_cache_read_tokens: 0,
+  total_cache_write_tokens: 0,
+  task_count: 0,
+  cost_cents: 0,
+};
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string(),

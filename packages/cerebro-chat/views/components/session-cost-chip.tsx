@@ -39,7 +39,7 @@ export function SessionCostChip({ sessionId }: { sessionId: string | null }) {
             aria-label="Session price"
             className="cursor-default rounded-md bg-accent/60 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground"
           >
-            {formatCost(usage.cost_cents)}
+            cost {formatCost(usage.cost_cents)}
           </span>
         }
       />

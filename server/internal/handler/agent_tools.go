@@ -160,7 +160,7 @@ func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO agent_tool_grant (agent_id, tool_name, config_json, enabled)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (agent_id, tool_name)
-         DO UPDATE SET config_json = EXCLUDED.config_json, enabled = EXCLUDED.enabled`,
+         DO UPDATE SET config_json = COALESCE(EXCLUDED.config_json, agent_tool_grant.config_json), enabled = EXCLUDED.enabled`, // CEREBRO-PATCH(agent-tool-grant-preserve-config): preserve existing config_json when PUT is called without a config body.
 		agent.ID, toolName, configJSON, body.Enabled,
 	)
 	if err != nil {

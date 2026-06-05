@@ -133,6 +133,10 @@ export function applyChatDoneToCache(
   // Clear in-flight pointer in the same tick so StatusPill unmounts and
   // the AssistantMessage owns the rendering.
   qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+  // FIR-31 — the reply just landed, so the session's accumulated cost grew;
+  // refresh the header cost chip (usage is a fetched aggregate, not patchable
+  // from this payload).
+  qc.invalidateQueries({ queryKey: chatKeys.usage(payload.chat_session_id) });
 }
 
 // =====================================================

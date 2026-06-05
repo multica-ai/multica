@@ -36,6 +36,8 @@ export const featureFlagsOptions = (wsId: string | null) =>
  */
 const FLAG_DEFAULTS: Record<string, boolean> = {
   cerebro_comment_reminders: true,
+  // FIR-31: per-reply cost badge + accumulated session-cost chip in chat.
+  cerebro_chat_message_cost: true,
 };
 
 /**
@@ -69,6 +71,24 @@ export function useCommentRemindersEnabled(): boolean {
   if (!data) return FLAG_DEFAULTS.cerebro_comment_reminders;
   return resolveFlag(
     "cerebro_comment_reminders",
+    data.overrides,
+    data.workspace_overrides,
+    data.locked,
+  );
+}
+
+/**
+ * Whether chat cost (per-reply badge + accumulated session total) is shown.
+ * Default-on, matching web's `cerebro_chat_message_cost`. While the flags
+ * query is loading it stays visible (opt-out semantics); the cost numbers are
+ * read-only so a stale `true` only ever shows a price, never mis-acts.
+ */
+export function useChatMessageCostEnabled(): boolean {
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { data } = useQuery(featureFlagsOptions(wsId));
+  if (!data) return FLAG_DEFAULTS.cerebro_chat_message_cost;
+  return resolveFlag(
+    "cerebro_chat_message_cost",
     data.overrides,
     data.workspace_overrides,
     data.locked,

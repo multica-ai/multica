@@ -33,6 +33,10 @@ export const chatKeys = {
    *  completes the cache stays warm so the persisted assistant message
    *  can render the same trace without refetching. */
   taskMessages: (taskId: string) => ["task-messages", taskId] as const,
+  /** FIR-31 — accumulated token + cost spend for a session. Same shape as
+   *  web's `chatKeys.usage`. Refreshed by invalidate on chat:done (see
+   *  applyChatDoneToCache); the chat header renders cost_cents as "cost $X.XX". */
+  usage: (sessionId: string) => ["chat", "usage", sessionId] as const,
 };
 
 // UUID gate mirrors `packages/core/chat/queries.ts`: optimistic task ids
@@ -77,5 +81,13 @@ export const taskMessagesOptions = (taskId: string | null | undefined) =>
     queryKey: chatKeys.taskMessages(taskId ?? ""),
     queryFn: ({ signal }) => api.listTaskMessages(taskId!, { signal }),
     enabled: isTaskMessageTaskId(taskId),
+    staleTime: Infinity,
+  });
+
+export const chatSessionUsageOptions = (sessionId: string | null) =>
+  queryOptions({
+    queryKey: chatKeys.usage(sessionId ?? ""),
+    queryFn: ({ signal }) => api.getChatSessionUsage(sessionId!, { signal }),
+    enabled: !!sessionId,
     staleTime: Infinity,
   });

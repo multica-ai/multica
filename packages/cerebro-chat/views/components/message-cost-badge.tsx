@@ -46,7 +46,7 @@ export function MessageCostBadge({
       <TooltipTrigger
         render={
           <span className="cursor-default text-xs font-medium tabular-nums text-muted-foreground">
-            {formatCost(cost.cost_cents)}
+            cost {formatCost(cost.cost_cents)}
           </span>
         }
       />
