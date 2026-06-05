@@ -32,7 +32,10 @@ import {
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
-import { notificationPreferenceOptions } from "../notification-preferences/queries";
+import {
+  notificationPreferenceOptions,
+  notificationPreferenceKeys,
+} from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
@@ -50,6 +53,7 @@ import type {
   IssueMetadataChangedPayload,
   InboxNewPayload,
   InboxItem,
+  NotificationPreferenceResponse,
   CommentCreatedPayload,
   CommentUpdatedPayload,
   CommentDeletedPayload,
@@ -220,29 +224,36 @@ export async function handleInboxNew(
   // styling is enough — no need to interrupt with a banner. `desktopAPI`
   // is injected by the preload script; its absence (web app) skips silently.
   if (typeof document !== "undefined" && document.hasFocus()) return;
-  // Respect the SOURCE workspace's system-notification preference. The
-  // Settings page owns the only `useQuery` for this resource, so the cache
-  // may be cold for a workspace whose Settings page was never visited —
-  // `ensureQueryData` resolves from cache when present and otherwise
-  // fetches once. Keying this on the active workspace would let a banner
-  // fire for a muted workspace (and vice-versa). On network failure we
-  // fall through to the default ("all") rather than swallow the banner.
+  // Resolve the source workspace's slug once: it pins BOTH the mute check
+  // and the deep link to the workspace the inbox item BELONGS to, never the
+  // currently active one. Reading `getCurrentSlug()` here was the source of
+  // wrong-workspace routing (#3766): an `inbox:new` from workspace A arriving
+  // while workspace B is active emitted a notification carrying B's slug and
+  // A's issue id, deep-linking to an issue B doesn't have.
+  const slug = await resolveInboxSourceSlug(qc, sourceWsId);
+  // Respect the SOURCE workspace's system-notification preference. Keying the
+  // query on `sourceWsId` is not enough: the request resolves its workspace
+  // from the `X-Workspace-Slug` header, which follows the ACTIVE workspace —
+  // so a cold-cache lookup while viewing B would read B's mute setting and
+  // cache it under A's key. Passing the source slug scopes the fetch to A.
+  // When the slug can't be resolved we read only an already-warm cache
+  // (populated earlier with the correct workspace context) rather than fetch
+  // with the wrong one; on network failure we fall through to the default
+  // ("all") rather than swallow the banner.
   if (sourceWsId) {
     try {
-      const prefData = await qc.ensureQueryData(
-        notificationPreferenceOptions(sourceWsId),
-      );
+      const prefData = slug
+        ? await qc.ensureQueryData(
+            notificationPreferenceOptions(sourceWsId, slug),
+          )
+        : qc.getQueryData<NotificationPreferenceResponse>(
+            notificationPreferenceKeys.all(sourceWsId),
+          );
       if (prefData?.preferences?.system_notifications === "muted") return;
     } catch {
       // Fall through with default behavior.
     }
   }
-  // Route the click to the workspace the inbox item BELONGS to — not the
-  // currently active one. Reading `getCurrentSlug()` here was the source
-  // of wrong-workspace routing (#3766): an `inbox:new` from workspace A
-  // arriving while workspace B is active emitted a notification carrying
-  // B's slug and A's issue id, deep-linking to an issue B doesn't have.
-  const slug = await resolveInboxSourceSlug(qc, sourceWsId);
   const desktopAPI = (
     globalThis as unknown as {
       desktopAPI?: {
