@@ -24,9 +24,6 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # The shared agent-runtime base must build before devenv-runtime which FROMs it.
-  # devenv-runtime defaults to BASE_TAG=latest, so the base needs to publish first.
-  #
   # Split into per-arch matrix legs because the base image's hermes install
   # crashes uv with SIGSEGV under QEMU x86_64 emulation on arm64 runners.
   # Each leg runs on its native arch, pushes an arch-suffixed tag
@@ -115,14 +112,3 @@ jobs:
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 
-  bake-build-devenv-runtime:
-    if: contains(github.event.pull_request.labels.*.name, 'Development')
-    # FROMs agent-runtime-base — base must build first.
-    needs: [bake-build-agent-runtime-base]
-    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
-    with:
-      environment: dev
-      branch: ${{ github.head_ref || github.ref_name }}
-      bakefile: docker/devenv-runtime/docker-bake.hcl
-      runs-on: ubicloud-standard-4-arm
-    secrets: inherit

@@ -24,10 +24,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The shared agent-runtime base must publish before devenv-runtime which FROMs it.
-  # devenv-runtime defaults to BASE_TAG=latest, so the base bake's :latest tag is
-  # what it pulls on a fresh build. To pin a specific base, bump BASE_TAG in
-  # docker/devenv-runtime/docker-bake.hcl to the IMG_SHA tag.
+  # The shared agent-runtime base must publish before agentrunner-runtime which
+  # FROMs it. agentrunner-runtime defaults to BASE_TAG=latest, so the base
+  # bake's :latest tag is what it pulls on a fresh build.
   #
   # Split into per-arch matrix legs because the base image's hermes install
   # crashes uv with SIGSEGV under QEMU x86_64 emulation on arm64 runners.
@@ -114,21 +113,8 @@ jobs:
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 
-  bake-build-devenv-runtime:
-    # FROMs agent-runtime-base:latest — base must publish first.
-    needs: [bake-build-agent-runtime-base]
-    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
-    with:
-      environment: prod
-      branch: ${{ github.head_ref || github.ref_name }}
-      bakefile: docker/devenv-runtime/docker-bake.hcl
-      runs-on: ubicloud-standard-4-arm
-    secrets: inherit
-
   bake-build-agentrunner-runtime:
-    # Post-S1A: FROMs agent-runtime-base directly (no devenv-runtime in the
-    # FROM chain). Builds in parallel with bake-build-devenv-runtime — both
-    # only wait on the shared base image.
+    # FROMs agent-runtime-base directly — base must publish first.
     needs: [bake-build-agent-runtime-base]
     uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
     with:
@@ -142,15 +128,12 @@ jobs:
   # Tag extraction + GitOps image bumps.
   #
   # The deploy fans out into two independent groups so a fast server build is
-  # never held hostage by the slow runner build chain (PLA-391). Previously a
-  # single `extract-tags` job depended on all four bake-builds, so the backend
-  # (built in ~30s) could not deploy until the base -> devenv -> agentrunner
-  # chain finished minutes later.
+  # never held hostage by the slower runner build chain (PLA-391).
   #
   #   * Server group  — backend + web build in parallel, then bump their two
   #     image tags in gitops/environments/tools/kustomization.yaml.
-  #   * Runner group  — agent-runtime-base -> devenv -> agentrunner build in
-  #     sequence (FROM chain); each runner image bumps its gitops target as
+  #   * Runner group  — agent-runtime-base -> agentrunner-runtime build in
+  #     sequence (FROM chain); agentrunner-runtime bumps its gitops target as
   #     soon as that image is built.
   #
   # Serialization rule for the commits below: the reusable gitops-deploy
@@ -159,8 +142,7 @@ jobs:
   # the SAME repo+path are queued safely; two deploys to the same repo at
   # DIFFERENT paths are NOT — the second push is rejected non-fast-forward.
   # Every commit that targets g2crowd/agentfarm is therefore chained into one
-  # sequence (backend -> web -> agent-runtime). The devenv-runtime bump targets
-  # the separate g2crowd/configuration repo and runs fully in parallel.
+  # sequence (backend -> web -> agent-runtime).
   # ----------------------------------------------------------------------------
 
   extract-server-tags:
@@ -178,19 +160,6 @@ jobs:
         run: |
           echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
-
-  extract-devenv-runtime-tag:
-    needs: [bake-build-devenv-runtime]
-    runs-on: ubuntu-latest
-    outputs:
-      devenv_runtime_tag: ${{ steps.extract.outputs.devenv_runtime_tag }}
-    steps:
-      - name: Extract devenv-runtime image tag
-        id: extract
-        env:
-          DEVENV_RUNTIME_IMAGE: ${{ needs.bake-build-devenv-runtime.outputs.image_name }}
-        run: |
-          echo "devenv_runtime_tag=${DEVENV_RUNTIME_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
   extract-agentrunner-runtime-tag:
     needs: [bake-build-agentrunner-runtime]
@@ -232,20 +201,6 @@ jobs:
       image_yq_matcher: .images[1].newTag
 
   # ---- Runner group ----
-  # devenv-runtime bumps the separate g2crowd/configuration repo, so it fires
-  # as soon as the devenv image is built and runs in parallel with the server
-  # group — no agentfarm push contention.
-  commit-to-gitops-devenv-runtime:
-    needs: [extract-devenv-runtime-tag]
-    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
-    secrets: inherit
-    with:
-      gitops_repository: g2crowd/configuration
-      image_tag: ${{ needs.extract-devenv-runtime-tag.outputs.devenv_runtime_tag }}
-      app_repo_branch: ${{ github.head_ref || github.ref_name }}
-      path_to_kustomization: kustomize/DevOps/devenv/environments/development/kustomization.yaml
-      image_yq_matcher: .images[1].newTag
-
   # agent-runtime bumps g2crowd/agentfarm at a DIFFERENT path than the server
   # bump, so the reusable workflow's repo+path concurrency group does NOT
   # serialize it against the server commits. It is chained after
