@@ -248,7 +248,11 @@ export function mergeAgentDashboardRows(
   runTimeRows: DashboardAgentRunTime[],
   localRows: AgentCostRow[] = [],
   localRunTimeRows: DashboardLocalRunTimeByRunner[] = [],
+  agents: { id: string; owner_id: string | null }[] = [],
 ): AgentDashboardRow[] {
+  const agentOwnerMap = new Map(
+    agents.map((a) => [a.id, a.owner_id] as const),
+  );
   const runTimeByAgent = new Map(
     runTimeRows.map((r) => [r.agent_id, r] as const),
   );
@@ -261,6 +265,7 @@ export function mergeAgentDashboardRows(
     merged.set(r.agentId, {
       agentId: r.agentId,
       source: "agent",
+      ownerId: agentOwnerMap.get(r.agentId) ?? undefined,
       tokens: r.tokens,
       cost: r.cost,
       seconds: rt?.total_seconds ?? 0,
@@ -275,6 +280,7 @@ export function mergeAgentDashboardRows(
     merged.set(r.agent_id, {
       agentId: r.agent_id,
       source: "agent",
+      ownerId: agentOwnerMap.get(r.agent_id) ?? undefined,
       tokens: 0,
       cost: 0,
       seconds: r.total_seconds,
@@ -463,4 +469,49 @@ export function formatDuration(seconds: number, lessThanMinuteLabel: string): st
     return h > 0 ? `${days}d ${h}h` : `${days}d`;
   }
   return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
+// ---------------------------------------------------------------------------
+// Member aggregation — groups AgentDashboardRow entries by ownerId so the
+// leaderboard can switch between per-agent and per-member views. Agents
+// without an ownerId (system-level) are grouped under a synthetic
+// "system" key. Each MemberDashboardRow carries its constituent agent rows
+// for the collapsible detail panel.
+// ---------------------------------------------------------------------------
+
+export interface MemberDashboardRow {
+  /** user_id of the member, or "__system__" for unowned agents. */
+  ownerId: string;
+  tokens: number;
+  cost: number;
+  seconds: number;
+  taskCount: number;
+  agents: AgentDashboardRow[];
+}
+
+const SYSTEM_OWNER = "__system__";
+
+export function aggregateByMember(rows: AgentDashboardRow[]): MemberDashboardRow[] {
+  const map = new Map<string, MemberDashboardRow>();
+  for (const r of rows) {
+    const key = r.ownerId ?? SYSTEM_OWNER;
+    const entry = map.get(key) ?? {
+      ownerId: key,
+      tokens: 0,
+      cost: 0,
+      seconds: 0,
+      taskCount: 0,
+      agents: [],
+    };
+    entry.tokens += r.tokens;
+    entry.cost += r.cost;
+    entry.seconds += r.seconds;
+    entry.taskCount += r.taskCount;
+    entry.agents.push(r);
+    map.set(key, entry);
+  }
+  return Array.from(map.values()).toSorted((a, b) => {
+    if (b.cost !== a.cost) return b.cost - a.cost;
+    return b.seconds - a.seconds;
+  });
 }

@@ -916,9 +916,9 @@ func autopilotTriggerLocation(timezone string) (*time.Location, string) {
 
 // buildIssueDescription appends an autopilot system instruction to the
 // user-provided description, asking the agent to rename the issue after
-// it understands the actual work. For webhook-sourced runs, also appends
-// a payload section so the agent has the event context inline (otherwise
-// the agent only sees the issue body, never the run's trigger_payload).
+// it understands the actual work. For any run with a trigger payload, also
+// appends a payload section so the agent has the trigger context inline
+// (otherwise the agent only sees the issue body, never the run's trigger_payload).
 func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun, triggerTimezone string) pgtype.Text {
 	triggeredAt := formatAutopilotRunTimestamp(run, triggerTimezone)
 	var b strings.Builder
@@ -926,6 +926,18 @@ func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.Autopil
 	b.WriteString("\n\n---\n*Autopilot run triggered at ")
 	b.WriteString(triggeredAt)
 	b.WriteString(". After starting work, rename this issue to accurately reflect what you are doing.*")
+
+	if len(run.TriggerPayload) > 0 {
+		b.WriteString("\n\nTrigger source: ")
+		b.WriteString(run.Source)
+		b.WriteString("\n\nTrigger payload:\n```json\n")
+		if pretty, err := prettifyJSON(run.TriggerPayload); err == nil {
+			b.Write(pretty)
+		} else {
+			b.Write(run.TriggerPayload)
+		}
+		b.WriteString("\n```")
+	}
 
 	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
 		event := "webhook.received"

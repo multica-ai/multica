@@ -73,6 +73,8 @@
     "field_agent": "Agent",
     "field_output_mode": "Output Mode",
     "field_project": "Project",
+    "field_manual_options": "Manual trigger options",
+    "manual_options_empty": "No manual options",
     "no_project": "No project",
     "project_unavailable": "Project unavailable",
     "field_prompt": "Prompt",
@@ -89,6 +91,12 @@
       "confirm": "Delete",
       "deleting": "Deleting..."
     }
+  },
+  "manual_run": {
+    "title": "Run with option",
+    "cancel": "Cancel",
+    "confirm": "Run",
+    "running": "Running..."
   },
   "run_status": {
     "issue_created": "Issue Created",
@@ -253,6 +261,11 @@
     "section_project": "Project",
     "no_project": "No project",
     "section_output_mode": "Output mode",
+    "section_manual_options": "Manual trigger options",
+    "manual_option_placeholder": "production",
+    "manual_option_add": "Add option",
+    "manual_option_remove": "Remove option",
+    "manual_options_empty": "Run now triggers directly until options are added.",
     "section_schedule": "Schedule",
     "section_trigger_kind": "Trigger",
     "trigger_kind_schedule": "Schedule",

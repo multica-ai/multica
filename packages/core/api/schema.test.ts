@@ -267,6 +267,67 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("autopilots", () => {
+    it("defaults missing manual_options to [] on list responses", async () => {
+      stubFetchJson({
+        autopilots: [
+          {
+            id: "ap-1",
+            workspace_id: "ws-1",
+            title: "Deploy",
+            description: null,
+            assignee_type: "agent",
+            assignee_id: "agent-1",
+            status: "active",
+            execution_mode: "run_only",
+            issue_title_template: null,
+            created_by_type: "member",
+            created_by_id: "user-1",
+            last_run_at: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res.autopilots[0]?.manual_options).toEqual([]);
+    });
+
+    it("defaults missing manual_options to [] on detail responses", async () => {
+      stubFetchJson({
+        autopilot: {
+          id: "ap-1",
+          workspace_id: "ws-1",
+          title: "Deploy",
+          description: null,
+          assignee_type: "agent",
+          assignee_id: "agent-1",
+          status: "active",
+          execution_mode: "run_only",
+          issue_title_template: null,
+          created_by_type: "member",
+          created_by_id: "user-1",
+          last_run_at: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+        triggers: [],
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.getAutopilot("ap-1");
+      expect(res.autopilot.manual_options).toEqual([]);
+    });
+
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ autopilots: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res).toEqual({ autopilots: [], total: 0 });
+    });
+  });
+
   describe("getAutopilotDelivery", () => {
     it("falls back to a placeholder carrying the requested id", async () => {
       stubFetchJson({ wrong: "shape" });
