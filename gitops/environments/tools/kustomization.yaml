@@ -26,4 +26,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newTag: "c5435cfb"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
-    newTag: "aec0980b"
+    newTag: "c5435cfb"
