@@ -26,8 +26,20 @@ import type {
 export function deriveAgentAvailability(
   runtime: AgentRuntime | null,
   now: number,
+  isBuiltin?: boolean,
+  tasks?: readonly AgentTask[],
 ): AgentAvailability {
-  if (!runtime) return "offline";
+  if (!runtime) {
+    // Built-in agents don't have a fixed runtime — derive availability from
+    // task status instead. Active tasks mean the agent IS running somewhere.
+    if (isBuiltin && tasks && tasks.length > 0) {
+      const hasActive = tasks.some(
+        (t) => t.status === "running" || t.status === "queued" || t.status === "dispatched",
+      );
+      if (hasActive) return "online";
+    }
+    return "offline";
+  }
   const health = deriveRuntimeHealth(runtime, now);
   if (health === "online") return "online";
   if (health === "recently_lost") return "unstable";
@@ -87,7 +99,12 @@ interface DerivePresenceInput {
 }
 
 export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPresenceDetail {
-  const availability = deriveAgentAvailability(input.runtime, input.now);
+  const availability = deriveAgentAvailability(
+    input.runtime,
+    input.now,
+    input.agent.is_builtin,
+    input.tasks,
+  );
   const detail = deriveWorkloadDetail(input.tasks);
 
   return {

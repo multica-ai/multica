@@ -42,6 +42,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     updated_at: "2026-04-01T00:00:00Z",
     archived_at: null,
     archived_by: null,
+    is_builtin: false,
     ...overrides,
   };
 }

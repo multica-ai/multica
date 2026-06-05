@@ -383,14 +383,47 @@ func (s *TaskService) willRetryTask(task db.MulticaAgentTaskQueue) bool {
 }
 
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
-// No context snapshot is stored — the agent fetches all data it needs at
-// runtime via the multica CLI.
+// Optional overrideRuntimeID, when provided, is used instead of the agent's
+// own runtime_id (used by the frontend runtime-select dialog for built-in agents).
 func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.MulticaIssue, triggerCommentID ...pgtype.UUID) (db.MulticaAgentTaskQueue, error) {
 	var commentID pgtype.UUID
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false)
+	// If a second vararg is passed, it's the overrideRuntimeID.
+	var overrideRuntimeID pgtype.UUID
+	if len(triggerCommentID) > 1 {
+		overrideRuntimeID = triggerCommentID[1]
+	}
+	return s.enqueueIssueTask(ctx, issue, commentID, false, overrideRuntimeID)
+}
+
+// resolveRuntimeForAgent returns a runtime_id for the agent. For normal agents
+// the agent's own runtime_id is used. For built-in agents (is_builtin=true,
+// runtime_id=NULL) the function picks the first available runtime in the
+// workspace.
+func (s *TaskService) resolveRuntimeForAgent(ctx context.Context, agent db.MulticaAgent, workspaceID pgtype.UUID) (pgtype.UUID, error) {
+	if agent.RuntimeID.Valid {
+		return agent.RuntimeID, nil
+	}
+	if !agent.IsBuiltin {
+		return pgtype.UUID{}, fmt.Errorf("agent has no runtime")
+	}
+
+	runtimes, err := s.Queries.ListAgentRuntimes(ctx, workspaceID)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("list runtimes for built-in agent: %w", err)
+	}
+	if len(runtimes) == 0 {
+		return pgtype.UUID{}, fmt.Errorf("no runtimes available in workspace for built-in agent")
+	}
+
+	rt := runtimes[0]
+	slog.Info("auto-selected runtime for built-in agent",
+		"agent_id", util.UUIDToString(agent.ID),
+		"runtime_id", util.UUIDToString(rt.ID),
+	)
+	return rt.ID, nil
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -398,7 +431,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.MulticaI
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.MulticaIssue, triggerCommentID pgtype.UUID, forceFreshSession bool) (db.MulticaAgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.MulticaIssue, triggerCommentID pgtype.UUID, forceFreshSession bool, overrideRuntimeID pgtype.UUID) (db.MulticaAgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.MulticaAgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -413,14 +446,24 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.MulticaIssu
 		slog.Debug("task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agent.ID))
 		return db.MulticaAgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
-		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
-		return db.MulticaAgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	runtimeID, err := s.resolveRuntimeForAgent(ctx, agent, issue.WorkspaceID)
+	if err != nil {
+		// If caller provided an override runtime, use it as fallback.
+		if overrideRuntimeID.Valid {
+			runtimeID = overrideRuntimeID
+		} else {
+			slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+			return db.MulticaAgentTaskQueue{}, fmt.Errorf("resolve runtime: %w", err)
+		}
+	}
+	// Caller-provided runtime takes priority over auto-resolution.
+	if overrideRuntimeID.Valid {
+		runtimeID = overrideRuntimeID
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           issue.AssigneeID,
-		RuntimeID:         agent.RuntimeID,
+		RuntimeID:         runtimeID,
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
 		TriggerCommentID:  triggerCommentID,
@@ -476,14 +519,15 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.MulticaIs
 		slog.Debug("mention task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.MulticaAgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
-		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-		return db.MulticaAgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	runtimeID, err := s.resolveRuntimeForAgent(ctx, agent, issue.WorkspaceID)
+	if err != nil {
+		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.MulticaAgentTaskQueue{}, fmt.Errorf("resolve runtime: %w", err)
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           agentID,
-		RuntimeID:         agent.RuntimeID,
+		RuntimeID:         runtimeID,
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
 		TriggerCommentID:  triggerCommentID,
@@ -554,8 +598,9 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if agent.ArchivedAt.Valid {
 		return db.MulticaAgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
-		return db.MulticaAgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	runtimeID, err := s.resolveRuntimeForAgent(ctx, agent, workspaceID)
+	if err != nil {
+		return db.MulticaAgentTaskQueue{}, fmt.Errorf("resolve runtime: %w", err)
 	}
 
 	payload := QuickCreateContext{
@@ -577,7 +622,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 
 	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:   agentID,
-		RuntimeID: agent.RuntimeID,
+		RuntimeID: runtimeID,
 		Priority:  priorityToInt("high"),
 		Context:   contextJSON,
 	})
@@ -613,13 +658,14 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.Multic
 	if agent.ArchivedAt.Valid {
 		return db.MulticaAgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
-		return db.MulticaAgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	runtimeID, err := s.resolveRuntimeForAgent(ctx, agent, chatSession.WorkspaceID)
+	if err != nil {
+		return db.MulticaAgentTaskQueue{}, fmt.Errorf("resolve runtime: %w", err)
 	}
 
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
 		AgentID:       chatSession.AgentID,
-		RuntimeID:     agent.RuntimeID,
+		RuntimeID:     runtimeID,
 		Priority:      2, // medium priority for chat
 		ChatSessionID: chatSession.ID,
 	})
@@ -1479,7 +1525,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.MulticaIssue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.MulticaAgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, pgtype.UUID{})
 	}
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true)
 }

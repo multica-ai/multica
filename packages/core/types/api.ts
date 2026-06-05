@@ -37,6 +37,8 @@ export interface UpdateIssueRequest {
   attachment_ids?: string[];
   workflow_id?: string | null;
   workflow_run_id?: string | null;
+  /** Runtime to use when assigning a built-in agent (no bound runtime). */
+  runtime_id?: string | null;
 }
 
 export interface ListIssuesParams {

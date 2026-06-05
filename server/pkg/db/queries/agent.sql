@@ -544,7 +544,7 @@ ORDER BY atq.agent_id, bucket;
 -- no workspace_id column.
 SELECT atq.* FROM multica_agent_task_queue atq
 JOIN multica_agent a ON a.id = atq.agent_id
-WHERE a.workspace_id = $1
+WHERE (a.workspace_id = $1 OR a.is_builtin = TRUE)
   AND atq.status IN ('queued', 'dispatched', 'running')
 
 UNION ALL
@@ -553,7 +553,7 @@ SELECT t.* FROM (
   SELECT DISTINCT ON (atq.agent_id) atq.*
   FROM multica_agent_task_queue atq
   JOIN multica_agent a ON a.id = atq.agent_id
-  WHERE a.workspace_id = $1
+  WHERE (a.workspace_id = $1 OR a.is_builtin = TRUE)
     AND atq.status IN ('completed', 'failed')
   ORDER BY atq.agent_id, atq.completed_at DESC NULLS LAST
 ) t;
@@ -585,3 +585,31 @@ RETURNING *;
 UPDATE multica_agent SET plugin_id = NULL, updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
+
+-- name: ListBuiltinAgents :many
+SELECT * FROM multica_agent
+WHERE is_builtin = TRUE AND archived_at IS NULL
+ORDER BY created_at ASC;
+
+-- name: SetAgentBuiltin :one
+UPDATE multica_agent
+SET is_builtin = TRUE, workspace_id = NULL, runtime_id = NULL, updated_at = now()
+WHERE id = $1 AND archived_at IS NULL
+RETURNING *;
+
+-- name: UnsetAgentBuiltin :one
+UPDATE multica_agent
+SET is_builtin = FALSE, workspace_id = $2, updated_at = now()
+WHERE id = $1 AND is_builtin = TRUE
+RETURNING *;
+
+-- name: GetBuiltinAgent :one
+SELECT * FROM multica_agent WHERE id = $1 AND is_builtin = TRUE;
+
+-- name: ListAgentsWithBuiltins :many
+SELECT * FROM (
+  (SELECT * FROM multica_agent WHERE workspace_id = $1::uuid AND archived_at IS NULL)
+  UNION ALL
+  (SELECT * FROM multica_agent WHERE is_builtin = TRUE AND archived_at IS NULL)
+) AS agents
+ORDER BY created_at ASC;

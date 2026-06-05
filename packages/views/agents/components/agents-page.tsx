@@ -46,6 +46,7 @@ import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig, availabilityOrder } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { type AgentRow, createAgentColumns } from "./agent-columns";
+import { BuiltinAgentCardSection } from "./builtin-agent-card-section";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
@@ -139,11 +140,20 @@ export function AgentsPage() {
   }, [members, currentUser]);
   const isWorkspaceAdmin = myRole === "owner" || myRole === "admin";
 
+  // Built-in agents are rendered as cards above the table; exclude them from
+  // the table row pipeline.
+  const builtinAgents = useMemo(
+    () => agents.filter((a) => a.is_builtin && !a.archived_at),
+    [agents],
+  );
+
   // Layer 1a — view (active / archived).
   const inView = useMemo(
     () =>
       agents.filter((a) =>
-        view === "archived" ? !!a.archived_at : !a.archived_at,
+        view === "archived"
+          ? !!a.archived_at
+          : !a.archived_at && !a.is_builtin,
       ),
     [agents, view],
   );
@@ -273,7 +283,7 @@ export function AgentsPage() {
   );
 
   const totalActiveCount = useMemo(
-    () => agents.filter((a) => !a.archived_at).length,
+    () => agents.filter((a) => !a.archived_at && !a.is_builtin).length,
     [agents],
   );
 
@@ -391,13 +401,20 @@ export function AgentsPage() {
     return <ListError onCreate={() => setShowCreate(true)} listError={listError} onRetry={refetchList} />;
   }
 
-  const showEmpty = totalActiveCount === 0 && archivedCount === 0;
+  const showEmpty = totalActiveCount === 0 && archivedCount === 0 && builtinAgents.length === 0;
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeaderBar
         totalCount={totalActiveCount}
         onCreate={() => setShowCreate(true)}
+      />
+
+      {/* Built-in agent cards — between header and toolbar */}
+      <BuiltinAgentCardSection
+        agents={builtinAgents}
+        loading={isLoading}
+        onCardClick={(id) => navigation.push(paths.agentDetail(id))}
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">

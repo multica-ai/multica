@@ -20,6 +20,7 @@ import {
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { isImeComposing, timeAgo } from "@multica/core/utils";
+import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Input } from "@multica/ui/components/ui/input";
@@ -68,6 +69,8 @@ interface InspectorProps {
    * `server/internal/handler/agent.go:519-535`.
    */
   canEdit: boolean;
+  /** When true, the inspector applies reduced opacity to signal read-only built-in mode. */
+  isBuiltinReadOnly?: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
 }
 
@@ -91,6 +94,7 @@ export function AgentDetailInspector({
   members,
   currentUserId,
   canEdit,
+  isBuiltinReadOnly = false,
   onUpdate,
 }: InspectorProps) {
   const { t } = useT("agents");
@@ -98,7 +102,12 @@ export function AgentDetailInspector({
   const isOnline = runtime?.status === "online";
 
   return (
-    <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
+    <aside
+      className={cn(
+        "flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto",
+        isBuiltinReadOnly && "opacity-70",
+      )}
+    >
       {/* Identity */}
       <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
         <AvatarEditor agent={agent} canEdit={canEdit} onUpdate={update} />

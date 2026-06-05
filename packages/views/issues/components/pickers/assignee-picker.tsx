@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { GitBranch, Lock, UserMinus } from "lucide-react";
+import { GitBranch, Lock, UserMinus, Zap } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -10,6 +10,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
 import { workflowActiveListOptions } from "@multica/core/workflows/queries";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -19,6 +20,7 @@ import {
 } from "./property-picker";
 import { useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
+import { RuntimeSelectDialog } from "../../../agents/components/runtime-select-dialog";
 
 /**
  * Legacy boolean shape kept around for callers (e.g. `use-issue-actions.ts`)
@@ -69,7 +71,11 @@ export function AssigneePicker({
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: activeWorkflows = [] } = useQuery(workflowActiveListOptions(wsId));
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { getActorName } = useActorName();
+
+  // Built-in agent runtime selection dialog state
+  const [pendingBuiltinAgent, setPendingBuiltinAgent] = useState<Agent | null>(null);
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -107,8 +113,45 @@ export function AssigneePicker({
       ? getActorName(assigneeType, assigneeId)
       : t(($) => $.pickers.assignee.trigger_unassigned);
 
+  // Handle clicking a built-in agent: show runtime dialog if >1 runtimes,
+  // auto-select if exactly 1, fall through without runtime if 0.
+  const handleBuiltinAgentClick = (agent: Agent) => {
+    const onlineRuntimes = runtimes.filter((r) => r.status === "online");
+    if (onlineRuntimes.length === 1) {
+      // Single runtime: auto-select and close picker
+      onUpdate({
+        assignee_type: "agent",
+        assignee_id: agent.id,
+        runtime_id: onlineRuntimes[0]!.id,
+      });
+      setOpen(false);
+    } else if (onlineRuntimes.length > 1) {
+      // Multiple runtimes: show selection dialog
+      setPendingBuiltinAgent(agent);
+    } else {
+      // No runtimes: proceed without runtime (backend will try auto-select)
+      onUpdate({
+        assignee_type: "agent",
+        assignee_id: agent.id,
+      });
+      setOpen(false);
+    }
+  };
+
+  const handleRuntimeConfirm = (runtimeId: string) => {
+    if (!pendingBuiltinAgent) return;
+    onUpdate({
+      assignee_type: "agent",
+      assignee_id: pendingBuiltinAgent.id,
+      runtime_id: runtimeId,
+    });
+    setPendingBuiltinAgent(null);
+    setOpen(false);
+  };
+
   return (
-    <PropertyPicker
+    <>
+      <PropertyPicker
       open={open}
       onOpenChange={(v: boolean) => {
         setOpen(v);
@@ -189,17 +232,30 @@ export function AssigneePicker({
                 tooltip={!allowed ? decision.message : undefined}
                 onClick={() => {
                   if (!allowed) return;
-                  onUpdate({
-                    assignee_type: "agent",
-                    assignee_id: a.id,
-                  });
-                  setOpen(false);
+                  if (a.is_builtin) {
+                    handleBuiltinAgentClick(a);
+                  } else {
+                    onUpdate({
+                      assignee_type: "agent",
+                      assignee_id: a.id,
+                    });
+                    setOpen(false);
+                  }
                 }}
               >
                 <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
                 <span className={`truncate ${allowed ? "" : "text-muted-foreground"}`}>{a.name}</span>
-                {a.visibility === "private" && (
+                {a.is_builtin && (
+                  <span className="ml-auto shrink-0 inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                    <Zap className="h-2.5 w-2.5" />
+                    {t(($) => $.pickers.assignee.builtin_label)}
+                  </span>
+                )}
+                {a.visibility === "private" && !a.is_builtin && (
                   <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
+                )}
+                {a.visibility === "private" && a.is_builtin && (
+                  <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
                 )}
               </PickerItem>
             );
@@ -258,5 +314,17 @@ export function AssigneePicker({
         filteredWorkflows.length === 0 &&
         filter && <PickerEmpty />}
     </PropertyPicker>
+    {pendingBuiltinAgent && (
+      <RuntimeSelectDialog
+        agentName={pendingBuiltinAgent.name}
+        runtimes={runtimes}
+        loading={false}
+        onConfirm={handleRuntimeConfirm}
+        onClose={() => {
+          setPendingBuiltinAgent(null);
+        }}
+      />
+    )}
+    </>
   );
 }
