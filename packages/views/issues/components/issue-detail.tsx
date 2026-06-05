@@ -42,6 +42,8 @@ import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-lates
 import { useNavScrollState } from "@multica/cerebro-ui/hooks/use-nav-scroll-state";
 // CEREBRO-PATCH(issue-detail-highlight-scroll-hook): JEH-1002 retry-based inbox→comment scroll lives in cerebro-ui (replaces the prior single-shot inline effect).
 import { useHighlightCommentScroll } from "@multica/cerebro-ui/hooks/use-highlight-comment-scroll";
+// CEREBRO-PATCH(issue-detail-context-trigger-import): TECH-2969 — click title in topbar to open context top-sheet.
+import { IssueContextTrigger } from "@multica/cerebro-ui/components/issue-context-trigger";
 // CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — unarchive button rendered in detail toolbar when host embeds IssueDetail in archived inbox view.
 import { CerebroUnarchiveToolbarButton } from "@multica/cerebro-inbox";
 import {
@@ -1689,7 +1691,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         <PageHeader className="gap-2 bg-background text-sm">
           {/* CEREBRO-PATCH(issue-detail-mobile-topbar-title): Mobile shows the issue title only; long titles scroll horizontally instead of truncating (JEH-1515). */}
           <div className="flex flex-1 items-center gap-1.5 min-w-0 md:hidden">
-            <span className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-medium text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{displayTitle}</span>
+            {/* CEREBRO-PATCH(issue-detail-context-trigger-mobile): TECH-2969 — tap title on mobile to open context top-sheet. */}
+            <IssueContextTrigger
+              fullTitle={displayTitle}
+              description={issue.description}
+              identifier={isChat ? null : issue.identifier}
+              className="min-w-0 flex-1"
+            >
+              <span className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-medium text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{displayTitle}</span>
+            </IssueContextTrigger>
           </div>
           <div className="hidden md:flex flex-1 items-center gap-1.5 min-w-0 overflow-x-auto">
             {workspace && (
@@ -1760,14 +1770,20 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                     {isChannel ? `# ${displayTitle}` : displayTitle}
                   </span>
                 ) : (
-                  <>
+                  /* CEREBRO-PATCH(issue-detail-context-trigger-desktop): TECH-2969 — click identifier+title in desktop breadcrumb to open context top-sheet. */
+                  <IssueContextTrigger
+                    fullTitle={displayTitle}
+                    description={issue.description}
+                    identifier={issue.identifier}
+                    className="min-w-0"
+                  >
                     <span className="shrink-0 text-muted-foreground">
                       {issue.identifier}
                     </span>
                     <span className="truncate font-medium text-foreground">
                       {displayTitle}
                     </span>
-                  </>
+                  </IssueContextTrigger>
                 )}
               </>
             )}
