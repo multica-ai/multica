@@ -64,6 +64,14 @@ type AgentRuntime struct {
 	Visibility     string             `json:"visibility"`
 }
 
+type AgentRuntimeBinding struct {
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AgentSkill struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	SkillID   pgtype.UUID        `json:"skill_id"`
