@@ -1318,6 +1318,109 @@ func TestExecuteAndDrain_IdleWatchdog_FiresAfterToolResultIfBackendStaysSilent(t
 	}
 }
 
+// TestExecuteAndDrain_ToolCallWatchdog_FiresOnHungToolCall is the core of the
+// per-tool-call timeout (FIR-2610). It models the exact blind spot the idle
+// watchdog can never catch: a single tool call (a `sleep`/`until` poll loop, a
+// frozen network call, an unresponsive MCP server) that emits tool_use and
+// then never returns a tool_result. The idle watchdog stands down while a tool
+// is in-flight, so before this fix the run sat at "running" until the 2 h
+// DefaultAgentTimeout. With MaxToolCallDuration set, it must be force-stopped
+// in a few ticks — minutes, not hours.
+func TestExecuteAndDrain_ToolCallWatchdog_FiresOnHungToolCall(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	// Idle watchdog deliberately DISABLED to prove the tool-call cap stands on
+	// its own. The tool stays in-flight far longer than the cap.
+	d.cfg.AgentIdleWatchdog = 0
+	d.cfg.MaxToolCallDuration = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	result, _, err := d.executeAndDrain(
+		ctx,
+		longToolCallBackend{toolSilence: 10 * time.Second},
+		"p",
+		agent.ExecOptions{},
+		slog.Default(),
+		"t-hung-tool",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "tool_timeout" {
+		t.Fatalf("expected status=tool_timeout for a hung in-flight tool call, got %q (err=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "MaxToolCallDuration") {
+		t.Fatalf("expected error to mention MaxToolCallDuration, got %q", result.Error)
+	}
+	// The whole point: it must fire on the cap, not sit for the 10 s tool
+	// silence (let alone the 2 h ceiling). 1 s is generous against slow CI.
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("tool-call watchdog took too long to fire: %s (cap=%s)", elapsed, d.cfg.MaxToolCallDuration)
+	}
+}
+
+// TestExecuteAndDrain_ToolCallWatchdog_DoesNotFireForToolWithinCap guards the
+// done-criterion that legitimate long single calls are not killed: a tool call
+// that finishes inside MaxToolCallDuration must complete normally.
+func TestExecuteAndDrain_ToolCallWatchdog_DoesNotFireForToolWithinCap(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 0
+	// Cap comfortably larger than the tool's silence.
+	d.cfg.MaxToolCallDuration = 2 * time.Second
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		longToolCallBackend{toolSilence: 50 * time.Millisecond},
+		"p",
+		agent.ExecOptions{},
+		slog.Default(),
+		"t-tool-within-cap",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed for a tool call within the cap, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+// TestExecuteAndDrain_ToolCallWatchdog_FiresWhileIdleWatchdogStandsDown proves
+// the two nets are complementary: with BOTH enabled and a hung in-flight tool,
+// the idle watchdog (shorter window) correctly stands down because a tool is
+// in-flight, and the tool-call cap is what actually stops the run — tagged
+// tool_timeout, not idle_watchdog.
+func TestExecuteAndDrain_ToolCallWatchdog_FiresWhileIdleWatchdogStandsDown(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+	d.cfg.MaxToolCallDuration = 150 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	result, _, err := d.executeAndDrain(
+		ctx,
+		longToolCallBackend{toolSilence: 10 * time.Second},
+		"p",
+		agent.ExecOptions{},
+		slog.Default(),
+		"t-hung-tool-both",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "tool_timeout" {
+		t.Fatalf("expected status=tool_timeout (idle watchdog must stand down for an in-flight tool), got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
 // ensureRepoReady must refresh `workspaceState.settings` on every checkout —
 // even when the repo cache already holds the URL. The /repo/checkout handler
 // reads `workspaceCoAuthoredByEnabled` right after, and the 30s workspace

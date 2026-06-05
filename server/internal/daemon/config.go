@@ -31,7 +31,27 @@ const (
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
-	DefaultAgentIdleWatchdog       = 30 * time.Minute
+	DefaultAgentIdleWatchdog = 30 * time.Minute
+	// DefaultMaxToolCallDuration is the per-tool-call hard cap. The idle
+	// watchdog above deliberately treats an in-flight tool call (a tool_use
+	// with no matching tool_result yet) as forward progress and never fires
+	// while one is outstanding — long `npm install` / `docker build` calls
+	// emit no messages for minutes and must not be killed mid-build. The
+	// blind spot: a tool call that hangs forever (a `sleep`/`until` poll loop
+	// on a CI/deploy, a frozen network call, an MCP server that never
+	// answers) is also "in-flight", so the idle watchdog can never catch it.
+	// It then sits at "running" until the coarse DefaultAgentTimeout (2 h),
+	// burning the dispatch slot and 50-200k tokens of accumulated context per
+	// hung run — the single largest token cost from failed runs in the whole
+	// catalogue. This cap force-stops any single tool call that stays
+	// in-flight longer than the limit, so a hung call dies in minutes instead
+	// of hours. 30 min sits far below the 2 h ceiling (catches every truly
+	// stuck call early) while leaving headroom above almost every legitimate
+	// long call — including a full `make check` (typecheck + unit + Go + e2e)
+	// on a cold checkout. Deployments with genuinely longer single calls
+	// (e.g. a 40-min build) raise it via MULTICA_MAX_TOOL_CALL_DURATION;
+	// set 0 to disable.
+	DefaultMaxToolCallDuration     = 30 * time.Minute
 	DefaultRuntimeName             = "Local Agent"
 	DefaultWorkspaceSyncInterval   = 30 * time.Second
 	DefaultHealthPort              = 19514
@@ -79,6 +99,7 @@ type Config struct {
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	MaxToolCallDuration            time.Duration // force-stop a run when a single tool call stays in-flight (tool_use with no tool_result) longer than this (0 = disabled)
 	ClaudeArgs                     []string
 	CodexArgs                      []string
 }
@@ -280,6 +301,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
+	// MULTICA_MAX_TOOL_CALL_DURATION=0 disables the per-tool-call hard cap.
+	// Routed through durationFromEnv so an operator with genuinely long single
+	// calls can raise it (or disable it) without patching the binary; any
+	// positive duration overrides DefaultMaxToolCallDuration.
+	maxToolCallDuration, err := durationFromEnv("MULTICA_MAX_TOOL_CALL_DURATION", DefaultMaxToolCallDuration)
+	if err != nil {
+		return Config{}, err
+	}
+
 	maxConcurrentTasks, err := intFromEnv("MULTICA_DAEMON_MAX_CONCURRENT_TASKS", DefaultMaxConcurrentTasks)
 	if err != nil {
 		return Config{}, err
@@ -428,6 +458,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
+		MaxToolCallDuration:            maxToolCallDuration,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
 	}, nil

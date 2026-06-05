@@ -240,6 +240,47 @@ func stageFakeAgent(t *testing.T) string {
 	return binDir
 }
 
+// TestLoadConfig_MaxToolCallDuration covers the per-tool-call cap (FIR-2610):
+// the default, an explicit env override (e.g. a deployment with genuinely long
+// single calls raising it), and the 0 = disabled opt-out.
+func TestLoadConfig_MaxToolCallDuration(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_MAX_TOOL_CALL_DURATION", "")
+		cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.MaxToolCallDuration != DefaultMaxToolCallDuration {
+			t.Fatalf("MaxToolCallDuration = %s, want default %s", cfg.MaxToolCallDuration, DefaultMaxToolCallDuration)
+		}
+	})
+
+	t.Run("env override", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_MAX_TOOL_CALL_DURATION", "45m")
+		cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.MaxToolCallDuration != 45*time.Minute {
+			t.Fatalf("MaxToolCallDuration = %s, want 45m", cfg.MaxToolCallDuration)
+		}
+	})
+
+	t.Run("disabled with zero", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_MAX_TOOL_CALL_DURATION", "0")
+		cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.MaxToolCallDuration != 0 {
+			t.Fatalf("MaxToolCallDuration = %s, want 0 (disabled)", cfg.MaxToolCallDuration)
+		}
+	})
+}
+
 // TestLoadConfig_AutoUpdateDefault_SelfHostOff is the regression guard for
 // MUL-2381: a daemon pointed at any non-cloud server URL must default
 // AutoUpdateEnabled to false, because self-host operators frequently run a
