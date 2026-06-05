@@ -141,6 +141,7 @@ func init() {
 	// (no flags)
 
 	// trigger (manual run)
+	autopilotTriggerCmd.Flags().String("payload", "", "Manual trigger payload; must match a configured manual option when the autopilot has manual options")
 	autopilotTriggerCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// runs
@@ -442,8 +443,14 @@ func runAutopilotTrigger(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve autopilot: %w", err)
 	}
 
+	var body any
+	if cmd.Flags().Changed("payload") {
+		payload, _ := cmd.Flags().GetString("payload")
+		body = map[string]any{"trigger_payload": payload}
+	}
+
 	var run map[string]any
-	if err := client.PostJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/trigger", nil, &run); err != nil {
+	if err := client.PostJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/trigger", body, &run); err != nil {
 		return fmt.Errorf("trigger autopilot: %w", err)
 	}
 

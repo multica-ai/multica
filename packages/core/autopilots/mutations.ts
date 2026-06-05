@@ -9,6 +9,7 @@ import type {
   GetAutopilotResponse,
   CreateAutopilotTriggerRequest,
   UpdateAutopilotTriggerRequest,
+  TriggerAutopilotRequest,
 } from "../types";
 
 export function useCreateAutopilot() {
@@ -85,8 +86,12 @@ export function useTriggerAutopilot() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (id: string) => api.triggerAutopilot(id),
-    onSettled: (_data, _err, id) => {
+    mutationFn: (vars: string | ({ id: string } & TriggerAutopilotRequest)) =>
+      typeof vars === "string"
+        ? api.triggerAutopilot(vars)
+        : api.triggerAutopilot(vars.id, { trigger_payload: vars.trigger_payload }),
+    onSettled: (_data, _err, vars) => {
+      const id = typeof vars === "string" ? vars : vars.id;
       qc.invalidateQueries({ queryKey: autopilotKeys.runs(wsId, id) });
       qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, id) });
     },
