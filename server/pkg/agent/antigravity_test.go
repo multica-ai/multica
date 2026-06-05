@@ -38,6 +38,34 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 	}
 }
 
+func TestBuildAntigravityArgsNoTimeoutOmitsPrintTimeout(t *testing.T) {
+	t.Parallel()
+
+	// timeout <= 0 means "no wall-clock cap" (MUL-3064): agy must be launched
+	// WITHOUT --print-timeout, otherwise antigravityFormatTimeout(0) clamps to
+	// 1s and the run is killed almost immediately — the opposite of "no cap".
+	args := buildAntigravityArgs(
+		"hello",
+		"/tmp/agy.log",
+		0,
+		ExecOptions{Cwd: "/work"},
+		quietAntigravityLogger(),
+	)
+
+	want := []string{
+		"-p", "hello",
+		"--dangerously-skip-permissions",
+		"--log-file", "/tmp/agy.log",
+		"--add-dir", "/work",
+	}
+	if !slices.Equal(args, want) {
+		t.Fatalf("buildAntigravityArgs(timeout=0) mismatch\n got: %v\nwant: %v", args, want)
+	}
+	if slices.Contains(args, "--print-timeout") {
+		t.Fatalf("--print-timeout must be omitted when timeout <= 0; got %v", args)
+	}
+}
+
 func TestBuildAntigravityArgsResume(t *testing.T) {
 	t.Parallel()
 
