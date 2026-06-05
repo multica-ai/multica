@@ -703,7 +703,14 @@ func TestShouldInterruptAgent(t *testing.T) {
 		want   bool
 	}{
 		{name: "status cancelled", status: "cancelled", err: nil, want: true},
+		{name: "status failed", status: "failed", err: nil, want: true},
+		{name: "status completed", status: "completed", err: nil, want: true},
+		{name: "status skipped", status: "skipped", err: nil, want: true},
+		{name: "status queued is no longer active for a local runner", status: "queued", err: nil, want: true},
+		{name: "unknown status is not active", status: "archived", err: nil, want: true},
 		{name: "task deleted (404)", status: "", err: notFound, want: true},
+		{name: "dispatched is active", status: "dispatched", err: nil, want: false},
+		{name: "waiting local directory is active", status: "waiting_local_directory", err: nil, want: false},
 		{name: "running normally", status: "running", err: nil, want: false},
 		{name: "transient 5xx is not a cancel signal", status: "", err: transient, want: false},
 		{name: "no information yet", status: "", err: nil, want: false},
@@ -715,6 +722,34 @@ func TestShouldInterruptAgent(t *testing.T) {
 				t.Fatalf("shouldInterruptAgent(%q, %v) = %v, want %v", tc.status, tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestWatchTaskCancellation_StatusFailed ensures the daemon stops local work
+// when the server has already moved the task to a terminal failure state.
+func TestWatchTaskCancellation_StatusFailed(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"failed"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cancelled := d.watchTaskCancellation(ctx, "task-failed", 10*time.Millisecond, slog.Default())
+
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchTaskCancellation did not signal cancellation when status=failed")
 	}
 }
 
