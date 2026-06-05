@@ -80,6 +80,9 @@ services:
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       APP_ENV: ${APP_ENV:-development}
+      POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
+      POSTHOG_HOST: ${POSTHOG_HOST:-https://us.i.posthog.com}
+      ANALYTICS_ENVIRONMENT: ${ANALYTICS_ENVIRONMENT:-production}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4900/health || exit 1"]
       interval: 5s
@@ -87,7 +90,9 @@ services:
       start_period: 10s
       retries: 5
 
-  # Override frontend to share Tailscale's network
+  # Override frontend to share Tailscale's network.
+  # Next.js listens on 3000 internally; the frontend-proxy (nginx) listens on
+  # 4800 and adds gzip compression before Tailscale forwards to the browser.
   frontend:
     network_mode: service:tailscale
     ports: !reset []
@@ -99,7 +104,20 @@ services:
     environment:
       HOSTNAME: "0.0.0.0"
       REMOTE_API_URL: http://127.0.0.1:4900
-      PORT: 4800
+      PORT: 3000
+
+  # Compression proxy in front of the frontend. Tailscale's built-in reverse
+  # proxy decompresses upstream responses, so we need nginx to re-compress
+  # JS/CSS/HTML before it reaches the browser.
+  frontend-proxy:
+    image: nginx:alpine
+    network_mode: service:tailscale
+    volumes:
+      - ./docker/frontend-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - tailscale
+      - frontend
+    restart: unless-stopped
 
 volumes:
   tailscale-state:
