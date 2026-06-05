@@ -1,6 +1,10 @@
 package daemon
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+)
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
@@ -60,7 +64,8 @@ type Task struct {
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string          `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
-	SquadName               string          `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
+	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
+	Plugin                  *execenv.AgentPlugin `json:"plugin,omitempty"`                    // DEPRECATED: use Agent.Plugin instead; kept for JSON compat
 	// RequestingUserName + RequestingUserProfileDescription describe the human
 	// the agent is working on behalf of. v1 sources them from the runtime
 	// owner (the user who registered the daemon). Empty when the runtime has
@@ -93,6 +98,7 @@ type AgentData struct {
 	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
 	Model         string            `json:"model,omitempty"`
 	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	Plugin        *execenv.AgentPlugin `json:"plugin,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.
