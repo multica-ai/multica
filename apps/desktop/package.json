@@ -42,6 +42,7 @@
     "@fontsource-variable/inter": "^5.2.5",
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@fontsource/geist-mono": "^5.2.7",
+    "@multica/cerebro-workspace-branding": "workspace:*",
     "@multica/cerebro-access": "workspace:*",
     "@multica/cerebro-agent-capabilities": "workspace:*",
     "@multica/cerebro-agent-avatar": "workspace:*",
