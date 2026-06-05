@@ -30,10 +30,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildClaudeArgs(opts, b.cfg.Logger)
 

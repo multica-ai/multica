@@ -499,14 +499,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
 	semanticInactivityTimeout := opts.SemanticInactivityTimeout
 	if semanticInactivityTimeout == 0 {
 		semanticInactivityTimeout = defaultCodexSemanticInactivityTimeout
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	// Materialise the agent's MCP config into the per-task
 	// `$CODEX_HOME/config.toml`. Argv would be the simpler path, but

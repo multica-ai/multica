@@ -39,10 +39,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	logFile, err := os.CreateTemp("", "multica-agy-log-*.log")
 	if err != nil {

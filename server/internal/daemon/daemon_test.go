@@ -1096,8 +1096,9 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 
 // idleWatchdogBackend simulates the MUL-2225 hang: emit one message to mark
 // activity, then go silent forever. With a short AgentIdleWatchdog, the
-// watchdog should fire and short-circuit executeAndDrain instead of waiting
-// for the full drainTimeout (which is ~21 minutes by default).
+// watchdog should fire and short-circuit executeAndDrain. With no wall-clock
+// cap (opts.Timeout = 0) the drain loop imposes no deadline of its own, so the
+// idle watchdog is the only thing that ends this otherwise-forever-silent run.
 type idleWatchdogBackend struct {
 	emitOne bool // when true, emit one message before going silent; when false, never emit anything
 }

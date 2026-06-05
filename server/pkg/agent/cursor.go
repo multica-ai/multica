@@ -31,10 +31,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
 	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)

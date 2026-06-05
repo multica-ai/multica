@@ -15,17 +15,23 @@ import (
 )
 
 const (
-	DefaultServerURL                      = "ws://localhost:8080/ws"
-	DefaultPollInterval                   = 30 * time.Second
-	DefaultHeartbeatInterval              = 15 * time.Second
-	DefaultAgentTimeout                   = 2 * time.Hour
+	DefaultServerURL         = "ws://localhost:8080/ws"
+	DefaultPollInterval      = 30 * time.Second
+	DefaultHeartbeatInterval = 15 * time.Second
+	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
+	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdog
+	// (DefaultAgentIdleWatchdog), so a session that keeps emitting events is
+	// never killed merely for running long (MUL-3064). Operators who want a
+	// hard ceiling for cost/resource control can set MULTICA_AGENT_TIMEOUT.
+	DefaultAgentTimeout                   = 0
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
 	// on a stuck child process (e.g. `docker ps` against a frozen dockerd),
-	// in which case `cmd.Wait()` never returns and the task sits at "running"
-	// for its full DefaultAgentTimeout (2 h). The previous 5 min default
+	// in which case `cmd.Wait()` never returns. With no wall-clock cap
+	// (DefaultAgentTimeout = 0) such a run would otherwise sit at "running"
+	// forever, so this watchdog is its sole liveness net. The previous 5 min default
 	// killed legitimate long assistant outputs (e.g. RFC-length writeups)
 	// where the model streams a single message for many minutes without any
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for

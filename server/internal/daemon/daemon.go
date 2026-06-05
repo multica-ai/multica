@@ -3087,15 +3087,21 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	}
 	taskLog.Debug("backend started, draining messages")
 
-	// Create an independent drain deadline so we don't block forever if the
-	// backend's internal timeout fails to produce a Result (e.g. scanner
-	// stuck on a hung stdout pipe). The extra 30 s gives the backend time
-	// to clean up after its own timeout fires.
-	drainTimeout := opts.Timeout + 30*time.Second
-	if opts.Timeout == 0 {
-		drainTimeout = 21 * time.Minute
+	// Bound the drain loop only when there is a wall-clock cap. With a positive
+	// opts.Timeout, give the drain a slightly longer deadline than the backend
+	// so it can still collect the backend's own timeout Result if the scanner
+	// is stuck on a hung stdout pipe (the extra 30 s covers cleanup after the
+	// backend's own deadline fires). With no cap (opts.Timeout <= 0) the
+	// inactivity watchdog is the only liveness net, so the drain must NOT
+	// impose its own deadline either — otherwise an actively streaming long run
+	// would be cut off here regardless of progress (MUL-3064).
+	var drainCtx context.Context
+	var drainCancel context.CancelFunc
+	if opts.Timeout > 0 {
+		drainCtx, drainCancel = context.WithTimeout(agentCtx, opts.Timeout+30*time.Second)
+	} else {
+		drainCtx, drainCancel = context.WithCancel(agentCtx)
 	}
-	drainCtx, drainCancel := context.WithTimeout(agentCtx, drainTimeout)
 	defer drainCancel()
 
 	var toolCount atomic.Int32
