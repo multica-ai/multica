@@ -161,7 +161,7 @@ type DaemonRegisterRequest struct {
 	DeviceName      string   `json:"device_name"`
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
-	Runtimes []struct {
+	Runtimes        []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -1125,19 +1125,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			ThinkingLevel: agent.ThinkingLevel.String,
 		}
 
-			// Populate plugin metadata and inject plugin content into
-			// agent instructions. Best-effort -- failures must not block
-			// task startup.
-			pd := fetchPluginData(r.Context(), h.cfg.BuiltinPluginAPIBaseURL, agent.PluginID.String)
-			if pd != nil {
-				resp.Agent.Plugin = pd.Info
-				if pd.Content != "" {
-					if resp.Agent.Instructions != "" {
-						resp.Agent.Instructions += "\n\n"
-					}
-					resp.Agent.Instructions += "You must follow these instructions:\n\n" + pd.Content
+		// Populate plugin metadata and inject plugin content into
+		// agent instructions. Best-effort -- failures must not block
+		// task startup.
+		pd := fetchPluginData(r.Context(), h.cfg.BuiltinPluginAPIBaseURL, agent.PluginID.String)
+		if pd != nil {
+			resp.Agent.Plugin = pd.Info
+			if pd.Content != "" {
+				if resp.Agent.Instructions != "" {
+					resp.Agent.Instructions += "\n\n"
 				}
+				resp.Agent.Instructions += "You must follow these instructions:\n<instructions>\n```\n" + pd.Content + "\n```\n</instructions>\n\n"
 			}
+		}
 	}
 
 	// Resolve the runtime owner's profile description so the daemon can

@@ -144,6 +144,8 @@ export interface Agent {
   thinking_level?: string;
   /** External plugin bound to this agent. NULL when no plugin is set. */
   plugin_id: string | null;
+  /** True when the agent is a global (cross-workspace) built-in agent. */
+  is_builtin: boolean;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   created_at: string;

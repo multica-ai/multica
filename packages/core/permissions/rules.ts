@@ -184,6 +184,29 @@ export function canManageMembers(ctx: PermissionContext): Decision {
  * `ownerCount` is the number of workspace members currently with role=owner.
  * Caller derives it locally from the cached member list.
  */
+export function canPromoteAgent(
+  ctx: PermissionContext,
+  canManageWorkflows: boolean,
+): Decision {
+  if (ctx.userId === null) {
+    return deny("not_authenticated", "Sign in to promote agents.");
+  }
+  if (!canManageWorkflows) {
+    return deny(
+      "not_admin_role",
+      "Only workflow admins can promote agents to built-in.",
+    );
+  }
+  return ALLOW;
+}
+
+export function canDemoteBuiltinAgent(
+  ctx: PermissionContext,
+  canManageWorkflows: boolean,
+): Decision {
+  return canPromoteAgent(ctx, canManageWorkflows);
+}
+
 export function canChangeMemberRole(
   target: Pick<Member, "role">,
   ownerCount: number,

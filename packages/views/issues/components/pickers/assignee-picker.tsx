@@ -1,15 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { GitBranch, Lock, UserMinus } from "lucide-react";
+import { GitBranch, Lock, UserMinus, Zap } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
-import { workflowActiveListOptions } from "@multica/core/workflows/queries";
+import { workflowActiveListOptions, workflowNodesOptions } from "@multica/core/workflows/queries";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -19,6 +20,7 @@ import {
 } from "./property-picker";
 import { useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
+import { RuntimeSelectDialog } from "../../../agents/components/runtime-select-dialog";
 
 /**
  * Legacy boolean shape kept around for callers (e.g. `use-issue-actions.ts`)
@@ -47,6 +49,7 @@ export function AssigneePicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  skipBuiltinRuntimeSelection = false,
 }: {
   assigneeType: IssueAssigneeType | null;
   assigneeId: string | null;
@@ -56,6 +59,9 @@ export function AssigneePicker({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  /** When true, selecting a built-in agent will NOT show the runtime selection dialog.
+   *  Use this in contexts like workflow editor where runtime is chosen at execution time. */
+  skipBuiltinRuntimeSelection?: boolean;
 }) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(false);
@@ -69,7 +75,19 @@ export function AssigneePicker({
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: activeWorkflows = [] } = useQuery(workflowActiveListOptions(wsId));
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { getActorName } = useActorName();
+  const queryClient = useQueryClient();
+
+  // Built-in agent runtime selection dialog state
+  const [pendingBuiltinAgent, setPendingBuiltinAgent] = useState<Agent | null>(null);
+
+  // Workflow runtime selection dialog state
+  const [pendingWorkflowRuntime, setPendingWorkflowRuntime] = useState<{
+    workflowId: string;
+    workflowTitle: string;
+  } | null>(null);
+  const [checkingWorkflow, setCheckingWorkflow] = useState(false);
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -107,8 +125,138 @@ export function AssigneePicker({
       ? getActorName(assigneeType, assigneeId)
       : t(($) => $.pickers.assignee.trigger_unassigned);
 
+  // Handle clicking a built-in agent: show runtime dialog if >1 runtimes,
+  // auto-select if exactly 1, fall through without runtime if 0.
+  // When skipBuiltinRuntimeSelection is true, just assign the agent directly.
+  const handleBuiltinAgentClick = (agent: Agent) => {
+    if (skipBuiltinRuntimeSelection) {
+      onUpdate({
+        assignee_type: "agent",
+        assignee_id: agent.id,
+      });
+      setOpen(false);
+      return;
+    }
+    const onlineRuntimes = runtimes.filter((r) => r.status === "online");
+    if (onlineRuntimes.length === 1) {
+      // Single runtime: auto-select and close picker
+      onUpdate({
+        assignee_type: "agent",
+        assignee_id: agent.id,
+        runtime_id: onlineRuntimes[0]!.id,
+      });
+      setOpen(false);
+    } else if (onlineRuntimes.length > 1) {
+      // Multiple runtimes: show selection dialog
+      setPendingBuiltinAgent(agent);
+    } else {
+      // No runtimes: proceed without runtime (backend will try auto-select)
+      onUpdate({
+        assignee_type: "agent",
+        assignee_id: agent.id,
+      });
+      setOpen(false);
+    }
+  };
+
+  const handleRuntimeConfirm = (runtimeId: string) => {
+    if (!pendingBuiltinAgent) return;
+    onUpdate({
+      assignee_type: "agent",
+      assignee_id: pendingBuiltinAgent.id,
+      runtime_id: runtimeId,
+    });
+    setPendingBuiltinAgent(null);
+    setOpen(false);
+  };
+
+  // Handle clicking a workflow: check if any node has a built-in agent,
+  // and if so, show the runtime selection dialog so all built-in agents
+  // in this workflow share the same runtime.
+  const handleWorkflowClick = async (workflow: { id: string; title: string }) => {
+    setCheckingWorkflow(true);
+    try {
+      const nodes = await queryClient.fetchQuery(workflowNodesOptions(wsId, workflow.id));
+      const agentMap = new Map(agents.map((a) => [a.id, a]));
+
+      const hasBuiltinAgent = nodes.some((node) => {
+        if ((node.worker_type === "agent" || node.worker_type === "squad") && node.worker_id) {
+          const agentId = node.worker_type === "squad"
+            ? squads.find((s) => s.id === node.worker_id)?.leader_id
+            : node.worker_id;
+          if (agentId) {
+            const agent = agentMap.get(agentId);
+            if (agent?.is_builtin) return true;
+          }
+        }
+        if ((node.critic_type === "agent" || node.critic_type === "squad") && node.critic_id) {
+          const agentId = node.critic_type === "squad"
+            ? squads.find((s) => s.id === node.critic_id)?.leader_id
+            : node.critic_id;
+          if (agentId) {
+            const agent = agentMap.get(agentId);
+            if (agent?.is_builtin) return true;
+          }
+        }
+        return false;
+      });
+
+      if (hasBuiltinAgent) {
+        const onlineRuntimes = runtimes.filter((r) => r.status === "online");
+        if (onlineRuntimes.length === 1) {
+          onUpdate({
+            assignee_type: "workflow",
+            assignee_id: workflow.id,
+            runtime_id: onlineRuntimes[0]!.id,
+          });
+          setOpen(false);
+        } else if (onlineRuntimes.length > 1) {
+          setPendingWorkflowRuntime({
+            workflowId: workflow.id,
+            workflowTitle: workflow.title,
+          });
+        } else {
+          // No online runtimes — assign without runtime_id
+          onUpdate({
+            assignee_type: "workflow",
+            assignee_id: workflow.id,
+          });
+          setOpen(false);
+        }
+      } else {
+        // No built-in agents in workflow — assign normally
+        onUpdate({
+          assignee_type: "workflow",
+          assignee_id: workflow.id,
+        });
+        setOpen(false);
+      }
+    } catch {
+      // On error, still assign the workflow (nodes may not have loaded)
+      onUpdate({
+        assignee_type: "workflow",
+        assignee_id: workflow.id,
+      });
+      setOpen(false);
+    } finally {
+      setCheckingWorkflow(false);
+    }
+  };
+
+  const handleWorkflowRuntimeConfirm = (runtimeId: string) => {
+    if (!pendingWorkflowRuntime) return;
+    onUpdate({
+      assignee_type: "workflow",
+      assignee_id: pendingWorkflowRuntime.workflowId,
+      runtime_id: runtimeId,
+    });
+    setPendingWorkflowRuntime(null);
+    setOpen(false);
+  };
+
   return (
-    <PropertyPicker
+    <>
+      <PropertyPicker
       open={open}
       onOpenChange={(v: boolean) => {
         setOpen(v);
@@ -189,17 +337,30 @@ export function AssigneePicker({
                 tooltip={!allowed ? decision.message : undefined}
                 onClick={() => {
                   if (!allowed) return;
-                  onUpdate({
-                    assignee_type: "agent",
-                    assignee_id: a.id,
-                  });
-                  setOpen(false);
+                  if (a.is_builtin) {
+                    handleBuiltinAgentClick(a);
+                  } else {
+                    onUpdate({
+                      assignee_type: "agent",
+                      assignee_id: a.id,
+                    });
+                    setOpen(false);
+                  }
                 }}
               >
                 <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
                 <span className={`truncate ${allowed ? "" : "text-muted-foreground"}`}>{a.name}</span>
-                {a.visibility === "private" && (
+                {a.is_builtin && (
+                  <span className="ml-auto shrink-0 inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                    <Zap className="h-2.5 w-2.5" />
+                    {t(($) => $.pickers.assignee.builtin_label)}
+                  </span>
+                )}
+                {a.visibility === "private" && !a.is_builtin && (
                   <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
+                )}
+                {a.visibility === "private" && a.is_builtin && (
+                  <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
                 )}
               </PickerItem>
             );
@@ -238,12 +399,9 @@ export function AssigneePicker({
               key={w.id}
               selected={isSelected("workflow", w.id)}
               onClick={() => {
-                onUpdate({
-                  assignee_type: "workflow",
-                  assignee_id: w.id,
-                });
-                setOpen(false);
+                handleWorkflowClick(w);
               }}
+              disabled={checkingWorkflow}
             >
               <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="truncate">{w.title}</span>
@@ -258,5 +416,28 @@ export function AssigneePicker({
         filteredWorkflows.length === 0 &&
         filter && <PickerEmpty />}
     </PropertyPicker>
+    {pendingBuiltinAgent && (
+      <RuntimeSelectDialog
+        agentName={pendingBuiltinAgent.name}
+        runtimes={runtimes}
+        loading={false}
+        onConfirm={handleRuntimeConfirm}
+        onClose={() => {
+          setPendingBuiltinAgent(null);
+        }}
+      />
+    )}
+    {pendingWorkflowRuntime && (
+      <RuntimeSelectDialog
+        agentName={pendingWorkflowRuntime.workflowTitle}
+        runtimes={runtimes}
+        loading={false}
+        onConfirm={handleWorkflowRuntimeConfirm}
+        onClose={() => {
+          setPendingWorkflowRuntime(null);
+        }}
+      />
+    )}
+    </>
   );
 }

@@ -16,7 +16,7 @@ UPDATE multica_workflow_run SET
     status = 'cancelled',
     completed_at = now()
 WHERE id = $1
-RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at
+RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at, runtime_id
 `
 
 func (q *Queries) CancelWorkflowRun(ctx context.Context, id pgtype.UUID) (MulticaWorkflowRun, error) {
@@ -35,6 +35,7 @@ func (q *Queries) CancelWorkflowRun(ctx context.Context, id pgtype.UUID) (Multic
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.RuntimeID,
 	)
 	return i, err
 }
@@ -45,7 +46,7 @@ UPDATE multica_workflow_run SET
     output = $2,
     completed_at = now()
 WHERE id = $1
-RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at
+RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at, runtime_id
 `
 
 type CompleteWorkflowRunParams struct {
@@ -69,6 +70,7 @@ func (q *Queries) CompleteWorkflowRun(ctx context.Context, arg CompleteWorkflowR
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.RuntimeID,
 	)
 	return i, err
 }
@@ -301,10 +303,10 @@ func (q *Queries) CreateWorkflowNode(ctx context.Context, arg CreateWorkflowNode
 const createWorkflowRun = `-- name: CreateWorkflowRun :one
 INSERT INTO multica_workflow_run (
     workflow_id, workspace_id, workflow_title, status,
-    triggered_by_type, triggered_by_id, input
+    triggered_by_type, triggered_by_id, input, runtime_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
-) RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at
+    $1, $2, $3, $4, $5, $6, $7, $8
+) RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at, runtime_id
 `
 
 type CreateWorkflowRunParams struct {
@@ -315,6 +317,7 @@ type CreateWorkflowRunParams struct {
 	TriggeredByType string      `json:"triggered_by_type"`
 	TriggeredByID   pgtype.UUID `json:"triggered_by_id"`
 	Input           []byte      `json:"input"`
+	RuntimeID       pgtype.UUID `json:"runtime_id"`
 }
 
 func (q *Queries) CreateWorkflowRun(ctx context.Context, arg CreateWorkflowRunParams) (MulticaWorkflowRun, error) {
@@ -326,6 +329,7 @@ func (q *Queries) CreateWorkflowRun(ctx context.Context, arg CreateWorkflowRunPa
 		arg.TriggeredByType,
 		arg.TriggeredByID,
 		arg.Input,
+		arg.RuntimeID,
 	)
 	var i MulticaWorkflowRun
 	err := row.Scan(
@@ -341,6 +345,7 @@ func (q *Queries) CreateWorkflowRun(ctx context.Context, arg CreateWorkflowRunPa
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.RuntimeID,
 	)
 	return i, err
 }
@@ -395,7 +400,7 @@ UPDATE multica_workflow_run SET
     status = 'failed',
     completed_at = now()
 WHERE id = $1
-RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at
+RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at, runtime_id
 `
 
 func (q *Queries) FailWorkflowRun(ctx context.Context, id pgtype.UUID) (MulticaWorkflowRun, error) {
@@ -414,6 +419,7 @@ func (q *Queries) FailWorkflowRun(ctx context.Context, id pgtype.UUID) (MulticaW
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.RuntimeID,
 	)
 	return i, err
 }
@@ -523,7 +529,7 @@ func (q *Queries) GetWorkflowNode(ctx context.Context, id pgtype.UUID) (MulticaW
 }
 
 const getWorkflowRun = `-- name: GetWorkflowRun :one
-SELECT id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at FROM multica_workflow_run
+SELECT id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at, runtime_id FROM multica_workflow_run
 WHERE id = $1
 `
 
@@ -543,6 +549,7 @@ func (q *Queries) GetWorkflowRun(ctx context.Context, id pgtype.UUID) (MulticaWo
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.RuntimeID,
 	)
 	return i, err
 }
@@ -790,7 +797,7 @@ func (q *Queries) ListWorkflowNodes(ctx context.Context, workflowID pgtype.UUID)
 
 const listWorkflowRuns = `-- name: ListWorkflowRuns :many
 
-SELECT id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at FROM multica_workflow_run
+SELECT id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at, runtime_id FROM multica_workflow_run
 WHERE workflow_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -827,6 +834,7 @@ func (q *Queries) ListWorkflowRuns(ctx context.Context, arg ListWorkflowRunsPara
 			&i.StartedAt,
 			&i.CompletedAt,
 			&i.CreatedAt,
+			&i.RuntimeID,
 		); err != nil {
 			return nil, err
 		}
@@ -839,7 +847,7 @@ func (q *Queries) ListWorkflowRuns(ctx context.Context, arg ListWorkflowRunsPara
 }
 
 const listWorkflowRunsByWorkspace = `-- name: ListWorkflowRunsByWorkspace :many
-SELECT id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at FROM multica_workflow_run
+SELECT id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at, runtime_id FROM multica_workflow_run
 WHERE workspace_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -873,6 +881,7 @@ func (q *Queries) ListWorkflowRunsByWorkspace(ctx context.Context, arg ListWorkf
 			&i.StartedAt,
 			&i.CompletedAt,
 			&i.CreatedAt,
+			&i.RuntimeID,
 		); err != nil {
 			return nil, err
 		}
@@ -1190,7 +1199,7 @@ UPDATE multica_workflow_run SET
     status = $2,
     completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN now() ELSE completed_at END
 WHERE id = $1
-RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at
+RETURNING id, workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id, input, output, started_at, completed_at, created_at, runtime_id
 `
 
 type UpdateWorkflowRunStatusParams struct {
@@ -1214,6 +1223,7 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.RuntimeID,
 	)
 	return i, err
 }

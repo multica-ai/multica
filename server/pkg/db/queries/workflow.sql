@@ -152,9 +152,9 @@ WHERE id = $1;
 -- name: CreateWorkflowRun :one
 INSERT INTO multica_workflow_run (
     workflow_id, workspace_id, workflow_title, status,
-    triggered_by_type, triggered_by_id, input
+    triggered_by_type, triggered_by_id, input, runtime_id
 ) VALUES (
-    $1, $2, $3, $4, $5, sqlc.narg('triggered_by_id'), sqlc.narg('input')
+    $1, $2, $3, $4, $5, sqlc.narg('triggered_by_id'), sqlc.narg('input'), sqlc.narg('runtime_id')
 ) RETURNING *;
 
 -- name: UpdateWorkflowRunStatus :one

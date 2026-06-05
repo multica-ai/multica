@@ -52,6 +52,7 @@ type AgentResponse struct {
 	// per-model; the API never normalizes across providers. See MUL-2339.
 	ThinkingLevel string              `json:"thinking_level"`
 	PluginID      *string             `json:"plugin_id"`
+	IsBuiltin     bool                `json:"is_builtin"`
 	OwnerID       *string             `json:"owner_id"`
 	Skills        []AgentSkillSummary `json:"skills"`
 	CreatedAt     string              `json:"created_at"`
@@ -113,6 +114,7 @@ func agentToResponse(a db.MulticaAgent) AgentResponse {
 		Model:              a.Model.String,
 		ThinkingLevel:      a.ThinkingLevel.String,
 		PluginID:           textToPtr(a.PluginID),
+		IsBuiltin:          a.IsBuiltin,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -299,8 +301,18 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if r.URL.Query().Get("include_archived") == "true" {
 		agents, err = h.Queries.ListAllAgents(r.Context(), parseUUID(workspaceID))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list agents")
+			return
+		}
+		builtins, builtinErr := h.Queries.ListBuiltinAgents(r.Context())
+		if builtinErr != nil {
+			slog.Warn("failed to list builtin agents", "error", builtinErr)
+		} else {
+			agents = append(agents, builtins...)
+		}
 	} else {
-		agents, err = h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
+		agents, err = h.Queries.ListAgentsWithBuiltins(r.Context(), parseUUID(workspaceID))
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
@@ -405,23 +417,34 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin,
 	// or unconditionally when the workspace opts into always_redact_env.
 	userID := requestUserID(r)
-	var alwaysRedact bool
-	ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID)
-	if err != nil {
-		slog.Warn("GetWorkspace failed for redact check", "workspace_id", uuidToString(agent.WorkspaceID), "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
-	if alwaysRedact {
-		redactEnv(&resp)
-		redactMcpConfig(&resp)
-		resp.CustomEnvRedactedReason = "policy"
-	} else if member, ok := ctxMember(r.Context()); ok {
-		if !canViewAgentEnv(agent, userID, member.Role) {
+	if agent.IsBuiltin {
+		// Built-in agents have no workspace context; only the user with
+		// can_manage_workflows can see the full config. Others see redacted.
+		currentUser, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+		if err != nil || !currentUser.CanManageWorkflows {
 			redactEnv(&resp)
 			redactMcpConfig(&resp)
 			resp.CustomEnvRedactedReason = "role"
+		}
+	} else {
+		var alwaysRedact bool
+		ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID)
+		if err != nil {
+			slog.Warn("GetWorkspace failed for redact check", "workspace_id", uuidToString(agent.WorkspaceID), "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+		alwaysRedact = workspaceAlwaysRedactEnv(ws.Settings)
+		if alwaysRedact {
+			redactEnv(&resp)
+			redactMcpConfig(&resp)
+			resp.CustomEnvRedactedReason = "policy"
+		} else if member, ok := ctxMember(r.Context()); ok {
+			if !canViewAgentEnv(agent, userID, member.Role) {
+				redactEnv(&resp)
+				redactMcpConfig(&resp)
+				resp.CustomEnvRedactedReason = "role"
+			}
 		}
 	}
 
@@ -710,7 +733,18 @@ func redactMcpConfig(resp *AgentResponse) {
 // canManageAgent checks whether the current user can update or archive an agent.
 // Only the agent owner or workspace owner/admin can manage any agent,
 // regardless of whether it is public or private.
+// For built-in agents, the can_manage_workflows global permission is required.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.MulticaAgent) bool {
+	if agent.IsBuiltin {
+		userID, _ := requireUserID(w, r)
+		userUUID := parseUUID(userID)
+		currentUser, err := h.Queries.GetUser(r.Context(), userUUID)
+		if err != nil || !currentUser.CanManageWorkflows {
+			writeError(w, http.StatusForbidden, "only workflow admins can manage built-in agents")
+			return false
+		}
+		return true
+	}
 	wsID := uuidToString(agent.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
@@ -1066,10 +1100,14 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Run history is part of the private-agent gate ("查看历史会话"). Same
-	// 403 semantics as GetAgent.
-	workspaceID := uuidToString(agent.WorkspaceID)
+	// 403 semantics as GetAgent. Built-in agents are global — use the current
+	// workspace for the access check instead of the agent's (NULL) workspace_id.
+	workspaceID := h.resolveWorkspaceID(r)
+	if !agent.IsBuiltin {
+		workspaceID = uuidToString(agent.WorkspaceID)
+	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+	if !agent.IsBuiltin && !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
@@ -1224,3 +1262,99 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 
 	writeJSON(w, http.StatusOK, resp)
 }
+// PromoteAgentToBuiltin promotes a workspace agent to a global built-in agent.
+// Only users with the can_manage_workflows permission can promote agents.
+// The agent must not already be built-in and must not be archived.
+func (h *Handler) PromoteAgentToBuiltin(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	userID, _ := requireUserID(w, r)
+	userUUID := parseUUID(userID)
+
+	// Only workflow admins can manage built-in agents.
+	currentUser, err := h.Queries.GetUser(r.Context(), userUUID)
+	if err != nil || !currentUser.CanManageWorkflows {
+		writeError(w, http.StatusForbidden, "only workflow admins can manage built-in agents")
+		return
+	}
+
+	if agent.IsBuiltin {
+		writeError(w, http.StatusConflict, "agent is already built-in")
+		return
+	}
+	if agent.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "cannot promote an archived agent")
+		return
+	}
+
+	promoted, err := h.Queries.SetAgentBuiltin(r.Context(), agent.ID)
+	if err != nil {
+		slog.Warn("promote agent to builtin failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to promote agent to builtin")
+		return
+	}
+
+	resp := agentToResponse(promoted)
+	slog.Info("agent promoted to builtin", append(logger.RequestAttrs(r), "agent_id", id, "name", promoted.Name)...)
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(promoted.WorkspaceID))
+	h.publish(protocol.EventAgentStatus, "", actorType, actorID, map[string]any{"agent": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DemoteAgentFromBuiltin demotes a built-in agent back to a workspace agent.
+// Only users with the can_manage_workflows permission can demote agents.
+// The agent must be built-in. The workspace_id from the request context is used
+// to assign the agent back to a workspace.
+func (h *Handler) DemoteAgentFromBuiltin(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	userID, _ := requireUserID(w, r)
+	userUUID := parseUUID(userID)
+
+	// Only workflow admins can manage built-in agents.
+	currentUser, err := h.Queries.GetUser(r.Context(), userUUID)
+	if err != nil || !currentUser.CanManageWorkflows {
+		writeError(w, http.StatusForbidden, "only workflow admins can manage built-in agents")
+		return
+	}
+
+	if !agent.IsBuiltin {
+		writeError(w, http.StatusConflict, "agent is not built-in")
+		return
+	}
+
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	demoted, err := h.Queries.UnsetAgentBuiltin(r.Context(), db.UnsetAgentBuiltinParams{
+		ID:          agent.ID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		slog.Warn("demote agent from builtin failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to demote agent from builtin")
+		return
+	}
+
+	resp := agentToResponse(demoted)
+	slog.Info("agent demoted from builtin", append(logger.RequestAttrs(r), "agent_id", id, "name", demoted.Name, "workspace_id", workspaceID)...)
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(demoted.WorkspaceID))
+	h.publish(protocol.EventAgentStatus, uuidToString(demoted.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+

@@ -2009,7 +2009,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					slog.Warn("failed to load workflow for new issue", "issue_id", uuidToString(issue.ID), "error", err)
 				} else {
-					run, nodeRuns, err := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, creatorType, actualCreatorID)
+					run, nodeRuns, err := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, creatorType, actualCreatorID, pgtype.UUID{})
 					if err != nil {
 						slog.Warn("failed to start workflow run for new issue", "issue_id", uuidToString(issue.ID), "error", err)
 					} else {
@@ -2066,8 +2066,21 @@ type UpdateIssueRequest struct {
 	// editor's preview Eye keeps working past a refresh. Existing bindings
 	// are idempotent — re-sending the same id is a no-op.
 	AttachmentIDs []string `json:"attachment_ids"`
+	// RuntimeID is set by the frontend runtime-select dialog when assigning
+	// a built-in agent (which has no bound runtime).
+	RuntimeID *string `json:"runtime_id"`
 }
 
+
+// parseOptionalRuntimeID converts the optional runtime_id string from the
+// request body to a pgtype.UUID. Returns an invalid (unset) UUID when nil
+// or empty.
+func parseOptionalRuntimeID(s *string) pgtype.UUID {
+	if s == nil || *s == "" {
+		return pgtype.UUID{}
+	}
+	return parseUUID(*s)
+}
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
@@ -2290,7 +2303,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			runtimeIDOverride := parseOptionalRuntimeID(req.RuntimeID)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, pgtype.UUID{}, runtimeIDOverride)
 		}
 
 		// Squad assign: trigger the squad leader, respecting the backlog
@@ -2304,7 +2318,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if wfErr != nil {
 				slog.Warn("failed to load workflow for issue assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr); resp.WorkflowID = uuidToPtr(issue.AssigneeID)
 			} else {
-				run, nodeRuns, wfErr := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, actorType, actorID)
+				run, nodeRuns, wfErr := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, actorType, actorID, parseOptionalRuntimeID(req.RuntimeID))
 				if wfErr != nil {
 					resp.WorkflowID = uuidToPtr(issue.AssigneeID); slog.Warn("failed to start workflow run on assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
 				} else {
@@ -2354,7 +2368,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusChanged && !assigneeChanged && actorType == "member" &&
 		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			runtimeIDOverride := parseOptionalRuntimeID(req.RuntimeID)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, pgtype.UUID{}, runtimeIDOverride)
 		}
 		if h.isSquadLeaderReady(r.Context(), issue) {
 			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
@@ -2418,7 +2433,11 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			WorkspaceID: wsUUID,
 		})
 		if err != nil {
-			return http.StatusBadRequest, "assignee_id does not refer to an agent of this workspace"
+			// Fallback: built-in agents are global (workspace_id = NULL).
+			agent, err = h.Queries.GetBuiltinAgent(ctx, assigneeID)
+			if err != nil {
+				return http.StatusBadRequest, "assignee_id does not refer to an agent of this workspace"
+			}
 		}
 		if agent.ArchivedAt.Valid {
 			return http.StatusBadRequest, "cannot assign to archived agent"
@@ -2511,7 +2530,12 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.MulticaIssu
 	}
 
 	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || agent.ArchivedAt.Valid {
+		return false
+	}
+	// Built-in agents (is_builtin=true) may have NULL runtime_id — they
+	// auto-select a runtime at enqueue time.
+	if !agent.RuntimeID.Valid && !agent.IsBuiltin {
 		return false
 	}
 
@@ -2790,7 +2814,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if assigneeChanged {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+				runtimeIDOverride := parseOptionalRuntimeID(req.Updates.RuntimeID)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, pgtype.UUID{}, runtimeIDOverride)
 			}
 			if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
 				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
@@ -2801,7 +2826,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if statusChanged && !assigneeChanged && actorType == "member" &&
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+				runtimeIDOverride := parseOptionalRuntimeID(req.Updates.RuntimeID)
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, pgtype.UUID{}, runtimeIDOverride)
 			}
 			if h.isSquadLeaderReady(r.Context(), issue) {
 				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)

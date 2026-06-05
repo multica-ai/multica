@@ -650,11 +650,18 @@ func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agent
 		ID:          agentUUID,
 		WorkspaceID: wsUUID,
 	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "agent not found")
-		return db.MulticaAgent{}, false
+	if err == nil {
+		return agent, true
 	}
-	return agent, true
+
+	// Fallback: try built-in agent (global, not workspace-scoped).
+	agent, err = h.Queries.GetBuiltinAgent(r.Context(), agentUUID)
+	if err == nil {
+		return agent, true
+	}
+
+	writeError(w, http.StatusNotFound, "agent not found")
+	return db.MulticaAgent{}, false
 }
 
 func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, itemID string) (db.MulticaInboxItem, bool) {

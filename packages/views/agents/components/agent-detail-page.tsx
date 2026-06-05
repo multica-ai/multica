@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   AlertCircle,
+  ArrowDown,
   ArrowLeft,
+  Eye,
   Lock,
   MoreHorizontal,
   Trash2,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,6 +29,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
+import { useWorkflowAdmins } from "@multica/core/workflows/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import {
@@ -48,6 +52,9 @@ import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentOverviewPane } from "./agent-overview-pane";
+import { BuiltinReadOnlyBanner } from "./builtin-read-only-banner";
+import { PromoteConfirmDialog } from "./promote-dialog";
+import { DemoteConfirmDialog } from "./demote-dialog";
 import { useT } from "../../i18n";
 
 interface AgentDetailPageProps {
@@ -98,7 +105,20 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // and restore identically to edit, so a single `canEdit` covers them all.
   const { canEdit } = useAgentPermissions(agent, wsId);
 
+  const { data: workflowAdmins = [] } = useWorkflowAdmins();
+
+  const canManageWorkflows = useMemo(() => {
+    if (!currentUser) return false;
+    return workflowAdmins.some(
+      (a) => a.id === currentUser.id && a.can_manage_workflows,
+    );
+  }, [workflowAdmins, currentUser]);
+
+  const isBuiltinReadOnly = !!(agent?.is_builtin) && !canManageWorkflows;
+
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmPromote, setConfirmPromote] = useState(false);
+  const [confirmDemote, setConfirmDemote] = useState(false);
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
     // Optimistic update: patch the matching agent in the cached list
@@ -161,6 +181,30 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       toast.success(t(($) => $.detail.agent_restored_toast));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.restore_failed_toast));
+    }
+  };
+
+  const handlePromote = async () => {
+    if (!agent) return;
+    setConfirmPromote(false);
+    try {
+      await api.promoteAgentToBuiltin(agent.id);
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success("已提升为内置 Agent");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "提升失败");
+    }
+  };
+
+  const handleDemote = async () => {
+    if (!agent) return;
+    setConfirmDemote(false);
+    try {
+      await api.demoteAgentFromBuiltin(agent.id);
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success("已降级为普通 Agent");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "降级失败");
     }
   };
 
@@ -245,11 +289,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         agent={agent}
         presence={presence}
         backHref={paths.agents()}
-        canArchive={canEdit.allowed}
+        canEdit={canEdit.allowed}
+        canManageWorkflows={canManageWorkflows}
+        isBuiltinReadOnly={isBuiltinReadOnly}
         onArchive={() => setConfirmArchive(true)}
+        onPromote={() => setConfirmPromote(true)}
+        onDemote={() => setConfirmDemote(true)}
       />
 
-      {!canEdit.allowed && (
+      {/* Built-in read-only banner — amber, shown for non-admins viewing built-in agents */}
+      {agent.is_builtin && !canManageWorkflows && (
+        <div className="px-6 pt-3">
+          <BuiltinReadOnlyBanner />
+        </div>
+      )}
+
+      {/* Permission gate — only when canEdit fails and NOT a built-in read-only case */}
+      {!canEdit.allowed && !isBuiltinReadOnly && (
         <div className="px-6 pt-3">
           <CapabilityBanner
             reason={canEdit.reason}
@@ -287,7 +343,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           runtimes={runtimes}
           members={members}
           currentUserId={currentUser?.id ?? null}
-          canEdit={canEdit.allowed}
+          canEdit={canEdit.allowed && !isBuiltinReadOnly}
+          isBuiltinReadOnly={isBuiltinReadOnly}
           onUpdate={handleUpdate}
         />
 
@@ -340,6 +397,22 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           </DialogContent>
         </Dialog>
       )}
+
+      {confirmPromote && (
+        <PromoteConfirmDialog
+          agentName={agent.name}
+          onConfirm={handlePromote}
+          onClose={() => setConfirmPromote(false)}
+        />
+      )}
+
+      {confirmDemote && (
+        <DemoteConfirmDialog
+          agentName={agent.name}
+          onConfirm={handleDemote}
+          onClose={() => setConfirmDemote(false)}
+        />
+      )}
     </div>
   );
 }
@@ -348,24 +421,30 @@ function DetailHeader({
   agent,
   presence,
   backHref,
-  canArchive,
+  canEdit,
+  canManageWorkflows,
+  isBuiltinReadOnly,
   onArchive,
+  onPromote,
+  onDemote,
 }: {
   agent: Agent;
   presence: AgentPresenceDetail | null;
   backHref: string;
-  canArchive: boolean;
+  canEdit: boolean;
+  canManageWorkflows: boolean;
+  isBuiltinReadOnly: boolean;
   onArchive: () => void;
+  onPromote: () => void;
+  onDemote: () => void;
 }) {
   const { t } = useT("agents");
   const isArchived = !!agent.archived_at;
   const av = presence
     ? { ...availabilityConfig[presence.availability], label: t(($) => $.availability[presence.availability]) }
     : null;
-  // Last-task state is intentionally not surfaced in the header — the
-  // Recent work section on this page already shows the same information
-  // (and richer: titles, timestamps, error messages). Showing "Completed"
-  // up here was redundant chrome.
+
+  const showKebab = !isArchived && (canEdit || isBuiltinReadOnly);
 
   return (
     <PageHeader className="justify-between gap-3 px-5">
@@ -379,6 +458,12 @@ function DetailHeader({
         </AppLink>
         <span className="text-muted-foreground/40">/</span>
         <h1 className="truncate text-sm font-medium">{agent.name}</h1>
+        {agent.is_builtin && (
+          <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/20 bg-amber-500/5 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-400">
+            <Zap className="h-3 w-3" />
+            内置
+          </span>
+        )}
         {!isArchived && av && presence && (
           <span
             className={`inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${av.textClass}`}
@@ -389,7 +474,7 @@ function DetailHeader({
         )}
       </div>
 
-      {!isArchived && canArchive && (
+      {showKebab && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button variant="ghost" size="icon-sm" />}
@@ -397,13 +482,34 @@ function DetailHeader({
             <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-auto">
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={onArchive}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t(($) => $.detail.more_archive)}
-            </DropdownMenuItem>
+            {isBuiltinReadOnly ? (
+              <DropdownMenuItem disabled>
+                <Eye className="h-3.5 w-3.5" />
+                查看详情
+              </DropdownMenuItem>
+            ) : (
+              <>
+                {canManageWorkflows && !agent.is_builtin && (
+                  <DropdownMenuItem onClick={onPromote}>
+                    <Zap className="h-3.5 w-3.5" />
+                    提升为内置 Agent
+                  </DropdownMenuItem>
+                )}
+                {canManageWorkflows && agent.is_builtin && (
+                  <DropdownMenuItem onClick={onDemote}>
+                    <ArrowDown className="h-3.5 w-3.5" />
+                    降级为普通 Agent
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={onArchive}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {t(($) => $.detail.more_archive)}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}

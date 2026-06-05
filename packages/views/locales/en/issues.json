@@ -386,7 +386,8 @@
       "members_group": "Members",
       "agents_group": "Agents",
       "squads_group": "Squads",
-      "workflows_group": "Workflows"
+      "workflows_group": "Workflows",
+      "builtin_label": "Built-in"
     },
     "start_date": {
       "trigger_label": "Start date",

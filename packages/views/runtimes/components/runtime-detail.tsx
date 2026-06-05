@@ -8,6 +8,7 @@ import {
   Cpu,
   Globe,
   Lock,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -123,7 +124,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const canDelete = isAdmin || isRuntimeOwner;
 
   const servingAgents = agents.filter(
-    (a) => a.runtime_id === runtime.id && !a.archived_at,
+    (a) => (a.runtime_id === runtime.id || a.is_builtin) && !a.archived_at,
   );
 
   const handleDelete = () => {
@@ -450,8 +451,14 @@ function ServingAgentsCard({
               >
                 <ActorAvatar actorType="agent" actorId={agent.id} size={20} enableHoverCard showStatusDot />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs font-medium">
+                  <div className="truncate text-xs font-medium flex items-center gap-1">
                     {agent.name}
+                    {agent.is_builtin && (
+                      <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-px text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                        <Zap className="h-2.5 w-2.5" />
+                        内置
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
                     <span className="inline-flex items-center gap-1.5">

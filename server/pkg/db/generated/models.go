@@ -45,6 +45,7 @@ type MulticaAgent struct {
 	Model              pgtype.Text        `json:"model"`
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
 	PluginID           pgtype.Text        `json:"plugin_id"`
+	IsBuiltin          bool               `json:"is_builtin"`
 }
 
 type MulticaAgentAuditLog struct {
@@ -725,6 +726,7 @@ type MulticaWorkflowRun struct {
 	StartedAt       pgtype.Timestamptz `json:"started_at"`
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	RuntimeID       pgtype.UUID        `json:"runtime_id"`
 }
 
 type MulticaWorkspace struct {
