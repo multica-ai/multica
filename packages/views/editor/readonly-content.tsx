@@ -171,6 +171,25 @@ function CodeBlockHeader({ language, code }: { language?: string; code: string }
   );
 }
 
+/**
+ * Extract plain text from a react-markdown AST node's children.
+ * Used by the `code` component to ensure code block / inline code content
+ * is always rendered as plain text, even if a preprocessing or parsing
+ * layer accidentally wrapped part of it in an interactive element.
+ */
+function extractTextFromAst(node: any): string {
+  if (!node?.children) return "";
+  return (node.children as any[])
+    .map((n: any) => {
+      if (n.type === "text") return n.value as string;
+      // Recurse into element children (e.g. <a> wrapping text)
+      if (n.children) return extractTextFromAst(n);
+      return "";
+    })
+    .join("")
+    .replace(/\n$/, "");
+}
+
 function buildComponents(): Partial<Components> {
   return {
     // Links — route mention:// to mention components, others show preview card
@@ -224,24 +243,28 @@ function buildComponents(): Partial<Components> {
         node?.position &&
         node.position.start.line !== node.position.end.line;
 
+      // Extract plain text from AST node to avoid rendering interactive
+      // elements (e.g. <a> links) inside code blocks/inline code.
+      const codeText = extractTextFromAst(node);
+
       if (isBlock && lang === "mermaid") {
-        return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+        return <MermaidDiagram chart={codeText} />;
       }
       if (isBlock && lang === "html") {
         // Like Mermaid, return the React element directly here and rely on
         // the `pre` renderer below to unwrap it — react-markdown otherwise
         // wraps `code` children in a `<pre>` whose monospace + overflow
         // styles would clamp the preview iframe.
-        return <HtmlBlockPreview html={String(children).replace(/\n$/, "")} />;
+        return <HtmlBlockPreview html={codeText} />;
       }
 
       if (!isBlock && !lang) {
-        // Inline code — CSS handles styling via .rich-text-editor code
-        return <code {...props}>{children}</code>;
+        // Inline code — always render as plain text, never interactive
+        return <code {...props}>{codeText || children}</code>;
       }
 
       // Block code — highlight with lowlight, output hljs classes
-      const code = String(children).replace(/\n$/, "");
+      const code = codeText || String(children).replace(/\n$/, "");
       try {
         const tree = lang
           ? lowlight.highlight(lang, code)
@@ -260,7 +283,7 @@ function buildComponents(): Partial<Components> {
       }
       return (
         <code className={cn("hljs", className)} {...props}>
-          {children}
+          {code}
         </code>
       );
     },
