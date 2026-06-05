@@ -4,11 +4,41 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// slugCacheEntry holds a cached slug→UUID mapping.
+type slugCacheEntry struct {
+	uuid string
+	at   time.Time
+}
+
+const slugCacheTTL = 5 * time.Minute
+
+var slugCache sync.Map
+
+// resolveSlugToUUID returns the workspace UUID for a slug, using an in-memory
+// cache to avoid a DB round-trip on every request. Slugs are immutable so this
+// is safe with a short TTL.
+func resolveSlugToUUID(ctx context.Context, queries *db.Queries, slug string) (string, error) {
+	if entry, ok := slugCache.Load(slug); ok {
+		if e := entry.(slugCacheEntry); time.Since(e.at) < slugCacheTTL {
+			return e.uuid, nil
+		}
+	}
+	ws, err := queries.GetWorkspaceBySlug(ctx, slug)
+	if err != nil {
+		return "", errWorkspaceNotFound
+	}
+	uuid := util.UUIDToString(ws.ID)
+	slugCache.Store(slug, slugCacheEntry{uuid: uuid, at: time.Now()})
+	return uuid, nil
+}
 
 // Context keys for workspace-scoped request data.
 type contextKey int
@@ -68,13 +98,13 @@ func ResolveWorkspaceIDFromRequest(r *http.Request, queries *db.Queries) string 
 		return id
 	}
 	if slug := r.Header.Get("X-Workspace-Slug"); slug != "" {
-		if ws, err := queries.GetWorkspaceBySlug(r.Context(), slug); err == nil {
-			return util.UUIDToString(ws.ID)
+		if uuid, err := resolveSlugToUUID(r.Context(), queries, slug); err == nil {
+			return uuid
 		}
 	}
 	if slug := r.URL.Query().Get("workspace_slug"); slug != "" {
-		if ws, err := queries.GetWorkspaceBySlug(r.Context(), slug); err == nil {
-			return util.UUIDToString(ws.ID)
+		if uuid, err := resolveSlugToUUID(r.Context(), queries, slug); err == nil {
+			return uuid
 		}
 	}
 	if id := r.Header.Get("X-Workspace-ID"); id != "" {
@@ -100,18 +130,10 @@ func resolveWorkspaceUUID(queries *db.Queries) workspaceResolver {
 	return func(r *http.Request) (string, error) {
 		// Slug path (preferred — frontend sends this after the URL refactor)
 		if slug := r.URL.Query().Get("workspace_slug"); slug != "" {
-			ws, err := queries.GetWorkspaceBySlug(r.Context(), slug)
-			if err != nil {
-				return "", errWorkspaceNotFound
-			}
-			return util.UUIDToString(ws.ID), nil
+			return resolveSlugToUUID(r.Context(), queries, slug)
 		}
 		if slug := r.Header.Get("X-Workspace-Slug"); slug != "" {
-			ws, err := queries.GetWorkspaceBySlug(r.Context(), slug)
-			if err != nil {
-				return "", errWorkspaceNotFound
-			}
-			return util.UUIDToString(ws.ID), nil
+			return resolveSlugToUUID(r.Context(), queries, slug)
 		}
 		// UUID fallback (CLI, daemon, legacy clients)
 		if id := r.URL.Query().Get("workspace_id"); id != "" {
