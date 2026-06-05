@@ -67,6 +67,7 @@ import {
   type ToolPolicyRow,
   type ToolSetting,
 } from "../core";
+import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
 
 /**
  * The five surfaces (FIR-2284 Bid 5). Each page renders the same catalog but
@@ -303,12 +304,21 @@ export function ToolPolicyTable({
                       <SideEffectTag effect={classifySideEffect(row)} />
                     </TableCell>
                     <TableCell>
-                      <DecisionControl
-                        row={row}
-                        editLayer={editLayer}
-                        disabled={busy}
-                        onChange={(s) => applySetting(row.tool_key, s)}
-                      />
+                      <div className="flex items-center gap-2">
+                        <DecisionControl
+                          row={row}
+                          editLayer={editLayer}
+                          disabled={busy}
+                          onChange={(s) => applySetting(row.tool_key, s)}
+                        />
+                        {view === "agent" && subjectId ? (
+                          <FirtalRegistryRowConfigure
+                            toolKey={row.tool_key}
+                            agentId={subjectId}
+                            variant="outline"
+                          />
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <OriginTag row={row} editLayer={editLayer} />
@@ -336,12 +346,21 @@ export function ToolPolicyTable({
                       {row.tool_key}
                     </div>
                   </div>
-                  <DecisionControl
-                    row={row}
-                    editLayer={editLayer}
-                    disabled={busy}
-                    onChange={(s) => applySetting(row.tool_key, s)}
-                  />
+                  <div className="flex shrink-0 items-center gap-2">
+                    {view === "agent" && subjectId ? (
+                      <FirtalRegistryRowConfigure
+                        toolKey={row.tool_key}
+                        agentId={subjectId}
+                        variant="outline"
+                      />
+                    ) : null}
+                    <DecisionControl
+                      row={row}
+                      editLayer={editLayer}
+                      disabled={busy}
+                      onChange={(s) => applySetting(row.tool_key, s)}
+                    />
+                  </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   <Badge variant="outline" className="font-normal">

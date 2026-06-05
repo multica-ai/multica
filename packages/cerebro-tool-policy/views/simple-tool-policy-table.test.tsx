@@ -19,6 +19,11 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
+const mockUseFeatureFlag = vi.hoisted(() => vi.fn());
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) => mockUseFeatureFlag(key),
+}));
+
 import {
   SimpleToolPolicyTable,
   classifyTool,
@@ -81,6 +86,8 @@ function renderTable() {
 beforeEach(() => {
   mockCerebroRequest.mockReset();
   mockCerebroRequest.mockResolvedValue(TABLE);
+  mockUseFeatureFlag.mockReset();
+  mockUseFeatureFlag.mockReturnValue(false);
 });
 
 describe("classifyTool", () => {
@@ -189,5 +196,31 @@ describe("SimpleToolPolicyTable", () => {
     expect(
       within(mysteryRow).getByRole("button", { name: "Tillad" }),
     ).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("renders the firtal_registry Konfigurer button only when its feature flag is on", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
+    });
+    mockUseFeatureFlag.mockImplementation(
+      (key) => key === "cerebro_firtal_registry_allowlist_ui",
+    );
+    renderTable();
+    const fdrRow = await screen.findByTestId("tool-row-firtal_registry");
+    expect(
+      within(fdrRow).getByTestId("firtal-registry-configure"),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Konfigurer button when the flag is off", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
+    });
+    mockUseFeatureFlag.mockReturnValue(false);
+    renderTable();
+    const fdrRow = await screen.findByTestId("tool-row-firtal_registry");
+    expect(
+      within(fdrRow).queryByTestId("firtal-registry-configure"),
+    ).toBeNull();
   });
 });

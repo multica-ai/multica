@@ -12,7 +12,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   AlertCircle,
   Check,
@@ -32,12 +31,12 @@ import type {
   AgentToolOverride,
   RuntimeTool,
 } from "@multica/cerebro-types";
+import { FirtalRegistryRowConfigure } from "@multica/cerebro-tool-policy/views";
 import {
   clearAgentToolOverride,
   listAgentToolOverrides,
   setAgentToolOverride,
 } from "../../api";
-import { FirtalRegistryConfigDialog } from "./firtal-registry-config-dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -70,10 +69,6 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<RowFilter>("all");
-  const [registryDialogOpen, setRegistryDialogOpen] = useState(false);
-  const firtalRegistryAllowlistUI = useFeatureFlag(
-    "cerebro_firtal_registry_allowlist_ui",
-  );
 
   const runtimeId = agent.runtime_id;
 
@@ -195,10 +190,7 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
         rows={rows}
         filteredRows={filteredRows}
         canEdit={canEdit}
-        firtalRegistryAllowlistUI={firtalRegistryAllowlistUI}
-        onConfigureFirtalRegistry={
-          firtalRegistryAllowlistUI ? () => setRegistryDialogOpen(true) : undefined
-        }
+        agentId={agent.id}
         onSetOverride={(toolName, enabled) =>
           setOverrideMutation.mutate({ toolName, enabled })
         }
@@ -207,14 +199,6 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
         }
         mutating={setOverrideMutation.isPending || clearOverrideMutation.isPending}
       />
-
-      {firtalRegistryAllowlistUI && (
-        <FirtalRegistryConfigDialog
-          agentId={agent.id}
-          open={registryDialogOpen}
-          onOpenChange={setRegistryDialogOpen}
-        />
-      )}
 
       <Legend />
     </div>
@@ -293,8 +277,7 @@ interface AgentToolsBodyProps {
   rows: ToolRowData[];
   filteredRows: ToolRowData[];
   canEdit: boolean;
-  firtalRegistryAllowlistUI: boolean;
-  onConfigureFirtalRegistry?: () => void;
+  agentId: string;
   onSetOverride: (toolName: string, enabled: boolean) => void;
   onClearOverride: (toolName: string) => void;
   mutating: boolean;
@@ -305,8 +288,7 @@ function AgentToolsBody({
   rows,
   filteredRows,
   canEdit,
-  firtalRegistryAllowlistUI,
-  onConfigureFirtalRegistry,
+  agentId,
   onSetOverride,
   onClearOverride,
   mutating,
@@ -382,8 +364,7 @@ function AgentToolsBody({
               key={row.tool.name}
               row={row}
               canEdit={canEdit}
-              firtalRegistryAllowlistUI={firtalRegistryAllowlistUI}
-              onConfigureFirtalRegistry={onConfigureFirtalRegistry}
+              agentId={agentId}
               mutating={mutating}
               onSetOverride={onSetOverride}
               onClearOverride={onClearOverride}
@@ -398,16 +379,14 @@ function AgentToolsBody({
 function AgentToolRow({
   row,
   canEdit,
-  firtalRegistryAllowlistUI,
-  onConfigureFirtalRegistry,
+  agentId,
   mutating,
   onSetOverride,
   onClearOverride,
 }: {
   row: ToolRowData;
   canEdit: boolean;
-  firtalRegistryAllowlistUI: boolean;
-  onConfigureFirtalRegistry?: () => void;
+  agentId: string;
   mutating: boolean;
   onSetOverride: (toolName: string, enabled: boolean) => void;
   onClearOverride: (toolName: string) => void;
@@ -457,20 +436,13 @@ function AgentToolRow({
               highlight={isOverride}
             />
           )}
-          {canEdit &&
-            firtalRegistryAllowlistUI &&
-            tool.name === "firtal_registry" &&
-            onConfigureFirtalRegistry && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={onConfigureFirtalRegistry}
-              >
-                Konfigurer
-              </Button>
-            )}
+          {canEdit && (
+            <FirtalRegistryRowConfigure
+              toolKey={tool.name}
+              agentId={agentId}
+              variant="outline"
+            />
+          )}
         </div>
       </td>
     </tr>
