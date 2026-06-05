@@ -15,6 +15,10 @@ type AppConfig struct {
 	AllowSignup    bool   `json:"allow_signup"`
 	GoogleClientID string `json:"google_client_id,omitempty"`
 
+	// LocalModeEnabled tells the web frontend that it can call /auth/local-login
+	// to auto-login when no valid session exists (self-hosted local deployments).
+	LocalModeEnabled bool `json:"local_mode_enabled,omitempty"`
+
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
@@ -31,8 +35,9 @@ type AppConfig struct {
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
-		AllowSignup:    os.Getenv("ALLOW_SIGNUP") != "false",
-		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"),
+		AllowSignup:      os.Getenv("ALLOW_SIGNUP") != "false",
+		GoogleClientID:   os.Getenv("GOOGLE_CLIENT_ID"),
+		LocalModeEnabled: localModeEnabled(),
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()

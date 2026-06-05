@@ -5,17 +5,21 @@ interface ConfigState {
   cdnDomain: string;
   allowSignup: boolean;
   googleClientId: string;
+  localModeEnabled: boolean;
   setCdnDomain: (domain: string) => void;
   setAuthConfig: (config: { allowSignup: boolean; googleClientId?: string }) => void;
+  setLocalModeEnabled: (enabled: boolean) => void;
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
   cdnDomain: "",
   allowSignup: true,
   googleClientId: "",
+  localModeEnabled: false,
   setCdnDomain: (domain) => set({ cdnDomain: domain }),
   setAuthConfig: ({ allowSignup, googleClientId = "" }) =>
     set({ allowSignup, googleClientId }),
+  setLocalModeEnabled: (enabled) => set({ localModeEnabled: enabled }),
 }));
 
 export function useConfigStore(): ConfigState;

@@ -1159,6 +1159,7 @@ export class ApiClient {
     posthog_key?: string;
     posthog_host?: string;
     analytics_environment?: string;
+    local_mode_enabled?: boolean;
   }> {
     return this.fetch("/api/config");
   }

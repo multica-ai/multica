@@ -56,6 +56,9 @@ export function AuthInitializer({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
         });
+        if (cfg.local_mode_enabled) {
+          configStore.getState().setLocalModeEnabled(true);
+        }
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,
@@ -94,10 +97,22 @@ export function AuthInitializer({
           onAuthSuccess(user);
           qc.setQueryData(workspaceKeys.list(), wsList);
         })
-        .catch((err) => {
+        .catch(async (err) => {
           logger.error("cookie auth init failed", err);
-          // In local mode, fall back to local-login when cookie auth fails
-          if (localMode) {
+          // In local mode, fall back to local-login when cookie auth fails.
+          // Check both the explicit prop and the server config (self-hosted
+          // deployments expose local_mode_enabled via /api/config).
+          let isLocalMode = localMode || configStore.getState().localModeEnabled;
+          if (!isLocalMode) {
+            // Config fetch may still be in flight — fetch it directly to decide
+            try {
+              const cfg = await api.getConfig();
+              isLocalMode = !!cfg.local_mode_enabled;
+            } catch {
+              // ignore — no local mode fallback available
+            }
+          }
+          if (isLocalMode) {
             api.localLogin()
               .then(({ token: newToken, user }) => {
                 storage.setItem("multica_token", newToken);
