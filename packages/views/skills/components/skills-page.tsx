@@ -30,6 +30,7 @@ import {
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { getGravatarUrl } from "@multica/core/gravatar";
+import { useGravatarSettings } from "@multica/core/gravatar/use-gravatar-settings";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Tooltip,
@@ -228,13 +229,17 @@ function SourceCell({
 }
 
 function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
+  const { enabled: gravatarEnabled } = useGravatarSettings();
   if (!creator) return null;
   return (
     <>
       <ActorAvatar
         name={creator.name}
         initials={creator.name.slice(0, 2).toUpperCase()}
-        avatarUrl={resolvePublicFileUrl(creator.avatar_url) ?? getGravatarUrl(creator.email)}
+        avatarUrl={
+          resolvePublicFileUrl(creator.avatar_url) ??
+          (gravatarEnabled ? getGravatarUrl(creator.email) : null)
+        }
         size="sm"
       />
       <span className="min-w-0 truncate">{creator.name}</span>

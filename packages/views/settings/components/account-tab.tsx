@@ -8,6 +8,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { getGravatarUrl } from "@multica/core/gravatar";
+import { useGravatarSettings } from "@multica/core/gravatar/use-gravatar-settings";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -37,6 +38,7 @@ export function AccountTab() {
   const { t } = useT("settings");
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const { enabled: gravatarEnabled } = useGravatarSettings();
 
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [profileDescription, setProfileDescription] = useState(
@@ -112,7 +114,7 @@ export function AccountTab() {
               <AvatarUploadControl
                 variant="user"
                 value={user?.avatar_url ?? null}
-                fallbackUrl={user?.email ? getGravatarUrl(user.email, 64) : null}
+                fallbackUrl={gravatarEnabled && user?.email ? getGravatarUrl(user.email, 64) : null}
                 name={user?.name ?? ""}
                 size={64}
                 onUploaded={async (url) => {

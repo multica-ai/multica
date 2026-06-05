@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, MemberRole } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { agentRunCounts30dOptions } from "@multica/core/agents";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -10,6 +11,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { getGravatarUrl } from "@multica/core/gravatar";
+import { deriveGravatarSettings } from "@multica/core/gravatar/settings";
 import { ActorAvatar } from "../common/actor-avatar";
 import { AppLink } from "../navigation";
 import { useT } from "../i18n";
@@ -29,6 +31,8 @@ interface MemberProfileCardProps {
 export function MemberProfileCard({ userId }: MemberProfileCardProps) {
   const { t } = useT("members");
   const wsId = useWorkspaceId();
+  const workspace = useCurrentWorkspace();
+  const gravatarEnabled = deriveGravatarSettings(workspace).enabled;
   const { data: members = [], isLoading: membersLoading } = useQuery(
     memberListOptions(wsId),
   );
@@ -82,7 +86,7 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
         <ActorAvatarBase
           name={member.name}
           initials={initials}
-          avatarUrl={resolvePublicFileUrl(member.avatar_url) ?? getGravatarUrl(member.email)}
+          avatarUrl={resolvePublicFileUrl(member.avatar_url) ?? (gravatarEnabled ? getGravatarUrl(member.email) : null)}
           size="xl"
           className="rounded-full"
         />
