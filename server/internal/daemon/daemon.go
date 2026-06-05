@@ -2910,6 +2910,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.OpenclawConfigPath != "" {
 		agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
 	}
+	// WujieClaw isolation: point at ~/.wujieai so it never reads/writes
+	// the global OpenClaw directories (~/.openclaw). Only injected when
+	// the user hasn't already set them (the blocklist prevents custom_env
+	// from overriding these, so this is the authoritative source).
+	if provider == "wujieclaw" {
+		if home, err := os.UserHomeDir(); err == nil {
+			wujieaiHome := filepath.Join(home, ".wujieai")
+			if _, set := agentEnv["OPENCLAW_HOME"]; !set {
+				agentEnv["OPENCLAW_HOME"] = wujieaiHome
+			}
+			if _, set := agentEnv["OPENCLAW_STATE_DIR"]; !set {
+				agentEnv["OPENCLAW_STATE_DIR"] = wujieaiHome
+			}
+		}
+	}
 	// Grant the wrapper config permission to $include the user's active
 	// config across directories. OpenClaw's $include defaults to confining
 	// resolution to the wrapper's own directory; without this, the
@@ -3854,7 +3869,9 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME",
+		"OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS",
+		"OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_GATEWAY_PORT":
 		return true
 	}
 	return false

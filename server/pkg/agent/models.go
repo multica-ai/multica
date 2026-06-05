@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -1035,6 +1036,9 @@ func discoverOpenclawAgents(ctx context.Context, providerType, executablePath st
 	} {
 		cmd := exec.CommandContext(runCtx, executablePath, jsonArgs...)
 		hideAgentWindow(cmd)
+		if providerType == "wujieclaw" {
+			cmd.Env = wujieclawIsolationEnv()
+		}
 		out, err := cmd.Output()
 		if err != nil {
 			continue
@@ -1049,6 +1053,9 @@ func discoverOpenclawAgents(ctx context.Context, providerType, executablePath st
 	// the wrong tokens produces nonsense entries like "Identity:".
 	cmd := exec.CommandContext(runCtx, executablePath, "agents", "list")
 	hideAgentWindow(cmd)
+	if providerType == "wujieclaw" {
+		cmd.Env = wujieclawIsolationEnv()
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return []Model{}, nil
@@ -1197,4 +1204,40 @@ func isOpenclawIdentifier(s string) bool {
 		}
 	}
 	return true
+}
+
+// wujieclawIsolationEnv returns an env slice that isolates the wujieclaw
+// CLI from the global OpenClaw directories. It inherits the current
+// process env and overrides OPENCLAW_HOME / OPENCLAW_STATE_DIR to
+// ~/.wujieai so model discovery reads wujieclaw's own config, not
+// openclaw's. The caller passes this as cmd.Env on the spawned
+// subprocess.
+func wujieclawIsolationEnv() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return os.Environ()
+	}
+	wujieaiHome := filepath.Join(home, ".wujieai")
+	env := os.Environ()
+	// Append (not replace) — the subprocess inherits everything and
+	// we only override the three isolation keys. Because os.Environ
+	// returns KEY=VALUE strings, duplicates are fine: the child's C
+	// runtime picks the first occurrence, so appending here means
+	// our override wins only if the key was NOT already present in
+	// the parent env. We want the opposite — always override — so
+	// we need to strip existing entries first.
+	filtered := env[:0]
+	for _, e := range env {
+		k := e[:strings.IndexByte(e, '=')]
+		if k == "OPENCLAW_HOME" || k == "OPENCLAW_STATE_DIR" || k == "OPENCLAW_CONFIG_PATH" {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	filtered = append(filtered,
+		"OPENCLAW_HOME="+wujieaiHome,
+		"OPENCLAW_STATE_DIR="+wujieaiHome,
+		"OPENCLAW_CONFIG_PATH="+filepath.Join(wujieaiHome, "wujieai.json"),
+	)
+	return filtered
 }

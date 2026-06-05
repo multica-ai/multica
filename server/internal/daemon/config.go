@@ -217,7 +217,17 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL"); ok {
 		agents["openclaw"] = e
 	}
-	if e, ok := probe("MULTICA_WUJECLAW_PATH", "wujieclaw", "MULTICA_WUJECLAW_MODEL"); ok {
+	// WujieClaw: prefer the correctly-spelled env vars; fall back to the
+	// legacy typo (MULTICA_WUJECLAW_*) for backward compatibility.
+	if e, ok := probe("MULTICA_WUJIECLAW_PATH", "wujieclaw", "MULTICA_WUJIECLAW_MODEL"); ok {
+		// Also check the legacy typo model env var when the correctly-spelled
+		// one is empty, so existing setups that only set MULTICA_WUJECLAW_MODEL
+		// keep working.
+		if e.Model == "" {
+			e.Model = strings.TrimSpace(os.Getenv("MULTICA_WUJECLAW_MODEL"))
+		}
+		agents["wujieclaw"] = e
+	} else if e, ok := probe("MULTICA_WUJECLAW_PATH", "wujieclaw", "MULTICA_WUJECLAW_MODEL"); ok {
 		agents["wujieclaw"] = e
 	}
 	if e, ok := probe("MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {

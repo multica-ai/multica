@@ -487,10 +487,10 @@ func TestListRuntimeLocalSkills_WujieClaw(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	writeTestLocalSkill(t, filepath.Join(home, ".openclaw", "skills"), "legacy", map[string]string{
+	writeTestLocalSkill(t, filepath.Join(home, ".wujieai", "skills"), "legacy", map[string]string{
 		"SKILL.md": "# Legacy\n",
 	})
-	writeTestLocalSkill(t, filepath.Join(home, ".wujieclaw", "workspace", "skills"), "planner", map[string]string{
+	writeTestLocalSkill(t, filepath.Join(home, ".wujieai", "workspace", "skills"), "planner", map[string]string{
 		"SKILL.md": "# Planner\n",
 	})
 
@@ -509,8 +509,8 @@ func TestListRuntimeLocalSkills_WujieClaw(t *testing.T) {
 		sourcePaths[skill.SourcePath] = true
 	}
 	for _, want := range []string{
-		"~/.wujieclaw/workspace/skills/planner",
-		"~/.openclaw/skills/legacy",
+		"~/.wujieai/workspace/skills/planner",
+		"~/.wujieai/skills/legacy",
 	} {
 		if !sourcePaths[want] {
 			t.Fatalf("missing source_path %q in %+v", want, skills)
