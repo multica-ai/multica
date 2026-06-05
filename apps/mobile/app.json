@@ -16,7 +16,7 @@
     ],
     "android": {
       "package": "com.wujieai.multica",
-      "versionCode": 11,
+      "versionCode": 12,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon-android.png",
         "backgroundColor": "#000000"
@@ -24,7 +24,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.wujieai.multica",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "supportsTablet": false,
       "icon": "./assets/icon-ios.png",
       "infoPlist": {
