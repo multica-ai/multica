@@ -8,6 +8,7 @@ import { CardPressable } from "@/components/ui/card";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { unregisterCurrentMobilePushToken } from "@/lib/mobile-push";
 
 export default function SelectWorkspace() {
   const user = useAuthStore((s) => s.user);
@@ -79,7 +80,13 @@ export default function SelectWorkspace() {
         </View>
 
         <View className="pt-4 border-t border-border">
-          <Button variant="outline" onPress={() => logout()}>
+          <Button
+            variant="outline"
+            onPress={async () => {
+              await unregisterCurrentMobilePushToken();
+              await logout();
+            }}
+          >
             <Text>Sign out</Text>
           </Button>
         </View>

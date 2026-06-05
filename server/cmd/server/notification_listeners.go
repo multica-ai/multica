@@ -882,7 +882,75 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		)
 	})
 
-	// task:completed — no inbox notification (completion is visible from status change)
+	// task:completed — notify all subscribers except the agent.
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		agentID, _ := payload["agent_id"].(string)
+		issueID, _ := payload["issue_id"].(string)
+		if issueID == "" {
+			return
+		}
+
+		issue, err := queries.GetIssue(ctx, parseUUID(issueID))
+		if err != nil {
+			slog.Error("task:completed notification: failed to get issue", "issue_id", issueID, "error", err)
+			return
+		}
+
+		exclude := map[string]bool{}
+		if agentID != "" {
+			exclude[agentID] = true
+		}
+
+		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
+			events.Event{
+				Type:        e.Type,
+				WorkspaceID: e.WorkspaceID,
+				ActorType:   "agent",
+				ActorID:     agentID,
+			},
+			exclude, "task_completed", "info",
+			issue.Title, "",
+			emptyDetails)
+	})
+
+	// task:waiting_local_directory — notify all subscribers except the agent.
+	bus.Subscribe(protocol.EventTaskWaitingLocalDirectory, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		agentID, _ := payload["agent_id"].(string)
+		issueID, _ := payload["issue_id"].(string)
+		if issueID == "" {
+			return
+		}
+
+		issue, err := queries.GetIssue(ctx, parseUUID(issueID))
+		if err != nil {
+			slog.Error("task:waiting_local_directory notification: failed to get issue", "issue_id", issueID, "error", err)
+			return
+		}
+
+		exclude := map[string]bool{}
+		if agentID != "" {
+			exclude[agentID] = true
+		}
+
+		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
+			events.Event{
+				Type:        e.Type,
+				WorkspaceID: e.WorkspaceID,
+				ActorType:   "agent",
+				ActorID:     agentID,
+			},
+			exclude, "agent_blocked", "action_required",
+			issue.Title, "",
+			emptyDetails)
+	})
 
 	// task:failed — notify all subscribers except the agent
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {

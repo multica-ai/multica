@@ -457,6 +457,35 @@ type NotificationPreference struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type MobilePushDeviceToken struct {
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Provider         string             `json:"provider"`
+	Token            string             `json:"token"`
+	DeviceID         pgtype.Text        `json:"device_id"`
+	Platform         string             `json:"platform"`
+	AppVersion       pgtype.Text        `json:"app_version"`
+	Environment      string             `json:"environment"`
+	Enabled          bool               `json:"enabled"`
+	LastRegisteredAt pgtype.Timestamptz `json:"last_registered_at"`
+	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MobilePushDelivery struct {
+	ID                pgtype.UUID        `json:"id"`
+	InboxItemID       pgtype.UUID        `json:"inbox_item_id"`
+	DeviceTokenID     pgtype.UUID        `json:"device_token_id"`
+	Provider          string             `json:"provider"`
+	Status            string             `json:"status"`
+	ProviderMessageID pgtype.Text        `json:"provider_message_id"`
+	Error             pgtype.Text        `json:"error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PersonalAccessToken struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`

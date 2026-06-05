@@ -149,6 +149,15 @@ export interface SpeechSynthesizeResponse {
   content_type: string;
 }
 
+export interface MobilePushTokenRequest {
+  provider: "expo";
+  token: string;
+  device_id?: string | null;
+  platform: "ios";
+  app_version?: string | null;
+  environment: string;
+}
+
 /** Web mirrors this from `packages/core/constants/upload.ts`. Mobile keeps
  *  its own copy per the `mirror, don't import` rule in apps/mobile/CLAUDE.md. */
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
@@ -422,6 +431,21 @@ class ApiClient {
       { method: "PUT", body: JSON.stringify({ preferences }) },
       { endpoint: "updateNotificationPreferences" },
     );
+  }
+
+  // --- Mobile push ---
+  async registerMobilePushToken(data: MobilePushTokenRequest): Promise<void> {
+    await this.fetch<void>("/api/mobile/push-tokens", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async unregisterMobilePushToken(data: MobilePushTokenRequest): Promise<void> {
+    await this.fetch<void>("/api/mobile/push-tokens", {
+      method: "DELETE",
+      body: JSON.stringify(data),
+    });
   }
 
   // --- Workspaces ---

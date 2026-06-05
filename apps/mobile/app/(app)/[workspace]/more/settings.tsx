@@ -29,6 +29,7 @@ import {
   useColorScheme,
   type ThemePreference,
 } from "@/lib/use-color-scheme";
+import { unregisterCurrentMobilePushToken } from "@/lib/mobile-push";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +76,7 @@ export default function SettingsPage() {
           text: "Sign out",
           style: "destructive",
           onPress: async () => {
+            await unregisterCurrentMobilePushToken();
             await clearWorkspace();
             await logout();
           },

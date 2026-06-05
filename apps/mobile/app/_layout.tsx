@@ -16,6 +16,10 @@ import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { initCrashReporting, withCrashReporting } from "@/lib/crash-reporting";
 import { LightboxProvider, prewarmHighlighter } from "@/lib/markdown";
+import {
+  unregisterCurrentMobilePushToken,
+  useMobilePushLifecycle,
+} from "@/lib/mobile-push";
 import { NAV_THEME } from "@/lib/theme";
 import { useCrashContext } from "@/lib/use-crash-context";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -43,6 +47,7 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
         if (signingOutRef.current) return;
         signingOutRef.current = true;
         void (async () => {
+          await unregisterCurrentMobilePushToken();
           await useAuthStore.getState().logout();
           await useWorkspaceStore.getState().clear();
           qc.clear();
@@ -66,6 +71,11 @@ function CrashContextSync() {
   return null;
 }
 
+function MobilePushInitializer() {
+  useMobilePushLifecycle();
+  return null;
+}
+
 function RootLayout() {
   const { colorScheme, isDarkColorScheme } = useColorScheme();
   return (
@@ -76,6 +86,7 @@ function RootLayout() {
             <QueryClientProvider client={queryClient}>
               <ThemeProvider value={NAV_THEME[colorScheme]}>
                 <AuthInitializer>
+                  <MobilePushInitializer />
                   <LightboxProvider>
                     <CrashContextSync />
                     <StatusBar style={isDarkColorScheme ? "light" : "dark"} />

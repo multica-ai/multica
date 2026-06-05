@@ -80,6 +80,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       [
+        "expo-notifications",
+        {
+          sounds: [],
+        },
+      ],
+      [
         "expo-build-properties",
         {
           ios: {

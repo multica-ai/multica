@@ -173,6 +173,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
+	service.NewMobilePushServiceFromEnv(queries).Register(bus)
 	// Auth caches: PAT cache is shared between the regular Auth middleware,
 	// the DaemonAuth fallback (mul_) path, and the revoke handler
 	// (invalidate). DaemonTokenCache backs the DaemonAuth mdt_ path. Both
@@ -760,6 +761,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/notification-preferences", func(r chi.Router) {
 				r.Get("/", h.GetNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
+			})
+
+			// Mobile push tokens
+			r.Route("/api/mobile/push-tokens", func(r chi.Router) {
+				r.Post("/", h.RegisterMobilePushToken)
+				r.Delete("/", h.UnregisterMobilePushToken)
 			})
 		})
 	})

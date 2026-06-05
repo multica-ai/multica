@@ -146,3 +146,11 @@ npx sentry-expo-upload-sourcemaps dist
 ## Voice backend behavior
 
 The iOS client records short audio locally and sends it only to the Multica backend speech proxy. It does not receive ASR/TTS provider keys. If the backend has speech disabled or the provider is unavailable, speech calls return typed recoverable errors such as `provider_missing`, `rate_limited`, `quota_exceeded`, or `provider_timeout`; the app should let the user continue by typing the message.
+
+## Push notifications
+
+The iOS app uses `expo-notifications` to request APNs-backed Expo push permission after a signed-in user has an active workspace. Device tokens are registered against the current user + workspace through `/api/mobile/push-tokens`; sign-out unregisters the current token before clearing auth.
+
+Server delivery is driven by existing inbox events and notification preferences. `system_notifications=muted` disables lock-screen delivery while keeping in-app inbox/realtime behavior intact. Without `EXPO_ACCESS_TOKEN`, the backend records deliveries as dry-run `skipped` rows and does not call Expo. Set `EXPO_ACCESS_TOKEN` for real delivery; `MULTICA_EXPO_PUSH_URL` can override the Expo endpoint for tests, and `MULTICA_PUSH_DRY_RUN=true` forces dry-run.
+
+Manual iOS validation still requires a signed device build: allow/deny permission, receive a background notification for assignment/mention/comment/agent completion/failure/block, tap it, and confirm the app routes to the target workspace issue. If a workspace is unavailable, the app falls back to workspace selection.

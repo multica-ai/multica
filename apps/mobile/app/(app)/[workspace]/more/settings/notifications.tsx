@@ -16,9 +16,14 @@ import type {
 import { Text } from "@/components/ui/text";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { notificationPreferenceOptions } from "@/data/queries/notification-preferences";
 import { useUpdateNotificationPreferences } from "@/data/mutations/notification-preferences";
+import {
+  useMobilePushActions,
+  useMobilePushStatus,
+} from "@/lib/mobile-push";
 
 const INBOX_GROUPS: Array<{
   key: Exclude<NotificationGroupKey, "system_notifications">;
@@ -58,6 +63,8 @@ export default function NotificationsSettingsScreen() {
     notificationPreferenceOptions(wsId),
   );
   const mutation = useUpdateNotificationPreferences();
+  const pushStatus = useMobilePushStatus();
+  const pushActions = useMobilePushActions();
 
   const preferences: NotificationPreferences = data?.preferences ?? {};
 
@@ -73,6 +80,8 @@ export default function NotificationsSettingsScreen() {
   };
 
   const systemEnabled = preferences.system_notifications !== "muted";
+  const canUseSystemNotifications =
+    pushStatus.permission === "granted" && systemEnabled;
 
   if (isLoading) {
     return (
@@ -127,27 +136,84 @@ export default function NotificationsSettingsScreen() {
       </Section>
 
       <Section
-        title="System"
-        description="Multica-wide announcements and important account events."
+        title="System push"
+        description="Lock screen and background notifications for important inbox items."
       >
-        <View className="flex-row items-center px-4 py-3 gap-3">
-          <View className="flex-1">
-            <Text className="text-base font-medium text-foreground">
-              System notifications
-            </Text>
-            <Text className="text-xs text-muted-foreground mt-0.5">
-              Account changes, security alerts, product updates.
-            </Text>
+        <View className="px-4 py-3 gap-3">
+          <View className="flex-row items-center gap-3">
+            <View className="flex-1">
+              <Text className="text-base font-medium text-foreground">
+                Push notifications
+              </Text>
+              <Text className="text-xs text-muted-foreground mt-0.5">
+                Assignments, mentions, comments, and agent status updates.
+              </Text>
+            </View>
+            <Switch
+              checked={systemEnabled}
+              onCheckedChange={(checked) =>
+                onToggle("system_notifications", checked)
+              }
+            />
           </View>
-          <Switch
-            checked={systemEnabled}
-            onCheckedChange={(checked) =>
-              onToggle("system_notifications", checked)
-            }
+          <PermissionStatus
+            enabled={canUseSystemNotifications}
+            permission={pushStatus.permission}
+            error={pushStatus.error}
+            registering={pushStatus.registering}
+            onRequest={pushActions.request}
+            onOpenSettings={pushActions.openSettings}
           />
         </View>
       </Section>
     </ScrollView>
+  );
+}
+
+function PermissionStatus({
+  enabled,
+  permission,
+  error,
+  registering,
+  onRequest,
+  onOpenSettings,
+}: {
+  enabled: boolean;
+  permission: string;
+  error: string | null;
+  registering: boolean;
+  onRequest: () => void;
+  onOpenSettings: () => void;
+}) {
+  const message =
+    permission === "granted"
+      ? enabled
+        ? "iOS push is enabled for this workspace."
+        : "iOS permission is enabled. Turn on the switch to receive push."
+      : permission === "denied"
+        ? "iOS notification permission is off. Re-enable it in Settings."
+        : permission === "undetermined"
+          ? "Allow notifications to receive lock screen updates."
+          : permission === "unsupported"
+            ? "Push notifications are available on iOS builds."
+            : "Checking notification permission.";
+
+  return (
+    <View className="gap-2">
+      <Text className="text-xs text-muted-foreground">
+        {error ?? message}
+      </Text>
+      {permission === "undetermined" || permission === "error" ? (
+        <Button variant="outline" onPress={onRequest} disabled={registering}>
+          <Text>{registering ? "Enabling..." : "Enable notifications"}</Text>
+        </Button>
+      ) : null}
+      {permission === "denied" ? (
+        <Button variant="outline" onPress={onOpenSettings}>
+          <Text>Open iOS Settings</Text>
+        </Button>
+      ) : null}
+    </View>
   );
 }
 

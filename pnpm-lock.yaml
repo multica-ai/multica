@@ -417,6 +417,9 @@ importers:
       expo-linking:
         specifier: ~55.0.0
         version: 55.0.15(expo@55.0.24)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
+      expo-notifications:
+        specifier: ~55.0.23
+        version: 55.0.23(expo@55.0.24)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.9.3)
       expo-router:
         specifier: ~55.0.14
         version: 55.0.14(28857138dad78e037ca803b5df54c4f8)
@@ -5089,6 +5092,9 @@ packages:
     peerDependencies:
       '@babel/core': ^7.0.0
 
+  badgin@1.2.3:
+    resolution: {integrity: sha512-NQGA7LcfCpSzIbGRbkgjgdWkjy7HI+Th5VLxTJfW5EeaAf3fnS+xWQaQOCYiny+q6QSvxqoSO04vCx+4u++EJw==}
+
   bail@2.0.2:
     resolution: {integrity: sha512-0xO6mYd7JB2YesxDKplafRpsiOzPt9V02ddPCLbY1xYGPOX24NTyN50qnUxgCPcSoYMhKpAuBTjQoRZCAkUDRw==}
 
@@ -6353,6 +6359,11 @@ packages:
     resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
     engines: {node: '>=12.0.0'}
 
+  expo-application@55.0.15:
+    resolution: {integrity: sha512-eWf5OGrat1r/TYr0daL684C6pJYiN2k30NmcISsD9fbtZLfA6Sbo/JebfYzP3OjO/T/i8j/9Pf3ePqUYPLfZnw==}
+    peerDependencies:
+      expo: '*'
+
   expo-asset@55.0.17:
     resolution: {integrity: sha512-pK9HHJuFqjE8kDUcbMFsZj3Cz8WdXpvZHZmYl7ouFQp59P83BvHln6VnqPDGlO+/4929G0Lm8ZUzbONuNRhi9w==}
     peerDependencies:
@@ -6490,6 +6501,13 @@ packages:
     peerDependenciesMeta:
       react-native-worklets:
         optional: true
+
+  expo-notifications@55.0.23:
+    resolution: {integrity: sha512-oWEsBZSedRFu+ErcJaIev7QQhCE/gTRO6KURAkFpMflMgI3yjT4O/qixXh4tHmEk5zfoOpR2u79AzvVcchfwww==}
+    peerDependencies:
+      expo: '*'
+      react: '*'
+      react-native: '*'
 
   expo-router@55.0.14:
     resolution: {integrity: sha512-rOn/wosp2hAPM+O2o41hnarbP5Zqv9UkHWa31KoSoiOme1tpmZd2yc93XtRAtzP0P5E5xzqq7a2rbEAarpP5XA==}
@@ -15522,6 +15540,8 @@ snapshots:
       babel-plugin-jest-hoist: 29.6.3
       babel-preset-current-node-syntax: 1.2.0(@babel/core@7.29.0)
 
+  badgin@1.2.3: {}
+
   bail@2.0.2: {}
 
   balanced-match@1.0.2: {}
@@ -17137,6 +17157,10 @@ snapshots:
 
   expect-type@1.3.0: {}
 
+  expo-application@55.0.15(expo@55.0.24):
+    dependencies:
+      expo: 55.0.24(@babel/core@7.29.0)(@expo/dom-webview@55.0.6)(@expo/metro-runtime@55.0.11)(expo-router@55.0.14)(react-dom@19.2.0(react@19.2.0))(react-native-worklets@0.7.4(@babel/core@7.29.0)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.9.3)
+
   expo-asset@55.0.17(expo@55.0.24)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.9.3):
     dependencies:
       '@expo/image-utils': 0.8.14(typescript@5.9.3)
@@ -17284,6 +17308,20 @@ snapshots:
       react-native: 0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0)
     optionalDependencies:
       react-native-worklets: 0.7.4(@babel/core@7.29.0)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
+
+  expo-notifications@55.0.23(expo@55.0.24)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.9.3):
+    dependencies:
+      '@expo/image-utils': 0.8.14(typescript@5.9.3)
+      abort-controller: 3.0.0
+      badgin: 1.2.3
+      expo: 55.0.24(@babel/core@7.29.0)(@expo/dom-webview@55.0.6)(@expo/metro-runtime@55.0.11)(expo-router@55.0.14)(react-dom@19.2.0(react@19.2.0))(react-native-worklets@0.7.4(@babel/core@7.29.0)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.9.3)
+      expo-application: 55.0.15(expo@55.0.24)
+      expo-constants: 55.0.16(expo@55.0.24)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))
+      react: 19.2.0
+      react-native: 0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0)
+    transitivePeerDependencies:
+      - supports-color
+      - typescript
 
   expo-router@55.0.14(28857138dad78e037ca803b5df54c4f8):
     dependencies:
