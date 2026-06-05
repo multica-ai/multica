@@ -1142,9 +1142,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     : issueAttachments;
   const issueLevelAttachments = useMemo(
     () => (issueAttachments ?? []).filter((a) =>
-      a.issue_id === id && a.comment_id === null && a.chat_message_id === null
+      a.comment_id === null && a.chat_message_id === null
     ),
-    [id, issueAttachments],
+    [issueAttachments],
   );
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
