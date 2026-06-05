@@ -26,6 +26,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 // Mock the workspace id singleton — items() reads it imperatively.
 vi.mock("@multica/core/platform", () => ({
   getCurrentWsId: () => "ws-1",
+  registerForWorkspaceRehydration: () => () => {},
 }));
 
 // Mock the API so we control searchIssues responses + observe calls.

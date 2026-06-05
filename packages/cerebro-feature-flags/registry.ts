@@ -80,7 +80,9 @@ export type CerebroFlagKey =
   // FIR-33 (sub of FIR-18): auto-switch the "Create with agent" modal to manual
   // create when the picked agent's daemon CLI is below the quick-create gate,
   // instead of leaving the user on a warning banner with Create disabled.
-  | "cerebro_quick_create_version_autoswitch";
+  | "cerebro_quick_create_version_autoswitch"
+  // TECH-2947: personal focus list pinned to the top of the inbox.
+  | "cerebro_focus_list";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -206,6 +208,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // stranding the user on a warning banner. Off restores the warning-only
   // behaviour.
   cerebro_quick_create_version_autoswitch: true,
+  // TECH-2947: ON by default. Personal focus list at the top of the inbox —
+  // a lightweight to-do surface for ADHD-friendly task tracking. Off hides
+  // the panel and the backend endpoints reject requests.
+  cerebro_focus_list: true,
 };
 
 /**

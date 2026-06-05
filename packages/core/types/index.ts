@@ -208,3 +208,5 @@ export type {
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
 } from "./billing";
+// CEREBRO-PATCH(cerebro-focus-list-types): TECH-2947 — personal focus list type.
+export type { FocusListItem } from "./focus_list";

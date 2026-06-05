@@ -81,6 +81,8 @@ import (
 	cerebrostatusmodels "github.com/multica-ai/multica/server/internal/cerebro/statusmodels"
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler import
 	cerebrosprints "github.com/multica-ai/multica/server/internal/cerebro/sprints"
+	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list for inbox
+	cerebrofocuslist "github.com/multica-ai/multica/server/internal/cerebro/focus_list"
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler import
 	cerebroagentavatar "github.com/multica-ai/multica/server/internal/cerebro/agent_avatar"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -402,6 +404,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler instance
 	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
+	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list handler instance
+	cerebroFocusListHandler := cerebrofocuslist.New(cerebroQueries)
 
 	r := chi.NewRouter()
 
@@ -1393,6 +1397,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Delete("/api/cerebro/share-tokens/{tokenId}", cerebroShareTokenHandler.Revoke)
 			// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 cross-agent tasks list endpoint
 			r.Get("/api/cerebro/tasks", cerebroTasksHandler.List)
+			// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list for inbox.
+			r.Route("/api/cerebro/focus-list", func(r chi.Router) {
+				r.Get("/", cerebroFocusListHandler.List)
+				r.Post("/", cerebroFocusListHandler.Create)
+				r.Patch("/{id}", cerebroFocusListHandler.Update)
+				r.Delete("/{id}", cerebroFocusListHandler.Delete)
+				r.Post("/{id}/done", cerebroFocusListHandler.MarkDone)
+				r.Post("/{id}/snooze", cerebroFocusListHandler.Snooze)
+			})
 			r.Mount("/api/cerebro/agent-passes", cerebroagentpass.NewAdminRoutes(cerebroQueries)) // CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin API.
 			// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST surface (PR 2/3).
 			r.Route("/api/cerebro/workflows", func(r chi.Router) {

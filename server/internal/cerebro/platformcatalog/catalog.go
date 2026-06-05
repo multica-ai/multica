@@ -825,6 +825,13 @@ var excluded = map[string]string{
 	"POST /api/inbox/{id}/unread":                  "self_only — caller's own inbox",
 	"POST /api/inbox/{id}/unarchive":               "self_only — caller's own inbox",
 	"POST /api/inbox/{id}/run-private-agent":       "self_only — caller running their own private agent from their inbox",
+
+	// cerebro focus-list — personal task queue, caller's own items only.
+	"POST /api/cerebro/focus-list/":        "self_only — caller's own focus list",
+	"PATCH /api/cerebro/focus-list/{id}":   "self_only — caller's own focus list",
+	"DELETE /api/cerebro/focus-list/{id}":  "self_only — caller's own focus list",
+	"POST /api/cerebro/focus-list/{id}/done":   "self_only — caller's own focus list",
+	"POST /api/cerebro/focus-list/{id}/snooze": "self_only — caller's own focus list",
 	"POST /api/invitations/{id}/accept":            "self_only — caller accepting their own invitation",
 	"POST /api/invitations/{id}/decline":           "self_only — caller declining their own invitation",
 	"POST /api/persona/approvals/{id}/approve":     "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
