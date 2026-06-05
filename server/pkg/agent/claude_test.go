@@ -1021,6 +1021,132 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 	}
 }
 
+func TestGoSDKParseUsage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		raw          map[string]any
+		defaultModel string
+		want         map[string]TokenUsage
+	}{
+		{
+			name: "flat snake_case",
+			raw: map[string]any{
+				"input_tokens":                float64(100),
+				"output_tokens":               float64(50),
+				"cache_read_input_tokens":     float64(30),
+				"cache_creation_input_tokens": float64(20),
+			},
+			defaultModel: "claude-sonnet-4-6",
+			want: map[string]TokenUsage{
+				"claude-sonnet-4-6": {InputTokens: 100, OutputTokens: 50, CacheReadTokens: 30, CacheWriteTokens: 20},
+			},
+		},
+		{
+			name: "flat camelCase",
+			raw: map[string]any{
+				"inputTokens":              float64(101),
+				"outputTokens":             float64(51),
+				"cacheReadInputTokens":     float64(31),
+				"cacheCreationInputTokens": float64(21),
+			},
+			defaultModel: "claude-opus-4-7",
+			want: map[string]TokenUsage{
+				"claude-opus-4-7": {InputTokens: 101, OutputTokens: 51, CacheReadTokens: 31, CacheWriteTokens: 21},
+			},
+		},
+		{
+			name: "nested usage",
+			raw: map[string]any{
+				"usage": map[string]any{
+					"inputTokens":              float64(102),
+					"outputTokens":             float64(52),
+					"cacheReadInputTokens":     float64(32),
+					"cacheCreationInputTokens": float64(22),
+				},
+			},
+			defaultModel: "claude-haiku-4-5",
+			want: map[string]TokenUsage{
+				"claude-haiku-4-5": {InputTokens: 102, OutputTokens: 52, CacheReadTokens: 32, CacheWriteTokens: 22},
+			},
+		},
+		{
+			name: "modelUsage wins",
+			raw: map[string]any{
+				"input_tokens": float64(999),
+				"modelUsage": map[string]any{
+					"claude-sonnet-4-6": map[string]any{
+						"inputTokens":              float64(103),
+						"outputTokens":             float64(53),
+						"cacheReadInputTokens":     float64(33),
+						"cacheCreationInputTokens": float64(23),
+					},
+					"claude-opus-4-7": map[string]any{
+						"usage": map[string]any{
+							"input_tokens":                float64(104),
+							"output_tokens":               float64(54),
+							"cache_read_input_tokens":     float64(34),
+							"cache_creation_input_tokens": float64(24),
+						},
+					},
+				},
+			},
+			defaultModel: "fallback",
+			want: map[string]TokenUsage{
+				"claude-sonnet-4-6": {InputTokens: 103, OutputTokens: 53, CacheReadTokens: 33, CacheWriteTokens: 23},
+				"claude-opus-4-7":   {InputTokens: 104, OutputTokens: 54, CacheReadTokens: 34, CacheWriteTokens: 24},
+			},
+		},
+		{
+			name: "reasoning counts as output",
+			raw: map[string]any{
+				"inputTokens":           float64(105),
+				"outputTokens":          float64(55),
+				"reasoningOutputTokens": float64(5),
+				"output_token_details": map[string]any{
+					"reasoningTokens": float64(3),
+				},
+			},
+			defaultModel: "claude-reasoning",
+			want: map[string]TokenUsage{
+				"claude-reasoning": {InputTokens: 105, OutputTokens: 63},
+			},
+		},
+		{
+			name: "thinking counts as output",
+			raw: map[string]any{
+				"inputTokens":    float64(106),
+				"outputTokens":   float64(56),
+				"thinkingTokens": float64(7),
+				"output_token_details": map[string]any{
+					"thinkingTokens": float64(2),
+				},
+			},
+			defaultModel: "claude-thinking",
+			want: map[string]TokenUsage{
+				"claude-thinking": {InputTokens: 106, OutputTokens: 65},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := make(map[string]TokenUsage)
+			goSDKParseUsage(tc.raw, tc.defaultModel, got)
+			if len(got) != len(tc.want) {
+				t.Fatalf("usage length = %d, want %d: %+v", len(got), len(tc.want), got)
+			}
+			for model, want := range tc.want {
+				if got[model] != want {
+					t.Fatalf("%s usage = %+v, want %+v (all=%+v)", model, got[model], want, got)
+				}
+			}
+		})
+	}
+}
+
 func mustMarshal(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(v)
