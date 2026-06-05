@@ -10,7 +10,7 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { getGravatarUrl } from "@multica/core/gravatar";
+import { resolveAvatarUrl } from "@multica/core/gravatar";
 import { deriveGravatarSettings } from "@multica/core/gravatar/settings";
 import { ActorAvatar } from "../common/actor-avatar";
 import { AppLink } from "../navigation";
@@ -86,7 +86,12 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
         <ActorAvatarBase
           name={member.name}
           initials={initials}
-          avatarUrl={resolvePublicFileUrl(member.avatar_url) ?? (gravatarEnabled ? getGravatarUrl(member.email) : null)}
+          avatarUrl={resolveAvatarUrl({
+            avatarUrl: member.avatar_url,
+            email: member.email,
+            gravatarEnabled,
+            resolvePublicFileUrl,
+          })}
           size="xl"
           className="rounded-full"
         />

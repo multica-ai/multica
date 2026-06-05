@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
-import { getGravatarUrl } from "@multica/core/gravatar";
+import { resolveAvatarUrl } from "@multica/core/gravatar";
 import { useGravatarSettings } from "@multica/core/gravatar/use-gravatar-settings";
 import { useT } from "../../i18n";
 import {
@@ -39,6 +39,13 @@ export function AccountTab() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const { enabled: gravatarEnabled } = useGravatarSettings();
+  // Only feeds the control's empty state — the upload and the uploaded image
+  // both stay the control's business, and a custom avatar still wins.
+  const fallbackAvatarUrl = resolveAvatarUrl({
+    email: user?.email,
+    gravatarEnabled,
+    size: 64,
+  });
 
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [profileDescription, setProfileDescription] = useState(
@@ -114,7 +121,7 @@ export function AccountTab() {
               <AvatarUploadControl
                 variant="user"
                 value={user?.avatar_url ?? null}
-                fallbackUrl={gravatarEnabled && user?.email ? getGravatarUrl(user.email, 64) : null}
+                fallbackUrl={fallbackAvatarUrl}
                 name={user?.name ?? ""}
                 size={64}
                 onUploaded={async (url) => {

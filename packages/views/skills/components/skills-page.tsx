@@ -29,7 +29,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { getGravatarUrl } from "@multica/core/gravatar";
+import { resolveAvatarUrl } from "@multica/core/gravatar";
 import { useGravatarSettings } from "@multica/core/gravatar/use-gravatar-settings";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -236,10 +236,12 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
       <ActorAvatar
         name={creator.name}
         initials={creator.name.slice(0, 2).toUpperCase()}
-        avatarUrl={
-          resolvePublicFileUrl(creator.avatar_url) ??
-          (gravatarEnabled ? getGravatarUrl(creator.email) : null)
-        }
+        avatarUrl={resolveAvatarUrl({
+          avatarUrl: creator.avatar_url,
+          email: creator.email,
+          gravatarEnabled,
+          resolvePublicFileUrl,
+        })}
         size="sm"
       />
       <span className="min-w-0 truncate">{creator.name}</span>

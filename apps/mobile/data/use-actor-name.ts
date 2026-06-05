@@ -4,7 +4,7 @@ import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
 import { workspaceListOptions } from "@/data/queries/workspaces";
-import { getGravatarUrl } from "@multica/core/gravatar";
+import { resolveAvatarUrl } from "@multica/core/gravatar";
 import { deriveGravatarSettings } from "@multica/core/gravatar/settings";
 
 /**
@@ -50,7 +50,11 @@ export function useActorLookup() {
     if (!type || !id) return null;
     if (type === "member") {
       const m = members.find((m) => m.user_id === id);
-      return m?.avatar_url ?? (gravatarEnabled && m?.email ? getGravatarUrl(m.email) : null);
+      return resolveAvatarUrl({
+        avatarUrl: m?.avatar_url,
+        email: m?.email,
+        gravatarEnabled,
+      });
     }
     if (type === "agent") {
       return agents.find((a) => a.id === id)?.avatar_url ?? null;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getGravatarUrl } from "./index";
+import { getGravatarUrl, resolveAvatarUrl } from "./index";
 
 describe("getGravatarUrl", () => {
   it("returns null for empty or falsy emails", () => {
@@ -38,5 +38,70 @@ describe("getGravatarUrl", () => {
     const url = getGravatarUrl("test@example.com");
     // SHA-256("test@example.com") = 973dfe463ec85785f5f95af5ba3906eedb2d931c24e69824a89ea65dba4e813b
     expect(url).toContain("973dfe463ec85785f5f95af5ba3906eedb2d931c24e69824a89ea65dba4e813b");
+  });
+});
+
+describe("resolveAvatarUrl", () => {
+  it("returns null when no avatar URL and gravatar disabled", () => {
+    expect(resolveAvatarUrl({ email: "test@example.com", gravatarEnabled: false })).toBeNull();
+  });
+
+  it("returns null when no avatar URL, no email, gravatar enabled", () => {
+    expect(resolveAvatarUrl({ gravatarEnabled: true })).toBeNull();
+    expect(resolveAvatarUrl({ email: null, gravatarEnabled: true })).toBeNull();
+    expect(resolveAvatarUrl({ email: "", gravatarEnabled: true })).toBeNull();
+  });
+
+  it("returns Gravatar URL when no custom avatar and gravatar enabled", () => {
+    const url = resolveAvatarUrl({ email: "test@example.com", gravatarEnabled: true });
+    expect(url).toMatch(/^https:\/\/www\.gravatar\.com\/avatar\//);
+  });
+
+  it("returns custom avatar URL when provided", () => {
+    const url = resolveAvatarUrl({
+      avatarUrl: "https://example.com/avatar.png",
+      email: "test@example.com",
+      gravatarEnabled: true,
+    });
+    expect(url).toBe("https://example.com/avatar.png");
+  });
+
+  it("prefers custom avatar over Gravatar", () => {
+    const url = resolveAvatarUrl({
+      avatarUrl: "https://example.com/avatar.png",
+      email: "test@example.com",
+      gravatarEnabled: true,
+    });
+    expect(url).not.toContain("gravatar.com");
+  });
+
+  it("uses resolvePublicFileUrl when provided", () => {
+    const mockResolver = (url: string | null | undefined) =>
+      url ? `https://cdn.example.com/${url}` : null;
+    const url = resolveAvatarUrl({
+      avatarUrl: "avatar.png",
+      resolvePublicFileUrl: mockResolver,
+    });
+    expect(url).toBe("https://cdn.example.com/avatar.png");
+  });
+
+  it("falls back to Gravatar when resolvePublicFileUrl returns null", () => {
+    const mockResolver = () => null;
+    const url = resolveAvatarUrl({
+      avatarUrl: "avatar.png",
+      email: "test@example.com",
+      gravatarEnabled: true,
+      resolvePublicFileUrl: mockResolver,
+    });
+    expect(url).toMatch(/^https:\/\/www\.gravatar\.com\/avatar\//);
+  });
+
+  it("respects custom size parameter", () => {
+    const url = resolveAvatarUrl({
+      email: "test@example.com",
+      gravatarEnabled: true,
+      size: 120,
+    });
+    expect(url).toContain("s=120");
   });
 });
