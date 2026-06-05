@@ -33,6 +33,18 @@ type CommentResponse struct {
 	ResolvedByID   *string              `json:"resolved_by_id"`
 	Reactions      []ReactionResponse   `json:"reactions"`
 	Attachments    []AttachmentResponse `json:"attachments"`
+	// Orientation stats — populated only on the roots_only path and omitted in
+	// every other mode, so the default response shape stays byte-identical for
+	// existing callers. ReplyCount is the number of descendants in the thread;
+	// LastActivityAt is the MAX(created_at) across the whole subtree. Together
+	// they let an agent triage which thread to drill into without fetching any
+	// replies.
+	ReplyCount     *int    `json:"reply_count,omitempty"`
+	LastActivityAt *string `json:"last_activity_at,omitempty"`
+	// ContentTruncated is set only under summary=true: true when Content was
+	// clipped to the summary budget, false when it fit. nil (omitted) means the
+	// caller did not request a summary projection, so Content is verbatim.
+	ContentTruncated *bool `json:"content_truncated,omitempty"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
@@ -60,6 +72,30 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 	}
 }
 
+// summaryContentRunes bounds comment content under summary=true. 200 runes is
+// enough to tell what a comment is about (its opening) while cutting the bulk
+// of a long body out of an agent's context budget. Counted in runes, not bytes,
+// so multi-byte (e.g. CJK) content is clipped on a character boundary.
+const summaryContentRunes = 200
+
+// summarizeContent clips content to summaryContentRunes for the summary
+// projection. Returns the (possibly clipped) content and whether it was
+// truncated. An ellipsis marks a clip so the reader knows more text exists.
+//
+// It scans by rune and stops at the (budget+1)th rune rather than allocating a
+// full []rune for the whole body — so a pathologically long comment costs only
+// the budget, not its full length, under summary mode.
+func summarizeContent(content string) (string, bool) {
+	count := 0
+	for byteOffset := range content { // range over a string yields rune start offsets
+		if count == summaryContentRunes {
+			return content[:byteOffset] + "…", true
+		}
+		count++
+	}
+	return content, false
+}
+
 // commentHardCap bounds the comments returned per issue. Sized as a defensive
 // safety net rather than a UX paging window: prod p99 is ~30 comments and
 // the all-time max observed is ~1.1k, so 2000 leaves ~2x headroom while still
@@ -73,10 +109,16 @@ const commentHardCap = 2000
 // agent-style readers bounded views that scale to long issues without dragging
 // every prior reply into context:
 //
-//   - roots_only=true — return only top-level comments (parent_id IS NULL).
-//     May combine with since for incremental polling of newly created roots,
-//     but is exclusive with thread/recent/tail/cursor modes because those
-//     have their own grouping or pagination semantics.
+//   - roots_only=true — return only top-level comments (parent_id IS NULL),
+//     each annotated with reply_count + last_activity_at so the caller can
+//     triage which thread to drill into. May combine with since for incremental
+//     polling of newly created roots, but is exclusive with thread/recent/tail/
+//     cursor modes because those have their own grouping or pagination semantics.
+//
+//   - summary=true — orthogonal content projection. Clips each returned
+//     comment's content to a fixed budget and sets content_truncated, so an
+//     agent can scan a list cheaply before pulling a full body. Composes with
+//     every mode (default, since, thread, recent, roots_only).
 //
 //   - thread=<comment-uuid> — return the root of the thread containing this
 //     comment plus every descendant. The anchor may be a root or any reply;
@@ -179,6 +221,23 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		case "false":
 		default:
 			writeError(w, http.StatusBadRequest, "invalid roots_only parameter; expected boolean")
+			return
+		}
+	}
+
+	// summary=true is an orthogonal content projection: it clips each comment's
+	// content to a fixed budget so an agent can scan a list without pulling full
+	// bodies into context. It is intentionally NOT mutually exclusive with any
+	// mode — it composes with the default list, since, thread, recent, and
+	// roots_only alike.
+	summary := false
+	if summaryStr := q.Get("summary"); summaryStr != "" {
+		switch summaryStr {
+		case "true":
+			summary = true
+		case "false":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid summary parameter; expected boolean")
 			return
 		}
 	}
@@ -314,6 +373,22 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	for i, c := range result.Comments {
 		cid := uuidToString(c.ID)
 		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
+		// Attach roots_only orientation stats when present (nil map elsewhere).
+		if st, ok := result.RootStats[cid]; ok {
+			rc := st.ReplyCount
+			resp[i].ReplyCount = &rc
+			if st.LastActivityAt.Valid {
+				la := timestampToString(st.LastActivityAt)
+				resp[i].LastActivityAt = &la
+			}
+		}
+		// Apply the summary projection last so it clips whatever content the
+		// chosen read mode produced, uniformly across every mode.
+		if summary {
+			clipped, truncated := summarizeContent(resp[i].Content)
+			resp[i].Content = clipped
+			resp[i].ContentTruncated = &truncated
+		}
 	}
 
 	// Emit the next cursor as response headers when the page is likely not
@@ -360,6 +435,16 @@ type fetchCommentsResult struct {
 	Comments     []db.Comment
 	NextBefore   string
 	NextBeforeID string
+	// RootStats carries per-root orientation stats keyed by comment id string.
+	// Populated only on the roots_only path; nil for every other mode.
+	RootStats map[string]rootStat
+}
+
+// rootStat is the per-thread orientation metadata attached to each root comment
+// on the roots_only path. See CommentResponse.ReplyCount / LastActivityAt.
+type rootStat struct {
+	ReplyCount     int
+	LastActivityAt pgtype.Timestamptz
 }
 
 var (
@@ -614,23 +699,51 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		// Root-only read for issue-level orientation. This intentionally
 		// stays separate from thread/recent modes: callers get the global
 		// top-level discussion first, then fetch a specific thread only when
-		// they need reply context.
+		// they need reply context. Each root carries reply_count +
+		// last_activity_at so the reader can triage which thread to drill into.
+		stats := map[string]rootStat{}
 		if args.Since.Valid {
-			comments, err := h.Queries.ListRootCommentsSinceForIssue(ctx, db.ListRootCommentsSinceForIssueParams{
+			rows, err := h.Queries.ListRootCommentsSinceForIssue(ctx, db.ListRootCommentsSinceForIssueParams{
 				IssueID:     issue.ID,
 				WorkspaceID: issue.WorkspaceID,
-				CreatedAt:   args.Since,
-				Limit:       commentHardCap,
+				Since:       args.Since,
+				RowLimit:    commentHardCap,
 			})
-			return fetchCommentsResult{Comments: comments}, err
+			if err != nil {
+				return fetchCommentsResult{}, err
+			}
+			comments := make([]db.Comment, len(rows))
+			for i, r := range rows {
+				comments[i] = db.Comment{
+					ID: r.ID, IssueID: r.IssueID, AuthorType: r.AuthorType, AuthorID: r.AuthorID,
+					Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+					ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
+					ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
+				}
+				stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
+			}
+			return fetchCommentsResult{Comments: comments, RootStats: stats}, nil
 		}
 
-		comments, err := h.Queries.ListRootCommentsForIssue(ctx, db.ListRootCommentsForIssueParams{
+		rows, err := h.Queries.ListRootCommentsForIssue(ctx, db.ListRootCommentsForIssueParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
-			Limit:       commentHardCap,
+			RowLimit:    commentHardCap,
 		})
-		return fetchCommentsResult{Comments: comments}, err
+		if err != nil {
+			return fetchCommentsResult{}, err
+		}
+		comments := make([]db.Comment, len(rows))
+		for i, r := range rows {
+			comments[i] = db.Comment{
+				ID: r.ID, IssueID: r.IssueID, AuthorType: r.AuthorType, AuthorID: r.AuthorID,
+				Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+				ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
+				ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
+			}
+			stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
+		}
+		return fetchCommentsResult{Comments: comments, RootStats: stats}, nil
 	}
 
 	// Default + since paths preserved verbatim (no behavioural change for
@@ -758,20 +871,17 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
 	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
-	// Collapse parent_id to the thread root before storing so the comment tree
-	// never exceeds depth 1 (the 2-level model the product and UI assume — see
-	// GetThreadRoot). The agent-drift guard above already compared the *raw*
-	// parent_id to the task's trigger comment, so normalization happens only
-	// here, after that check. We also repoint parentComment at the root so the
-	// downstream thread-aware steps (AutoUnresolveThreadOnReply,
-	// isReplyToMemberThread) act on the thread root, not an interior reply.
+	// parent_id stores the exact comment being replied to. Thread-level behavior
+	// (for example auto-unresolving a resolved thread) resolves the root
+	// separately so storing a reply-to-reply does not destroy the direct-parent
+	// signal used by trigger decisions.
+	var rootComment *db.Comment
 	if parentID.Valid {
 		if root, err := h.Queries.GetThreadRoot(r.Context(), db.GetThreadRootParams{
 			CommentID:   parentID,
 			WorkspaceID: issue.WorkspaceID,
 		}); err == nil {
-			parentID = root.ID
-			parentComment = &root
+			rootComment = &root
 		}
 	}
 
@@ -811,7 +921,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// so the reply is visible regardless of the unresolve outcome. Shared with
 	// the agent task path (TaskService.createAgentComment) — both reply paths
 	// must keep the resolved root in sync.
-	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
+	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
 	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID)
 

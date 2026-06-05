@@ -24,8 +24,10 @@ import {
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useRecentContextStore } from "@multica/core/chat";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
@@ -33,8 +35,9 @@ import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
+import { filterRunningAssigneeGroups } from "./project-issue-filters";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { AppLink, useNavigation } from "../../navigation";
+import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
@@ -67,7 +70,7 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
-import { PageHeader } from "../../layout/page-header";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -139,24 +142,39 @@ function ProjectIssuesContent({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of snapshot) {
+      if (task.status === "running" && task.issue_id) ids.add(task.issue_id);
+    }
+    return ids;
+  }, [snapshot]);
 
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+  );
+
+  const filteredAssigneeGroups = useMemo(
+    () => filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
+    [assigneeGroups, agentRunningFilter, runningIssueIds],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
@@ -221,8 +239,8 @@ function ProjectIssuesContent({
     <div className="flex flex-col flex-1 min-h-0">
       {viewMode === "board" && (
         <BoardView
-          issues={assigneeGroups ? projectIssues : issues}
-          assigneeGroups={assigneeGroups}
+          issues={filteredAssigneeGroups ? filteredAssigneeGroups.flatMap((group) => group.issues) : issues}
+          assigneeGroups={filteredAssigneeGroups}
           assigneeGroupQueryKey={assigneeGroupQueryKey}
           assigneeGroupFilter={assigneeGroupFilter}
           visibleStatuses={visibleStatuses}
@@ -378,9 +396,20 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
-  const workspace = useCurrentWorkspace();
-  const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
+  useEffect(() => {
+    if (project) {
+      recordRecentContext(wsId, {
+        type: "project",
+        id: project.id,
+        label: project.title,
+        subtitle: project.description ?? undefined,
+        icon: project.icon,
+        projectStatus: project.status,
+      });
+    }
+  }, [project?.id, project?.title, project?.description, project?.icon, project?.status, recordRecentContext, wsId]);
   const projectScope = `project:${projectId}`;
   const projectFilter = useMemo<MyIssuesFilter>(
     () => ({ project_id: projectId }),
@@ -695,15 +724,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         <div className="flex h-full flex-col">
-          <PageHeader className="gap-2 bg-background text-sm">
-            <div className="flex flex-1 items-center gap-1.5 min-w-0">
-              <AppLink href={wsPaths.projects()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
-                {workspaceName ?? t(($) => $.detail.breadcrumb_fallback)}
-              </AppLink>
-              <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              <span className="truncate">{project.title}</span>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
+          <BreadcrumbHeader
+            segments={[{ href: wsPaths.projects(), label: t(($) => $.detail.breadcrumb_fallback) }]}
+            leaf={<span className="truncate font-medium text-foreground">{project.title}</span>}
+            actions={
+              <>
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -769,8 +794,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 />
                 <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
               </Tooltip>
-            </div>
-          </PageHeader>
+              </>
+            }
+          />
 
           <ViewStoreProvider store={projectViewStore}>
               <ProjectIssuesSurface

@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/agenttmpl"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -126,9 +127,9 @@ type CreateAgentFromTemplateRequest struct {
 	// Optional overrides — let the picker UI customise the template before
 	// creation without forcing a second round-trip to the detail page.
 	// When nil/empty, the template's own values are used.
-	Description     *string  `json:"description,omitempty"`
-	Instructions    *string  `json:"instructions,omitempty"`
-	AvatarURL       *string  `json:"avatar_url,omitempty"`
+	Description  *string `json:"description,omitempty"`
+	Instructions *string `json:"instructions,omitempty"`
+	AvatarURL    *string `json:"avatar_url,omitempty"`
 	// Workspace skill IDs to attach **in addition to** the template's
 	// skills. The merge dedupes against template skills automatically
 	// (agent_skill INSERT uses ON CONFLICT DO NOTHING).
@@ -553,7 +554,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
 
-	h.Analytics.Capture(analytics.AgentCreated(
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 		ownerID,
 		workspaceID,
 		uuidToString(agent.ID),
@@ -660,4 +661,3 @@ func fetchSkillFromURL(client *http.Client, rawURL string) (*importedSkill, erro
 	}
 	return nil, fmt.Errorf("unknown import source for %s", rawURL)
 }
-

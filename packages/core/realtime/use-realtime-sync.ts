@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
@@ -14,6 +14,7 @@ import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
+import { labelKeys } from "../labels/queries";
 import {
   agentTaskSnapshotKeys,
   agentActivityKeys,
@@ -21,6 +22,7 @@ import {
   agentTasksKeys,
 } from "../agents/queries";
 import { githubKeys } from "../github/queries";
+import { larkKeys } from "../lark/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -70,6 +72,7 @@ import type {
   ChatDonePayload,
   ChatMessage,
   ChatPendingTask,
+  ChatMessagesPage,
   InvitationCreatedPayload,
 } from "../types";
 
@@ -86,23 +89,27 @@ export function applyChatDoneToCache(
   const messageId = payload.message_id;
   const content = payload.content;
   if (messageId && content !== undefined) {
+    const assistant: ChatMessage = {
+      id: messageId,
+      chat_session_id: sessionId,
+      role: "assistant",
+      content,
+      task_id: taskId,
+      created_at: payload.created_at ?? new Date().toISOString(),
+      elapsed_ms: payload.elapsed_ms ?? null,
+    };
     qc.setQueryData<ChatMessage[] | undefined>(
       chatKeys.messages(sessionId),
       (old) => {
         if (!old) return old; // first fetch will pick it up
         // Idempotent against reconnect replay.
         if (old.some((m) => m.id === messageId)) return old;
-        const assistant: ChatMessage = {
-          id: messageId,
-          chat_session_id: sessionId,
-          role: "assistant",
-          content,
-          task_id: taskId,
-          created_at: payload.created_at ?? new Date().toISOString(),
-          elapsed_ms: payload.elapsed_ms ?? null,
-        };
         return [...old, assistant];
       },
+    );
+    qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+      chatKeys.messagesPage(sessionId),
+      (old) => patchLatestChatMessagePage(old, assistant),
     );
   }
   // Replacement is in the messages list now; safe to drop pending.
@@ -110,7 +117,27 @@ export function applyChatDoneToCache(
   // Authoritative refetch reconciles redaction / migrations / clients
   // that took the fallback branch above.
   qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+}
+
+function patchLatestChatMessagePage(
+  old: InfiniteData<ChatMessagesPage> | undefined,
+  message: ChatMessage,
+): InfiniteData<ChatMessagesPage> | undefined {
+  if (!old?.pages.length) return old;
+  const seen = old.pages.some((page) => page.messages.some((m) => m.id === message.id));
+  if (seen) return old;
+  return {
+    ...old,
+    pages: old.pages.map((page, index) => {
+      if (index !== 0) return page;
+      return {
+        ...page,
+        messages: [...page.messages, message],
+      };
+    }),
+  };
 }
 
 /**
@@ -157,12 +184,15 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
   }
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
@@ -298,6 +328,10 @@ export function useRealtimeSync(
       github_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: githubKeys.installations(wsId) });
+      },
+      lark_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
       },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all

@@ -9,6 +9,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -118,7 +119,7 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 	}
 	if taskSvc != nil && taskSvc.Analytics != nil {
 		for _, row := range staleRows {
-			taskSvc.Analytics.Capture(analytics.RuntimeOffline(
+			obsmetrics.RecordEvent(taskSvc.Analytics, taskSvc.Metrics, analytics.RuntimeOffline(
 				util.UUIDToString(row.OwnerID),
 				util.UUIDToString(row.WorkspaceID),
 				util.UUIDToString(row.ID),
@@ -253,6 +254,7 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	}
 
 	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
+	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 
@@ -276,6 +278,7 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 	}
 
 	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
+	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 

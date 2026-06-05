@@ -318,6 +318,97 @@ func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	}
 }
 
+func newIssuePullRequestsTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "pull-requests"}
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
+func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI PR lookup",
+			})
+		case "/api/issues/issue-uuid/pull-requests":
+			json.NewEncoder(w).Encode(map[string]any{
+				"pull_requests": []map[string]any{
+					{
+						"url":    "https://github.com/multica-ai/multica/pull/42",
+						"number": float64(42),
+						"state":  "open",
+						"title":  "MUL-2818 add issue PR CLI",
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssuePullRequestsTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssuePullRequests(cmd, []string{"MUL-2818"})
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssuePullRequests: %v", err)
+	}
+
+	if want := []string{"/api/issues/MUL-2818", "/api/issues/issue-uuid/pull-requests"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	prs, _ := payload["pull_requests"].([]any)
+	if len(prs) != 1 {
+		t.Fatalf("pull_requests length = %d, want 1", len(prs))
+	}
+	pr, _ := prs[0].(map[string]any)
+	if pr["url"] != "https://github.com/multica-ai/multica/pull/42" || pr["number"] != float64(42) || pr["state"] != "open" || pr["title"] != "MUL-2818 add issue PR CLI" {
+		t.Fatalf("unexpected PR payload: %#v", pr)
+	}
+}
+
+func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
+	prs := []map[string]any{{
+		"url":    "https://github.com/multica-ai/multica/pull/42",
+		"number": float64(42),
+		"state":  "open",
+		"title":  "MUL-2818 add issue PR CLI",
+	}}
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	printIssuePullRequestsTable(prs)
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	text := string(out)
+	for _, want := range []string{"NUMBER", "STATE", "TITLE", "URL", "42", "open", "MUL-2818 add issue PR CLI", "https://github.com/multica-ai/multica/pull/42"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("table output missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestTruncateID(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1553,6 +1644,7 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().String("since", "", "")
 	cmd.Flags().Bool("roots-only", false, "")
+	cmd.Flags().Bool("summary", false, "")
 	cmd.Flags().String("thread", "", "")
 	cmd.Flags().Int("recent", 0, "")
 	cmd.Flags().Int("tail", 0, "")
@@ -1757,6 +1849,53 @@ func TestRunIssueCommentList_RootsOnlyPassesThroughWithSince(t *testing.T) {
 	}
 	if got := gotQuery.Get("since"); got != "2026-01-01T00:00:00Z" {
 		t.Errorf("since query = %q, want timestamp", got)
+	}
+}
+
+// TestRunIssueCommentList_SummaryPassesThrough pins the CLI side of the summary
+// projection: --summary must forward summary=true, and it must compose with
+// --roots-only (the orientation read it pairs with most often) rather than
+// being rejected as an incompatible combination.
+func TestRunIssueCommentList_SummaryPassesThrough(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("summary", "true"); err != nil {
+		t.Fatalf("set summary: %v", err)
+	}
+	if err := cmd.Flags().Set("roots-only", "true"); err != nil {
+		t.Fatalf("set roots-only: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if got := gotQuery.Get("summary"); got != "true" {
+		t.Errorf("summary query = %q, want true", got)
+	}
+	if got := gotQuery.Get("roots_only"); got != "true" {
+		t.Errorf("roots_only query = %q, want true", got)
 	}
 }
 

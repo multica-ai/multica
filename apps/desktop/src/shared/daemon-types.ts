@@ -4,7 +4,11 @@ export type DaemonState =
   | "starting"
   | "stopping"
   | "installing_cli"
-  | "cli_not_found";
+  | "cli_not_found"
+  // The daemon can't start because the server rejected its credentials (the
+  // cached PAT expired / was revoked, or the session token is dead). Without
+  // this, an auth failure silently sticks at "starting" forever — see #3512.
+  | "auth_expired";
 
 export interface DaemonStatus {
   state: DaemonState;
@@ -32,6 +36,7 @@ export const DAEMON_STATE_COLORS: Record<DaemonState, string> = {
   stopping: "bg-amber-500 animate-pulse",
   installing_cli: "bg-sky-500 animate-pulse",
   cli_not_found: "bg-red-500",
+  auth_expired: "bg-red-500",
 };
 
 export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
@@ -41,6 +46,7 @@ export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
   stopping: "Stopping…",
   installing_cli: "Setting up…",
   cli_not_found: "Setup Failed",
+  auth_expired: "Sign-in required",
 };
 
 export function formatUptime(uptime?: string): string {
@@ -81,5 +87,7 @@ export function daemonStateDescription(state: DaemonState, runtimeCount: number)
       return "Setting up the runtime for the first time. Only happens once.";
     case "cli_not_found":
       return "Setup failed · couldn't download the runtime. Check your network.";
+    case "auth_expired":
+      return "Sign-in expired · sign in again to bring this device back online.";
   }
 }

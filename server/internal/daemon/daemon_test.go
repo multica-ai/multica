@@ -1719,32 +1719,49 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 	cases := []struct {
 		name              string
 		status            string
+		comment           string
 		failureReasonIn   string
 		wantFailureReason string
 	}{
 		{
 			name:              "blocked with explicit reason preserves it",
 			status:            "blocked",
+			comment:           "rate limit reached",
 			failureReasonIn:   "iteration_limit",
 			wantFailureReason: "iteration_limit",
 		},
 		{
-			name:              "blocked without reason defaults to agent_error",
+			// MUL-2946: when the daemon doesn't supply a refined
+			// reason, the comment text is run through
+			// taskfailure.Classify so the failure_reason column
+			// lands in the canonical refined taxonomy instead of
+			// the legacy "agent_error" coarse bucket.
+			name:              "blocked without reason classifies comment as rate-limit",
 			status:            "blocked",
+			comment:           "rate limit reached",
 			failureReasonIn:   "",
-			wantFailureReason: "agent_error",
+			wantFailureReason: "agent_error.provider_capacity_or_rate_limit",
 		},
 		{
-			name:              "cancelled defaults to cancelled reason",
+			name:              "blocked without reason and unrecognized comment lands in agent_error.unknown",
+			status:            "blocked",
+			comment:           "the agent gave up for reasons we don't recognize",
+			failureReasonIn:   "",
+			wantFailureReason: "agent_error.unknown",
+		},
+		{
+			name:              "cancelled defaults to cancelled reason regardless of comment",
 			status:            "cancelled",
+			comment:           "rate limit reached",
 			failureReasonIn:   "",
 			wantFailureReason: "cancelled",
 		},
 		{
-			name:              "unknown status fails closed",
+			name:              "unknown status routes through classifier",
 			status:            "weird_new_status",
+			comment:           "rate limit reached",
 			failureReasonIn:   "",
-			wantFailureReason: "agent_error",
+			wantFailureReason: "agent_error.provider_capacity_or_rate_limit",
 		},
 	}
 
@@ -1757,7 +1774,7 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
 			d.reportTaskResult(context.Background(), "task-x", TaskResult{
 				Status:        tc.status,
-				Comment:       "rate limit reached",
+				Comment:       tc.comment,
 				SessionID:     "ses-x",
 				WorkDir:       "/tmp/x",
 				FailureReason: tc.failureReasonIn,
@@ -1768,7 +1785,7 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 			if rec.path != "/api/daemon/tasks/task-x/fail" {
 				t.Fatalf("expected /fail endpoint for status=%q, got %s", tc.status, rec.path)
 			}
-			if rec.payload["error"] != "rate limit reached" {
+			if rec.payload["error"] != tc.comment {
 				t.Errorf("error body: got %v", rec.payload["error"])
 			}
 			if got := rec.payload["failure_reason"]; got != tc.wantFailureReason {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -31,8 +31,28 @@ vi.mock("./tabs/custom-args-tab", () => ({
 vi.mock("./tabs/mcp-config-tab", () => ({
   McpConfigTab: () => <div>mcp-config-tab</div>,
 }));
+vi.mock("./tabs/integrations-tab", () => ({
+  IntegrationsTab: () => <div>integrations-tab</div>,
+}));
 vi.mock("../../common/actor-issues-panel", () => ({
   ActorIssuesPanel: () => <div>actor-issues-panel</div>,
+}));
+
+// The pane now reads workspace context to decide whether the Integrations
+// tab is worth showing (it queries Lark installations to learn whether the
+// deployment has the feature configured). Provide a stable workspace id and
+// a listing query backed by a ref so each test can flip `configured`.
+const larkListingRef = vi.hoisted(() => ({
+  current: { installations: [] as unknown[], configured: false },
+}));
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+vi.mock("@multica/core/lark", () => ({
+  larkInstallationsOptions: () => ({
+    queryKey: ["lark", "installations"],
+    queryFn: () => Promise.resolve(larkListingRef.current),
+  }),
 }));
 
 import { AgentOverviewPane } from "./agent-overview-pane";
@@ -97,23 +117,21 @@ function renderPane(runtimes: AgentRuntime[]) {
   );
 }
 
+beforeEach(() => {
+  larkListingRef.current = { installations: [], configured: false };
+});
+
 describe("AgentOverviewPane MCP tab visibility", () => {
-  it("renders the MCP tab when the agent runs on the Claude runtime", () => {
-    renderPane([makeRuntime("claude")]);
-    expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-
-  it("renders the MCP tab when the agent runs on the Codex runtime", () => {
-    // Codex now reads mcp_config too — must not be hidden from the tab strip.
-    renderPane([makeRuntime("codex")]);
-    expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-
-  it("renders the MCP tab when the agent runs on the OpenClaw runtime", () => {
-    // OpenClaw materialises mcp_config via the per-task wrapper config
-    // (OPENCLAW_CONFIG_PATH) rather than ExecOptions, but the Tab must still
-    // surface so admins can save the managed set.
-    renderPane([makeRuntime("openclaw")]);
+  it.each([
+    ["Claude", "claude"],
+    ["Codex", "codex"],
+    ["Hermes", "hermes"],
+    ["Kimi", "kimi"],
+    ["Kiro", "kiro"],
+    ["OpenCode", "opencode"],
+    ["OpenClaw", "openclaw"],
+  ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
+    renderPane([makeRuntime(provider)]);
     expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
   });
 
@@ -132,5 +150,24 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     // then back on, which reads as a bug.
     renderPane([]);
     expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane Integrations tab visibility", () => {
+  it("shows the Integrations tab once the deployment has Lark configured", async () => {
+    larkListingRef.current = { installations: [], configured: true };
+    renderPane([makeRuntime("claude")]);
+    expect(
+      await screen.findByRole("button", { name: /^Integrations$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Integrations tab when Lark is not configured", () => {
+    // Default ref is configured:false; the tab must not appear on
+    // deployments without the integration, which are the common case.
+    renderPane([makeRuntime("claude")]);
+    expect(
+      screen.queryByRole("button", { name: /^Integrations$/i }),
+    ).not.toBeInTheDocument();
   });
 });

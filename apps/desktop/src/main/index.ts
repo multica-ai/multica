@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
@@ -13,6 +13,11 @@ import { installNavigationGestures } from "./navigation-gestures";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import {
+  createElectronReloadPrompt,
+  installRendererRecoveryHandlers,
+  type RendererRecoveryWindow,
+} from "./renderer-recovery";
 
 // Bundled icon used for dock/taskbar branding. macOS/Windows production
 // builds let the OS pick up the icon from the .app bundle / .exe resources,
@@ -224,13 +229,6 @@ function createWindow(): void {
       log(level, `${message} (${sourceId}:${lineNumber})`);
     });
 
-    // Fires when the renderer process dies for any reason (OOM, crash,
-    // killed). `details.reason` is the discriminator: "crashed", "oom",
-    // "killed", "abnormal-exit", "launch-failed", etc.
-    mainWindow.webContents.on("render-process-gone", (_event, details) => {
-      log("process-gone", JSON.stringify(details));
-    });
-
     // Fires when loadURL / loadFile can't reach its target (dev server
     // not up yet, network blip, file missing). errorCode is a Chromium
     // net error number; -3 = ABORTED is normal during HMR and skipped.
@@ -245,13 +243,14 @@ function createWindow(): void {
       },
     );
 
-    // Fires when the preload script throws before the renderer can boot.
-    // This is the one error class that NEVER reaches DevTools (preload
-    // runs before any window) — without this listener it's invisible.
-    mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
-      log("preload-error", `path=${preloadPath} err=${error?.stack ?? error}`);
-    });
   }
+
+  installRendererRecoveryHandlers(mainWindow as unknown as RendererRecoveryWindow, {
+    isDev: is.dev,
+    showReloadPrompt: createElectronReloadPrompt((options) =>
+      dialog.showMessageBox(mainWindow!, options),
+    ),
+  });
 
   installContextMenu(mainWindow.webContents);
   installNavigationGestures(mainWindow);

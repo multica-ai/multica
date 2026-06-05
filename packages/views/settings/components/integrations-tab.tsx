@@ -43,6 +43,7 @@ import type {
   FeishuProjectLabelSyncRule,
   FeishuProjectRouteInput,
 } from "@multica/core/types";
+import { LarkTab } from "./lark-tab";
 import { useT } from "../../i18n";
 import { FeishuProjectRoutingSection, type RouteRow } from "./feishu-project-routing-section";
 
@@ -61,8 +62,8 @@ const NO_FIELD = "__none__";
 const NO_MATCH = "__none__";
 
 // GitHub integration moved to its own Settings tab (see github-tab.tsx).
-// This tab now hosts only third-party integrations that remain workspace-
-// scoped under "Integrations" — currently just Feishu Project.
+// This tab hosts the remaining workspace-scoped third-party integrations —
+// currently Feishu Project and Lark.
 export function IntegrationsTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
@@ -306,7 +307,7 @@ export function IntegrationsTab() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-10">
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">{t(($) => $.integrations.section_title)}</h2>
 
@@ -613,6 +614,10 @@ export function IntegrationsTab() {
             )}
           </CardContent>
         </Card>
+      </section>
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">{t(($) => $.lark.section_title)}</h2>
+        <LarkTab />
       </section>
     </div>
   );

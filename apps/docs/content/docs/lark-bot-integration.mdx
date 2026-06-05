@@ -1,0 +1,95 @@
+---
+title: Lark Bot integration
+description: Bind a Multica agent to a Lark (飞书) Bot, then talk to it from a Lark DM or group — @-mention it, chat naturally, or type /issue to file a Multica issue without leaving Lark.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bind any [agent](/agents) to a Lark (飞书) Bot and your team can work with it from inside Lark — DM the Bot, @-mention it in a group, or type `/issue` to file a [Multica issue](/issues) without opening the app. The agent's replies stream back into the chat as a live card that updates while it works.
+
+Each Bot is bound **one-to-one** to a single Multica agent. Binding a second agent creates a second Bot; one agent never has two Bots.
+
+## What the integration does
+
+| Surface | Behavior |
+|---|---|
+| **Agent → Integrations** | The agent detail page has an **Integrations** tab (and a matching section in the left sidebar). Owners and admins see **Bind to Lark** there; once bound it flips to a **Connected to Lark** badge with a **Manage in Lark** link. |
+| **DM the Bot** | A workspace member messages the Bot directly in Lark. Each conversation becomes a Multica [chat](/chat) session with the agent; the agent answers in-thread. |
+| **@-mention in a group** | Add the Bot to a Lark group and @-mention it. Only the mentioning message is read — the Bot does not listen to the whole group. |
+| **`/issue` command** | Typing `/issue <title>` (optionally with a body) creates a new Multica issue in the workspace, attributed to you. |
+| **Live reply card** | The Bot posts an interactive card and keeps patching it as the agent runs — progress, the final answer, or an error. |
+
+## Bind an agent (owner / admin)
+
+Binding uses a scan-to-install flow — no app secrets to copy, no developer console steps.
+
+1. Open the agent in **Agents → _your agent_**.
+2. Go to the **Integrations** tab (or use the **Integrations** section in the left sidebar) and click **Bind to Lark**.
+3. A QR code appears. On your phone, open **Lark → Scan**, then authorize the new PersonalAgent Bot.
+4. When the scan completes the dialog closes and the agent shows **Connected to Lark**. Your own Lark identity is bound to your Multica account automatically, so you can start chatting with the Bot right away.
+
+<Callout type="info">
+The QR is single-use and expires after a short window. If it lapses before you authorize, click **Scan again** for a fresh code.
+</Callout>
+
+Once an agent is connected, the **Bind to Lark** button is replaced by a **Manage in Lark** link. Use it to open the Bot's app page in Lark when you need to adjust scopes, rename it, or request additional permissions — re-scanning is intentionally disabled so you don't strand the existing Bot.
+
+## Use the Bot (members)
+
+### First message: bind your Lark identity
+
+The first time you message the Bot, it replies with a card asking you to **bind your Lark identity**. Tap the link, sign in to Multica, and your Lark account is linked to your Multica membership. This is what lets the agent act as you — for example, `/issue` files the issue under your name.
+
+<Callout type="warning">
+Only people who are **members of the workspace** can use the Bot. If you aren't a member, or you skip the identity bind, the Bot won't respond — your message is dropped (and recorded for audit, without its contents).
+</Callout>
+
+### Chat and `/issue`
+
+- **Ask the agent anything** — DM the Bot or @-mention it in a group. The conversation is a normal agent chat session; the agent replies in the card.
+- **File an issue** — send `/issue Fix the login redirect` and Multica creates that issue in the workspace, assigned the way any new issue would be. Add more lines after the title for a description.
+- **Watch it work** — the reply card patches itself while the agent runs, so you see progress and the result in place.
+
+If the agent is **offline** (its runtime isn't connected) or **archived**, the Bot replies with a short status notice instead of silently dropping your message.
+
+## Manage and disconnect
+
+Workspace-wide management lives in **Settings → Integrations**:
+
+- **Connected bots** lists every Bot in the workspace and the agent each one is bound to. This list is visible to all members.
+- **Disconnect** is **owner / admin only**. Disconnecting stops the Bot from receiving Lark messages and tears down its connection; the installation record is kept for audit, and you can re-bind the same agent later.
+
+## Permissions
+
+- **Bind / disconnect** require workspace **owner** or **admin**. Members see the connected-bots list but no bind or disconnect controls.
+- **Talking to the Bot** requires being a workspace member with a bound Lark identity. Everyone else is dropped.
+- The integration never stores message bodies for dropped messages — only a drop reason, for audit.
+
+## Self-host setup
+
+On Multica Cloud the integration is already available — skip this section.
+
+For self-host, Lark is **off until you set an at-rest encryption key**. The key encrypts each Bot's app secret before it touches the database.
+
+1. Generate a 32-byte key and set it on the API server:
+
+   ```dotenv
+   MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+2. Restart the API. Until the key is set, **Settings → Integrations** shows a "Lark integration not enabled" notice and the **Bind to Lark** entry points stay hidden.
+
+<Callout type="info">
+**International tenants.** The integration defaults to the mainland host (`open.feishu.cn`). If your organization is on Lark's international tenant, point the transport at it:
+
+```dotenv
+MULTICA_LARK_HTTP_BASE_URL=https://open.larksuite.com
+```
+</Callout>
+
+## Next
+
+- [Agents](/agents) — each Bot is bound to exactly one agent
+- [Chat](/chat) — what a Bot conversation maps to inside Multica
+- [Issues](/issues) — what `/issue` creates
+- [Environment variables](/environment-variables) — full self-host configuration reference

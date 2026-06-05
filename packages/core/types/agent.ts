@@ -169,11 +169,13 @@ export interface Agent {
    */
   custom_env_key_count?: number;
   /**
-   * MCP server configuration forwarded to the runtime CLI (Claude's
-   * `--mcp-config`). The shape is opaque to the platform — whatever
-   * JSON the CLI accepts, the daemon writes to disk verbatim. `null`
-   * (or the field omitted on legacy backends) means no config; the
-   * daemon falls back to the CLI's own default. MUL-2764.
+   * MCP server configuration forwarded to runtimes that consume
+   * `agent.mcp_config` (see providerSupportsMcpConfig). Each backend
+   * materialises it in the runtime-native place: Claude flags, Codex
+   * config.toml, ACP session params, OpenCode env config, OpenClaw
+   * wrapper config, etc. `null` (or the field omitted on legacy backends)
+   * means no managed config; the daemon falls back to the CLI's own
+   * default. MUL-2764.
    *
    * When the caller can't see secrets (an agent actor, or a non-owner
    * non-admin), the server replaces the value with `null` and sets
@@ -336,8 +338,8 @@ export interface UpdateAgentRequest {
    *   - field omitted → no change
    *   - `null` → clear the column; the daemon falls back to the CLI's
    *     built-in default at launch
-   *   - object → replace the stored JSON verbatim; the platform does
-   *     not validate the shape (MCP CLI accepts whatever it accepts)
+   *   - object → replace the stored JSON verbatim; runtime backends
+   *     validate / translate it according to their own MCP integration
    */
   mcp_config?: unknown | null;
   visibility?: AgentVisibility;
@@ -557,7 +559,7 @@ export interface RuntimeModel {
   default?: boolean;
   /**
    * Per-model reasoning/effort catalog discovered by the daemon. Currently
-   * populated for claude and codex runtimes only; omitted (or undefined)
+   * populated for claude, codex, and opencode runtimes; omitted (or undefined)
    * for every other provider, which the UI treats as "no thinking-level
    * picker for this model". See MUL-2339.
    */
