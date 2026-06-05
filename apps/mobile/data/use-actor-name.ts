@@ -17,9 +17,12 @@ import { deriveGravatarSettings } from "@multica/core/gravatar/settings";
  */
 export function useActorLookup() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
-  const { data: workspaces = [] } = useQuery(workspaceListOptions());
-  const workspace = workspaces.find((w) => w.id === wsId) ?? null;
-  const gravatarEnabled = deriveGravatarSettings(workspace).enabled;
+  // Use select to derive only the gravatar setting — avoids re-renders
+  // when unrelated workspace data changes.
+  const gravatarEnabled = useQuery({
+    ...workspaceListOptions(),
+    select: (data) => deriveGravatarSettings(data.find((w) => w.id === wsId) ?? null).enabled,
+  }).data ?? false;
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
