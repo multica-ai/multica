@@ -169,7 +169,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if health["status"] == "running" {
+	if daemonAlive(health) {
 		label := "daemon"
 		if profile != "" {
 			label = fmt.Sprintf("daemon [%s]", profile)
@@ -238,21 +238,33 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
-	// Poll health endpoint until the daemon is ready or timeout.
-	deadline := time.Now().Add(15 * time.Second)
+	// Poll the health endpoint until the daemon reports ready ("running") or we
+	// time out. The daemon binds the health port almost immediately but reports
+	// status:"starting" until preflight finishes (PAT renew + initial workspace
+	// sync, which exec's every configured agent for version detection and can
+	// take ~20s on a cold cache). Wait long enough to cover that so a healthy
+	// cold start is not misreported as a failure.
+	const startupTimeout = 45 * time.Second
+	deadline := time.Now().Add(startupTimeout)
 	started := false
+	lastStatus := ""
 	for time.Now().Before(deadline) {
 		time.Sleep(500 * time.Millisecond)
 		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
 		health = checkDaemonHealthOnPort(hctx, healthPort)
 		hcancel()
-		if health["status"] == "running" {
+		lastStatus, _ = health["status"].(string)
+		if lastStatus == "running" {
 			started = true
 			break
 		}
 	}
 	if !started {
-		fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
+		if lastStatus == "starting" {
+			fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logPath)
+		} else {
+			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
+		}
 		return nil
 	}
 
@@ -437,7 +449,7 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if health["status"] == "running" {
+	if daemonAlive(health) {
 		pid, _ := health["pid"].(float64)
 		if pid > 0 {
 			fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
@@ -446,12 +458,14 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 					_ = p.Kill()
 				}
 			}
+			// Wait until the port is fully released (not merely past "running"),
+			// otherwise the fresh start below races the old daemon's listener.
 			for i := 0; i < 10; i++ {
 				time.Sleep(500 * time.Millisecond)
 				sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
 				h := checkDaemonHealthOnPort(sctx, healthPort)
 				scancel()
-				if h["status"] != "running" {
+				if !daemonAlive(h) {
 					break
 				}
 			}
@@ -472,7 +486,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if health["status"] != "running" {
+	if !daemonAlive(health) {
 		label := "Daemon"
 		if profile != "" {
 			label = fmt.Sprintf("Daemon [%s]", profile)
@@ -512,7 +526,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		ctx2, cancel2 := context.WithTimeout(context.Background(), 1*time.Second)
 		h := checkDaemonHealthOnPort(ctx2, healthPort)
 		cancel2()
-		if h["status"] != "running" {
+		if !daemonAlive(h) {
 			os.Remove(daemonPIDPathForProfile(profile))
 			fmt.Fprintln(os.Stderr, "Daemon stopped.")
 			return nil
@@ -565,12 +579,14 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		label = fmt.Sprintf("Daemon [%s]", profile)
 	}
 
-	if health["status"] != "running" {
+	switch health["status"] {
+	case "running":
+		printDaemonStatusReport(os.Stdout, label, health)
+	case "starting":
+		fmt.Fprintf(os.Stdout, "%s: starting (pid %v)\n", label, health["pid"])
+	default:
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
-		return nil
 	}
-
-	printDaemonStatusReport(os.Stdout, label, health)
 	return nil
 }
 
@@ -620,6 +636,20 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	lines, _ := cmd.Flags().GetInt("lines")
 
 	return tailLogFile(logPath, lines, follow)
+}
+
+// daemonAlive reports whether a health response indicates a live daemon
+// process on the port — either fully "running" (ready) or still "starting"
+// (port bound, preflight in progress). Lifecycle commands that only need to
+// know "is a daemon there" (already-running guard, restart, stop) use this,
+// whereas `daemon start`'s readiness wait gates on the stricter "running".
+func daemonAlive(health map[string]any) bool {
+	switch health["status"] {
+	case "running", "starting":
+		return true
+	default:
+		return false
+	}
 }
 
 // checkDaemonHealthOnPort calls the daemon's local health endpoint on the given port.

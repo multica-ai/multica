@@ -72,8 +72,19 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			agents = append(agents, name)
 		}
 
+		// "starting" until preflight (PAT renew + initial workspace sync +
+		// runtime registration) completes; "running" once the daemon can
+		// actually claim tasks. The health port is bound before preflight for
+		// liveness/diagnostics, so callers must not treat a reachable endpoint
+		// as ready — they gate on this status. Consumers that only know
+		// "running" (older CLI/desktop) safely treat "starting" as not-ready.
+		status := "starting"
+		if d.ready.Load() {
+			status = "running"
+		}
+
 		resp := HealthResponse{
-			Status:          "running",
+			Status:          status,
 			PID:             os.Getpid(),
 			Uptime:          time.Since(startedAt).Truncate(time.Second).String(),
 			DaemonID:        d.cfg.DaemonID,
