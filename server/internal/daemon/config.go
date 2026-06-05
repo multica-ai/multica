@@ -19,8 +19,8 @@ const (
 	DefaultPollInterval      = 30 * time.Second
 	DefaultHeartbeatInterval = 15 * time.Second
 	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
-	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdog
-	// (DefaultAgentIdleWatchdog), so a session that keeps emitting events is
+	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdogs
+	// (DefaultAgentIdleWatchdog / DefaultAgentToolWatchdog), so a session that keeps emitting events is
 	// never killed merely for running long (MUL-3064). Operators who want a
 	// hard ceiling for cost/resource control can set MULTICA_AGENT_TIMEOUT.
 	DefaultAgentTimeout                   = 0
