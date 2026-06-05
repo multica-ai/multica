@@ -270,7 +270,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.17",
           date: "2026-06-05",
-          title: "Feishu Bot 그룹 채팅, 사용량 스케줄링, 이슈 개선",
+          title: "Feishu Bot 그룹 채팅, 사용량 스케줄링, CLI 업데이트",
           changes: [],
           features: [
             "Feishu Bot을 그룹에서 멘션하면 주변 대화가 함께 전달되어, 에이전트가 이전 논의를 더 잘 이해할 수 있습니다.",

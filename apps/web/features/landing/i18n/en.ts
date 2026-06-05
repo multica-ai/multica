@@ -295,7 +295,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.17",
         date: "2026-06-05",
-        title: "Feishu Bot Group Chat, Usage Scheduling, and Issue Improvements",
+        title: "Feishu Bot Group Chat, Usage Scheduling, and CLI Updates",
         changes: [],
         features: [
           "Feishu Bot group mentions now include nearby conversation context, so the responding agent can understand what the team was discussing before it was mentioned",

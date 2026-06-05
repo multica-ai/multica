@@ -295,7 +295,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.17",
         date: "2026-06-05",
-        title: "飞书 Bot 群聊、使用量调度和 Issue 优化",
+        title: "飞书 Bot 群聊、使用量调度和命令行更新",
         changes: [],
         features: [
           "飞书群聊里提及智能体时，会带上附近的对话上下文，智能体更容易理解团队前面在讨论什么",

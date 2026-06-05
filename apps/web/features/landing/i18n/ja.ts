@@ -271,7 +271,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.17",
           date: "2026-06-05",
-          title: "Feishu Bot グループチャット、利用状況スケジューリング、イシュー改善",
+          title: "Feishu Bot グループチャット、利用状況スケジューリング、CLI 更新",
           changes: [],
           features: [
             "Feishu Bot をグループでメンションすると、周辺の会話も一緒に渡されるため、エージェントが直前の文脈を理解しやすくなりました。",
