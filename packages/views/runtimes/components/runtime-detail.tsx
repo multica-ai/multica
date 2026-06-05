@@ -32,7 +32,7 @@ import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { formatLastSeen, isSelfHealingRuntime } from "../utils";
-import { HealthBadge } from "./shared";
+import { HealthBadge, providerLabel } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
@@ -290,9 +290,7 @@ function HeroCard({
         </Fact>
         <Fact label="Runtime">
           <span className="block truncate text-sm">
-            {device?.runtime ?? (
-              <span className="capitalize">{runtime.provider}</span>
-            )}
+            {device?.runtime ?? providerLabel(runtime.provider)}
           </span>
         </Fact>
       </dl>

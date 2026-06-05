@@ -36,6 +36,9 @@ var capabilityRegistry = map[string]Capability{
 		ResumeSession:    true,
 		StructuredOutput: true,
 	},
+	"antigravity": {
+		ResumeSession: true,
+	},
 	"copilot": {
 		StreamDisplay:    true,
 		ToolCallStream:   true,
@@ -74,6 +77,12 @@ var capabilityRegistry = map[string]Capability{
 		StructuredOutput: true,
 	},
 	"kiro": {
+		ResumeSession:    true,
+		StructuredOutput: true,
+	},
+	"qoderclicn": {
+		StreamDisplay:    true,
+		ToolCallStream:   true,
 		ResumeSession:    true,
 		StructuredOutput: true,
 	},
