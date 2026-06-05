@@ -365,29 +365,9 @@ jobs:
         run: |
           helm package multica
 
-      - name: Create Release if not exists
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          tag="${{ needs.prepare.outputs.tag_name }}"
-          if ! gh release view "$tag" --repo ${{ github.repository }} > /dev/null 2>&1; then
-            echo "Release $tag does not exist. Creating..."
-            gh release create "$tag" \
-              --repo ${{ github.repository }} \
-              --title "Release $tag" \
-              --generate-notes
-          else
-            echo "Release $tag already exists."
-          fi
-
-      - name: Upload Helm Chart to Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        working-directory: helm
-        run: |
-          chart_file=$(ls multica-*.tgz | head -n 1)
-          echo "Uploading $chart_file to release ${{ needs.prepare.outputs.tag_name }}..."
-          gh release upload "${{ needs.prepare.outputs.tag_name }}" \
-            --repo ${{ github.repository }} \
-            "$chart_file" \
-            --clobber
+      - name: Upload Helm Chart as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart-${{ needs.prepare.outputs.tag_name }}
+          path: helm/multica-*.tgz
+          if-no-files-found: error

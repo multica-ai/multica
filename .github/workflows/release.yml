@@ -257,6 +257,8 @@ jobs:
           build-args: |
             REMOTE_API_URL=http://backend:8080
             NEXT_PUBLIC_APP_VERSION=${{ needs.verify.outputs.tag_name }}
+            NEXT_PUBLIC_BASE_PATH=${{ vars.NEXT_PUBLIC_BASE_PATH }}
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
           outputs: type=image,name=ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-web,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
