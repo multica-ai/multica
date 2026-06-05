@@ -159,6 +159,8 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  // CEREBRO-PATCH(cerebro-focus-list-client): TECH-2947
+  FocusListItem,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -2600,6 +2602,40 @@ export class ApiClient {
   // InboxItem (the row is removed from the active inbox on settle).
   async runPrivateAgentRunRequest(id: string): Promise<{ id: string; status: string }> {
     return this.fetch(`/api/inbox/${id}/run-private-agent`, { method: "POST" });
+  }
+
+  // CEREBRO-PATCH(cerebro-focus-list-client): TECH-2947 — personal focus list API.
+  async listFocusListItems(): Promise<FocusListItem[]> {
+    return this.fetch("/api/cerebro/focus-list");
+  }
+
+  async createFocusListItem(params: { text: string; issueId?: string | null }): Promise<FocusListItem> {
+    return this.fetch("/api/cerebro/focus-list", {
+      method: "POST",
+      body: JSON.stringify({ text: params.text, issue_id: params.issueId ?? null }),
+    });
+  }
+
+  async updateFocusListItem(id: string, params: { text?: string; issueId?: string | null }): Promise<FocusListItem> {
+    return this.fetch(`/api/cerebro/focus-list/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text: params.text, issue_id: params.issueId ?? null }),
+    });
+  }
+
+  async markFocusListItemDone(id: string): Promise<FocusListItem> {
+    return this.fetch(`/api/cerebro/focus-list/${id}/done`, { method: "POST" });
+  }
+
+  async snoozeFocusListItem(id: string, until: Date): Promise<FocusListItem> {
+    return this.fetch(`/api/cerebro/focus-list/${id}/snooze`, {
+      method: "POST",
+      body: JSON.stringify({ until: until.toISOString() }),
+    });
+  }
+
+  async deleteFocusListItem(id: string): Promise<void> {
+    return this.fetch(`/api/cerebro/focus-list/${id}`, { method: "DELETE" });
   }
 
   async getUnreadInboxCount(): Promise<{ count: number }> {

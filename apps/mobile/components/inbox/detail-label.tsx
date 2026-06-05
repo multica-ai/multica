@@ -70,6 +70,12 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   skill_change_request_created: "Skill change requested",
   skill_change_request_reviewed: "Skill change reviewed",
   runtime_auto_paused: "Runtime paused", // FIR-2611: aggregated auth/quota auto-pause card.
+  // TECH-2961: agent-authored comments split by tag. Mirrors useTypeLabels in
+  // packages/views/inbox/components/inbox-detail-label.tsx — labels match the
+  // English copy used on web/desktop.
+  agent_comment_no_tag: "Agent comment",
+  agent_comment_member_tag: "Agent tagged you",
+  agent_comment_agent_tag: "Agent hand-off",
 };
 
 function shortDate(dateStr: string): string {

@@ -6,15 +6,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
 import { Label } from "@multica/ui/components/ui/label";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@multica/ui/components/ui/sheet";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   getFirtalRegistryGrantConfig,
@@ -28,6 +28,9 @@ const agentToolsKey = (agentId: string) =>
 
 const dataSourcesKey = (agentId: string) =>
   ["cerebro", "firtal-registry-data-sources", agentId] as const;
+
+const configKey = (agentId: string) =>
+  [...agentToolsKey(agentId), "firtal_registry-config"] as const;
 
 function parseGrantConfig(raw: FirtalRegistryGrantConfig): {
   allowAll: boolean;
@@ -57,7 +60,7 @@ export function FirtalRegistryConfigDialog({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
   const configQuery = useQuery({
-    queryKey: [...agentToolsKey(agentId), "firtal_registry-config"],
+    queryKey: configKey(agentId),
     queryFn: () => getFirtalRegistryGrantConfig(agentId),
     enabled: open,
   });
@@ -119,17 +122,20 @@ export function FirtalRegistryConfigDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>firtal_registry — data sources</DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="flex w-full max-w-xl flex-col gap-0 p-0 sm:max-w-xl"
+      >
+        <SheetHeader className="border-b">
+          <SheetTitle>firtal_registry — data sources</SheetTitle>
+          <SheetDescription>
             Vælg hvilke data sources agenten må se via Firtal Data Registry.
             Uden tilladelse ser agenten ingen kilder.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <div className="space-y-4">
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
           <div className="flex items-center justify-between gap-3 rounded-md border p-3">
             <div className="space-y-0.5">
               <Label htmlFor="allow-all-ds">Tillad alle data sources</Label>
@@ -145,7 +151,7 @@ export function FirtalRegistryConfigDialog({
           </div>
 
           {!allowAll && (
-            <div className="space-y-2">
+            <div className="flex flex-1 flex-col gap-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input
@@ -172,7 +178,7 @@ export function FirtalRegistryConfigDialog({
                   Ingen data sources matcher søgningen.
                 </p>
               ) : (
-                <ul className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
+                <ul className="flex-1 space-y-1 overflow-y-auto rounded-md border p-2">
                   {filteredSources.map((ds) => {
                     const checked = selected.has(ds.id);
                     return (
@@ -208,34 +214,36 @@ export function FirtalRegistryConfigDialog({
           )}
         </div>
 
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            Annuller
-          </Button>
-          <Button
-            type="button"
-            disabled={
-              saveMutation.isPending ||
-              (!allowAll && selected.size === 0) ||
-              dataSourcesQuery.isLoading
-            }
-            onClick={() => saveMutation.mutate()}
-          >
-            {saveMutation.isPending ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Gemmer…
-              </>
-            ) : (
-              "Gem"
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <SheetFooter className="border-t">
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Annuller
+            </Button>
+            <Button
+              type="button"
+              disabled={
+                saveMutation.isPending ||
+                (!allowAll && selected.size === 0) ||
+                dataSourcesQuery.isLoading
+              }
+              onClick={() => saveMutation.mutate()}
+            >
+              {saveMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Gemmer…
+                </>
+              ) : (
+                "Gem"
+              )}
+            </Button>
+          </div>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }

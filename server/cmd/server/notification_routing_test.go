@@ -251,6 +251,23 @@ func TestResolveChannelChoice_DefaultsWhenNoPrefs(t *testing.T) {
 		{channelDesktop, "new_comment", false},
 		// Mail: nothing by default until transport is built.
 		{channelMail, "issue_assigned", false},
+		// CEREBRO-PATCH(agent-comment-tag-split-routing-test): TECH-2961 —
+		// agent-authored comments are split into three routing keys based on the
+		// tag the comment carries. no-tag is silent in inbox by default;
+		// member-tag and agent-tag are on, so escalations and hand-offs don't
+		// disappear silently. All three surface in the notifications feed.
+		{channelInbox, "agent_comment_no_tag", false},
+		{channelInbox, "agent_comment_member_tag", true},
+		{channelInbox, "agent_comment_agent_tag", true},
+		{channelNotifications, "agent_comment_no_tag", true},
+		{channelNotifications, "agent_comment_member_tag", true},
+		{channelNotifications, "agent_comment_agent_tag", true},
+		{channelMobile, "agent_comment_no_tag", false},
+		{channelMobile, "agent_comment_member_tag", true},
+		{channelMobile, "agent_comment_agent_tag", false},
+		{channelDesktop, "agent_comment_no_tag", false},
+		{channelDesktop, "agent_comment_member_tag", true},
+		{channelDesktop, "agent_comment_agent_tag", false},
 	}
 	for _, tc := range cases {
 		got := resolveChannelChoice(context.Background(), queries, "member", testUserID, tc.channel, tc.key)

@@ -102,6 +102,24 @@ const ROW_GROUPS: RowGroup[] = [
         hint: "Bumped to Inbox automatically if you're @-tagged.",
       },
       {
+        // TECH-2961: agent-authored comments are split by tag, so monologues,
+        // member-tag escalations and agent-tag hand-offs can be controlled
+        // independently of human comment traffic.
+        routingKey: "agent_comment_no_tag",
+        label: "Agent comment — no tag",
+        hint: "An agent commented and didn't tag anyone. Off in your inbox by default so monologues don't pile up.",
+      },
+      {
+        routingKey: "agent_comment_member_tag",
+        label: "Agent comment — tagging a person",
+        hint: "An agent commented and @-tagged a teammate. On in your inbox by default so escalations stay visible.",
+      },
+      {
+        routingKey: "agent_comment_agent_tag",
+        label: "Agent comment — tagging another agent",
+        hint: "An agent handed work to another agent. On in your inbox by default so hand-offs are easy to follow.",
+      },
+      {
         routingKey: "assignee_changed",
         label: "Assignee changed",
         hint: "Someone else gained or lost ownership.",

@@ -136,8 +136,125 @@ func TestCoreEventListenerWiring_DeliversAgentCommentToHumanSubscriber(t *testin
 	})
 
 	items := inboxItemsByRoute(t, subscriberID, routeNotifications)
-	if len(items) != 1 || items[0].Type != "new_comment" {
-		t.Fatalf("expected agent comment to create one notifications-routed new_comment item, got %+v", items)
+	// CEREBRO-PATCH(agent-comment-tag-split-listener-test): TECH-2961 —
+	// agent-authored comments with no @mention route through
+	// "agent_comment_no_tag" so users can mute them independently of real
+	// new-comment notifications. Defaults still surface them in the
+	// notifications feed, so the row still shows up here.
+	if len(items) != 1 || items[0].Type != "agent_comment_no_tag" {
+		t.Fatalf("expected agent comment to create one notifications-routed agent_comment_no_tag item, got %+v", items)
+	}
+}
+
+// CEREBRO-PATCH(agent-comment-tag-split-listener-test): TECH-2961 —
+// TestCoreEventListenerWiring_AgentCommentWithAgentMentionRoutesAgentTag
+// verifies the split: an agent comment that tags another agent routes through
+// "agent_comment_agent_tag" — the inbox default for this routing key is on,
+// so subscribers see hand-offs in their inbox by default.
+func TestCoreEventListenerWiring_AgentCommentWithAgentMentionRoutesAgentTag(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerCoreEventListeners(bus, queries, nil)
+
+	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
+	otherAgentID := "00000000-0000-0000-0000-bbbbbbbbbbbb"
+
+	subscriberEmail := "notif-agent-tag-agent-subscriber@multica.ai"
+	subscriberID := createTestUser(t, subscriberEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, subscriberEmail)
+		clearUserPrefs(t, subscriberID)
+	})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	addTestSubscriber(t, issueID, "member", subscriberID, "creator")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-00000000009a",
+				IssueID:    issueID,
+				AuthorType: "agent",
+				AuthorID:   agentID,
+				Content:    stringPtr("[@Other](mention://agent/" + otherAgentID + ") can you take this?"),
+				Type:       "comment",
+			},
+			"issue_title":  "agent-tag-agent",
+			"issue_status": "in_progress",
+		},
+	})
+
+	// Inbox default for agent_comment_agent_tag is ON, so the routing-tested
+	// outcome is one row on the inbox route.
+	items := inboxItemsByRoute(t, subscriberID, routeInbox)
+	if len(items) != 1 || items[0].Type != "agent_comment_agent_tag" {
+		t.Fatalf("expected agent-to-agent mention comment to route as agent_comment_agent_tag in the inbox, got %+v", items)
+	}
+}
+
+// CEREBRO-PATCH(agent-comment-tag-split-listener-test): TECH-2961 —
+// TestCoreEventListenerWiring_AgentCommentWithMemberMentionRoutesMemberTag
+// verifies the split: an agent comment that tags a member routes through
+// "agent_comment_member_tag" — the inbox default for this routing key is on,
+// so subscribers see escalations in their inbox by default.
+func TestCoreEventListenerWiring_AgentCommentWithMemberMentionRoutesMemberTag(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerCoreEventListeners(bus, queries, nil)
+
+	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
+
+	mentionedEmail := "notif-agent-tag-member-mentioned@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, mentionedEmail)
+		clearUserPrefs(t, mentionedID)
+	})
+
+	subscriberEmail := "notif-agent-tag-member-subscriber@multica.ai"
+	subscriberID := createTestUser(t, subscriberEmail)
+	t.Cleanup(func() {
+		cleanupTestUser(t, subscriberEmail)
+		clearUserPrefs(t, subscriberID)
+	})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	addTestSubscriber(t, issueID, "member", subscriberID, "creator")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-00000000009b",
+				IssueID:    issueID,
+				AuthorType: "agent",
+				AuthorID:   agentID,
+				Content:    stringPtr("[@Member](mention://member/" + mentionedID + ") please review this."),
+				Type:       "comment",
+			},
+			"issue_title":  "agent-tag-member",
+			"issue_status": "in_review",
+		},
+	})
+
+	items := inboxItemsByRoute(t, subscriberID, routeInbox)
+	if len(items) != 1 || items[0].Type != "agent_comment_member_tag" {
+		t.Fatalf("expected agent-to-member mention comment to route as agent_comment_member_tag in the inbox, got %+v", items)
 	}
 }
 

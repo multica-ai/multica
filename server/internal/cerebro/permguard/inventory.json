@@ -49,6 +49,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/focus-list/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
       "gate": "via:DELETE /api/cerebro/sprint-recurring-tasks/{id}/"
     },
@@ -273,6 +277,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PATCH /api/cerebro/focus-list/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PATCH /api/cerebro/references/{refId}",
       "gate": "workspace_member"
     },
@@ -423,6 +431,18 @@
     {
       "id": "POST /api/cerebro/agent-passes/",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cerebro/focus-list/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/focus-list/{id}/done",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/focus-list/{id}/snooze",
+      "gate": "workspace_member"
     },
     {
       "id": "POST /api/cerebro/github/pull-requests",

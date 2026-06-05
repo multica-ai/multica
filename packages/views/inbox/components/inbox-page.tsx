@@ -119,6 +119,8 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 // CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — workspace logo in the inbox (my-issues) breadcrumb.
 import { WorkspaceBreadcrumbLogo } from "../../workspace/workspace-avatar";
+// CEREBRO-PATCH(cerebro-focus-list-inbox): TECH-2947 — personal focus list at the top of the inbox.
+import { InboxFocusList } from "@multica/cerebro-focus-list";
 import { ChannelListItem, InboxListItem, useTimeAgo } from "./inbox-list-item";
 import { AgentRunPip, taskStatusToRunState } from "../../common/agent-run-pip"; // CEREBRO-PATCH(inbox-run-state-pip): active vs queued indicator (JEH-1332)
 import { useTypeLabels } from "./inbox-detail-label";
@@ -1168,8 +1170,17 @@ export function InboxPage() {
 
   const emptyMessage = isArchivedView ? "No archived items" : "No notifications";
 
+  // CEREBRO-PATCH(cerebro-focus-list-inbox): TECH-2947 — gate on feature flag.
+  const focusListEnabled = useFeatureFlag("cerebro_focus_list");
+
   const listBody = (
     <div>
+      {/* CEREBRO-PATCH(cerebro-focus-list-inbox): TECH-2947 — focus list above inbox entries */}
+      {focusListEnabled && !isArchivedView && (
+        <InboxFocusList
+          onIssueOpen={(issueId) => setSelectedKey("issue", issueId)}
+        />
+      )}
       {filteredEntries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
