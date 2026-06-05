@@ -1,4 +1,4 @@
-import { forwardRef, useRef, useState, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -192,15 +192,26 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, onUploadFile, placeholder, hideAttachments }: any,
+    { defaultValue, onUpdate, onExternalSyncAccepted, onUploadFile, placeholder, hideAttachments }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
+    const emittedRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    useEffect(() => {
+      const incoming = defaultValue || "";
+      if (valueRef.current !== emittedRef.current) return;
+      if (valueRef.current !== incoming) {
+        valueRef.current = incoming;
+        emittedRef.current = incoming;
+        setValue(incoming);
+      }
+      onExternalSyncAccepted?.(incoming);
+    }, [defaultValue, onExternalSyncAccepted]);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
-      setMarkdown: (markdown: string) => { valueRef.current = markdown; setValue(markdown); },
-      clearContent: () => { valueRef.current = ""; setValue(""); },
+      setMarkdown: (markdown: string) => { valueRef.current = markdown; emittedRef.current = markdown; setValue(markdown); },
+      clearContent: () => { valueRef.current = ""; emittedRef.current = ""; setValue(""); },
       focus: () => {},
       uploadFile: (file: File) => { void onUploadFile?.(file); },
       uploadFiles: (files: File[]) => { files.forEach((file) => void onUploadFile?.(file)); },
@@ -819,6 +830,83 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
+  it("sends empty description baseline in update payload", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      description: "",
+    });
+
+    renderIssueDetail();
+
+    const editor = await screen.findByTestId("rich-text-editor");
+    fireEvent.change(editor, { target: { value: "new description" } });
+
+    await waitFor(() => {
+      expect(mockApiObj.updateIssue).toHaveBeenCalledWith(
+        "issue-1",
+        expect.objectContaining({
+          description: "new description",
+          description_base_updated_at: mockIssue.updated_at,
+          description_base_value: "",
+        }),
+      );
+    });
+  });
+
+  it("keeps the previous description baseline when a dirty editor rejects a remote description", async () => {
+    const oldIssue = {
+      ...mockIssue,
+      description: "old description",
+      updated_at: "2026-01-20T00:00:00Z",
+    };
+    const remoteIssue = {
+      ...oldIssue,
+      description: "remote description",
+      updated_at: "2026-01-20T00:01:00Z",
+    };
+    mockApiObj.getIssue.mockResolvedValue(oldIssue);
+
+    const { queryClient } = renderIssueDetail();
+
+    const editor = await screen.findByTestId("rich-text-editor");
+    await waitFor(() => {
+      expect(editor).toHaveValue("old description");
+    });
+
+    fireEvent.change(editor, { target: { value: "local draft" } });
+
+    await waitFor(() => {
+      expect(mockApiObj.updateIssue).toHaveBeenLastCalledWith(
+        "issue-1",
+        expect.objectContaining({
+          description: "local draft",
+          description_base_updated_at: oldIssue.updated_at,
+          description_base_value: "old description",
+        }),
+      );
+    });
+
+    mockApiObj.updateIssue.mockClear();
+    queryClient.setQueryData(["issues", "ws-1", "detail", "issue-1"], remoteIssue);
+
+    await waitFor(() => {
+      expect(editor).toHaveValue("local draft");
+    });
+
+    fireEvent.change(editor, { target: { value: "local draft after remote" } });
+
+    await waitFor(() => {
+      expect(mockApiObj.updateIssue).toHaveBeenLastCalledWith(
+        "issue-1",
+        expect.objectContaining({
+          description: "local draft after remote",
+          description_base_updated_at: oldIssue.updated_at,
+          description_base_value: "old description",
+        }),
+      );
+    });
+  });
+
   it("renders issue identifier in the breadcrumb", async () => {
     renderIssueDetail();
 
@@ -836,6 +924,12 @@ describe("IssueDetail (shared)", () => {
   });
 
   it("renders workspace name as breadcrumb link", async () => {
+    renderIssueDetail();
+
+    const workspaceLink = await screen.findByText("Test WS");
+    expect(workspaceLink.closest("a")).toHaveAttribute("href", "/test");
+  });
+
   it("renders the issue title leaf as a link to the issue detail page", async () => {
     renderIssueDetail();
 

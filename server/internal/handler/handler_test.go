@@ -3959,6 +3959,69 @@ func TestUpdateIssueDescriptionConflict_RejectsStaleBase(t *testing.T) {
 	}
 }
 
+func TestUpdateIssueDescriptionConflict_RejectsEmptyBaseChangedToNonEmpty(t *testing.T) {
+	ctx := context.Background()
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, "Desc conflict project empty base").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Empty base conflict test",
+		"project_id": projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+
+	serverUpdatedAt := created.UpdatedAt
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"description": "changed from empty by another writer",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first description update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"description":                 "edited by original empty-base client",
+		"description_base_updated_at": serverUpdatedAt,
+		"description_base_value":      "",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	json.NewDecoder(w.Body).Decode(&body)
+	if body["error"] != "description_conflict" {
+		t.Fatalf("expected error 'description_conflict', got %v", body["error"])
+	}
+	if body["description"] != "changed from empty by another writer" {
+		t.Fatalf("expected current server description in 409 body, got %v", body["description"])
+	}
+}
+
 // TestUpdateIssueDescriptionConflict_AllowsStaleBaseWhenDescriptionUnchanged
 // verifies that a stale updated_at baseline does NOT trigger a false-positive
 // conflict when only non-description fields (e.g. title) caused the timestamp

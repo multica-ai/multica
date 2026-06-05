@@ -92,6 +92,7 @@ interface ContentEditorProps {
   debounceMs?: number;
   onSubmit?: () => void;
   onBlur?: () => void;
+  onExternalSyncAccepted?: (markdown: string) => void;
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
   showBubbleMenu?: boolean;
@@ -167,6 +168,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       debounceMs = 300,
       onSubmit,
       onBlur,
+      onExternalSyncAccepted,
       onUploadFile,
       showBubbleMenu = true,
       submitOnEnter = false,
@@ -181,6 +183,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
+    const onExternalSyncAcceptedRef = useRef(onExternalSyncAccepted);
     const onUploadFileRef = useRef(onUploadFile);
     const lastEmittedRef = useRef<string | null>(null);
     // When the editor fires onUpdate (debounced save), we set this flag to
@@ -200,6 +203,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
+    onExternalSyncAcceptedRef.current = onExternalSyncAccepted;
     onUploadFileRef.current = onUploadFile;
 
     const queryClient = useQueryClient();
@@ -210,7 +214,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
       onCreate: ({ editor: ed }) => {
-        lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
+        const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
+        lastEmittedRef.current = md;
+        onExternalSyncAcceptedRef.current?.(md);
       },
       content: defaultValue ? preprocessMarkdown(defaultValue) : "",
       contentType: defaultValue ? "markdown" : undefined,
@@ -304,6 +310,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         const incomingNormalized = stripBlobUrls(incoming).trimEnd();
         if (incomingNormalized === current) {
           suppressSyncRef.current = false;
+          onExternalSyncAcceptedRef.current?.(incomingNormalized);
         }
         return;
       }
@@ -312,7 +319,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       const incomingNormalized = stripBlobUrls(incoming).trimEnd();
       // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
       // when the cache reflects a write this same editor just emitted.
-      if (incomingNormalized === current) return;
+      if (incomingNormalized === current) {
+        onExternalSyncAcceptedRef.current?.(incomingNormalized);
+        return;
+      }
 
       // Guard 4: `emitUpdate: false`. Tiptap v3's setContent defaults to
       // `emitUpdate: true`; without this we would re-trigger onUpdate →
@@ -332,6 +342,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       });
 
       lastEmittedRef.current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+      onExternalSyncAcceptedRef.current?.(lastEmittedRef.current);
     }, [defaultValue, editor]);
 
     useImperativeHandle(ref, () => ({

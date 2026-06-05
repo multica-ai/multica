@@ -2694,15 +2694,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			serverUpdatedAt := prevIssue.UpdatedAt.Time.UTC()
 			if !serverUpdatedAt.Equal(baseTime) {
-				serverDesc := textToPtr(prevIssue.Description)
-				baseDesc := req.DescriptionBaseValue
-				// Only reject when the server's description has actually diverged
-				// from what the client based its edit on.  updated_at may differ
-				// because of title/status/etc., which is fine.
-				if serverDesc != nil && baseDesc != nil && *serverDesc != *baseDesc {
+				serverDescValue := ""
+				if serverDesc := textToPtr(prevIssue.Description); serverDesc != nil {
+					serverDescValue = *serverDesc
+				}
+				baseDescValue := ""
+				if req.DescriptionBaseValue != nil {
+					baseDescValue = *req.DescriptionBaseValue
+				}
+				if serverDescValue != baseDescValue {
 					writeJSON(w, http.StatusConflict, map[string]any{
 						"error":       "description_conflict",
-						"description": serverDesc,
+						"description": serverDescValue,
 						"updated_at":  prevIssue.UpdatedAt.Time.UTC().Format(time.RFC3339),
 					})
 					return

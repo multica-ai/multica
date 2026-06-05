@@ -1617,13 +1617,9 @@ export function IssueDetail({
   // onUpdate callback always sees the freshest values without recapturing.
   const descBaseUpdatedAtRef = useRef<string>("");
   const descBaseValueRef = useRef<string>("");
-  // Initialise / refresh the baseline whenever the issue data changes
-  // (initial load, WS update, or our own successful save).
-  useEffect(() => {
-    if (issue) {
-      descBaseUpdatedAtRef.current = issue.updated_at ?? "";
-      descBaseValueRef.current = issue.description ?? "";
-    }
+  const handleDescriptionExternalSyncAccepted = useCallback(() => {
+    descBaseUpdatedAtRef.current = issue?.updated_at ?? "";
+    descBaseValueRef.current = issue?.description ?? "";
   }, [issue?.updated_at, issue?.description]);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => descEditorRef.current?.uploadFiles(files),
@@ -2557,9 +2553,10 @@ export function IssueDetail({
                 handleUpdateField({
                   description: md,
                   description_base_updated_at: descBaseUpdatedAtRef.current || undefined,
-                  description_base_value: descBaseValueRef.current || undefined,
+                  description_base_value: descBaseValueRef.current ?? undefined,
                 });
               }}
+              onExternalSyncAccepted={handleDescriptionExternalSyncAccepted}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
               currentIssueId={resolvedId}
