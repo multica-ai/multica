@@ -1348,6 +1348,13 @@ type GetAgentTaskInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// Loads a task only when its owning agent lives in the given workspace.
+// agent_id is NOT NULL on every task row (and ON DELETE CASCADE, so the agent
+// always exists), which makes this the universal tenant guard for
+// user-initiated cancellation — independent of which optional source FK
+// (issue / chat_session / autopilot_run) happens to be set. It is what lets
+// run_only autopilot tasks and quick_create tasks (whose issue does not exist
+// yet) be cancelled at all, instead of 404-ing on a missing source FK.
 func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskInWorkspaceParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, getAgentTaskInWorkspace, arg.ID, arg.WorkspaceID)
 	var i AgentTaskQueue

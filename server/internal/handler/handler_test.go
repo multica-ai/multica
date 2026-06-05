@@ -2053,10 +2053,10 @@ func insertHandlerTestSkillInForeignWorkspace(t *testing.T, namePrefix, content 
 	name := namePrefix + "-" + t.Name()
 	var skillID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by, origin)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5, $6)
 		RETURNING id
-	`, workspaceID, name, "fixture", content, testUserID).Scan(&skillID); err != nil {
+	`, workspaceID, name, "fixture", content, testUserID, "local:"+name).Scan(&skillID); err != nil {
 		t.Fatalf("insert foreign skill: %v", err)
 	}
 	t.Cleanup(func() {

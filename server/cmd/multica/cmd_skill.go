@@ -4,10 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -428,10 +426,11 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	var result map[string]any
+	// Import is idempotent by source URL since migration 112: the server returns
+	// the skill itself (200 for an existing same-origin reuse, 201 for a fresh
+	// import). It no longer 409s on a name clash, so there is no duplicate
+	// conflict body to special-case here — any error is a genuine failure.
 	if err := client.PostJSON(ctx, "/api/skills/import", body, &result); err != nil {
-		if handleSkillImportConflict(cmd, err) {
-			return nil
-		}
 		return fmt.Errorf("import skill: %w", err)
 	}
 
@@ -442,31 +441,6 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 
 	fmt.Printf("Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
 	return nil
-}
-
-func handleSkillImportConflict(cmd *cobra.Command, err error) bool {
-	var httpErr *cli.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict || strings.TrimSpace(httpErr.Body) == "" {
-		return false
-	}
-
-	var body map[string]any
-	if json.Unmarshal([]byte(httpErr.Body), &body) != nil {
-		return false
-	}
-	if _, ok := body["existing_skill"]; !ok {
-		return false
-	}
-
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		_ = cli.PrintJSON(os.Stdout, body)
-		return true
-	}
-
-	existing, _ := body["existing_skill"].(map[string]any)
-	fmt.Printf("Skill already exists: %s (%s)\n", strVal(existing, "name"), strVal(existing, "id"))
-	return true
 }
 
 func runSkillSearch(cmd *cobra.Command, args []string) error {

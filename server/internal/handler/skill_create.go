@@ -16,7 +16,11 @@ type skillCreateInput struct {
 	Description string
 	Content     string
 	Config      any
-	Files       []CreateSkillFileRequest
+	// Origin is the skill's identity (UNIQUE(workspace_id, origin)). Imported /
+	// template-imported skills pass the raw source URL stored in
+	// config.origin.source_url; hand-authored skills pass "local:"+name.
+	Origin string
+	Files  []CreateSkillFileRequest
 }
 
 // createSkillWithFilesInTx writes a skill plus its supporting files using the
@@ -40,6 +44,7 @@ func createSkillWithFilesInTx(ctx context.Context, qtx *db.Queries, input skillC
 		Content:     sanitizeNullBytes(input.Content),
 		Config:      config,
 		CreatedBy:   input.CreatorID,
+		Origin:      sanitizeNullBytes(input.Origin),
 	})
 	if err != nil {
 		return SkillWithFilesResponse{}, err

@@ -135,10 +135,10 @@ func insertHandlerTestSkill(t *testing.T, namePrefix, content string) string {
 	name := namePrefix + "-" + t.Name()
 	var id string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by, origin)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5, $6)
 		RETURNING id
-	`, testWorkspaceID, name, "fixture", content, testUserID).Scan(&id); err != nil {
+	`, testWorkspaceID, name, "fixture", content, testUserID, "local:"+name).Scan(&id); err != nil {
 		t.Fatalf("insert skill: %v", err)
 	}
 	t.Cleanup(func() {

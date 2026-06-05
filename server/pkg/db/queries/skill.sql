@@ -23,25 +23,29 @@ WHERE id = $1;
 SELECT * FROM skill
 WHERE id = $1 AND workspace_id = $2;
 
--- name: GetSkillByWorkspaceAndName :one
--- Used by agent-template materialization to implement find-or-create: when a
--- template references a skill by name that already exists in the workspace,
+-- name: GetSkillByWorkspaceAndOrigin :one
+-- Origin is the skill's true identity (migration 112). Used by import and
+-- agent-template materialization to implement find-or-create: same origin =>
 -- reuse the existing skill_id rather than INSERT (which would fail the
--- UNIQUE(workspace_id, name) constraint from migration 008).
-SELECT * FROM skill
-WHERE workspace_id = $1 AND name = $2;
+-- UNIQUE(workspace_id, origin) constraint).
+SELECT * FROM skill WHERE workspace_id = $1 AND origin = $2;
 
 -- name: CreateSkill :one
-INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO skill (workspace_id, name, description, content, config, created_by, origin)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: UpdateSkill :one
+-- `origin` is only ever set when renaming a hand-authored skill (origin
+-- 'local:'||name must track the name so local rename collisions still trip the
+-- UNIQUE(workspace_id, origin) constraint). Imported skills pass NULL here so
+-- their source-URL origin is preserved across a display-name rename.
 UPDATE skill SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     content = COALESCE(sqlc.narg('content'), content),
     config = COALESCE(sqlc.narg('config'), config),
+    origin = COALESCE(sqlc.narg('origin'), origin),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

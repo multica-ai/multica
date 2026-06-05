@@ -101,18 +101,6 @@ type SkillWithFilesResponse struct {
 	Files []SkillFileResponse `json:"files"`
 }
 
-type ExistingSkillIdentity struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-func writeSkillImportDuplicateConflict(w http.ResponseWriter, existing ExistingSkillIdentity) {
-	writeJSON(w, http.StatusConflict, map[string]any{
-		"error":          "a skill with this name already exists",
-		"existing_skill": existing,
-	})
-}
-
 func skillToResponse(s db.Skill) SkillResponse {
 	return SkillResponse{
 		ID:          uuidToString(s.ID),
@@ -127,18 +115,38 @@ func skillToResponse(s db.Skill) SkillResponse {
 	}
 }
 
-func (h *Handler) existingSkillIdentityByName(ctx context.Context, workspaceID pgtype.UUID, name string) (ExistingSkillIdentity, bool, error) {
-	skill, err := h.Queries.GetSkillByWorkspaceAndName(ctx, db.GetSkillByWorkspaceAndNameParams{
+// skillByWorkspaceAndOrigin looks up an existing skill by its origin (the true
+// dedup identity since migration 112). Returns ok=false on no match.
+func (h *Handler) skillByWorkspaceAndOrigin(ctx context.Context, workspaceID pgtype.UUID, origin string) (db.Skill, bool, error) {
+	skill, err := h.Queries.GetSkillByWorkspaceAndOrigin(ctx, db.GetSkillByWorkspaceAndOriginParams{
 		WorkspaceID: workspaceID,
-		Name:        name,
+		Origin:      origin,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ExistingSkillIdentity{}, false, nil
+			return db.Skill{}, false, nil
 		}
-		return ExistingSkillIdentity{}, false, err
+		return db.Skill{}, false, err
 	}
-	return ExistingSkillIdentity{ID: uuidToString(skill.ID), Name: skill.Name}, true, nil
+	return skill, true, nil
+}
+
+// skillWithFilesResponse loads a skill's files and assembles the full
+// SkillWithFilesResponse. Used when returning an already-existing skill (e.g.
+// an idempotent same-origin re-import) without going through create.
+func (h *Handler) skillWithFilesResponse(ctx context.Context, skill db.Skill) (SkillWithFilesResponse, error) {
+	files, err := h.Queries.ListSkillFiles(ctx, skill.ID)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	fileResps := make([]SkillFileResponse, len(files))
+	for i, f := range files {
+		fileResps[i] = skillFileToResponse(f)
+	}
+	return SkillWithFilesResponse{
+		SkillResponse: skillToResponse(skill),
+		Files:         fileResps,
+	}, nil
 }
 
 // decodeSkillConfig decodes a JSONB skill.config blob, defaulting to {} when
@@ -358,7 +366,11 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		Content:     req.Content,
 		Config:      req.Config,
-		Files:       req.Files,
+		// Hand-authored skills are identified by their name: two manual skills
+		// with the same name must still collide (409), so origin is derived
+		// from the name. The UNIQUE(workspace_id, origin) constraint enforces it.
+		Origin: "local:" + req.Name,
+		Files:  req.Files,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -426,7 +438,15 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		ID: parseUUID(id),
 	}
 	if req.Name != nil {
-		params.Name = pgtype.Text{String: sanitizeNullBytes(*req.Name), Valid: true}
+		newName := sanitizeNullBytes(*req.Name)
+		params.Name = pgtype.Text{String: newName, Valid: true}
+		// Hand-authored skills are identified by "local:"+name, so their origin
+		// must track a rename to keep local name collisions caught by the
+		// UNIQUE(workspace_id, origin) constraint. Imported skills keep their
+		// source-URL origin untouched across a display-name rename.
+		if strings.HasPrefix(skill.Origin, "local:") {
+			params.Origin = pgtype.Text{String: "local:" + newName, Valid: true}
+		}
 	}
 	if req.Description != nil {
 		params.Description = pgtype.Text{String: sanitizeNullBytes(*req.Description), Valid: true}
@@ -1780,6 +1800,26 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		config["origin"] = imported.origin
 	}
 
+	// `origin` is the dedup identity (migration 112). It MUST be the exact
+	// string stored in config.origin.source_url (the normalized URL the
+	// fetchers recorded), so re-importing the same URL is recognised as the
+	// same skill and reused. Importing a different URL whose frontmatter name
+	// collides with an existing skill no longer conflicts — the origin differs,
+	// so they coexist.
+	origin := normalized
+
+	// Idempotent same-URL import: if this origin already exists, return it
+	// instead of creating a duplicate or 409-ing.
+	if existing, found, findErr := h.skillByWorkspaceAndOrigin(r.Context(), workspaceUUID, origin); findErr == nil && found {
+		resp, err := h.skillWithFilesResponse(r.Context(), existing)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load existing skill: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
 		WorkspaceID: workspaceUUID,
 		CreatorID:   creatorUUID,
@@ -1787,15 +1827,22 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		Description: imported.description,
 		Content:     imported.content,
 		Config:      config,
+		Origin:      origin,
 		Files:       files,
 	})
 	if err != nil {
+		// A concurrent same-URL import can win the race between the lookup
+		// above and this INSERT, tripping UNIQUE(workspace_id, origin). Resolve
+		// the now-existing skill by origin and return it rather than 409-ing.
 		if isUniqueViolation(err) {
-			if existing, found, findErr := h.existingSkillIdentityByName(r.Context(), workspaceUUID, imported.name); findErr == nil && found {
-				writeSkillImportDuplicateConflict(w, existing)
-			} else {
-				writeError(w, http.StatusConflict, "a skill with this name already exists")
+			if existing, found, findErr := h.skillByWorkspaceAndOrigin(r.Context(), workspaceUUID, origin); findErr == nil && found {
+				existingResp, loadErr := h.skillWithFilesResponse(r.Context(), existing)
+				if loadErr == nil {
+					writeJSON(w, http.StatusOK, existingResp)
+					return
+				}
 			}
+			writeError(w, http.StatusConflict, "a skill from this source already exists")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())

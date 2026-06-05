@@ -43,11 +43,15 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	return string(out), runErr
 }
 
-func TestRunSkillImportJsonTreatsDuplicateAsStructuredResult(t *testing.T) {
+func TestRunSkillImportReturnsSkillOnSuccess(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 
+	// Since migration 112 the import endpoint is idempotent by source URL: it
+	// returns the skill itself (200 for a same-origin reuse, 201 for a fresh
+	// import) and no longer 409s with an existing_skill body. The CLI must read
+	// the skill from the success body, not the retired conflict shape.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
@@ -59,13 +63,10 @@ func TestRunSkillImportJsonTreatsDuplicateAsStructuredResult(t *testing.T) {
 			t.Fatalf("X-Workspace-ID = %q, want workspace-123", r.Header.Get("X-Workspace-ID"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
+		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": "a skill with this name already exists",
-			"existing_skill": map[string]any{
-				"id":   "skill-123",
-				"name": "review-helper",
-			},
+			"id":   "skill-123",
+			"name": "review-helper",
 		})
 	}))
 	defer srv.Close()
@@ -79,22 +80,15 @@ func TestRunSkillImportJsonTreatsDuplicateAsStructuredResult(t *testing.T) {
 		return runSkillImport(cmd, nil)
 	})
 	if err != nil {
-		t.Fatalf("runSkillImport returned error for duplicate import: %v", err)
+		t.Fatalf("runSkillImport returned error: %v", err)
 	}
 
 	var got map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode stdout JSON %q: %v", out, err)
 	}
-	if got["error"] != "a skill with this name already exists" {
-		t.Fatalf("error = %v", got["error"])
-	}
-	existing, ok := got["existing_skill"].(map[string]any)
-	if !ok {
-		t.Fatalf("existing_skill missing or wrong type: %#v", got["existing_skill"])
-	}
-	if existing["id"] != "skill-123" || existing["name"] != "review-helper" {
-		t.Fatalf("existing_skill = %#v", existing)
+	if got["id"] != "skill-123" || got["name"] != "review-helper" {
+		t.Fatalf("imported skill = %#v, want id skill-123 name review-helper", got)
 	}
 }
 

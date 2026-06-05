@@ -179,10 +179,10 @@ func seedSkill(t *testing.T, ctx context.Context) pgtype.UUID {
 	// with previous runs on the same DB.
 	name := uniqueName("scope-guard skill")
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-		VALUES ($1, $2, '', '', '{}'::jsonb, $3)
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by, origin)
+		VALUES ($1, $2, '', '', '{}'::jsonb, $3, $4)
 		RETURNING id
-	`, testWorkspaceID, name, testUserID).Scan(&s); err != nil {
+	`, testWorkspaceID, name, testUserID, "local:"+name).Scan(&s); err != nil {
 		t.Fatalf("seed skill: %v", err)
 	}
 	return parseUUID(s)

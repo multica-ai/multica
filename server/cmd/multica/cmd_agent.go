@@ -165,7 +165,7 @@ func init() {
 	// the template's instructions. When set, --description/--instructions/
 	// --custom-args/--custom-env/--runtime-config are ignored (the template
 	// provides all the agent shape); --name and --runtime-id are still required.
-	agentCreateCmd.Flags().String("from-template", "", "Template slug to seed the agent from (e.g. code-reviewer). Lists are available via GET /api/agent-templates.")
+	agentCreateCmd.Flags().String("from-template", "", "Template slug to seed the agent from. Available slugs: GET /api/agent-templates.")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")

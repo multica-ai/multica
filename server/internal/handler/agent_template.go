@@ -218,34 +218,28 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			"skill_url_count", len(tmpl.Skills),
 		)...)
 
-	// Pre-flight dedupe: each skill that already exists in the workspace
-	// by `cached_name` can be reused WITHOUT fetching. This is the big win:
-	// on the second create-from-the-same-template, fetch_count drops to 0
-	// and the whole operation completes in <100ms instead of 20+ seconds.
+	// Pre-flight dedupe: each skill whose origin (source URL) already exists in
+	// the workspace can be reused WITHOUT fetching. This is the big win: on the
+	// second create-from-the-same-template, fetch_count drops to 0 and the
+	// whole operation completes in <100ms instead of 20+ seconds.
 	//
-	// `cached_name` MUST match the upstream SKILL.md frontmatter `name`
-	// (see template authoring docs in agenttmpl/types.go). When it doesn't,
-	// the pre-flight misses and we fall back to the in-TX find-or-create
-	// below — slower (one wasted fetch) but still correct.
+	// Dedup keys on `source_url` (the skill's origin since migration 112), not
+	// `cached_name`: cached_name is now display-only and can collide with a
+	// different-source workspace skill, which would have reused the wrong one.
 	preReused := make(map[int]db.Skill, len(tmpl.Skills))
 	toFetchRefs := make([]agenttmpl.TemplateSkillRef, 0, len(tmpl.Skills))
 	toFetchOrigIdx := make([]int, 0, len(tmpl.Skills))
 	for i, ref := range tmpl.Skills {
-		if ref.CachedName == "" {
-			toFetchRefs = append(toFetchRefs, ref)
-			toFetchOrigIdx = append(toFetchOrigIdx, i)
-			continue
-		}
-		existing, err := h.Queries.GetSkillByWorkspaceAndName(r.Context(), db.GetSkillByWorkspaceAndNameParams{
+		existing, err := h.Queries.GetSkillByWorkspaceAndOrigin(r.Context(), db.GetSkillByWorkspaceAndOriginParams{
 			WorkspaceID: wsUUID,
-			Name:        ref.CachedName,
+			Origin:      ref.SourceURL,
 		})
 		if err == nil {
 			preReused[i] = existing
 			slog.Info("agent-template create: pre-reuse hit (skipped fetch)",
 				append(logger.RequestAttrs(r),
 					"index", i,
-					"cached_name", ref.CachedName,
+					"source_url", ref.SourceURL,
 					"existing_skill_id", uuidToString(existing.ID),
 				)...)
 			continue
@@ -321,20 +315,20 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		// Second-chance dedupe by ACTUAL frontmatter name. Catches the case
-		// where the template author's cached_name drifted from the upstream
-		// frontmatter `name` — pre-flight misses but the workspace still has
-		// the skill under its real name, and we want to reuse not duplicate.
-		existing, err := qtx.GetSkillByWorkspaceAndName(r.Context(), db.GetSkillByWorkspaceAndNameParams{
+		// Second-chance dedupe by origin (source URL). Catches a skill that was
+		// created concurrently between the pre-flight lookup and this tx, or
+		// that the pre-flight missed. Reuse rather than duplicate. Keys on the
+		// same origin as the pre-flight so both stages agree on identity.
+		existing, err := qtx.GetSkillByWorkspaceAndOrigin(r.Context(), db.GetSkillByWorkspaceAndOriginParams{
 			WorkspaceID: wsUUID,
-			Name:        imp.name,
+			Origin:      ref.SourceURL,
 		})
 		if err == nil {
-			slog.Info("agent-template create: reusing existing skill (frontmatter-name match, cached_name drifted)",
+			slog.Info("agent-template create: reusing existing skill (origin match)",
 				append(logger.RequestAttrs(r),
 					"index", i,
+					"source_url", ref.SourceURL,
 					"frontmatter_name", imp.name,
-					"cached_name", ref.CachedName,
 					"existing_skill_id", uuidToString(existing.ID),
 				)...)
 			allSkillIDs = append(allSkillIDs, existing.ID)
@@ -346,6 +340,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 				append(logger.RequestAttrs(r),
 					"index", i,
 					"name", imp.name,
+					"source_url", ref.SourceURL,
 					"error", err,
 				)...)
 			writeError(w, http.StatusInternalServerError, "lookup existing skill failed: "+err.Error())
@@ -393,7 +388,10 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			Description: imp.description,
 			Content:     imp.content,
 			Config:      map[string]any{"origin": origin},
-			Files:       files,
+			// Identity = source URL, matching config.origin.source_url above and
+			// the pre-flight / second-chance lookups, so a later create reuses.
+			Origin: ref.SourceURL,
+			Files:  files,
 		})
 		if err != nil {
 			// Full PG error in the log so we can tell unique-constraint from

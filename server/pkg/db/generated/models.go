@@ -558,6 +558,7 @@ type Skill struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Origin      string             `json:"origin"`
 }
 
 type SkillFile struct {
