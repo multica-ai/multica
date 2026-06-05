@@ -40,13 +40,18 @@
   },
   "leaderboard": {
     "title": "排行榜",
+    "tab_agent": "智能体排行",
+    "tab_member": "成员排行",
     "caption": "{{count}} 个智能体",
+    "caption_member": "{{count}} 位成员",
     "header_agent": "智能体",
+    "header_member": "成员",
     "header_tokens": "Token",
     "header_cost": "费用",
     "header_time": "运行时长",
     "header_tasks": "任务数",
-    "no_data": "所选时间范围内暂无智能体活动。"
+    "no_data": "所选时间范围内暂无智能体活动。",
+    "system_group": "系统"
   },
   "empty": {
     "title": "暂无消耗数据",
