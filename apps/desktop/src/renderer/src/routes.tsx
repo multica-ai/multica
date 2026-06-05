@@ -24,6 +24,8 @@ import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
+import { ChannelsPage } from "./pages/channels/channels-page";
+import { ChannelDetailPage } from "./pages/channels/channel-detail-page";
 import { SettingsPage } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
 import { Download, Server } from "lucide-react";
@@ -184,6 +186,12 @@ export const appRoutes: RouteObject[] = [
             path: "squads/:id",
             element: <SquadDetailPageView />,
             handle: { title: "Squad" },
+          },
+          { path: "channels", element: <ChannelsPage />, handle: { title: "Channels" } },
+          {
+            path: "channels/:channelId",
+            element: <ChannelDetailPage />,
+            handle: { title: "Channel" },
           },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           {

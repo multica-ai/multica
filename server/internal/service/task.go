@@ -662,6 +662,163 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	return task, nil
 }
 
+// ChannelMessageContextType marks a task as a channel-message-triggered job.
+const ChannelMessageContextType = "channel_message"
+
+// channelContextWindow is the number of recent messages pre-loaded into the
+// task context. This eliminates a round-trip CLI call inside the agent and
+// keeps the prompt focused — the agent sees exactly what it needs.
+// Keep small: each message is ~100-300 tokens; 12 messages ≈ 2 k tokens.
+const channelContextWindow = 12
+
+// ChannelMessageEntry is a single channel message serialised into the task
+// context so the agent has conversation history without an extra API call.
+type ChannelMessageEntry struct {
+	ID         string `json:"id"`
+	AuthorName string `json:"author_name"` // resolved display name
+	AuthorType string `json:"author_type"` // "user" | "agent" | "system"
+	Content    string `json:"content"`
+	CreatedAt  string `json:"created_at"` // RFC3339
+}
+
+// ChannelMessageContext is the JSONB payload for channel message tasks.
+type ChannelMessageContext struct {
+	Type        string `json:"type"`
+	WorkspaceID string `json:"workspace_id"`
+	ChannelID   string `json:"channel_id"`
+	MessageID   string `json:"message_id"`
+	Content     string `json:"content"`
+	AuthorName  string `json:"author_name"`
+	// RecentMessages holds the last channelContextWindow messages before and
+	// including the triggering message, pre-resolved to display names.
+	// Agents should use this instead of calling `multica channel messages`.
+	RecentMessages []ChannelMessageEntry `json:"recent_messages,omitempty"`
+}
+
+// EnqueueChannelMessageTask creates a queued task for an agent member of a channel
+// when a message is sent (typically a @mention). The agent reads channel context
+// and posts a reply via the CLI.
+func (s *TaskService) EnqueueChannelMessageTask(
+	ctx context.Context,
+	agentID, workspaceID pgtype.UUID,
+	channelID, messageID, content, authorName string,
+) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	// Pre-load recent channel messages so the agent has conversation context
+	// without an extra round-trip. Failures are non-fatal — the agent can
+	// still call `multica channel messages` as a fallback.
+	recentMessages := s.loadRecentChannelMessages(ctx, channelID, agentID)
+
+	payload := ChannelMessageContext{
+		Type:           ChannelMessageContextType,
+		WorkspaceID:    util.UUIDToString(workspaceID),
+		ChannelID:      channelID,
+		MessageID:      messageID,
+		Content:        content,
+		AuthorName:     authorName,
+		RecentMessages: recentMessages,
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal channel message context: %w", err)
+	}
+
+	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+		AgentID:   agentID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create channel message task: %w", err)
+	}
+
+	slog.Info("channel message task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agent_id", util.UUIDToString(agentID),
+		"channel_id", channelID,
+		"message_id", messageID,
+	)
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+// loadRecentChannelMessages fetches the last channelContextWindow messages for a
+// channel and resolves each author's display name. Returns an empty slice on any
+// error (non-fatal: the agent can fall back to `multica channel messages`).
+//
+// The receiving agent's own ID is passed so we can label its own past messages
+// as "you (previously)" — helping the agent avoid repeating itself.
+func (s *TaskService) loadRecentChannelMessages(
+	ctx context.Context,
+	channelID string,
+	receivingAgentID pgtype.UUID,
+) []ChannelMessageEntry {
+	msgs, err := s.Queries.ListChannelMessages(ctx, db.ListChannelMessagesParams{
+		ChannelID: util.MustParseUUID(channelID),
+		Limit:     channelContextWindow,
+		Offset:    0,
+	})
+	if err != nil {
+		slog.Warn("channel context: failed to load recent messages", "channel_id", channelID, "error", err)
+		return nil
+	}
+
+	// Name-resolution cache: avoids redundant DB queries for the same author.
+	nameCache := make(map[string]string, 4)
+	resolveAuthorName := func(authorType, authorID string) string {
+		if cached, ok := nameCache[authorID]; ok {
+			return cached
+		}
+		var name string
+		switch authorType {
+		case "agent":
+			if a, err := s.Queries.GetAgent(ctx, util.MustParseUUID(authorID)); err == nil {
+				if a.ID == receivingAgentID {
+					name = a.Name + " (you, previously)"
+				} else {
+					name = a.Name
+				}
+			}
+		case "user", "member":
+			if u, err := s.Queries.GetUser(ctx, util.MustParseUUID(authorID)); err == nil {
+				name = u.Name
+			}
+		case "system":
+			name = "System"
+		}
+		if name == "" {
+			name = authorType
+		}
+		nameCache[authorID] = name
+		return name
+	}
+
+	entries := make([]ChannelMessageEntry, 0, len(msgs))
+	for _, m := range msgs {
+		authorID := util.UUIDToString(m.AuthorID)
+		entries = append(entries, ChannelMessageEntry{
+			ID:         util.UUIDToString(m.ID),
+			AuthorName: resolveAuthorName(m.AuthorType, authorID),
+			AuthorType: m.AuthorType,
+			Content:    m.Content,
+			CreatedAt:  m.CreatedAt.Time.UTC().Format(time.RFC3339),
+		})
+	}
+	return entries
+}
+
 // ErrChatTaskAgentArchived signals that EnqueueChatTask refused to
 // queue work because the destination agent has been archived. This
 // is a productizable state — surface it to the user as "this agent
@@ -1888,6 +2045,10 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
 	}
+	// channel_id lets the channel view update its pending-task status to "running".
+	if cm, ok := s.parseChannelMessageContext(task); ok && cm.ChannelID != "" {
+		payload["channel_id"] = cm.ChannelID
+	}
 
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
@@ -1915,6 +2076,11 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 	}
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
+	}
+	// channel_id lets the channel view track in-flight tasks in real-time
+	// (live timeline, streaming tool calls) the same way chat uses chat_session_id.
+	if cm, ok := s.parseChannelMessageContext(task); ok && cm.ChannelID != "" {
+		payload["channel_id"] = cm.ChannelID
 	}
 	s.Bus.Publish(events.Event{
 		Type:        eventType,
@@ -1954,6 +2120,10 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	// broadcasts, which is why quick-create tasks appeared stuck queued.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return qc.WorkspaceID
+	}
+	// Channel message tasks also carry workspace in context JSONB.
+	if cm, ok := s.parseChannelMessageContext(task); ok {
+		return cm.WorkspaceID
 	}
 	return ""
 }
@@ -2146,6 +2316,33 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 		return QuickCreateContext{}, false
 	}
 	return qc, true
+}
+
+// ParseChannelMessageContextPublic is the exported version of
+// parseChannelMessageContext, used by handlers that need the channel context.
+func (s *TaskService) ParseChannelMessageContextPublic(task db.AgentTaskQueue) (ChannelMessageContext, bool) {
+	return s.parseChannelMessageContext(task)
+}
+
+// parseChannelMessageContext returns the channel-message payload if the
+// task's context JSONB contains type == "channel_message"; otherwise the
+// bool is false. Same filter as parseQuickCreateContext: issue/chat/autopilot
+// tasks are never channel tasks.
+func (s *TaskService) parseChannelMessageContext(task db.AgentTaskQueue) (ChannelMessageContext, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return ChannelMessageContext{}, false
+	}
+	if len(task.Context) == 0 {
+		return ChannelMessageContext{}, false
+	}
+	var cm ChannelMessageContext
+	if err := json.Unmarshal(task.Context, &cm); err != nil {
+		return ChannelMessageContext{}, false
+	}
+	if cm.Type != ChannelMessageContextType {
+		return ChannelMessageContext{}, false
+	}
+	return cm, true
 }
 
 // notifyQuickCreateCompleted writes a success inbox notification to the

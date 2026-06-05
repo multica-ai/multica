@@ -1,0 +1,47 @@
+{
+  "create": {
+    "title": "Create channel",
+    "name_label": "Channel name",
+    "name_placeholder": "e.g. general, product-discussion",
+    "description_label": "Description (optional)",
+    "description_placeholder": "This channel is for...",
+    "type_label": "Type",
+    "type_public": "Public - visible to all members",
+    "type_private": "Private - invited members only",
+    "cancel": "Cancel",
+    "create": "Create",
+    "creating": "Creating..."
+  },
+  "list": {
+    "title": "Channels",
+    "empty": "No channels yet",
+    "create_first": "Create the first channel",
+    "join": "Join"
+  },
+  "members": {
+    "manage_title": "Manage members",
+    "current_count": "Current members ({{count}})",
+    "empty": "No members yet",
+    "user_badge": "User",
+    "agent_badge": "Agent",
+    "remove": "Remove",
+    "add_users": "Add users",
+    "add_agents": "Add agents",
+    "invite": "Invite",
+    "done": "Done"
+  },
+  "composer": {
+    "mention_members": "Mention members",
+    "placeholder": "Type a message... (Ctrl+Enter to send, @ to mention members)",
+    "send": "Send"
+  },
+  "messages": {
+    "steps": "{{count}} steps",
+    "status_queued": "Queued...",
+    "status_running": "Thinking...",
+    "status_dispatched": "Processing...",
+    "converted": "Converted to issue",
+    "loading": "Loading...",
+    "empty": "No messages yet. Send the first message to start the discussion."
+  }
+}

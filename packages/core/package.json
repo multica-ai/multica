@@ -45,6 +45,7 @@
     "./notification-preferences/queries": "./notification-preferences/queries.ts",
     "./notification-preferences/mutations": "./notification-preferences/mutations.ts",
     "./chat": "./chat/index.ts",
+    "./channels": "./channels/index.ts",
     "./chat/queries": "./chat/queries.ts",
     "./chat/mutations": "./chat/mutations.ts",
     "./runtimes": "./runtimes/index.ts",

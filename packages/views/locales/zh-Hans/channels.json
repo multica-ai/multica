@@ -1,0 +1,47 @@
+{
+  "create": {
+    "title": "创建频道",
+    "name_label": "频道名称",
+    "name_placeholder": "如：general、产品讨论",
+    "description_label": "描述（可选）",
+    "description_placeholder": "这个频道是用来...",
+    "type_label": "类型",
+    "type_public": "公开 - 所有成员可见",
+    "type_private": "私有 - 仅受邀成员可见",
+    "cancel": "取消",
+    "create": "创建",
+    "creating": "创建中..."
+  },
+  "list": {
+    "title": "频道",
+    "empty": "还没有频道",
+    "create_first": "创建第一个频道",
+    "join": "加入"
+  },
+  "members": {
+    "manage_title": "管理成员",
+    "current_count": "当前成员 ({{count}})",
+    "empty": "暂无成员",
+    "user_badge": "用户",
+    "agent_badge": "Agent",
+    "remove": "移除",
+    "add_users": "添加用户",
+    "add_agents": "添加 Agent",
+    "invite": "邀请",
+    "done": "完成"
+  },
+  "composer": {
+    "mention_members": "提及成员",
+    "placeholder": "输入消息... (Ctrl+Enter 发送, @ 提及成员)",
+    "send": "发送"
+  },
+  "messages": {
+    "steps": "{{count}} steps",
+    "status_queued": "排队中...",
+    "status_running": "思考中...",
+    "status_dispatched": "处理中...",
+    "converted": "已转为 Issue",
+    "loading": "加载中...",
+    "empty": "暂无消息，发送第一条消息开始讨论。"
+  }
+}

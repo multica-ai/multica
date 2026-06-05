@@ -1,0 +1,47 @@
+{
+  "create": {
+    "title": "채널 만들기",
+    "name_label": "채널 이름",
+    "name_placeholder": "예: general, product-discussion",
+    "description_label": "설명 (선택 사항)",
+    "description_placeholder": "이 채널은...",
+    "type_label": "유형",
+    "type_public": "공개 - 모든 멤버에게 표시",
+    "type_private": "비공개 - 초대된 멤버만",
+    "cancel": "취소",
+    "create": "만들기",
+    "creating": "만드는 중..."
+  },
+  "list": {
+    "title": "채널",
+    "empty": "아직 채널이 없습니다",
+    "create_first": "첫 채널 만들기",
+    "join": "참여"
+  },
+  "members": {
+    "manage_title": "멤버 관리",
+    "current_count": "현재 멤버 ({{count}})",
+    "empty": "아직 멤버가 없습니다",
+    "user_badge": "사용자",
+    "agent_badge": "Agent",
+    "remove": "제거",
+    "add_users": "사용자 추가",
+    "add_agents": "Agent 추가",
+    "invite": "초대",
+    "done": "완료"
+  },
+  "composer": {
+    "mention_members": "멤버 멘션",
+    "placeholder": "메시지를 입력하세요... (Ctrl+Enter로 전송, @로 멤버 멘션)",
+    "send": "전송"
+  },
+  "messages": {
+    "steps": "{{count}} steps",
+    "status_queued": "대기 중...",
+    "status_running": "생각 중...",
+    "status_dispatched": "처리 중...",
+    "converted": "Issue로 전환됨",
+    "loading": "불러오는 중...",
+    "empty": "아직 메시지가 없습니다. 첫 메시지를 보내 토론을 시작하세요."
+  }
+}

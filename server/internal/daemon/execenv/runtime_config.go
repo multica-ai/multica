@@ -578,6 +578,27 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		}
 		b.WriteString("- Complete the autopilot instructions directly\n")
 		b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
+	} else if ctx.ChannelMessageID != "" {
+		// Channel message task: respond to a message in a channel.
+		b.WriteString("**This task was triggered by a channel message.** There is NO issue to update. Your job is to read the channel context and reply.\n\n")
+		fmt.Fprintf(&b, "- Channel ID: `%s`\n", ctx.ChannelID)
+		fmt.Fprintf(&b, "- Triggering message ID: `%s`\n\n", ctx.ChannelMessageID)
+		if ctx.ChannelContent != "" {
+			authorLabel := "A user"
+			if ctx.ChannelAuthorName != "" {
+				authorLabel = ctx.ChannelAuthorName
+			}
+			fmt.Fprintf(&b, "The message you must respond to (from %s):\n\n> %s\n\n", authorLabel, ctx.ChannelContent)
+		}
+		b.WriteString("Workflow:\n\n")
+		fmt.Fprintf(&b, "1. Read recent channel context: `multica channel messages %s --limit 20 --output json`\n", ctx.ChannelID)
+		b.WriteString("2. Understand the conversation and the request directed at you.\n")
+		b.WriteString("3. Compose a helpful, concise response.\n")
+		fmt.Fprintf(&b, "4. **Post your reply — this step is mandatory**: `multica channel send %s --content \"<your response>\"`\n\n", ctx.ChannelID)
+		b.WriteString("Hard rules:\n\n")
+		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` — there is no issue for this task.\n")
+		b.WriteString("- You MAY @mention another agent in your reply if you need their input or expertise to continue the discussion. Only do this when you have a specific question or need for them — do NOT @mention just to be polite or acknowledge.\n")
+		b.WriteString("- If you have nothing meaningful to add, exit without sending.\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")

@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop podman-build podman-up podman-down podman-logs podman-migrate podman-ps podman-deploy podman-deploy-web
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -27,7 +27,7 @@ export
 
 MULTICA_ARGS ?= $(ARGS)
 
-COMPOSE := docker compose
+COMPOSE := podman compose
 
 define REQUIRE_ENV
 	@if [ ! -f "$(ENV_FILE)" ]; then \
@@ -66,15 +66,15 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 		echo "==> Generated random JWT_SECRET"; \
 	fi
 	@echo "==> Pulling official Multica images..."
-	@if ! docker compose -f docker-compose.selfhost.yml pull; then \
+	@if ! $(COMPOSE) -f docker-compose.selfhost.yml pull; then \
 		echo ""; \
 		echo "Official images for tag '$${MULTICA_IMAGE_TAG:-latest}' are not published yet."; \
 		echo "If this is before the first GHCR release, build from the current checkout:"; \
 		echo "  make selfhost-build"; \
 		exit 1; \
 	fi
-	@echo "==> Starting Multica via Docker Compose..."
-	docker compose -f docker-compose.selfhost.yml up -d
+	@echo "==> Starting Multica via $(COMPOSE)..."
+	$(COMPOSE) -f docker-compose.selfhost.yml up -d
 	@echo "==> Waiting for backend to be ready..."
 	@for i in $$(seq 1 30); do \
 		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
@@ -100,7 +100,7 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 	else \
 		echo ""; \
 		echo "Services are still starting. Check logs:"; \
-		echo "  docker compose -f docker-compose.selfhost.yml logs"; \
+		echo "  $(COMPOSE) -f docker-compose.selfhost.yml logs"; \
 	fi
 
 selfhost-build: ## Build backend/web from the current checkout and start the self-hosted stack
@@ -116,7 +116,7 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 		echo "==> Generated random JWT_SECRET"; \
 	fi
 	@echo "==> Building Multica from the current checkout..."
-	docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
+	$(COMPOSE) -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 	@echo "==> Waiting for backend to be ready..."
 	@for i in $$(seq 1 30); do \
 		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
@@ -142,13 +142,96 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 	else \
 		echo ""; \
 		echo "Services are still starting. Check logs:"; \
-		echo "  docker compose -f docker-compose.selfhost.yml logs"; \
+		echo "  $(COMPOSE) -f docker-compose.selfhost.yml logs"; \
 	fi
 
 selfhost-stop: ## Stop the self-hosted Docker Compose stack
 	@echo "==> Stopping Multica services..."
-	docker compose -f docker-compose.selfhost.yml down
+	$(COMPOSE) -f docker-compose.selfhost.yml down
 	@echo "✓ All services stopped."
+
+# ---------- Podman local dev (pre-built images) ----------
+##@ Podman
+
+PODMAN_COMPOSE := podman compose -f docker-compose.podman.yml
+
+podman-build: ## Build backend and frontend images from current checkout for podman
+	@echo "==> Building multica-backend:latest ..."
+	podman build -t multica-backend:latest -f Dockerfile .
+	@echo "==> Building multica-frontend:latest ..."
+	podman build -t multica-frontend:latest -f Dockerfile.web \
+		--build-arg REMOTE_API_URL=http://host.containers.internal:$${PORT:-18600} \
+		--build-arg NEXT_PUBLIC_WS_URL=$${NEXT_PUBLIC_WS_URL:-} \
+		--build-arg NEXT_PUBLIC_APP_VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
+		.
+	@echo "✓ Images built."
+
+podman-up: ## Start postgres + backend + frontend via podman (uses .env)
+	@[ -f .env ] || (echo "Missing .env — copy .env.example first"; exit 1)
+	@echo "==> Starting Multica via podman compose..."
+	$(PODMAN_COMPOSE) up -d
+	@echo "==> Waiting for backend at localhost:$${PORT:-18600}..."
+	@for i in $$(seq 1 30); do \
+		if curl -sf http://localhost:$${PORT:-18600}/health > /dev/null 2>&1; then break; fi; \
+		sleep 2; \
+	done
+	@if curl -sf http://localhost:$${PORT:-18600}/health > /dev/null 2>&1; then \
+		echo ""; \
+		echo "✓ Multica is running!"; \
+		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-18601}"; \
+		echo "  Backend:  http://localhost:$${PORT:-18600}"; \
+		echo ""; \
+	else \
+		echo "Services still starting — check logs:"; \
+		echo "  make podman-logs"; \
+	fi
+
+podman-down: ## Stop all podman Multica containers
+	$(PODMAN_COMPOSE) down
+	@echo "✓ Multica containers stopped."
+
+podman-logs: ## Tail logs from all podman Multica containers
+	$(PODMAN_COMPOSE) logs -f
+
+podman-migrate: ## Run database migrations inside the running backend container
+	@echo "==> Running migrations..."
+	podman exec multica-backend-1 ./migrate up
+	@echo "✓ Migrations applied."
+
+podman-ps: ## Show status of podman Multica containers
+	$(PODMAN_COMPOSE) ps
+
+podman-deploy: ## Cross-compile linux binary, copy into running backend container, run migrations, restart
+	@echo "==> Cross-compiling server, multica and migrate for linux/arm64..."
+	cd server && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server-linux ./cmd/server
+	cd server && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/migrate-linux ./cmd/migrate
+	cd server && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/multica-linux ./cmd/multica
+	@echo "==> Copying binaries and migrations into container..."
+	podman cp server/bin/server-linux multica-backend-1:/app/server
+	podman cp server/bin/migrate-linux multica-backend-1:/app/migrate
+	podman cp server/bin/multica-linux multica-backend-1:/app/multica
+	podman exec multica-backend-1 chmod +x /app/server /app/migrate /app/multica
+	@echo "==> Syncing migration files..."
+	@for f in server/migrations/*.sql; do \
+		podman cp "$$f" multica-backend-1:/app/migrations/$$(basename $$f); \
+	done
+	@echo "==> Running migrations..."
+	podman exec multica-backend-1 /app/migrate up
+	@echo "==> Restarting backend..."
+	podman restart multica-backend-1
+	@sleep 2
+	@curl -sf http://localhost:$${PORT:-18600}/health > /dev/null && echo "✓ Backend restarted and healthy." || echo "⚠ Backend not responding yet — check: make podman-logs"
+
+podman-deploy-web: ## Build frontend, copy .next into running frontend container, restart
+	@echo "==> Building frontend..."
+	pnpm --filter @multica/web build
+	@echo "==> Replacing .next in frontend container..."
+	podman exec multica-frontend-1 rm -rf /app/apps/web/.next
+	podman cp apps/web/.next multica-frontend-1:/app/apps/web/.next
+	@echo "==> Restarting frontend..."
+	podman restart multica-frontend-1
+	@sleep 5
+	@curl -sf -o /dev/null -w "%{http_code}" http://localhost:$${FRONTEND_PORT:-18601} | grep -q 200 && echo "✓ Frontend restarted and healthy." || echo "⚠ Frontend not responding yet — check: make podman-logs"
 
 # ---------- One-click commands ----------
 ##@ One-click
@@ -164,18 +247,43 @@ setup: ## Prepare the current checkout from its env file: install deps, ensure D
 	@echo ""
 	@echo "✓ Setup complete! Run 'make start' to launch the app."
 
-start: ## Start backend and frontend for the current checkout and run migrations first
+start: ## Start backend, frontend, and daemon for the current checkout (runs migrations first)
 	$(REQUIRE_ENV)
 	@echo "Using env file: $(ENV_FILE)"
-	@echo "Backend: http://localhost:$(PORT)"
+	@echo "Backend:  http://localhost:$(PORT)"
 	@echo "Frontend: http://localhost:$(FRONTEND_PORT)"
+	@echo "Daemon:   agent runtime"
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	@echo "Building Go binaries..."
+	cd server && go build -o bin/server ./cmd/server
+	cd server && go build -o bin/multica ./cmd/multica
+	cd server && go build -o bin/migrate ./cmd/migrate
 	@echo "Running migrations..."
-	cd server && go run ./cmd/migrate up
-	@echo "Starting backend and frontend..."
-	@trap 'kill 0' EXIT; \
-		(cd server && go run ./cmd/server) & \
-		pnpm dev:web & \
+	server/bin/migrate up
+	@if [ "$${DEV_FRONTEND:-}" != "1" ]; then \
+		echo "Building frontend (production)..."; \
+		REMOTE_API_URL=http://localhost:$(PORT) pnpm --filter @multica/web build; \
+	fi
+	@echo "Starting backend, frontend, and daemon..."
+	@export REMOTE_API_URL=http://localhost:$(PORT); \
+	trap 'kill 0' EXIT; \
+		server/bin/server & \
+		if [ "$${DEV_FRONTEND:-}" = "1" ]; then \
+			pnpm dev:web & \
+		else \
+			(cd apps/web && npx next start -p $(FRONTEND_PORT)) & \
+		fi; \
+		echo "Waiting for backend..."; \
+		for i in $$(seq 1 30); do \
+			curl -sf http://localhost:$(PORT)/health > /dev/null 2>&1 && break; \
+			sleep 1; \
+		done; \
+		if curl -sf http://localhost:$(PORT)/health > /dev/null 2>&1; then \
+			echo "Starting daemon..."; \
+			server/bin/multica daemon start --foreground & \
+		else \
+			echo "⚠ Backend not ready — start daemon manually: ./server/bin/multica daemon start --foreground"; \
+		fi; \
 		wait
 
 stop: ## Stop backend and frontend processes for the current checkout

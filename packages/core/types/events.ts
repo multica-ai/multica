@@ -57,6 +57,10 @@ export type WSEventType =
   | "chat:session_read"
   | "chat:session_deleted"
   | "chat:session_updated"
+  | "channel:created"
+  | "channel:message"
+  | "channel:member_added"
+  | "channel:member_removed"
   | "project:created"
   | "project:updated"
   | "project:deleted"
@@ -217,6 +221,7 @@ export interface TaskMessagePayload {
   task_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
   seq: number;
   type: "text" | "thinking" | "tool_use" | "tool_result" | "error";
   tool?: string;
@@ -230,6 +235,7 @@ export interface TaskQueuedPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
   status: string;
 }
 
@@ -239,6 +245,7 @@ export interface TaskDispatchPayload {
   issue_id: string;
   runtime_id: string;
   chat_session_id?: string;
+  channel_id?: string;
 }
 
 export interface TaskRunningPayload {
@@ -268,6 +275,7 @@ export interface TaskCompletedPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
   status: string;
 }
 
@@ -276,6 +284,7 @@ export interface TaskFailedPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
   status: string;
 }
 
@@ -284,6 +293,7 @@ export interface TaskCancelledPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
   status: string;
 }
 
