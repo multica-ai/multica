@@ -186,6 +186,9 @@ func (h *Handler) projectStatusKeySets(ctx context.Context, workspaceID pgtype.U
 		category, _ := issuestatus.CategoryForBehavior(key)
 		add(key, category)
 	}
+	// Fork M-11: archived has no catalog row and no canonical category, so
+	// it is added explicitly — terminal like cancelled, never completed.
+	add(issuestatus.Archived, issuestatus.CategoryClosed)
 	for key, category := range custom {
 		add(key, category)
 	}

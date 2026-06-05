@@ -47,10 +47,7 @@ type IssueStatusResponse struct {
 // carry terminal behavior. Callers pass the result into indexed status
 // predicates instead of resolving the category once per issue row.
 func (h *Handler) terminalIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) ([]string, error) {
-	return issuestatus.ExpandCategories(ctx, h.Queries, workspaceID, []string{
-		issuestatus.CategoryDone,
-		issuestatus.CategoryClosed,
-	})
+	return issuestatus.ExpandTerminalCategories(ctx, h.Queries, workspaceID)
 }
 
 func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {

@@ -1259,7 +1259,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
-	case "cancelled":
+	case "cancelled", "archived":
 		reason := "issue " + issue.Status
 		updatedRun, err := s.failAutopilotRun(ctx, autopilotRunFailure{
 			ID:            run.ID,

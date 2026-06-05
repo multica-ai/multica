@@ -16,7 +16,8 @@ export type BuiltInIssueStatus =
   | "in_review"
   | "done"
   | "blocked"
-  | "cancelled";
+  | "cancelled"
+  | "archived";
 
 /**
  * A status KEY as stored on the issue: one of the 7 built-ins, or a custom key

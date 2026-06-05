@@ -29,11 +29,13 @@ func DuplicateMessage(identifier, title, status string) string {
 // resolved by merging it out of Triage. That is not expressible here because
 // Triage is not a status: the duplicate queries carry `triage_state IS NULL`
 // instead (MUL-7189 §2.6).
+// inactiveStatusKeys is the fork's M-11 widening of upstream's done+closed
+// set: it delegates to ExpandTerminalCategories so Archived counts as inactive
+// too. Archived has no issue_status catalog row, so ExpandCategories cannot
+// reach it on its own — but an archived issue is closed, and a closed issue
+// must not block a new duplicate of the same title.
 func inactiveStatusKeys(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID) ([]string, error) {
-	return issuestatus.ExpandCategories(ctx, q, workspaceID, []string{
-		issuestatus.CategoryDone,
-		issuestatus.CategoryClosed,
-	})
+	return issuestatus.ExpandTerminalCategories(ctx, q, workspaceID)
 }
 
 func LockAndFindActiveDuplicate(

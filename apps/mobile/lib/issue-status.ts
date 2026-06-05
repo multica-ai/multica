@@ -81,6 +81,11 @@ export const STATUS_LABEL: Record<BuiltInIssueStatus, string> = {
   done: "issues:status.done",
   blocked: "issues:status.blocked",
   cancelled: "issues:status.cancelled",
+  // Archived is the fork's M-11 terminal status. It falls back to the Done
+  // string rather than gaining a translation of its own: the mobile client
+  // has no locale bundle for it and a hardcoded label would read as English
+  // in every language, which is the exact failure the i18n labels prevent.
+  archived: "issues:status.done",
 };
 
 export const CATEGORY_LABEL: Record<IssueStatusCategory, string> = {
