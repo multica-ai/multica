@@ -65,7 +65,7 @@ type Task struct {
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string          `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
-	Plugin                  *execenv.AgentPlugin `json:"plugin,omitempty"`                    // plugin bound to the agent; nil = no plugin
+	Plugin                  *execenv.AgentPlugin `json:"plugin,omitempty"`                    // DEPRECATED: use Agent.Plugin instead; kept for JSON compat
 	// RequestingUserName + RequestingUserProfileDescription describe the human
 	// the agent is working on behalf of. v1 sources them from the runtime
 	// owner (the user who registered the daemon). Empty when the runtime has

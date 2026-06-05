@@ -19,12 +19,12 @@ type AgentPlugin struct {
 
 // PluginInstall describes how to install a plugin from a marketplace.
 type PluginInstall struct {
-	Method              string `json:"method"`                // e.g. "plugin_marketplace"
-	Marketplace         string `json:"marketplace"`           // e.g. "anthropics/claude-plugins-official"
-	PluginName          string `json:"plugin_name"`           // e.g. "superpowers"
-	MarketplaceName     string `json:"marketplace_name"`      // e.g. "claude-plugins-official"
-	MarketplaceRepo     string `json:"marketplace_repo"`      // e.g. "anthropics/claude-plugins-official"
-	MarketplaceVerified bool   `json:"marketplace_verified"`  // e.g. true
+	Method              string `json:"method"`               // e.g. "plugin_marketplace"
+	Marketplace         string `json:"marketplace"`          // e.g. "anthropics/claude-plugins-official"
+	PluginName          string `json:"plugin_name"`          // e.g. "superpowers"
+	MarketplaceName     string `json:"marketplace_name"`     // e.g. "claude-plugins-official"
+	MarketplaceRepo     string `json:"marketplace_repo"`     // e.g. "anthropics/claude-plugins-official"
+	MarketplaceVerified bool   `json:"marketplace_verified"` // e.g. true
 }
 
 // setupPlugins is a provider-aware plugin installer dispatcher.
@@ -59,6 +59,8 @@ func setupCSCPlugins(ctx context.Context, cscBin string, workDir string, plugin 
 	install := plugin.Install
 
 	// Step 1: marketplace add (non-fatal — may already be registered)
+	install.MarketplaceName = "costrict-plugins"
+	install.MarketplaceRepo = "https://github.com/costrict-plugins-repo/marketplace.git"
 	if err := runCSCCmd(ctx, cscBin, workDir, "plugin", "marketplace", "add", install.MarketplaceRepo); err != nil {
 		logger.Error("execenv: csc plugin marketplace add failed", "repo", install.MarketplaceRepo, "error", err)
 	}

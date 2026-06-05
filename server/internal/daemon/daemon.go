@@ -2228,11 +2228,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentID string
 	var skills []SkillData
 	var instructions string
+	var plugin *execenv.AgentPlugin
 	if task.Agent != nil {
 		agentID = task.Agent.ID
 		agentName = task.Agent.Name
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
+		plugin = task.Agent.Plugin
 	}
 
 	// Prepare isolated execution environment.
@@ -2258,7 +2260,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:       task.QuickCreatePrompt,
 		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
-		Plugin:                              task.Plugin,
+		Plugin:                              plugin,
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 	}
