@@ -1,0 +1,178 @@
+---
+title: "Multica v1.3.0"
+description: "157 release bullets: 68 new, 57 fixed, 12 improved, plus 20 more."
+date: 2026-06-05
+---
+
+**Release summary:** 157 release bullets: 68 new, 57 fixed, 12 improved, plus 20 more.
+
+Changes since [v1.2.0](https://github.com/firtal-group/firtal-cerebro/compare/v1.2.0...v1.3.0) — bump: **minor**
+
+## New
+
+- Top-sheet context preview from breadcrumb title (TECH-2969) [#934](https://github.com/firtal-group/firtal-cerebro/pull/934)
+- Firtal_registry allowlist as right-hand sheet + row counter [#935](https://github.com/firtal-group/firtal-cerebro/pull/935)
+- Split agent-unmentioned comments onto their own routing key (TECH-2961) [#931](https://github.com/firtal-group/firtal-cerebro/pull/931)
+- Personal focus list (TECH-2947) [#923](https://github.com/firtal-group/firtal-cerebro/pull/923)
+- Firtal_registry Konfigurer affordance on all Tools surfaces [#928](https://github.com/firtal-group/firtal-cerebro/pull/928)
+- Cost on mobile + "cost" label prefix [#922](https://github.com/firtal-group/firtal-cerebro/pull/922)
+- Confirm before starting a foreign private agent (FIR-32) [#920](https://github.com/firtal-group/firtal-cerebro/pull/920)
+- Accumulated session-cost chip at top of inbox chat [#919](https://github.com/firtal-group/firtal-cerebro/pull/919)
+- Auto-switch to manual when agent CLI is too old [#914](https://github.com/firtal-group/firtal-cerebro/pull/914)
+- Per-reply cost badge in the message footer (FIR-31) [#907](https://github.com/firtal-group/firtal-cerebro/pull/907)
+- Create issue from message + fix hover-gap bug [#906](https://github.com/firtal-group/firtal-cerebro/pull/906)
+- Edit channel modal — name + description in one go (FIR-2660) [#886](https://github.com/firtal-group/firtal-cerebro/pull/886)
+- One-click "Add everyone" in new-channel flow (FIR-2660) [#898](https://github.com/firtal-group/firtal-cerebro/pull/898)
+- Restrict channel creation to owners/admins (FIR-2660) [#884](https://github.com/firtal-group/firtal-cerebro/pull/884)
+- Gate Projects sidebar entry behind cerebro_projects flag (TECH-2880) [#885](https://github.com/firtal-group/firtal-cerebro/pull/885)
+- Add Firtal portal top bar to layout
+- Skill ownership UI — panels, version history, change-request queue, fork (FIR-2629)
+- Add PCM stream player ([JEH-741](/search?q=JEH-741)) [#422](https://github.com/firtal-group/firtal-cerebro/pull/422)
+- /version endpoint exposing deployed commit SHA ([JEH-1761](/search?q=JEH-1761)) [#448](https://github.com/firtal-group/firtal-cerebro/pull/448)
+- Replace firtal_bq_query with firtal_registry tool (FIR-11)
+- Workspace standard model + workspace avatar migration (FIR-2800)
+- Manual sprint-sweep trigger endpoint (FIR-2699) [#844](https://github.com/firtal-group/firtal-cerebro/pull/844)
+- Per-tool-call timeout to stop 2h hangs on poll/frozen calls [#771](https://github.com/firtal-group/firtal-cerebro/pull/771)
+- Headless daemon image for Sliplane (FIR-2369) [#662](https://github.com/firtal-group/firtal-cerebro/pull/662)
+- Add CTR meta proposal supabase schema (FIR-1946) [#660](https://github.com/firtal-group/firtal-cerebro/pull/660)
+- Nightly auto-deploy after Tine approval (FIR-2217) [#608](https://github.com/firtal-group/firtal-cerebro/pull/608)
+- Migration down — drop avatar_url from workspace table (FIR-2580)
+- Migration — add avatar_url to workspace table (FIR-2580)
+- Workspace logo med upload, AI-generering og dynamisk favicon/dock-ikon (FIR-2580)
+- Send issue / parent-issue / project titles in trace_meta (FIR-2763 M1) [#862](https://github.com/firtal-group/firtal-cerebro/pull/862)
+- Annullér alle opgaver på agentens egen side (FIR-2714)
+- Gate comment-target guard with cerebro feature flag (FIR-2674) [#846](https://github.com/firtal-group/firtal-cerebro/pull/846)
+- Configurable agent-trigger permissions + approval comment flow (FIR-2409)
+- Add Pinned view folder (FIR-2653)
+- Wire issue→sprint picker into the issue sidebar (FIR-2666) [#840](https://github.com/firtal-group/firtal-cerebro/pull/840)
+- Set repo default access only on add; show + link to Permissions otherwise (FIR-2505) [#842](https://github.com/firtal-group/firtal-cerebro/pull/842)
+- Retry action + pause reason in agent runs/list (FIR-2592) [#838](https://github.com/firtal-group/firtal-cerebro/pull/838)
+- Comment reminders — own menu + native time picker (FIR-2644) [#815](https://github.com/firtal-group/firtal-cerebro/pull/815)
+- Guard against agent comments with no target (FIR-2674) [#824](https://github.com/firtal-group/firtal-cerebro/pull/824)
+- Project sprint feature behind cerebro_sprints flag (FIR-2666) [#825](https://github.com/firtal-group/firtal-cerebro/pull/825)
+- Self-healing auto-membership + default-group placement (FIR-2523) [#818](https://github.com/firtal-group/firtal-cerebro/pull/818)
+- Hand stalled sub-issue to squad leader instead of freezing (FIR-2687) [#819](https://github.com/firtal-group/firtal-cerebro/pull/819)
+- Render PDFs inline in Documents & attachment viewer (FIR-2661)
+- Reuse existing GITHUB_TOKEN — no dedicated sync token (FIR-2656) [#816](https://github.com/firtal-group/firtal-cerebro/pull/816)
+- Poll-based PR↔issue link endpoint (FIR-2568) [#765](https://github.com/firtal-group/firtal-cerebro/pull/765)
+- Gate local runtime creation via the tool-policy chain (FIR-2672) [#812](https://github.com/firtal-group/firtal-cerebro/pull/812)
+- Skill governance tools + propose-over-edit norm (FIR-2655) [#803](https://github.com/firtal-group/firtal-cerebro/pull/803)
+- Nightly sync of approved skills to firtal-skills archive [#806](https://github.com/firtal-group/firtal-cerebro/pull/806)
+- "Remind me" in shared comment menu — web + desktop (FIR-2643)
+- Comment-reminder backend foundation (FIR-2641) [#799](https://github.com/firtal-group/firtal-cerebro/pull/799)
+- Close ownership-flow gaps — inbox + session link + version bump (FIR-2627, FIR-2306) [#789](https://github.com/firtal-group/firtal-cerebro/pull/789)
+- Owner-controlled, lockable workspace feature flags (FIR-2505) [#795](https://github.com/firtal-group/firtal-cerebro/pull/795)
+- Wake squad leader to decompose an empty orchestrate parent (FIR-2564)
+- Exhaustive platform-capability catalog in permission table (FIR-2594 phase 1)
+- Web UI for skill ownership / versions / change-requests / forks (FIR-2629) [#790](https://github.com/firtal-group/firtal-cerebro/pull/790)
+- Per-repo default access (allow/ask/deny) in Repositories settings (FIR-2505) [#755](https://github.com/firtal-group/firtal-cerebro/pull/755)
+- CLI flow for skill ownership/CR/version/fork (FIR-2628) [#787](https://github.com/firtal-group/firtal-cerebro/pull/787)
+- Standing "never busy-wait on CI/deploy" runtime-brief rule — FIR-2610 [#786](https://github.com/firtal-group/firtal-cerebro/pull/786)
+- On-behalf-of UI — sidebar + dashboard chart (MUL-2553) [#770](https://github.com/firtal-group/firtal-cerebro/pull/770)
+- Semantic + hybrid (FTS + vector) — FIR-2604 trin 2 [#778](https://github.com/firtal-group/firtal-cerebro/pull/778)
+- Grouped typeahead — Issues / Comments sections in Cmd+K (FIR-2605) [#775](https://github.com/firtal-group/firtal-cerebro/pull/775)
+- Notify+wake parent on child in_review/blocked (FIR-2601) [#772](https://github.com/firtal-group/firtal-cerebro/pull/772)
+- Stall watchdog — recover/escalate frozen waves (FIR-2564) [#776](https://github.com/firtal-group/firtal-cerebro/pull/776)
+- Postgres FTS + inline filters — FIR-2595 trin 1 [#764](https://github.com/firtal-group/firtal-cerebro/pull/764)
+- Orchestrator attribution + comment dedup + full-delivery eval (FIR-2564) [#767](https://github.com/firtal-group/firtal-cerebro/pull/767)
+- Google Workspace groups â Multica cerebro_group from BigQuery (FIR-2596) [#762](https://github.com/firtal-group/firtal-cerebro/pull/762)
+- Auto-subscribe humans when their agents create issues (MUL-2553) [#751](https://github.com/firtal-group/firtal-cerebro/pull/751)
+- Route every "ask" through one shared approval inbox (FIR-2586) [#757](https://github.com/firtal-group/firtal-cerebro/pull/757)
+
+## Fixed
+
+- Strip trailing ** from bold-wrapped URLs in linkify preprocessor [#927](https://github.com/firtal-group/firtal-cerebro/pull/927)
+- Add registerForWorkspaceRehydration to platform mock in mention-suggestion test [#930](https://github.com/firtal-group/firtal-cerebro/pull/930)
+- Preserve config_json when PUT is called without config body
+- Make Run button tappable on mobile PWA (FIR-37) [#918](https://github.com/firtal-group/firtal-cerebro/pull/918)
+- Smartere classifier + unpause for auth/quota-fejl — stop bounce-loop (FIR-2611) [#878](https://github.com/firtal-group/firtal-cerebro/pull/878)
+- Force body padding-top to 0 when portal bar is off (TECH-2911) [#913](https://github.com/firtal-group/firtal-cerebro/pull/913)
+- Always overwrite Error when watchdog fires [#909](https://github.com/firtal-group/firtal-cerebro/pull/909)
+- Revert always-mounted dialog — Base UI Dialog positions incorrectly when open=false on mount
+- Restore /docs [...slug] catch-all dropped by upstream merge [#911](https://github.com/firtal-group/firtal-cerebro/pull/911)
+- Tighten inbox swipe-to-archive threshold and add hold-to-commit [#887](https://github.com/firtal-group/firtal-cerebro/pull/887)
+- Constrain SidebarProvider height when portal bar active (TECH-2911) [#905](https://github.com/firtal-group/firtal-cerebro/pull/905)
+- Shift sidebar below Firtal portal bar (TECH-2903 hotfix 2) [#904](https://github.com/firtal-group/firtal-cerebro/pull/904)
+- Chown upload volume at runtime + drop to app user (TECH-2905) [#902](https://github.com/firtal-group/firtal-cerebro/pull/902)
+- Reserve 48px for Firtal portal bar + gate behind feature flag (TECH-2903) [#901](https://github.com/firtal-group/firtal-cerebro/pull/901)
+- Drop dup formatPauseReason + honor skill owner over creator (unblock CI) [#899](https://github.com/firtal-group/firtal-cerebro/pull/899)
+- Drop next force-include that flattened next and broke standalone boot (FIR-2823)
+- Pin @swc/helpers in standalone trace so Sliplane prod boots (FIR-2823)
+- Restore .next tracer sources + pin next in outputFileTracingIncludes (FIR-2823) [#879](https://github.com/firtal-group/firtal-cerebro/pull/879)
+- Group create_agent capability is the gate (MUL-2443) [#877](https://github.com/firtal-group/firtal-cerebro/pull/877)
+- Add generate-logo route to permguard inventory — FIR-2580
+- Scope mobile inbox push toggle [#466](https://github.com/firtal-group/firtal-cerebro/pull/466)
+- Bottom-align skill search to the input (FIR-2637) [#793](https://github.com/firtal-group/firtal-cerebro/pull/793)
+- Make backend + web images buildable (cerebro fork) [#617](https://github.com/firtal-group/firtal-cerebro/pull/617)
+- Exclude next build outputs from tracing [#599](https://github.com/firtal-group/firtal-cerebro/pull/599)
+- Commit friday release docs notes [#591](https://github.com/firtal-group/firtal-cerebro/pull/591)
+- Record account tokens from task usage ([JEH-1365](/search?q=JEH-1365)) [#479](https://github.com/firtal-group/firtal-cerebro/pull/479)
+- Add gpt-5.5 to pricing table (FIR-2776)
+- Add avatar_url to UpdateWorkspace SQL query and params — FIR-2580
+- Add AvatarUrl to upstream Workspace struct — FIR-2580
+- Soft-validate work_session_id so CLI propose works (FIR-2753) [#871](https://github.com/firtal-group/firtal-cerebro/pull/871)
+- Add CEREBRO-PATCH markers to cost handler files
+- Brug lokale fonts i build [#855](https://github.com/firtal-group/firtal-cerebro/pull/855)
+- Retry Next.js build once after transient failure [#858](https://github.com/firtal-group/firtal-cerebro/pull/858)
+- Fjern gruppesync fra login (FIR-2724)
+- English-only UI + wider editor modal (FIR-1550) [#843](https://github.com/firtal-group/firtal-cerebro/pull/843)
+- Respect cerebro_sprints flag + set recurring-issue creator (FIR-2666, FIR-2699) [#839](https://github.com/firtal-group/firtal-cerebro/pull/839)
+- Don't hardcode jesperhvejsel CLAUDE_CONFIG_DIR for daemon [#834](https://github.com/firtal-group/firtal-cerebro/pull/834)
+- Don't cold-load the board issue-list when opening a message (FIR-2684 follow-up) [#832](https://github.com/firtal-group/firtal-cerebro/pull/832)
+- Classify sprint mutating routes
+- Mount setup-token routes
+- Fall back to workspace QA agent when squad has no independent verifier (FIR-2564)
+- Open a message without reloading the whole page (FIR-2684) [#821](https://github.com/firtal-group/firtal-cerebro/pull/821)
+- Widen document & attachment previews to fill space (FIR-2661)
+- Honor workspace-level override for platform-capabilities flag (FIR-2672) [#820](https://github.com/firtal-group/firtal-cerebro/pull/820)
+- Use independent squad member as verifier when leader built the work [#817](https://github.com/firtal-group/firtal-cerebro/pull/817)
+- Advance current_version on direct skill edits (FIR-2306) [#631](https://github.com/firtal-group/firtal-cerebro/pull/631)
+- Issue-detail 3-dot Status submenu honors project model (FIR-1550) [#788](https://github.com/firtal-group/firtal-cerebro/pull/788)
+- Carry human-origin provenance on engine agent dispatches (FIR-2564)
+- Allow opt-in internal gateway URL (FIR-2556) [#738](https://github.com/firtal-group/firtal-cerebro/pull/738)
+- Mobile layout — scrollable tabs + Filtre toggle (FIR-2638) [#796](https://github.com/firtal-group/firtal-cerebro/pull/796)
+- Compounding token measurement for prune (FIR-2639) [#798](https://github.com/firtal-group/firtal-cerebro/pull/798)
+- Invalid has:<value> filter returns all rows instead of empty (FIR-2571) [#792](https://github.com/firtal-group/firtal-cerebro/pull/792)
+- Reconcile verified sub-issue to done (status = reality) (FIR-2564) [#784](https://github.com/firtal-group/firtal-cerebro/pull/784)
+- Filter-only search 500 — drop unused text params (FIR-2595) [#783](https://github.com/firtal-group/firtal-cerebro/pull/783)
+- Guard on-behalf-of filter against absent store field (MUL-2553) [#781](https://github.com/firtal-group/firtal-cerebro/pull/781)
+- Single comment thread + in_review completion + dedup/watchdog fixes — FIR-2564 [#780](https://github.com/firtal-group/firtal-cerebro/pull/780)
+- Silence BLOCKED comment for unstarted serverside timeout (FIR-2609) [#768](https://github.com/firtal-group/firtal-cerebro/pull/768)
+
+## Improved
+
+- Point at deploy skill for merge/deploy gate rules
+- Add standing rule — merge to main when CI is green
+- Single source of truth for FDR gateway URL/key (FIR-2825) [#881](https://github.com/firtal-group/firtal-cerebro/pull/881)
+- Correct environment URLs in CLAUDE.md (FIR-2823)
+- Correct environment URLs — main=staging (Sara.firtal.com), production=Multica.firtal.com (FIR-2823)
+- Align DEPLOY.md, CLAUDE.md, deploy.sh.example with production-branch gate [#860](https://github.com/firtal-group/firtal-cerebro/pull/860)
+- Fork-audit 2026-05 — 682-commit categorisation + Top-10 leverage (FIR-2173) [#576](https://github.com/firtal-group/firtal-cerebro/pull/576)
+- Reference known office/runtime IPs in runtime guide [#841](https://github.com/firtal-group/firtal-cerebro/pull/841)
+- Point runtime setup at sara-api.firtal.com (no Tailscale) [#835](https://github.com/firtal-group/firtal-cerebro/pull/835)
+- Drop comment trigram fuzzy — fixes deploymeny seq scan (FIR-2664) [#813](https://github.com/firtal-group/firtal-cerebro/pull/813)
+- Index-using trigram + opt-in hybrid (FIR-2664) [#808](https://github.com/firtal-group/firtal-cerebro/pull/808)
+- Permission-system reference + CI doc-guard (MUL-2590)
+
+## Other changes
+
+- Admin-UI til firtal_registry data source-allowlist (TECH-2925) [#910](https://github.com/firtal-group/firtal-cerebro/pull/910)
+- Mål context_tokens for snapshot og bundled (FIR-2572)
+- [JEH-1572](/search?q=JEH-1572): Tilføj sikker credential lifecycle QA-fixture [#418](https://github.com/firtal-group/firtal-cerebro/pull/418)
+- Kør backend-containeren som ikke-root bruger [#549](https://github.com/firtal-group/firtal-cerebro/pull/549)
+- FIR-2717: Vis runtime-pause på køede tasks — ikke issue-kommentar [#850](https://github.com/firtal-group/firtal-cerebro/pull/850)
+- Fix cost optimization subtab layout
+- Fix cost optimization tokens and prompt inspector [#867](https://github.com/firtal-group/firtal-cerebro/pull/867)
+- Cost optimization: mål Snapshot og Bundled i tokens
+- FIR-2765: Cost optimization — faner, analytics og prompt inspector [#863](https://github.com/firtal-group/firtal-cerebro/pull/863)
+- Cloud runtime: værktøjs-gate fra runtime-liste, ikke CSV (FIR-2761) [#864](https://github.com/firtal-group/firtal-cerebro/pull/864)
+- Chat-opgaver sender nu original_user_id til værktøjs-cascade [#861](https://github.com/firtal-group/firtal-cerebro/pull/861)
+- FIR-2732: Standard-gruppe for nye brugere [#854](https://github.com/firtal-group/firtal-cerebro/pull/854)
+- FIR-2718: Sprint feedback — settings toggle, date picker, sprint CLI [#847](https://github.com/firtal-group/firtal-cerebro/pull/847)
+- Tilfoej kundeservice-MCP til Firtal Gateway tools [#849](https://github.com/firtal-group/firtal-cerebro/pull/849)
+- Fix mobile typecheck schema drift [#769](https://github.com/firtal-group/firtal-cerebro/pull/769)
+- Synk Google-grupper ved login
+- 5 rettelser + Google-først login (FIR-2490) [#807](https://github.com/firtal-group/firtal-cerebro/pull/807)
+- Cost optimization: per-workspace holdout share + UI controls (FIR-2640) [#800](https://github.com/firtal-group/firtal-cerebro/pull/800)
+- Ret mobil-appens typecheck [#779](https://github.com/firtal-group/firtal-cerebro/pull/779)
+- Forklar runtime-pauser og retry runs
