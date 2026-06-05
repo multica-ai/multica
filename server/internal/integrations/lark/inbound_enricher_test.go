@@ -84,6 +84,9 @@ func (f *enricherFakeClient) SendMarkdownCard(context.Context, SendMarkdownCardP
 func (f *enricherFakeClient) SendBindingPromptCard(context.Context, BindingPromptParams) error {
 	return nil
 }
+func (f *enricherFakeClient) AddMessageReaction(context.Context, AddReactionParams) error {
+	return nil
+}
 func (f *enricherFakeClient) GetBotInfo(context.Context, InstallationCredentials) (BotInfo, error) {
 	return BotInfo{}, nil
 }

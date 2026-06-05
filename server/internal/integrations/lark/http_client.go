@@ -465,6 +465,39 @@ func (c *httpAPIClient) SendBindingPromptCard(ctx context.Context, p BindingProm
 	return nil
 }
 
+func (c *httpAPIClient) AddMessageReaction(ctx context.Context, p AddReactionParams) error {
+	if p.MessageID == "" {
+		return errors.New("lark http client: missing message_id")
+	}
+	if p.EmojiType == "" {
+		return errors.New("lark http client: missing emoji_type")
+	}
+	token, err := c.tenantAccessToken(ctx, p.InstallationID)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{
+		"reaction_type": map[string]string{
+			"emoji_type": p.EmojiType,
+		},
+	}
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(p.MessageID) + "/reactions"
+	if err := c.doJSON(ctx, c.resolveBaseURL(p.InstallationID), http.MethodPost, path, token, body, &resp); err != nil {
+		return fmt.Errorf("lark http client: add message reaction: %w", err)
+	}
+	if resp.Code != 0 {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(p.InstallationID.AppID)
+		}
+		return fmt.Errorf("lark http client: add message reaction: code=%d msg=%q", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
 // GetBotInfo calls /open-apis/bot/v3/info to learn the Bot's
 // per-installation `open_id` and then /open-apis/contact/v3/users/
 // {open_id}?user_id_type=open_id to resolve its stable `union_id`.

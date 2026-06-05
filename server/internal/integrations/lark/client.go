@@ -60,6 +60,11 @@ type APIClient interface {
 	// Lark's card schema.
 	SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error
 
+	// AddMessageReaction adds an emoji reaction to an existing Lark
+	// message. Used as a low-noise acknowledgement that the bot has
+	// received a user request and is working on it.
+	AddMessageReaction(ctx context.Context, p AddReactionParams) error
+
 	// GetBotInfo returns the Bot's per-installation `open_id` (the
 	// `bot_open_id` we persist on lark_installation). RegistrationService
 	// is the only caller — after the device-flow registration returns
@@ -233,6 +238,12 @@ type BindingPromptParams struct {
 	BindURL string
 }
 
+type AddReactionParams struct {
+	InstallationID InstallationCredentials
+	MessageID      string
+	EmojiType      string
+}
+
 // InstallationCredentials is the per-installation transport context the
 // client needs to authenticate against Lark on behalf of a workspace's
 // bot. Passing these explicitly to each call (rather than constructing
@@ -311,6 +322,11 @@ func (s *stubAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 
 func (s *stubAPIClient) SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error {
 	s.log.Warn("lark stub client: SendBindingPromptCard called", "open_id", string(p.OpenID))
+	return ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) AddMessageReaction(ctx context.Context, p AddReactionParams) error {
+	s.log.Warn("lark stub client: AddMessageReaction called", "message_id", p.MessageID, "emoji_type", p.EmojiType)
 	return ErrAPIClientNotConfigured
 }
 
