@@ -18,9 +18,20 @@ export function ProviderChip({ provider }: { provider: string }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
       <ProviderLogo provider={provider} className="h-3 w-3" />
-      <span className="capitalize">{provider}</span>
+      <span>{providerLabel(provider)}</span>
     </span>
   );
+}
+
+export function providerLabel(provider: string): string {
+  switch (provider) {
+    case "qoderclicn":
+      return "Qoder";
+    case "DeepSeek-TUI":
+      return "DeepSeek-TUI";
+    default:
+      return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
 }
 
 // Maps each derived 4-state runtime health to a semantic colour class.
