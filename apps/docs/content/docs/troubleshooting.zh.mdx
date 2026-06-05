@@ -213,7 +213,7 @@ SELECT jobname, schedule, database, active FROM cron.job;
 - 确认至少一个后端副本里调度器真的在跑 —— 每 30 秒应该往 `sys_cron_executions` 的 `rollup_task_usage_hourly` 加一条 SUCCESS 行。
 - 手动跑一次 SQL 验证函数本身没问题：`SELECT rollup_task_usage_hourly();` —— 刷新看板；如果数字出来了，SQL 这层 OK，问题在调度器认领路径上。
 - 如果 migration `113_sys_cron_executions` 还没应用，重启后端让 migration 跑一遍，或手动 `migrate up`。
-- 历史里有遗留的 `pg_cron` 入口也没事 —— SQL 函数里还持有 advisory lock 4246，应用调度器和 `pg_cron` 不会双写；要清掉冗余项见 [Self-host 快速上手 → 用量汇总](/self-host-quickstart#7-用量汇总无需运维操作) 里的 `cron.unschedule`。
+- 历史里有遗留的 `pg_cron` 入口也没事 —— SQL 函数里还持有 advisory lock 4246，应用调度器和 `pg_cron` 不会双写；要清掉冗余项见 [Self-host 快速上手 → 用量汇总](/self-host-quickstart#7-usage-rollup-no-operator-action-required) 里的 `cron.unschedule`。
 
 ## migration `103` 报 `refusing to drop legacy daily rollups`
 
@@ -246,7 +246,7 @@ ERROR: refusing to drop legacy daily rollups:
    ```
 
 2. 重新跑升级 —— 重启 backend 容器即可，启动时会自动跑 migration。Guard 看到新的 watermark，`103` 就会通过。
-3. 之后由进程内调度器持续推 watermark —— 见 [Self-host 快速上手 → 用量汇总](/self-host-quickstart#7-用量汇总无需运维操作)。
+3. 之后由进程内调度器持续推 watermark —— 见 [Self-host 快速上手 → 用量汇总](/self-host-quickstart#7-usage-rollup-no-operator-action-required)。
 
 `--sleep-between-slices=2s` 在有多年历史的生产库上是个比较克制的默认值。如果你只想保留最近 N 个月、可以接受永久丢掉更老的桶，用 `--months-back N --force-partial`。
 

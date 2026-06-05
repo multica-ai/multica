@@ -192,6 +192,8 @@ multica.example.com {
 
 流程和 Cloud 一样——见 [Cloud 快速上手 → 5-6 步](/cloud-quickstart#5-创建智能体)。
 
+<span id="7-usage-rollup-no-operator-action-required" />
+
 ## 7. 用量汇总（无需运维操作）
 
 <Callout type="info">
@@ -263,8 +265,8 @@ multica setup self-host \
 - **后端起不来**：看容器日志 `docker compose -f docker-compose.selfhost.yml logs backend`；常见是 `.env` 里 `DATABASE_URL` 或 `JWT_SECRET` 有问题
 - **验证码收不到**：没配任何邮件后端（Resend 和 SMTP 都没设） → 从 `docker compose logs backend` 里找 `[DEV] Verification code`
 - **WebSocket 连不上**：公网部署必须设 `FRONTEND_ORIGIN` 成你真实的前端域名；见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)
-- **Usage / Runtime 看板一直是 0**：没人调度 `rollup_task_usage_hourly()` —— 见上面的 [第 7 步](#7-用量汇总无需运维操作) 和 [故障排查 → Usage 看板一直是 0](/troubleshooting#usage-看板一直是-0)
-- **`migrate up` 报 `refusing to drop legacy daily rollups`**：`v0.3.4 → v0.3.5+` 升级路径的 fail-closed guard。从 MUL-2957 起 migrate 命令在应用 migration 103 之前会自动跑 backfill —— 见 [第 7 步](#7-用量汇总无需运维操作)
+- **Usage / Runtime 看板一直是 0**：没人调度 `rollup_task_usage_hourly()` —— 见上面的 [第 7 步](#7-usage-rollup-no-operator-action-required) 和 [故障排查 → Usage 看板一直是 0](/troubleshooting#usage-看板一直是-0)
+- **`migrate up` 报 `refusing to drop legacy daily rollups`**：`v0.3.4 → v0.3.5+` 升级路径的 fail-closed guard。从 MUL-2957 起 migrate 命令在应用 migration 103 之前会自动跑 backfill —— 见 [第 7 步](#7-usage-rollup-no-operator-action-required)
 
 ## 下一步
 
