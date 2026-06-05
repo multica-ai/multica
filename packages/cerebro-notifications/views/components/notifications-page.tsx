@@ -58,7 +58,13 @@ function matchesFilter(item: InboxItem, filter: FilterId): boolean {
     case "mentions":
       return item.type === "mentioned";
     case "comments":
-      return item.type === "new_comment";
+      // TECH-2961: every agent-comment variant counts as a comment in the filter.
+      return (
+        item.type === "new_comment" ||
+        item.type === "agent_comment_no_tag" ||
+        item.type === "agent_comment_member_tag" ||
+        item.type === "agent_comment_agent_tag"
+      );
     case "status_priority":
       return STATUS_PRIORITY_TYPES.has(item.type);
     case "reactions":

@@ -55,7 +55,11 @@
     "due_date_reminder": "截止日期提醒",
     "start_date_reminder": "开始日期提醒",
     "_comment_cerebro_patch_runtime_pause": "CEREBRO-PATCH(inbox-types-locale-zh): FIR-2611 runtime_auto_paused label",
-    "runtime_auto_paused": "运行时已暂停"
+    "runtime_auto_paused": "运行时已暂停",
+    "_comment_cerebro_patch_agent_comment_split": "CEREBRO-PATCH(inbox-types-locale-zh): TECH-2961 agent-comment-by-tag split labels",
+    "agent_comment_no_tag": "智能体评论",
+    "agent_comment_member_tag": "智能体提及了你",
+    "agent_comment_agent_tag": "智能体交接"
   },
   "labels": {
     "set_status_to": "状态设为",

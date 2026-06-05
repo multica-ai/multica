@@ -33,7 +33,11 @@ export type InboxItemType =
   | "skill_change_request_created"
   | "skill_change_request_reviewed"
   // CEREBRO-PATCH(core-types-inbox): FIR-2611 — one aggregated card per runtime/day when a runtime auto-pauses on expired login / hit quota.
-  | "runtime_auto_paused";
+  | "runtime_auto_paused"
+  // CEREBRO-PATCH(core-types-inbox): TECH-2961 — agent-authored comments are split into three routing keys based on the tag they carry, so users can mute monologues without losing hand-offs.
+  | "agent_comment_no_tag"
+  | "agent_comment_member_tag"
+  | "agent_comment_agent_tag";
 
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of
