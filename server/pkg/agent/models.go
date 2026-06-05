@@ -994,7 +994,10 @@ func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, 
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return cursorStaticModels(), nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// 15s to match the other network-backed discovery paths (pi/opencode/ACP);
+	// cursor-agent fetches its frequently-changing catalog, so a tight cap can
+	// time out and fall back to the minimal static list. See #3729.
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
 	hideAgentWindow(cmd)
