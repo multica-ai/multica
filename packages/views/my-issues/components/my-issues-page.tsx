@@ -9,7 +9,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useAuthStore } from "@multica/core/auth";
 import { useQuery } from "@tanstack/react-query";
 import { filterIssues } from "../../issues/utils/filter";
-import { BOARD_STATUSES } from "@multica/core/issues/config";
+import { ALL_STATUSES, BOARD_STATUSES } from "@multica/core/issues/config";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BoardView } from "../../issues/components/board-view";
@@ -165,10 +165,12 @@ export function MyIssuesPage() {
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
-    if (statusFilters.length > 0)
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+    if (statusFilters.length > 0) {
+      const pool = viewMode === "list" ? ALL_STATUSES : BOARD_STATUSES;
+      return pool.filter((s) => statusFilters.includes(s));
+    }
     return BOARD_STATUSES;
-  }, [statusFilters]);
+  }, [statusFilters, viewMode]);
 
   const hiddenStatuses = useMemo(() => {
     return BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s));

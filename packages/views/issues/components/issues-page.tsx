@@ -10,7 +10,7 @@ import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/co
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../utils/filter";
-import { BOARD_STATUSES } from "@multica/core/issues/config";
+import { ALL_STATUSES, BOARD_STATUSES } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
@@ -142,10 +142,12 @@ export function IssuesPage() {
   const { data: childProgressMap = EMPTY_CHILD_PROGRESS } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
-    if (statusFilters.length > 0)
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+    if (statusFilters.length > 0) {
+      const pool = viewMode === "list" ? ALL_STATUSES : BOARD_STATUSES;
+      return pool.filter((s) => statusFilters.includes(s));
+    }
     return BOARD_STATUSES;
-  }, [statusFilters]);
+  }, [statusFilters, viewMode]);
 
   const hiddenStatuses = useMemo(() => {
     return BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s));
