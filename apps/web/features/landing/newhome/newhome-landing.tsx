@@ -181,39 +181,32 @@ function NewHomeHero() {
 }
 
 // The values section turns the hero's promise into concrete, watchable proof.
-// Each value pairs a short claim (left) with a focused, auto-playing micro-demo
-// (right) built from the REAL product components. Value #1 ships first; #2–#4
-// follow.
-//
-// `overflow-x-clip` lets each demo bleed past the content column toward the
-// page edge (the reference layout) without introducing a horizontal scrollbar.
+// Each value is a self-contained bordered card: a short claim on the left, a
+// focused auto-playing micro-demo (real product components) on the right. The
+// card supplies its own border + tint (no section divider / background), and
+// its border is the boundary that clips the demo — so the demo bleeds to the
+// card edge, never past the browser edge. Value #1 ships first; #2–#4 follow.
 function ValuesSection() {
   return (
-    <section
-      id="features"
-      className="overflow-x-clip border-t border-[#0a0d12]/8 bg-[#0a0d12]/[0.015] py-20 sm:py-24"
-    >
+    <section id="features" className="py-16 sm:py-20">
       <div className="mx-auto max-w-[1200px] px-5 sm:px-6 lg:px-8">
-        <h2 className="max-w-[20ch] text-[1.9rem] font-semibold leading-[1.08] tracking-[-0.025em] sm:text-[2.3rem]">
-          From scattered agent runs to work you can actually manage.
-        </h2>
-
-        <ValueRow
+        <ValueCard
           eyebrow="Visibility"
           title="See every agent on one board"
           description="Agent work used to scatter across terminals, chats, and scripts. Now every task — queued, running, in review, done — lives on one board you can watch in real time."
         >
           <ValueBoardDemo />
-        </ValueRow>
+        </ValueCard>
       </div>
     </section>
   );
 }
 
-// Value layout: a compact text column on the left (vertically centered) and the
-// live demo on the right. The demo keeps its real, shared-zoom size and bleeds
-// off the right page edge instead of being squeezed into the column.
-function ValueRow({
+// One value card: a tinted, bordered, rounded container. Text column on the
+// left (vertically centered); the live demo on the right at its real shared
+// zoom, bleeding to the card's right edge where the card's `overflow-hidden`
+// clips it — so the border, not the browser, is the boundary.
+function ValueCard({
   eyebrow,
   title,
   description,
@@ -225,22 +218,26 @@ function ValueRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mt-12 grid items-center gap-10 lg:mt-16 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)] lg:gap-12">
-      <div>
-        <p className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-[#0a0d12]/40">
-          {eyebrow}
-        </p>
-        <h3 className="mt-2.5 text-[1.7rem] font-semibold leading-[1.1] tracking-[-0.02em]">
-          {title}
-        </h3>
-        <p className="mt-3.5 text-[15px] leading-7 text-[#0a0d12]/55">{description}</p>
-      </div>
+    <div className="overflow-hidden rounded-[24px] border border-[#0a0d12]/10 bg-[#0a0d12]/[0.025]">
+      <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
+        <div className="px-7 py-10 sm:px-10 sm:py-12 lg:py-16 lg:pr-2 lg:pl-12">
+          <p className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-[#0a0d12]/40">
+            {eyebrow}
+          </p>
+          <h3 className="mt-2.5 text-[1.7rem] font-semibold leading-[1.1] tracking-[-0.02em] lg:whitespace-nowrap">
+            {title}
+          </h3>
+          <p className="mt-3.5 text-[15px] leading-7 text-[#0a0d12]/55">{description}</p>
+        </div>
 
-      {/* Demo shrinks to its own width (w-max) and overflows the 1fr track to
-          the right; the section's overflow-x-clip trims the bleed. landing-demo
-          scopes the brand override + scrollbar hiding the product expects. */}
-      <div className="landing-demo w-max rounded-[14px] border border-[#0a0d12]/10 bg-white p-3 shadow-[0_1px_3px_rgba(10,13,18,0.04)] sm:p-4">
-        {children}
+        {/* Demo shrinks to its own width (w-max) and overflows the 1fr track to
+            the right; the card's overflow-hidden trims it at the right border.
+            landing-demo scopes the brand override + scrollbar hiding. */}
+        <div className="px-7 pb-10 sm:px-10 sm:pb-0 lg:py-10 lg:pr-0 lg:pl-0">
+          <div className="landing-demo w-max rounded-[14px] border border-[#0a0d12]/10 bg-white p-3 shadow-[0_1px_3px_rgba(10,13,18,0.04)] sm:p-4">
+            {children}
+          </div>
+        </div>
       </div>
     </div>
   );
