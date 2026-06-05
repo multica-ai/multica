@@ -63,6 +63,7 @@ type AgentResponse struct {
 	ThinkingLevel string              `json:"thinking_level"`
 	OwnerID       *string             `json:"owner_id"`
 	Skills        []AgentSkillSummary `json:"skills"`
+	Internal      bool                `json:"internal"`
 	CreatedAt     string              `json:"created_at"`
 	UpdatedAt     string              `json:"updated_at"`
 	ArchivedAt    *string             `json:"archived_at"`
@@ -128,6 +129,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		ThinkingLevel:      a.ThinkingLevel.String,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
+		Internal:           a.Internal,
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
 		ArchivedAt:         timestampToPtr(a.ArchivedAt),
@@ -584,6 +586,10 @@ type CreateAgentRequest struct {
 	// event still fires with `template=""`, which is the correct signal
 	// for "manually authored agent".
 	Template string `json:"template"`
+	// Internal marks this agent as a background worker not intended for direct
+	// human assignment. Internal agents are hidden from the default assignee
+	// picker view; they're still reachable via search. See SLE-53.
+	Internal bool `json:"internal"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -724,6 +730,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		Internal:           req.Internal,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -791,6 +798,10 @@ type UpdateAgentRequest struct {
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
 	ThinkingLevel *string `json:"thinking_level"`
+	// Internal is a bi-state flag: omitted means no change; present means
+	// set to the given bool. True marks the agent as a background worker
+	// hidden from the default assignee picker view. See SLE-53.
+	Internal *bool `json:"internal"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -1045,6 +1056,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			))
 			return
 		}
+	}
+
+	if req.Internal != nil {
+		params.Internal = pgtype.Bool{Bool: *req.Internal, Valid: true}
 	}
 
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)
