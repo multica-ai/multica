@@ -198,17 +198,23 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 
 ## GitHub 연동
 
-[GitHub PR ↔ 이슈 연동](/github-integration)에는 두 개의 변수가 필요합니다. 설정에서 Connect GitHub를 활성화하고 들어오는 webhook을 수락하려면 둘 다 설정하세요.
+[GitHub PR ↔ 이슈 연동](/github-integration)에는 두 개의 필수 변수가 필요합니다. 설정에서 Connect GitHub를 활성화하고 들어오는 webhook을 수락하려면 둘 다 설정하세요. 추가로 두 개의 선택 변수를 설정하면 설치 시점에 연결된 계정 이름을 즉시 가져올 수 있습니다.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `GITHUB_APP_SLUG` | 비어 있음 | GitHub App의 slug (`https://github.com/apps/<slug>`의 끝부분). 설정 → GitHub 설치 버튼 URL을 구성합니다 |
 | `GITHUB_WEBHOOK_SECRET` | 비어 있음 | GitHub App에 설정한 Webhook secret. 모든 `pull_request` / `installation` delivery의 HMAC-SHA256 검증에 사용되며, setup 콜백 state token의 HMAC 키로도 사용됩니다 |
+| `GITHUB_APP_ID` | 비어 있음 | 선택. App 설정 페이지에 표시되는 숫자 App ID. `GITHUB_APP_PRIVATE_KEY`와 함께 설정하면 setup 콜백이 설치 시점에 GitHub에서 연결된 계정 이름을 가져올 수 있습니다 |
+| `GITHUB_APP_PRIVATE_KEY` | 비어 있음 | 선택. App RSA 비공개 키의 전체 PEM 블록 (`-----BEGIN/END-----` 줄 포함, 줄바꿈 유지). GitHub의 App 인증 REST 호출에 필요한 단명 JWT를 발급하는 데 사용됩니다 |
 
-**둘 중 하나라도 설정하지 않았을 때의 동작:**
+**필수 변수 중 하나라도 설정하지 않았을 때의 동작:**
 
 - 설정 → GitHub의 `Connect GitHub`가 **비활성화**되고 admin에게 "not configured" 힌트를 표시합니다.
 - `/api/webhooks/github` 엔드포인트는 **`503 github webhooks not configured`**를 반환합니다 — Multica는 모든 서명을 유효한 것으로 취급하기보다, secret 없이는 이벤트 처리를 거부합니다.
+
+**선택 `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY`가 설정되지 않았을 때의 동작:**
+
+- 설치 직후 연결 카드에 잠시 `Connected to unknown`이 표시됩니다. GitHub의 `installation.created` 웹훅이 도착하면(보통 몇 초 이내) Multica가 행을 실제 조직/사용자 이름으로 갱신하고 실시간 브로드캐스트를 보내, 열려 있는 Settings → GitHub 탭이 수동 새로고침 없이 업데이트됩니다.
 
 **참고:** `GITHUB_WEBHOOK_SECRET`은 설치 흐름 state token의 서명 키로 재사용되므로, 운영자는 secret 하나만 관리하면 됩니다. 이것은 GitHub App의 *Client* secret이 **아닙니다** — Client secret은 OAuth 관련이며 이 연동에서는 사용되지 않습니다. 전체 안내는 [GitHub 연동 → 자체 호스팅 설정](/github-integration#self-host-setup)을 참고하세요.
 
