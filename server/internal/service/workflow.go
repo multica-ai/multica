@@ -177,7 +177,7 @@ func (s *WorkflowService) ValidateDAG(ctx context.Context, workflowID pgtype.UUI
 
 // StartRun creates a workflow_run and node_runs for every node, then
 // kicks off root nodes (nodes with no incoming edges).
-func (s *WorkflowService) StartRun(ctx context.Context, workflow db.MulticaWorkflow, triggeredByType, triggeredByID string, input json.RawMessage) (*db.MulticaWorkflowRun, error) {
+func (s *WorkflowService) StartRun(ctx context.Context, workflow db.MulticaWorkflow, triggeredByType, triggeredByID string, input json.RawMessage, runtimeID pgtype.UUID) (*db.MulticaWorkflowRun, error) {
 	if workflow.Status != "active" {
 		return nil, fmt.Errorf("workflow is not active (status=%s)", workflow.Status)
 	}
@@ -197,6 +197,7 @@ func (s *WorkflowService) StartRun(ctx context.Context, workflow db.MulticaWorkf
 			TriggeredByType: triggeredByType,
 			TriggeredByID:   triggeredByUUID,
 			Input:           input,
+			RuntimeID:       runtimeID,
 		})
 		if err != nil {
 			return fmt.Errorf("create workflow run: %w", err)
@@ -280,6 +281,7 @@ func (s *WorkflowService) StartRunForIssue(
 	issue db.MulticaIssue,
 	triggeredByType string,
 	triggeredByID string,
+	runtimeID pgtype.UUID,
 ) (*db.MulticaWorkflowRun, []db.MulticaWorkflowNodeRun, error) {
 	input, err := json.Marshal(map[string]any{
 		"title":       issue.Title,
@@ -289,7 +291,7 @@ func (s *WorkflowService) StartRunForIssue(
 		return nil, nil, fmt.Errorf("marshal issue input: %w", err)
 	}
 
-	run, err := s.StartRun(ctx, workflow, triggeredByType, triggeredByID, input)
+	run, err := s.StartRun(ctx, workflow, triggeredByType, triggeredByID, input, runtimeID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -779,7 +781,14 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Mult
 	if err != nil {
 		return nil, fmt.Errorf("get agent: %w", err)
 	}
-	if !agent.RuntimeID.Valid {
+	// Resolve the runtime: use agent's bound runtime, or for built-in agents
+	// use the runtime selected when the workflow run was started.
+	var taskRuntimeID pgtype.UUID
+	if agent.RuntimeID.Valid {
+		taskRuntimeID = agent.RuntimeID
+	} else if agent.IsBuiltin && run.RuntimeID.Valid {
+		taskRuntimeID = run.RuntimeID
+	} else {
 		return nil, fmt.Errorf("agent has no runtime")
 	}
 
@@ -816,7 +825,7 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Mult
 	// Create workflow-bound agent task directly.
 	task, err := s.Queries.CreateWorkflowAgentTask(ctx, db.CreateWorkflowAgentTaskParams{
 		AgentID:            agentID,
-		RuntimeID:          agent.RuntimeID,
+		RuntimeID:          taskRuntimeID,
 		Priority:           2, // medium
 		Context:            contextJSON,
 		WorkflowNodeRunID:  nodeRun.ID,

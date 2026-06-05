@@ -2009,7 +2009,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					slog.Warn("failed to load workflow for new issue", "issue_id", uuidToString(issue.ID), "error", err)
 				} else {
-					run, nodeRuns, err := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, creatorType, actualCreatorID)
+					run, nodeRuns, err := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, creatorType, actualCreatorID, pgtype.UUID{})
 					if err != nil {
 						slog.Warn("failed to start workflow run for new issue", "issue_id", uuidToString(issue.ID), "error", err)
 					} else {
@@ -2318,7 +2318,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if wfErr != nil {
 				slog.Warn("failed to load workflow for issue assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr); resp.WorkflowID = uuidToPtr(issue.AssigneeID)
 			} else {
-				run, nodeRuns, wfErr := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, actorType, actorID)
+				run, nodeRuns, wfErr := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, actorType, actorID, parseOptionalRuntimeID(req.RuntimeID))
 				if wfErr != nil {
 					resp.WorkflowID = uuidToPtr(issue.AssigneeID); slog.Warn("failed to start workflow run on assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
 				} else {

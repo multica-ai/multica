@@ -726,6 +726,7 @@ type MulticaWorkflowRun struct {
 	StartedAt       pgtype.Timestamptz `json:"started_at"`
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	RuntimeID       pgtype.UUID        `json:"runtime_id"`
 }
 
 type MulticaWorkspace struct {

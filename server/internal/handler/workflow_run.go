@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -166,7 +167,7 @@ func (h *Handler) StartWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := h.WorkflowService.StartRun(r.Context(), wf, "member", userID, req.Input)
+	run, err := h.WorkflowService.StartRun(r.Context(), wf, "member", userID, req.Input, pgtype.UUID{})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start run: "+err.Error())
 		return

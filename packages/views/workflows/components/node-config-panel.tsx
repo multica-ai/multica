@@ -156,6 +156,7 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
                   cacheNodeEdits(node.id, { worker_type: wt, worker_id: wid });
                 }}
                 align="start"
+                skipBuiltinRuntimeSelection
               />
             </div>
           </div>
