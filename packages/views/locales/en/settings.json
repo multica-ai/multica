@@ -248,6 +248,7 @@
     "agent_bot_connected_label": "Connected to Lark",
     "agent_bot_manage_link": "Manage in Lark",
     "agent_bot_manage_tooltip": "Open this Bot's app page in Lark — manage scopes, edit display name, request additional permissions.",
+    "agent_bot_disconnect_tooltip": "Unbind this Lark Bot from the Agent. The Bot will stop receiving Lark messages.",
     "install_dialog_title": "Bind to Lark",
     "install_dialog_description": "Open Lark on your phone and scan the code below to create a PersonalAgent Bot.",
     "install_dialog_description_for_agent": "Open Lark on your phone and scan the code below to create a Bot for {{agent}}.",

@@ -325,6 +325,7 @@
     "agent_bot_connected_label": "Lark에 연결됨",
     "agent_bot_manage_link": "Lark에서 관리",
     "agent_bot_manage_tooltip": "Lark 개발자 콘솔에서 이 봇의 앱 페이지를 열어 스코프 관리, 이름 변경, 추가 권한 신청을 할 수 있어요.",
+    "agent_bot_disconnect_tooltip": "이 Lark 봇과 에이전트 연결을 해제합니다. 봇은 Lark 메시지 수신을 중단합니다.",
     "install_dialog_title": "Lark에 연결",
     "install_dialog_description": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 PersonalAgent 봇을 만드세요.",
     "install_dialog_description_for_agent": "휴대폰에서 Lark를 열고 아래 코드를 스캔해 {{agent}}용 봇을 만드세요.",

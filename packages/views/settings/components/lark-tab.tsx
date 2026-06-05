@@ -12,6 +12,7 @@ import { ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 // was fine. The named export maps straight to `exports.QRCode` and
 // resolves correctly under both bundlers.
 import { QRCode } from "react-qr-code";
+import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import {
@@ -359,10 +360,16 @@ export function LarkAgentBindButton({
 
 // LarkAgentBotConnectedBadge is the "already connected" affordance the
 // agent inspector renders in place of the Bind button when this agent
-// has an active Lark installation. The badge is non-interactive (just
-// a status pill), the Manage link opens the Bot's dev console page in
-// a new tab so the user can manage scopes / display name / additional
-// permissions without re-scanning the QR.
+// has an active Lark installation. It surfaces three things side by
+// side: a green-dot status pill, a "Manage in Lark" link to the Bot's
+// dev console page (new tab), and an Unbind/Disconnect action that
+// removes the installation after a confirm dialog.
+//
+// Visibility rules carry over from the parent `LarkAgentBindButton`:
+// only owners and admins ever reach this component, so the unbind
+// affordance is unconditionally shown — the backend gates DELETE on
+// the same role and would 403 anyone else, which makes a redundant
+// `canManage` check here dead code.
 //
 // The dev-console host depends on which Lark cloud the bot lives on:
 // Feishu (mainland) bots are managed at open.feishu.cn, Lark
@@ -384,9 +391,43 @@ function LarkAgentBotConnectedBadge({
   className?: string;
 }) {
   const { t } = useT("settings");
+  const wsId = useWorkspaceId();
+  const qc = useQueryClient();
   const manageHref = `${larkDevConsoleHost(installation.region)}/app/${encodeURIComponent(installation.app_id)}`;
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  async function handleDisconnect() {
+    if (disconnecting) return;
+    setDisconnecting(true);
+    try {
+      await api.deleteLarkInstallation(wsId, installation.id);
+      // Invalidate before closing the dialog: the badge unmounts when
+      // the listings query updates (the parent swaps to the Bind CTA),
+      // so leaving the open state behind is fine — but doing the
+      // network call before the close prevents a flash of "stale
+      // connected" state.
+      await qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
+      toast.success(t(($) => $.lark.toast_disconnected));
+      setConfirmOpen(false);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.lark.toast_disconnect_failed),
+      );
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
   return (
-    <div className={className} data-testid="lark-agent-bot-connected">
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-x-3 gap-y-1",
+        className,
+      )}
+      data-testid="lark-agent-bot-connected"
+    >
       <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
         <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
         {t(($) => $.lark.agent_bot_connected_label)}
@@ -395,12 +436,64 @@ function LarkAgentBotConnectedBadge({
         href={manageHref}
         target="_blank"
         rel="noopener noreferrer"
-        className="ml-3 inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+        className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
         title={t(($) => $.lark.agent_bot_manage_tooltip)}
       >
         <ExternalLink className="h-3 w-3" />
         {t(($) => $.lark.agent_bot_manage_link)}
       </a>
+      {/* Unbind affordance — kept visually quieter than the primary
+          "Manage in Lark" link so it doesn't compete for attention,
+          but still discoverable. Confirmation is mandatory: the
+          backend disconnect tears down the WebSocket and stops
+          message delivery, and this is the user-facing recovery path
+          for the install_supported=false / re-scan zombie-bot trap
+          (server/internal/handler/lark.go). */}
+      <button
+        type="button"
+        onClick={() => setConfirmOpen(true)}
+        disabled={disconnecting}
+        className="inline-flex items-center gap-1 rounded text-xs text-muted-foreground transition-colors hover:text-destructive focus-visible:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 disabled:cursor-not-allowed disabled:opacity-50"
+        title={t(($) => $.lark.agent_bot_disconnect_tooltip)}
+        aria-label={t(($) => $.lark.disconnect)}
+        data-testid="lark-agent-bot-disconnect"
+      >
+        <Trash2 className="h-3 w-3" />
+        {disconnecting
+          ? t(($) => $.lark.disconnecting)
+          : t(($) => $.lark.disconnect)}
+      </button>
+
+      <AlertDialog
+        open={confirmOpen}
+        onOpenChange={(v) => {
+          if (!v && !disconnecting) setConfirmOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.lark.disconnect_confirm_title)}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.lark.disconnect_confirm_description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={disconnecting}>
+              {t(($) => $.lark.disconnect_confirm_cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+            >
+              {disconnecting
+                ? t(($) => $.lark.disconnecting)
+                : t(($) => $.lark.disconnect)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

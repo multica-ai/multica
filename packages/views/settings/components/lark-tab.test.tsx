@@ -146,6 +146,7 @@ vi.mock("react-qr-code", () => {
 });
 
 import { LarkAgentBindButton, LarkTab } from "./lark-tab";
+import { toast } from "sonner";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, settings: enSettings },
@@ -239,11 +240,13 @@ describe("LarkAgentBindButton (CTA gate)", () => {
         updated_at: "2026-06-03T00:00:00Z",
       },
     ];
-    const { container } = render(
+    render(
       <LarkAgentBindButton agentId="agent-1" agentName="Bot" />,
       { wrapper: I18nWrapper },
     );
-    expect(container.querySelector("button")).toBeNull();
+    // The Bind CTA must be gone — re-scanning would orphan the
+    // PersonalAgent (see badge comment in lark-tab.tsx).
+    expect(screen.queryByRole("button", { name: /Bind to Lark/i })).toBeNull();
     expect(screen.getByText(/Connected to Lark/i)).toBeTruthy();
     const link = screen.getByRole("link", { name: /Manage in Lark/i }) as HTMLAnchorElement;
     expect(link.href).toBe("https://open.feishu.cn/app/cli_existing_app");
@@ -319,11 +322,13 @@ describe("LarkAgentBindButton (CTA gate)", () => {
         updated_at: "2026-06-03T00:00:00Z",
       },
     ];
-    const { container } = render(
+    render(
       <LarkAgentBindButton agentId="agent-1" agentName="Bot" />,
       { wrapper: I18nWrapper },
     );
-    expect(container.querySelector("button")).toBeNull();
+    // The Bind CTA must be gone even when install_supported=false,
+    // since the existing-installation check runs first.
+    expect(screen.queryByRole("button", { name: /Bind to Lark/i })).toBeNull();
     expect(screen.getByText(/Connected to Lark/i)).toBeTruthy();
     expect(
       screen.getByRole("link", { name: /Manage in Lark/i }),
@@ -349,6 +354,147 @@ describe("LarkAgentBindButton (CTA gate)", () => {
       wrapper: I18nWrapper,
     });
     expect(screen.getByRole("button", { name: /Bind to Lark/i })).toBeTruthy();
+  });
+});
+
+// The Connected badge surfaces an Unbind affordance for owners/admins
+// (parent gate keeps non-admins out of this component entirely). The
+// disconnect path is the recovery handle for the install_supported=false
+// re-scan zombie-bot trap and the dual-bot conflict — these tests pin
+// the contract: confirm gating, deleteLarkInstallation wiring, cache
+// invalidation, and toast feedback on success / failure.
+describe("LarkAgentBotConnectedBadge (Unbind / Disconnect)", () => {
+  beforeEach(() => {
+    resetFixtures();
+    installationsRef.current.installations = [
+      {
+        id: "inst-1",
+        workspace_id: "ws-1",
+        agent_id: "agent-1",
+        app_id: "cli_existing_app",
+        bot_open_id: "ou_existing_bot",
+        installer_user_id: "user-1",
+        status: "active",
+        installed_at: "2026-06-03T00:00:00Z",
+        created_at: "2026-06-03T00:00:00Z",
+        updated_at: "2026-06-03T00:00:00Z",
+      },
+    ];
+  });
+
+  it("renders a Disconnect affordance alongside the Manage link when the agent is bound", () => {
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    // The badge surfaces three siblings: the green-dot status pill,
+    // the Manage link, and the Unbind action. We assert by test-id so
+    // we don't trip over /Disconnect/i copy that also appears in the
+    // (closed) AlertDialog.
+    expect(screen.getByTestId("lark-agent-bot-disconnect")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Manage in Lark/i })).toBeTruthy();
+  });
+
+  it("opens the confirm dialog and does NOT call the API until the user confirms", async () => {
+    const user = userEvent.setup();
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    await user.click(screen.getByTestId("lark-agent-bot-disconnect"));
+    // Confirm dialog must mount with the correct copy.
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Disconnect this Lark bot\?/i),
+      ).toBeTruthy();
+    });
+    // Critically: clicking the trigger alone must NOT have deleted the
+    // installation — confirmation is mandatory.
+    expect(mockDeleteInstallation).not.toHaveBeenCalled();
+  });
+
+  it("calls deleteLarkInstallation with (workspaceId, installationId), invalidates the cache, and toasts on confirm", async () => {
+    mockDeleteInstallation.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    await user.click(screen.getByTestId("lark-agent-bot-disconnect"));
+    // Wait for the dialog to mount, then click the destructive action
+    // (the AlertDialogAction's accessible name is the same "Disconnect"
+    // label as the trigger button — but we're now inside the dialog
+    // role, so role+name is unambiguous).
+    const confirmButton = await screen.findByRole("button", {
+      name: /^Disconnect$/i,
+    });
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(mockDeleteInstallation).toHaveBeenCalledTimes(1);
+    });
+    expect(mockDeleteInstallation).toHaveBeenCalledWith("workspace-1", "inst-1");
+    // Listings cache must be invalidated so the parent re-renders the
+    // Bind CTA in place of the now-stale Connected badge.
+    expect(mockInvalidate).toHaveBeenCalledWith({
+      queryKey: ["lark", "installations", "workspace-1"],
+    });
+    expect(toast.success).toHaveBeenCalledTimes(1);
+  });
+
+  it("toasts an error and keeps the badge mounted when the API call rejects", async () => {
+    mockDeleteInstallation.mockRejectedValue(
+      new Error("upstream 500"),
+    );
+    const user = userEvent.setup();
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    await user.click(screen.getByTestId("lark-agent-bot-disconnect"));
+    const confirmButton = await screen.findByRole("button", {
+      name: /^Disconnect$/i,
+    });
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledTimes(1);
+    });
+    // Cache must NOT be invalidated on failure — invalidating would
+    // round-trip a refetch, momentarily flicker the row away even
+    // though the install is still active server-side.
+    expect(mockInvalidate).not.toHaveBeenCalled();
+    // Badge stays mounted so the user can retry.
+    expect(screen.getByTestId("lark-agent-bot-connected")).toBeTruthy();
+  });
+
+  it("disables the Cancel button while the request is in-flight (prevents racing the close)", async () => {
+    let resolveDelete: () => void = () => {};
+    mockDeleteInstallation.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    await user.click(screen.getByTestId("lark-agent-bot-disconnect"));
+    const confirmButton = await screen.findByRole("button", {
+      name: /^Disconnect$/i,
+    });
+    await user.click(confirmButton);
+
+    // Cancel is disabled while disconnecting — closing mid-flight
+    // would orphan the in-flight invalidate + toast.
+    const cancel = screen.getByRole("button", { name: /Cancel/i });
+    await waitFor(() => {
+      expect((cancel as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    // Resolve and let the request finish so jsdom doesn't carry a
+    // dangling promise into the next test.
+    resolveDelete();
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalled();
+    });
   });
 });
 

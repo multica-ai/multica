@@ -248,6 +248,7 @@
     "agent_bot_connected_label": "已连接到飞书",
     "agent_bot_manage_link": "在飞书中管理",
     "agent_bot_manage_tooltip": "打开飞书开发者控制台中该 Bot 的应用页面——管理权限、修改名称、申请新的权限范围。",
+    "agent_bot_disconnect_tooltip": "将该飞书 Bot 与智能体解绑，Bot 将停止接收飞书消息。",
     "install_dialog_title": "绑定到飞书",
     "install_dialog_description": "用飞书扫描下方二维码，创建一个 PersonalAgent Bot。",
     "install_dialog_description_for_agent": "用飞书扫描下方二维码，为 {{agent}} 创建一个 Bot。",

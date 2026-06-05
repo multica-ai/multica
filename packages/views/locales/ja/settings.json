@@ -248,6 +248,7 @@
     "agent_bot_connected_label": "Lark に接続済み",
     "agent_bot_manage_link": "Lark で管理",
     "agent_bot_manage_tooltip": "Lark のデベロッパーコンソールでこのボットのアプリページを開き、スコープ管理 / 名称変更 / 追加権限の申請ができます。",
+    "agent_bot_disconnect_tooltip": "この Lark ボットとエージェントの連携を解除します。ボットは Lark メッセージの受信を停止します。",
     "install_dialog_title": "Lark に接続",
     "install_dialog_description": "Lark を開き、以下のコードをスキャンして PersonalAgent ボットを作成してください。",
     "install_dialog_description_for_agent": "Lark を開き、以下のコードをスキャンして {{agent}} 用のボットを作成してください。",
