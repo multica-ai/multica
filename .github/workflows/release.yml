@@ -53,8 +53,10 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
-      - name: Run tests
-        run: cd server && go test ./...
+      # Tests are run in the separate CI workflow; skip here to keep the
+      # release pipeline fast and focused on artifact generation.
+      # - name: Run tests
+      #   run: cd server && go test ./...
 
   release:
     needs: verify
