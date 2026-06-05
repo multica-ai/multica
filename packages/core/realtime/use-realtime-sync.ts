@@ -171,6 +171,33 @@ export function applyWorkspaceUpdatedToCache(
 }
 
 /**
+ * Resolves the slug of the workspace an inbox item originated from, via the
+ * cached workspace list (fetched once when the cache is cold).
+ *
+ * Desktop notification routing must pin to the *source* workspace of the
+ * inbox item, not the currently active one: the user can be on workspace B
+ * when an `inbox:new` for workspace A arrives, and macOS Notification Center
+ * holds banners across workspace switches. Returns null when the workspace
+ * cannot be resolved — callers must NOT fall back to the current slug (that
+ * recreates the wrong-workspace routing this exists to prevent, #3766) and
+ * should show the notification without a deep link instead.
+ */
+export async function resolveInboxSourceSlug(
+  qc: QueryClient,
+  workspaceId: string,
+): Promise<string | null> {
+  if (!workspaceId) return null;
+  try {
+    const workspaces = await qc.ensureQueryData(workspaceListOptions());
+    return workspaces?.find((w) => w.id === workspaceId)?.slug ?? null;
+  } catch {
+    // Workspace list unavailable (e.g. network hiccup): degrade to a
+    // link-less notification rather than guessing a slug.
+    return null;
+  }
+}
+
+/**
  * Invalidates all workspace-scoped queries. Used after reconnect and when a
  * new WSClient instance is detected (workspace switch) to recover events
  * missed while disconnected.
@@ -495,13 +522,12 @@ export function useRealtimeSync(
           // Fall through with default behavior.
         }
       }
-      // Capture the source workspace slug at emit time. The user may switch
-      // workspaces before clicking the banner (macOS Notification Center
-      // holds banners), so routing must not read "current slug" at click
-      // time — otherwise notifications from workspace A click through to
-      // workspace B's inbox and 404.
-      const slug = getCurrentSlug();
-      if (!slug) return;
+      // Route the click to the workspace the inbox item BELONGS to — not the
+      // currently active one. Reading `getCurrentSlug()` here was the source
+      // of wrong-workspace routing (#3766): an `inbox:new` from workspace A
+      // arriving while workspace B is active emitted a notification carrying
+      // B's slug and A's issue id, deep-linking to an issue B doesn't have.
+      const slug = await resolveInboxSourceSlug(qc, item.workspace_id);
       const desktopAPI = (
         window as unknown as {
           desktopAPI?: {
@@ -518,8 +544,12 @@ export function useRealtimeSync(
       // `issueKey` matches the inbox page's URL selector (issue id when the
       // item is attached to an issue, otherwise the inbox item id). `itemId`
       // is the inbox row's own id, needed to fire markInboxRead on click.
+      // A null slug (workspace list unavailable / item from a workspace this
+      // client can't see) still shows the banner — the user should learn about
+      // the inbox item — but with an empty slug so the click is a no-op
+      // (DesktopInboxBridge ignores empty slugs) instead of routing wrong.
       desktopAPI?.showNotification?.({
-        slug,
+        slug: slug ?? "",
         itemId: item.id,
         issueKey: item.issue_id ?? item.id,
         title: item.title,

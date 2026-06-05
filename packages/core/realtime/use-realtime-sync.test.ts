@@ -13,6 +13,7 @@ import type {
 import {
   applyChatDoneToCache,
   applyWorkspaceUpdatedToCache,
+  resolveInboxSourceSlug,
 } from "./use-realtime-sync";
 
 const sessionId = "session-1";
@@ -231,5 +232,59 @@ describe("applyChatDoneToCache paged messages", () => {
 
     expect(paged?.pages[0]?.messages.map((m) => m.id)).toEqual(["msg-latest", "msg-assistant"]);
     expect(paged?.pages[1]?.messages.map((m) => m.id)).toEqual(["msg-user"]);
+  });
+});
+describe("resolveInboxSourceSlug", () => {
+  function workspace(overrides: Partial<Workspace> = {}): Workspace {
+    return {
+      id: "ws-a",
+      name: "Workspace A",
+      slug: "workspace-a",
+      description: null,
+      context: null,
+      settings: {},
+      repos: [],
+      issue_prefix: "WSA",
+      avatar_url: null,
+      created_at: "2026-05-18T00:00:00Z",
+      updated_at: "2026-05-18T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("resolves the inbox item's source workspace, not another cached one", async () => {
+    // Regression for #3766: an `inbox:new` from workspace A arriving while
+    // workspace B is active must resolve A's slug for notification routing.
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [
+      workspace({ id: "ws-b", slug: "workspace-b", name: "Workspace B" }),
+      workspace(),
+    ]);
+
+    await expect(resolveInboxSourceSlug(qc, "ws-a")).resolves.toBe("workspace-a");
+  });
+
+  it("returns null instead of falling back when the workspace is unknown", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [
+      workspace({ id: "ws-b", slug: "workspace-b" }),
+    ]);
+
+    await expect(resolveInboxSourceSlug(qc, "ws-a")).resolves.toBeNull();
+  });
+
+  it("returns null for an empty workspace id without touching the cache", async () => {
+    const qc = createQueryClient();
+    const ensure = vi.spyOn(qc, "ensureQueryData");
+
+    await expect(resolveInboxSourceSlug(qc, "")).resolves.toBeNull();
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the workspace list cannot be fetched", async () => {
+    const qc = createQueryClient();
+    vi.spyOn(qc, "ensureQueryData").mockRejectedValueOnce(new Error("network down"));
+
+    await expect(resolveInboxSourceSlug(qc, "ws-a")).resolves.toBeNull();
   });
 });
