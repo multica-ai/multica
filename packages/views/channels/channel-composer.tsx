@@ -7,6 +7,7 @@ import type { ChannelMember } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Bot, User } from "lucide-react";
+import { useT } from "../i18n";
 
 interface MentionCandidate {
   id: string;
@@ -33,6 +34,7 @@ function parseMentionQuery(
 }
 
 export function ChannelComposer({ channelId }: { channelId: string }) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const [content, setContent] = useState("");
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -135,7 +137,9 @@ export function ChannelComposer({ channelId }: { channelId: string }) {
     <div className="border-t p-3">
       {showDropdown && (
         <div className="mb-2 rounded-md border bg-popover shadow-md overflow-hidden">
-          <div className="px-2 py-1 text-xs text-muted-foreground border-b">提及成员</div>
+          <div className="px-2 py-1 text-xs text-muted-foreground border-b">
+            {t(($) => $.composer.mention_members)}
+          </div>
           {candidates.map((c, i) => (
             <button
               key={c.id}
@@ -156,7 +160,9 @@ export function ChannelComposer({ channelId }: { channelId: string }) {
               )}
               <span className="flex-1 text-left truncate">{c.name}</span>
               <span className="text-xs text-muted-foreground">
-                {c.type === "agent" ? "Agent" : "用户"}
+                {c.type === "agent"
+                  ? t(($) => $.members.agent_badge)
+                  : t(($) => $.members.user_badge)}
               </span>
             </button>
           ))}
@@ -168,7 +174,7 @@ export function ChannelComposer({ channelId }: { channelId: string }) {
           <textarea
             ref={textareaRef}
             className="w-full min-h-[40px] max-h-[120px] rounded-md border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="输入消息... (Ctrl+Enter 发送, @ 提及成员)"
+            placeholder={t(($) => $.composer.placeholder)}
             value={content}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
@@ -181,7 +187,7 @@ export function ChannelComposer({ channelId }: { channelId: string }) {
           disabled={!content.trim() || sendMessage.isPending}
           className="shrink-0"
         >
-          发送
+          {t(($) => $.composer.send)}
         </Button>
       </div>
     </div>

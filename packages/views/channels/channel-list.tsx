@@ -27,6 +27,7 @@ import {
 } from "@multica/ui/components/ui/select";
 import { AppLink } from "../navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useT } from "../i18n";
 
 function ChannelListSkeleton() {
   return (
@@ -47,6 +48,7 @@ function CreateChannelDialog({
   onOpenChange: (v: boolean) => void;
   wsId: string;
 }) {
+  const { t } = useT("channels");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<"public" | "private">("public");
@@ -70,30 +72,30 @@ function CreateChannelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建频道</DialogTitle>
+          <DialogTitle>{t(($) => $.create.title)}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="channel-name">频道名称</Label>
+            <Label htmlFor="channel-name">{t(($) => $.create.name_label)}</Label>
             <Input
               id="channel-name"
-              placeholder="如：general、产品讨论"
+              placeholder={t(($) => $.create.name_placeholder)}
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoFocus
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="channel-description">描述（可选）</Label>
+            <Label htmlFor="channel-description">{t(($) => $.create.description_label)}</Label>
             <Input
               id="channel-description"
-              placeholder="这个频道是用来..."
+              placeholder={t(($) => $.create.description_placeholder)}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>类型</Label>
+            <Label>{t(($) => $.create.type_label)}</Label>
             <Select
               value={type}
               onValueChange={(v) => setType(v as "public" | "private")}
@@ -105,13 +107,13 @@ function CreateChannelDialog({
                 <SelectItem value="public">
                   <span className="flex items-center gap-2">
                     <Hash className="size-3.5" />
-                    公开 — 所有成员可见
+                    {t(($) => $.create.type_public)}
                   </span>
                 </SelectItem>
                 <SelectItem value="private">
                   <span className="flex items-center gap-2">
                     <Lock className="size-3.5" />
-                    私有 — 仅受邀成员可见
+                    {t(($) => $.create.type_private)}
                   </span>
                 </SelectItem>
               </SelectContent>
@@ -123,13 +125,13 @@ function CreateChannelDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              取消
+              {t(($) => $.create.cancel)}
             </Button>
             <Button
               type="submit"
               disabled={!name.trim() || createChannel.isPending}
             >
-              {createChannel.isPending ? "创建中..." : "创建"}
+              {createChannel.isPending ? t(($) => $.create.creating) : t(($) => $.create.create)}
             </Button>
           </DialogFooter>
         </form>
@@ -144,6 +146,7 @@ interface ChannelListProps {
 }
 
 export function ChannelList({ activeChannelId: propActiveId }: ChannelListProps = {}) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const workspace = useCurrentWorkspace();
   const storeActiveId = useChannelStore((s) => s.activeChannelId);
@@ -163,14 +166,14 @@ export function ChannelList({ activeChannelId: propActiveId }: ChannelListProps 
     <>
       <div className="flex items-center justify-between px-3 pt-3 pb-1">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-          频道
+          {t(($) => $.list.title)}
         </span>
         <Button
           variant="ghost"
           size="icon"
           className="size-6 text-muted-foreground hover:text-foreground"
           onClick={() => setCreateOpen(true)}
-          title="创建频道"
+          title={t(($) => $.create.title)}
         >
           <Plus className="size-3.5" />
         </Button>
@@ -179,14 +182,14 @@ export function ChannelList({ activeChannelId: propActiveId }: ChannelListProps 
       <div className="flex flex-col gap-0.5 px-2 pb-2">
         {channels.length === 0 ? (
           <div className="px-2 py-4 text-center text-xs text-muted-foreground">
-            还没有频道
+            {t(($) => $.list.empty)}
             <br />
             <button
               type="button"
               className="mt-1 text-primary hover:underline"
               onClick={() => setCreateOpen(true)}
             >
-              创建第一个频道
+              {t(($) => $.list.create_first)}
             </button>
           </div>
         ) : (
@@ -212,7 +215,9 @@ export function ChannelList({ activeChannelId: propActiveId }: ChannelListProps 
                 )}
                 <span className="flex-1 truncate">{ch.name}</span>
                 {!ch.is_member && (
-                  <span className="text-[10px] text-muted-foreground/60">加入</span>
+                  <span className="text-[10px] text-muted-foreground/60">
+                    {t(($) => $.list.join)}
+                  </span>
                 )}
               </AppLink>
             );

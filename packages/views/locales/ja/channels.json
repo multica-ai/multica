@@ -1,0 +1,47 @@
+{
+  "create": {
+    "title": "チャンネルを作成",
+    "name_label": "チャンネル名",
+    "name_placeholder": "例: general、product-discussion",
+    "description_label": "説明 (任意)",
+    "description_placeholder": "このチャンネルは...",
+    "type_label": "タイプ",
+    "type_public": "公開 - すべてのメンバーに表示",
+    "type_private": "非公開 - 招待されたメンバーのみ",
+    "cancel": "キャンセル",
+    "create": "作成",
+    "creating": "作成中..."
+  },
+  "list": {
+    "title": "チャンネル",
+    "empty": "チャンネルはまだありません",
+    "create_first": "最初のチャンネルを作成",
+    "join": "参加"
+  },
+  "members": {
+    "manage_title": "メンバーを管理",
+    "current_count": "現在のメンバー ({{count}})",
+    "empty": "メンバーはまだいません",
+    "user_badge": "ユーザー",
+    "agent_badge": "Agent",
+    "remove": "削除",
+    "add_users": "ユーザーを追加",
+    "add_agents": "Agent を追加",
+    "invite": "招待",
+    "done": "完了"
+  },
+  "composer": {
+    "mention_members": "メンバーをメンション",
+    "placeholder": "メッセージを入力... (Ctrl+Enter で送信、@ でメンション)",
+    "send": "送信"
+  },
+  "messages": {
+    "steps": "{{count}} steps",
+    "status_queued": "待機中...",
+    "status_running": "思考中...",
+    "status_dispatched": "処理中...",
+    "converted": "Issue に変換済み",
+    "loading": "読み込み中...",
+    "empty": "メッセージはまだありません。最初のメッセージを送信して議論を始めましょう。"
+  }
+}

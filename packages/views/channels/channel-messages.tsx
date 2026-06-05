@@ -17,6 +17,7 @@ import {
 import { Markdown } from "@multica/views/common/markdown";
 import { splitTimeline } from "../chat/lib/copy-text";
 import type { ChannelPendingTask } from "@multica/core/channels";
+import { useT } from "../i18n";
 
 // Stable empty array to avoid infinite re-renders from Zustand selector.
 const EMPTY_TASKS: ChannelPendingTask[] = [];
@@ -53,12 +54,13 @@ function ChannelTimelineView({
 }
 
 function ProcessFold({ items, defaultOpen }: { items: ChatTimelineItem[]; defaultOpen?: boolean }) {
+  const { t } = useT("channels");
   const [open, setOpen] = useState(defaultOpen ?? false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
         {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        <span>{items.length} steps</span>
+        <span>{t(($) => $.messages.steps, { count: items.length })}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
@@ -191,6 +193,7 @@ function AgentThinkingBubble({ taskId, agentName, status }: {
   agentName: string;
   status: "queued" | "dispatched" | "running";
 }) {
+  const { t } = useT("channels");
   // Enable as soon as we have a task_id — WS task:message events start flowing
   // from the moment the daemon claims the task (before status flips to "running").
   const { data: taskMessages = [] } = useQuery({
@@ -214,7 +217,11 @@ function AgentThinkingBubble({ taskId, agentName, status }: {
         <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">{agentName}</span>
         <Loader2 className="size-3 text-purple-400 animate-spin ml-1" />
         <span className="text-[10px] text-muted-foreground">
-          {status === "queued" ? "排队中…" : status === "running" ? "思考中…" : "处理中…"}
+          {status === "queued"
+            ? t(($) => $.messages.status_queued)
+            : status === "running"
+              ? t(($) => $.messages.status_running)
+              : t(($) => $.messages.status_dispatched)}
         </span>
       </div>
       {timeline.length > 0 && (
@@ -295,6 +302,7 @@ function MessageBubble({
   msg: ChannelMessage;
   authorName: string;
 }) {
+  const { t } = useT("channels");
   const isAgent = msg.author_type === "agent";
   const time = new Date(msg.created_at).toLocaleTimeString("zh-CN", {
     hour: "2-digit",
@@ -323,7 +331,7 @@ function MessageBubble({
         <span className="text-[10px] text-muted-foreground">{time}</span>
         {msg.status === "converted" && (
           <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">
-            已转为 Issue
+            {t(($) => $.messages.converted)}
           </span>
         )}
       </div>
@@ -350,6 +358,7 @@ function MessageBubble({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function ChannelMessages({ channelId }: { channelId: string }) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -361,6 +370,8 @@ export function ChannelMessages({ channelId }: { channelId: string }) {
   // In-flight tasks for THIS channel (multiple agents may be responding concurrently).
   // Use a stable empty array reference to avoid infinite re-renders when no tasks exist.
   const pendingTasks = useChannelStore((s) => s.pendingTasks[channelId]) ?? EMPTY_TASKS;
+  const messageCount = (messages as ChannelMessage[]).length;
+  const pendingTaskCount = pendingTasks.length;
 
   // Resolve member names from the members list.
   const nameMap = new Map<string, { name: string; type: "user" | "agent" }>();
@@ -371,12 +382,12 @@ export function ChannelMessages({ channelId }: { channelId: string }) {
   // Auto-scroll to bottom when new messages arrive or pending tasks change.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [(messages as ChannelMessage[]).length, pendingTasks.length]);
+  }, [messageCount, pendingTaskCount]);
 
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-        加载中...
+        {t(($) => $.messages.loading)}
       </div>
     );
   }
@@ -384,7 +395,7 @@ export function ChannelMessages({ channelId }: { channelId: string }) {
   if (messages.length === 0 && pendingTasks.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-        暂无消息，发送第一条消息开始讨论。
+        {t(($) => $.messages.empty)}
       </div>
     );
   }
@@ -393,7 +404,9 @@ export function ChannelMessages({ channelId }: { channelId: string }) {
     <div className="flex flex-col gap-1 p-3 overflow-y-auto">
       {(messages as ChannelMessage[]).map((msg) => {
         const member = nameMap.get(msg.author_id);
-        const authorName = member?.name ?? (msg.author_type === "agent" ? "Agent" : "用户");
+        const authorName = member?.name ?? (msg.author_type === "agent"
+          ? t(($) => $.members.agent_badge)
+          : t(($) => $.members.user_badge));
         return (
           <MessageBubble key={msg.id} msg={msg} authorName={authorName} />
         );
@@ -404,7 +417,7 @@ export function ChannelMessages({ channelId }: { channelId: string }) {
         <AgentThinkingBubble
           key={task.task_id}
           taskId={task.task_id}
-          agentName={nameMap.get(task.agent_id)?.name ?? "Agent"}
+          agentName={nameMap.get(task.agent_id)?.name ?? t(($) => $.members.agent_badge)}
           status={task.status}
         />
       ))}

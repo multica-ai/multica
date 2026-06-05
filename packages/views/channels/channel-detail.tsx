@@ -27,6 +27,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ChannelList } from "./channel-list";
 import { ChannelMessages } from "./channel-messages";
 import { ChannelComposer } from "./channel-composer";
+import { useT } from "../i18n";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Member Management Dialog
@@ -43,6 +44,7 @@ function ManageMembersDialog({
   channelId: string;
   wsId: string;
 }) {
+  const { t } = useT("channels");
   const { data: members = [] } = useQuery(channelMembersOptions(wsId, channelId));
   const { data: workspaceMembers = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -64,16 +66,16 @@ function ManageMembersDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>管理成员</DialogTitle>
+          <DialogTitle>{t(($) => $.members.manage_title)}</DialogTitle>
         </DialogHeader>
 
         {/* Current members */}
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            当前成员 ({(members as ChannelMember[]).length})
+            {t(($) => $.members.current_count, { count: (members as ChannelMember[]).length })}
           </p>
           {(members as ChannelMember[]).length === 0 ? (
-            <p className="text-sm text-muted-foreground py-2">暂无成员</p>
+            <p className="text-sm text-muted-foreground py-2">{t(($) => $.members.empty)}</p>
           ) : (
             <div className="max-h-48 overflow-y-auto space-y-1">
               {(members as ChannelMember[]).map((m) => (
@@ -94,7 +96,9 @@ function ManageMembersDialog({
                       {m.name || m.member_id}
                     </span>
                     <Badge variant="outline" className="text-[10px] shrink-0">
-                      {m.member_type === "agent" ? "Agent" : "用户"}
+                      {m.member_type === "agent"
+                        ? t(($) => $.members.agent_badge)
+                        : t(($) => $.members.user_badge)}
                     </Badge>
                   </div>
                   {m.role !== "owner" && (
@@ -107,7 +111,7 @@ function ManageMembersDialog({
                       }
                       disabled={removeMember.isPending}
                     >
-                      移除
+                      {t(($) => $.members.remove)}
                     </Button>
                   )}
                 </div>
@@ -122,7 +126,7 @@ function ManageMembersDialog({
         {nonMemberUsers.length > 0 && (
           <div className="space-y-1">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              添加用户
+              {t(($) => $.members.add_users)}
             </p>
             <div className="max-h-36 overflow-y-auto space-y-1">
               {nonMemberUsers.map((m) => (
@@ -146,7 +150,7 @@ function ManageMembersDialog({
                     }
                     disabled={addMember.isPending}
                   >
-                    邀请
+                    {t(($) => $.members.invite)}
                   </Button>
                 </div>
               ))}
@@ -158,7 +162,7 @@ function ManageMembersDialog({
         {nonMemberAgents.length > 0 && (
           <div className="space-y-1">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              添加 Agent
+              {t(($) => $.members.add_agents)}
             </p>
             <div className="max-h-36 overflow-y-auto space-y-1">
               {(nonMemberAgents as Agent[]).map((a) => (
@@ -183,7 +187,7 @@ function ManageMembersDialog({
                     }
                     disabled={addMember.isPending}
                   >
-                    邀请
+                    {t(($) => $.members.invite)}
                   </Button>
                 </div>
               ))}
@@ -193,7 +197,7 @@ function ManageMembersDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            完成
+            {t(($) => $.members.done)}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -214,6 +218,7 @@ function ChannelHeader({
   wsId: string;
   onManageMembers: () => void;
 }) {
+  const { t } = useT("channels");
   const { data: channel } = useQuery(channelDetailOptions(wsId, channelId));
   const { data: members = [] } = useQuery(channelMembersOptions(wsId, channelId));
 
@@ -227,7 +232,7 @@ function ChannelHeader({
       ) : (
         <Hash className="size-4 shrink-0 text-muted-foreground" />
       )}
-      <span className="font-semibold flex-1 truncate">{ch?.name ?? "频道"}</span>
+      <span className="font-semibold flex-1 truncate">{ch?.name ?? t(($) => $.list.title)}</span>
       {ch?.description && (
         <>
           <Separator orientation="vertical" className="h-4" />
