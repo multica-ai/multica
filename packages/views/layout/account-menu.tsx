@@ -20,6 +20,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { getGravatarUrl } from "@multica/core/gravatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -96,7 +97,9 @@ export function AccountMenu() {
     <ActorAvatar
       name={name}
       initials={(name || "U").charAt(0).toUpperCase()}
-      avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
+      avatarUrl={
+        resolvePublicFileUrl(user?.avatar_url) ?? (user?.email ? getGravatarUrl(user.email) : null)
+      }
       size={size}
     />
   );

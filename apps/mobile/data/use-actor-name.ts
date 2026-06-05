@@ -3,6 +3,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
+import { getGravatarUrl } from "@multica/core/gravatar";
 
 /**
  * Resolve actor (member / agent / squad) name + avatar URL from the
@@ -40,7 +41,8 @@ export function useActorLookup() {
   ): string | null => {
     if (!type || !id) return null;
     if (type === "member") {
-      return members.find((m) => m.user_id === id)?.avatar_url ?? null;
+      const m = members.find((m) => m.user_id === id);
+      return m?.avatar_url ?? (m?.email ? getGravatarUrl(m.email) : null);
     }
     if (type === "agent") {
       return agents.find((a) => a.id === id)?.avatar_url ?? null;

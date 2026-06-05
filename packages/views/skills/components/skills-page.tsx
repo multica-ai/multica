@@ -29,6 +29,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { getGravatarUrl } from "@multica/core/gravatar";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Tooltip,
@@ -233,7 +234,7 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
       <ActorAvatar
         name={creator.name}
         initials={creator.name.slice(0, 2).toUpperCase()}
-        avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
+        avatarUrl={resolvePublicFileUrl(creator.avatar_url) ?? getGravatarUrl(creator.email)}
         size="sm"
       />
       <span className="min-w-0 truncate">{creator.name}</span>

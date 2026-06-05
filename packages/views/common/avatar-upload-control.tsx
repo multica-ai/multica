@@ -40,6 +40,12 @@ interface AvatarUploadControlProps {
   value: string | null;
   /** Drives the empty-state fallback icon/initials. */
   variant: AvatarUploadVariant;
+  /**
+   * Image to show in place of the empty state when no avatar is set, before
+   * falling back to initials/icon. The caller owns deciding whether that is
+   * appropriate (a Gravatar URL is only passed once the workspace opted in).
+   */
+  fallbackUrl?: string | null;
   /** Name used for initials / first-letter fallback and the image alt. */
   name?: string;
   /** Pixel width and height of the avatar. Defaults to 64. */
@@ -146,6 +152,7 @@ async function persistedByCaller(
 export function AvatarUploadControl({
   value,
   variant,
+  fallbackUrl = null,
   name = "",
   size = 64,
   disabled = false,
@@ -173,6 +180,7 @@ export function AvatarUploadControl({
   const resolved = value && !emoji ? resolvePublicFileUrl(value) : null;
   const hasImage = !!resolved && !previewError;
   const hasAvatar = !!emoji || hasImage;
+  const hasFallbackImage = !hasAvatar && !!fallbackUrl && !previewError;
   const emojiEnabled = !!onEmojiSelected;
   // Any alternative to an image turns the click into a menu.
   const menuEnabled = emojiEnabled || textIconEnabled;
@@ -290,6 +298,13 @@ export function AvatarUploadControl({
       ) : hasImage ? (
         <img
           src={resolved ?? undefined}
+          alt={name}
+          className="h-full w-full object-cover"
+          onError={() => setPreviewError(true)}
+        />
+      ) : hasFallbackImage ? (
+        <img
+          src={fallbackUrl ?? undefined}
           alt={name}
           className="h-full w-full object-cover"
           onError={() => setPreviewError(true)}

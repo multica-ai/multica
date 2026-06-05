@@ -198,6 +198,7 @@
     "./ai-traffic": "./ai-traffic/index.ts",
     "./utils": "./utils.ts",
     "./security/redact-secrets": "./security/redact-secrets.ts",
+    "./gravatar": "./gravatar.ts",
     "./constants/*": "./constants/*.ts",
     "./feature-flags": "./feature-flags/index.ts",
     "./feature-flags/keys": "./feature-flags/keys.ts",

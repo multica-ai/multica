@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
+import { getGravatarUrl } from "@multica/core/gravatar";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -111,6 +112,7 @@ export function AccountTab() {
               <AvatarUploadControl
                 variant="user"
                 value={user?.avatar_url ?? null}
+                fallbackUrl={user?.email ? getGravatarUrl(user.email, 64) : null}
                 name={user?.name ?? ""}
                 size={64}
                 onUploaded={async (url) => {
