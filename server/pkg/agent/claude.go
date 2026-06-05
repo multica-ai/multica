@@ -455,8 +455,83 @@ func (b *claudeBackend) handleUser(
 }
 
 func isClaudePermissionNotGranted(s string) bool {
-	return strings.Contains(s, "Claude requested permissions") &&
-		strings.Contains(s, "you haven't granted it yet")
+	for _, text := range claudePermissionCandidateTexts(s) {
+		if hasClaudePermissionNotGrantedLine(text) {
+			return true
+		}
+	}
+	return false
+}
+
+func claudePermissionCandidateTexts(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+
+	var decoded string
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+		return []string{decoded}
+	}
+
+	var blocks []struct {
+		Text    string `json:"text,omitempty"`
+		Content string `json:"content,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &blocks); err == nil {
+		candidates := make([]string, 0, len(blocks))
+		for _, block := range blocks {
+			if strings.TrimSpace(block.Text) != "" {
+				candidates = append(candidates, block.Text)
+			}
+			if strings.TrimSpace(block.Content) != "" {
+				candidates = append(candidates, block.Content)
+			}
+		}
+		if len(candidates) > 0 {
+			return candidates
+		}
+	}
+
+	return []string{raw}
+}
+
+func hasClaudePermissionNotGrantedLine(text string) bool {
+	inFence := false
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || trimmed == "" {
+			continue
+		}
+		if isClaudePermissionNotGrantedLine(trimmed) {
+			return true
+		}
+	}
+	return false
+}
+
+func isClaudePermissionNotGrantedLine(line string) bool {
+	if !strings.HasPrefix(line, "Claude requested permissions to ") ||
+		!strings.Contains(line, "you haven't granted it yet") {
+		return false
+	}
+	if strings.Contains(line, "strings.Contains") ||
+		strings.Contains(line, "isClaudePermissionNotGranted") ||
+		strings.Contains(line, "`Claude requested permissions") ||
+		strings.Contains(line, "Claude requested permissions`") ||
+		strings.Contains(line, `"Claude requested permissions`) ||
+		strings.Contains(line, `Claude requested permissions"`) ||
+		strings.Contains(line, "`you haven't granted it yet") ||
+		strings.Contains(line, "you haven't granted it yet`") ||
+		strings.Contains(line, `"you haven't granted it yet`) ||
+		strings.Contains(line, `you haven't granted it yet"`) {
+		return false
+	}
+	return true
 }
 
 func (b *claudeBackend) handleControlRequest(ctx context.Context, msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }, onApproval ApprovalCallback) {
