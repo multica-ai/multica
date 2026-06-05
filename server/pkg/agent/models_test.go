@@ -278,11 +278,12 @@ func TestStaticCatalogsHaveAtMostOneDefault(t *testing.T) {
 	// default so the UI badge is unambiguous. More than one
 	// usually means a copy/paste slip when adding new models.
 	catalogs := map[string][]Model{
-		"claude":  claudeStaticModels(),
-		"codex":   codexStaticModels(),
-		"gemini":  geminiStaticModels(),
-		"cursor":  cursorStaticModels(),
-		"copilot": copilotStaticModels(),
+		"claude":     claudeStaticModels(),
+		"codex":      codexStaticModels(),
+		"gemini":     geminiStaticModels(),
+		"cursor":     cursorStaticModels(),
+		"copilot":    copilotStaticModels(),
+		"qoderclicn": qoderclicnStaticModels(),
 	}
 	for provider, models := range catalogs {
 		count := 0
@@ -477,6 +478,50 @@ bareword-only-line
 	// the legacy `provider:model` form gets colon→slash normalization.
 	if models[3].ID != "opencode/claude-sonnet-4-6:exp" || models[3].Provider != "opencode" {
 		t.Errorf("expected ':' inside table-format model name to be preserved: %+v", models[3])
+	}
+}
+
+func TestParseQoderclicnModels(t *testing.T) {
+	input := `MODEL
+Auto
+Qwen3.7-Max
+GLM-5.1
+Qwen3.7-Max
+bad model with spaces
+`
+	models := parseQoderclicnModels(input)
+	if len(models) != 4 {
+		t.Fatalf("expected 4 models (header skipped, duplicate deduped), got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "Auto" || !models[0].Default || models[0].Label != "Auto" {
+		t.Fatalf("first model = %+v, want Auto default", models[0])
+	}
+	if models[1].ID != "Qwen3.7-Max" || models[1].Label != "Qwen3.7 Max" {
+		t.Fatalf("second model = %+v", models[1])
+	}
+	if models[2].ID != "GLM-5.1" {
+		t.Fatalf("third model = %+v", models[2])
+	}
+	if models[3].ID != "bad" {
+		t.Fatalf("qoderclicn parser should use first field for table tolerance, got %+v", models[3])
+	}
+}
+
+func TestListModelsQoderclicnFallsBackToStatic(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "qoderclicn")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "qoderclicn", "/nonexistent/qoderclicn")
+	if err != nil {
+		t.Fatalf("ListModels(qoderclicn) error: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("expected static fallback models, got empty list")
+	}
+	if got[0].ID != "Auto" || !got[0].Default {
+		t.Fatalf("expected Auto default first, got %+v", got[0])
 	}
 }
 

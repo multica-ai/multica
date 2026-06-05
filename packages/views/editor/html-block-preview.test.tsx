@@ -11,7 +11,31 @@ vi.mock("../i18n", () => ({
           show_source: "Show source",
           fullscreen: "Fullscreen",
         },
+        attachment: {
+          preview: "Preview",
+          open_in_new_tab: "Open in new tab",
+          close: "Close",
+        },
+        image: {
+          download: "Download",
+        },
       }),
+  }),
+}));
+
+vi.mock("@multica/core/paths", () => ({
+  paths: {
+    workspace: (slug: string) => ({
+      htmlArtifactPreview: (key: string) => `/${slug}/html-preview?key=${key}`,
+    }),
+  },
+  useWorkspaceSlug: () => "test",
+}));
+
+vi.mock("../navigation", () => ({
+  useNavigation: () => ({
+    openInNewTab: vi.fn(),
+    getShareableUrl: (path: string) => `https://app.example${path}`,
   }),
 }));
 
@@ -57,6 +81,22 @@ describe("HtmlBlockPreview — preview / source toggle", () => {
     fireEvent.click(screen.getByTitle("Show preview"));
     expect(document.querySelector("iframe")).toBeTruthy();
     expect(screen.queryByTestId("code-block-static")).toBeNull();
+  });
+
+  it("does not let the floating toolbar intercept code selection outside its buttons", () => {
+    render(<HtmlBlockPreview html="<p>hi</p>" />);
+
+    const wrapper = document.querySelector(".code-block-wrapper");
+    const header = document.querySelector(".code-block-header");
+    const toggle = screen.getByTitle("Show source");
+
+    expect(wrapper?.className).toContain("select-text");
+    expect(header?.className).toContain("pointer-events-none");
+    expect(header?.className).toContain("select-none");
+    expect(toggle.className).toContain("pointer-events-auto");
+
+    const mouseDown = fireEvent.mouseDown(toggle);
+    expect(mouseDown).toBe(false);
   });
 });
 

@@ -44,11 +44,53 @@ interface CodeRange {
 function findCodeRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
 
-  // Find fenced code blocks (```...```)
-  const fencedRegex = /```[\s\S]*?```/g
+  // Find backtick-fenced code blocks (```...```)
+  const backtickRegex = /```[\s\S]*?```/g
   let match
-  while ((match = fencedRegex.exec(text)) !== null) {
+  while ((match = backtickRegex.exec(text)) !== null) {
     ranges.push({ start: match.index, end: match.index + match[0].length })
+  }
+
+  // Find tilde-fenced code blocks (~~~...~~~)
+  const tildeRegex = /~~~[\s\S]*?~~~/g
+  while ((match = tildeRegex.exec(text)) !== null) {
+    const pos = match.index
+    const insideOther = ranges.some((r) => pos >= r.start && pos < r.end)
+    if (!insideOther) {
+      ranges.push({ start: pos, end: pos + match[0].length })
+    }
+  }
+
+  // Find indented code blocks (4 spaces or 1 tab at start of consecutive lines)
+  // Per CommonMark: a line is code if it starts with ≥4 spaces or ≥1 tab,
+  // and indented code ends at a blank line or a line with <4 spaces.
+  const lines = text.split('\n')
+  let blockStart: number | null = null
+  let charPos = 0
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    const isIndented = /^( {4}|\t)/.test(line)
+    const isBlank = line.trim() === ''
+    if (isIndented) {
+      if (blockStart === null) blockStart = charPos
+    } else {
+      if (blockStart !== null && !isBlank) {
+        // Non-indented, non-blank line ends the block
+        const blockEnd = charPos // points to start of the ending line
+        if (!ranges.some((r) => blockStart! >= r.start && blockStart! < r.end)) {
+          ranges.push({ start: blockStart, end: blockEnd - 1 })
+        }
+        blockStart = null
+      }
+      // Blank lines inside an indented block are allowed; don't reset blockStart
+    }
+    charPos += line.length + 1 // +1 for the '\n'
+  }
+  // Close any trailing block
+  if (blockStart !== null) {
+    if (!ranges.some((r) => blockStart! >= r.start && blockStart! < r.end)) {
+      ranges.push({ start: blockStart, end: text.length })
+    }
   }
 
   // Find display math blocks ($$...$$)

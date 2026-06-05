@@ -128,6 +128,7 @@ import type {
   AutopilotRun,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
+  TriggerAutopilotRequest,
   CreateAutopilotTriggerRequest,
   UpdateAutopilotTriggerRequest,
   ListAutopilotsResponse,
@@ -180,6 +181,8 @@ import { parseWithFallback } from "./schema";
 import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
+  AutopilotResponseSchema,
+  AutopilotRunResponseSchema,
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
@@ -197,6 +200,8 @@ import {
   EMPTY_AGENT_RUN_DETAIL,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  EMPTY_AUTOPILOT,
+  EMPTY_AUTOPILOT_RUN,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
@@ -206,8 +211,11 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_DISCOVER_IMPORT_SKILLS_RESPONSE,
+  EMPTY_GET_AUTOPILOT_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_LABELS_RESPONSE,
+  EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE,
+  EMPTY_LIST_AUTOPILOTS_RESPONSE,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD,
@@ -220,9 +228,12 @@ import {
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
+  GetAutopilotResponseSchema,
   DiscoverImportSkillsResponseSchema,
   IssueLabelsResponseSchema,
   LabelSchema,
+  ListAutopilotRunsResponseSchema,
+  ListAutopilotsResponseSchema,
   ListIssuesResponseSchema,
   ListLabelsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
@@ -2757,53 +2768,81 @@ export class ApiClient {
   async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/autopilots?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
+    return parseWithFallback(raw, ListAutopilotsResponseSchema, EMPTY_LIST_AUTOPILOTS_RESPONSE, {
+      endpoint: "GET /api/autopilots",
+    }) as ListAutopilotsResponse;
   }
 
   async getAutopilot(id: string): Promise<GetAutopilotResponse> {
-    return this.fetch(`/api/autopilots/${id}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}`);
+    return parseWithFallback(raw, GetAutopilotResponseSchema, EMPTY_GET_AUTOPILOT_RESPONSE, {
+      endpoint: "GET /api/autopilots/:id",
+    }) as GetAutopilotResponse;
   }
 
   async createAutopilot(data: CreateAutopilotRequest): Promise<Autopilot> {
-    return this.fetch("/api/autopilots", {
+    const raw = await this.fetch<unknown>("/api/autopilots", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, AutopilotResponseSchema, EMPTY_AUTOPILOT, {
+      endpoint: "POST /api/autopilots",
+    }) as Autopilot;
   }
 
   async updateAutopilot(id: string, data: UpdateAutopilotRequest): Promise<Autopilot> {
-    return this.fetch(`/api/autopilots/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, AutopilotResponseSchema, { ...EMPTY_AUTOPILOT, id }, {
+      endpoint: "PATCH /api/autopilots/:id",
+    }) as Autopilot;
   }
 
   async deleteAutopilot(id: string): Promise<void> {
     await this.fetch(`/api/autopilots/${id}`, { method: "DELETE" });
   }
 
-  async triggerAutopilot(id: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${id}/trigger`, { method: "POST" });
+  async triggerAutopilot(id: string, data?: TriggerAutopilotRequest): Promise<AutopilotRun> {
+    const init: RequestInit = { method: "POST" };
+    if (data) {
+      init.body = JSON.stringify(data);
+    }
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/trigger`, init);
+    return parseWithFallback(raw, AutopilotRunResponseSchema, { ...EMPTY_AUTOPILOT_RUN, autopilot_id: id }, {
+      endpoint: "POST /api/autopilots/:id/trigger",
+    }) as AutopilotRun;
   }
 
   async listAutopilotRuns(id: string, params?: { limit?: number; offset?: number }): Promise<ListAutopilotRunsResponse> {
     const search = new URLSearchParams();
     if (params?.limit) search.set("limit", params.limit.toString());
     if (params?.offset) search.set("offset", params.offset.toString());
-    return this.fetch(`/api/autopilots/${id}/runs?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/runs?${search}`);
+    return parseWithFallback(raw, ListAutopilotRunsResponseSchema, EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE, {
+      endpoint: "GET /api/autopilots/:id/runs",
+    }) as ListAutopilotRunsResponse;
   }
 
   // Returns a single run including its full trigger_payload. List responses
   // omit trigger_payload to keep them small (a webhook envelope can be
   // up to 256 KiB × limit rows), so the detail view fetches via this route.
   async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    return parseWithFallback(raw, AutopilotRunResponseSchema, { ...EMPTY_AUTOPILOT_RUN, id: runId, autopilot_id: autopilotId }, {
+      endpoint: "GET /api/autopilots/:id/runs/:runId",
+    }) as AutopilotRun;
   }
 
   async cancelAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}/cancel`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/runs/${runId}/cancel`, {
       method: "POST",
     });
+    return parseWithFallback(raw, AutopilotRunResponseSchema, { ...EMPTY_AUTOPILOT_RUN, id: runId, autopilot_id: autopilotId }, {
+      endpoint: "POST /api/autopilots/:id/runs/:runId/cancel",
+    }) as AutopilotRun;
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {

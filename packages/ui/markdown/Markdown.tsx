@@ -272,10 +272,10 @@ function createComponents(
     return {
       ...baseComponents,
       // Inline code
-      code: ({ className, children, ...props }) => {
+      code: ({ className, children, node, ...props }) => {
         const match = /language-(\w+)/.exec(className || '')
         const isBlock =
-          'node' in props && props.node?.position?.start.line !== props.node?.position?.end.line
+          node?.position && node.position.start.line !== node.position.end.line
 
         // Block code - use CodeBlock with full mode
         if (match || isBlock) {
@@ -283,8 +283,8 @@ function createComponents(
           return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
         }
 
-        // Inline code
-        return <InlineCode>{children}</InlineCode>
+        // Inline code — force string to avoid rendering interactive elements
+        return <InlineCode>{String(children)}</InlineCode>
       },
       pre: ({ children }) => <>{children}</>,
       // Comfortable paragraph spacing
@@ -334,17 +334,17 @@ function createComponents(
   return {
     ...baseComponents,
     // Full code blocks with copy button
-    code: ({ className, children, ...props }) => {
+    code: ({ className, children, node, ...props }) => {
       const match = /language-(\w+)/.exec(className || '')
       const isBlock =
-        'node' in props && props.node?.position?.start.line !== props.node?.position?.end.line
+        node?.position && node.position.start.line !== node.position.end.line
 
       if (match || isBlock) {
         const code = String(children).replace(/\n$/, '')
         return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
       }
 
-      return <InlineCode>{children}</InlineCode>
+      return <InlineCode>{String(children)}</InlineCode>
     },
     pre: ({ children }) => <>{children}</>,
     // Rich paragraph spacing

@@ -120,6 +120,48 @@ export function isInlineFileLinkTitle(title?: string): boolean {
   return title === INLINE_FILE_LINK_TITLE;
 }
 
+export function fillTableColumnWidths({
+  maxWidth,
+  viewportWidth,
+  widths,
+}: {
+  maxWidth: number;
+  viewportWidth: number;
+  widths: number[];
+}): number[] {
+  if (widths.length === 0 || viewportWidth <= 0) return widths;
+
+  const totalWidth = widths.reduce((total, width) => total + width, 0);
+  if (totalWidth >= viewportWidth) return widths;
+
+  const filledWidths = [...widths];
+  let remainingWidth = viewportWidth - totalWidth;
+  let expandableIndexes = filledWidths
+    .map((width, index) => ({ index, width }))
+    .filter(({ width }) => width < maxWidth)
+    .map(({ index }) => index);
+
+  while (remainingWidth > 0 && expandableIndexes.length > 0) {
+    const increment = remainingWidth / expandableIndexes.length;
+    let distributedWidth = 0;
+
+    expandableIndexes = expandableIndexes.filter((index) => {
+      const width = filledWidths[index] ?? 0;
+      const availableWidth = maxWidth - width;
+      const appliedWidth = Math.min(availableWidth, increment);
+      const nextWidth = width + appliedWidth;
+      filledWidths[index] = nextWidth;
+      distributedWidth += appliedWidth;
+      return nextWidth < maxWidth;
+    });
+
+    if (distributedWidth <= 0) break;
+    remainingWidth -= distributedWidth;
+  }
+
+  return filledWidths;
+}
+
 function preprocessInlineFileLinks(
   line: string,
   skipRanges: readonly CodeRange[],

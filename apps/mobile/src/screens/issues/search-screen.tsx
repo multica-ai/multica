@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { MessageSquare, Search as SearchIcon } from "lucide-react-native";
+import { Clock, MessageSquare, Search as SearchIcon, Trash2, X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { api } from "@multica/core/api";
 import type { IssueStatus, SearchIssueResult } from "@multica/core/types";
@@ -9,7 +9,15 @@ import type { RootStackParamList } from "../../navigation/root-navigator";
 import { EmptyState, Screen } from "../../components/ui/primitives";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import { formatIssueStatus } from "../../i18n/format";
+import { mobileStorage } from "../../platform/storage";
 import { colors, radii, spacing } from "../../theme/tokens";
+import { useMobileWorkspace } from "../../navigation/workspace-context";
+import {
+  addSearchHistoryItem,
+  clearSearchHistory,
+  readSearchHistory,
+  removeSearchHistoryItem,
+} from "./search-history";
 
 const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_LIMIT = 20;
@@ -18,13 +26,19 @@ type Props = NativeStackScreenProps<RootStackParamList, "Search">;
 
 export function SearchScreen({ navigation }: Props) {
   const { t } = useTranslation();
+  const { workspace } = useMobileWorkspace();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchIssueResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [isError, setIsError] = useState(false);
+  const [history, setHistory] = useState<string[]>(() => readSearchHistory(mobileStorage, workspace.id));
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    setHistory(readSearchHistory(mobileStorage, workspace.id));
+  }, [workspace.id]);
 
   useEffect(() => {
     return () => {
@@ -33,7 +47,11 @@ export function SearchScreen({ navigation }: Props) {
     };
   }, []);
 
-  const runSearch = useCallback((value: string) => {
+  const commitHistory = useCallback((value: string) => {
+    setHistory(addSearchHistoryItem(mobileStorage, workspace.id, value));
+  }, [workspace.id]);
+
+  const runSearch = useCallback((value: string, options?: { commit?: boolean }) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
 
@@ -63,6 +81,7 @@ export function SearchScreen({ navigation }: Props) {
           if (!controller.signal.aborted) {
             setResults(res.issues);
             setHasSearched(true);
+            if (options?.commit) commitHistory(trimmed);
           }
         } catch {
           if (!controller.signal.aborted) {
@@ -77,12 +96,29 @@ export function SearchScreen({ navigation }: Props) {
         }
       })();
     }, SEARCH_DEBOUNCE_MS);
-  }, []);
+  }, [commitHistory]);
 
   const handleChangeText = useCallback((value: string) => {
     setQuery(value);
     runSearch(value);
   }, [runSearch]);
+
+  const submitSearch = useCallback(() => {
+    runSearch(query, { commit: true });
+  }, [query, runSearch]);
+
+  const selectHistoryItem = useCallback((value: string) => {
+    setQuery(value);
+    runSearch(value, { commit: true });
+  }, [runSearch]);
+
+  const deleteHistoryItem = useCallback((value: string) => {
+    setHistory(removeSearchHistoryItem(mobileStorage, workspace.id, value));
+  }, [workspace.id]);
+
+  const clearHistory = useCallback(() => {
+    setHistory(clearSearchHistory(mobileStorage, workspace.id));
+  }, [workspace.id]);
 
   return (
     <Screen padded={false} safeArea={false}>
@@ -96,6 +132,7 @@ export function SearchScreen({ navigation }: Props) {
             autoFocus
             clearButtonMode="while-editing"
             onChangeText={handleChangeText}
+            onSubmitEditing={submitSearch}
             placeholder={t("issues.search_placeholder")}
             placeholderTextColor={colors.mutedForeground}
             returnKeyType="search"
@@ -113,8 +150,17 @@ export function SearchScreen({ navigation }: Props) {
           <EmptyState title={t("issues.no_matching")} />
         ) : null}
 
-        {!isError && !hasSearched && !query.trim() ? (
+        {!isError && !hasSearched && !query.trim() && history.length === 0 ? (
           <EmptyState detail={t("issues.search_empty_detail")} title={t("issues.search_empty_title")} />
+        ) : null}
+
+        {!isError && !hasSearched && !query.trim() && history.length > 0 ? (
+          <SearchHistoryList
+            history={history}
+            onClear={clearHistory}
+            onDelete={deleteHistoryItem}
+            onSelect={selectHistoryItem}
+          />
         ) : null}
 
         {!isError && results.length > 0 ? (
@@ -126,13 +172,68 @@ export function SearchScreen({ navigation }: Props) {
             renderItem={({ item }) => (
               <SearchResultItem
                 issue={item}
-                onPress={() => navigation.navigate("IssueDetail", { issueId: item.id })}
+                onPress={() => {
+                  commitHistory(query);
+                  navigation.navigate("IssueDetail", { issueId: item.id });
+                }}
               />
             )}
           />
         ) : null}
       </View>
     </Screen>
+  );
+}
+
+function SearchHistoryList({
+  history,
+  onClear,
+  onDelete,
+  onSelect,
+}: {
+  history: string[];
+  onClear: () => void;
+  onDelete: (query: string) => void;
+  onSelect: (query: string) => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <View style={styles.historyPanel}>
+      <View style={styles.historyHeader}>
+        <Text style={styles.historyTitle}>{t("issues.recent_searches")}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onClear}
+          style={({ pressed }) => [styles.historyClearButton, pressed && styles.pressed]}
+        >
+          <Trash2 color={colors.mutedForeground} size={15} strokeWidth={2} />
+          <Text style={styles.historyClearText}>{t("issues.clear_history")}</Text>
+        </Pressable>
+      </View>
+      <View style={styles.historyList}>
+        {history.map((item) => (
+          <View key={item} style={styles.historyItem}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onSelect(item)}
+              style={({ pressed }) => [styles.historyItemMain, pressed && styles.pressed]}
+            >
+              <Clock color={colors.mutedForeground} size={16} strokeWidth={2} />
+              <Text numberOfLines={1} style={styles.historyItemText}>{item}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityLabel={t("issues.delete_history_item", { query: item })}
+              accessibilityRole="button"
+              onPress={() => onDelete(item)}
+              style={({ pressed }) => [styles.historyDeleteButton, pressed && styles.pressed]}
+            >
+              <X color={colors.mutedForeground} size={16} strokeWidth={2} />
+            </Pressable>
+          </View>
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -218,6 +319,68 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingTop: spacing.md,
     paddingBottom: spacing.xl,
+  },
+  historyPanel: {
+    gap: spacing.md,
+    paddingTop: spacing.lg,
+  },
+  historyHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  historyTitle: {
+    color: colors.foreground,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  historyClearButton: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 36,
+    paddingHorizontal: spacing.xs,
+  },
+  historyClearText: {
+    color: colors.mutedForeground,
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  historyList: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
+  },
+  historyItem: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    minHeight: 48,
+  },
+  historyItemMain: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 48,
+    minWidth: 0,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.sm,
+  },
+  historyItemText: {
+    color: colors.foreground,
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  historyDeleteButton: {
+    alignItems: "center",
+    height: 48,
+    justifyContent: "center",
+    width: 48,
   },
   resultItem: {
     backgroundColor: colors.card,

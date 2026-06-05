@@ -95,4 +95,22 @@ describe("CodeBlockView — html language toggle", () => {
     expect(screen.queryByTitle("Show preview")).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
   });
+
+  it("marks the wrapper as selectable block content and keeps toolbar mousedown from taking the selection", () => {
+    render(<CodeBlockView {...makeProps("typescript", "const x = 1;")} />);
+
+    const wrapper = screen.getByTestId("nvw");
+    expect(wrapper.className).toContain("code-block-wrapper");
+    expect(wrapper.className).toContain("select-text");
+
+    const header = wrapper.querySelector(".code-block-header");
+    expect(header?.className).toContain("pointer-events-none");
+    expect(header?.className).toContain("select-none");
+
+    const copyButton = screen.getByTitle("Copy code");
+    expect(copyButton.className).toContain("pointer-events-auto");
+
+    const mouseDown = fireEvent.mouseDown(copyButton);
+    expect(mouseDown).toBe(false);
+  });
 });

@@ -10,65 +10,44 @@ This directory contains the baseline Kubernetes manifests for the `multica-bot` 
 
 ## Secret handling
 
-Do not commit real credentials into `k8s/bot/secret.yaml`. The checked-in file is an `envsubst` template that should be rendered from a local `.env.bot` file:
+`.env.bot` is the source of truth for the `multica-bot-secrets`
+Kubernetes Secret. Do not maintain a second key list in Kubernetes manifests.
+Sync the whole file through the repository script:
 
 ```bash
-set -a
-source .env.bot
-set +a
-envsubst < k8s/bot/secret.yaml | kubectl apply -f -
+node k8s/bot/sync-env.mjs \
+  --env-file .env.bot \
+  --namespace multica-bot \
+  --secret multica-bot-secrets
 ```
 
-The following variables are expected by the template:
+By default the script applies `multica-bot-secrets`, then restarts and waits for
+`deployment/backend` and `deployment/frontend`. It logs only key names, key
+counts, Secret apply status, and rollout results. Secret values must never be
+printed in Jenkins or Agent logs.
 
-- `JWT_SECRET`
-- `POSTGRES_PASSWORD`
-- `DATABASE_URL`
-- `RESEND_API_KEY`
-- `RESEND_FROM_EMAIL`
-- `SMTP_HOST`
-- `SMTP_PORT`
-- `SMTP_USERNAME`
-- `SMTP_PASSWORD`
-- `SMTP_SSL`
-- `SMTP_FROM_NAME`
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_TOKEN_URL`
-- `GOOGLE_USERINFO_URL`
-- `DINGTALK_CLIENT_ID`
-- `DINGTALK_CLIENT_SECRET`
-- `DINGTALK_ROBOT_CODE`
-- `DINGTALK_TOKEN_ENCRYPTION_KEY`
-- `GITEE_TOKEN` (optional — required for importing skills from private Gitee repos)
-- `S3_BUCKET` (optional — enables cloud attachment storage and direct uploads when set)
-- `S3_REGION`
-- `S3_KEY_PREFIX`
-- `S3_FORCE_PATH_STYLE`
-- `AWS_ENDPOINT_URL`
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `CLOUDFRONT_KEY_PAIR_ID`
-- `CLOUDFRONT_PRIVATE_KEY_SECRET`
-- `CLOUDFRONT_PRIVATE_KEY`
-- `CLOUDFRONT_DOMAIN`
+Use `--dry-run` to validate the parsed key set without calling `kubectl`:
+
+```bash
+node k8s/bot/sync-env.mjs --env-file .env.bot --dry-run
+```
 
 `DINGTALK_TOKEN_ENCRYPTION_KEY` is optional in application code, but it should be set in production so linked DingTalk tokens are not encrypted with the JWT signing secret.
 
 `GOOGLE_TOKEN_URL` and `GOOGLE_USERINFO_URL` are optional. Leave them empty to use Google's public endpoints directly, or set them to a trusted proxy when the backend cannot reach Google from the cluster network. The proxy must be reachable from the backend pod and must not require exposing `GOOGLE_CLIENT_SECRET` to the browser.
 
-`S3_BUCKET` is optional. Leave it empty to use local upload storage, or set it with the remaining S3/OBS variables before rendering `secret.yaml` to enable attachment direct uploads.
+`S3_BUCKET` is optional. Leave it empty to use local upload storage, or set it with the remaining S3/OBS variables before syncing `multica-bot-secrets` to enable attachment direct uploads.
 
 ## Apply order
 
 ```bash
 kubectl apply -f k8s/bot/namespace.yaml
-set -a && source .env.bot && set +a
-envsubst < k8s/bot/secret.yaml | kubectl apply -f -
+node k8s/bot/sync-env.mjs --env-file .env.bot --no-rollout
 kubectl apply -f k8s/bot/postgres.yaml
 kubectl apply -f k8s/bot/backend.yaml
 kubectl apply -f k8s/bot/frontend.yaml
 kubectl apply -f k8s/bot/ingress.yaml
+node k8s/bot/sync-env.mjs --env-file .env.bot
 ```
 
 ## DingTalk phase1 smoke check

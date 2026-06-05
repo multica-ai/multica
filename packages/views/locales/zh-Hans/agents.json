@@ -30,7 +30,7 @@
     "archived": "已归档"
   },
   "workload": {
-    "working": "处理中",
+    "working": "工作中",
     "queued": "排队中",
     "idle": "空闲"
   },
