@@ -1,3 +1,6 @@
+# NOTE: For standard releases, push a tag — .github/workflows/release.yml handles CLI,
+# Docker images, Desktop installers, and Helm charts automatically.
+# This workflow is kept for ad-hoc manual builds only.
 name: Build CLI
 
 on:

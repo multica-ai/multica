@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.release_meta.outputs.tag_name }}
+      semver: ${{ steps.release_meta.outputs.semver }}
       is_stable: ${{ steps.release_meta.outputs.is_stable }}
     steps:
       - name: Checkout
@@ -39,6 +40,7 @@ jobs:
             exit 1
           fi
           echo "tag_name=$tag" >> "$GITHUB_OUTPUT"
+          echo "semver=${tag#v}" >> "$GITHUB_OUTPUT"
           if [[ "$tag" == *-* ]]; then
             echo "is_stable=false" >> "$GITHUB_OUTPUT"
           else
@@ -378,3 +380,43 @@ jobs:
           # Windows signing later.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
+
+  helm-release:
+    needs: [verify, release, docker-backend-merge, docker-web-merge]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.17.0"
+
+      - name: Update Chart version
+        working-directory: helm/multica
+        run: |
+          sed -i "s/^version:.*/version: ${{ needs.verify.outputs.semver }}/" Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ needs.verify.outputs.semver }}\"/" Chart.yaml
+
+      - name: Update image tags in values.yaml
+        working-directory: helm/multica
+        run: |
+          sed -i 's|tag: "0.0.1"|tag: "${{ needs.verify.outputs.tag_name }}"|g' values.yaml
+
+      - name: Package Helm Chart
+        working-directory: helm
+        run: |
+          helm package multica
+
+      - name: Upload Helm Chart to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: helm
+        run: |
+          chart_file=$(ls multica-*.tgz | head -n 1)
+          echo "Uploading $chart_file to release ${{ needs.verify.outputs.tag_name }}..."
+          gh release upload "${{ needs.verify.outputs.tag_name }}" \
+            --repo ${{ github.repository }} \
+            "$chart_file" \
+            --clobber
