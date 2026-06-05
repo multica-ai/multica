@@ -207,10 +207,18 @@ func (e *RegistrationError) Error() string {
 	return fmt.Sprintf("registration: %s: %s", e.Code, e.Description)
 }
 
-// Begin opens a new device-flow session against the configured Feishu
-// (mainland) domain. Lark may surface a Lark-international tenant on
-// the FIRST poll — we don't try to predict it here; the polling loop
-// in RegistrationService handles the domain swap.
+// Begin opens a new device-flow session against the open-platform host
+// for the requested region. Region is normally chosen explicitly by the
+// caller (the user picked "Feishu" or "Lark" in the UI) so the QR
+// renders against the same cloud the user expects to scan from; an
+// empty value falls back to Feishu (mainland) for back-compat with
+// callers that pre-date region-aware install. Lark may STILL surface a
+// Lark-international tenant on a subsequent poll even when the begin
+// host was Feishu — the SwitchedDomain branch in RegistrationService
+// keeps that auto-detect path alive as a fallback for users who pick
+// the wrong entry, so explicit region selection is a routing
+// optimization (saves one round-trip and renders the right cloud's QR
+// up front), not a constraint on what the device flow can recover from.
 //
 // namePreset pre-fills the bot/app name on Lark's "create a
 // PersonalAgent" form so the installed bot defaults to e.g.
@@ -218,7 +226,15 @@ func (e *RegistrationError) Error() string {
 // "{用户姓名}的智能助手". It is a user-editable default (the user can
 // still change it on the form), and it rides on the QR URL — not the
 // begin POST body, which has no name field. Empty omits the pre-fill.
-func (c *RegistrationClient) Begin(ctx context.Context, namePreset string) (*BeginResult, error) {
+func (c *RegistrationClient) Begin(ctx context.Context, namePreset string, region Region) (*BeginResult, error) {
+	// Pick the begin domain off the requested region. Empty / unknown
+	// regions degrade to Feishu (mainland) — same back-compat invariant
+	// as RegionOrDefault, so callers that pre-date this signature
+	// (passing "") keep working.
+	domain := c.cfg.Domain
+	if region == RegionLark {
+		domain = c.cfg.LarkDomain
+	}
 	var resp struct {
 		DeviceCode              string `json:"device_code"`
 		VerificationURIComplete string `json:"verification_uri_complete"`
@@ -235,7 +251,7 @@ func (c *RegistrationClient) Begin(ctx context.Context, namePreset string) (*Beg
 		"auth_method":       []string{"client_secret"},
 		"request_user_info": []string{"open_id"},
 	}
-	if err := c.doForm(ctx, c.cfg.Domain, form, &resp); err != nil {
+	if err := c.doForm(ctx, domain, form, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Error != "" {
@@ -262,7 +278,7 @@ func (c *RegistrationClient) Begin(ctx context.Context, namePreset string) (*Beg
 	return &BeginResult{
 		DeviceCode: resp.DeviceCode,
 		QRCodeURL:  qr,
-		Domain:     c.cfg.Domain,
+		Domain:     domain,
 		Interval:   time.Duration(interval) * time.Second,
 		ExpiresIn:  time.Duration(expireIn) * time.Second,
 	}, nil

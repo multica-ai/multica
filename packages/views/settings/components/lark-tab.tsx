@@ -295,7 +295,15 @@ export function LarkAgentBindButton({
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
   const user = useAuthStore((s) => s.user);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  // dialogRegion carries two pieces of state in one variable: which
+  // cloud the dialog should target (drives the device-flow `begin`
+  // host and the dialog copy), AND whether the dialog is open at all
+  // (null = closed). A separate boolean would have to be kept in sync
+  // with the region — collapsing them prevents an "open but with no
+  // region picked" intermediate state from existing.
+  const [dialogRegion, setDialogRegion] = useState<"feishu" | "lark" | null>(
+    null,
+  );
 
   const { data: listing } = useQuery({
     ...larkInstallationsOptions(wsId),
@@ -333,25 +341,61 @@ export function LarkAgentBindButton({
   // a fresh scan would fail at the post-poll bot-info step, so hide the CTA.
   if (!installSupported) return null;
 
+  // Two CTAs, one per cloud — Feishu (mainland) on the left, Lark
+  // (international) on the right. We deliberately render two explicit
+  // entry points instead of one auto-detect QR because Lark only emits
+  // tenant_brand="lark" mid-poll AFTER the user has authorized; until
+  // then a Lark user has to scan a QR served from accounts.feishu.cn,
+  // which has surfaced as confusing for international users (MUL-3083
+  // follow-up). Each button passes its region to the install dialog,
+  // which threads it to the backend so the device-flow `begin` POSTs
+  // directly against the matching accounts host. The mid-poll
+  // tenant-brand auto-switch in RegistrationService is preserved as a
+  // safety net for users who pick the wrong entry.
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
-        className={className}
-        title={agentName ? t(($) => $.lark.bind_button_title, { agent: agentName }) : undefined}
+      <div
+        className={cn("flex flex-wrap items-center gap-2", className)}
+        data-testid="lark-agent-bind-buttons"
       >
-        <ExternalLink className="h-3 w-3" />
-        {t(($) => $.lark.bind_button)}
-      </Button>
-      {dialogOpen && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogRegion("feishu")}
+          disabled={!agentId}
+          title={
+            agentName
+              ? t(($) => $.lark.bind_button_feishu_title, { agent: agentName })
+              : undefined
+          }
+          data-testid="lark-agent-bind-feishu"
+        >
+          <ExternalLink className="h-3 w-3" />
+          {t(($) => $.lark.bind_button_feishu)}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogRegion("lark")}
+          disabled={!agentId}
+          title={
+            agentName
+              ? t(($) => $.lark.bind_button_lark_title, { agent: agentName })
+              : undefined
+          }
+          data-testid="lark-agent-bind-lark"
+        >
+          <ExternalLink className="h-3 w-3" />
+          {t(($) => $.lark.bind_button_lark)}
+        </Button>
+      </div>
+      {dialogRegion && (
         <LarkInstallDialog
           wsId={wsId}
           agentId={agentId}
           agentName={agentName}
-          onClose={() => setDialogOpen(false)}
+          region={dialogRegion}
+          onClose={() => setDialogRegion(null)}
         />
       )}
     </>
@@ -499,7 +543,7 @@ function LarkAgentBotConnectedBadge({
 }
 
 // LarkInstallDialog walks the user through the device-flow install:
-// 1) POST /lark/install/begin → render QR
+// 1) POST /lark/install/begin?region=<feishu|lark> → render QR
 // 2) poll /lark/install/{sessionId}/status until success | error | expiry
 // 3) on success: toast, close, invalidate installations cache
 //
@@ -507,15 +551,23 @@ function LarkAgentBotConnectedBadge({
 // rather than reusing a stale device_code — Lark's device_code is
 // single-use and a re-render of the same QR after an error would just
 // fail again at the next poll.
+//
+// region is a required prop so the begin POST hits the right cloud
+// (accounts.feishu.cn vs accounts.larksuite.com) and the dialog copy
+// (title, scan hint, link fallback) reflects the cloud the user
+// picked. Defaulting it would silently route Lark users to a Feishu QR
+// — exactly the confusion this split-CTA refactor is meant to remove.
 function LarkInstallDialog({
   wsId,
   agentId,
   agentName,
+  region,
   onClose,
 }: {
   wsId: string;
   agentId: string;
   agentName?: string;
+  region: "feishu" | "lark";
   onClose: () => void;
 }) {
   const { t } = useT("settings");
@@ -549,7 +601,7 @@ function LarkInstallDialog({
     setErrorMessage(null);
     setSession(null);
     try {
-      const res = await api.beginLarkInstall(wsId, agentId);
+      const res = await api.beginLarkInstall(wsId, agentId, region);
       if (closedRef.current) return;
       setSession({
         sessionId: res.session_id,
@@ -606,7 +658,11 @@ function LarkInstallDialog({
         setStatus(res.status);
         if (res.status === "success") {
           await qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
-          toast.success(t(($) => $.lark.install_success_toast));
+          toast.success(
+            region === "lark"
+              ? t(($) => $.lark.install_success_toast_lark)
+              : t(($) => $.lark.install_success_toast_feishu),
+          );
           // Close after a tiny beat so the user sees the success state
           // briefly before the dialog disappears.
           setTimeout(() => {
@@ -677,11 +733,19 @@ function LarkInstallDialog({
     >
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>{t(($) => $.lark.install_dialog_title)}</DialogTitle>
+          <DialogTitle>
+            {region === "lark"
+              ? t(($) => $.lark.install_dialog_title_lark)
+              : t(($) => $.lark.install_dialog_title_feishu)}
+          </DialogTitle>
           <DialogDescription>
-            {agentName
-              ? t(($) => $.lark.install_dialog_description_for_agent, { agent: agentName })
-              : t(($) => $.lark.install_dialog_description)}
+            {region === "lark"
+              ? agentName
+                ? t(($) => $.lark.install_dialog_description_for_agent_lark, { agent: agentName })
+                : t(($) => $.lark.install_dialog_description_lark)
+              : agentName
+                ? t(($) => $.lark.install_dialog_description_for_agent_feishu, { agent: agentName })
+                : t(($) => $.lark.install_dialog_description_feishu)}
           </DialogDescription>
         </DialogHeader>
 
@@ -698,7 +762,9 @@ function LarkInstallDialog({
                 <QRCode value={session.qrCodeURL} size={192} />
               </div>
               <p className="text-center text-xs text-muted-foreground">
-                {t(($) => $.lark.install_scan_hint)}
+                {region === "lark"
+                  ? t(($) => $.lark.install_scan_hint_lark)
+                  : t(($) => $.lark.install_scan_hint_feishu)}
               </p>
               <a
                 href={session.qrCodeURL}
@@ -706,7 +772,9 @@ function LarkInstallDialog({
                 rel="noopener noreferrer"
                 className="text-xs underline text-muted-foreground"
               >
-                {t(($) => $.lark.install_open_link_fallback)}
+                {region === "lark"
+                  ? t(($) => $.lark.install_open_link_fallback_lark)
+                  : t(($) => $.lark.install_open_link_fallback_feishu)}
               </a>
             </>
           )}

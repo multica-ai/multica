@@ -219,6 +219,13 @@ type registrationSession struct {
 	qrCodeURL  string
 	interval   time.Duration
 	expiresAt  time.Time
+	// region is the cloud the install was started against. The polling
+	// loop reads it as the initial value of its `region` local; if the
+	// poll stream surfaces a tenant_brand mid-flow, the local flips to
+	// RegionLark, but the session field stays at what the user picked
+	// (it is informational — the authoritative cloud flows back through
+	// finishSuccess via the loop's local).
+	region Region
 
 	mu             sync.Mutex
 	status         RegistrationSessionStatus
@@ -281,6 +288,16 @@ type BeginInstallParams struct {
 	WorkspaceID pgtype.UUID
 	AgentID     pgtype.UUID
 	InitiatorID pgtype.UUID
+	// Region picks which cloud's accounts host the device-flow begins
+	// against — Feishu (mainland, accounts.feishu.cn) or Lark
+	// (international, accounts.larksuite.com). The user picks this
+	// explicitly in the UI ("Bind to Feishu" vs "Bind to Lark") so the
+	// QR rendered up front already targets the right cloud and Lark
+	// users do not have to hit a Feishu URL first and rely on the
+	// tenant-brand auto-switch. Empty / unknown values fall back to
+	// Feishu, matching RegionOrDefault, so existing callers without
+	// the new field keep working.
+	Region Region
 }
 
 // BeginInstallResult is the public payload the handler echoes to the
@@ -323,7 +340,14 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 		return BeginInstallResult{}, fmt.Errorf("lark registration: agent not in workspace: %w", err)
 	}
 
-	begin, err := s.client.Begin(ctx, botNamePreset(agent.Name))
+	// Normalize the requested region: empty / unknown → Feishu, the same
+	// back-compat invariant the storage layer uses (RegionOrDefault).
+	// This both protects the device-flow client from a bogus value
+	// from the handler AND means a pre-region caller (omitting the
+	// field) keeps getting the historical mainland-first behaviour.
+	region := RegionOrDefault(string(p.Region))
+
+	begin, err := s.client.Begin(ctx, botNamePreset(agent.Name), region)
 	if err != nil {
 		return BeginInstallResult{}, fmt.Errorf("lark registration: begin: %w", err)
 	}
@@ -343,6 +367,7 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 		qrCodeURL:   begin.QRCodeURL,
 		interval:    begin.Interval,
 		expiresAt:   now.Add(begin.ExpiresIn),
+		region:      region,
 		status:      RegistrationStatusPending,
 	}
 	s.mu.Lock()
@@ -408,13 +433,21 @@ func (s *RegistrationService) runPolling(sess *registrationSession) {
 	domain := sess.domain
 	deviceCode := sess.deviceCode
 	// region tracks which cloud this install belongs to. It starts at
-	// Feishu (the begin host) and flips to Lark the moment the poll
-	// stream surfaces tenant_brand="lark" (the SwitchedDomain branch
-	// below). At finishSuccess time it is the authoritative per-install
-	// region, derived from the protocol's own role-based switch rather
-	// than by string-matching accounts hostnames (so staging/mock
+	// whatever the user picked at begin-time (Feishu by default; the
+	// frontend now exposes an explicit Lark CTA that begins on
+	// accounts.larksuite.com directly). The SwitchedDomain branch
+	// below is still honored as a safety net — if a user clicks the
+	// Feishu CTA but actually authorizes with a Lark-international
+	// account, the poll stream surfaces tenant_brand="lark" and we
+	// flip the local accordingly. So at finishSuccess time `region`
+	// is the authoritative per-install cloud, derived first from the
+	// user's UI choice and then from the protocol's role-based switch
+	// — never by string-matching accounts hostnames (so staging/mock
 	// domains classify correctly too).
-	region := RegionFeishu
+	region := sess.region
+	if region == "" {
+		region = RegionFeishu
+	}
 
 	for {
 		select {

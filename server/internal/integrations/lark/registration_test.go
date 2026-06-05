@@ -81,7 +81,7 @@ func TestRegistrationClient_Begin_HappyPath(t *testing.T) {
 	})
 
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	res, err := c.Begin(context.Background(), "Ada - Multica")
+	res, err := c.Begin(context.Background(), "Ada - Multica", "")
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestRegistrationClient_Begin_OmitsNameWhenPresetEmpty(t *testing.T) {
 	})
 
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	res, err := c.Begin(context.Background(), "")
+	res, err := c.Begin(context.Background(), "", "")
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -143,6 +143,83 @@ func TestRegistrationClient_Begin_OmitsNameWhenPresetEmpty(t *testing.T) {
 	}
 	if _, ok := u.Query()["name"]; ok {
 		t.Errorf("qr URL should omit name when preset empty, got %q", res.QRCodeURL)
+	}
+}
+
+// TestRegistrationClient_Begin_RegionLarkBeginsOnLarksuite pins the
+// new explicit-region routing: passing region=lark to Begin must POST
+// the begin form against the configured LarkDomain (international) host
+// rather than the Feishu default. This is the routing optimization the
+// split "Bind to Feishu / Bind to Lark" UI relies on — without it, a
+// Lark user would still hit accounts.feishu.cn first and only flip to
+// larksuite mid-poll via the tenant-brand auto-switch.
+func TestRegistrationClient_Begin_RegionLarkBeginsOnLarksuite(t *testing.T) {
+	feishuFake := newRegistrationFake(t)
+	feishuFake.mux.HandleFunc(registrationEndpoint, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("region=lark should NOT POST begin to the Feishu host (%s)", feishuFake.URL())
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	larkFake := newRegistrationFake(t)
+	larkFake.stubBegin(map[string]any{
+		"device_code":               "dc_lark",
+		"verification_uri_complete": "https://accounts.larksuite.com/oauth/v1/qrcode?code=abc",
+	})
+
+	c := NewRegistrationClient(RegistrationConfig{
+		Domain:     feishuFake.URL(),
+		LarkDomain: larkFake.URL(),
+	})
+	res, err := c.Begin(context.Background(), "", RegionLark)
+	if err != nil {
+		t.Fatalf("Begin(region=lark): %v", err)
+	}
+	if res.Domain != larkFake.URL() {
+		t.Errorf("BeginResult.Domain: got %q want %q (LarkDomain) — subsequent polls must hit the larksuite host directly",
+			res.Domain, larkFake.URL())
+	}
+	if got := larkFake.beginN.Load(); got != 1 {
+		t.Errorf("Lark begin POSTs: got %d want 1", got)
+	}
+	if got := feishuFake.beginN.Load(); got != 0 {
+		t.Errorf("Feishu begin POSTs: got %d want 0 (region=lark must not touch Feishu host)", got)
+	}
+}
+
+// TestRegistrationClient_Begin_RegionFeishuBeginsOnFeishu pins the
+// explicit-feishu side of the same split: passing region=feishu (or
+// the empty-string back-compat default) keeps the original mainland
+// host. Documenting both directions catches a future regression where
+// the region selector accidentally inverts.
+func TestRegistrationClient_Begin_RegionFeishuBeginsOnFeishu(t *testing.T) {
+	feishuFake := newRegistrationFake(t)
+	feishuFake.stubBegin(map[string]any{
+		"device_code":               "dc_feishu",
+		"verification_uri_complete": "https://accounts.feishu.cn/oauth/v1/qrcode?code=abc",
+	})
+
+	larkFake := newRegistrationFake(t)
+	larkFake.mux.HandleFunc(registrationEndpoint, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("region=feishu should NOT POST begin to the Lark host (%s)", larkFake.URL())
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	c := NewRegistrationClient(RegistrationConfig{
+		Domain:     feishuFake.URL(),
+		LarkDomain: larkFake.URL(),
+	})
+	res, err := c.Begin(context.Background(), "", RegionFeishu)
+	if err != nil {
+		t.Fatalf("Begin(region=feishu): %v", err)
+	}
+	if res.Domain != feishuFake.URL() {
+		t.Errorf("BeginResult.Domain: got %q want %q (Feishu)", res.Domain, feishuFake.URL())
+	}
+	if got := feishuFake.beginN.Load(); got != 1 {
+		t.Errorf("Feishu begin POSTs: got %d want 1", got)
+	}
+	if got := larkFake.beginN.Load(); got != 0 {
+		t.Errorf("Lark begin POSTs: got %d want 0", got)
 	}
 }
 
@@ -159,7 +236,7 @@ func TestRegistrationClient_Begin_DefaultsWhenServerOmitsTimers(t *testing.T) {
 	})
 
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	res, err := c.Begin(context.Background(), "")
+	res, err := c.Begin(context.Background(), "", "")
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -178,7 +255,7 @@ func TestRegistrationClient_Begin_LarkError(t *testing.T) {
 		"error_description": "missing archetype",
 	})
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	_, err := c.Begin(context.Background(), "")
+	_, err := c.Begin(context.Background(), "", "")
 	if err == nil {
 		t.Fatal("expected error from Lark error response")
 	}
@@ -198,7 +275,7 @@ func TestRegistrationClient_Begin_HTTPNon2xx(t *testing.T) {
 		_, _ = w.Write([]byte("server boom"))
 	})
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	_, err := c.Begin(context.Background(), "")
+	_, err := c.Begin(context.Background(), "", "")
 	if err == nil {
 		t.Fatal("want error on 500")
 	}

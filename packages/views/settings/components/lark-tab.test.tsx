@@ -187,22 +187,31 @@ function resetFixtures() {
 describe("LarkAgentBindButton (CTA gate)", () => {
   beforeEach(resetFixtures);
 
-  it("renders the bind CTA when the viewer is a workspace owner and install is supported", () => {
+  it("renders both Feishu and Lark bind CTAs when the viewer is a workspace owner and install is supported", () => {
+    // The CTA was split into two explicit entry points — one per cloud
+    // — so the begin POST hits the right accounts host up front (no
+    // tenant-brand mid-poll auto-switch from a Feishu-first start) and
+    // the QR / dialog copy reflects the cloud the user picked. Both
+    // buttons must mount side by side for owners/admins; either one
+    // alone would re-introduce the "Lark user has to scan a Feishu QR"
+    // confusion this split is meant to remove (MUL-3083 follow-up).
     render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
       wrapper: I18nWrapper,
     });
+    expect(screen.getByRole("button", { name: /Bind to Feishu/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Bind to Lark/i })).toBeTruthy();
   });
 
-  it("renders the bind CTA when the viewer is a workspace admin", () => {
+  it("renders both bind CTAs when the viewer is a workspace admin", () => {
     membersRef.current = [{ user_id: "user-1", role: "admin" }];
     render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
       wrapper: I18nWrapper,
     });
+    expect(screen.getByRole("button", { name: /Bind to Feishu/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Bind to Lark/i })).toBeTruthy();
   });
 
-  it("hides the bind CTA for a non-admin agent owner (matches backend admin gate)", () => {
+  it("hides both bind CTAs for a non-admin agent owner (matches backend admin gate)", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     const { container } = render(
       <LarkAgentBindButton agentId="agent-1" agentName="Bot" />,
@@ -211,7 +220,7 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     expect(container.querySelector("button")).toBeNull();
   });
 
-  it("hides the bind CTA when the device-flow install path is not wired on the server", () => {
+  it("hides both bind CTAs when the device-flow install path is not wired on the server", () => {
     installationsRef.current.install_supported = false;
     const { container } = render(
       <LarkAgentBindButton agentId="agent-1" agentName="Bot" />,
@@ -220,7 +229,59 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     expect(container.querySelector("button")).toBeNull();
   });
 
-  it("swaps the bind CTA for a 'Connected + Manage in Lark' badge when this agent already has an active installation", () => {
+  it("clicking Bind to Feishu begins an install with region='feishu'", async () => {
+    // Pin the routing wire-up: each split CTA must pass its own region
+    // string to the API client (which threads it onto the
+    // /lark/install/begin?region=… query param), so the device-flow
+    // begins on the matching accounts host. A regression here would
+    // silently send Lark users to a Feishu QR — the exact bug this
+    // refactor addresses.
+    const user = userEvent.setup();
+    mockBeginInstall.mockResolvedValue({
+      session_id: "sess-feishu",
+      qr_code_url: "https://accounts.feishu.cn/oauth/v1/device?u=feishu",
+      expires_in_seconds: 300,
+      poll_interval_seconds: 2,
+    });
+    mockGetStatus.mockResolvedValue({ status: "pending" });
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    await user.click(screen.getByRole("button", { name: /Bind to Feishu/i }));
+    await waitFor(() => {
+      expect(mockBeginInstall).toHaveBeenCalledTimes(1);
+    });
+    expect(mockBeginInstall).toHaveBeenCalledWith(
+      "workspace-1",
+      "agent-1",
+      "feishu",
+    );
+  });
+
+  it("clicking Bind to Lark begins an install with region='lark'", async () => {
+    const user = userEvent.setup();
+    mockBeginInstall.mockResolvedValue({
+      session_id: "sess-lark",
+      qr_code_url: "https://accounts.larksuite.com/oauth/v1/device?u=lark",
+      expires_in_seconds: 300,
+      poll_interval_seconds: 2,
+    });
+    mockGetStatus.mockResolvedValue({ status: "pending" });
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    await user.click(screen.getByRole("button", { name: /Bind to Lark/i }));
+    await waitFor(() => {
+      expect(mockBeginInstall).toHaveBeenCalledTimes(1);
+    });
+    expect(mockBeginInstall).toHaveBeenCalledWith(
+      "workspace-1",
+      "agent-1",
+      "lark",
+    );
+  });
+
+  it("swaps the bind CTAs for a 'Connected + Manage in Lark' badge when this agent already has an active installation", () => {
     // Anti-zombie guard: re-scanning the same agent upserts the row
     // and orphans the previously-created Lark PersonalAgent. The badge
     // closes the install entry point and links the user to the Bot's
@@ -244,8 +305,9 @@ describe("LarkAgentBindButton (CTA gate)", () => {
       <LarkAgentBindButton agentId="agent-1" agentName="Bot" />,
       { wrapper: I18nWrapper },
     );
-    // The Bind CTA must be gone — re-scanning would orphan the
+    // Both Bind CTAs must be gone — re-scanning would orphan the
     // PersonalAgent (see badge comment in lark-tab.tsx).
+    expect(screen.queryByRole("button", { name: /Bind to Feishu/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Bind to Lark/i })).toBeNull();
     expect(screen.getByText(/Connected to Lark/i)).toBeTruthy();
     const link = screen.getByRole("link", { name: /Manage in Lark/i }) as HTMLAnchorElement;
@@ -280,7 +342,7 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     expect(link.href).toBe("https://open.larksuite.com/app/cli_lark_app");
   });
 
-  it("still shows the bind CTA when an installation exists for a DIFFERENT agent (per-agent scoping)", () => {
+  it("still shows both bind CTAs when an installation exists for a DIFFERENT agent (per-agent scoping)", () => {
     installationsRef.current.installations = [
       {
         id: "inst-other",
@@ -298,6 +360,7 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
       wrapper: I18nWrapper,
     });
+    expect(screen.getByRole("button", { name: /Bind to Feishu/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Bind to Lark/i })).toBeTruthy();
   });
 
@@ -326,8 +389,9 @@ describe("LarkAgentBindButton (CTA gate)", () => {
       <LarkAgentBindButton agentId="agent-1" agentName="Bot" />,
       { wrapper: I18nWrapper },
     );
-    // The Bind CTA must be gone even when install_supported=false,
+    // Both Bind CTAs must be gone even when install_supported=false,
     // since the existing-installation check runs first.
+    expect(screen.queryByRole("button", { name: /Bind to Feishu/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Bind to Lark/i })).toBeNull();
     expect(screen.getByText(/Connected to Lark/i)).toBeTruthy();
     expect(
@@ -335,7 +399,7 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     ).toBeTruthy();
   });
 
-  it("still shows the bind CTA when this agent's only installation is revoked (treat as not-installed for re-bind)", () => {
+  it("still shows both bind CTAs when this agent's only installation is revoked (treat as not-installed for re-bind)", () => {
     installationsRef.current.installations = [
       {
         id: "inst-revoked",
@@ -353,6 +417,7 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
       wrapper: I18nWrapper,
     });
+    expect(screen.getByRole("button", { name: /Bind to Feishu/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Bind to Lark/i })).toBeTruthy();
   });
 });
