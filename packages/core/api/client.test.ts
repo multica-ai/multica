@@ -152,6 +152,69 @@ describe("ApiClient", () => {
     expect(headers["X-Client-OS"]).toBeUndefined();
   });
 
+  it("uses the expected HTTP contract for comment trigger preview and suppress", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ agents: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "comment-1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "user-1",
+          content: "hello",
+          type: "comment",
+          parent_id: null,
+          reactions: [],
+          attachments: [],
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:00:00Z",
+        }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.previewCommentTriggers("issue-1", "hello", "parent-1");
+    await client.createComment(
+      "issue-1",
+      "hello",
+      "comment",
+      "parent-1",
+      ["attachment-1"],
+      ["agent-1"],
+    );
+
+    expect(fetchMock.mock.calls.map(([url, init]) => ({
+      url,
+      method: init?.method,
+      body: init?.body,
+    }))).toMatchObject([
+      {
+        url: "https://api.example.test/api/issues/issue-1/comments/trigger-preview",
+        method: "POST",
+        body: JSON.stringify({ content: "hello", parent_id: "parent-1" }),
+      },
+      {
+        url: "https://api.example.test/api/issues/issue-1/comments",
+        method: "POST",
+        body: JSON.stringify({
+          content: "hello",
+          type: "comment",
+          parent_id: "parent-1",
+          attachment_ids: ["attachment-1"],
+          suppress_agent_ids: ["agent-1"],
+        }),
+      },
+    ]);
+  });
+
   it("uses the Cloud Runtime node API contract", async () => {
     const node = {
       id: "node-1",
