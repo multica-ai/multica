@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DAGCanvas } from "../../workflows/components";
+import { ReactFlowProvider } from "@xyflow/react";
 import {
   workflowDetailOptions,
   workflowNodesOptions,
@@ -221,20 +222,15 @@ export function WorkflowDagViewer({
       )}
 
       <div className={cn("h-[270px] overflow-hidden rounded-lg border bg-card", !runId && "opacity-60")}>
-        <DAGCanvas
-          nodes={nodes}
-          edges={edges}
-          nodeStatusColors={nodeStatusColors}
-          nodeStatuses={nodeStatuses}
-          onNodeClick={(id) => setSelectedNodeId(id === selectedNodeId ? null : id)}
-          initialScale={3}
-          initialOffset={(() => {
-            if (nodes.length === 0) return undefined;
-            const minX = Math.min(...nodes.map((n) => n.position_x));
-            const minY = Math.min(...nodes.map((n) => n.position_y));
-            return { x: 200 - minX, y: 150 - minY };
-          })()}
-        />
+        <ReactFlowProvider>
+          <DAGCanvas
+            nodes={nodes}
+            edges={edges}
+            nodeStatusColors={nodeStatusColors}
+            nodeStatuses={nodeStatuses}
+            onNodeClick={(id) => setSelectedNodeId(id === selectedNodeId ? null : id)}
+          />
+        </ReactFlowProvider>
       </div>
 
       {/* Selected node run detail panel */}

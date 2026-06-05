@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Trash2 } from "lucide-react";
+import { Trash2, X } from "lucide-react";
+import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -12,7 +13,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useDeleteNode } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { AssigneePicker } from "../../issues/components/pickers/assignee-picker";
-import type { WorkflowNode, WorkerType, CriticType } from "@multica/core/types";
+import type { WorkflowNode, WorkerType, CriticType, NodeShape } from "@multica/core/types";
+import { NODE_SHAPES, parseNodeShape } from "@multica/core/types";
 import type { IssueAssigneeType } from "@multica/core/types/issue";
 
 function toAssigneeType(t: string): IssueAssigneeType | null {
@@ -35,43 +37,153 @@ function fromAssigneeTypeCritic(t: IssueAssigneeType | null): CriticType {
   return "human";
 }
 
+// --- Shape preview icons ---
+
+const SHAPE_PREVIEW: Record<NodeShape, React.ReactNode> = {
+  rectangle: (
+    <svg width="18" height="14" viewBox="0 0 18 14">
+      <rect x="1" y="1" width="16" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  ),
+  diamond: (
+    <svg width="18" height="18" viewBox="0 0 18 18">
+      <polygon points="9,0 17,9 9,18 0,9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  ),
+  pill: (
+    <svg width="18" height="14" viewBox="0 0 18 14">
+      <rect x="1" y="1" width="16" height="12" rx="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  ),
+  hexagon: (
+    <svg width="18" height="18" viewBox="0 0 18 18">
+      <polygon points="5,0 13,0 18,9 13,18 5,18 0,9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  ),
+};
+
+function ShapePreview({ shape }: { shape: NodeShape }) {
+  return SHAPE_PREVIEW[shape];
+}
+
+function toFormatSchemaString(fs: unknown): string {
+  if (!fs) return "";
+  if (typeof fs === "string") return fs;
+  return JSON.stringify(fs, null, 2);
+}
+
+function safeParseFormatSchema(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch { /* invalid JSON */ }
+  return null;
+}
+
+const PRESET_COLORS = [
+  "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4",
+  "#3b82f6", "#6366f1", "#8b5cf6", "#ec4899",
+];
+
+const FONT_SIZES = [12, 13, 14, 16, 18, 20, 24];
+
 interface NodeConfigPanelProps {
   node: WorkflowNode;
   workflowId: string;
+  nodes?: WorkflowNode[];
   onClose: () => void;
 }
 
-export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelProps) {
+export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeConfigPanelProps) {
   const { t } = useT("workflows");
   const wsId = useWorkspaceId();
   const deleteMutation = useDeleteNode(wsId, workflowId);
-  const editorMode = useWorkflowEditorStore((s) => s.mode);
   const nodeEdits = useWorkflowEditorStore((s) => s.nodeEdits);
   const cacheNodeEdits = useWorkflowEditorStore((s) => s.cacheNodeEdits);
-  const isEditing = editorMode === "edit";
 
   const saved = nodeEdits[node.id];
+
+  const isAnnotation = (() => {
+    const fs = saved?.format_schema ?? node.format_schema;
+    return fs && typeof fs === "object" && !Array.isArray(fs) && (fs as Record<string, unknown>).type === "annotation";
+  })();
+
   const [title, setTitle] = useState(saved?.title ?? node.title);
   const [description, setDescription] = useState(saved?.description ?? node.description);
   const [formatSchema, setFormatSchema] = useState<string>(
-    (saved?.format_schema as string | undefined) ?? (node.format_schema ? JSON.stringify(node.format_schema, null, 2) : "")
+    toFormatSchemaString(saved?.format_schema ?? node.format_schema)
   );
   const [workerType, setWorkerType] = useState(saved?.worker_type ?? node.worker_type);
   const [workerId, setWorkerId] = useState<string | null>(saved?.worker_id ?? node.worker_id ?? null);
   const [criticType, setCriticType] = useState(saved?.critic_type ?? node.critic_type);
   const [criticId, setCriticId] = useState<string | null>(saved?.critic_id ?? node.critic_id ?? null);
   const [criticApiUrl, setCriticApiUrl] = useState(saved?.critic_api_url ?? node.critic_api_url ?? "");
+  const [workerInstructions, setWorkerInstructions] = useState(saved?.worker_instructions ?? node.worker_instructions ?? "");
+  const [criticInstructions, setCriticInstructions] = useState(saved?.critic_instructions ?? node.critic_instructions ?? "");
+  const [shape, setShape] = useState<NodeShape>(parseNodeShape(saved?.format_schema ?? node.format_schema));
+  const [nodeColor, setNodeColor] = useState<string>((() => {
+    const fs = saved?.format_schema ?? node.format_schema;
+    if (fs && typeof fs === "object" && typeof (fs as Record<string, unknown>).color === "string") {
+      return (fs as Record<string, unknown>).color as string;
+    }
+    return "";
+  })());
+  const [fontSize, setFontSize] = useState<number>((() => {
+    const fs = saved?.format_schema ?? node.format_schema;
+    if (fs && typeof fs === "object" && typeof (fs as Record<string, unknown>).fontSize === "number") {
+      return (fs as Record<string, unknown>).fontSize as number;
+    }
+    return 14;
+  })());
+
+  const bindableNodes = useMemo(
+    () => nodes.filter((n) => {
+      if (n.id === node.id) return false;
+      const fs = n.format_schema;
+      return !(fs && typeof fs === "object" && !Array.isArray(fs) && (fs as Record<string, unknown>).type === "annotation");
+    }),
+    [nodes, node.id],
+  );
+
+  const getTargetNodeId = (): string | null => {
+    const fs = nodeEdits[node.id]?.format_schema ?? node.format_schema;
+    if (fs && typeof fs === "object" && !Array.isArray(fs)) {
+      return (fs as Record<string, unknown>).annotation_target_node_id as string | null ?? null;
+    }
+    return null;
+  };
+
+  const targetNodeId = getTargetNodeId();
 
   useEffect(() => {
     const s = nodeEdits[node.id];
     setTitle(s?.title ?? node.title);
     setDescription(s?.description ?? node.description);
-    setFormatSchema(((s?.format_schema as string | undefined) ?? (node.format_schema ? JSON.stringify(node.format_schema, null, 2) : "")) as string);
+    setFormatSchema(toFormatSchemaString(s?.format_schema ?? node.format_schema));
     setWorkerType(s?.worker_type ?? node.worker_type);
     setWorkerId(s?.worker_id ?? node.worker_id ?? null);
     setCriticType(s?.critic_type ?? node.critic_type);
     setCriticId(s?.critic_id ?? node.critic_id ?? null);
     setCriticApiUrl(s?.critic_api_url ?? node.critic_api_url ?? "");
+    setWorkerInstructions(s?.worker_instructions ?? node.worker_instructions ?? "");
+    setCriticInstructions(s?.critic_instructions ?? node.critic_instructions ?? "");
+    setShape(parseNodeShape(s?.format_schema ?? node.format_schema));
+    setNodeColor((() => {
+      const fs = s?.format_schema ?? node.format_schema;
+      if (fs && typeof fs === "object" && typeof (fs as Record<string, unknown>).color === "string") {
+        return (fs as Record<string, unknown>).color as string;
+      }
+      return "";
+    })());
+    setFontSize((() => {
+      const fs = s?.format_schema ?? node.format_schema;
+      if (fs && typeof fs === "object" && typeof (fs as Record<string, unknown>).fontSize === "number") {
+        return (fs as Record<string, unknown>).fontSize as number;
+      }
+      return 14;
+    })());
   }, [node]);
 
   const handleDelete = async () => {
@@ -105,7 +217,6 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
             onChange={(e) => { setTitle(e.target.value); cacheNodeEdits(node.id, { title: e.target.value }); }}
             placeholder={t(($) => $.node.title_placeholder)}
             className="h-8 text-sm"
-            disabled={!isEditing}
           />
         </div>
 
@@ -117,7 +228,6 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
             onChange={(e) => { setDescription(e.target.value); cacheNodeEdits(node.id, { description: e.target.value }); }}
             placeholder={t(($) => $.node.description_placeholder)}
             className="min-h-[60px] text-sm"
-            disabled={!isEditing}
             rows={2}
           />
         </div>
@@ -127,16 +237,198 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
           <Label className="text-sm">{t(($) => $.node.format_schema_label)}</Label>
           <Textarea
             value={formatSchema}
-            onChange={(e) => { setFormatSchema(e.target.value); cacheNodeEdits(node.id, { format_schema: e.target.value }); }}
+            onChange={(e) => {
+              setFormatSchema(e.target.value);
+              const parsed = safeParseFormatSchema(e.target.value);
+              if (parsed) {
+                cacheNodeEdits(node.id, { format_schema: parsed });
+              }
+            }}
             placeholder="{}"
             className="min-h-[80px] text-sm font-mono"
-            disabled={!isEditing}
             rows={4}
           />
           <p className="text-[11px] text-muted-foreground">{t(($) => $.node.format_schema_hint)}</p>
         </div>
 
-        {/* Worker config */}
+        {/* Bind to Node — only for annotations */}
+        {isAnnotation && (
+        <div className="space-y-1.5">
+          <Label className="text-sm">Bind to Node</Label>
+          {targetNodeId ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm flex-1 truncate">
+                {bindableNodes.find((bn) => bn.id === targetNodeId)?.title ?? "Unknown node"}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0"
+                onClick={() => {
+                  let obj: Record<string, unknown> = {};
+                  try {
+                    const parsed = JSON.parse(formatSchema || "{}");
+                    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                      obj = parsed as Record<string, unknown>;
+                    }
+                  } catch { /* keep default */ }
+                  delete obj.annotation_target_node_id;
+                  cacheNodeEdits(node.id, { format_schema: obj });
+                  setFormatSchema(JSON.stringify(obj, null, 2));
+                }}
+                title="Unbind"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          ) : (
+            <select
+              className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+              value=""
+              onChange={(e) => {
+                const tid = e.target.value;
+                if (!tid) return;
+                let obj: Record<string, unknown> = {};
+                try {
+                  const parsed = JSON.parse(formatSchema || "{}");
+                  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                    obj = parsed as Record<string, unknown>;
+                  }
+                } catch { /* keep default */ }
+                obj.annotation_target_node_id = tid;
+                cacheNodeEdits(node.id, { format_schema: obj });
+                setFormatSchema(JSON.stringify(obj, null, 2));
+              }}
+            >
+              <option value="">Select a node...</option>
+              {bindableNodes.map((bn) => (
+                <option key={bn.id} value={bn.id}>{bn.title}</option>
+              ))}
+            </select>
+          )}
+        </div>
+        )}
+
+        {/* Shape selector */}
+        <div className="space-y-1.5">
+          <Label className="text-sm">Shape</Label>
+          <div className="flex gap-2">
+            {NODE_SHAPES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  setShape(s);
+                  let obj: Record<string, unknown> = { shape: s };
+                  try {
+                    const parsed = JSON.parse(formatSchema || "{}");
+                    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                      obj = { ...(parsed as Record<string, unknown>), shape: s };
+                    }
+                  } catch { /* keep default */ }
+                  cacheNodeEdits(node.id, { format_schema: obj });
+                  setFormatSchema(JSON.stringify(obj, null, 2));
+                }}
+                className={cn(
+                  "flex items-center justify-center w-10 h-10 rounded-md border-2 transition-colors",
+                  shape === s ? "border-primary bg-primary/10" : "border-border hover:border-muted-foreground",
+                )}
+                title={s}
+              >
+                <ShapePreview shape={s} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Color picker */}
+        <div className="space-y-1.5">
+          <Label className="text-sm">{t(($) => $.node.label_color)}</Label>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setNodeColor("");
+                let obj: Record<string, unknown> = {};
+                try {
+                  const parsed = JSON.parse(formatSchema || "{}");
+                  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                    obj = parsed as Record<string, unknown>;
+                  }
+                } catch { /* keep default */ }
+                obj.color = "";
+                cacheNodeEdits(node.id, { format_schema: obj });
+                setFormatSchema(JSON.stringify(obj, null, 2));
+              }}
+              className={cn(
+                "w-7 h-7 rounded border-2 transition-colors",
+                !nodeColor ? "border-primary" : "border-border hover:border-muted-foreground",
+              )}
+              title="Default"
+            >
+              <div className="w-full h-full rounded-[3px] bg-card border border-border" />
+            </button>
+            {PRESET_COLORS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => {
+                  setNodeColor(c);
+                  let obj: Record<string, unknown> = { color: c };
+                  try {
+                    const parsed = JSON.parse(formatSchema || "{}");
+                    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                      obj = { ...(parsed as Record<string, unknown>), color: c };
+                    }
+                  } catch { /* keep default */ }
+                  cacheNodeEdits(node.id, { format_schema: obj });
+                  setFormatSchema(JSON.stringify(obj, null, 2));
+                }}
+                className={cn(
+                  "w-7 h-7 rounded border-2 transition-colors",
+                  nodeColor === c ? "border-primary" : "border-border hover:border-muted-foreground",
+                )}
+                title={c}
+              >
+                <div className="w-full h-full rounded-[3px]" style={{ backgroundColor: c }} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Font size */}
+        <div className="space-y-1.5">
+          <Label className="text-sm">{t(($) => $.node.label_font_size)}</Label>
+          <div className="flex gap-1.5">
+            {FONT_SIZES.map((size) => (
+              <button
+                key={size}
+                type="button"
+                onClick={() => {
+                  setFontSize(size);
+                  let obj: Record<string, unknown> = { fontSize: size };
+                  try {
+                    const parsed = JSON.parse(formatSchema || "{}");
+                    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                      obj = { ...(parsed as Record<string, unknown>), fontSize: size };
+                    }
+                  } catch { /* keep default */ }
+                  cacheNodeEdits(node.id, { format_schema: obj });
+                  setFormatSchema(JSON.stringify(obj, null, 2));
+                }}
+                className={cn(
+                  "w-9 h-8 rounded border-2 transition-colors text-xs",
+                  fontSize === size ? "border-primary bg-primary/10 text-primary" : "border-border hover:border-muted-foreground",
+                )}
+              >
+                {size}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Worker config — hidden for annotations */}
+        {!isAnnotation && (
         <div className="space-y-3 pt-2 border-t">
           <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             {t(($) => $.node.section_worker)}
@@ -144,8 +436,7 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
 
           <div className="space-y-1.5">
             <Label className="text-sm">{t(($) => $.node.worker_type_label)}</Label>
-            <div className={!isEditing ? "pointer-events-none opacity-60" : ""}>
-              <AssigneePicker
+            <AssigneePicker
                 assigneeType={toAssigneeType(workerType)}
                 assigneeId={workerId}
                 onUpdate={(u) => {
@@ -158,12 +449,24 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
                 align="start"
                 skipBuiltinRuntimeSelection
               />
-            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-sm">{t(($) => $.node.worker_instructions_label)}</Label>
+            <Textarea
+              value={workerInstructions}
+              onChange={(e) => { setWorkerInstructions(e.target.value); cacheNodeEdits(node.id, { worker_instructions: e.target.value }); }}
+              placeholder={t(($) => $.node.worker_instructions_hint)}
+              className="min-h-[60px] text-sm"
+              rows={2}
+            />
           </div>
 
         </div>
+        )}
 
-        {/* Critic config */}
+        {/* Critic config — hidden for annotations */}
+        {!isAnnotation && (
         <div className="space-y-3 pt-2 border-t">
           <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             {t(($) => $.node.section_critic)}
@@ -171,7 +474,6 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
 
           <div className="space-y-1.5">
             <Label className="text-sm">{t(($) => $.node.critic_type_label)}</Label>
-            <div className={!isEditing ? "pointer-events-none opacity-60" : ""}>
               <AssigneePicker
                 assigneeType={toAssigneeType(criticType)}
                 assigneeId={criticId}
@@ -184,7 +486,6 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
                 }}
                 align="start"
               />
-            </div>
           </div>
 
           {criticType === "api" && (
@@ -195,18 +496,27 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
                 onChange={(e) => { setCriticApiUrl(e.target.value); cacheNodeEdits(node.id, { critic_api_url: e.target.value }); }}
                 placeholder="https://..."
                 className="h-8 text-sm"
-                disabled={!isEditing}
               />
               <p className="text-[11px] text-muted-foreground">{t(($) => $.node.critic_api_url_hint)}</p>
             </div>
           )}
 
+          <div className="space-y-1.5">
+            <Label className="text-sm">{t(($) => $.node.critic_instructions_label)}</Label>
+            <Textarea
+              value={criticInstructions}
+              onChange={(e) => { setCriticInstructions(e.target.value); cacheNodeEdits(node.id, { critic_instructions: e.target.value }); }}
+              className="min-h-[60px] text-sm"
+              rows={2}
+            />
+          </div>
+
         </div>
+        )}
         </div>
       </div>
 
       <div className="px-4 py-3 border-t shrink-0">
-        {isEditing && (
           <Button
             size="sm"
             variant="destructive"
@@ -217,7 +527,6 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
             <Trash2 className="h-3.5 w-3.5 mr-1.5" />
             {deleteMutation.isPending ? t(($) => $.node.saving) : t(($) => $.node.delete)}
           </Button>
-        )}
       </div>
     </div>
   );

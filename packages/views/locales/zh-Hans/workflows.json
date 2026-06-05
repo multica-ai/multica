@@ -19,8 +19,7 @@
       "active": "启用",
       "draft": "草稿",
       "paused": "暂停",
-      "archived": "归档",
-      "template": "模板"
+      "archived": "归档"
     }
   },
   "status": {
@@ -74,7 +73,10 @@
       "creating": "创建中..."
     },
     "section_danger": "危险区域",
-    "delete_button": "删除工作流"
+    "delete_button": "删除工作流",
+    "canvas_theme_system": "跟随系统",
+    "canvas_theme_light": "浅色主题",
+    "canvas_theme_dark": "深色主题"
   },
   "node": {
     "title": "标题",
@@ -109,7 +111,9 @@
     "toast_saved": "节点已保存",
     "toast_save_failed": "保存节点失败",
     "toast_deleted": "节点已删除",
-    "toast_delete_failed": "删除节点失败"
+    "toast_delete_failed": "删除节点失败",
+    "label_color": "颜色",
+    "label_font_size": "字号"
   },
   "edge": {
     "toast_created": "边已创建",
