@@ -405,6 +405,17 @@ func TestProtectedRoutesRequireAuth(t *testing.T) {
 	}
 }
 
+func TestTranscriptionRouteRequiresAuth(t *testing.T) {
+	resp, err := http.Post(testServer.URL+"/api/transcriptions", "multipart/form-data", strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("request to transcription route failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
 func TestInvalidJWT(t *testing.T) {
 	cases := []struct {
 		name  string

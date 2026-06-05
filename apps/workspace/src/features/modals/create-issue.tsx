@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { CalendarDays, Check, ChevronRight, Maximize2, Minimize2, UserMinus, X as XIcon } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { CalendarDays, Check, ChevronRight, Loader2, Maximize2, Mic, Minimize2, Square, UserMinus, X as XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { UpdateIssueRequest, IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
@@ -24,7 +24,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { ContentEditor, type ContentEditorRef } from "@/features/editor";
-import { TitleEditor } from "@/features/editor";
+import { TitleEditor, type TitleEditorRef } from "@/features/editor";
 import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, ParentIssuePicker } from "@/features/issues/components";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
 import { ProjectPicker } from "@/features/projects/components/project-picker";
@@ -33,6 +33,8 @@ import { useIssueMutations } from "@/features/issues/mutations";
 import { useIssueStore } from "@/features/issues";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
 import { getCreateIssueInitialValues } from "@/features/issues/utils/template";
+import { applyVoiceTranscriptToDraft } from "@/features/issues/utils/voice-transcript";
+import { useIssueTranscription, useIssueVoiceRecorder } from "@/features/issues/hooks";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { FileUploadButton } from "@/components/common/file-upload-button";
 import { ActorAvatar } from "@/components/common/actor-avatar";
@@ -91,6 +93,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const initialValues = getCreateIssueInitialValues(draft, data);
 
   const [title, setTitle] = useState(initialValues.title);
+  const titleEditorRef = useRef<TitleEditorRef>(null);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const [status, setStatus] = useState<IssueStatus>(initialValues.status);
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(initialValues.projectId);
@@ -109,8 +112,13 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const [assigneeFilter, setAssigneeFilter] = useState("");
 
   // File upload
-  const { uploadWithToast } = useFileUpload();
+  const { upload, uploadWithToast } = useFileUpload();
   const handleUpload = (file: File) => uploadWithToast(file);
+  const voiceRecorder = useIssueVoiceRecorder();
+  const voiceTranscription = useIssueTranscription();
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [keepOriginalRecording, setKeepOriginalRecording] = useState(false);
+  const [pendingVoiceTranscription, setPendingVoiceTranscription] = useState(false);
 
   const assigneeQuery = assigneeFilter.toLowerCase();
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(assigneeQuery));
@@ -151,6 +159,57 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     }
   };
 
+  useEffect(() => {
+    if (!pendingVoiceTranscription || !voiceRecorder.recording) return;
+    const recording = voiceRecorder.recording;
+    setPendingVoiceTranscription(false);
+    void (async () => {
+      const result = await voiceTranscription.transcribe(recording.file);
+      if (result?.text) {
+        setVoiceTranscript(result.text);
+      } else {
+        toast.error(voiceTranscription.error ?? "Transcription failed");
+      }
+    })();
+  }, [pendingVoiceTranscription, voiceRecorder.recording, voiceTranscription]);
+
+  const startVoiceCapture = async () => {
+    setVoiceTranscript("");
+    voiceTranscription.reset();
+    await voiceRecorder.start();
+  };
+
+  const stopVoiceCapture = () => {
+    setPendingVoiceTranscription(true);
+    voiceRecorder.stop();
+  };
+
+  const discardVoiceTranscript = () => {
+    setVoiceTranscript("");
+    setKeepOriginalRecording(false);
+    setPendingVoiceTranscription(false);
+    voiceTranscription.reset();
+    voiceRecorder.reset();
+  };
+
+  const insertVoiceTranscript = () => {
+    const currentDescription = descEditorRef.current?.getMarkdown() ?? "";
+    const nextDraft = applyVoiceTranscriptToDraft({
+      title,
+      description: currentDescription,
+      transcript: voiceTranscript,
+    });
+    updateTitle(nextDraft.title);
+    titleEditorRef.current?.setText(nextDraft.title);
+    descEditorRef.current?.setMarkdown(nextDraft.description);
+    setDraft({ description: nextDraft.description });
+    if (nextDraft.titleNeedsManualConfirmation) {
+      toast.error("Add a title before creating this issue");
+    }
+    setVoiceTranscript("");
+    voiceTranscription.reset();
+  };
+
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
@@ -169,16 +228,24 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         due_date: dueDate || undefined,
       });
 
-      if (initialValues.labelIds.length > 0) {
+	      if (initialValues.labelIds.length > 0) {
         const labelResults = await Promise.allSettled(
           initialValues.labelIds.map((labelId) => addIssueLabel(issue.id, { labelId })),
         );
         if (labelResults.some((result) => result.status === "rejected")) {
           toast.error("Issue created, but some labels could not be copied");
         }
-      }
+	      }
 
-      clearDraft();
+	      if (keepOriginalRecording && voiceRecorder.recording) {
+	        try {
+	          await upload(voiceRecorder.recording.file, { issueId: issue.id });
+	        } catch {
+	          toast.error("Issue created, but the voice recording was not preserved");
+	        }
+	      }
+
+	      clearDraft();
       onClose();
       toast.custom((t) => (
         <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-90">
@@ -267,6 +334,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         {/* Title */}
         <div className="px-5 pb-2 shrink-0">
           <TitleEditor
+            ref={titleEditorRef}
             autoFocus
             defaultValue={initialValues.title}
             placeholder="Issue title"
@@ -487,11 +555,100 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
           />
         </div>
 
+        {(voiceRecorder.status === "recording" || voiceTranscription.status === "transcribing" || voiceTranscript || voiceRecorder.error || voiceTranscription.error) && (
+          <div className="border-t px-5 py-3 shrink-0 space-y-3">
+            {voiceRecorder.status === "recording" && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="size-2 rounded-full bg-destructive animate-pulse" />
+                  <span>Recording</span>
+                </div>
+                <Button size="sm" variant="outline" onClick={stopVoiceCapture}>
+                  <Square className="size-3.5" />
+                  Stop
+                </Button>
+              </div>
+            )}
+
+            {voiceTranscription.status === "transcribing" && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                <span>Transcribing recording</span>
+              </div>
+            )}
+
+            {(voiceRecorder.error || voiceTranscription.error) && !voiceTranscript && (
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-destructive">{voiceRecorder.error ?? voiceTranscription.error}</span>
+                <Button size="sm" variant="outline" onClick={discardVoiceTranscript}>Dismiss</Button>
+              </div>
+            )}
+
+            {voiceTranscript && (
+              <div className="space-y-3">
+                <textarea
+                  value={voiceTranscript}
+                  onChange={(event) => setVoiceTranscript(event.target.value)}
+                  className="min-h-20 w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  aria-label="Voice transcript"
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={keepOriginalRecording}
+                      onChange={(event) => setKeepOriginalRecording(event.target.checked)}
+                      className="size-4"
+                    />
+                    Keep original recording
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={discardVoiceTranscript}>Discard</Button>
+                    <Button size="sm" onClick={insertVoiceTranscript}>Insert</Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
-          <FileUploadButton
-            onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-          />
+          <div className="flex items-center gap-2">
+            <FileUploadButton
+              onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+            />
+            {voiceRecorder.supported ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={voiceRecorder.status === "recording" ? stopVoiceCapture : startVoiceCapture}
+                      disabled={voiceTranscription.status === "transcribing"}
+                      aria-label={voiceRecorder.status === "recording" ? "Stop recording" : "Record voice"}
+                    >
+                      {voiceRecorder.status === "recording" ? <Square className="size-4" /> : <Mic className="size-4" />}
+                    </Button>
+                  }
+                />
+                <TooltipContent side="top">{voiceRecorder.status === "recording" ? "Stop recording" : "Record voice"}</TooltipContent>
+              </Tooltip>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button type="button" size="icon" variant="ghost" disabled aria-label="Recording unsupported">
+                      <Mic className="size-4" />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="top">Recording unsupported</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
           <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
             {submitting ? "Creating..." : "Create Issue"}
           </Button>

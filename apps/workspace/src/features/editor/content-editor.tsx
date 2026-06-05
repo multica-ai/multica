@@ -60,6 +60,7 @@ interface ContentEditorProps {
 
 interface ContentEditorRef {
   getMarkdown: () => string;
+  setMarkdown: (markdown: string) => void;
   clearContent: () => void;
   focus: () => void;
   uploadFile: (file: File) => void;
@@ -187,6 +188,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => editor?.getMarkdown() ?? "",
+      setMarkdown: (markdown: string) => {
+        if (!editor) return;
+        const processed = markdown ? preprocessMarkdown(markdown) : "";
+        if (processed) {
+          editor.commands.setContent(processed, { contentType: "markdown" });
+        } else {
+          editor.commands.clearContent();
+        }
+        onUpdateRef.current?.(markdown);
+      },
       clearContent: () => {
         editor?.commands.clearContent();
       },

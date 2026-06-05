@@ -210,6 +210,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 				r.Post("/import/apply", h.ApplyWorkspaceImport)
 			})
 
+			r.Post("/api/transcriptions", h.TranscribeAudio)
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/", h.ListIssues)
