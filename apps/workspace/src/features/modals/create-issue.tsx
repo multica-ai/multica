@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { CalendarDays, Check, ChevronRight, Loader2, Maximize2, Mic, Minimize2, Square, UserMinus, X as XIcon } from "lucide-react";
+import { CalendarDays, Check, ChevronRight, Download, Loader2, Maximize2, Mic, Minimize2, Paperclip, Pencil, Square, Trash2, UserMinus, X as XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { UpdateIssueRequest, IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
@@ -39,6 +39,8 @@ import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { FileUploadButton } from "@/components/common/file-upload-button";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import { useRouter } from "@/shared/router";
+import { api } from "@/shared/api";
+import { downloadBlob } from "@/shared/utils";
 
 // ---------------------------------------------------------------------------
 // Pill trigger — shared rounded-full button style for toolbar
@@ -73,6 +75,11 @@ function shortDateTime(date: string | null): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+interface PendingIssueAttachment {
+  id: string;
+  filename: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +120,11 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
 
   // File upload
   const { upload, uploadWithToast } = useFileUpload();
-  const handleUpload = (file: File) => uploadWithToast(file);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingIssueAttachment[]>([]);
+  const [editingAttachmentId, setEditingAttachmentId] = useState<string | null>(null);
+  const [editingAttachmentFilename, setEditingAttachmentFilename] = useState("");
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null);
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
   const voiceRecorder = useIssueVoiceRecorder();
   const voiceTranscription = useIssueTranscription();
   const [voiceTranscript, setVoiceTranscript] = useState("");
@@ -159,6 +170,68 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     }
   };
 
+  const handleUpload = async (file: File) => {
+    const result = await uploadWithToast(file);
+    if (result) {
+      setPendingAttachments((current) => [...current, { id: result.id, filename: result.filename }]);
+    }
+    return result;
+  };
+
+  const startEditingAttachment = (attachment: PendingIssueAttachment) => {
+    setEditingAttachmentId(attachment.id);
+    setEditingAttachmentFilename(attachment.filename);
+  };
+
+  const cancelEditingAttachment = () => {
+    setEditingAttachmentId(null);
+    setEditingAttachmentFilename("");
+  };
+
+  const saveAttachmentFilename = async (attachment: PendingIssueAttachment) => {
+    const filename = editingAttachmentFilename.trim();
+    if (!filename) {
+      toast.error("Filename is required");
+      return;
+    }
+    try {
+      const updated = await api.updateAttachment(attachment.id, { filename });
+      setPendingAttachments((current) =>
+        current.map((item) => (item.id === attachment.id ? { ...item, filename: updated.filename } : item)),
+      );
+      cancelEditingAttachment();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update attachment");
+    }
+  };
+
+  const deletePendingAttachment = async (attachment: PendingIssueAttachment) => {
+    setDeletingAttachmentId(attachment.id);
+    try {
+      await api.deleteAttachment(attachment.id);
+      setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id));
+      if (editingAttachmentId === attachment.id) {
+        cancelEditingAttachment();
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete attachment");
+    } finally {
+      setDeletingAttachmentId(null);
+    }
+  };
+
+  const downloadPendingAttachment = async (attachment: PendingIssueAttachment) => {
+    setDownloadingAttachmentId(attachment.id);
+    try {
+      const blob = await api.downloadAttachment(attachment.id);
+      downloadBlob(blob, attachment.filename);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to download attachment");
+    } finally {
+      setDownloadingAttachmentId(null);
+    }
+  };
+
   useEffect(() => {
     if (!pendingVoiceTranscription || !voiceRecorder.recording) return;
     const recording = voiceRecorder.recording;
@@ -167,6 +240,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
       const result = await voiceTranscription.transcribe(recording.file);
       if (result?.text) {
         setVoiceTranscript(result.text);
+        setKeepOriginalRecording(true);
       } else {
         toast.error(voiceTranscription.error ?? "Transcription failed");
       }
@@ -244,6 +318,14 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
 	          toast.error("Issue created, but the voice recording was not preserved");
 	        }
 	      }
+
+      if (pendingAttachments.length > 0) {
+        try {
+          await api.linkIssueAttachments(issue.id, pendingAttachments.map((attachment) => attachment.id));
+        } catch {
+          toast.error("Issue created, but some attachments were not linked");
+        }
+      }
 
 	      clearDraft();
       onClose();
@@ -355,6 +437,72 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
             debounceMs={500}
           />
         </div>
+
+        {pendingAttachments.length > 0 && (
+          <section aria-label="Pending issue attachments" className="border-t px-5 py-3 shrink-0 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Paperclip className="size-4 text-muted-foreground" />
+              <span>Attachments</span>
+            </div>
+            <div className="space-y-2">
+              {pendingAttachments.map((attachment) => (
+                <div key={attachment.id} className="flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-sm">
+                  {editingAttachmentId === attachment.id ? (
+                    <input
+                      value={editingAttachmentFilename}
+                      onChange={(event) => setEditingAttachmentFilename(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") void saveAttachmentFilename(attachment);
+                        if (event.key === "Escape") cancelEditingAttachment();
+                      }}
+                      className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 outline-none focus:ring-2 focus:ring-ring"
+                      aria-label="Pending attachment filename"
+                      autoFocus
+                    />
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
+                  )}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {editingAttachmentId === attachment.id ? (
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => void saveAttachmentFilename(attachment)} aria-label="Save pending attachment">
+                          <Check className="size-3.5" />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={cancelEditingAttachment} aria-label="Cancel pending attachment edit">
+                          <XIcon className="size-3.5" />
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => startEditingAttachment(attachment)} aria-label="Rename pending attachment">
+                          <Pencil className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void downloadPendingAttachment(attachment)}
+                          disabled={downloadingAttachmentId === attachment.id}
+                          aria-label="Download pending attachment"
+                        >
+                          <Download className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void deletePendingAttachment(attachment)}
+                          disabled={deletingAttachmentId === attachment.id}
+                          aria-label="Delete pending attachment"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Property toolbar */}
         <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
@@ -616,6 +764,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
           <div className="flex items-center gap-2">
             <FileUploadButton
+              ariaLabel="Upload attachment"
               onSelect={(file) => descEditorRef.current?.uploadFile(file)}
             />
             {voiceRecorder.supported ? (

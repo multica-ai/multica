@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -199,6 +201,10 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 // ListAttachments — GET /api/issues/{id}/attachments
 // ---------------------------------------------------------------------------
 
+type linkIssueAttachmentsRequest struct {
+	AttachmentIDs []string `json:"attachment_ids"`
+}
+
 func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -221,6 +227,42 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		resp[i] = h.attachmentToResponse(a)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// LinkIssueAttachments attaches uploaded workspace files to an issue.
+func (h *Handler) LinkIssueAttachments(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+
+	var req linkIssueAttachmentsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.AttachmentIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "attachment_ids is required")
+		return
+	}
+
+	uuids := make([]pgtype.UUID, len(req.AttachmentIDs))
+	for i, id := range req.AttachmentIDs {
+		uuids[i] = parseUUID(id)
+	}
+
+	if err := h.Queries.LinkAttachmentsToIssue(r.Context(), db.LinkAttachmentsToIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Column3:     uuids,
+	}); err != nil {
+		slog.Error("failed to link issue attachments", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to link attachments")
+		return
+	}
+
+	h.ListAttachments(w, r)
 }
 
 // ---------------------------------------------------------------------------
@@ -247,9 +289,110 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
 }
 
+// DownloadAttachment proxies attachment bytes with forced download headers.
+func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
+	attachmentID := chi.URLParam(r, "id")
+	workspaceID := resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
+		ID:          parseUUID(attachmentID),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, att.Url, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid attachment url")
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		slog.Error("attachment download fetch failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to download attachment")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeError(w, http.StatusBadGateway, "failed to download attachment")
+		return
+	}
+
+	w.Header().Set("Content-Type", att.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(att.SizeBytes, 10))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, sanitizeAttachmentFilename(att.Filename)))
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		slog.Error("attachment download stream failed", "error", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // DeleteAttachment — DELETE /api/attachments/{id}
 // ---------------------------------------------------------------------------
+
+type updateAttachmentRequest struct {
+	Filename string `json:"filename"`
+}
+
+// UpdateAttachment updates editable attachment metadata.
+func (h *Handler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
+	attachmentID := chi.URLParam(r, "id")
+	workspaceID := resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req updateAttachmentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	filename := strings.TrimSpace(req.Filename)
+	if filename == "" {
+		writeError(w, http.StatusBadRequest, "filename is required")
+		return
+	}
+
+	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
+		ID:          parseUUID(attachmentID),
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+
+	if !canManageAttachment(r, att, userID) {
+		writeError(w, http.StatusForbidden, "not authorized to update this attachment")
+		return
+	}
+
+	updated, err := h.Queries.UpdateAttachmentFilename(r.Context(), db.UpdateAttachmentFilenameParams{
+		ID:          att.ID,
+		WorkspaceID: att.WorkspaceID,
+		Filename:    filename,
+	})
+	if err != nil {
+		slog.Error("failed to update attachment", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update attachment")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, h.attachmentToResponse(updated))
+}
 
 func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	attachmentID := chi.URLParam(r, "id")
@@ -273,13 +416,7 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only the uploader (or workspace admin) can delete
-	uploaderID := uuidToString(att.UploaderID)
-	isUploader := att.UploaderType == "member" && uploaderID == userID
-	member, hasMember := ctxMember(r.Context())
-	isAdmin := hasMember && (member.Role == "admin" || member.Role == "owner")
-
-	if !isUploader && !isAdmin {
+	if !canManageAttachment(r, att, userID) {
 		writeError(w, http.StatusForbidden, "not authorized to delete this attachment")
 		return
 	}
@@ -295,6 +432,26 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 	h.deleteS3Object(r.Context(), att.Url)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func canManageAttachment(r *http.Request, att db.Attachment, userID string) bool {
+	uploaderID := uuidToString(att.UploaderID)
+	if att.UploaderType == "member" && uploaderID == userID {
+		return true
+	}
+	member, hasMember := ctxMember(r.Context())
+	return hasMember && (member.Role == "admin" || member.Role == "owner")
+}
+
+func sanitizeAttachmentFilename(filename string) string {
+	name := strings.TrimSpace(filename)
+	name = strings.ReplaceAll(name, `"`, "")
+	name = strings.ReplaceAll(name, "\r", "")
+	name = strings.ReplaceAll(name, "\n", "")
+	if name == "" {
+		return "attachment"
+	}
+	return name
 }
 
 // ---------------------------------------------------------------------------

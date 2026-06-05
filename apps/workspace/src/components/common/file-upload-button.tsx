@@ -10,6 +10,7 @@ interface FileUploadButtonProps {
   disabled?: boolean;
   className?: string;
   size?: "sm" | "default";
+  ariaLabel?: string;
 }
 
 function FileUploadButton({
@@ -17,6 +18,7 @@ function FileUploadButton({
   disabled,
   className,
   size = "default",
+  ariaLabel = "Upload file",
 }: FileUploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -34,6 +36,7 @@ function FileUploadButton({
     <>
       <button
         type="button"
+        aria-label={ariaLabel}
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
         className={cn(

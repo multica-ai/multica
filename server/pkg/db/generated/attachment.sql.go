@@ -120,6 +120,26 @@ func (q *Queries) LinkAttachmentsToComment(ctx context.Context, arg LinkAttachme
 	return err
 }
 
+const linkAttachmentsToIssue = `-- name: LinkAttachmentsToIssue :exec
+UPDATE attachment
+SET issue_id = $1
+WHERE workspace_id = $2
+  AND issue_id IS NULL
+  AND comment_id IS NULL
+  AND id = ANY($3::uuid[])
+`
+
+type LinkAttachmentsToIssueParams struct {
+	IssueID     pgtype.UUID   `json:"issue_id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	Column3     []pgtype.UUID `json:"column_3"`
+}
+
+func (q *Queries) LinkAttachmentsToIssue(ctx context.Context, arg LinkAttachmentsToIssueParams) error {
+	_, err := q.db.Exec(ctx, linkAttachmentsToIssue, arg.IssueID, arg.WorkspaceID, arg.Column3)
+	return err
+}
+
 const listAttachmentURLsByCommentID = `-- name: ListAttachmentURLsByCommentID :many
 SELECT url FROM attachment
 WHERE comment_id = $1
@@ -293,4 +313,36 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateAttachmentFilename = `-- name: UpdateAttachmentFilename :one
+UPDATE attachment
+SET filename = $3
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at
+`
+
+type UpdateAttachmentFilenameParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Filename    string      `json:"filename"`
+}
+
+func (q *Queries) UpdateAttachmentFilename(ctx context.Context, arg UpdateAttachmentFilenameParams) (Attachment, error) {
+	row := q.db.QueryRow(ctx, updateAttachmentFilename, arg.ID, arg.WorkspaceID, arg.Filename)
+	var i Attachment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.UploaderType,
+		&i.UploaderID,
+		&i.Filename,
+		&i.Url,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.CreatedAt,
+	)
+	return i, err
 }

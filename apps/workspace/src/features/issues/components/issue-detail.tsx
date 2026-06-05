@@ -10,14 +10,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  Download,
+  Pencil,
   Link2,
   MoreHorizontal,
   PanelRight,
+  Paperclip,
   RotateCcw,
+  Trash2,
   UserMinus,
   Users,
   X,
 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -57,7 +62,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { ActorAvatar } from "@/components/common/actor-avatar";
-import type { Issue, UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry, IssueDependencyType } from "@/shared/types";
+import type { Attachment, Issue, UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry, IssueDependencyType } from "@/shared/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@/features/issues/config";
 import { StatusIcon, PriorityIcon, DueDatePicker, IssueDateTimePicker, AssigneePicker, canAssignAgent, ParentIssuePicker, LabelPicker, DependencyPicker } from "@/features/issues/components";
 import { CommentCard } from "./comment-card";
@@ -78,7 +83,9 @@ import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { ProjectPicker } from "@/features/projects/components/project-picker";
 import { useModalStore } from "@/features/modals";
 import { Link, useRouter } from "@/shared/router";
-import { timeAgo } from "@/shared/utils";
+import { api } from "@/shared/api";
+import { queryKeys } from "@/shared/query";
+import { downloadBlob, timeAgo } from "@/shared/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { IssueTimerSection } from "@/features/time-tracking";
 
@@ -106,6 +113,117 @@ function statusLabel(status: string): string {
 
 function priorityLabel(priority: string): string {
   return PRIORITY_CONFIG[priority as IssuePriority]?.label ?? priority;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function IssueAttachmentList({
+  attachments,
+  editingId,
+  editingFilename,
+  deletingId,
+  downloadingId,
+  onStartEdit,
+  onChangeEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onDelete,
+  onDownload,
+}: {
+  attachments: Attachment[];
+  editingId: string | null;
+  editingFilename: string;
+  deletingId: string | null;
+  downloadingId: string | null;
+  onStartEdit: (attachment: Attachment) => void;
+  onChangeEdit: (value: string) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (attachment: Attachment) => void;
+  onDelete: (attachment: Attachment) => void;
+  onDownload: (attachment: Attachment) => void;
+}) {
+  if (attachments.length === 0) return null;
+
+  return (
+    <section aria-label="Issue attachments" className="mt-4 space-y-2">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Paperclip className="size-4 text-muted-foreground" />
+        <span>Attachments</span>
+      </div>
+      <div className="space-y-2">
+        {attachments.map((attachment) => (
+          <div
+            key={attachment.id}
+            className="flex items-center justify-between gap-3 rounded-md border bg-card px-3 py-2 text-sm"
+          >
+            {editingId === attachment.id ? (
+              <input
+                value={editingFilename}
+                onChange={(event) => onChangeEdit(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") onSaveEdit(attachment);
+                  if (event.key === "Escape") onCancelEdit();
+                }}
+                className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 outline-none focus:ring-2 focus:ring-ring"
+                aria-label="Attachment filename"
+                autoFocus
+              />
+            ) : (
+              <a
+                href={attachment.download_url || attachment.url}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 flex-1 truncate hover:underline"
+              >
+                {attachment.filename}
+              </a>
+            )}
+            <span className="shrink-0 text-xs text-muted-foreground">{formatFileSize(attachment.size_bytes)}</span>
+            <div className="flex shrink-0 items-center gap-1">
+              {editingId === attachment.id ? (
+                <>
+                  <Button size="sm" variant="ghost" onClick={() => onSaveEdit(attachment)} aria-label="Save attachment">
+                    <Check className="size-3.5" />
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={onCancelEdit} aria-label="Cancel attachment edit">
+                    <X className="size-3.5" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button size="sm" variant="ghost" onClick={() => onStartEdit(attachment)} aria-label="Rename attachment">
+                    <Pencil className="size-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onDownload(attachment)}
+                    disabled={downloadingId === attachment.id}
+                    aria-label="Download attachment"
+                  >
+                    <Download className="size-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onDelete(attachment)}
+                    disabled={deletingId === attachment.id}
+                    aria-label="Delete attachment"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function formatActivity(
@@ -511,6 +629,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const { getActorName } = useActorName();
   const lastPath = useNavigationStore((state) => state.lastPath);
   const { uploadWithToast } = useFileUpload();
+  const queryClient = useQueryClient();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
   });
@@ -523,8 +642,33 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [editingAttachmentId, setEditingAttachmentId] = useState<string | null>(null);
+  const [editingAttachmentFilename, setEditingAttachmentFilename] = useState("");
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
   const issueDetailQuery = useIssueDetailQuery(id);
+  const attachmentsQuery = useQuery({
+    queryKey: queryKeys.issues.attachments(id),
+    queryFn: () => api.listAttachments(id),
+  });
+  const updateAttachmentMutation = useMutation({
+    mutationFn: ({ attachmentId, filename }: { attachmentId: string; filename: string }) =>
+      api.updateAttachment(attachmentId, { filename }),
+    onSuccess: () => {
+      setEditingAttachmentId(null);
+      setEditingAttachmentFilename("");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.attachments(id) });
+    },
+  });
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: (attachmentId: string) => api.deleteAttachment(attachmentId),
+    onSuccess: (_data, attachmentId) => {
+      queryClient.setQueryData<Attachment[]>(queryKeys.issues.attachments(id), (current) =>
+        (current ?? []).filter((attachment) => attachment.id !== attachmentId),
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.attachments(id) });
+    },
+  });
   const {
     updateIssue,
     archiveIssue,
@@ -618,11 +762,69 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   );
 
   const descEditorRef = useRef<ContentEditorRef>(null);
-  // Description embeds are inline markdown content — they should not appear in
-  // the issue attachment list, so we intentionally omit issueId here.
+  // Description uploads belong to the issue, so the attachment list can manage them.
   const handleDescriptionUpload = useCallback(
-    (file: File) => uploadWithToast(file),
-    [uploadWithToast],
+    async (file: File) => {
+      const result = await uploadWithToast(file, { issueId: id });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.attachments(id) });
+      return result;
+    },
+    [id, queryClient, uploadWithToast],
+  );
+
+  const startEditingAttachment = useCallback((attachment: Attachment) => {
+    setEditingAttachmentId(attachment.id);
+    setEditingAttachmentFilename(attachment.filename);
+  }, []);
+
+  const cancelEditingAttachment = useCallback(() => {
+    setEditingAttachmentId(null);
+    setEditingAttachmentFilename("");
+  }, []);
+
+  const saveAttachmentFilename = useCallback(
+    (attachment: Attachment) => {
+      const filename = editingAttachmentFilename.trim();
+      if (!filename) {
+        toast.error("Filename is required");
+        return;
+      }
+      updateAttachmentMutation.mutate(
+        { attachmentId: attachment.id, filename },
+        {
+          onError: (error) => {
+            toast.error(error instanceof Error ? error.message : "Failed to update attachment");
+          },
+        },
+      );
+    },
+    [editingAttachmentFilename, updateAttachmentMutation],
+  );
+
+  const deleteAttachment = useCallback(
+    (attachment: Attachment) => {
+      deleteAttachmentMutation.mutate(attachment.id, {
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : "Failed to delete attachment");
+        },
+      });
+    },
+    [deleteAttachmentMutation],
+  );
+
+  const downloadAttachment = useCallback(
+    async (attachment: Attachment) => {
+      setDownloadingAttachmentId(attachment.id);
+      try {
+        const blob = await api.downloadAttachment(attachment.id);
+        downloadBlob(blob, attachment.filename);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to download attachment");
+      } finally {
+        setDownloadingAttachmentId(null);
+      }
+    },
+    [],
   );
 
   const handleDelete = async () => {
@@ -1067,9 +1269,24 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             )}
             <FileUploadButton
               size="sm"
+              ariaLabel="Upload attachment"
               onSelect={(file) => descEditorRef.current?.uploadFile(file)}
             />
           </div>
+
+          <IssueAttachmentList
+            attachments={attachmentsQuery.data ?? []}
+            editingId={editingAttachmentId}
+            editingFilename={editingAttachmentFilename}
+            deletingId={deleteAttachmentMutation.variables ?? null}
+            downloadingId={downloadingAttachmentId}
+            onStartEdit={startEditingAttachment}
+            onChangeEdit={setEditingAttachmentFilename}
+            onCancelEdit={cancelEditingAttachment}
+            onSaveEdit={saveAttachmentFilename}
+            onDelete={deleteAttachment}
+            onDownload={(attachment) => void downloadAttachment(attachment)}
+          />
 
           <div className="mt-6 space-y-5 rounded-xl border bg-card p-4 md:hidden">
             <IssueSidebarSections

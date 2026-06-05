@@ -244,6 +244,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
+					r.Post("/attachments/link", h.LinkIssueAttachments)
 					// Time entries linked to this issue.
 					r.Post("/time-entries", h.CreateTimeEntry)
 					r.Get("/time-entries", h.ListIssueTimeEntries)
@@ -297,6 +298,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
+			r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+			r.Patch("/api/attachments/{id}", h.UpdateAttachment)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
 			// Comments

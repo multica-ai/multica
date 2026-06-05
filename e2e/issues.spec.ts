@@ -61,6 +61,61 @@ test.describe("Issues", () => {
     await expect(page.getByText(title).first()).toBeVisible({ timeout: 10000 });
   });
 
+  test("can manage attachments while creating an issue", async ({ page }) => {
+    await page.getByRole("button", { name: "New issue" }).click();
+
+    let fileChooserPromise = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Upload attachment" }).click();
+    let fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: "draft-note.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Draft attachment"),
+    });
+    await expect(page.getByLabel("Pending issue attachments")).toContainText("draft-note.txt");
+    const pendingDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download pending attachment" }).click();
+    expect((await pendingDownloadPromise).suggestedFilename()).toBe("draft-note.txt");
+
+    await page.getByRole("button", { name: "Rename pending attachment" }).click();
+    await page.getByLabel("Pending attachment filename").fill("renamed-draft-note.txt");
+    await page.getByRole("button", { name: "Save pending attachment" }).click();
+    await expect(page.getByLabel("Pending issue attachments")).toContainText("renamed-draft-note.txt");
+
+    await page.getByRole("button", { name: "Delete pending attachment" }).click();
+    await expect(page.getByLabel("Pending issue attachments")).not.toBeVisible();
+
+    fileChooserPromise = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Upload attachment" }).click();
+    fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: "linked-note.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Linked attachment"),
+    });
+    await expect(page.getByLabel("Pending issue attachments")).toContainText("linked-note.txt");
+
+    const title = "E2E Create Attachment " + Date.now();
+    await page.getByLabel("Issue title").fill(title);
+    const linkResponse = page.waitForResponse((response) =>
+      response.url().includes("/api/issues/") && response.url().includes("/attachments/link") && response.status() === 200,
+    );
+    await page.getByRole("button", { name: "Create Issue" }).click();
+    await linkResponse;
+    await expect(page.getByText(title).first()).toBeVisible({ timeout: 10000 });
+
+    const created = await api.listIssues({ search: title });
+    const issue = created.issues?.find((item: { title: string }) => item.title === title);
+    expect(issue).toBeTruthy();
+
+    await page.goto(`/issues/${issue.id}`);
+    await expect(page.getByLabel("Issue attachments")).toContainText("linked-note.txt");
+    const issueDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download attachment" }).click();
+    expect((await issueDownloadPromise).suggestedFilename()).toBe("linked-note.txt");
+    await api.deleteIssue(issue.id);
+  });
+
   test("can create an issue from mocked voice capture", async ({ page }) => {
     const transcript = `E2E Voice Capture ${Date.now()}. Details from mocked recording.`;
     let uploadBody = "";
@@ -149,6 +204,118 @@ test.describe("Issues", () => {
         await api.deleteIssue(issue.id);
       }
     }
+  });
+
+  test("preserves original voice recording as an issue attachment by default", async ({ page }) => {
+    const transcript = `E2E Voice Attachment ${Date.now()}. Details from mocked recording.`;
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: {
+          getUserMedia: async () => ({
+            getTracks: () => [{ stop: () => undefined }],
+          }),
+        },
+      });
+
+      class MockMediaRecorder {
+        static isTypeSupported() {
+          return true;
+        }
+
+        mimeType = "audio/webm";
+        state = "inactive";
+        ondataavailable: ((event: { data: Blob }) => void) | null = null;
+        onstop: (() => void) | null = null;
+
+        start() {
+          this.state = "recording";
+        }
+
+        stop() {
+          this.state = "inactive";
+          this.ondataavailable?.({ data: new Blob(["mock audio"], { type: this.mimeType }) });
+          this.onstop?.();
+        }
+      }
+
+      Object.defineProperty(window, "MediaRecorder", {
+        configurable: true,
+        value: MockMediaRecorder,
+      });
+    });
+
+    await page.route("**/api/transcriptions", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          text: transcript,
+          provider: "cloudflare",
+          model: "@cf/openai/whisper-large-v3-turbo",
+        }),
+      });
+    });
+
+    await page.getByRole("button", { name: "New issue" }).click();
+    await page.getByRole("button", { name: "Record voice" }).click();
+    await page.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(page.getByLabel("Voice transcript")).toHaveValue(transcript);
+    await expect(page.getByLabel("Keep original recording")).toBeChecked();
+    await page.getByRole("button", { name: "Insert" }).click();
+
+    const expectedTitle = transcript.split(".")[0] + ".";
+    const uploadResponse = page.waitForResponse((response) =>
+      response.url().includes("/api/upload-file") && response.status() === 200,
+    );
+    await page.getByRole("button", { name: "Create Issue" }).click();
+    await uploadResponse;
+    await expect(page.getByText(expectedTitle).first()).toBeVisible({ timeout: 10000 });
+
+    const created = await api.listIssues({ search: expectedTitle });
+    const issue = created.issues?.find((item: { title: string }) => item.title === expectedTitle);
+    expect(issue).toBeTruthy();
+
+    const attachments = await api.listAttachments(issue.id);
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0].filename).toMatch(/^voice-.*\.webm$/);
+
+    await page.getByRole("link", { name: new RegExp(expectedTitle) }).first().click();
+    await expect(page.getByLabel("Issue attachments")).toContainText(attachments[0].filename);
+
+    await api.deleteIssue(issue.id);
+  });
+
+  test("can manage issue attachments uploaded from the description editor", async ({ page }) => {
+    const issue = await api.createIssue("E2E Attachment Management " + Date.now());
+
+    await page.goto(`/issues/${issue.id}`);
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Upload attachment" }).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: "voice-note.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Attachment uploaded from issue description"),
+    });
+
+    await expect(page.getByLabel("Issue attachments")).toContainText("voice-note.txt");
+
+    await page.getByRole("button", { name: "Rename attachment" }).click();
+    await page.getByLabel("Attachment filename").fill("renamed-voice-note.txt");
+    const renameResponse = page.waitForResponse((response) =>
+      response.url().includes("/api/attachments/") && response.request().method() === "PATCH" && response.status() === 200,
+    );
+    await page.getByRole("button", { name: "Save attachment" }).click();
+    await renameResponse;
+    await expect(page.getByRole("link", { name: "renamed-voice-note.txt" })).toBeVisible();
+
+    const deleteResponse = page.waitForResponse((response) =>
+      response.url().includes("/api/attachments/") && response.request().method() === "DELETE" && response.status() === 204,
+    );
+    await page.getByRole("button", { name: "Delete attachment" }).click();
+    await deleteResponse;
+    await expect(page.getByLabel("Issue attachments")).not.toBeVisible();
   });
 
   test("keeps issue creation when voice attachment upload fails", async ({ page }) => {
