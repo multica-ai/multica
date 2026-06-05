@@ -183,6 +183,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onBlurRef = useRef(onBlur);
     const onUploadFileRef = useRef(onUploadFile);
     const lastEmittedRef = useRef<string | null>(null);
+    // When the editor fires onUpdate (debounced save), we set this flag to
+    // protect the editor content from external defaultValue syncs until the
+    // cache confirms our write.  This prevents the editor from being
+    // overwritten by cache rollback + refetch after a 409 Conflict.
+    const suppressSyncRef = useRef(false);
 
     // Current workspace slug kept in a ref so the click handler always sees the
     // latest value without recreating the editor. Used by openLink to prefix
@@ -225,6 +230,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
           if (md === lastEmittedRef.current) return;
           lastEmittedRef.current = md;
+          suppressSyncRef.current = true;
           onUpdateRef.current?.(md);
         }, debounceMs);
       },
@@ -286,6 +292,21 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // onUpdate will reach the server and the cache will reconcile; skipping
       // here avoids overwriting unsaved local edits.
       if (isDirty) return;
+
+      // Guard 2.5: suppress-sync — the editor just emitted content via
+      // onUpdate (a debounced save).  The next defaultValue sync that matches
+      // our emitted content confirms the save was accepted and clears the
+      // flag.  While the flag is set, any external sync (cache rollback from
+      // a 409 rejection, or a refetch of a different server value) must not
+      // overwrite the editor.
+      if (suppressSyncRef.current) {
+        const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
+        const incomingNormalized = stripBlobUrls(incoming).trimEnd();
+        if (incomingNormalized === current) {
+          suppressSyncRef.current = false;
+        }
+        return;
+      }
 
       const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
       const incomingNormalized = stripBlobUrls(incoming).trimEnd();

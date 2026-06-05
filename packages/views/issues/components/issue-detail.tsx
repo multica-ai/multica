@@ -1613,6 +1613,18 @@ export function IssueDetail({
   const handleUpdateField = actions.updateField;
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Description conflict detection baseline (OPE-2294). Stored in refs so the
+  // onUpdate callback always sees the freshest values without recapturing.
+  const descBaseUpdatedAtRef = useRef<string>("");
+  const descBaseValueRef = useRef<string>("");
+  // Initialise / refresh the baseline whenever the issue data changes
+  // (initial load, WS update, or our own successful save).
+  useEffect(() => {
+    if (issue) {
+      descBaseUpdatedAtRef.current = issue.updated_at ?? "";
+      descBaseValueRef.current = issue.description ?? "";
+    }
+  }, [issue?.updated_at, issue?.description]);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
@@ -2542,7 +2554,11 @@ export function IssueDetail({
                 // issueId context), so we only save the description text here.
                 // Removing an attachment node from the body does NOT unlink or
                 // delete the attachment — only the attachment area delete does.
-                handleUpdateField({ description: md });
+                handleUpdateField({
+                  description: md,
+                  description_base_updated_at: descBaseUpdatedAtRef.current || undefined,
+                  description_base_value: descBaseValueRef.current || undefined,
+                });
               }}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}

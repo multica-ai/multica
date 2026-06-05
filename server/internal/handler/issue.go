@@ -2498,6 +2498,12 @@ type UpdateIssueRequest struct {
 	// editor's preview Eye keeps working past a refresh. Existing bindings
 	// are idempotent — re-sending the same id is a no-op.
 	AttachmentIDs []string `json:"attachment_ids"`
+	// Description conflict detection (OPE-2294). When both description and these
+	// baseline fields are provided, the server checks for concurrent edits before
+	// accepting the update. CLI and old callers that omit these fields are
+	// unaffected — the update proceeds with the existing behaviour.
+	DescriptionBaseUpdatedAt *string `json:"description_base_updated_at"`
+	DescriptionBaseValue     *string `json:"description_base_value"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -2678,6 +2684,31 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	projectTouched := false
 	if _, ok := rawFields["project_id"]; ok {
 		projectTouched = true
+	}
+
+	// Description conflict detection (OPE-2294).
+	// Only active when the caller sends both a new description AND a baseline
+	// timestamp — old clients / CLI are unaffected.
+	if req.Description != nil && req.DescriptionBaseUpdatedAt != nil && *req.DescriptionBaseUpdatedAt != "" {
+		baseTime, err := time.Parse(time.RFC3339, *req.DescriptionBaseUpdatedAt)
+		if err == nil {
+			serverUpdatedAt := prevIssue.UpdatedAt.Time.UTC()
+			if !serverUpdatedAt.Equal(baseTime) {
+				serverDesc := textToPtr(prevIssue.Description)
+				baseDesc := req.DescriptionBaseValue
+				// Only reject when the server's description has actually diverged
+				// from what the client based its edit on.  updated_at may differ
+				// because of title/status/etc., which is fine.
+				if serverDesc != nil && baseDesc != nil && *serverDesc != *baseDesc {
+					writeJSON(w, http.StatusConflict, map[string]any{
+						"error":       "description_conflict",
+						"description": serverDesc,
+						"updated_at":  prevIssue.UpdatedAt.Time.UTC().Format(time.RFC3339),
+					})
+					return
+				}
+			}
+		}
 	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
