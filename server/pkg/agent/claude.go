@@ -455,6 +455,11 @@ func (b *claudeBackend) handleUser(
 }
 
 func isClaudePermissionNotGranted(s string) bool {
+	if !strings.Contains(s, "Claude requested permissions") ||
+		!strings.Contains(s, "you haven't granted it yet") {
+		return false
+	}
+
 	for _, text := range claudePermissionCandidateTexts(s) {
 		if hasClaudePermissionNotGrantedLine(text) {
 			return true
@@ -469,27 +474,31 @@ func claudePermissionCandidateTexts(raw string) []string {
 		return nil
 	}
 
-	var decoded string
-	if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
-		return []string{decoded}
+	if trimmed[0] == '"' {
+		var decoded string
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+			return []string{decoded}
+		}
 	}
 
-	var blocks []struct {
-		Text    string `json:"text,omitempty"`
-		Content string `json:"content,omitempty"`
-	}
-	if err := json.Unmarshal([]byte(trimmed), &blocks); err == nil {
-		candidates := make([]string, 0, len(blocks))
-		for _, block := range blocks {
-			if strings.TrimSpace(block.Text) != "" {
-				candidates = append(candidates, block.Text)
-			}
-			if strings.TrimSpace(block.Content) != "" {
-				candidates = append(candidates, block.Content)
-			}
+	if trimmed[0] == '[' {
+		var blocks []struct {
+			Text    string `json:"text,omitempty"`
+			Content string `json:"content,omitempty"`
 		}
-		if len(candidates) > 0 {
-			return candidates
+		if err := json.Unmarshal([]byte(trimmed), &blocks); err == nil {
+			candidates := make([]string, 0, len(blocks))
+			for _, block := range blocks {
+				if strings.TrimSpace(block.Text) != "" {
+					candidates = append(candidates, block.Text)
+				}
+				if strings.TrimSpace(block.Content) != "" {
+					candidates = append(candidates, block.Content)
+				}
+			}
+			if len(candidates) > 0 {
+				return candidates
+			}
 		}
 	}
 
