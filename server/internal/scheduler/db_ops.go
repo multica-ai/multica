@@ -38,20 +38,22 @@ func dbNow(ctx context.Context, pool *pgxpool.Pool) (time.Time, error) {
 // claim is the result of trying to acquire a plan. Only one of the
 // boolean outcomes is true at a time.
 type claim struct {
-	ID          uuid.UUID
-	LeaseToken  uuid.UUID
-	Attempt     int
-	Won         bool // fresh insert
-	Stole       bool // stale-steal or FAILED retry
-	Conflicted  bool // another runner already owns this plan
-	SkippedRetry string // FAILED row exists but is not yet retry-eligible
+	ID         uuid.UUID
+	LeaseToken uuid.UUID
+	Attempt    int
+	Won        bool // fresh insert
+	Stole      bool // stale-steal or FAILED retry
+	Conflicted bool // another runner already owns this plan, or attempts exhausted
 }
 
 // tryClaim attempts to acquire the lease for (job, scope, plan_time).
 // Returns Won=true on a fresh insert, Stole=true on a stale-steal or
-// retry-after-FAILED, Conflicted=true if another runner owns a fresh
-// RUNNING row, and SkippedRetry set if the FAILED row exists but is not
-// yet eligible to retry.
+// retry-after-FAILED, and Conflicted=true if another runner owns the
+// plan, the row is already SUCCESS, the FAILED row is not yet
+// retry-eligible (next_retry_at in the future), or attempts are
+// exhausted. The caller treats every Conflicted outcome the same way
+// (no-op); the scheduler distinguishes them through audit-row metrics
+// rather than per-call return fields.
 func tryClaim(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -147,9 +149,8 @@ func tryClaim(
 
 	// No-row update — somebody else owns a fresh RUNNING lease, the
 	// row is already SUCCESS, the row is FAILED but not yet
-	// retry-eligible, or attempts are exhausted. We do not need to
-	// distinguish the no-op cases at the call site for the happy path,
-	// but we surface SkippedRetry so the caller can record a metric.
+	// retry-eligible, or attempts are exhausted. The caller treats
+	// these no-op cases identically.
 	c.Conflicted = true
 	return c, nil
 }

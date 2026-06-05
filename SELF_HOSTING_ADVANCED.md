@@ -184,74 +184,35 @@ cd server && go run ./cmd/migrate up
 
 ## Usage Dashboard Rollup
 
-The Usage and Runtime dashboards read from `task_usage_hourly`, a derived table populated by `rollup_task_usage_hourly()`. The function is **not** scheduled out of the box on the default self-host stack: the bundled `pgvector/pgvector:pg17` image ships without `pg_cron`, and the backend does not run the rollup in-process either. Until something calls it on a schedule, raw `task_usage` rows will keep arriving while the dashboard stays at zero.
+The Usage and Runtime dashboards read from `task_usage_hourly`, a derived table populated by `rollup_task_usage_hourly()`. As of MUL-2957 the backend runs this rollup **in-process** on every replica via a DB-backed scheduler (`sys_cron_executions`); a fresh self-host install needs no operator action — the bundled `pgvector/pgvector:pg17` image works without changes.
 
-Pick one of the supported paths:
+### How the in-process scheduler works
 
-### Option A — External cron / systemd-timer
-
-The simplest path. Schedule `SELECT rollup_task_usage_hourly()` every five minutes from any out-of-band timer (host crontab, systemd timer, sidecar container, Kubernetes CronJob). It is idempotent and watermark-driven — overlapping runs are no-ops on an internal advisory lock, and a missed tick catches up on the next run.
-
-Docker Compose:
-
-```bash
-# /etc/cron.d/multica-rollup
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
-  -c "SELECT rollup_task_usage_hourly();" >/dev/null
-```
-
-Kubernetes (one-off `CronJob`):
-
-```yaml
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: multica-usage-rollup
-spec:
-  schedule: "*/5 * * * *"
-  concurrencyPolicy: Forbid
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          restartPolicy: OnFailure
-          containers:
-            - name: psql
-              image: postgres:17-alpine
-              command:
-                - psql
-                - "$(DATABASE_URL)"
-                - -c
-                - "SELECT rollup_task_usage_hourly();"
-              env:
-                - name: DATABASE_URL
-                  valueFrom:
-                    secretKeyRef:
-                      name: multica-secrets
-                      key: DATABASE_URL
-```
-
-### Option B — Postgres with `pg_cron`
-
-If you'd rather have Postgres schedule itself, swap the bundled image for one that ships both `pgvector` and `pg_cron` (e.g. `supabase/postgres`, or a custom build of `pgvector/pgvector` with `pg_cron` added). `pg_cron` requires `shared_preload_libraries=pg_cron` in `postgresql.conf`, which only takes effect on Postgres restart — set it before bringing the container up.
-
-Then register the job once:
+Every backend replica ticks every 30 seconds and tries to claim the current 5-minute UTC plan in `sys_cron_executions`. The unique key `(job_name, scope_kind, scope_id, plan_time)` makes the claim a single-winner contest across all replicas, so multi-instance deployments do not double-write. The handler then calls `SELECT rollup_task_usage_hourly()`; the SQL function holds advisory lock `4246` internally, so a stray `pg_cron` job or manual call can run alongside the scheduler without ever colliding on the rollup itself. Inspect the audit table for steady-state operation:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-SELECT cron.schedule(
-  'rollup_task_usage_hourly',
-  '*/5 * * * *',
-  $$SELECT rollup_task_usage_hourly()$$
-);
+SELECT plan_time, status, attempt, runner_id,
+       error_code, error_msg, started_at, finished_at
+  FROM sys_cron_executions
+ WHERE job_name = 'rollup_task_usage_hourly'
+ ORDER BY plan_time DESC
+ LIMIT 20;
 ```
 
-`pg_cron.database_name` defaults to `postgres`; if your Multica database has a different name, point `pg_cron` at it via that GUC or run `cron.schedule_in_database(...)` instead.
+### Compatibility — existing `pg_cron` registrations
 
-### Option C — Backfill historical data first
+If you previously registered the rollup as a `pg_cron` job (`SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', …)`), it is safe to leave it in place: advisory lock 4246 prevents double-writes, and the loser path no-ops cleanly. To drop the redundant entry once the in-process scheduler is up:
 
-`rollup_task_usage_hourly()` only processes new buckets after it starts running. If you already have `task_usage` rows from before the rollup was scheduled — most commonly when upgrading from `v0.3.4` to `v0.3.5+`, or on a fresh install that has been collecting usage for a while — run `backfill_task_usage_hourly` once to seed historical buckets, then set up Option A or Option B for ongoing rollups.
+```sql
+SELECT cron.unschedule('rollup_task_usage_hourly')
+  FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
+```
+
+External cron / systemd / Kubernetes `CronJob` setups that call `SELECT rollup_task_usage_hourly()` directly are also still valid — they were the only option before MUL-2957 and remain a supported compatibility path. They are no longer the recommended setup; new deployments should rely on the in-process scheduler.
+
+### Standalone backfill command
+
+`rollup_task_usage_hourly()` only processes new buckets after it starts running. If you already have `task_usage` rows from before the rollup was claimed for the first time — most commonly when upgrading from `v0.3.4` to `v0.3.5+` on a database that already has months of usage — you can run `backfill_task_usage_hourly` to seed historical buckets:
 
 ```bash
 # Docker Compose
@@ -263,7 +224,7 @@ kubectl -n multica exec deploy/multica-backend -- \
   ./backfill_task_usage_hourly --sleep-between-slices=2s
 ```
 
-The command walks `task_usage`'s full time range in monthly slices and calls the same idempotent primitive the cron path uses, so it's safe to re-run, to interrupt with Ctrl-C, and to run concurrently with an already-scheduled rollup. Flags:
+The command walks `task_usage`'s full time range in monthly slices and calls the same idempotent primitive the in-process scheduler uses, so it's safe to re-run, to interrupt with Ctrl-C, and to run concurrently with the scheduler (advisory lock 4246 serialises them). Flags:
 
 | Flag | Description |
 |---|---|
@@ -275,17 +236,9 @@ After backfill completes, the rollup-state watermark is stamped to `now() - 5 mi
 
 ### `v0.3.4 → v0.3.5+` upgrade order
 
-Migration `103` adds a fail-closed guard that refuses to drop the legacy daily rollups until `task_usage_hourly` has caught up. If you run `migrate up` straight through on a database with existing `task_usage` rows, it aborts with:
+Migration `103` adds a fail-closed guard that refuses to drop the legacy daily rollups until `task_usage_hourly` has caught up. As of MUL-2957 the migrate command runs an idempotent monthly-slice backfill (under advisory lock 4246) **automatically** immediately before applying migration `103`, so v0.3.4 → v0.3.5+ upgrades complete in a single `migrate up` invocation — no operator step is required.
 
-```text
-ERROR: refusing to drop legacy daily rollups:
-  task_usage_hourly_rollup_state.watermark_at (1970-01-01 ...) trails
-  task_usage latest event (...) by more than 01:00:00 — backfill is
-  incomplete or pg_cron is not running. Run cmd/backfill_task_usage_hourly
-  (and let pg_cron catch up) before re-running migrate
-```
-
-Recovery is straightforward: run `backfill_task_usage_hourly` (Option C above), then re-run `migrate up` (or restart the backend container — migrations run automatically on startup). **Fresh installs are exempt** — the guard short-circuits when `task_usage` is empty, and migrations succeed, but the dashboard will still stay at zero until you set up Option A or Option B.
+If you are upgrading from a binary that pre-dates MUL-2957 (or the auto-hook fails for an environmental reason), recovery is the manual path: run `backfill_task_usage_hourly` against the database, then re-run `migrate up` (or restart the backend container — migrations run automatically on startup). **Fresh installs are exempt** — the guard short-circuits when `task_usage` is empty, and the in-process scheduler picks up new buckets from the first tick.
 
 ## Manual Setup (Without Docker Compose)
 

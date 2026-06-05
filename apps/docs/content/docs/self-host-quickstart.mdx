@@ -264,8 +264,8 @@ The full reference — three login modes, the `backend` ExternalName workaround 
 - **Backend won't start**: check container logs with `docker compose -f docker-compose.selfhost.yml logs backend`; usually it's a bad `DATABASE_URL` or `JWT_SECRET` in `.env`
 - **Verification code not received**: no email backend is configured (neither Resend nor SMTP) → look for `[DEV] Verification code` in `docker compose logs backend`
 - **WebSocket won't connect**: for public deployments you must set `FRONTEND_ORIGIN` to your real frontend domain; see [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
-- **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)
-- **`migrate up` fails with `refusing to drop legacy daily rollups`**: upgrade-path guard from `v0.3.4 → v0.3.5+`. Run `backfill_task_usage_hourly` first — see [Step 7 → Option C](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)
+- **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-usage-rollup-no-operator-action-required) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)
+- **`migrate up` fails with `refusing to drop legacy daily rollups`**: upgrade-path guard from `v0.3.4 → v0.3.5+`. As of MUL-2957 the migrate command runs the backfill automatically before applying migration 103 — see [Step 7](#7-usage-rollup-no-operator-action-required)
 
 ## Next steps
 
