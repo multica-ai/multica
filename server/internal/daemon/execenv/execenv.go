@@ -4,6 +4,7 @@
 package execenv
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -38,6 +39,7 @@ type PrepareParams struct {
 	Provider       string            // agent provider (determines runtime config and skill injection paths)
 	CodexVersion   string            // detected Codex CLI version (only used when Provider == "codex")
 	OpenclawBin    string            // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	CSCBin         string            // resolved csc CLI path (only used when Provider == "csc"); empty = skip plugin setup
 	Task           TaskContextForEnv // context data for writing files
 }
 
@@ -61,7 +63,8 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
-	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	IsSquadLeader           bool            // true when the agent is acting as a squad leader (may exit silently on no_action)
+	Plugin                  *AgentPlugin // plugin bound to the agent; nil = no plugin
 	// RequestingUserName + RequestingUserProfileDescription describe the
 	// human the agent is acting on behalf of. v1 sources them from the
 	// runtime owner (the user who registered the daemon). Rendered into the
@@ -188,6 +191,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}
 		env.OpenclawConfigPath = result.ConfigPath
 		env.OpenclawIncludeRoot = result.IncludeRoot
+	}
+
+	// Install plugins into the task working directory. The plugins provide
+	// the runtime with the tools it needs to execute the dispatched task.
+	// Fail closed: if plugins are specified but installation fails, the task
+	// cannot run meaningfully.
+	if params.Provider == "csc" && params.CSCBin != "" {
+		if err := setupPlugins(context.Background(), params.Provider, params.CSCBin, env.WorkDir, params.Task.Plugin, logger); err != nil {
+			return nil, fmt.Errorf("plugin setup: %w", err)
+		}
 	}
 
 	logger.Info("execenv: prepared env", "root", envRoot, "repos_available", len(params.Task.Repos))

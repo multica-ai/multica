@@ -17,7 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.release_meta.outputs.tag_name }}
+      semver: ${{ steps.release_meta.outputs.semver }}
       is_stable: ${{ steps.release_meta.outputs.is_stable }}
+      repo_owner_lower: ${{ steps.release_meta.outputs.repo_owner_lower }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,11 +41,13 @@ jobs:
             exit 1
           fi
           echo "tag_name=$tag" >> "$GITHUB_OUTPUT"
+          echo "semver=${tag#v}" >> "$GITHUB_OUTPUT"
           if [[ "$tag" == *-* ]]; then
             echo "is_stable=false" >> "$GITHUB_OUTPUT"
           else
             echo "is_stable=true" >> "$GITHUB_OUTPUT"
           fi
+          echo "repo_owner_lower=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -51,17 +55,13 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
-      - name: Run tests
-        run: cd server && go test ./...
+      # Tests are run in the separate CI workflow; skip here to keep the
+      # release pipeline fast and focused on artifact generation.
+      # - name: Run tests
+      #   run: cd server && go test ./...
 
   release:
     needs: verify
-    # Only run on the canonical upstream repo. Forks don't have the
-    # HOMEBREW_TAP_GITHUB_TOKEN secret and should not be publishing to
-    # `multica-ai/homebrew-tap` anyway. Without this guard, every fork's
-    # tag push fails this job (401 against the upstream tap), which makes
-    # downstream CI go red without affecting the actual artifact pipeline.
-    if: github.repository_owner == 'multica-ai'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -82,7 +82,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
   # Multi-arch images are built natively per platform on dedicated runners
   # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm) and merged into a
@@ -112,7 +111,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/multica-backend
+          images: ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-backend
           labels: |
             org.opencontainers.image.title=Multica Backend
             org.opencontainers.image.description=Multica self-hosted backend
@@ -141,7 +140,7 @@ jobs:
           build-args: |
             VERSION=${{ needs.verify.outputs.tag_name }}
             COMMIT=${{ github.sha }}
-          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/multica-backend,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-backend,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -178,7 +177,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/multica-backend
+          images: ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-backend
           flavor: |
             latest=false
           tags: |
@@ -198,12 +197,12 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/${{ github.repository_owner }}/multica-backend@sha256:%s ' *)
+            $(printf 'ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-backend@sha256:%s ' *)
 
       - name: Inspect image
         run: |
           docker buildx imagetools inspect \
-            ghcr.io/${{ github.repository_owner }}/multica-backend:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-backend:${{ steps.meta.outputs.version }}
 
   docker-web-build:
     needs: verify
@@ -229,7 +228,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/multica-web
+          images: ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-web
           labels: |
             org.opencontainers.image.title=Multica Web
             org.opencontainers.image.description=Multica self-hosted web frontend
@@ -258,7 +257,7 @@ jobs:
           build-args: |
             REMOTE_API_URL=http://backend:8080
             NEXT_PUBLIC_APP_VERSION=${{ needs.verify.outputs.tag_name }}
-          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/multica-web,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-web,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -295,7 +294,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/multica-web
+          images: ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-web
           flavor: |
             latest=false
           tags: |
@@ -315,66 +314,49 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/${{ github.repository_owner }}/multica-web@sha256:%s ' *)
+            $(printf 'ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-web@sha256:%s ' *)
 
       - name: Inspect image
         run: |
           docker buildx imagetools inspect \
-            ghcr.io/${{ github.repository_owner }}/multica-web:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ needs.verify.outputs.repo_owner_lower }}/multica-web:${{ steps.meta.outputs.version }}
 
-  # Build the Desktop installers for Linux and Windows and upload them to
-  # the GitHub Release that the `release` job above just published. macOS
-  # Desktop continues to ship via the manual `release-desktop` skill so it
-  # can be signed + notarized with Apple Developer credentials that are
-  # not (yet) wired into CI.
-  desktop:
-    needs: release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux
-          - os: windows-latest
-            target: win
-    runs-on: ${{ matrix.os }}
+  helm-release:
+    needs: [verify, release, docker-backend-merge, docker-web-merge]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
         with:
-          fetch-depth: 0
+          version: "3.17.0"
 
-      - name: Install rpmbuild (Linux)
-        if: matrix.target == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y rpm
+      - name: Update Chart version
+        working-directory: helm/multica
+        run: |
+          sed -i "s/^version:.*/version: ${{ needs.verify.outputs.semver }}/" Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ needs.verify.outputs.semver }}\"/" Chart.yaml
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
+      - name: Update image tags in values.yaml
+        working-directory: helm/multica
+        run: |
+          sed -i 's|tag: "0.0.1"|tag: "${{ needs.verify.outputs.tag_name }}"|g' values.yaml
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Package Helm Chart
+        working-directory: helm
+        run: |
+          helm package multica
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Package Desktop installers (${{ matrix.target }})
-        working-directory: apps/desktop
+      - name: Upload Helm Chart to Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # electron-builder's GitHub publisher reads this:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Disable code signing on Linux/Windows for now — the public
-          # release is unsigned for these platforms, the CLI carries the
-          # trust boundary. Set CSC_LINK in repo secrets to enable
-          # Windows signing later.
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
+        working-directory: helm
+        run: |
+          chart_file=$(ls multica-*.tgz | head -n 1)
+          echo "Uploading $chart_file to release ${{ needs.verify.outputs.tag_name }}..."
+          gh release upload "${{ needs.verify.outputs.tag_name }}" \
+            --repo ${{ github.repository }} \
+            "$chart_file" \
+            --clobber

@@ -122,7 +122,7 @@ func writeProjectResources(workDir string, ctx TaskContextForEnv) error {
 func resolveSkillsDir(workDir, provider string) (string, error) {
 	var skillsDir string
 	switch provider {
-	case "claude":
+	case "claude", "csc":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".claude", "skills")
 	case "copilot":

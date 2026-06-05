@@ -3486,3 +3486,128 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		}
 	})
 }
+
+func TestPrepare_CSCPluginSetup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake not supported on windows")
+	}
+
+	dir := t.TempDir()
+	// Create a fake csc binary that succeeds
+	fakeBin := filepath.Join(dir, "fake-csc")
+	script := "#!/bin/sh\necho $@ >> " + filepath.Join(dir, "invocations.log") + "\nexit 0\n"
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	workspacesRoot := filepath.Join(dir, "wsroot")
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-1234",
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "test-agent",
+		Provider:       "csc",
+		CSCBin:         fakeBin,
+		Task: TaskContextForEnv{
+			Plugin: &AgentPlugin{
+				Name: "cospower",
+				Install: &PluginInstall{
+					Method:              "plugin_marketplace",
+					Marketplace:         "example/marketplace",
+					PluginName:          "cospower",
+					MarketplaceName:     "marketplace",
+					MarketplaceRepo:     "https://github.com/example/marketplace.git",
+					MarketplaceVerified: true,
+				},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	if env == nil {
+		t.Fatal("expected non-nil Environment")
+	}
+
+	// Verify plugin commands were invoked
+	data, err := os.ReadFile(filepath.Join(dir, "invocations.log"))
+	if err != nil {
+		t.Fatal("expected invocations.log to exist - setupPlugins was not called")
+	}
+	log := string(data)
+	if !strings.Contains(log, "plugin marketplace add") {
+		t.Errorf("expected marketplace add invocation, got:\n%s", log)
+	}
+	if !strings.Contains(log, "plugin update") {
+		t.Errorf("expected plugin update invocation, got:\n%s", log)
+	}
+	if !strings.Contains(log, "plugin install") {
+		t.Errorf("expected plugin install invocation, got:\n%s", log)
+	}
+	if !strings.Contains(log, "-s project") {
+		t.Errorf("expected -s project scope in install, got:\n%s", log)
+	}
+}
+
+func TestPrepare_CSCPluginSetupFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake not supported on windows")
+	}
+
+	dir := t.TempDir()
+	// Create a fake csc binary that fails
+	fakeBin := filepath.Join(dir, "fake-csc")
+	script := "#!/bin/sh\nexit 1\n"
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	workspacesRoot := filepath.Join(dir, "wsroot")
+	_, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-1234",
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "test-agent",
+		Provider:       "csc",
+		CSCBin:         fakeBin,
+		Task: TaskContextForEnv{
+			Plugin: &AgentPlugin{
+				Name: "cospower",
+				Install: &PluginInstall{
+					Method:              "plugin_marketplace",
+					Marketplace:         "example/marketplace",
+					PluginName:          "cospower",
+					MarketplaceName:     "marketplace",
+					MarketplaceRepo:     "https://github.com/example/marketplace.git",
+					MarketplaceVerified: true,
+				},
+			},
+		},
+	}, testLogger())
+	if err == nil {
+		t.Fatal("expected Prepare to fail when CSC plugin setup fails")
+	}
+	if !strings.Contains(err.Error(), "plugin setup") {
+		t.Errorf("error should mention plugin setup, got: %v", err)
+	}
+}
+
+func TestPrepare_CSCSkippedWhenBinEmpty(t *testing.T) {
+	dir := t.TempDir()
+	workspacesRoot := filepath.Join(dir, "wsroot")
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-1234",
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "test-agent",
+		Provider:       "csc",
+		CSCBin:         "", // empty - should skip plugin setup
+		Task:           TaskContextForEnv{},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare should succeed with empty CSCBin, got: %v", err)
+	}
+	if env == nil {
+		t.Fatal("expected non-nil Environment")
+	}
+}

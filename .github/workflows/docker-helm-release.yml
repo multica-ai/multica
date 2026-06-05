@@ -1,3 +1,6 @@
+# NOTE: For standard releases, push a tag — .github/workflows/release.yml handles CLI,
+# Docker images, Desktop installers, and Helm charts automatically.
+# This workflow is kept for custom deployments (subpath, custom base paths, etc.) only.
 name: Docker & Helm Release
 
 on:

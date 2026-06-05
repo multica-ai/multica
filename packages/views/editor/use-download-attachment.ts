@@ -63,29 +63,26 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
         return;
       }
 
-      // Web: claim the popup permission synchronously, then hydrate the URL.
-      // `window.open` here returns a WindowProxy because we deliberately
-      // omit `noopener`; we revoke the back-channel ourselves once we have
-      // the real URL.
-      const placeholder = typeof window !== "undefined"
-        ? window.open("about:blank", "_blank")
-        : null;
+      // Web: use a transient <a> tag to trigger the download / open.
+      // This avoids the about:blank navigation issue where some browsers
+      // silently drop an async location.href assignment on a placeholder
+      // window, leaving the user staring at a blank tab.
       try {
         const fresh = await api.getAttachment(attachmentId);
         if (!fresh.download_url) {
-          placeholder?.close();
           failed();
           return;
         }
-        if (placeholder) {
-          placeholder.opener = null;
-          placeholder.location.href = fresh.download_url;
-        } else if (typeof window !== "undefined") {
-          // Popup blocked outright — last-resort navigate the current tab.
-          window.location.href = fresh.download_url;
-        }
+        const a = document.createElement("a");
+        a.href = fresh.download_url;
+        a.download = fresh.filename || "";
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
       } catch {
-        placeholder?.close();
         failed();
       }
     },
