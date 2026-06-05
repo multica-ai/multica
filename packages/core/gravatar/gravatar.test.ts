@@ -2,6 +2,13 @@ import { describe, it, expect } from "vitest";
 import { getGravatarUrl } from "./index";
 
 describe("getGravatarUrl", () => {
+  it("returns null for empty or falsy emails", () => {
+    expect(getGravatarUrl(null)).toBeNull();
+    expect(getGravatarUrl(undefined)).toBeNull();
+    expect(getGravatarUrl("")).toBeNull();
+    expect(getGravatarUrl("   ")).toBeNull();
+  });
+
   it("returns a Gravatar URL with SHA-256 hash", () => {
     const url = getGravatarUrl("test@example.com");
     expect(url).toMatch(/^https:\/\/www\.gravatar\.com\/avatar\/[a-f0-9]{64}\?/);

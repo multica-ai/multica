@@ -1127,8 +1127,10 @@
     "deleting": "Suppression..."
   },
   "labs": {
-    "section_placeholder_title": "Aucune expérimentation pour l'instant",
-    "section_placeholder_description": "Les fonctionnalités expérimentales apparaîtront ici dès qu'elles seront disponibles.",
+    "experiments_title": "Expérimentations",
+    "experiments_description": "Essayez les nouvelles fonctionnalités avant leur disponibilité générale. Ces réglages sont expérimentaux et peuvent changer.",
+    "gravatar_title": "Prise en charge de Gravatar",
+    "gravatar_description": "Afficher les images Gravatar pour les utilisateurs sans avatar personnalisé. Utilise le hachage SHA-256 de leur adresse e-mail.",
     "toast_failed": "Échec de la mise à jour du réglage"
   },
   "github": {

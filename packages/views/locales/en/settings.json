@@ -1128,8 +1128,10 @@
     "deleting": "Deleting..."
   },
   "labs": {
-    "section_placeholder_title": "No experiments yet",
-    "section_placeholder_description": "Experimental features will appear here as they become available.",
+    "experiments_title": "Experiments",
+    "experiments_description": "Try out new features before they're generally available. These settings are experimental and may change.",
+    "gravatar_title": "Gravatar support",
+    "gravatar_description": "Show Gravatar images for users who don't have a custom avatar. Uses the SHA-256 hash of their email address.",
     "toast_failed": "Failed to update setting"
   },
   "github": {

@@ -1118,8 +1118,10 @@
     "deleting": "削除中..."
   },
   "labs": {
-    "section_placeholder_title": "まだ実験機能はありません",
-    "section_placeholder_description": "実験的な機能は利用可能になり次第ここに表示されます。",
+    "experiments_title": "実験機能",
+    "experiments_description": "新機能を正式リリース前に試せます。これらの設定は実験的なもので、変更される場合があります。",
+    "gravatar_title": "Gravatar のサポート",
+    "gravatar_description": "カスタムアバターがないユーザーに Gravatar 画像を表示します。メールアドレスの SHA-256 ハッシュを使用します。",
     "toast_failed": "設定を更新できませんでした"
   },
   "github": {
