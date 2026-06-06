@@ -445,6 +445,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/focus-list/reorder",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/github/pull-requests",
       "exempt": "pre-auth service-to-service \u2014 CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push before any user JWT exists (FIR-2568)"
     },

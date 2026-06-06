@@ -4,8 +4,6 @@ import {
   POST_SWIPE_CLICK_SUPPRESS_MS,
   SWIPE_COMMIT_MAX_PX,
   SWIPE_COMMIT_MIN_PX,
-  SWIPE_RELEASE_ARCHIVE_PX,
-  shouldArchiveOnRelease,
   commitThresholdPx,
   leftPanelCommitThresholdPx,
   shouldCommitHeldSwipe,
@@ -25,11 +23,11 @@ describe("POST_SWIPE_CLICK_SUPPRESS_MS", () => {
 });
 
 describe("commitThresholdPx", () => {
-  it("returns 80% of width inside the clamp band", () => {
-    // iPhone Pro (414 px) -> 331.2 -> not clamped
-    expect(commitThresholdPx(414)).toBeCloseTo(331.2, 1);
-    // iPhone 16 Pro Max (430 px) -> 344.0 -> not clamped
-    expect(commitThresholdPx(430)).toBeCloseTo(344.0, 1);
+  it("returns 70% of width inside the clamp band", () => {
+    // iPhone Pro (414 px) -> 289.8 -> not clamped
+    expect(commitThresholdPx(414)).toBeCloseTo(289.8, 1);
+    // iPhone 16 Pro Max (430 px) -> 301.0 -> not clamped
+    expect(commitThresholdPx(430)).toBeCloseTo(301.0, 1);
   });
 
   it("clamps to the minimum on very narrow rows", () => {
@@ -70,8 +68,8 @@ describe("shouldCommitHeldSwipe", () => {
   });
 
   it("commits after hold when still beyond threshold", () => {
-    // 80% of 414 = 331.2 — must exceed that
-    expect(shouldCommitHeldSwipe(340, 414, true)).toBe(true);
+    // 70% of 414 = 289.8 — must exceed that
+    expect(shouldCommitHeldSwipe(295, 414, true)).toBe(true);
   });
 
   it("cancels when the user moves back under threshold before release", () => {
@@ -80,35 +78,24 @@ describe("shouldCommitHeldSwipe", () => {
 });
 
 describe("shouldInstantArchive", () => {
-  it("commits when swipe reaches 80% of row width", () => {
-    // 414 px row: 80% = 331.2 px
-    expect(shouldInstantArchive(332, 414)).toBe(true);
+  it("commits when swipe reaches 70% of row width", () => {
+    // 414 px row: 70% = 289.8 px
+    expect(shouldInstantArchive(290, 414)).toBe(true);
   });
 
-  it("does not commit at 79% of row width", () => {
-    // 414 px row: 79% = 327.06 px
-    expect(shouldInstantArchive(327, 414)).toBe(false);
+  it("does not commit just below 70% of row width", () => {
+    // 414 px row: 69% = 285.66 px
+    expect(shouldInstantArchive(285, 414)).toBe(false);
   });
 
-  it("commits at exactly 80%", () => {
+  it("commits at exactly 70%", () => {
     const rowWidth = 400;
-    expect(shouldInstantArchive(rowWidth * 0.80, rowWidth)).toBe(true);
+    expect(shouldInstantArchive(rowWidth * 0.70, rowWidth)).toBe(true);
   });
 
-  it("does not commit below the 80% threshold", () => {
-    // 70% of 414 = 289.8 px — clearly below threshold
-    expect(shouldInstantArchive(290, 414)).toBe(false);
+  it("does not commit below the 70% threshold", () => {
+    // 50% of 414 = 207 px — clearly below threshold
+    expect(shouldInstantArchive(207, 414)).toBe(false);
   });
 });
 
-describe("shouldArchiveOnRelease", () => {
-  it("archives once the released swipe is more than 50 px", () => {
-    expect(SWIPE_RELEASE_ARCHIVE_PX).toBe(50);
-    expect(shouldArchiveOnRelease(51)).toBe(true);
-  });
-
-  it("does not archive at exactly 50 px or below", () => {
-    expect(shouldArchiveOnRelease(50)).toBe(false);
-    expect(shouldArchiveOnRelease(49)).toBe(false);
-  });
-});

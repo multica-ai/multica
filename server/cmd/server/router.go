@@ -1401,6 +1401,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/cerebro/focus-list", func(r chi.Router) {
 				r.Get("/", cerebroFocusListHandler.List)
 				r.Post("/", cerebroFocusListHandler.Create)
+				r.Post("/reorder", cerebroFocusListHandler.Reorder) // CEREBRO-PATCH(cerebro-focus-list-routes): TECH-2947 reorder route.
 				r.Patch("/{id}", cerebroFocusListHandler.Update)
 				r.Delete("/{id}", cerebroFocusListHandler.Delete)
 				r.Post("/{id}/done", cerebroFocusListHandler.MarkDone)

@@ -157,6 +157,23 @@ func (q *Queries) MarkFocusListItemDone(ctx context.Context, id pgtype.UUID) (Ce
 	return i, err
 }
 
+const setFocusListItemPosition = `-- name: SetFocusListItemPosition :exec
+UPDATE cerebro_focus_list_item
+SET position = $2,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+type SetFocusListItemPositionParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Position float64     `json:"position"`
+}
+
+func (q *Queries) SetFocusListItemPosition(ctx context.Context, arg SetFocusListItemPositionParams) error {
+	_, err := q.db.Exec(ctx, setFocusListItemPosition, arg.ID, arg.Position)
+	return err
+}
+
 const snoozeFocusListItem = `-- name: SnoozeFocusListItem :one
 UPDATE cerebro_focus_list_item
 SET snoozed_until = $2,

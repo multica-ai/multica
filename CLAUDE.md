@@ -472,7 +472,7 @@ make check
 
 **Production** runs on Sliplane as Docker containers built from `Dockerfile.web` (frontend) and `Dockerfile` (backend). It tracks `origin/production` and rebuilds on each push to that branch.
 
-**Deploy flow — gated, not direct.** Merging a PR into `main` does NOT deploy. Live deploy fires only when `main` is merged into the `production` branch. The `main → production` merge is gated by an approval comment on a release-issue in Multica's "Deployments" project — created automatically by the `auto-deploy-trigger` autopilot.
+**Gate rules for merge → live: see the `deploy` skill, section "Gate rules".** Summary: `main` (staging, `Sara.firtal.com`) merges itself when CI is green AND the change is reversible; only irreversible changes (destructive DB migrations, infra-mutations, prod-data) need approval before merge. `production` (prod, `Multica.firtal.com`) is a separate gated promotion — see the deploy-review flow below. This CLAUDE.md does not restate the rule so the two versions can't drift; the deploy skill is the single source of truth.
 
 End-to-end:
 

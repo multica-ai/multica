@@ -45,8 +45,11 @@
  *  - v10: release-to-archive threshold changed to >50 px. This
  *        matches the mobile inbox requirement and makes the gesture feel like
  *        a quick dismiss instead of a near-full-row drag.
- *  - v11 (current): left-swipe action reveal commits at 40% while archive
+ *  - v11: left-swipe action reveal commits at 40% while archive
  *        keeps its separate right-swipe threshold.
+ *  - v12 (current): hold-to-commit and instant-archive thresholds lowered
+ *        from 80% → 70%. Slightly less far to reach than near-full-row, but
+ *        still well past accidental-swipe territory.
  *
  * Sources:
  *  - "Pointer events vs touch events for swipe" — react-swipeable's README
@@ -55,7 +58,7 @@
  *  - Material 3 swipe-to-dismiss positional threshold — 25–30%.
  */
 
-export const SWIPE_COMMIT_FRACTION = 0.80;
+export const SWIPE_COMMIT_FRACTION = 0.70;
 export const SWIPE_COMMIT_MIN_PX = 80;
 export const SWIPE_COMMIT_MAX_PX = 400;
 export const SWIPE_RELEASE_ARCHIVE_PX = 50;
@@ -99,11 +102,11 @@ export const LEFT_PANEL_COMMIT_FRACTION = 0.40;
 
 /**
  * Commit threshold (px) needed to fire archive / panel-reveal for a row of
- * the given width. 80% with a [80, 400] clamp:
+ * the given width. 70% with a [80, 400] clamp:
  *
- *   iPhone SE (320 px) → 256 px (80%)
- *   iPhone Pro (414 px) → 331 px (80%)
- *   iPhone 16 Pro Max (430 px) → 344 px (80%)
+ *   iPhone SE (320 px) → 224 px (70%)
+ *   iPhone Pro (414 px) → 290 px (70%)
+ *   iPhone 16 Pro Max (430 px) → 301 px (70%)
  *   iPad split-view (~600 px) → 400 px (clamp cap, ~67%)
  */
 export function commitThresholdPx(rowWidth: number): number {
@@ -126,7 +129,7 @@ export function shouldCommitHeldSwipe(
 /** Fraction of row width that triggers instant archive on release
  * without requiring a hold — must match SWIPE_COMMIT_FRACTION so reaching
  * the archive zone always commits immediately. */
-export const SWIPE_INSTANT_ARCHIVE_FRACTION = 0.80;
+export const SWIPE_INSTANT_ARCHIVE_FRACTION = 0.70;
 
 /** Returns true when the user has swiped far enough that archive should
  * commit immediately on release, bypassing the hold-to-commit timer. */

@@ -832,6 +832,7 @@ var excluded = map[string]string{
 	"DELETE /api/cerebro/focus-list/{id}":  "self_only — caller's own focus list",
 	"POST /api/cerebro/focus-list/{id}/done":   "self_only — caller's own focus list",
 	"POST /api/cerebro/focus-list/{id}/snooze": "self_only — caller's own focus list",
+	"POST /api/cerebro/focus-list/reorder":     "self_only — caller's own focus list",
 	"POST /api/invitations/{id}/accept":            "self_only — caller accepting their own invitation",
 	"POST /api/invitations/{id}/decline":           "self_only — caller declining their own invitation",
 	"POST /api/persona/approvals/{id}/approve":     "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",

@@ -12,6 +12,10 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 import { CerebroOpenInAppBanner } from "@/components/cerebro-open-in-app-banner";
 import { CerebroWorkspaceFavicon } from "@/components/cerebro-workspace-favicon";
+import {
+  CerebroWorkspaceTitle,
+  CerebroWorkspaceSidebarColor,
+} from "@multica/cerebro-workspace-branding";
 
 export default function WorkspaceLayout({
   children,
@@ -94,6 +98,8 @@ export default function WorkspaceLayout({
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
       <CerebroWorkspaceFavicon />
+      <CerebroWorkspaceTitle />
+      <CerebroWorkspaceSidebarColor />
       <CerebroOpenInAppBanner />
       {children}
     </WorkspaceSlugProvider>

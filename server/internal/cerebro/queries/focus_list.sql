@@ -46,3 +46,9 @@ RETURNING id, workspace_id, member_id, text, issue_id, snoozed_until, done_at, p
 
 -- name: DeleteFocusListItem :exec
 DELETE FROM cerebro_focus_list_item WHERE id = $1;
+
+-- name: SetFocusListItemPosition :exec
+UPDATE cerebro_focus_list_item
+SET position = $2,
+    updated_at = NOW()
+WHERE id = $1;

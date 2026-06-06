@@ -12,6 +12,10 @@ import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 import { WorkspacePresencePrefetch } from "@multica/views/layout";
 import { useTabStore } from "@/stores/tab-store";
 import { CerebroWorkspaceDockIcon } from "./cerebro-workspace-dock-icon";
+import {
+  CerebroWorkspaceTitle,
+  CerebroWorkspaceSidebarColor,
+} from "@multica/cerebro-workspace-branding";
 
 /**
  * Desktop equivalent of apps/web/app/[workspaceSlug]/layout.tsx.
@@ -86,6 +90,8 @@ export function WorkspaceRouteLayout() {
     <WorkspaceSlugProvider slug={workspaceSlug}>
       <WorkspacePresencePrefetch />
       <CerebroWorkspaceDockIcon />
+      <CerebroWorkspaceTitle />
+      <CerebroWorkspaceSidebarColor />
       <Outlet />
     </WorkspaceSlugProvider>
   );

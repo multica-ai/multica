@@ -21,7 +21,7 @@ func TestBuildGatewayMessagesCapsHistoryAndExcludesPostStartMessages(t *testing.
 	messages := buildGatewayMessages(db.Agent{
 		Name:         "Charlotte",
 		Instructions: "Svar kort.",
-	}, history, ts(started), 2)
+	}, "", history, ts(started), 2)
 
 	if len(messages) != 3 {
 		t.Fatalf("len(messages) = %d, want system + 2 history messages: %+v", len(messages), messages)
@@ -61,7 +61,7 @@ func TestBuildGatewayIssueMessagesIncludesIssueOpeningAndDistinguishesAuthors(t 
 		ID:           agentID,
 		Name:         "Sara",
 		Instructions: "Be concise.",
-	}, issue, comments, trigger, ts(started), 50)
+	}, "", issue, comments, trigger, ts(started), 50)
 
 	if messages[0].Role != "system" {
 		t.Fatalf("expected system first, got %+v", messages[0])
@@ -106,7 +106,7 @@ func TestBuildGatewayIssueMessagesAppliesLimitButKeepsTriggerComment(t *testing.
 	}
 	trigger := &db.Comment{ID: uuid(13), AuthorType: "member", AuthorID: memberID, Content: "trigger"}
 
-	messages := buildGatewayIssueMessages(db.Agent{ID: agentID, Name: "Sara"}, issue, comments, trigger, ts(started), 2)
+	messages := buildGatewayIssueMessages(db.Agent{ID: agentID, Name: "Sara"}, "", issue, comments, trigger, ts(started), 2)
 
 	// Expect: system + issue opening + last 2 transcript entries + trigger.
 	if len(messages) != 5 {
@@ -125,7 +125,7 @@ func TestBuildGatewayAutopilotMessagesEmbedsTitleAndDescription(t *testing.T) {
 		Title:       "Daily digest",
 		Description: pgtype.Text{String: "Summarize yesterday's commits.", Valid: true},
 	}
-	messages := buildGatewayAutopilotMessages(db.Agent{Name: "Sara", Instructions: "Tone: terse."}, ap)
+	messages := buildGatewayAutopilotMessages(db.Agent{Name: "Sara", Instructions: "Tone: terse."}, "", ap)
 
 	if len(messages) != 2 {
 		t.Fatalf("len = %d, want 2: %+v", len(messages), messages)
