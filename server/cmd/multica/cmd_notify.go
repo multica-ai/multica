@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -66,14 +67,15 @@ type notifyDebugEvent struct {
 }
 
 type notifyDebugDelivery struct {
-	ID           string  `json:"id"`
-	Channel      string  `json:"channel"`
-	Status       string  `json:"status"`
-	AttemptCount int32   `json:"attempt_count"`
-	LastError    *string `json:"last_error"`
-	SentAt       *string `json:"sent_at"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	ID              string          `json:"id"`
+	Channel         string          `json:"channel"`
+	Status          string          `json:"status"`
+	AttemptCount    int32           `json:"attempt_count"`
+	LastError       *string         `json:"last_error"`
+	PayloadSnapshot json.RawMessage `json:"payload_snapshot"`
+	SentAt          *string         `json:"sent_at"`
+	CreatedAt       string          `json:"created_at"`
+	UpdatedAt       string          `json:"updated_at"`
 }
 
 type notifyDebugRow struct {

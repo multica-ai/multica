@@ -125,7 +125,15 @@ func TestRunNotifyDebugDeliveries(t *testing.T) {
 						"comment_id":        "comment-1",
 						"created_at":        "2026-06-06T00:00:00Z",
 					},
-					"delivery": nil,
+					"delivery": map[string]any{
+						"id":               "delivery-1",
+						"channel":          "openclaw_weixin",
+						"status":           "pending",
+						"attempt_count":    1,
+						"payload_snapshot": map[string]any{"wechat_id": "wechat-user", "channel": "openclaw-weixin"},
+						"created_at":       "2026-06-06T00:00:00Z",
+						"updated_at":       "2026-06-06T00:00:00Z",
+					},
 				},
 			},
 		})
@@ -178,8 +186,15 @@ func TestRunNotifyDebugDeliveries(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("decode output: %v\n%s", err, out.String())
 	}
-	if result.Total != 1 || len(result.Rows) != 1 || result.Rows[0].Delivery != nil {
+	if result.Total != 1 || len(result.Rows) != 1 || result.Rows[0].Delivery == nil {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(result.Rows[0].Delivery.PayloadSnapshot, &payload); err != nil {
+		t.Fatalf("decode payload_snapshot: %v", err)
+	}
+	if payload["wechat_id"] != "wechat-user" || payload["channel"] != "openclaw-weixin" {
+		t.Fatalf("unexpected payload_snapshot: %#v", payload)
 	}
 }
 
