@@ -1686,8 +1686,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     </div>
   );
 
+  // CEREBRO-PATCH(issue-detail-column-ref): TECH-2969 — ref lets IssueContextTrigger portal its panel into the issue column only.
+  const issueColumnRef = useRef<HTMLDivElement>(null);
+
   const detailContent = (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div ref={issueColumnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
           {/* CEREBRO-PATCH(issue-detail-mobile-topbar-title): Mobile shows the issue title only; long titles scroll horizontally instead of truncating (JEH-1515). */}
           <div className="flex flex-1 items-center gap-1.5 min-w-0 md:hidden">
@@ -1697,6 +1700,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               description={issue.description}
               identifier={isChat ? null : issue.identifier}
               className="min-w-0 flex-1"
+              containerRef={issueColumnRef}
             >
               <span className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-medium text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{displayTitle}</span>
             </IssueContextTrigger>
@@ -1776,6 +1780,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                     description={issue.description}
                     identifier={issue.identifier}
                     className="min-w-0"
+                    containerRef={issueColumnRef}
                   >
                     <span className="shrink-0 text-muted-foreground">
                       {issue.identifier}
