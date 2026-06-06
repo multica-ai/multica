@@ -90,8 +90,14 @@ func TestBuildMmxArgsFiltersBlockedCustomArgs(t *testing.T) {
 	if strings.Contains(joined, "stolen-key") {
 		t.Errorf("blocked --api-key should not pass through: %v", args)
 	}
-	if strings.Contains(joined, "text") {
+	if strings.Contains(joined, "--output text") {
 		t.Errorf("blocked --output value leaked through: %v", args)
+	}
+	// Verify --output value is "json" not "text".
+	for i, a := range args {
+		if a == "--output" && i+1 < len(args) && args[i+1] != "json" {
+			t.Errorf("--output should be 'json', got %q", args[i+1])
+		}
 	}
 	if !strings.Contains(joined, "--temperature 0.7") {
 		t.Errorf("non-blocked extra arg should pass through: %v", args)
