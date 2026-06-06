@@ -69,9 +69,10 @@ export interface WorkflowCanvasProps {
   onEdgeCreate?: (sourceNodeId: string, targetNodeId: string) => void;
   onEdgeDelete?: (edgeId: string) => void;
   onNodeClick?: (nodeId: string) => void;
-  onNodeCreate?: (type: string, x: number, y: number, color?: string) => void;
+  onNodeCreate?: (type: string, x: number, y: number) => void;
   nodeStatusColors?: Record<string, string>;
   nodeStatuses?: Record<string, { status: string; isRunning: boolean }>;
+  showMiniMap?: boolean;
 }
 
 export function WorkflowCanvas({
@@ -84,6 +85,7 @@ export function WorkflowCanvas({
   onNodeCreate,
   nodeStatusColors,
   nodeStatuses,
+  showMiniMap = true,
 }: WorkflowCanvasProps) {
   const mode = useWorkflowEditorStore((s) => s.mode);
   const selectNode = useWorkflowEditorStore((s) => s.selectNode);
@@ -270,9 +272,10 @@ export function WorkflowCanvas({
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      if (mode !== "edit") return;
-      selectNode(node.id);
-      selectEdge(null);
+      if (mode === "edit") {
+        selectNode(node.id);
+        selectEdge(null);
+      }
       onNodeClick?.(node.id);
     },
     [selectNode, selectEdge, onNodeClick, mode],
@@ -470,9 +473,8 @@ export function WorkflowCanvas({
       event.preventDefault();
       const dragType = event.dataTransfer.getData("application/x-multica-shape");
       if (!dragType) return;
-      const color = event.dataTransfer.getData("application/x-multica-color") || undefined;
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      onNodeCreate?.(dragType, position.x, position.y, color);
+      onNodeCreate?.(dragType, position.x, position.y);
     },
     [screenToFlowPosition, onNodeCreate],
   );
@@ -518,7 +520,7 @@ export function WorkflowCanvas({
     >
       <Background />
       <Controls />
-      <MiniMap nodeColor={(node) => miniMapNodeColors[node.id] ?? "#e2e8f0"} />
+      {showMiniMap && <MiniMap nodeColor={(node) => miniMapNodeColors[node.id] ?? "#e2e8f0"} />}
       {alignmentGuides.length > 0 && (
         <svg
           style={{
