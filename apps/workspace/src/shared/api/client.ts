@@ -956,8 +956,49 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/attachments`);
   }
 
+  async linkIssueAttachments(issueId: string, attachmentIds: string[]): Promise<Attachment[]> {
+    return this.fetch(`/api/issues/${issueId}/attachments/link`, {
+      method: "POST",
+      body: JSON.stringify({ attachment_ids: attachmentIds }),
+    });
+  }
+
+  async updateAttachment(id: string, data: { filename: string }): Promise<Attachment> {
+    return this.fetch(`/api/attachments/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
+  }
+
+  async downloadAttachment(id: string): Promise<Blob> {
+    const rid = crypto.randomUUID().slice(0, 8);
+    const start = Date.now();
+    const path = `/api/attachments/${id}/download`;
+    this.logger.info(`→ GET ${path}`, { rid });
+
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: "GET",
+      headers: {
+        "X-Request-ID": rid,
+        ...this.authHeaders(),
+      },
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      if (res.status === 401) this.handleUnauthorized();
+      const payload = await this.parseErrorPayload(res);
+      const message = payload?.error ?? `Download failed: ${res.status}`;
+      this.logger.error(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
+      throw new Error(message);
+    }
+
+    this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
+    return res.blob();
   }
 
   async getNotificationPreferences(): Promise<NotificationPreference> {

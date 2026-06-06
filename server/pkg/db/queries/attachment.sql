@@ -38,5 +38,19 @@ WHERE issue_id = $2
   AND comment_id IS NULL
   AND id = ANY($3::uuid[]);
 
+-- name: LinkAttachmentsToIssue :exec
+UPDATE attachment
+SET issue_id = $1
+WHERE workspace_id = $2
+  AND issue_id IS NULL
+  AND comment_id IS NULL
+  AND id = ANY($3::uuid[]);
+
+-- name: UpdateAttachmentFilename :one
+UPDATE attachment
+SET filename = $3
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
 -- name: DeleteAttachment :exec
 DELETE FROM attachment WHERE id = $1 AND workspace_id = $2;

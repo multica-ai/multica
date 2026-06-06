@@ -28,6 +28,7 @@ export const queryKeys = {
     detail: (issueId: string) => ["issues", "detail", issueId] as const,
     timeline: (issueId: string) => ["issues", "detail", issueId, "timeline"] as const,
     reactions: (issueId: string) => ["issues", "detail", issueId, "reactions"] as const,
+    attachments: (issueId: string) => ["issues", "detail", issueId, "attachments"] as const,
     subscribers: (issueId: string) =>
       ["issues", "detail", issueId, "subscribers"] as const,
   },

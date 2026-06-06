@@ -128,6 +128,11 @@ export class TestApiClient {
     return res.json();
   }
 
+  async listAttachments(issueId: string) {
+    const res = await this.authedFetch(`/api/issues/${issueId}/attachments`);
+    return res.json();
+  }
+
   async listIssues(params?: Record<string, string | null | undefined>) {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(params ?? {})) {
