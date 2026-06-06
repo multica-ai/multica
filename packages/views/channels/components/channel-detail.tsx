@@ -149,11 +149,18 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    // CEREBRO-PATCH(channel-thread-responsive-overlay): TECH-3009 fix — defer
+    // setState via rAF so it never fires during react-resizable-panels' commit,
+    // which caused React error #310 in the inbox split view.
+    let raf = 0;
     const obs = new ResizeObserver((entries) => {
-      setContainerWidth(entries[0]?.contentRect.width ?? Infinity);
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() =>
+        setContainerWidth(entries[0]?.contentRect.width ?? Infinity),
+      );
     });
     obs.observe(el);
-    return () => obs.disconnect();
+    return () => { obs.disconnect(); cancelAnimationFrame(raf); };
   }, []);
 
   // CEREBRO-PATCH(channels-slack-message-view): hide the floating agent-chat

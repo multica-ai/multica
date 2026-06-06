@@ -1354,15 +1354,21 @@ export function InboxPage() {
   // new inbox notification for the same issue, and the dedup helper picks the
   // newest one — keying on its id would remount IssueDetail on every event,
   // wiping the comment composer draft and resetting scroll position.
+  // CEREBRO-PATCH(inbox-channel-error-boundary): TECH-3009 — wrap ChannelDetail
+  // in an error boundary (mirrors the IssueDetail boundary below) so a render
+  // crash in the channel pane shows a recoverable fallback instead of
+  // propagating to the whole InboxPage.
   const detailContent = selectedChannel ? (
-    <ChannelDetail
-      key={selectedChannel.id}
-      channelId={selectedChannel.id}
-      initialChannel={selectedChannel}
-      // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004
-      initialCommentId={selectedChannelCommentId}
-      onArchive={() => setSelectedKey(null, "")}
-    />
+    <ErrorBoundary resetKeys={[selectedChannel.id]}>
+      <ChannelDetail
+        key={selectedChannel.id}
+        channelId={selectedChannel.id}
+        initialChannel={selectedChannel}
+        // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004
+        initialCommentId={selectedChannelCommentId}
+        onArchive={() => setSelectedKey(null, "")}
+      />
+    </ErrorBoundary>
   ) : selectedChatSession || selectedKey === "new-chat" ? (
     <InboxChatPanel
       key={selectedChatSession?.id ?? "new"}
