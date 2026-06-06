@@ -137,7 +137,6 @@ func tryClaim(
 		runnerID,
 		dbTime, staleSecs,
 		job.Name, scope.Kind, scope.ID, planTime,
-		job.AllowStaleReentry,
 	).Scan(&c.ID, &c.LeaseToken, &c.Attempt)
 	if err == nil {
 		c.Stole = true
