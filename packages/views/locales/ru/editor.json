@@ -1,0 +1,76 @@
+{
+  "bubble_menu": {
+    "bold": "Жирный",
+    "italic": "Курсив",
+    "strikethrough": "Зачёркнутый",
+    "code": "Код",
+    "link": "Ссылка",
+    "list": "Список",
+    "quote": "Цитата",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "Текст",
+      "normal_text": "Обычный текст",
+      "heading_1": "Заголовок 1",
+      "heading_2": "Заголовок 2",
+      "heading_3": "Заголовок 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Маркированный список",
+      "ordered_list": "Нумерованный список"
+    },
+    "sub_issue": {
+      "tooltip": "Создать подзадачу из выделения",
+      "created": "Создано {{identifier}}",
+      "create_failed": "Не удалось создать подзадачу"
+    }
+  },
+  "image": {
+    "view": "Открыть изображение",
+    "download": "Скачать",
+    "copy_link": "Копировать ссылку",
+    "delete": "Удалить",
+    "link_copied": "Ссылка скопирована",
+    "copy_link_failed": "Не удалось скопировать ссылку"
+  },
+  "attachment": {
+    "download_failed": "Не удалось получить ссылку для скачивания. Попробуйте через мгновение.",
+    "preview": "Предпросмотр",
+    "preview_loading": "Загрузка предпросмотра…",
+    "preview_failed": "Не удалось загрузить предпросмотр",
+    "preview_too_large": "Файл слишком большой для предпросмотра. Скачайте его.",
+    "preview_unsupported": "Этот тип файла нельзя предпросмотреть.",
+    "close": "Закрыть",
+    "open_in_new_tab": "Открыть в новой вкладке",
+    "remove": "Удалить вложение"
+  },
+  "link_hover": {
+    "copy_link": "Копировать ссылку",
+    "open_link": "Открыть ссылку",
+    "link_copied": "Ссылка скопирована",
+    "copy_failed": "Не удалось скопировать"
+  },
+  "mention": {
+    "group_users": "Пользователи",
+    "group_issues": "Задачи",
+    "all_members": "Все участники",
+    "searching": "Поиск...",
+    "no_results": "Ничего не найдено"
+  },
+  "code_block": {
+    "copy_code": "Копировать код",
+    "show_preview": "Показать предпросмотр",
+    "show_source": "Показать исходник",
+    "fullscreen": "Полный экран"
+  },
+  "file_card": {
+    "uploading": "Загрузка {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Заголовок"
+  },
+  "mermaid": {
+    "render_error": "Не удалось отрисовать диаграмму Mermaid.",
+    "rendering": "Отрисовка диаграммы…"
+  }
+}

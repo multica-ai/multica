@@ -1,0 +1,41 @@
+{
+  "nav": {
+    "inbox": "Входящие",
+    "my_issues": "Мои задачи",
+    "issues": "Задачи",
+    "projects": "Проекты",
+    "autopilots": "Автопилот",
+    "agents": "Агенты",
+    "squads": "Отряды",
+    "usage": "Использование",
+    "runtimes": "Среды выполнения",
+    "skills": "Навыки",
+    "settings": "Настройки"
+  },
+  "help": {
+    "trigger": "Помощь",
+    "docs": "Документация",
+    "changelog": "История изменений",
+    "feedback": "Обратная связь"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Загрузка рабочей области…",
+    "loading_named_prefix": "Загрузка"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Открепить",
+    "workspaces_label": "Рабочие области",
+    "create_workspace": "Создать рабочую область",
+    "pending_invitations_label": "Ожидающие приглашения",
+    "invitation_workspace_fallback": "Рабочая область",
+    "invitation_join": "Присоединиться",
+    "invitation_decline": "Отклонить",
+    "log_out": "Выйти",
+    "new_issue": "Создать задачу",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Закреплено",
+    "workspace_group": "Рабочая область",
+    "configure_group": "Настройка",
+    "unread_overflow": "99+"
+  }
+}

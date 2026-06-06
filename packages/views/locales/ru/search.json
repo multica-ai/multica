@@ -1,0 +1,44 @@
+{
+  "title": "Поиск",
+  "description": "Поиск по страницам, задачам, проектам и участникам",
+  "placeholder": "Введите команду или запрос...",
+  "groups": {
+    "pages": "Страницы",
+    "commands": "Команды",
+    "members": "Участники",
+    "projects": "Проекты",
+    "issues": "Задачи",
+    "recent": "Недавние"
+  },
+  "pages": {
+    "inbox": "Входящие",
+    "my_issues": "Мои задачи",
+    "issues": "Задачи",
+    "projects": "Проекты",
+    "agents": "Агенты",
+    "runtimes": "Среды выполнения",
+    "skills": "Навыки",
+    "settings": "Настройки"
+  },
+  "commands": {
+    "current_theme_aria": "Текущая тема",
+    "new_issue": "Создать задачу",
+    "new_project": "Создать проект",
+    "copy_issue_link": "Копировать ссылку на задачу",
+    "copy_identifier": "Копировать идентификатор ({{identifier}})",
+    "switch_to_light": "Светлая тема",
+    "switch_to_dark": "Тёмная тема",
+    "use_system_theme": "Системная тема"
+  },
+  "toast": {
+    "link_copied": "Ссылка скопирована",
+    "copied_identifier": "Скопировано {{identifier}}"
+  },
+  "empty": {
+    "no_results": "Ничего не найдено.",
+    "type_to_search": "Введите запрос для поиска задач и проектов"
+  },
+  "trigger": {
+    "label": "Поиск..."
+  }
+}

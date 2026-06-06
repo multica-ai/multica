@@ -1,0 +1,81 @@
+{
+  "page": {
+    "title": "Отряды",
+    "new_button": "Новый отряд",
+    "empty_no_squads": "Пока нет отрядов. Создайте первый, чтобы начать.",
+    "empty_no_match": "Нет отрядов, подходящих под фильтры."
+  },
+  "inspector": {
+    "details_section": "Сведения",
+    "archive_button": "В архив"
+  },
+  "archive_dialog": {
+    "title": "Архивировать этот отряд?",
+    "description": "«{{name}}» будет архивирован. Задачи, назначенные этому отряду, будут переданы его лидеру. Это действие необратимо — создайте новый отряд, если маршрутизация понадобится снова.",
+    "cancel": "Отмена",
+    "confirm": "В архив",
+    "archiving": "Архивирование…"
+  },
+  "name_editor": {
+    "cancel": "Отмена"
+  },
+  "add_member_dialog": {
+    "title": "Добавить участника",
+    "description": "Добавьте участника рабочей области или агента в этот отряд.",
+    "label_member": "Участник",
+    "label_role": "Роль",
+    "label_optional": "(необязательно)",
+    "placeholder_role_inline": "Добавить роль…",
+    "cancel": "Отмена"
+  },
+  "description_dialog": {
+    "title": "Изменить описание",
+    "placeholder_empty": "Добавьте описание",
+    "cancel": "Отмена"
+  },
+  "discard_changes_dialog": {
+    "title": "Отменить несохранённые изменения?",
+    "description": "На этой вкладке есть несохранённые изменения. При переключении вкладок они будут потеряны.",
+    "keep_editing": "Продолжить редактирование",
+    "discard_button": "Отменить"
+  },
+  "members_tab": {
+    "section_title": "Участники",
+    "section_count_one": "{{count}} участник в этом отряде",
+    "section_count_few": "{{count}} участника в этом отряде",
+    "section_count_many": "{{count}} участников в этом отряде",
+    "section_count_other": "{{count}} участников в этом отряде",
+    "add_member_button": "Добавить участника",
+    "create_agent_button": "Создать агента",
+    "leader_chip": "Лидер",
+    "view_agent_tooltip": "Открыть карточку агента",
+    "make_leader_tooltip": "Сделать лидером отряда",
+    "remove_member_tooltip": "Убрать из отряда",
+    "status_working": "В работе",
+    "status_idle": "Простой",
+    "status_offline": "Офлайн",
+    "status_unstable": "Нестабильно",
+    "issue_status_blocked": "blocked",
+    "active_issue_more": "и ещё {{count}}",
+    "last_active_label": "активность {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "Отряд недоступен",
+    "detail_link": "Подробнее →",
+    "archived": "В архиве",
+    "member_count_one": "{{count}} участник",
+    "member_count_few": "{{count}} участника",
+    "member_count_many": "{{count}} участников",
+    "member_count_other": "{{count}} участников",
+    "members_section": "Участники",
+    "more_members_one": "+{{count}}",
+    "more_members_few": "+{{count}}",
+    "more_members_many": "+{{count}}",
+    "more_members_other": "+{{count}}"
+  },
+  "instructions_tab": {
+    "description": "Инструкции отряда добавляются в промпт агента-лидера каждый раз, когда он работает над задачей, назначенной этому отряду. С их помощью можно дать лидеру общие для отряда указания, рабочие договорённости или контекст, которому он должен следовать в каждой task.",
+    "unsaved_changes": "Несохранённые изменения",
+    "save_button": "Сохранить"
+  }
+}
