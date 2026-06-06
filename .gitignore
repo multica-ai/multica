@@ -3,6 +3,7 @@ dist
 *.log
 .DS_Store
 .envrc
+scripts/import_superpowers_skills.py
 
 # build outputs
 .turbo

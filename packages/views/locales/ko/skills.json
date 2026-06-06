@@ -162,6 +162,10 @@
       "runtime": {
         "title": "런타임에서 복사",
         "desc": "로컬 런타임을 스캔해 디스크에 있는 스킬을 이 워크스페이스로 승격합니다."
+      },
+      "bulk": {
+        "title": "일괄 가져오기",
+        "desc": "GitHub 저장소나 로컬 폴더에서 여러 skill을 한 번에 가져옵니다."
       }
     },
     "method_card": {
@@ -170,7 +174,9 @@
       "url_title": "URL에서 가져오기",
       "url_desc": "ClawHub 또는 Skills.sh의 공개 스킬을 가져옵니다.",
       "runtime_title": "런타임에서 복사",
-      "runtime_desc": "로컬 런타임에 이미 설치된 스킬을 워크스페이스로 가져옵니다."
+      "runtime_desc": "로컬 런타임에 이미 설치된 스킬을 워크스페이스로 가져옵니다.",
+      "bulk_title": "일괄 가져오기",
+      "bulk_desc": "여러 skill을 한 번에 — GitHub 저장소 또는 로컬 폴더."
     },
     "manual": {
       "name_label": "이름",
@@ -198,6 +204,26 @@
       "cancel": "취소",
       "toast_imported": "스킬을 가져왔습니다"
     }
+  },
+  "bulk_import": {
+    "source_label": "소스",
+    "source_github": "GitHub 저장소",
+    "source_folder": "로컬 폴더",
+    "github_url_label": "저장소 또는 폴더 URL",
+    "github_url_placeholder": "github.com/owner/repo 또는 .../tree/main/skills",
+    "discover": "찾기",
+    "discovering": "찾는 중…",
+    "folder_pick": "폴더 선택",
+    "folder_drop_hint": "또는 폴더를 여기에 놓으세요",
+    "folder_reading": "폴더 읽는 중…",
+    "candidates_title": "찾은 skill",
+    "already_exists": "이미 있음",
+    "empty_no_skills": "SKILL.md를 찾을 수 없습니다.",
+    "empty_hint": "각 skill은 SKILL.md가 있는 폴더입니다.",
+    "capped_notice": "처음 {{count}}개만 표시; 더 있습니다.",
+    "folder_too_large": "폴더가 너무 커서 브라우저에서 읽을 수 없습니다.",
+    "discover_failed": "해당 소스를 읽을 수 없습니다.",
+    "import_selected": "선택한 {{count}}개 가져오기"
   },
   "runtime_import": {
     "runtime_label": "런타임",
