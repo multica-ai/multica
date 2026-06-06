@@ -1323,6 +1323,18 @@ export function InboxPage() {
   );
 
   const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;
+  // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004 — find the most
+  // recent unread inbox notification for the selected channel that carries a
+  // comment_id, so ChannelDetail can auto-open the relevant thread on mount.
+  const selectedChannelCommentId = useMemo<string | undefined>(() => {
+    if (!selectedChannel) return undefined;
+    const relevant = items
+      .filter(
+        (i) => !i.read && !i.archived && i.issue_id === selectedChannel.id && i.details?.comment_id,
+      )
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return relevant[0]?.details?.comment_id ?? undefined;
+  }, [selectedChannel, items]);
   // CEREBRO-PATCH(inbox-mobile-detail-title): Mobile detail header shows the selected message/chat/channel title next to Back (JEH-1515).
   const selectedDetailTitle = selectedChannel
     ? selectedChannel.kind === "channel"
@@ -1347,6 +1359,8 @@ export function InboxPage() {
       key={selectedChannel.id}
       channelId={selectedChannel.id}
       initialChannel={selectedChannel}
+      // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004
+      initialCommentId={selectedChannelCommentId}
       onArchive={() => setSelectedKey(null, "")}
     />
   ) : selectedChatSession || selectedKey === "new-chat" ? (

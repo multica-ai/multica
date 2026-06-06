@@ -56,9 +56,14 @@ interface ChannelDetailProps {
   /** Called after the user archives the channel from the thread header.
    *  Lets the inbox clear its selection. */
   onArchive?: () => void;
+  // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004 — comment ID from
+  // the inbox notification that triggered this channel open. On first load we
+  // find this comment in the timeline and auto-open its parent thread so the
+  // user lands directly on the relevant reply instead of having to scroll/guess.
+  initialCommentId?: string;
 }
 
-export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelDetailProps) {
+export function ChannelDetail({ channelId, initialChannel, onArchive, initialCommentId }: ChannelDetailProps) {
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
 
@@ -119,6 +124,36 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
     if (activeThreadId && !activeThreadEntry) setActiveThreadId(null);
   }, [activeThreadId, activeThreadEntry]);
 
+  // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004 — when the channel
+  // is opened from an inbox notification, find the notified comment in the
+  // timeline and auto-open its parent thread. A ref prevents re-triggering
+  // after the user manually closes/changes the thread.
+  const autoOpenedCommentRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialCommentId || autoOpenedCommentRef.current === initialCommentId) return;
+    if (!timeline.length) return;
+    const entry = timeline.find((e) => e.id === initialCommentId && e.type === "comment");
+    if (!entry) return;
+    autoOpenedCommentRef.current = initialCommentId;
+    if (entry.parent_id) setActiveThreadId(entry.parent_id);
+  }, [initialCommentId, timeline]);
+
+  // CEREBRO-PATCH(channel-thread-responsive-overlay): TECH-3004 — observe the
+  // component's own width so the thread overlays on any narrow container (e.g.
+  // when the channel is embedded in the inbox split view at medium viewport
+  // sizes), not only on mobile-width viewports.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(Infinity);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver((entries) => {
+      setContainerWidth(entries[0]?.contentRect.width ?? Infinity);
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
   // CEREBRO-PATCH(channels-slack-message-view): hide the floating agent-chat
   // bubble while the channel/DM is open — the ThreadSidePanel docks where the
   // bubble sits and the two overlap. Mirrors the same pattern in
@@ -161,9 +196,12 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   // unreadably (see screenshot on the issue). When a thread is open and the
   // viewport is mobile-wide, hide the message column and let the thread panel
   // render full-screen with a Slack-style back-header.
+  // CEREBRO-PATCH(channel-thread-responsive-overlay): TECH-3004 — also overlay
+  // when the container itself is narrow (< 700px), e.g. when the channel is
+  // embedded inside the inbox split view on medium-sized screens.
   const isMobile = useIsMobile();
   const threadOpen = !!activeThreadEntry;
-  const threadFullScreen = isMobile && threadOpen;
+  const threadFullScreen = (isMobile || containerWidth < 700) && threadOpen;
   const threadBackLabel = display.isChannel ? `#${display.title}` : display.title;
 
   const archiveInbox = useArchiveInbox();
@@ -190,7 +228,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col">
+    // CEREBRO-PATCH(channel-thread-responsive-overlay): TECH-3004 — ref for ResizeObserver.
+    <div ref={containerRef} className="flex h-full min-h-0 flex-1 flex-col">
       {/* CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — hide the
           channel chrome (title, pin/archive, participants) while a thread is
           open on a narrow viewport. The thread panel's own back-header
