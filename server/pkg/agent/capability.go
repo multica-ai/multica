@@ -89,6 +89,9 @@ var capabilityRegistry = map[string]Capability{
 	"DeepSeek-TUI": {
 		StructuredOutput: true,
 	},
+	"mmx": {
+		StructuredOutput: true,
+	},
 }
 
 // registeredProviders returns the sorted list of provider names in the
