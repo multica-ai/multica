@@ -89,6 +89,50 @@ func (q *Queries) CompleteNotificationDelivery(ctx context.Context, arg Complete
 	return i, err
 }
 
+const completeNotificationDeliveryIfStatus = `-- name: CompleteNotificationDeliveryIfStatus :one
+UPDATE notification_delivery
+SET status = $2,
+    last_error = $3,
+    sent_at = $4,
+    updated_at = now()
+WHERE id = $1 AND status = $5
+RETURNING id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at, target_type, target_id
+`
+
+type CompleteNotificationDeliveryIfStatusParams struct {
+	ID        pgtype.UUID        `json:"id"`
+	Status    string             `json:"status"`
+	LastError pgtype.Text        `json:"last_error"`
+	SentAt    pgtype.Timestamptz `json:"sent_at"`
+	Status_2  string             `json:"status_2"`
+}
+
+func (q *Queries) CompleteNotificationDeliveryIfStatus(ctx context.Context, arg CompleteNotificationDeliveryIfStatusParams) (NotificationDelivery, error) {
+	row := q.db.QueryRow(ctx, completeNotificationDeliveryIfStatus,
+		arg.ID,
+		arg.Status,
+		arg.LastError,
+		arg.SentAt,
+		arg.Status_2,
+	)
+	var i NotificationDelivery
+	err := row.Scan(
+		&i.ID,
+		&i.NotificationEventID,
+		&i.Channel,
+		&i.Status,
+		&i.AttemptCount,
+		&i.LastError,
+		&i.PayloadSnapshot,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TargetType,
+		&i.TargetID,
+	)
+	return i, err
+}
+
 const createNotificationDelivery = `-- name: CreateNotificationDelivery :one
 INSERT INTO notification_delivery (
     notification_event_id,
@@ -273,7 +317,7 @@ SELECT EXISTS (
     WHERE ne.recipient_user_id = $1
       AND ne.comment_id = $2
       AND nd.channel = $3
-      AND nd.status IN ('pending', 'sent')
+      AND nd.status IN ('pending', 'awaiting_ack', 'sent')
 ) AS "exists"
 `
 
@@ -298,7 +342,7 @@ SELECT EXISTS (
     WHERE ne.recipient_user_id = $1
       AND ne.comment_id = $2
       AND nd.channel = 'openclaw_weixin'
-      AND nd.status IN ('pending', 'sent')
+      AND nd.status IN ('pending', 'awaiting_ack', 'sent')
 ) AS "exists"
 `
 
@@ -395,6 +439,75 @@ func (q *Queries) GetExternalAccountBindingByUserAndProvider(ctx context.Context
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getNotificationDeliveryWithEvent = `-- name: GetNotificationDeliveryWithEvent :one
+SELECT
+    nd.id AS delivery_id,
+    nd.notification_event_id,
+    nd.channel,
+    nd.status,
+    nd.attempt_count,
+    nd.last_error,
+    nd.payload_snapshot,
+    nd.sent_at,
+    nd.created_at AS delivery_created_at,
+    nd.updated_at AS delivery_updated_at,
+    nd.target_type,
+    nd.target_id,
+    ne.workspace_id,
+    ne.recipient_user_id,
+    ne.type AS event_type,
+    ne.issue_id,
+    ne.comment_id
+FROM notification_delivery nd
+JOIN notification_event ne ON ne.id = nd.notification_event_id
+WHERE nd.id = $1
+`
+
+type GetNotificationDeliveryWithEventRow struct {
+	DeliveryID          pgtype.UUID        `json:"delivery_id"`
+	NotificationEventID pgtype.UUID        `json:"notification_event_id"`
+	Channel             string             `json:"channel"`
+	Status              string             `json:"status"`
+	AttemptCount        int32              `json:"attempt_count"`
+	LastError           pgtype.Text        `json:"last_error"`
+	PayloadSnapshot     []byte             `json:"payload_snapshot"`
+	SentAt              pgtype.Timestamptz `json:"sent_at"`
+	DeliveryCreatedAt   pgtype.Timestamptz `json:"delivery_created_at"`
+	DeliveryUpdatedAt   pgtype.Timestamptz `json:"delivery_updated_at"`
+	TargetType          string             `json:"target_type"`
+	TargetID            pgtype.UUID        `json:"target_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	RecipientUserID     pgtype.UUID        `json:"recipient_user_id"`
+	EventType           string             `json:"event_type"`
+	IssueID             pgtype.UUID        `json:"issue_id"`
+	CommentID           pgtype.UUID        `json:"comment_id"`
+}
+
+func (q *Queries) GetNotificationDeliveryWithEvent(ctx context.Context, id pgtype.UUID) (GetNotificationDeliveryWithEventRow, error) {
+	row := q.db.QueryRow(ctx, getNotificationDeliveryWithEvent, id)
+	var i GetNotificationDeliveryWithEventRow
+	err := row.Scan(
+		&i.DeliveryID,
+		&i.NotificationEventID,
+		&i.Channel,
+		&i.Status,
+		&i.AttemptCount,
+		&i.LastError,
+		&i.PayloadSnapshot,
+		&i.SentAt,
+		&i.DeliveryCreatedAt,
+		&i.DeliveryUpdatedAt,
+		&i.TargetType,
+		&i.TargetID,
+		&i.WorkspaceID,
+		&i.RecipientUserID,
+		&i.EventType,
+		&i.IssueID,
+		&i.CommentID,
 	)
 	return i, err
 }
@@ -746,6 +859,60 @@ func (q *Queries) ListNotificationEventsByRecipient(ctx context.Context, arg Lis
 			&i.Link,
 			&i.Details,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTimedOutNotificationDeliveries = `-- name: ListTimedOutNotificationDeliveries :many
+SELECT id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at, target_type, target_id FROM notification_delivery
+WHERE channel = $1
+  AND status = $2
+  AND updated_at < now() - ($3::int * interval '1 second')
+ORDER BY updated_at ASC
+LIMIT $4::int
+`
+
+type ListTimedOutNotificationDeliveriesParams struct {
+	Channel        string `json:"channel"`
+	Status         string `json:"status"`
+	TimeoutSeconds int32  `json:"timeout_seconds"`
+	Limit          int32  `json:"limit"`
+}
+
+func (q *Queries) ListTimedOutNotificationDeliveries(ctx context.Context, arg ListTimedOutNotificationDeliveriesParams) ([]NotificationDelivery, error) {
+	rows, err := q.db.Query(ctx, listTimedOutNotificationDeliveries,
+		arg.Channel,
+		arg.Status,
+		arg.TimeoutSeconds,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationDelivery{}
+	for rows.Next() {
+		var i NotificationDelivery
+		if err := rows.Scan(
+			&i.ID,
+			&i.NotificationEventID,
+			&i.Channel,
+			&i.Status,
+			&i.AttemptCount,
+			&i.LastError,
+			&i.PayloadSnapshot,
+			&i.SentAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TargetType,
+			&i.TargetID,
 		); err != nil {
 			return nil, err
 		}

@@ -15,11 +15,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func cleanupNotificationDispatchData(t *testing.T) {
@@ -548,6 +550,94 @@ func TestDispatchPendingOpenclawWeixinDeliveries_RecordsMissingDaemon(t *testing
 	}
 	if delivery.SentAt.Valid {
 		t.Fatal("expected sent_at to be empty for missing daemon")
+	}
+}
+
+func TestDispatchPendingOpenclawWeixinDeliveries_AwaitsDaemonAck(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	eventID, deliveryID := seedPendingOpenclawWeixinDelivery(t)
+	hub := daemonws.NewHub()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, daemonws.ClientIdentity{
+			UserID:     testUserID,
+			RuntimeIDs: []string{"runtime-1"},
+		})
+	}))
+	defer server.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for hub.RuntimeConnectionCount("runtime-1") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("runtime connection was not registered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, hub)
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if delivery.Status != "awaiting_ack" {
+		t.Fatalf("expected delivery status awaiting_ack, got %q", delivery.Status)
+	}
+	if delivery.AttemptCount != 1 {
+		t.Fatalf("expected attempt_count 1, got %d", delivery.AttemptCount)
+	}
+	if delivery.SentAt.Valid {
+		t.Fatal("expected sent_at to remain empty while awaiting ack")
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+	var msg protocol.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal frame: %v", err)
+	}
+	if msg.Type != protocol.EventNotificationDeliver {
+		t.Fatalf("frame type = %q, want %q", msg.Type, protocol.EventNotificationDeliver)
+	}
+	var payload protocol.NotificationDeliverPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.DeliveryID != deliveryID || payload.Channel != "openclaw_weixin" || payload.OpenClawChannel != "openclaw-weixin" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestDispatchPendingOpenclawWeixinDeliveries_SweepsAckTimeout(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	eventID, _ := seedPendingOpenclawWeixinDelivery(t)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE notification_delivery
+		SET status = 'awaiting_ack', attempt_count = 1, updated_at = now() - interval '5 minutes'
+		WHERE notification_event_id = $1
+	`, eventID); err != nil {
+		t.Fatalf("update awaiting_ack delivery: %v", err)
+	}
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, daemonws.NewHub())
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if delivery.Status != "pending" {
+		t.Fatalf("expected timed out delivery to return pending, got %q", delivery.Status)
+	}
+	if !delivery.LastError.Valid || !strings.Contains(delivery.LastError.String, "daemon delivery ack timeout") {
+		t.Fatalf("expected timeout last_error, got %#v", delivery.LastError)
 	}
 }
 
