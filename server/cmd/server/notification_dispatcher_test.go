@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -157,6 +158,66 @@ func seedPendingDingTalkDelivery(t *testing.T, seed dingTalkDeliverySeed) (strin
 	}
 
 	return util.UUIDToString(binding.ID), util.UUIDToString(event.ID), util.UUIDToString(delivery.ID)
+}
+
+func seedPendingOpenclawWeixinDelivery(t *testing.T) (string, string) {
+	t.Helper()
+
+	queries := db.New(testPool)
+	eventPayload := map[string]any{
+		"type":             "new_comment",
+		"title":            "dispatcher issue",
+		"body":             "agent replied",
+		"link":             "https://app.multica.test/test/issues/123",
+		"issue_identifier": "OPE-20",
+	}
+	rawEventPayload, err := json.Marshal(eventPayload)
+	if err != nil {
+		t.Fatalf("marshal event payload: %v", err)
+	}
+	payloadSnapshot, err := json.Marshal(map[string]any{
+		"binding_id":         "binding-openclaw",
+		"provider":           "openclaw_weixin",
+		"wechat_id":          "wechat-user@im.wechat",
+		"channel":            "openclaw-weixin",
+		"notification_event": json.RawMessage(rawEventPayload),
+	})
+	if err != nil {
+		t.Fatalf("marshal delivery payload: %v", err)
+	}
+
+	event, err := queries.CreateNotificationEvent(context.Background(), db.CreateNotificationEventParams{
+		WorkspaceID:     util.MustParseUUID(testWorkspaceID),
+		RecipientUserID: util.MustParseUUID(testUserID),
+		Type:            "new_comment",
+		Severity:        "info",
+		IssueID:         pgtype.UUID{},
+		CommentID:       pgtype.UUID{},
+		ActorType:       util.StrToText("agent"),
+		ActorID:         util.MustParseUUID("00000000-0000-0000-0000-000000000001"),
+		Title:           "dispatcher issue",
+		Body:            util.StrToText("agent replied"),
+		Link:            util.StrToText("https://app.multica.test/test/issues/123"),
+		Details:         []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateNotificationEvent: %v", err)
+	}
+
+	delivery, err := queries.CreateNotificationDelivery(context.Background(), db.CreateNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "openclaw_weixin",
+		Status:              "pending",
+		AttemptCount:        0,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     payloadSnapshot,
+		SentAt:              pgtype.Timestamptz{},
+	})
+	if err != nil {
+		t.Fatalf("CreateNotificationDelivery: %v", err)
+	}
+
+	return util.UUIDToString(event.ID), util.UUIDToString(delivery.ID)
 }
 
 func loadNotificationDeliveryByEvent(t *testing.T, eventID string) db.NotificationDelivery {
@@ -461,6 +522,32 @@ func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 	}
 	if messageCalls != 1 {
 		t.Fatalf("expected 1 message call, got %d", messageCalls)
+	}
+}
+
+func TestDispatchPendingOpenclawWeixinDeliveries_RecordsMissingDaemon(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	eventID, deliveryID := seedPendingOpenclawWeixinDelivery(t)
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, daemonws.NewHub())
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if util.UUIDToString(delivery.ID) != deliveryID {
+		t.Fatalf("expected delivery %s, got %s", deliveryID, util.UUIDToString(delivery.ID))
+	}
+	if delivery.Status != "pending" {
+		t.Fatalf("expected delivery status to remain pending for retry, got %q", delivery.Status)
+	}
+	if delivery.AttemptCount != 1 {
+		t.Fatalf("expected attempt_count 1, got %d", delivery.AttemptCount)
+	}
+	if !delivery.LastError.Valid || !strings.Contains(delivery.LastError.String, "no online daemon for user") {
+		t.Fatalf("expected missing daemon last_error, got %#v", delivery.LastError)
+	}
+	if delivery.SentAt.Valid {
+		t.Fatal("expected sent_at to be empty for missing daemon")
 	}
 }
 

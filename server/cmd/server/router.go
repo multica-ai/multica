@@ -425,6 +425,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					r.Get("/notification-debug/deliveries", h.ListNotificationDebugRows)
 				})
 				// Owner-only access
 				r.Group(func(r chi.Router) {

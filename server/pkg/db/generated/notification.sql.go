@@ -501,6 +501,138 @@ func (q *Queries) ListNotificationChannelPreferencesByUser(ctx context.Context, 
 	return items, nil
 }
 
+const listNotificationDebugRows = `-- name: ListNotificationDebugRows :many
+SELECT
+    ne.id AS notification_event_id,
+    ne.workspace_id,
+    ne.recipient_user_id,
+    ne.type,
+    ne.severity,
+    ne.issue_id,
+    ne.comment_id,
+    ne.actor_type,
+    ne.actor_id,
+    ne.title,
+    ne.body,
+    ne.link,
+    ne.details,
+    ne.created_at AS event_created_at,
+    nd.id AS delivery_id,
+    nd.channel,
+    nd.status,
+    nd.attempt_count,
+    nd.last_error,
+    nd.payload_snapshot,
+    nd.sent_at,
+    nd.created_at AS delivery_created_at,
+    nd.updated_at AS delivery_updated_at,
+    nd.target_type,
+    nd.target_id
+FROM notification_event ne
+LEFT JOIN notification_delivery nd
+  ON nd.notification_event_id = ne.id
+ AND ($1::text IS NULL OR nd.channel = $1::text)
+WHERE ne.workspace_id = $2::uuid
+  AND ($3::uuid IS NULL OR ne.issue_id = $3::uuid)
+  AND ($4::uuid IS NULL OR ne.recipient_user_id = $4::uuid)
+  AND ($5::uuid IS NULL OR ne.comment_id = $5::uuid)
+  AND ($6::text IS NULL OR ne.type = $6::text)
+ORDER BY ne.created_at DESC, nd.created_at DESC NULLS LAST
+LIMIT LEAST(GREATEST($7::int, 1), 200)
+`
+
+type ListNotificationDebugRowsParams struct {
+	Channel         pgtype.Text `json:"channel"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	IssueID         pgtype.UUID `json:"issue_id"`
+	RecipientUserID pgtype.UUID `json:"recipient_user_id"`
+	CommentID       pgtype.UUID `json:"comment_id"`
+	EventType       pgtype.Text `json:"event_type"`
+	Limit           int32       `json:"limit"`
+}
+
+type ListNotificationDebugRowsRow struct {
+	NotificationEventID pgtype.UUID        `json:"notification_event_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	RecipientUserID     pgtype.UUID        `json:"recipient_user_id"`
+	Type                string             `json:"type"`
+	Severity            string             `json:"severity"`
+	IssueID             pgtype.UUID        `json:"issue_id"`
+	CommentID           pgtype.UUID        `json:"comment_id"`
+	ActorType           pgtype.Text        `json:"actor_type"`
+	ActorID             pgtype.UUID        `json:"actor_id"`
+	Title               string             `json:"title"`
+	Body                pgtype.Text        `json:"body"`
+	Link                pgtype.Text        `json:"link"`
+	Details             []byte             `json:"details"`
+	EventCreatedAt      pgtype.Timestamptz `json:"event_created_at"`
+	DeliveryID          pgtype.UUID        `json:"delivery_id"`
+	Channel             pgtype.Text        `json:"channel"`
+	Status              pgtype.Text        `json:"status"`
+	AttemptCount        pgtype.Int4        `json:"attempt_count"`
+	LastError           pgtype.Text        `json:"last_error"`
+	PayloadSnapshot     []byte             `json:"payload_snapshot"`
+	SentAt              pgtype.Timestamptz `json:"sent_at"`
+	DeliveryCreatedAt   pgtype.Timestamptz `json:"delivery_created_at"`
+	DeliveryUpdatedAt   pgtype.Timestamptz `json:"delivery_updated_at"`
+	TargetType          pgtype.Text        `json:"target_type"`
+	TargetID            pgtype.UUID        `json:"target_id"`
+}
+
+func (q *Queries) ListNotificationDebugRows(ctx context.Context, arg ListNotificationDebugRowsParams) ([]ListNotificationDebugRowsRow, error) {
+	rows, err := q.db.Query(ctx, listNotificationDebugRows,
+		arg.Channel,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.RecipientUserID,
+		arg.CommentID,
+		arg.EventType,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNotificationDebugRowsRow{}
+	for rows.Next() {
+		var i ListNotificationDebugRowsRow
+		if err := rows.Scan(
+			&i.NotificationEventID,
+			&i.WorkspaceID,
+			&i.RecipientUserID,
+			&i.Type,
+			&i.Severity,
+			&i.IssueID,
+			&i.CommentID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Title,
+			&i.Body,
+			&i.Link,
+			&i.Details,
+			&i.EventCreatedAt,
+			&i.DeliveryID,
+			&i.Channel,
+			&i.Status,
+			&i.AttemptCount,
+			&i.LastError,
+			&i.PayloadSnapshot,
+			&i.SentAt,
+			&i.DeliveryCreatedAt,
+			&i.DeliveryUpdatedAt,
+			&i.TargetType,
+			&i.TargetID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNotificationDeliveriesByEvent = `-- name: ListNotificationDeliveriesByEvent :many
 SELECT id, notification_event_id, channel, status, attempt_count, last_error, payload_snapshot, sent_at, created_at, updated_at, target_type, target_id FROM notification_delivery
 WHERE notification_event_id = $1

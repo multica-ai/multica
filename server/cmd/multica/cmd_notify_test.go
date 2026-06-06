@@ -93,8 +93,101 @@ func TestRunNotifyBindWechatRequiresWechatID(t *testing.T) {
 	}
 }
 
+func TestRunNotifyDebugDeliveries(t *testing.T) {
+	var gotAuth string
+	var gotPath string
+	var gotQuery = map[string]string{}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		for key, values := range r.URL.Query() {
+			if len(values) > 0 {
+				gotQuery[key] = values[0]
+			}
+		}
+		if r.URL.Path != "/api/workspaces/workspace-1/notification-debug/deliveries" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"total": 1,
+			"rows": []map[string]any{
+				{
+					"notification_event": map[string]any{
+						"id":                "event-1",
+						"recipient_user_id": "recipient-1",
+						"type":              "new_comment",
+						"comment_id":        "comment-1",
+						"created_at":        "2026-06-06T00:00:00Z",
+					},
+					"delivery": nil,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-1")
+
+	cmd := testCmd()
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("issue-id", "", "")
+	cmd.Flags().String("recipient-id", "", "")
+	cmd.Flags().String("comment-id", "", "")
+	cmd.Flags().String("event-type", "", "")
+	cmd.Flags().String("channel", "", "")
+	cmd.Flags().Int("limit", 100, "")
+	cmd.Flags().String("output", "json", "")
+	if err := cmd.Flags().Set("issue-id", "issue-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("channel", "openclaw_weixin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("limit", "25"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("output", "json"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	if err := runNotifyDebugDeliveries(cmd, nil); err != nil {
+		t.Fatalf("runNotifyDebugDeliveries() error = %v", err)
+	}
+	if gotAuth != "Bearer test-token" {
+		t.Fatalf("Authorization = %q, want Bearer test-token", gotAuth)
+	}
+	if gotPath != "/api/workspaces/workspace-1/notification-debug/deliveries" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotQuery["issue_id"] != "issue-1" || gotQuery["channel"] != "openclaw_weixin" || gotQuery["limit"] != "25" {
+		t.Fatalf("unexpected query params: %#v", gotQuery)
+	}
+
+	var result notifyDebugDeliveriesResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out.String())
+	}
+	if result.Total != 1 || len(result.Rows) != 1 || result.Rows[0].Delivery != nil {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
 func TestNotifyCommandRegistered(t *testing.T) {
 	if _, _, err := notifyCmd.Find([]string{"bind-wechat"}); err != nil {
 		t.Fatalf("expected notify bind-wechat command to exist: %v", err)
+	}
+	if _, _, err := notifyCmd.Find([]string{"debug-deliveries"}); err != nil {
+		t.Fatalf("expected notify debug-deliveries command to exist: %v", err)
 	}
 }
