@@ -3021,6 +3021,9 @@ importers:
       '@multica/core':
         specifier: workspace:*
         version: link:../core
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.100.14(react@19.2.3)
       react:
         specifier: 'catalog:'
         version: 19.2.3
@@ -3311,6 +3314,9 @@ importers:
       '@multica/cerebro-ui':
         specifier: workspace:*
         version: link:../cerebro-ui
+      '@multica/cerebro-workspace-branding':
+        specifier: workspace:*
+        version: link:../cerebro-workspace-branding
       '@multica/core':
         specifier: workspace:*
         version: link:../core

@@ -3,7 +3,7 @@
 // CEREBRO-PATCH(workspace-tab-cerebro): cerebro modification of upstream file
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Cloud, KeyRound, LogOut, Save, Wrench, CheckCircle2, FlaskConical, Camera, Loader2, Sparkles, Check } from "lucide-react";
+import { Cloud, KeyRound, LogOut, Save, Wrench, CheckCircle2, FlaskConical, Camera, Loader2, Sparkles, Check, Palette } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -56,6 +56,8 @@ import { useT } from "../../i18n";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(workspace-accent-color): TECH-3002 — color utilities for accent color section.
+import { hexToHue, hueToOklchPair, hueToHex, extractHueFromUrl } from "@multica/cerebro-workspace-branding";
 
 interface FirtalGatewaySettings {
   enabled?: boolean;
@@ -485,6 +487,9 @@ export function WorkspaceTab() {
         </Card>
       </section>
 
+      {/* CEREBRO-PATCH(workspace-accent-color): TECH-3002 — accent color picker section. */}
+      <WorkspaceColorSection workspace={workspace} canManage={canManageWorkspace} />
+
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
@@ -817,6 +822,169 @@ export function WorkspaceTab() {
   );
 }
 
+// CEREBRO-PATCH(workspace-accent-color): TECH-3002 — accent color picker section.
+// Shows light/dark sidebar preview swatches and injects a live preview <style>
+// that overrides --sidebar while the settings page is open. On save, writes
+// accent_color_manual to workspace.settings. Reset clears the manual override.
+// Fallback hash color (same algorithm as CerebroWorkspaceSidebarColor) ensures
+// the picker always has a sensible starting value even with no logo.
+const FALLBACK_HUES = [240, 155, 295, 35, 15, 205];
+function fallbackHueForId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  return FALLBACK_HUES[Math.abs(h) % FALLBACK_HUES.length]!;
+}
+const ACCENT_PREVIEW_STYLE_ID = "cerebro-ws-accent-preview";
+
+function WorkspaceColorSection({
+  workspace,
+  canManage,
+}: {
+  workspace: Workspace;
+  canManage: boolean;
+}) {
+  const { t } = useT("settings");
+  const qc = useQueryClient();
+
+  const manualHex = typeof workspace.settings?.accent_color_manual === "string"
+    ? workspace.settings.accent_color_manual
+    : null;
+  const autoHex = typeof workspace.settings?.accent_color_auto === "string"
+    ? workspace.settings.accent_color_auto
+    : null;
+  const fallbackHex = hueToHex(fallbackHueForId(workspace.id));
+  const effectiveHex = manualHex ?? autoHex ?? fallbackHex;
+
+  const [localHex, setLocalHex] = useState(effectiveHex);
+  const [saving, setSaving] = useState(false);
+
+  // Sync local color when workspace settings change (e.g. after auto-extract completes).
+  useEffect(() => {
+    setLocalHex(manualHex ?? autoHex ?? fallbackHex);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualHex, autoHex, workspace.id]);
+
+  // Live preview: inject a temporary sidebar color override while on this page.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const [dark, light] = hueToOklchPair(hexToHue(localHex));
+    let el = document.getElementById(ACCENT_PREVIEW_STYLE_ID) as HTMLStyleElement | null;
+    if (!el) {
+      el = document.createElement("style");
+      el.id = ACCENT_PREVIEW_STYLE_ID;
+      document.head.appendChild(el);
+    }
+    el.textContent = `:root { --sidebar: ${light}; }\n@media (prefers-color-scheme: dark) { :root { --sidebar: ${dark}; } }`;
+    return () => { document.getElementById(ACCENT_PREVIEW_STYLE_ID)?.remove(); };
+  }, [localHex]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: { ...workspace.settings, accent_color_manual: localHex },
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      toast.success(t(($) => $.workspace.accent_color_toast_saved));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.accent_color_toast_failed));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setSaving(true);
+    try {
+      const restSettings = Object.fromEntries(
+        Object.entries(workspace.settings ?? {}).filter(([k]) => k !== "accent_color_manual"),
+      );
+      const updated = await api.updateWorkspace(workspace.id, { settings: restSettings });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      setLocalHex(autoHex ?? fallbackHex);
+      toast.success(t(($) => $.workspace.accent_color_toast_reset));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.accent_color_toast_failed));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const [previewDark, previewLight] = hueToOklchPair(hexToHue(localHex));
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Palette className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">{t(($) => $.workspace.accent_color_section)}</h2>
+      </div>
+      <Card>
+        <CardContent className="space-y-4">
+          <div>
+            <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.accent_color_label)}</Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t(($) => $.workspace.accent_color_hint)}</p>
+            <div className="mt-2 flex items-center gap-3">
+              <input
+                type="color"
+                value={localHex}
+                onChange={(e) => setLocalHex(e.target.value)}
+                disabled={!canManage || saving}
+                className="h-8 w-12 cursor-pointer rounded border bg-background p-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={t(($) => $.workspace.accent_color_label)}
+              />
+              <div className="flex items-center gap-1.5" aria-hidden>
+                <div
+                  className="flex h-8 w-12 items-center justify-center rounded border text-xs font-medium"
+                  style={{ background: previewLight, color: "oklch(0.30 0.02 0)" }}
+                  title={t(($) => $.workspace.accent_color_preview_light)}
+                >
+                  Aa
+                </div>
+                <div
+                  className="flex h-8 w-12 items-center justify-center rounded border text-xs font-medium"
+                  style={{ background: previewDark, color: "oklch(0.85 0.02 0)" }}
+                  title={t(($) => $.workspace.accent_color_preview_dark)}
+                >
+                  Aa
+                </div>
+              </div>
+              <code className="font-mono text-xs text-muted-foreground">{localHex}</code>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            {manualHex && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleReset()}
+                disabled={!canManage || saving}
+              >
+                {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                {saving ? t(($) => $.workspace.accent_color_resetting) : t(($) => $.workspace.accent_color_reset)}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={() => void handleSave()}
+              disabled={!canManage || saving}
+            >
+              <Save className="h-3 w-3" />
+              {saving ? t(($) => $.workspace.accent_color_saving) : t(($) => $.workspace.accent_color_save)}
+            </Button>
+          </div>
+          {!canManage && (
+            <p className="text-xs text-muted-foreground">{t(($) => $.workspace.accent_color_owner_hint)}</p>
+          )}
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
 // CEREBRO-PATCH(workspace-logo-uploader): FIR-2580 — owner/admin logo upload at
 // the top of workspace settings. Accepts PNG/JPEG/WebP, reuses useFileUpload +
 // the WorkspaceAvatar fallback look, and persists via updateWorkspace({avatar_url}).
@@ -855,6 +1023,23 @@ function WorkspaceLogoUploader({
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
       toast.success(t(($) => $.workspace.logo_toast_success));
+      // CEREBRO-PATCH(workspace-accent-color): TECH-3002 — auto-extract accent color
+      // from the new logo and store it as accent_color_auto in settings.
+      if (avatarUrl) {
+        const resolved2 = resolvePublicFileUrl(avatarUrl);
+        if (resolved2) {
+          void extractHueFromUrl(resolved2).then((hue) => {
+            if (hue == null) return;
+            void api.updateWorkspace(workspace.id, {
+              settings: { ...workspace.settings, accent_color_auto: hueToHex(hue) },
+            }).then((updated2) => {
+              qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+                old?.map((ws) => (ws.id === updated2.id ? updated2 : ws)),
+              );
+            });
+          });
+        }
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.workspace.logo_toast_error));
     } finally {
