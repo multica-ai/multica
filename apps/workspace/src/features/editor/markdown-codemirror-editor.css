@@ -27,7 +27,18 @@
 }
 
 .markdown-codemirror-editor .cm-line {
-  padding: 0;
+  padding: 1px 0;
+}
+
+.markdown-codemirror-editor .cm-cursor {
+  border-left-color: hsl(var(--primary));
+  border-left-width: 2px;
+}
+
+.markdown-codemirror-editor .cm-matchingBracket,
+.markdown-codemirror-editor .cm-nonmatchingBracket {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 .markdown-codemirror-editor .cm-placeholder {

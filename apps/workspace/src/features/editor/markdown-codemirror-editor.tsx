@@ -6,15 +6,18 @@ import {
   useImperativeHandle,
   useRef,
 } from "react";
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { markdown } from "@codemirror/lang-markdown";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { EditorState, type Extension } from "@codemirror/state";
+import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import {
   EditorView,
   keymap,
   placeholder as codemirrorPlaceholder,
   type ViewUpdate,
 } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 import { cn } from "@/lib/utils";
 import type { UploadResult } from "@/shared/hooks/use-file-upload";
 import "./markdown-codemirror-editor.css";
@@ -56,6 +59,168 @@ function addBlockSpacing(doc: string, from: number, to: number, markdown: string
   const needsTrailingBreak = after.length > 0 && !after.startsWith("\n");
   return `${needsLeadingBreak ? "\n" : ""}${markdown}${needsTrailingBreak ? "\n" : ""}`;
 }
+
+function toggleInlineMark(view: EditorView, marker: string): boolean {
+  const selection = view.state.selection.main;
+  const selected = view.state.sliceDoc(selection.from, selection.to);
+
+  if (selection.empty) {
+    view.dispatch({
+      changes: { from: selection.from, insert: marker + marker },
+      selection: { anchor: selection.from + marker.length },
+    });
+    return true;
+  }
+
+  if (selected.startsWith(marker) && selected.endsWith(marker)) {
+    view.dispatch({
+      changes: {
+        from: selection.from,
+        to: selection.to,
+        insert: selected.slice(marker.length, selected.length - marker.length),
+      },
+    });
+    return true;
+  }
+
+  view.dispatch({
+    changes: { from: selection.from, to: selection.to, insert: marker + selected + marker },
+    selection: { anchor: selection.to + marker.length * 2 },
+  });
+  return true;
+}
+
+function insertLink(view: EditorView): boolean {
+  const selection = view.state.selection.main;
+  const selected = view.state.sliceDoc(selection.from, selection.to) || "text";
+  const markdownLink = `[${selected}](url)`;
+  const urlStart = selection.from + selected.length + 3;
+
+  view.dispatch({
+    changes: { from: selection.from, to: selection.to, insert: markdownLink },
+    selection: EditorSelection.range(urlStart, urlStart + 3),
+  });
+  return true;
+}
+
+function setHeading(view: EditorView, level: 1 | 2 | 3): boolean {
+  const line = view.state.doc.lineAt(view.state.selection.main.from);
+  const existing = line.text.match(/^(#{1,6})\s+/);
+  const prefix = `${"#".repeat(level)} `;
+  const existingMarker = existing?.[1];
+
+  if (existingMarker && existingMarker.length === level) {
+    view.dispatch({
+      changes: { from: line.from, to: line.from + existing[0].length, insert: "" },
+    });
+    return true;
+  }
+
+  view.dispatch({
+    changes: {
+      from: line.from,
+      to: line.from + (existing?.[0].length ?? 0),
+      insert: prefix,
+    },
+  });
+  return true;
+}
+
+function toggleListPrefix(view: EditorView, prefix: "- " | "1. "): boolean {
+  const line = view.state.doc.lineAt(view.state.selection.main.from);
+  const marker = line.text.match(/^(\s*)([-*+]|\d+[.)])\s+/);
+
+  if (marker) {
+    const indent = marker[1] ?? "";
+    view.dispatch({
+      changes: { from: line.from + indent.length, to: line.from + marker[0].length, insert: prefix },
+    });
+    return true;
+  }
+
+  const indent = line.text.match(/^\s*/)?.[0] ?? "";
+  view.dispatch({
+    changes: { from: line.from + indent.length, insert: prefix },
+  });
+  return true;
+}
+
+function continueMarkdownList(view: EditorView): boolean {
+  const selection = view.state.selection.main;
+  if (!selection.empty) return false;
+
+  const line = view.state.doc.lineAt(selection.from);
+  const beforeCursor = line.text.slice(0, selection.from - line.from);
+  const afterCursor = line.text.slice(selection.from - line.from);
+  const match = beforeCursor.match(/^(\s*)(([-*+])|(\d+)([.)]))\s+(.*)$/);
+  if (!match) return false;
+
+  const indent = match[1] ?? "";
+  const rawMarker = match[2] ?? "-";
+  const unorderedMarker = match[3];
+  const orderedNumber = match[4];
+  const orderedSuffix = match[5] ?? ".";
+  const itemText = match[6] ?? "";
+  if (itemText.trim() === "" && afterCursor.trim() === "") {
+    view.dispatch({
+      changes: { from: line.from, to: selection.from, insert: "" },
+    });
+    return true;
+  }
+
+  const nextMarker = unorderedMarker
+    ? rawMarker
+    : `${Number(orderedNumber) + 1}${orderedSuffix}`;
+
+  view.dispatch({
+    changes: { from: selection.from, insert: `\n${indent}${nextMarker} ` },
+    selection: { anchor: selection.from + indent.length + nextMarker.length + 2 },
+  });
+  return true;
+}
+
+function adjustListIndent(view: EditorView, direction: "in" | "out"): boolean {
+  const line = view.state.doc.lineAt(view.state.selection.main.from);
+  if (!/^(\s*)([-*+]|\d+[.)])\s+/.test(line.text)) return false;
+
+  if (direction === "in") {
+    view.dispatch({
+      changes: { from: line.from, insert: "  " },
+      selection: { anchor: view.state.selection.main.from + 2 },
+    });
+    return true;
+  }
+
+  const removable = line.text.match(/^ {1,2}/)?.[0] ?? "";
+  if (!removable) return true;
+
+  view.dispatch({
+    changes: { from: line.from, to: line.from + removable.length, insert: "" },
+    selection: {
+      anchor: Math.max(line.from, view.state.selection.main.from - removable.length),
+    },
+  });
+  return true;
+}
+
+const markdownHighlightStyle = HighlightStyle.define([
+  { tag: tags.heading1, fontSize: "1.18em", fontWeight: "700" },
+  { tag: tags.heading2, fontSize: "1.08em", fontWeight: "700" },
+  { tag: tags.heading3, fontWeight: "650" },
+  { tag: tags.strong, fontWeight: "700" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.link, color: "hsl(var(--primary))", textDecoration: "none" },
+  { tag: tags.url, color: "hsl(var(--primary))" },
+  {
+    tag: tags.monospace,
+    backgroundColor: "hsl(var(--muted))",
+    borderRadius: "4px",
+    color: "hsl(var(--foreground))",
+  },
+  { tag: tags.quote, color: "hsl(var(--muted-foreground))" },
+  { tag: tags.list, color: "hsl(var(--foreground))" },
+  { tag: tags.meta, color: "hsl(var(--muted-foreground))" },
+]);
 
 const baseTheme = EditorView.theme({
   "&": {
@@ -150,8 +315,10 @@ const MarkdownCodeMirrorEditor = forwardRef<
 
     const extensions: Extension[] = [
       history(),
+      closeBrackets(),
       markdown(),
       baseTheme,
+      syntaxHighlighting(markdownHighlightStyle),
       EditorView.lineWrapping,
       EditorView.contentAttributes.of({
         "aria-label": placeholderText || "Editor",
@@ -165,6 +332,19 @@ const MarkdownCodeMirrorEditor = forwardRef<
             return true;
           },
         },
+        { key: "Mod-b", run: (view) => toggleInlineMark(view, "**") },
+        { key: "Mod-i", run: (view) => toggleInlineMark(view, "*") },
+        { key: "Mod-e", run: (view) => toggleInlineMark(view, "`") },
+        { key: "Mod-k", run: insertLink },
+        { key: "Mod-Alt-1", run: (view) => setHeading(view, 1) },
+        { key: "Mod-Alt-2", run: (view) => setHeading(view, 2) },
+        { key: "Mod-Alt-3", run: (view) => setHeading(view, 3) },
+        { key: "Mod-Shift-7", run: (view) => toggleListPrefix(view, "1. ") },
+        { key: "Mod-Shift-8", run: (view) => toggleListPrefix(view, "- ") },
+        { key: "Enter", run: continueMarkdownList },
+        { key: "Tab", run: (view) => adjustListIndent(view, "in") },
+        { key: "Shift-Tab", run: (view) => adjustListIndent(view, "out") },
+        ...closeBracketsKeymap,
         ...historyKeymap,
         ...defaultKeymap,
       ]),
