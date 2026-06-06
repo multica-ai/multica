@@ -55,6 +55,9 @@ var childStatusNotifyTemplates = map[string]string{
 // Errors are logged at warn and swallowed: this is a best-effort notification
 // on the side of a successful status update.
 func (h *Handler) notifyParentOfChildStatus(ctx context.Context, prev, issue db.Issue) {
+	if !h.cerebroChildStatusNotifyParentEnabled(ctx, issue.WorkspaceID) {
+		return
+	}
 	if !issue.ParentIssueID.Valid {
 		return
 	}
