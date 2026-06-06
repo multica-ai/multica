@@ -1,33 +1,31 @@
 "use client";
 
 import Script from "next/script";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
 
 /**
  * Loads the Firtal portal top bar (apps.firtal.com/bar.js) on every page.
  *
- * The body reserves 48px of top padding server-side via `pt-12` in layout.tsx,
- * so the bar can never overlay app content — it always lands in reserved
- * space. When `cerebro_firtal_portal_bar` is off, this component tears down
- * any existing bar host and clears the inline body padding so the 48px is
- * reclaimed.
- *
- * The CSS-class padding on body is what makes the no-overlay guarantee work
- * with bar.js: bar.js reads `body.style.paddingTop` (inline only) and adds
- * 48px on top. Because the reservation is via CSS class, bar.js sees an empty
- * string, applies its own 48px inline, and the two values match — no double
- * padding, no layout shift.
+ * bar.js owns the body padding needed for normal document flow. Cerebro only
+ * tracks whether the bar actually loaded so fixed-position Multica chrome
+ * (notably the workspace sidebar) can move below it. When the flag is off, or
+ * when bar.js fails to load in an installed PWA, stale inline padding from an
+ * earlier document is removed instead of pushing the whole app shell down.
  */
 export function CerebroFirtalPortalBar() {
   const enabled = useFlagValue("cerebro_firtal_portal_bar");
 
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return;
+    if (!enabled) return;
+    delete document.body.dataset.firtalBar;
+    document.body.style.paddingTop = "";
+  }, [enabled]);
+
   useEffect(() => {
     if (typeof document === "undefined") return;
-    if (enabled) {
-      document.body.dataset.firtalBar = "on";
-      return;
-    }
+    if (enabled) return;
     document.body.style.paddingTop = "0";
     delete document.body.dataset.firtalBar;
     document.getElementById("firtal-bar-host")?.remove();
@@ -35,12 +33,25 @@ export function CerebroFirtalPortalBar() {
 
   if (!enabled) return null;
 
+  const markBarLoaded = () => {
+    document.body.dataset.firtalBar = "on";
+  };
+
+  const markBarUnavailable = () => {
+    document.body.style.paddingTop = "0";
+    delete document.body.dataset.firtalBar;
+    document.getElementById("firtal-bar-host")?.remove();
+  };
+
   return (
     <Script
       src="https://apps.firtal.com/bar.js"
       data-apps-url="https://apps.firtal.com/api/apps"
       data-home="https://apps.firtal.com"
       strategy="afterInteractive"
+      onLoad={markBarLoaded}
+      onReady={markBarLoaded}
+      onError={markBarUnavailable}
     />
   );
 }

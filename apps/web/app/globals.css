@@ -25,13 +25,11 @@
 @source "../../../packages/cerebro-*/**/*.{ts,tsx}";
 
 /*
- * TECH-2903: the workspace sidebar is `position: fixed; inset-y-0`, so body
- * padding-top does not push it down. When the Firtal portal top bar is on,
- * shift the fixed sidebar (and its drawer/sheet variants) below the 48px
- * reserved space so the bar can never cover the workspace switcher at the
- * sidebar's top edge. The body[data-firtal-bar="on"] attribute is owned by
- * the CerebroFirtalPortalBar component — set server-side, cleared client-side
- * when the flag is off.
+ * TECH-2903: the workspace sidebar is `position: fixed; inset-y-0`, so
+ * bar.js' body padding does not push it down. Once the Firtal portal top bar
+ * has actually loaded, shift the fixed sidebar below the 48px portal bar so
+ * the bar can never cover the workspace switcher at the sidebar's top edge.
+ * The body[data-firtal-bar="on"] attribute is owned by CerebroFirtalPortalBar.
  */
 body[data-firtal-bar="on"] [data-slot="sidebar-container"] {
   top: 3rem;
@@ -39,12 +37,10 @@ body[data-firtal-bar="on"] [data-slot="sidebar-container"] {
 }
 
 /*
- * TECH-2911: the sidebar-wrapper (SidebarProvider root) is h-svh, but body
- * has pt-12 (48px) when the portal bar is active. This pushes the wrapper
- * 48px below the viewport bottom, which drags SidebarInset — and any
- * absolutely-positioned children like the chat input bar — off-screen.
- * Constrain the wrapper to the visible area so the chat input bar stays
- * within the viewport.
+ * TECH-2911: bar.js reserves 48px on body when the portal bar is active.
+ * The sidebar-wrapper (SidebarProvider root) is h-svh, so without an explicit
+ * height limit it can extend below the visible viewport and drag
+ * absolutely-positioned children like the chat input bar off-screen.
  */
 body[data-firtal-bar="on"] [data-slot="sidebar-wrapper"] {
   height: calc(100svh - 3rem);
@@ -52,22 +48,12 @@ body[data-firtal-bar="on"] [data-slot="sidebar-wrapper"] {
 }
 
 /*
- * TECH-2911 follow-up: belt-and-braces for the portal-bar-OFF state.
- *
- * The body has the `pt-12` Tailwind class statically. When the portal bar
- * flag is off, CerebroFirtalPortalBar's useEffect sets `style.paddingTop=0`
- * inline to reclaim those 48px. That JS reset has two known windows where it
- * can be too late or wrong:
- *
- *   1. SSR + first paint: the server always renders `data-firtal-bar="on"`,
- *      so initially the pt-12 padding is real even if the user has the flag
- *      off. The useEffect hasn't fired yet.
- *   2. bar.js may have set `body.style.paddingTop="48px"` inline during a
- *      previous "on" session; on toggle-off the host element is removed but
- *      that inline padding can outlast a re-render in rare orderings.
- *
- * When the attribute is not "on", the portal bar must reserve nothing.
- * Force it. !important is what lets this rule beat any stale inline padding.
+ * TECH-2911 follow-up: belt-and-braces for the portal-bar inactive state.
+ * bar.js writes body.style.paddingTop inline. Installed PWA sessions can keep
+ * an old document alive long enough for that inline value to survive a route
+ * transition or service-worker-driven refresh. Until CerebroFirtalPortalBar
+ * confirms that bar.js loaded and sets data-firtal-bar="on", force the app
+ * shell back to zero top padding. !important beats stale inline padding.
  */
 body:not([data-firtal-bar="on"]) {
   padding-top: 0 !important;

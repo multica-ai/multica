@@ -110,8 +110,8 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full")}
     >
-      {/* CEREBRO-PATCH(web-firtal-bar-reserve): pt-12 reserves 48px for the Firtal portal top bar; data-firtal-bar="on" shifts the fixed-position sidebar below the bar (CSS rule in globals.css). Cleared client-side by CerebroFirtalPortalBar when the flag is off. TECH-2903. */}
-      <body className="h-full overflow-hidden pt-12" data-firtal-bar="on">
+      {/* CEREBRO-PATCH(web-firtal-bar-reserve): CerebroFirtalPortalBar owns the portal-bar body state client-side. Do not reserve pt-12 server-side; installed PWAs can keep stale body padding across reloads, and a global reservation pushes the app shell down before we know whether bar.js actually loaded. TECH-2903. */}
+      <body className="h-full overflow-hidden">
         {/* CEREBRO-PATCH(web-serwist): wrap with SerwistProvider for service worker */}
         <SerwistProvider
           swUrl="/sw.js"
