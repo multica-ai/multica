@@ -1,6 +1,6 @@
 ---
 name: multica-autopilots
-description: Use when creating, updating, inspecting, triggering, or debugging Multica autopilots. Covers the full chain: schedule/webhook/manual trigger, create_issue vs run_only execution, agent/squad leader admission, runs, created issues/tasks, webhook URL rotation, and side-effect boundaries.
+description: "Use when creating, updating, inspecting, triggering, or debugging Multica autopilots. Covers the full chain: schedule/webhook/manual trigger, create_issue vs run_only execution, agent/squad leader admission, runs, created issues/tasks, webhook URL rotation, and side-effect boundaries."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---

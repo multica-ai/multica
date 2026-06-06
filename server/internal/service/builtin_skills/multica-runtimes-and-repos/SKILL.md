@@ -1,6 +1,6 @@
 ---
 name: multica-runtimes-and-repos
-description: Use when inspecting or debugging Multica runtimes, daemon task claiming, agent not running, workdir/session reuse, or repository checkout. Covers runtime online/offline state, daemon heartbeat/claim chain, task-scoped repo checkout, project repo context, local_directory caveats, and safe diagnostic commands.
+description: "Use when inspecting or debugging Multica runtimes, daemon task claiming, agent not running, workdir/session reuse, or repository checkout. Covers runtime online/offline state, daemon heartbeat/claim chain, task-scoped repo checkout, project repo context, local_directory caveats, and safe diagnostic commands."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---

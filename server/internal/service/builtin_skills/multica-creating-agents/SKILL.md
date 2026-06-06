@@ -1,6 +1,6 @@
 ---
 name: multica-creating-agents
-description: Use when creating, inspecting, or debugging a Multica agent through the `multica agent` CLI or `POST /api/agents` — what each field is, its persisted shape, whether it is metadata-only or consumed by the daemon at claim time, which inputs are validated/rejected, how custom_env secrets are gated, and how skill binding behaves. Not for assigning issues to existing agents or for runtime task prompts.
+description: "Use when creating, inspecting, or debugging a Multica agent through the `multica agent` CLI or `POST /api/agents` — what each field is, its persisted shape, whether it is metadata-only or consumed by the daemon at claim time, which inputs are validated/rejected, how custom_env secrets are gated, and how skill binding behaves. Not for assigning issues to existing agents or for runtime task prompts."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
