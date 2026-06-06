@@ -28,7 +28,7 @@ import type {
 } from "@multica/core/types";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { filterIssues } from "../utils/filter";
+import { filterIssues, type IssueFilters } from "../utils/filter";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -444,6 +444,7 @@ function buildAssigneeLanes(
 export function SwimLaneView({
   issues,
   unfilteredIssues,
+  activeFilters: activeFiltersProp,
   visibleStatuses = BOARD_STATUSES,
   hiddenStatuses = [],
   onMoveIssue,
@@ -463,6 +464,7 @@ export function SwimLaneView({
    * a parent in a hidden status still surfaces its label correctly.
    */
   unfilteredIssues?: Issue[];
+  activeFilters?: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
   visibleStatuses?: IssueStatus[];
   hiddenStatuses?: IssueStatus[];
   onMoveIssue: (issueId: string, updates: SwimLaneMoveUpdates) => void;
@@ -483,15 +485,6 @@ export function SwimLaneView({
   const swimlaneOrders = useViewStore((s) => s.swimlaneOrders);
   const swimlaneOrder = swimlaneOrders[swimlaneGrouping];
 
-  const priorityFilters = useViewStore((s) => s.priorityFilters);
-  const assigneeFilters = useViewStore((s) => s.assigneeFilters);
-  const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
-  const creatorFilters = useViewStore((s) => s.creatorFilters);
-  const projectFilters = useViewStore((s) => s.projectFilters);
-  const includeNoProject = useViewStore((s) => s.includeNoProject);
-  const labelFilters = useViewStore((s) => s.labelFilters);
-  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
-
   const wsId = useWorkspaceId();
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
@@ -504,27 +497,18 @@ export function SwimLaneView({
   }, [snapshot]);
 
   const activeFilters = useMemo(() => ({
+    // Status is enforced by visible-column rendering, not by filterIssues
     statusFilters: [],
-    priorityFilters,
-    assigneeFilters,
-    includeNoAssignee,
-    creatorFilters,
-    projectFilters,
-    includeNoProject,
-    labelFilters,
-    agentRunningFilter,
+    priorityFilters: activeFiltersProp?.priorityFilters ?? [],
+    assigneeFilters: activeFiltersProp?.assigneeFilters ?? [],
+    includeNoAssignee: activeFiltersProp?.includeNoAssignee ?? false,
+    creatorFilters: activeFiltersProp?.creatorFilters ?? [],
+    projectFilters: activeFiltersProp?.projectFilters ?? [],
+    includeNoProject: activeFiltersProp?.includeNoProject ?? false,
+    labelFilters: activeFiltersProp?.labelFilters ?? [],
+    agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
     runningIssueIds,
-  }), [
-    priorityFilters,
-    assigneeFilters,
-    includeNoAssignee,
-    creatorFilters,
-    projectFilters,
-    includeNoProject,
-    labelFilters,
-    agentRunningFilter,
-    runningIssueIds,
-  ]);
+  }), [activeFiltersProp, runningIssueIds]);
   const { data: projects = EMPTY_PROJECTS } = useQuery({
     ...projectListOptions(wsId),
     enabled: swimlaneGrouping === "project",
