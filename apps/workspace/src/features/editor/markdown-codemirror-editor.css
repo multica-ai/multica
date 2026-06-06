@@ -1,0 +1,41 @@
+.markdown-codemirror-editor {
+  width: 100%;
+}
+
+.markdown-codemirror-editor .cm-editor {
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.625;
+  outline: none;
+}
+
+.markdown-codemirror-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.markdown-codemirror-editor .cm-scroller {
+  overflow: visible !important;
+  font-family: inherit;
+}
+
+.markdown-codemirror-editor .cm-content {
+  min-height: 1.625rem;
+  padding: 0;
+  caret-color: hsl(var(--foreground));
+}
+
+.markdown-codemirror-editor .cm-line {
+  padding: 0;
+}
+
+.markdown-codemirror-editor .cm-placeholder {
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+}
+
+.markdown-codemirror-editor .cm-selectionBackground,
+.markdown-codemirror-editor .cm-content ::selection {
+  background-color: hsl(var(--primary) / 0.18) !important;
+}
