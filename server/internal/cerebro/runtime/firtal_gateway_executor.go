@@ -394,6 +394,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 // message to surface when the resulting message list contains no user turn.
 type taskPlan struct {
 	workspaceID       pgtype.UUID
+	workspaceContext  string // workspace-level system prompt injected into all agents
 	messagesWithLimit func(limit int) []GatewayMessage
 	emptyMessageError string
 	// inlinedContextReads is how many platform reads this runtime folds into the
@@ -413,10 +414,12 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 		if err != nil {
 			return taskPlan{}, fmt.Errorf("failed to load chat history: %w", err)
 		}
+		wsCtx := gatewayLoadWorkspaceContext(ctx, e.queries, chatSession.WorkspaceID)
 		return taskPlan{
-			workspaceID: chatSession.WorkspaceID,
+			workspaceID:      chatSession.WorkspaceID,
+			workspaceContext: wsCtx,
 			messagesWithLimit: func(limit int) []GatewayMessage {
-				return buildGatewayMessages(agent, history, task.StartedAt, limit)
+				return buildGatewayMessages(agent, wsCtx, history, task.StartedAt, limit)
 			},
 			emptyMessageError: "chat task has no user message to answer",
 			// Chat history is inlined; a daemon agent would list it itself.
@@ -449,10 +452,12 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 		if triggerComment != nil {
 			inlinedReads = 3
 		}
+		wsCtx := gatewayLoadWorkspaceContext(ctx, e.queries, issue.WorkspaceID)
 		return taskPlan{
-			workspaceID: issue.WorkspaceID,
+			workspaceID:      issue.WorkspaceID,
+			workspaceContext: wsCtx,
 			messagesWithLimit: func(limit int) []GatewayMessage {
-				return buildGatewayIssueMessages(agent, issue, comments, triggerComment, task.StartedAt, limit)
+				return buildGatewayIssueMessages(agent, wsCtx, issue, comments, triggerComment, task.StartedAt, limit)
 			},
 			emptyMessageError:   "issue task has no user message to answer",
 			inlinedContextReads: inlinedReads,
@@ -467,10 +472,12 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 		if err != nil {
 			return taskPlan{}, fmt.Errorf("failed to load autopilot: %w", err)
 		}
+		wsCtx := gatewayLoadWorkspaceContext(ctx, e.queries, ap.WorkspaceID)
 		return taskPlan{
-			workspaceID: ap.WorkspaceID,
+			workspaceID:      ap.WorkspaceID,
+			workspaceContext: wsCtx,
 			messagesWithLimit: func(_ int) []GatewayMessage {
-				return buildGatewayAutopilotMessages(agent, ap)
+				return buildGatewayAutopilotMessages(agent, wsCtx, ap)
 			},
 			emptyMessageError: "autopilot run has no prompt to answer",
 		}, nil
@@ -1290,11 +1297,11 @@ func toolResultText(r mcp.CallToolResult) string {
 	return b.String()
 }
 
-func buildGatewayMessages(agent db.Agent, history []db.ChatMessage, startedAt pgtype.Timestamptz, limit int) []GatewayMessage {
+func buildGatewayMessages(agent db.Agent, workspaceContext string, history []db.ChatMessage, startedAt pgtype.Timestamptz, limit int) []GatewayMessage {
 	if limit <= 0 {
 		limit = defaultFirtalGatewayHistoryLimit
 	}
-	out := []GatewayMessage{{Role: "system", Content: buildGatewaySystemPrompt(agent)}}
+	out := []GatewayMessage{{Role: "system", Content: buildGatewaySystemPrompt(agent, workspaceContext)}}
 	chatMessages := make([]GatewayMessage, 0, len(history))
 	for _, m := range history {
 		if startedAt.Valid && m.CreatedAt.Valid && m.CreatedAt.Time.After(startedAt.Time) {
@@ -1316,11 +1323,26 @@ func buildGatewayMessages(agent db.Agent, history []db.ChatMessage, startedAt pg
 	return append(out, chatMessages...)
 }
 
-func buildGatewaySystemPrompt(agent db.Agent) string {
+// gatewayLoadWorkspaceContext fetches the workspace context string for the
+// given workspace ID. Returns empty string on any error so callers do not
+// need to handle failures — a missing context is silently omitted from the
+// prompt rather than breaking the entire task.
+func gatewayLoadWorkspaceContext(ctx context.Context, q *db.Queries, wsID pgtype.UUID) string {
+	ws, err := q.GetWorkspace(ctx, wsID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(ws.Context.String)
+}
+
+func buildGatewaySystemPrompt(agent db.Agent, workspaceContext string) string {
 	parts := []string{
 		"You are a Multica chat agent running on the server-side Firtal Data Registry AI Gateway runtime.",
 		"You can answer chat messages only. You do not have local tools, shell access, repository checkout, files, or daemon state.",
 		"Answer directly in the existing chat conversation.",
+	}
+	if workspaceContext != "" {
+		parts = append(parts, "## Workspace Context\n\n"+workspaceContext)
 	}
 	if instructions := strings.TrimSpace(agent.Instructions); instructions != "" {
 		parts = append(parts, "Agent instructions:\n"+instructions)
@@ -1333,11 +1355,14 @@ func buildGatewaySystemPrompt(agent db.Agent) string {
 // via TaskService.CompleteTask, so we frame the task accordingly and remind
 // the model it has no tools — it can't fetch repos, run shell, or call CLI
 // commands and must answer only from the issue context provided.
-func buildGatewayIssueSystemPrompt(agent db.Agent) string {
+func buildGatewayIssueSystemPrompt(agent db.Agent, workspaceContext string) string {
 	parts := []string{
 		"You are a Multica agent running on the server-side Firtal Data Registry AI Gateway runtime.",
 		"You have been asked to respond to an issue. You do not have local tools, shell access, repository checkout, files, or CLI commands. You cannot run code, edit files, or call multica subcommands.",
 		"Your reply will be posted as a comment on the issue. Answer concisely and directly from the issue context provided below.",
+	}
+	if workspaceContext != "" {
+		parts = append(parts, "## Workspace Context\n\n"+workspaceContext)
 	}
 	if instructions := strings.TrimSpace(agent.Instructions); instructions != "" {
 		parts = append(parts, "Agent instructions:\n"+instructions)
@@ -1353,11 +1378,11 @@ func buildGatewayIssueSystemPrompt(agent db.Agent) string {
 // so the model treats it as the message to answer rather than reacting to
 // older history. limit caps the transcript at the most recent N entries
 // (preserving the opening issue message + the trigger comment when set).
-func buildGatewayIssueMessages(agent db.Agent, issue db.Issue, comments []db.Comment, triggerComment *db.Comment, startedAt pgtype.Timestamptz, limit int) []GatewayMessage {
+func buildGatewayIssueMessages(agent db.Agent, workspaceContext string, issue db.Issue, comments []db.Comment, triggerComment *db.Comment, startedAt pgtype.Timestamptz, limit int) []GatewayMessage {
 	if limit <= 0 {
 		limit = defaultFirtalGatewayHistoryLimit
 	}
-	out := []GatewayMessage{{Role: "system", Content: buildGatewayIssueSystemPrompt(agent)}}
+	out := []GatewayMessage{{Role: "system", Content: buildGatewayIssueSystemPrompt(agent, workspaceContext)}}
 	out = append(out, GatewayMessage{Role: "user", Content: formatIssueOpening(issue)})
 
 	transcript := make([]GatewayMessage, 0, len(comments))
@@ -1428,10 +1453,13 @@ func formatIssueOpening(issue db.Issue) string {
 // single user turn. Run-only autopilots have no issue, no chat, and no
 // comment history — only the autopilot's title and description carry the
 // instruction, and the model's text reply is written to autopilot_run.result.
-func buildGatewayAutopilotMessages(agent db.Agent, ap db.Autopilot) []GatewayMessage {
+func buildGatewayAutopilotMessages(agent db.Agent, workspaceContext string, ap db.Autopilot) []GatewayMessage {
 	systemParts := []string{
 		"You are a Multica agent running on the server-side Firtal Data Registry AI Gateway runtime.",
 		"You have been triggered by an autopilot. You do not have local tools, shell access, repository checkout, files, or CLI commands. Answer directly with the requested output as text.",
+	}
+	if workspaceContext != "" {
+		systemParts = append(systemParts, "## Workspace Context\n\n"+workspaceContext)
 	}
 	if instructions := strings.TrimSpace(agent.Instructions); instructions != "" {
 		systemParts = append(systemParts, "Agent instructions:\n"+instructions)
