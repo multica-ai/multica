@@ -49,6 +49,8 @@ import {
 import { useT } from "../../i18n";
 // CEREBRO-PATCH(channels-create-issue-from-message): TECH-2909
 import { CreateIssueFromMessageDialog } from "./cerebro-create-issue-from-message";
+// CEREBRO-PATCH(channel-message-cost-badge-import): FIR-39 per-comment cost badge on channel messages.
+import { CommentCostBadge } from "@multica/cerebro-channels";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
@@ -239,6 +241,8 @@ const MessageRow = memo(function MessageRow({
                 {new Date(entry.created_at).toLocaleString()}
               </TooltipContent>
             </Tooltip>
+            {/* CEREBRO-PATCH(channel-message-cost): FIR-39 per-comment cost badge inline with the timestamp. */}
+            <CommentCostBadge issueId={channelId} commentId={entry.id} authorType={entry.actor_type} />
           </div>
         )}
 

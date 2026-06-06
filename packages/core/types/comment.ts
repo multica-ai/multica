@@ -44,3 +44,25 @@ export interface MoveCommentsToThreadResponse {
   issue_id: string;
   moved_count: number;
 }
+
+// CEREBRO-PATCH(issue-comment-cost-types): FIR-39 per-comment cost badge. Spend
+// for one agent comment, pinned to the last comment its task produced so a
+// run that posts progress + result does not double-count. Looked up by
+// comment_id on the comment card / channel message footer; numbers sum to
+// IssueUsageSummary (already shown in the issue sidebar).
+export interface IssueCommentCost {
+  task_id: string;
+  comment_id: string;
+  /** Single model used, or "" when the task spanned multiple models. */
+  model: string;
+  cost_cents: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
+// CEREBRO-PATCH(issue-comment-cost-types): FIR-39 — GET /comment-costs response.
+export interface IssueCommentCosts {
+  costs: IssueCommentCost[];
+}

@@ -44,6 +44,8 @@ import { EditChannelDialog } from "./edit-channel-dialog";
 import { ChannelListenersPanel } from "./channel-listeners-panel";
 // CEREBRO-PATCH(channel-agent-inline-row): JEH-698 inline "agent is working" row mounted between the comment stream and CommentInput.
 import { ChannelAgentInlineRow } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(channel-cost-chip-import): FIR-39 channel-wide total cost chip in the header.
+import { ChannelCostChip } from "@multica/cerebro-channels";
 // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — DM/Channel åbner i bunden + sticky-bottom + "Ny besked"-pille.
 import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
 import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
@@ -257,6 +259,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
             </button>
           )}
           <div className="ml-auto flex items-center gap-1">
+            {/* CEREBRO-PATCH(channel-cost-chip): FIR-39 channel-wide total cost. */}
+            <ChannelCostChip channelId={channelId} />
             <ChannelListenersPanel channel={channel} />
             {display.isChannel && (
               // CEREBRO-PATCH(channel-detail-edit-button): FIR-2660 edit-channel modal (name + description).

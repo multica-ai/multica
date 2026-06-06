@@ -60,6 +60,7 @@ import type {
   CreateRuntimeSetupTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  IssueCommentCosts, // CEREBRO-PATCH(issue-comment-cost-client): FIR-39
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -2485,6 +2486,11 @@ export class ApiClient {
 
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
     return this.fetch(`/api/issues/${issueId}/usage`);
+  }
+
+  // CEREBRO-PATCH(issue-comment-cost-client): FIR-39 per-comment cost badge.
+  async getIssueCommentCosts(issueId: string): Promise<IssueCommentCosts> {
+    return this.fetch(`/api/issues/${issueId}/comment-costs`);
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {

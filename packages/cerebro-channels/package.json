@@ -11,7 +11,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@multica/core": "workspace:*"
+    "@multica/core": "workspace:*",
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/ui": "workspace:*"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",

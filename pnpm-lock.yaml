@@ -1352,9 +1352,15 @@ importers:
 
   packages/cerebro-channels:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
       '@multica/core':
         specifier: workspace:*
         version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.100.14(react@19.2.3)

@@ -13,6 +13,11 @@ export type CerebroFlagKey =
   | "cerebro_mcp_guide"
   | "cerebro_channels"
   | "cerebro_chat_message_cost"
+  // FIR-39: per-comment cost badge on issues + channels (mirror of the chat
+  // per-reply badge from FIR-31). One run can post multiple comments; cost is
+  // pinned to the run's last comment so it sums to the issue total chip
+  // already shown in the sidebar without double-counting.
+  | "cerebro_comment_cost"
   | "cerebro_web_push"
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
@@ -101,6 +106,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_mcp_guide: true,
   cerebro_channels: true,
   cerebro_chat_message_cost: true,
+  cerebro_comment_cost: true,
   cerebro_web_push: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
@@ -333,6 +339,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Show the spend ($) of each assistant reply in the chat footer, next to \"Replied in …\". Hover for the token/model breakdown. Off hides the per-reply badge (the session-total chip in the header stays).",
+  },
+  {
+    key: "cerebro_comment_cost",
+    label: "Per-comment issue & channel cost",
+    group: "issues",
+    description:
+      "Show the spend ($) of each agent comment on issues and channels, with a token/model breakdown on hover. A run that posts progress + a result places the badge on the run's last comment, so per-comment numbers sum to the issue total already shown in the sidebar (JEH-736) without double-counting. Off hides the per-comment badge.",
   },
   {
     key: "cerebro_web_push",
