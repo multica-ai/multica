@@ -231,6 +231,67 @@ func (h *Handler) Snooze(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toItemResponse(updated))
 }
 
+// Reorder rewrites the positions of the given items in the order received.
+// Body: {"ids": ["uuid1", "uuid2", ...]}
+// Each id is verified to belong to the caller before any update lands.
+func (h *Handler) Reorder(w http.ResponseWriter, r *http.Request) {
+	_, userID, ok := requireContext(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if len(body.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids is required")
+		return
+	}
+	type idAndUUID struct {
+		raw  string
+		uuid pgtype.UUID
+	}
+	parsed := make([]idAndUUID, 0, len(body.IDs))
+	for _, raw := range body.IDs {
+		u, err := util.ParseUUID(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid item id")
+			return
+		}
+		parsed = append(parsed, idAndUUID{raw: raw, uuid: u})
+	}
+	// Authorize every id up-front; partial reordering would leave the list in
+	// a half-applied state.
+	for _, p := range parsed {
+		item, err := h.Cerebro.GetFocusListItem(r.Context(), p.uuid)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "focus list item not found")
+			} else {
+				writeError(w, http.StatusInternalServerError, "failed to fetch focus list item")
+			}
+			return
+		}
+		if util.UUIDToString(item.MemberID) != util.UUIDToString(userID) {
+			writeError(w, http.StatusForbidden, "not your focus list item")
+			return
+		}
+	}
+	for idx, p := range parsed {
+		if err := h.Cerebro.SetFocusListItemPosition(r.Context(), cerebrodb.SetFocusListItemPositionParams{
+			ID:       p.uuid,
+			Position: float64(idx + 1),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reorder focus list item")
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // Delete removes the item permanently.
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	_, userID, ok := requireContext(w, r)

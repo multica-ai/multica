@@ -89,6 +89,38 @@ export function useSnoozeFocusListItem() {
   });
 }
 
+export function useReorderFocusListItems() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.reorderFocusListItems(ids),
+    onMutate: async (ids) => {
+      await qc.cancelQueries({ queryKey: focusListKeys.all(wsId) });
+      const prev = qc.getQueryData<FocusListItem[]>(focusListKeys.all(wsId));
+      qc.setQueryData<FocusListItem[]>(focusListKeys.all(wsId), (old) => {
+        if (!old) return old;
+        const byId = new Map(old.map((i) => [i.id, i]));
+        const reordered = ids
+          .map((id, idx) => {
+            const item = byId.get(id);
+            return item ? { ...item, position: idx + 1 } : null;
+          })
+          .filter((i): i is FocusListItem => i !== null);
+        const reorderedIds = new Set(ids);
+        const rest = old.filter((i) => !reorderedIds.has(i.id));
+        return [...reordered, ...rest];
+      });
+      return { prev };
+    },
+    onError: (_err, _ids, ctx) => {
+      if (ctx?.prev) qc.setQueryData(focusListKeys.all(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: focusListKeys.all(wsId) });
+    },
+  });
+}
+
 export function useDeleteFocusListItem() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

@@ -50,6 +50,13 @@ import {
   type PinnedGroup, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — frozen-group ref type
   useInboxPinnedMatcher, // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — "Pinned" view predicate
   useInboxMessageRefresh, // CEREBRO-PATCH(inbox-message-refresh): FIR-2684 — always refetch opened message
+  // CEREBRO-PATCH(inbox-sort-method): TECH-2947 — user-selectable sort method + direction
+  useInboxSortPreference,
+  sortByInboxPreference,
+  INBOX_SORT_METHOD_OPTIONS,
+  INBOX_SORT_DIRECTION_OPTIONS,
+  // CEREBRO-PATCH(inbox-focus-list-visibility): TECH-2947 — per-user show/hide for the priorities panel
+  useFocusListVisibility,
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -291,6 +298,10 @@ export function InboxPage() {
     if (!actionGroupingEnabled && groupBy.primary === "action")
       setGroupBy({ primary: "none", secondary: "none" });
   }, [actionGroupingEnabled, groupBy.primary]);
+  // CEREBRO-PATCH(inbox-sort-method): TECH-2947 — per-user sort method + direction
+  const [sortPref, setSortPref] = useInboxSortPreference(wsId, userId);
+  // CEREBRO-PATCH(inbox-focus-list-visibility): TECH-2947 — per-user show/hide for the priorities panel
+  const [focusListVisible, setFocusListVisible] = useFocusListVisibility(wsId, userId);
   // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — prepend flag-gated Action option
   const groupByOptions = actionGroupingEnabled
     ? [INBOX_ACTION_GROUP_BY_OPTION, ...GROUP_BY_OPTIONS]
@@ -774,6 +785,41 @@ export function InboxPage() {
                 ))}
               </>
             )}
+            {/* CEREBRO-PATCH(inbox-sort-method): TECH-2947 — sort method + direction picker */}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled>Sort by</DropdownMenuItem>
+            {INBOX_SORT_METHOD_OPTIONS.map((opt) => (
+              <DropdownMenuItem
+                key={`sort-method-${opt.value}`}
+                onClick={() => setSortPref({ method: opt.value })}
+              >
+                <span className="w-4 text-muted-foreground">
+                  {sortPref.method === opt.value ? "✓" : ""}
+                </span>
+                {opt.label}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled>Direction</DropdownMenuItem>
+            {INBOX_SORT_DIRECTION_OPTIONS.map((opt) => (
+              <DropdownMenuItem
+                key={`sort-dir-${opt.value}`}
+                onClick={() => setSortPref({ direction: opt.value })}
+              >
+                <span className="w-4 text-muted-foreground">
+                  {sortPref.direction === opt.value ? "✓" : ""}
+                </span>
+                {opt.label}
+              </DropdownMenuItem>
+            ))}
+            {/* CEREBRO-PATCH(inbox-focus-list-visibility): TECH-2947 — per-user show/hide for the Priorities panel */}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setFocusListVisible(!focusListVisible)}>
+              <span className="w-4 text-muted-foreground">
+                {focusListVisible ? "✓" : ""}
+              </span>
+              Show priorities
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => {
@@ -853,8 +899,15 @@ export function InboxPage() {
     }
     // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — keep the open row anchored; re-sorts on close
     const keyOf = (e: MergedEntry) => (e.kind === "notif" ? e.item.issue_id ?? e.item.id : e.id);
-    return sortInboxEntriesPinned(entries, keyOf, selectedKey, pinnedSelectionRef);
-  }, [chatSessions, items, channels, channelMap, selectedKey]); // CEREBRO-PATCH(inbox-pin-selected): re-pin on selection change
+    // CEREBRO-PATCH(inbox-sort-method): TECH-2947 — only the default sort keeps the pinned-open-row anchor;
+    // a user-chosen sort (last_other / last_me / asc) replaces the time-based sort entirely.
+    if (sortPref.method === "last_message" && sortPref.direction === "desc") {
+      return sortInboxEntriesPinned(entries, keyOf, selectedKey, pinnedSelectionRef);
+    }
+    return sortByInboxPreference(entries, sortPref, (entry) =>
+      inboxSortSignals(entry, userId),
+    );
+  }, [chatSessions, items, channels, channelMap, selectedKey, sortPref, userId]); // CEREBRO-PATCH(inbox-pin-selected): re-pin on selection change; CEREBRO-PATCH(inbox-sort-method): re-sort on pref change
 
   const filteredEntries = useMemo<MergedEntry[]>(
     () =>
@@ -1175,8 +1228,8 @@ export function InboxPage() {
 
   const listBody = (
     <div>
-      {/* CEREBRO-PATCH(cerebro-focus-list-inbox): TECH-2947 — focus list above inbox entries */}
-      {focusListEnabled && !isArchivedView && (
+      {/* CEREBRO-PATCH(cerebro-focus-list-inbox): TECH-2947 — focus list above inbox entries; gated on feature flag AND per-user visibility setting */}
+      {focusListEnabled && focusListVisible && !isArchivedView && (
         <InboxFocusList
           onIssueOpen={(issueId) => setSelectedKey("issue", issueId)}
         />
@@ -1597,4 +1650,47 @@ function matchesView(
     case "pinned":
       return false;
   }
+}
+
+// CEREBRO-PATCH(inbox-sort-method): TECH-2947 — three time-signals per entry used by
+// the user-selectable sort. `lastMessage` is what `sortInboxEntriesPinned` already
+// uses; `lastFromMe` / `lastFromOther` filter the signal by author. Returns
+// -Infinity when the signal is unknown so sortByInboxPreference can sink the
+// row to the bottom without flipping under direction.
+function inboxSortSignals(
+  entry:
+    | { kind: "chat"; time: number; session: { has_unread?: boolean; updated_at: string } }
+    | { kind: "notif"; time: number; item: InboxItem }
+    | { kind: "channel"; time: number; channel: Channel },
+  userId: string,
+): { lastMessage: number; lastFromMe: number; lastFromOther: number } {
+  const lastMessage = entry.time;
+  if (entry.kind === "notif") {
+    const item = entry.item;
+    const authoredByMe = item.actor_type === "member" && item.actor_id === userId;
+    return {
+      lastMessage,
+      lastFromMe: authoredByMe ? lastMessage : -Infinity,
+      lastFromOther: authoredByMe ? -Infinity : lastMessage,
+    };
+  }
+  if (entry.kind === "channel") {
+    const lastMsg = entry.channel.last_message;
+    if (!lastMsg) return { lastMessage, lastFromMe: -Infinity, lastFromOther: -Infinity };
+    const authoredByMe = lastMsg.author_type === "member" && lastMsg.author_id === userId;
+    return {
+      lastMessage,
+      lastFromMe: authoredByMe ? lastMessage : -Infinity,
+      lastFromOther: authoredByMe ? -Infinity : lastMessage,
+    };
+  }
+  // Chat sessions: ChatSession has no per-author signal; has_unread === true
+  // means the agent replied last (= not from me), false means the user spoke
+  // last in the session.
+  const fromAgent = !!entry.session.has_unread;
+  return {
+    lastMessage,
+    lastFromMe: fromAgent ? -Infinity : lastMessage,
+    lastFromOther: fromAgent ? lastMessage : -Infinity,
+  };
 }

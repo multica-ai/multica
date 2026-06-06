@@ -2638,6 +2638,14 @@ export class ApiClient {
     return this.fetch(`/api/cerebro/focus-list/${id}`, { method: "DELETE" });
   }
 
+  // CEREBRO-PATCH(cerebro-focus-list-client): TECH-2947 reorder for drag-and-drop priorities.
+  async reorderFocusListItems(ids: string[]): Promise<void> {
+    return this.fetch(`/api/cerebro/focus-list/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  }
+
   async getUnreadInboxCount(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/unread-count");
   }
