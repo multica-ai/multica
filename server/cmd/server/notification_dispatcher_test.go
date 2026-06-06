@@ -612,7 +612,7 @@ func TestDispatchPendingOpenclawWeixinDeliveries_AwaitsDaemonAck(t *testing.T) {
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	if payload.DeliveryID != deliveryID || payload.Channel != "openclaw_weixin" || payload.OpenClawChannel != "openclaw-weixin" {
+	if payload.DeliveryID != deliveryID || payload.Channel != "openclaw-weixin" || payload.OpenClawChannel != "openclaw-weixin" {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
 }

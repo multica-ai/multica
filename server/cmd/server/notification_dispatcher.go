@@ -1263,7 +1263,7 @@ func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, dae
 	daemonPayload := protocol.NotificationDeliverPayload{
 		DeliveryID:      util.UUIDToString(claimed.ID),
 		Type:            "openclaw_weixin",
-		Channel:         "openclaw_weixin",
+		Channel:         channel,
 		WechatID:        wechatID,
 		OpenClawChannel: channel,
 		Content:         content,

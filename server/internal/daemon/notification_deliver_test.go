@@ -84,7 +84,7 @@ func TestHandleNotificationDeliverSendsSuccessResultWithStableCWD(t *testing.T) 
 	if err := json.Unmarshal(msg.Payload, &result); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if !result.Success || result.DeliveryID != "delivery-1" || result.Output != "sent" {
+	if !result.Success || result.DeliveryID != "delivery-1" || result.Channel != "openclaw_weixin" || result.Output != "sent" {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 }
