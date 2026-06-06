@@ -56,6 +56,7 @@ import type {
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
+  RuntimeQuota,
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
@@ -1265,6 +1266,14 @@ export class ApiClient {
     requestId: string,
   ): Promise<RuntimeLocalSkillImportRequest> {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
+  }
+
+  async initiateQuotaCheck(runtimeId: string): Promise<{ id: string; status: string }> {
+    return this.fetch(`/api/runtimes/${runtimeId}/quota-check`, { method: "POST" });
+  }
+
+  async getRuntimeQuota(runtimeId: string): Promise<RuntimeQuota> {
+    return this.fetch(`/api/runtimes/${runtimeId}/quota`);
   }
 
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {

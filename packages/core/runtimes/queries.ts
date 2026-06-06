@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 
 export const runtimeKeys = {
@@ -13,6 +13,7 @@ export const runtimeKeys = {
   usageByHour: (rid: string, days: number, tz: string) =>
     ["runtimes", "usage", "by-hour", rid, days, tz] as const,
   latestVersion: () => ["runtimes", "latestVersion"] as const,
+  quota: (rid: string) => ["runtimes", "quota", rid] as const,
 };
 
 // `tz` is the viewer's IANA name — all reports follow the viewer's tz.
@@ -74,5 +75,25 @@ export function latestCliVersionOptions() {
       }
     },
     staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+export function runtimeQuotaOptions(runtimeId: string) {
+  return queryOptions({
+    queryKey: runtimeKeys.quota(runtimeId),
+    queryFn: () => api.getRuntimeQuota(runtimeId),
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+export function useInitiateQuotaCheck(runtimeId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.initiateQuotaCheck(runtimeId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.quota(runtimeId) });
+    },
   });
 }

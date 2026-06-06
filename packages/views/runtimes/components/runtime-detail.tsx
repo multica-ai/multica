@@ -36,6 +36,7 @@ import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
+import { QuotaSection } from "./quota-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { useT } from "../../i18n";
 
@@ -164,6 +165,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               cliVersion={cliVersion}
               daemonShort={daemonShort}
             />
+            <QuotaSection runtime={runtime} />
             <UsageSection runtime={runtime} />
           </div>
 

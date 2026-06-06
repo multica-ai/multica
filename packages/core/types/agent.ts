@@ -679,3 +679,31 @@ export interface RuntimeLocalSkillsResult {
 export interface RuntimeLocalSkillImportResult {
   skill: Skill;
 }
+
+export interface RuntimeQuotaWindow {
+  limit: number;
+  remaining: number;
+  resets_at: string;
+}
+
+export type RuntimeQuotaStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "timeout"
+  | "no_data";
+
+export interface RuntimeQuota {
+  id?: string;
+  runtime_id?: string;
+  provider?: string;
+  status: RuntimeQuotaStatus;
+  rate_requests: RuntimeQuotaWindow | null;
+  rate_tokens: RuntimeQuotaWindow | null;
+  credits_limit: number | null;
+  provider_note?: string;
+  error: string | null;
+  fetched_at: string | null;
+  stale: boolean;
+}

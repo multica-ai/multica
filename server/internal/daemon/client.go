@@ -320,6 +320,11 @@ func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, re
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
 }
 
+// ReportQuotaCheckResult sends the provider rate-limit probe result to the server.
+func (c *Client) ReportQuotaCheckResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/quota/%s/result", runtimeID, requestID), result, nil)
+}
+
 // WorkspaceInfo holds minimal workspace metadata returned by the API.
 type WorkspaceInfo struct {
 	ID   string `json:"id"`

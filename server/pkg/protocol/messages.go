@@ -143,6 +143,13 @@ type DaemonHeartbeatAckPayload struct {
 	// that don't know this field silently ignore it (standard JSON behavior)
 	// and fall back to the singular PendingLocalSkillImport above.
 	PendingLocalSkillImports []DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
+	PendingQuotaCheck        *DaemonHeartbeatPendingQuotaCheck        `json:"pending_quota_check,omitempty"`
+}
+
+// DaemonHeartbeatPendingQuotaCheck describes a request for the daemon to
+// probe the provider's current rate-limit state and report it back.
+type DaemonHeartbeatPendingQuotaCheck struct {
+	ID string `json:"id"`
 }
 
 // HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no

@@ -53,6 +53,9 @@ export type {
   RuntimeLocalSkillsResult,
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
+  RuntimeQuota,
+  RuntimeQuotaWindow,
+  RuntimeQuotaStatus,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";

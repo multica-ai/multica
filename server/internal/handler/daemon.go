@@ -1001,6 +1001,25 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 		}
 	}
 
+	probeQuotaCtx, cancelProbeQuota := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+	hasQuota, probeQuotaErr := h.QuotaCheckStore.HasPending(probeQuotaCtx, runtimeID)
+	cancelProbeQuota()
+	switch {
+	case probeQuotaErr == nil && hasQuota:
+		pendingQuota, popErr := h.QuotaCheckStore.PopPending(ctx, runtimeID)
+		if popErr != nil {
+			slog.Warn("quota check PopPending failed", "error", popErr, "runtime_id", runtimeID)
+		} else if pendingQuota != nil {
+			ack.PendingQuotaCheck = &protocol.DaemonHeartbeatPendingQuotaCheck{ID: pendingQuota.ID}
+		}
+	case probeQuotaErr != nil:
+		if errors.Is(probeQuotaErr, context.DeadlineExceeded) || errors.Is(probeQuotaErr, context.Canceled) {
+			slog.Warn("quota check HasPending timed out", "runtime_id", runtimeID)
+		} else {
+			slog.Warn("quota check HasPending failed", "error", probeQuotaErr, "runtime_id", runtimeID)
+		}
+	}
+
 	return ack, m, nil
 }
 
