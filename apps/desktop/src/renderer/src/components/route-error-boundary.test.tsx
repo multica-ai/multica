@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { NotFoundPage, RouteErrorBoundary } from "./route-error-boundary";
@@ -30,7 +30,7 @@ describe("NotFoundPage", () => {
 });
 
 describe("RouteErrorBoundary", () => {
-  it("renders a friendly error state for thrown route errors", () => {
+  it("renders a friendly error state for thrown route errors", async () => {
     const router = createMemoryRouter(
       [
         {
@@ -47,7 +47,9 @@ describe("RouteErrorBoundary", () => {
 
     render(<RouterProvider router={router} />);
 
-    expect(screen.getByRole("heading", { name: "Page not found" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Page not found" })).toBeInTheDocument(),
+    );
     expect(screen.getByText("Error 404")).toBeInTheDocument();
     expect(screen.queryByText(/Unexpected Application Error/i)).not.toBeInTheDocument();
   });
