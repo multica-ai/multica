@@ -1747,50 +1747,37 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            {linkSelfInBreadcrumb ? (
-              <AppLink
-                href={isChat ? paths.channelDetail(issue.id) : paths.issueDetail(issue.id)}
-                className="flex min-w-0 items-center gap-1.5 hover:text-foreground/80 transition-colors"
-              >
-                {isChat ? (
+            {isChat ? (
+              linkSelfInBreadcrumb ? (
+                <AppLink
+                  href={paths.channelDetail(issue.id)}
+                  className="flex min-w-0 items-center gap-1.5 hover:text-foreground/80 transition-colors"
+                >
                   <span className="truncate font-medium text-foreground">
                     {isChannel ? `# ${displayTitle}` : displayTitle}
                   </span>
-                ) : (
-                  <>
-                    <span className="shrink-0 text-muted-foreground">
-                      {issue.identifier}
-                    </span>
-                    <span className="truncate font-medium text-foreground">
-                      {displayTitle}
-                    </span>
-                  </>
-                )}
-              </AppLink>
+                </AppLink>
+              ) : (
+                <span className="truncate font-medium text-foreground">
+                  {isChannel ? `# ${displayTitle}` : displayTitle}
+                </span>
+              )
             ) : (
-              <>
-                {isChat ? (
-                  <span className="truncate font-medium text-foreground">
-                    {isChannel ? `# ${displayTitle}` : displayTitle}
-                  </span>
-                ) : (
-                  /* CEREBRO-PATCH(issue-detail-context-trigger-desktop): TECH-2969 — click identifier+title in desktop breadcrumb to open context top-sheet. */
-                  <IssueContextTrigger
-                    fullTitle={displayTitle}
-                    description={issue.description}
-                    identifier={issue.identifier}
-                    className="min-w-0"
-                    containerRef={issueColumnRef}
-                  >
-                    <span className="shrink-0 text-muted-foreground">
-                      {issue.identifier}
-                    </span>
-                    <span className="truncate font-medium text-foreground">
-                      {displayTitle}
-                    </span>
-                  </IssueContextTrigger>
-                )}
-              </>
+              /* CEREBRO-PATCH(issue-detail-context-trigger-desktop): TECH-2969 — click identifier+title in desktop breadcrumb to open context top-sheet. Also fires from inbox (linkSelfInBreadcrumb=true) — non-chat issues always use the context trigger. */
+              <IssueContextTrigger
+                fullTitle={displayTitle}
+                description={issue.description}
+                identifier={issue.identifier}
+                className="min-w-0"
+                containerRef={issueColumnRef}
+              >
+                <span className="shrink-0 text-muted-foreground">
+                  {issue.identifier}
+                </span>
+                <span className="truncate font-medium text-foreground">
+                  {displayTitle}
+                </span>
+              </IssueContextTrigger>
             )}
             {/* CEREBRO-PATCH(issue-private-badge-header): inherited-privacy badge in issue header (JEH-1750). */}
             {issue.is_private && <PrivateBadge size="sm" className="ml-1 shrink-0" />}
