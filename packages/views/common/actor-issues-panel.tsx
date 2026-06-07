@@ -5,7 +5,7 @@ import { useStore } from "zustand";
 import { ListTodo, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { BOARD_STATUSES } from "@multica/core/issues/config";
+import { BOARD_STATUSES, STATUS_ORDER } from "@multica/core/issues/config";
 import {
   childIssueProgressOptions,
   myIssueListOptions,
@@ -138,7 +138,7 @@ export function ActorIssuesPanel({
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0) {
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+      return STATUS_ORDER.filter((s) => statusFilters.includes(s));
     }
     return BOARD_STATUSES;
   }, [statusFilters]);

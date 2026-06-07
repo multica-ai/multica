@@ -9,7 +9,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useAuthStore } from "@multica/core/auth";
 import { useQuery } from "@tanstack/react-query";
 import { filterIssues } from "../../issues/utils/filter";
-import { BOARD_STATUSES } from "@multica/core/issues/config";
+import { BOARD_STATUSES, STATUS_ORDER } from "@multica/core/issues/config";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BoardView } from "../../issues/components/board-view";
@@ -166,7 +166,7 @@ export function MyIssuesPage() {
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+      return STATUS_ORDER.filter((s) => statusFilters.includes(s));
     return BOARD_STATUSES;
   }, [statusFilters]);
 
