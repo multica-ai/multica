@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@multica/core": "workspace:*",
+    "@multica/cerebro-display-currency": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",

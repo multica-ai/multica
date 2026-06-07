@@ -8,6 +8,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { chatSessionUsageOptions } from "@multica/core/chat/queries";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 
 /**
  * FIR-31 — accumulated session-total cost chip for the top of the chat.
@@ -24,6 +25,7 @@ import { useFlagValue } from "@multica/cerebro-feature-flags";
  */
 export function SessionCostChip({ sessionId }: { sessionId: string | null }) {
   const enabled = useFlagValue("cerebro_chat_message_cost");
+  const { formatCents } = useCostFormatter();
   const { data: usage } = useQuery({
     ...chatSessionUsageOptions(sessionId ?? ""),
     enabled: enabled && !!sessionId,
@@ -39,12 +41,12 @@ export function SessionCostChip({ sessionId }: { sessionId: string | null }) {
             aria-label="Session price"
             className="cursor-default rounded-md bg-accent/60 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground"
           >
-            cost {formatCost(usage.cost_cents)}
+            cost {formatCents(usage.cost_cents)}
           </span>
         }
       />
       <TooltipContent side="bottom" className="text-xs">
-        <div className="font-medium">Session total: {formatCost(usage.cost_cents)}</div>
+        <div className="font-medium">Session total: {formatCents(usage.cost_cents)}</div>
         <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] text-muted-foreground">
           <span>Input</span>
           <span className="text-right">{formatTokens(usage.total_input_tokens)}</span>
@@ -62,15 +64,10 @@ export function SessionCostChip({ sessionId }: { sessionId: string | null }) {
   );
 }
 
-// Local formatters mirror message-cost-badge.tsx / chat-session-header.tsx —
-// kept local on purpose to avoid a circular package edge with @multica/views.
-function formatCost(cents: number): string {
-  const usd = cents / 100;
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
-}
-
+// Cost formatting now flows through @multica/cerebro-format-cost (via the
+// useCostFormatter hook) so the workspace display currency is honored. The
+// shared formatter lives in its own zero-dependency package, so importing it
+// here does not recreate the @multica/views circular edge (the JEH-736 note).
 function formatTokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;

@@ -32,6 +32,8 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler import.
 	cerebrocostoptimization "github.com/multica-ai/multica/server/internal/cerebro/cost_optimization"
+	// CEREBRO-PATCH(cerebro-display-currency-routes): FIR-40 per-workspace display-currency handler import.
+	cerebrodisplaycurrency "github.com/multica-ai/multica/server/internal/cerebro/displaycurrency"
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 service-to-service pricing pull for the registry's agent-trace costing.
 	cerebropricing "github.com/multica-ai/multica/server/internal/cerebro/pricing"
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 streaming dictation proxy handler import.
@@ -283,6 +285,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	featureFlagsHandler := feature_flags.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler.
 	costOptimizationHandler := cerebrocostoptimization.New(cerebroQueries, queries, bus)
+	// CEREBRO-PATCH(cerebro-display-currency-routes): FIR-40 per-workspace display-currency handler.
+	displayCurrencyHandler := cerebrodisplaycurrency.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(router-channel-listen): wire the cerebro channel-listen
 	// service into the upstream handler so the comment trigger path can
 	// dispatch always-listening agents in channels.
@@ -728,6 +732,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/cost-optimization/prompt-inspector", costOptimizationHandler.PromptInspector)
 					// CEREBRO-PATCH(cerebro-cost-optimization-holdout): FIR-2640 per-saving holdout share read (any member).
 					r.Get("/cost-optimization/holdout", costOptimizationHandler.ListHoldout)
+					// CEREBRO-PATCH(cerebro-display-currency-routes): FIR-40 workspace display currency + cached rate (any member).
+					r.Get("/display-currency", displayCurrencyHandler.Get)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
 					r.Get("/groups", cerebroGroupsHandler.List)
 					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 workspace role list (member-level).
@@ -801,6 +807,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-cost-optimization-holdout): FIR-2640 per-saving holdout share writes (admin/owner only).
 					r.Put("/cost-optimization/holdout/{key}", costOptimizationHandler.UpsertHoldout)
 					r.Delete("/cost-optimization/holdout/{key}", costOptimizationHandler.DeleteHoldout)
+					// CEREBRO-PATCH(cerebro-display-currency-routes): FIR-40 set workspace display currency (admin/owner only).
+					r.Put("/display-currency", displayCurrencyHandler.SetCurrency)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval decisions + intake seam (admin/owner only).
 					r.Post("/approvals/intake", cerebroApprovalsHandler.Intake)
 					r.Post("/approvals/{approvalId}/approve", cerebroApprovalsHandler.Approve)

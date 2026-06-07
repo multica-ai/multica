@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useNavigation } from "@multica/views/navigation";
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import { TranscriptButton } from "@multica/views/common/task-transcript";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
@@ -262,6 +263,7 @@ function Row({
   visibleColumns: Record<ColumnId, boolean>;
 }) {
   const { push } = useNavigation();
+  const { formatCents } = useCostFormatter();
   const target = rowTarget(task, workspaceSlug);
   const onClick = () => {
     if (target) push(target);
@@ -383,7 +385,7 @@ function Row({
       )}
       {visibleColumns.cost && (
         <td className="px-3 py-2 text-right text-muted-foreground">
-          {formatCost(task.cost_cents)}
+          {task.cost_cents ? formatCents(task.cost_cents) : "—"}
         </td>
       )}
       {visibleColumns.triggered_by && (
@@ -606,9 +608,3 @@ function formatDuration(startISO: string | undefined, endISO: string | undefined
   }
 }
 
-function formatCost(cents: number | undefined): string {
-  if (cents === undefined || cents === 0) return "—";
-  if (cents < 100) return `$0.${String(cents).padStart(2, "0")}`;
-  const dollars = cents / 100;
-  return `$${dollars.toFixed(2)}`;
-}

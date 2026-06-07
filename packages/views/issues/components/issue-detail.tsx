@@ -4,6 +4,8 @@
 // CEREBRO-PATCH(channels-flag-gate): cerebro_channels feature flag controls channel/DM chrome
 
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
@@ -287,15 +289,6 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
-}
-
-// Render server-returned cents as USD with a precision floor so single-digit
-// cent runs don't render as "$0.00".
-function formatCostCents(cents: number): string {
-  const usd = cents / 100;
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
 }
 
 function TimelineSkeleton() {
@@ -652,6 +645,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
   const workspace = useCurrentWorkspace();
+  // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 — cost rendered in the
+  // workspace display currency (standard 2-decimal precision, as before for USD).
+  const { formatCents: formatCostCents } = useCostFormatter();
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
