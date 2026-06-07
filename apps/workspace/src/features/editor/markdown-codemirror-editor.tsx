@@ -23,6 +23,13 @@ import {
 import { tags } from "@lezer/highlight";
 import { cn } from "@/lib/utils";
 import type { UploadResult } from "@/shared/hooks/use-file-upload";
+import {
+  findInlineCodeRanges,
+  hasMatchingFencePair,
+  isClosingFenceLine,
+  parseOpeningFenceLine,
+  type CodeFence,
+} from "./markdown-codemirror-parser";
 import "./markdown-codemirror-editor.css";
 
 interface MarkdownCodeMirrorEditorProps {
@@ -206,23 +213,26 @@ function adjustListIndent(view: EditorView, direction: "in" | "out"): boolean {
   return true;
 }
 
-function isFenceLine(text: string): boolean {
-  return /^ {0,3}(```|~~~)/.test(text);
-}
-
-function isInsideCodeFence(view: EditorView, pos: number): boolean {
-  let inside = false;
-  const currentLine = view.state.doc.lineAt(pos);
-  for (let lineNo = 1; lineNo < currentLine.number; lineNo++) {
+function getOpenFenceBeforeLine(view: EditorView, lineNumber: number): CodeFence | null {
+  let openFence: CodeFence | null = null;
+  for (let lineNo = 1; lineNo < lineNumber; lineNo++) {
     const line = view.state.doc.line(lineNo);
-    if (isFenceLine(line.text)) inside = !inside;
+    if (!openFence) {
+      openFence = parseOpeningFenceLine(line.text);
+      continue;
+    }
+    if (isClosingFenceLine(line.text, openFence)) openFence = null;
   }
-  return inside;
+  return openFence;
 }
 
 function adjustCodeIndent(view: EditorView, direction: "in" | "out"): boolean {
   const selection = view.state.selection.main;
-  if (!selection.empty || !isInsideCodeFence(view, selection.from)) return false;
+  if (!selection.empty) return false;
+
+  const line = view.state.doc.lineAt(selection.from);
+  const openFence = getOpenFenceBeforeLine(view, line.number);
+  if (!openFence || isClosingFenceLine(line.text, openFence)) return false;
 
   if (direction === "in") {
     view.dispatch({
@@ -232,7 +242,6 @@ function adjustCodeIndent(view: EditorView, direction: "in" | "out"): boolean {
     return true;
   }
 
-  const line = view.state.doc.lineAt(selection.from);
   const beforeCursor = view.state.sliceDoc(line.from, selection.from);
   const removable = beforeCursor.match(/ {1,2}$/)?.[0] ?? "";
   if (!removable) return true;
@@ -264,7 +273,7 @@ function toggleCodeBlock(view: EditorView): boolean {
   const selectedLines = selected.split("\n");
   const firstLine = selectedLines[0] ?? "";
   const lastLine = selectedLines[selectedLines.length - 1] ?? "";
-  if (isFenceLine(firstLine) && isFenceLine(lastLine)) {
+  if (hasMatchingFencePair(firstLine, lastLine)) {
     view.dispatch({
       changes: {
         from: selection.from,
@@ -285,50 +294,47 @@ function toggleCodeBlock(view: EditorView): boolean {
 
 function buildMarkdownDecorations(view: EditorView): DecorationSet {
   const decorations = [];
-  let inside = false;
+  let openFence: CodeFence | null = null;
 
   for (let lineNo = 1; lineNo <= view.state.doc.lines; lineNo++) {
     const line = view.state.doc.line(lineNo);
-    const fence = isFenceLine(line.text);
 
-    if (fence && !inside) {
+    if (!openFence) {
+      const fence = parseOpeningFenceLine(line.text);
+      if (!fence) {
+        for (const range of findInlineCodeRanges(line.text)) {
+          decorations.push(
+            Decoration.mark({ class: "cm-md-inline-code" }).range(
+              line.from + range.from,
+              line.from + range.to,
+            ),
+          );
+        }
+        continue;
+      }
+
       decorations.push(
         Decoration.line({
           class: "cm-md-codeblock cm-md-codeblock-fence cm-md-codeblock-start",
         }).range(line.from),
       );
-      inside = true;
+      openFence = fence;
       continue;
     }
 
-    if (fence && inside) {
+    if (isClosingFenceLine(line.text, openFence)) {
       decorations.push(
         Decoration.line({
           class: "cm-md-codeblock cm-md-codeblock-fence cm-md-codeblock-end",
         }).range(line.from),
       );
-      inside = false;
+      openFence = null;
       continue;
     }
 
-    if (inside) {
-      decorations.push(
-        Decoration.line({ class: "cm-md-codeblock" }).range(line.from),
-      );
-      continue;
-    }
-
-    const inlineCodeRe = /`([^`\n]+)`/g;
-    for (const match of line.text.matchAll(inlineCodeRe)) {
-      const start = match.index;
-      if (start === undefined) continue;
-      decorations.push(
-        Decoration.mark({ class: "cm-md-inline-code" }).range(
-          line.from + start,
-          line.from + start + match[0].length,
-        ),
-      );
-    }
+    decorations.push(
+      Decoration.line({ class: "cm-md-codeblock" }).range(line.from),
+    );
   }
 
   return Decoration.set(decorations);
