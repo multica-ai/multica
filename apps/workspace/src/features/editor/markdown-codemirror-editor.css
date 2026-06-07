@@ -1,0 +1,88 @@
+.markdown-codemirror-editor {
+  width: 100%;
+}
+
+.markdown-codemirror-editor .cm-editor {
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.625;
+  outline: none;
+}
+
+.markdown-codemirror-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.markdown-codemirror-editor .cm-scroller {
+  overflow: visible !important;
+  font-family: inherit;
+}
+
+.markdown-codemirror-editor .cm-content {
+  min-height: 1.625rem;
+  padding: 0;
+  caret-color: hsl(var(--foreground));
+}
+
+.markdown-codemirror-editor .cm-line {
+  padding: 1px 0;
+}
+
+.markdown-codemirror-editor .cm-line.cm-md-codeblock {
+  background: hsl(var(--muted) / 0.7);
+  border-left: 2px solid hsl(var(--border));
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas,
+    Liberation Mono, monospace;
+  line-height: 1.55;
+  padding: 1px 8px;
+}
+
+.markdown-codemirror-editor .cm-line.cm-md-codeblock-start {
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  padding-top: 6px;
+}
+
+.markdown-codemirror-editor .cm-line.cm-md-codeblock-end {
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+  padding-bottom: 6px;
+}
+
+.markdown-codemirror-editor .cm-line.cm-md-codeblock-fence {
+  color: hsl(var(--muted-foreground));
+}
+
+.markdown-codemirror-editor .cm-md-inline-code {
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: 4px;
+  color: hsl(var(--foreground));
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas,
+    Liberation Mono, monospace;
+  font-size: 0.92em;
+  padding: 0 3px;
+}
+
+.markdown-codemirror-editor .cm-cursor {
+  border-left-color: hsl(var(--primary));
+  border-left-width: 2px;
+}
+
+.markdown-codemirror-editor .cm-matchingBracket,
+.markdown-codemirror-editor .cm-nonmatchingBracket {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.markdown-codemirror-editor .cm-placeholder {
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+}
+
+.markdown-codemirror-editor .cm-selectionBackground,
+.markdown-codemirror-editor .cm-content ::selection {
+  background-color: hsl(var(--primary) / 0.18) !important;
+}

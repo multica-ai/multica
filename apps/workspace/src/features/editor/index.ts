@@ -4,6 +4,11 @@ export {
   type ContentEditorRef,
 } from "./content-editor";
 export {
+  MarkdownCodeMirrorEditor,
+  type MarkdownCodeMirrorEditorProps,
+  type MarkdownCodeMirrorEditorRef,
+} from "./markdown-codemirror-editor";
+export {
   TitleEditor,
   type TitleEditorProps,
   type TitleEditorRef,
