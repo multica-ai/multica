@@ -283,7 +283,7 @@ function toggleCodeBlock(view: EditorView): boolean {
   return true;
 }
 
-function buildCodeBlockDecorations(view: EditorView): DecorationSet {
+function buildMarkdownDecorations(view: EditorView): DecorationSet {
   const decorations = [];
   let inside = false;
 
@@ -315,23 +315,36 @@ function buildCodeBlockDecorations(view: EditorView): DecorationSet {
       decorations.push(
         Decoration.line({ class: "cm-md-codeblock" }).range(line.from),
       );
+      continue;
+    }
+
+    const inlineCodeRe = /`([^`\n]+)`/g;
+    for (const match of line.text.matchAll(inlineCodeRe)) {
+      const start = match.index;
+      if (start === undefined) continue;
+      decorations.push(
+        Decoration.mark({ class: "cm-md-inline-code" }).range(
+          line.from + start,
+          line.from + start + match[0].length,
+        ),
+      );
     }
   }
 
   return Decoration.set(decorations);
 }
 
-const codeBlockDecorations = ViewPlugin.fromClass(
+const markdownDecorations = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
 
     constructor(view: EditorView) {
-      this.decorations = buildCodeBlockDecorations(view);
+      this.decorations = buildMarkdownDecorations(view);
     }
 
     update(update: ViewUpdate) {
       if (update.docChanged || update.viewportChanged) {
-        this.decorations = buildCodeBlockDecorations(update.view);
+        this.decorations = buildMarkdownDecorations(update.view);
       }
     }
   },
@@ -455,7 +468,7 @@ const MarkdownCodeMirrorEditor = forwardRef<
       closeBrackets(),
       markdown(),
       baseTheme,
-      codeBlockDecorations,
+      markdownDecorations,
       syntaxHighlighting(markdownHighlightStyle),
       EditorView.lineWrapping,
       EditorView.contentAttributes.of({
