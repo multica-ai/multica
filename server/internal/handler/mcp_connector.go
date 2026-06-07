@@ -106,7 +106,7 @@ func (h *Handler) ensureGlobalMcpConnectorsSeeded(ctx context.Context) error {
 		if len(inputSchema) == 0 {
 			inputSchema = []byte("{}")
 		}
-		if _, err := h.Queries.InsertGlobalMcpConnector(ctx, db.InsertGlobalMcpConnectorParams{
+		if err := h.Queries.InsertGlobalMcpConnector(ctx, db.InsertGlobalMcpConnectorParams{
 			Slug:        c.Slug,
 			Name:        c.Name,
 			Icon:        strToText(c.Icon),

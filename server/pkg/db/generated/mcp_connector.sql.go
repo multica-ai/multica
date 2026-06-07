@@ -158,13 +158,12 @@ func (q *Queries) GetMcpConnector(ctx context.Context, arg GetMcpConnectorParams
 	return i, err
 }
 
-const insertGlobalMcpConnector = `-- name: InsertGlobalMcpConnector :one
+const insertGlobalMcpConnector = `-- name: InsertGlobalMcpConnector :exec
 INSERT INTO mcp_connector (
     workspace_id, slug, name, icon, description, popularity,
     input_schema, mcp_template, created_by
 ) VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, NULL)
 ON CONFLICT DO NOTHING
-RETURNING id, workspace_id, slug, name, icon, description, popularity, input_schema, mcp_template, created_by, created_at, updated_at
 `
 
 type InsertGlobalMcpConnectorParams struct {
@@ -180,10 +179,10 @@ type InsertGlobalMcpConnectorParams struct {
 // Inserts a single global (workspace_id NULL) curated connector from the
 // embedded seed. created_by is NULL for seeded rows. ON CONFLICT DO NOTHING
 // keeps concurrent seeders from racing on the global-slug partial unique
-// index; a no-op insert returns no row, which the seeder treats as "already
-// present".
-func (q *Queries) InsertGlobalMcpConnector(ctx context.Context, arg InsertGlobalMcpConnectorParams) (McpConnector, error) {
-	row := q.db.QueryRow(ctx, insertGlobalMcpConnector,
+// index. :exec (not :one) so a no-op insert on conflict returns no error —
+// a :one variant would surface pgx.ErrNoRows and 500 the cold-start seed.
+func (q *Queries) InsertGlobalMcpConnector(ctx context.Context, arg InsertGlobalMcpConnectorParams) error {
+	_, err := q.db.Exec(ctx, insertGlobalMcpConnector,
 		arg.Slug,
 		arg.Name,
 		arg.Icon,
@@ -192,22 +191,7 @@ func (q *Queries) InsertGlobalMcpConnector(ctx context.Context, arg InsertGlobal
 		arg.InputSchema,
 		arg.McpTemplate,
 	)
-	var i McpConnector
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Slug,
-		&i.Name,
-		&i.Icon,
-		&i.Description,
-		&i.Popularity,
-		&i.InputSchema,
-		&i.McpTemplate,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+	return err
 }
 
 const listMcpConnectors = `-- name: ListMcpConnectors :many

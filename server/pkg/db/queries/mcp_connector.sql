@@ -58,15 +58,14 @@ SELECT count(*) FROM mcp_connector WHERE workspace_id IS NULL;
 SELECT * FROM mcp_connector
 WHERE workspace_id IS NULL AND slug = $1;
 
--- name: InsertGlobalMcpConnector :one
+-- name: InsertGlobalMcpConnector :exec
 -- Inserts a single global (workspace_id NULL) curated connector from the
 -- embedded seed. created_by is NULL for seeded rows. ON CONFLICT DO NOTHING
 -- keeps concurrent seeders from racing on the global-slug partial unique
--- index; a no-op insert returns no row, which the seeder treats as "already
--- present".
+-- index. :exec (not :one) so a no-op insert on conflict returns no error —
+-- a :one variant would surface pgx.ErrNoRows and 500 the cold-start seed.
 INSERT INTO mcp_connector (
     workspace_id, slug, name, icon, description, popularity,
     input_schema, mcp_template, created_by
 ) VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, NULL)
-ON CONFLICT DO NOTHING
-RETURNING *;
+ON CONFLICT DO NOTHING;
