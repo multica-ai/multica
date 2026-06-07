@@ -12,9 +12,12 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import {
+  Decoration,
+  type DecorationSet,
   EditorView,
   keymap,
   placeholder as codemirrorPlaceholder,
+  ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
@@ -203,6 +206,140 @@ function adjustListIndent(view: EditorView, direction: "in" | "out"): boolean {
   return true;
 }
 
+function isFenceLine(text: string): boolean {
+  return /^ {0,3}(```|~~~)/.test(text);
+}
+
+function isInsideCodeFence(view: EditorView, pos: number): boolean {
+  let inside = false;
+  const currentLine = view.state.doc.lineAt(pos);
+  for (let lineNo = 1; lineNo < currentLine.number; lineNo++) {
+    const line = view.state.doc.line(lineNo);
+    if (isFenceLine(line.text)) inside = !inside;
+  }
+  return inside;
+}
+
+function adjustCodeIndent(view: EditorView, direction: "in" | "out"): boolean {
+  const selection = view.state.selection.main;
+  if (!selection.empty || !isInsideCodeFence(view, selection.from)) return false;
+
+  if (direction === "in") {
+    view.dispatch({
+      changes: { from: selection.from, insert: "  " },
+      selection: { anchor: selection.from + 2 },
+    });
+    return true;
+  }
+
+  const line = view.state.doc.lineAt(selection.from);
+  const beforeCursor = view.state.sliceDoc(line.from, selection.from);
+  const removable = beforeCursor.match(/ {1,2}$/)?.[0] ?? "";
+  if (!removable) return true;
+
+  view.dispatch({
+    changes: {
+      from: selection.from - removable.length,
+      to: selection.from,
+      insert: "",
+    },
+    selection: { anchor: selection.from - removable.length },
+  });
+  return true;
+}
+
+function toggleCodeBlock(view: EditorView): boolean {
+  const selection = view.state.selection.main;
+  const selected = view.state.sliceDoc(selection.from, selection.to);
+
+  if (selection.empty) {
+    const snippet = "```\n\n```";
+    view.dispatch({
+      changes: { from: selection.from, insert: snippet },
+      selection: { anchor: selection.from + 4 },
+    });
+    return true;
+  }
+
+  const selectedLines = selected.split("\n");
+  const firstLine = selectedLines[0] ?? "";
+  const lastLine = selectedLines[selectedLines.length - 1] ?? "";
+  if (isFenceLine(firstLine) && isFenceLine(lastLine)) {
+    view.dispatch({
+      changes: {
+        from: selection.from,
+        to: selection.to,
+        insert: selectedLines.slice(1, -1).join("\n"),
+      },
+    });
+    return true;
+  }
+
+  const wrapped = "```\n" + selected + "\n```";
+  view.dispatch({
+    changes: { from: selection.from, to: selection.to, insert: wrapped },
+    selection: EditorSelection.range(selection.from + 4, selection.from + 4 + selected.length),
+  });
+  return true;
+}
+
+function buildCodeBlockDecorations(view: EditorView): DecorationSet {
+  const decorations = [];
+  let inside = false;
+
+  for (let lineNo = 1; lineNo <= view.state.doc.lines; lineNo++) {
+    const line = view.state.doc.line(lineNo);
+    const fence = isFenceLine(line.text);
+
+    if (fence && !inside) {
+      decorations.push(
+        Decoration.line({
+          class: "cm-md-codeblock cm-md-codeblock-fence cm-md-codeblock-start",
+        }).range(line.from),
+      );
+      inside = true;
+      continue;
+    }
+
+    if (fence && inside) {
+      decorations.push(
+        Decoration.line({
+          class: "cm-md-codeblock cm-md-codeblock-fence cm-md-codeblock-end",
+        }).range(line.from),
+      );
+      inside = false;
+      continue;
+    }
+
+    if (inside) {
+      decorations.push(
+        Decoration.line({ class: "cm-md-codeblock" }).range(line.from),
+      );
+    }
+  }
+
+  return Decoration.set(decorations);
+}
+
+const codeBlockDecorations = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+
+    constructor(view: EditorView) {
+      this.decorations = buildCodeBlockDecorations(view);
+    }
+
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildCodeBlockDecorations(update.view);
+      }
+    }
+  },
+  {
+    decorations: (plugin) => plugin.decorations,
+  },
+);
+
 const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.heading1, fontSize: "1.18em", fontWeight: "700" },
   { tag: tags.heading2, fontSize: "1.08em", fontWeight: "700" },
@@ -318,6 +455,7 @@ const MarkdownCodeMirrorEditor = forwardRef<
       closeBrackets(),
       markdown(),
       baseTheme,
+      codeBlockDecorations,
       syntaxHighlighting(markdownHighlightStyle),
       EditorView.lineWrapping,
       EditorView.contentAttributes.of({
@@ -335,6 +473,7 @@ const MarkdownCodeMirrorEditor = forwardRef<
         { key: "Mod-b", run: (view) => toggleInlineMark(view, "**") },
         { key: "Mod-i", run: (view) => toggleInlineMark(view, "*") },
         { key: "Mod-e", run: (view) => toggleInlineMark(view, "`") },
+        { key: "Mod-Shift-c", run: toggleCodeBlock },
         { key: "Mod-k", run: insertLink },
         { key: "Mod-Alt-1", run: (view) => setHeading(view, 1) },
         { key: "Mod-Alt-2", run: (view) => setHeading(view, 2) },
@@ -342,8 +481,16 @@ const MarkdownCodeMirrorEditor = forwardRef<
         { key: "Mod-Shift-7", run: (view) => toggleListPrefix(view, "1. ") },
         { key: "Mod-Shift-8", run: (view) => toggleListPrefix(view, "- ") },
         { key: "Enter", run: continueMarkdownList },
-        { key: "Tab", run: (view) => adjustListIndent(view, "in") },
-        { key: "Shift-Tab", run: (view) => adjustListIndent(view, "out") },
+        {
+          key: "Tab",
+          run: (view) =>
+            adjustListIndent(view, "in") || adjustCodeIndent(view, "in"),
+        },
+        {
+          key: "Shift-Tab",
+          run: (view) =>
+            adjustListIndent(view, "out") || adjustCodeIndent(view, "out"),
+        },
         ...closeBracketsKeymap,
         ...historyKeymap,
         ...defaultKeymap,

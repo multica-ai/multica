@@ -30,6 +30,31 @@
   padding: 1px 0;
 }
 
+.markdown-codemirror-editor .cm-line.cm-md-codeblock {
+  background: hsl(var(--muted) / 0.7);
+  border-left: 2px solid hsl(var(--border));
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas,
+    Liberation Mono, monospace;
+  line-height: 1.55;
+  padding: 1px 8px;
+}
+
+.markdown-codemirror-editor .cm-line.cm-md-codeblock-start {
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  padding-top: 6px;
+}
+
+.markdown-codemirror-editor .cm-line.cm-md-codeblock-end {
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+  padding-bottom: 6px;
+}
+
+.markdown-codemirror-editor .cm-line.cm-md-codeblock-fence {
+  color: hsl(var(--muted-foreground));
+}
+
 .markdown-codemirror-editor .cm-cursor {
   border-left-color: hsl(var(--primary));
   border-left-width: 2px;
