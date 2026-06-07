@@ -3,12 +3,25 @@
 // components render unchanged. Issues are a MUTABLE module array so demo
 // interactions (drag to change status) persist across refetches.
 
-import type { Agent, AgentTask } from "@multica/core/types/agent";
+import type {
+  Agent,
+  AgentRuntime,
+  AgentTask,
+  RuntimeUsage,
+  RuntimeUsageByAgent,
+  RuntimeUsageByHour,
+  Skill,
+} from "@multica/core/types/agent";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import type { TimelineEntry } from "@multica/core/types/activity";
 import type { GitHubPullRequest } from "@multica/core/types/github";
 import type { Issue, IssueStatus, IssuePriority } from "@multica/core/types/issue";
 import type { MemberWithUser, Workspace } from "@multica/core/types/workspace";
+import type {
+  Squad,
+  SquadMember,
+  SquadMemberStatusListResponse,
+} from "@multica/core/types/squad";
 
 const NOW = "2026-06-01T09:00:00Z";
 
@@ -55,6 +68,92 @@ const GEMINI_SVG = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='-3 -3 30 30
 
 const KIMI_SVG = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' fill='#1F1147'/><path fill='#ffffff' d='M7.2 6h2.4v5.1l4.3-5.1h2.9l-4.4 5.1L17 18h-2.9l-3.2-5.2-1.3 1.5V18H7.2V6z'/></svg>`;
 
+export const RUNTIMES: AgentRuntime[] = [
+  {
+    id: "rt-local-claude",
+    workspace_id: "ws-demo",
+    daemon_id: "daemon-local",
+    name: "Claude Code (Jiayuan MacBook Pro)",
+    runtime_mode: "local",
+    provider: "claude",
+    launch_header: "claude",
+    status: "online",
+    device_info: "Jiayuan MacBook Pro · multica 0.3.14 (Claude Code)",
+    metadata: { cli_version: "v0.3.14", launched_by: "Desktop" },
+    owner_id: "u-alex",
+    visibility: "private",
+    last_seen_at: new Date().toISOString(),
+    created_at: NOW,
+    updated_at: NOW,
+  },
+  {
+    id: "rt-local-codex",
+    workspace_id: "ws-demo",
+    daemon_id: "daemon-local",
+    name: "Codex (Jiayuan MacBook Pro)",
+    runtime_mode: "local",
+    provider: "codex",
+    launch_header: "codex",
+    status: "online",
+    device_info: "Jiayuan MacBook Pro · multica 0.3.14 (Codex)",
+    metadata: { cli_version: "v0.3.14", launched_by: "Desktop" },
+    owner_id: "u-alex",
+    visibility: "private",
+    last_seen_at: new Date().toISOString(),
+    created_at: NOW,
+    updated_at: NOW,
+  },
+  {
+    id: "rt-mini-gemini",
+    workspace_id: "ws-demo",
+    daemon_id: "daemon-office-mini",
+    name: "Gemini CLI (Office Mac mini)",
+    runtime_mode: "local",
+    provider: "gemini",
+    launch_header: "gemini",
+    status: "online",
+    device_info: "Office Mac mini · multica 0.3.13 (Gemini CLI)",
+    metadata: { cli_version: "v0.3.13", launched_by: "daemon" },
+    owner_id: "u-sam",
+    visibility: "public",
+    last_seen_at: new Date().toISOString(),
+    created_at: NOW,
+    updated_at: NOW,
+  },
+  {
+    id: "rt-cloud-kimi",
+    workspace_id: "ws-demo",
+    daemon_id: null,
+    name: "Kimi Cloud Runtime",
+    runtime_mode: "cloud",
+    provider: "kimi",
+    launch_header: "kimi",
+    status: "online",
+    device_info: "us-east-1 · autoscaled cloud node",
+    metadata: {},
+    owner_id: "u-alex",
+    visibility: "public",
+    last_seen_at: new Date().toISOString(),
+    created_at: NOW,
+    updated_at: NOW,
+  },
+] as unknown as AgentRuntime[];
+
+function runtimeIdForAgent(agentId: string): string {
+  switch (agentId) {
+    case "a-claude":
+      return "rt-local-claude";
+    case "a-codex":
+      return "rt-local-codex";
+    case "a-gemini":
+      return "rt-mini-gemini";
+    case "a-kimi":
+      return "rt-cloud-kimi";
+    default:
+      return "rt-local-claude";
+  }
+}
+
 export const AGENTS: Agent[] = [
   { id: "a-claude", name: "Claude Code", avatar_url: svgUri(CLAUDE_SVG) },
   { id: "a-codex", name: "Codex", avatar_url: svgUri(CODEX_SVG) },
@@ -70,8 +169,8 @@ export const AGENTS: Agent[] = [
       // Fields read by the agent hover-card (AgentProfileCard). Without these
       // (esp. `skills`) hovering an agent throws.
       skills: [],
-      runtime_id: "rt-demo",
-      runtime_mode: "cloud",
+      runtime_id: runtimeIdForAgent(a.id),
+      runtime_mode: RUNTIMES.find((r) => r.id === runtimeIdForAgent(a.id))?.runtime_mode ?? "local",
       runtime_config: {},
       custom_args: [],
       owner_id: "u-alex",
@@ -83,12 +182,116 @@ export const AGENTS: Agent[] = [
     }) as unknown as Agent,
 );
 
+export const SQUADS: Squad[] = [
+  {
+    id: "squad-api",
+    workspace_id: "ws-demo",
+    name: "API Squad",
+    description: "Coordinates API hardening work across implementation, tests, docs, and review.",
+    instructions:
+      "Follow the API hardening playbook: inspect the affected route, split implementation and verification, request a human checkpoint when behavior changes, then open a PR with docs and tests.",
+    avatar_url: null,
+    leader_id: "a-claude",
+    creator_id: "u-alex",
+    created_at: NOW,
+    updated_at: NOW,
+    archived_at: null,
+    archived_by: null,
+    member_count: 4,
+    member_preview: [
+      { member_type: "agent", member_id: "a-claude", role: "Lead / planner" },
+      { member_type: "agent", member_id: "a-codex", role: "Implementation" },
+      { member_type: "agent", member_id: "a-gemini", role: "Tests and docs" },
+      { member_type: "member", member_id: "u-alex", role: "Human checkpoint" },
+    ],
+  },
+] as unknown as Squad[];
+
+export const SQUAD_MEMBERS: Record<string, SquadMember[]> = {
+  "squad-api": [
+    {
+      id: "sm-api-claude",
+      squad_id: "squad-api",
+      member_type: "agent",
+      member_id: "a-claude",
+      role: "Lead / planner",
+      created_at: NOW,
+    },
+    {
+      id: "sm-api-codex",
+      squad_id: "squad-api",
+      member_type: "agent",
+      member_id: "a-codex",
+      role: "Implementation",
+      created_at: NOW,
+    },
+    {
+      id: "sm-api-gemini",
+      squad_id: "squad-api",
+      member_type: "agent",
+      member_id: "a-gemini",
+      role: "Tests and docs",
+      created_at: NOW,
+    },
+    {
+      id: "sm-api-alex",
+      squad_id: "squad-api",
+      member_type: "member",
+      member_id: "u-alex",
+      role: "Human checkpoint",
+      created_at: NOW,
+    },
+  ] as unknown as SquadMember[],
+};
+
+export const SQUAD_MEMBER_STATUS: Record<string, SquadMemberStatusListResponse> = {
+  "squad-api": {
+    members: [
+      {
+        member_type: "agent",
+        member_id: "a-claude",
+        status: "idle",
+        active_issues: [],
+        last_active_at: NOW,
+      },
+      {
+        member_type: "agent",
+        member_id: "a-codex",
+        status: "idle",
+        active_issues: [],
+        last_active_at: NOW,
+      },
+      {
+        member_type: "agent",
+        member_id: "a-gemini",
+        status: "working",
+        active_issues: [
+          {
+            issue_id: "issue-137",
+            identifier: "MUL-137",
+            title: "Add rate limiting to the public API",
+            issue_status: "in_review",
+          },
+        ],
+        last_active_at: NOW,
+      },
+      {
+        member_type: "member",
+        member_id: "u-alex",
+        status: null,
+        active_issues: [],
+        last_active_at: null,
+      },
+    ],
+  },
+};
+
 type Seed = {
   n: number;
   title: string;
   status: IssueStatus;
   priority: IssuePriority;
-  at: "member" | "agent";
+  at: "member" | "agent" | "squad";
   aid: string;
   due?: string;
 };
@@ -103,6 +306,7 @@ const SEEDS: Seed[] = [
   { n: 156, title: "Refactor billing webhooks handler", status: "todo", priority: "medium", at: "agent", aid: "a-kimi" },
   { n: 129, title: "Implement OAuth login flow", status: "in_progress", priority: "high", at: "agent", aid: "a-claude", due: "2026-06-08" },
   { n: 133, title: "Migrate analytics events to new schema", status: "in_progress", priority: "medium", at: "agent", aid: "a-gemini" },
+  { n: 137, title: "Add rate limiting to the public API", status: "in_review", priority: "high", at: "squad", aid: "squad-api" },
   { n: 138, title: "Fix flaky checkout E2E test", status: "in_progress", priority: "medium", at: "agent", aid: "a-codex" },
   { n: 147, title: "Polish onboarding empty states", status: "in_progress", priority: "medium", at: "member", aid: "u-alex" },
   { n: 124, title: "Weekly dependency upgrade sweep", status: "in_review", priority: "low", at: "agent", aid: "a-claude" },
@@ -124,6 +328,8 @@ function makeIssue(seed: Seed, index: number): Issue {
     description:
       seed.at === "agent"
         ? `Assigned to an agent. ${seed.title}. The agent picks this up, runs it, and reports back here.`
+        : seed.at === "squad"
+          ? "API hardening playbook: split implementation, verification, docs, and PR review across the squad."
         : `${seed.title}.`,
     status: seed.status,
     priority: seed.priority,
@@ -151,6 +357,7 @@ export const ISSUES: Issue[] = SEEDS.map(makeIssue);
 const WORKING: { agent: string; issue: string }[] = [
   { agent: "a-claude", issue: "issue-129" },
   { agent: "a-gemini", issue: "issue-133" },
+  { agent: "a-gemini", issue: "issue-137" },
   { agent: "a-codex", issue: "issue-138" },
 ];
 
@@ -164,7 +371,7 @@ export const RUNNING_TASKS: AgentTask[] = WORKING.map(
     ({
       id: `task-${i}`,
       agent_id: agent,
-      runtime_id: "rt-demo",
+      runtime_id: runtimeIdForAgent(agent),
       issue_id: issue,
       status: "running",
       priority: 0,
@@ -232,6 +439,7 @@ function comment(
   content: string,
   minsAgo: number,
   parentId: string | null = null,
+  reactions: TimelineEntry["reactions"] = [],
 ): TimelineEntry {
   return {
     type: "comment",
@@ -241,12 +449,23 @@ function comment(
     content,
     comment_type: "comment",
     parent_id: parentId,
-    reactions: [],
+    reactions,
     attachments: [],
     created_at: mins(minsAgo),
     updated_at: mins(minsAgo),
     resolved_at: null,
   } as unknown as TimelineEntry;
+}
+
+function thumbsUp(commentId: string): NonNullable<TimelineEntry["reactions"]>[number] {
+  return {
+    id: `r-${commentId}-1`,
+    comment_id: commentId,
+    actor_type: "member",
+    actor_id: "u-alex",
+    emoji: "👍",
+    created_at: mins(1),
+  };
 }
 
 // Comment / activity threads, keyed by issue id. Issues without an entry just
@@ -267,6 +486,13 @@ export const TIMELINE: Record<string, TimelineEntry[]> = {
   "issue-138": [
     comment("c-138-1", "agent", "a-codex", "Reproduced the flake — it's a race on the cart fixture between the checkout poll and the seed step. Adding an explicit wait + idempotent seed.", 30),
     comment("c-138-2", "member", "u-alex", "Nice, that's been haunting CI for weeks.", 18, "c-138-1"),
+  ],
+  "issue-137": [
+    comment("c-137-1", "member", "u-alex", "Route this through the API Squad. Use the hardening playbook: implementation, tests, docs, and a PR summary.", 52),
+    comment("c-137-2", "agent", "a-claude", "I split the work: Codex owns the limiter implementation, Gemini owns tests and docs, and I will review the PR before marking it ready.", 38, "c-137-1"),
+    comment("c-137-3", "agent", "a-codex", "Draft PR is up with the token bucket middleware. Waiting on route-specific limits before final review.", 24, "c-137-1"),
+    comment("c-137-4", "member", "u-alex", "Please add per-route overrides and document the Retry-After header.", 16, "c-137-1"),
+    comment("c-137-5", "agent", "a-gemini", "Done. Added route overrides, docs, and regression coverage. PR is ready for review.", 4, "c-137-1", [thumbsUp("c-137-5")]),
   ],
   "issue-124": [
     comment("c-124-1", "agent", "a-claude", "Bumped 14 dependencies, 2 majors held back behind a follow-up. Lockfile + changelog in the PR.", 140),
@@ -319,6 +545,9 @@ export const PULL_REQUESTS: Record<string, GitHubPullRequest[]> = {
   "issue-133": [
     pr("pr-3", 3716, "fix(execenv): refresh skills in place on reuse instead of accumulating duplicate dirs", "merged", "Bohan-J", { mergedMinsAgo: 200, add: 64, del: 31, files: 4 }),
   ],
+  "issue-137": [
+    pr("pr-5", 3721, "feat(api): add per-route rate limiting middleware", "open", "multica-bot", { checks: "passed", add: 184, del: 22, files: 6 }),
+  ],
   "issue-124": [
     pr("pr-4", 3718, "fix(lark): use named import for react-qr-code to survive electron-vite interop", "open", "Bohan-J", { checks: "passed", add: 12, del: 6, files: 1 }),
   ],
@@ -338,7 +567,7 @@ function task(
   return {
     id,
     agent_id: agentId,
-    runtime_id: "rt-demo",
+    runtime_id: runtimeIdForAgent(agentId),
     issue_id: issueId,
     status,
     priority: 0,
@@ -366,6 +595,11 @@ export const EXEC_LOG: Record<string, AgentTask[]> = {
   "issue-138": [
     task("t-138-run", "a-codex", "issue-138", "running", "Fix flaky checkout E2E test", 10, null),
     task("t-138-1", "a-codex", "issue-138", "completed", "Reproduce the flake", 60, 44),
+  ],
+  "issue-137": [
+    task("t-137-3", "a-gemini", "issue-137", "running", "Verify docs and final PR summary", 3, null),
+    task("t-137-2", "a-codex", "issue-137", "completed", "Implement token bucket limiter", 34, 20),
+    task("t-137-1", "a-claude", "issue-137", "completed", "Plan API hardening playbook", 48, 40),
   ],
   "issue-124": [
     task("t-124-1", "a-claude", "issue-124", "completed", "Weekly dependency upgrade sweep", 160, 138),
@@ -420,14 +654,143 @@ export const TRANSCRIPT_BY_ISSUE: Record<string, Msg[]> = {
     result("Bash", "30 passed (0 flaky)"),
     say("30/30 green now. Pushing the fix and linking the PR."),
   ],
+  "issue-137": [
+    think("The implementation is ready. I am checking the docs and route override cases before the squad marks the PR ready."),
+    tool("Read", { file_path: "server/internal/gateway/ratelimit.go" }),
+    result("Read", "Token bucket middleware, per-route override table, and Retry-After header handling."),
+    tool("Bash", { command: "go test ./internal/gateway/..." }),
+    result("Bash", "ok  \tmultica/internal/gateway\t2.14s"),
+    say("Verified the limiter, docs, and regression tests. PR #3721 is ready for review."),
+  ],
 };
 
-// Mock skills for the "Skills" tab — reusable workflows agents can run.
-export const SKILLS: { name: string; description: string }[] = [
-  { name: "PR Review", description: "Read a diff, flag bugs & style issues, leave inline review comments." },
-  { name: "Bug Repro", description: "Turn a bug report into a minimal reproduction and a failing test." },
-  { name: "Release Notes", description: "Summarize merged PRs since the last tag into a changelog." },
-  { name: "Dependency Sweep", description: "Bump dependencies, run the suite, open a PR with the lockfile diff." },
-  { name: "Issue Triage", description: "Label, prioritize, and route inbound issues to the right owner." },
-  { name: "Docs Sync", description: "Keep API docs in lockstep with code changes on every merge." },
-];
+// Workspace skills — full server-shaped rows so the real SkillsPage and agent
+// profile cards can render source, creator, files, and agent assignments.
+export const SKILLS: Skill[] = [
+  {
+    id: "skill-oauth-flow",
+    workspace_id: "ws-demo",
+    name: "OAuth integration checklist",
+    description: "Repeat the proven OAuth flow: reuse sessions, validate state, test refresh, and open a PR.",
+    config: {
+      origin: {
+        type: "runtime_local",
+        runtime_id: "rt-local-claude",
+        provider: "claude",
+        source_path: "~/.claude/skills/oauth-integration",
+      },
+    },
+    created_by: "u-alex",
+    content: "# OAuth integration checklist\n\nReuse the existing session store, validate state, cover refresh, and include PR notes.",
+    files: [
+      {
+        id: "sf-oauth-1",
+        skill_id: "skill-oauth-flow",
+        path: "fixtures/oauth-state.test.md",
+        content: "Regression checklist for OAuth state validation.",
+        created_at: NOW,
+        updated_at: NOW,
+      },
+    ],
+    created_at: NOW,
+    updated_at: NOW,
+  },
+  {
+    id: "skill-pr-review",
+    workspace_id: "ws-demo",
+    name: "PR Review",
+    description: "Read a diff, flag bugs and style issues, then leave review comments.",
+    config: {},
+    created_by: "u-alex",
+    content: "# PR Review\n\nInspect changed files, run targeted checks, and summarize blocking issues.",
+    files: [],
+    created_at: NOW,
+    updated_at: NOW,
+  },
+  {
+    id: "skill-bug-repro",
+    workspace_id: "ws-demo",
+    name: "Bug Repro",
+    description: "Turn a bug report into a minimal reproduction and a failing test.",
+    config: {},
+    created_by: "u-sam",
+    content: "# Bug Repro\n\nReproduce, minimize, write failing coverage, then attach logs.",
+    files: [],
+    created_at: NOW,
+    updated_at: NOW,
+  },
+  {
+    id: "skill-dependency-sweep",
+    workspace_id: "ws-demo",
+    name: "Dependency Sweep",
+    description: "Bump dependencies, run the suite, and open a PR with the lockfile diff.",
+    config: {},
+    created_by: "u-alex",
+    content: "# Dependency Sweep\n\nUpgrade in batches, run tests, and document held-back majors.",
+    files: [],
+    created_at: NOW,
+    updated_at: NOW,
+  },
+] as unknown as Skill[];
+
+for (const agent of AGENTS) {
+  if (agent.id === "a-claude") agent.skills = [SKILLS[0]!, SKILLS[1]!];
+  if (agent.id === "a-codex") agent.skills = [SKILLS[1]!, SKILLS[2]!];
+  if (agent.id === "a-gemini") agent.skills = [SKILLS[0]!, SKILLS[3]!];
+  if (agent.id === "a-kimi") agent.skills = [SKILLS[2]!];
+}
+
+const USAGE_DATES = Array.from({ length: 21 }, (_, i) => {
+  const d = new Date(Date.now() - (20 - i) * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+});
+
+export const RUNTIME_USAGE: RuntimeUsage[] = RUNTIMES.flatMap((runtime, runtimeIndex) =>
+  USAGE_DATES.map((date, dayIndex) => ({
+    runtime_id: runtime.id,
+    date,
+    provider: runtime.provider,
+    model:
+      runtime.provider === "codex"
+        ? "gpt-5.4"
+        : runtime.provider === "gemini"
+          ? "gemini-2.5-pro"
+          : "claude-sonnet-4-5",
+    input_tokens: 18_000 + runtimeIndex * 4_200 + dayIndex * 900,
+    output_tokens: 4_200 + runtimeIndex * 1_100 + dayIndex * 240,
+    cache_read_tokens: 9_000 + runtimeIndex * 1_600 + dayIndex * 520,
+    cache_write_tokens: 1_500 + runtimeIndex * 280 + dayIndex * 80,
+  })),
+) as RuntimeUsage[];
+
+export const RUNTIME_USAGE_BY_AGENT: RuntimeUsageByAgent[] = AGENTS.map(
+  (agent, index) =>
+    ({
+      agent_id: agent.id,
+      model:
+        agent.id === "a-codex"
+          ? "gpt-5.4"
+          : agent.id === "a-gemini"
+            ? "gemini-2.5-pro"
+            : "claude-sonnet-4-5",
+      input_tokens: 82_000 + index * 18_000,
+      output_tokens: 18_000 + index * 4_200,
+      cache_read_tokens: 38_000 + index * 7_200,
+      cache_write_tokens: 6_000 + index * 1_200,
+      task_count: 8 + index * 3,
+    }) as RuntimeUsageByAgent,
+);
+
+export const RUNTIME_USAGE_BY_HOUR: RuntimeUsageByHour[] = Array.from(
+  { length: 12 },
+  (_, index) =>
+    ({
+      hour: 8 + index,
+      model: index % 3 === 0 ? "gpt-5.4" : "claude-sonnet-4-5",
+      input_tokens: 12_000 + index * 1_300,
+      output_tokens: 2_400 + index * 280,
+      cache_read_tokens: 5_200 + index * 420,
+      cache_write_tokens: 900 + index * 90,
+      task_count: 1 + (index % 4),
+    }) as RuntimeUsageByHour,
+);

@@ -2,11 +2,15 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { Download, Star } from "lucide-react";
+import { ArrowRight, Download, Star } from "lucide-react";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { ProviderLogo } from "@multica/views/runtimes";
-import { githubUrl } from "../components/shared";
+import {
+  LandingFooterContent,
+  type LandingFooterGroup,
+} from "../components/landing-footer";
+import { githubUrl, twitterUrl } from "../components/shared";
 import { DEMO_ZOOM } from "./demo/zoom";
 
 // The interactive product demo is heavy (the whole issues board subsystem) and
@@ -40,11 +44,6 @@ const ValueTranscriptDemo = dynamic(
   () => import("./demo/value-transcript-demo").then((m) => m.ValueTranscriptDemo),
   { ssr: false, loading: () => <div className="h-[360px]" /> },
 );
-const ValueSkillsDemo = dynamic(
-  () => import("./demo/value-skills-demo").then((m) => m.ValueSkillsDemo),
-  { ssr: false, loading: () => <div className="h-[360px]" /> },
-);
-
 // GitHub Invertocat (official mark). lucide-react dropped its brand icons, so we
 // inline the silhouette here rather than depend on a removed export.
 function GitHubIcon({ className }: { className?: string }) {
@@ -74,7 +73,7 @@ const DEMO_WINDOW_H = 648;
  * is finalized.
  *
  * Hero copy follows the homepage positioning from MUL-2920:
- *   slogan   — "One board for all your agents."
+ *   slogan   — "One board for all your agent work."
  *   subtitle — assign work, track progress, automate execution.
  *
  * Layout follows the ElevenLabs reference: sans-serif headline on the left,
@@ -86,17 +85,48 @@ export function NewHomeLanding() {
     <div className="min-h-screen bg-white font-sans text-[#0a0d12]">
       <NewHomeNav />
       <NewHomeHero />
+      <LandingFooterContent
+        brandHref="/newhome"
+        ctaHref="/login"
+        groups={NEWHOME_FOOTER_GROUPS}
+      />
     </div>
   );
 }
 
-// Top-level information architecture (see MUL-2932 menu IA):
-// homepage · features · enterprise · pricing · resources(docs/changelog/…)
 const NAV_LINKS = [
   { href: "#features", label: "Features" },
-  { href: "#enterprise", label: "Enterprise" },
-  { href: "#pricing", label: "Pricing" },
-  { href: "#resources", label: "Resources" },
+  { href: "#proof", label: "Proof" },
+  { href: "#changelog", label: "Changelog" },
+  { href: "/docs", label: "Docs" },
+];
+
+const NEWHOME_FOOTER_GROUPS: LandingFooterGroup[] = [
+  {
+    label: "Product",
+    links: [
+      { href: "#features", label: "Features" },
+      { href: "#proof", label: "Proof" },
+      { href: "#changelog", label: "Changelog" },
+      { href: "/download", label: "Download" },
+    ],
+  },
+  {
+    label: "Resources",
+    links: [
+      { href: "/docs", label: "Documentation" },
+      { href: githubUrl, label: "GitHub" },
+      { href: twitterUrl, label: "X (Twitter)" },
+    ],
+  },
+  {
+    label: "Company",
+    links: [
+      { href: "/about", label: "About" },
+      { href: githubUrl, label: "Open Source" },
+      { href: "/contact-sales", label: "Contact Sales" },
+    ],
+  },
 ];
 
 function NewHomeNav() {
@@ -161,11 +191,12 @@ function NewHomeHero() {
       <section className="mx-auto max-w-[1200px] px-5 pb-14 pt-10 sm:px-6 sm:pt-12 lg:px-8 lg:pt-16">
         <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between lg:gap-16">
           <h1 className="max-w-[14ch] text-[2.4rem] font-semibold leading-[1.03] tracking-[-0.03em] sm:text-[3rem] lg:text-[3.55rem]">
-            One board for all your agents.
+            One board for all your agent work.
           </h1>
           <p className="max-w-[440px] text-[16px] leading-7 text-[#0a0d12]/60 sm:text-[17px] lg:pb-2">
-            Assign work, track progress, and automate execution across Claude
-            Code, Codex, and every agent you run.
+            Stop babysitting runs across terminals and chats. Assign work,
+            watch agents coordinate, and turn every run into reusable team
+            knowledge.
           </p>
         </div>
 
@@ -186,43 +217,46 @@ function NewHomeHero() {
 
       <SupportedAgents />
       <ValuesSection />
+      <ProofSection />
+      <ChangelogSection />
+      <FinalCtaSection />
     </main>
   );
 }
 
-// The values section turns the hero's promise into concrete, watchable proof.
-// Each value is a self-contained bordered card pairing a short claim with a
-// focused auto-playing micro-demo. The cards alternate sides (text/demo →
-// demo/text → …) so the eye zig-zags down the page. The card's border is the
-// boundary that clips the demo, so it bleeds to the card edge, not the browser.
+// The values section turns the hero's promise into concrete jobs users hire
+// Multica to do. Keep runtime, squad, transcript, and skill details as proof
+// points under those jobs instead of making the section a feature list.
 const VALUES = [
   {
-    eyebrow: "Visibility",
-    title: "See every agent on one board",
-    description:
-      "Agent work used to scatter across terminals, chats, and scripts. Now every task — queued, running, in review, done — lives on one board you can watch in real time.",
+    eyebrow: "Workspace",
+    title: "Every agent run has a home",
+    problem:
+      "Agents are running on laptops, Mac minis, cloud boxes, and CLI sessions. The work disappears into terminal scrollback, chat updates, and disconnected repos.",
+    outcome:
+      "Multica brings the work back into one shared workspace: tasks, runtimes, agents, PRs, statuses, and usage all stay visible.",
+    proof: ["Local + cloud runtimes", "Agent usage", "One shared board"],
     demo: <ValueBoardDemo />,
   },
   {
-    eyebrow: "Delegation",
-    title: "Delegate to agents like teammates",
-    description:
-      "Hand work to an agent the way you would a teammate — assign it an issue or @mention it in a comment. It picks the task up, does the work, and reports back with a PR.",
+    eyebrow: "Coordination",
+    title: "Agents coordinate without you chasing context",
+    problem:
+      "Complex tasks should not require a human dispatcher. Today someone still breaks the task down, picks the right agent, forwards context, checks progress, and asks for the next pass.",
+    outcome:
+      "Assign work to an agent or squad, give it a playbook, and let agents pick up the right pieces, ask for help, and report back with PR-ready work.",
+    proof: ["Squads", "Playbooks", "Human checkpoints"],
     demo: <ValueDelegateDemo />,
   },
   {
-    eyebrow: "Accountability",
-    title: "Every run is on the record",
-    description:
-      "Every run is captured end to end — the reasoning, the files it read, the commands it ran, the result. Reopen any run and see exactly what happened.",
+    eyebrow: "Memory",
+    title: "Every useful run becomes team memory",
+    problem:
+      "A good agent run should not disappear into terminal scrollback. The reasoning, files, commands, comments, reactions, and follow-up instructions are the work.",
+    outcome:
+      "Multica keeps that record attached to the issue, so repeated workflows can become reusable skills for the whole team.",
+    proof: ["Execution records", "Issue context", "Reusable skills"],
     demo: <ValueTranscriptDemo />,
-  },
-  {
-    eyebrow: "Leverage",
-    title: "Turn team knowledge into reusable skills",
-    description:
-      "Package a repeatable workflow once and any agent can run it — PR review, bug repro, release notes. Your team's know-how becomes muscle every agent shares.",
-    demo: <ValueSkillsDemo />,
   },
 ];
 
@@ -247,13 +281,17 @@ function ValuesSection() {
 function ValueCard({
   eyebrow,
   title,
-  description,
+  problem,
+  outcome,
+  proof,
   reverse = false,
   children,
 }: {
   eyebrow: string;
   title: string;
-  description: string;
+  problem: string;
+  outcome: string;
+  proof: string[];
   reverse?: boolean;
   children: React.ReactNode;
 }) {
@@ -261,25 +299,52 @@ function ValueCard({
     <div className="overflow-hidden rounded-[6px] border border-[#0a0d12]/10 bg-[#0a0d12]/[0.025]">
       <div
         className={cn(
-          "grid items-center gap-8",
+          "grid min-w-0 items-center gap-8",
           reverse
-            ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]"
-            : "lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]",
+            ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)]"
+            : "lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]",
         )}
       >
         <div
           className={cn(
-            "px-7 py-10 sm:px-10 sm:py-12 lg:py-16",
+            "min-w-0 px-7 py-10 sm:px-10 sm:py-12 lg:py-16",
             reverse ? "lg:order-2 lg:pl-2 lg:pr-12" : "lg:order-1 lg:pr-2 lg:pl-12",
           )}
         >
-          <p className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-[#0a0d12]/40">
+          <p className="text-[12.5px] font-semibold uppercase tracking-[0.08em] text-[#0a0d12]/45">
             {eyebrow}
           </p>
           <h3 className="mt-2.5 text-[1.7rem] font-semibold leading-[1.12] tracking-[-0.02em]">
             {title}
           </h3>
-          <p className="mt-3.5 text-[15px] leading-7 text-[#0a0d12]/55">{description}</p>
+          <div className="mt-4 space-y-4">
+            <div>
+              <p className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[#0a0d12]/35">
+                The problem
+              </p>
+              <p className="mt-1.5 text-[14.5px] leading-7 text-[#0a0d12]/55">
+                {problem}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[#0a0d12]/35">
+                With Multica
+              </p>
+              <p className="mt-1.5 text-[14.5px] leading-7 text-[#0a0d12]/62">
+                {outcome}
+              </p>
+            </div>
+          </div>
+          <ul className="mt-5 flex flex-wrap gap-2">
+            {proof.map((item) => (
+              <li
+                key={item}
+                className="max-w-full rounded-[6px] border border-[#0a0d12]/10 bg-white px-2.5 py-1.5 text-[12px] font-medium text-[#0a0d12]/60"
+              >
+                {item}
+              </li>
+            ))}
+          </ul>
         </div>
 
         {/* Demo shrinks to its own width (w-max) and overflows the 1fr track
@@ -288,11 +353,11 @@ function ValueCard({
             landing-demo scopes the brand override + scrollbar hiding. */}
         <div
           className={cn(
-            "px-7 pb-10 sm:px-10 sm:pb-0 lg:py-10",
+            "min-w-0 px-7 pb-10 sm:px-10 sm:pb-0 lg:py-10",
             reverse ? "lg:order-1 lg:flex lg:justify-end lg:pl-0" : "lg:order-2 lg:pr-0",
           )}
         >
-          <div className="landing-demo w-max rounded-[6px] border border-[#0a0d12]/10 bg-white p-3 shadow-[0_1px_3px_rgba(10,13,18,0.04)] sm:p-4">
+          <div className="landing-demo w-full max-w-full overflow-hidden rounded-[6px] border border-[#0a0d12]/10 bg-white p-3 shadow-[0_1px_3px_rgba(10,13,18,0.04)] sm:p-4 lg:w-max">
             {children}
           </div>
         </div>
@@ -361,6 +426,219 @@ function AgentTrackGroup({ ariaHidden = false }: { ariaHidden?: boolean }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+const PROOF_POINTS = [
+  {
+    value: `${GITHUB_STAR_COUNT} stars`,
+    label: "Open source on GitHub",
+    body: "Built in public, inspectable, and self-hostable by teams that need to understand the system their agents run through.",
+    href: githubUrl,
+  },
+  {
+    value: `${SUPPORTED_AGENTS.length} agents`,
+    label: "Vendor-neutral runtime layer",
+    body: "Bring Claude Code, Codex, Gemini, Cursor, OpenCode, Copilot, and more into one workspace instead of separate silos.",
+    href: "#agents",
+  },
+  {
+    value: "Self-hostable",
+    label: "Run it on your own infrastructure",
+    body: "Keep agent work close to your code, machines, and infrastructure when cloud-only tooling is not enough.",
+    href: "/docs/getting-started/self-hosting",
+  },
+  {
+    value: "Recorded runs",
+    label: "Auditable agent execution",
+    body: "Every issue, comment, PR, command, reaction, and follow-up instruction stays attached to the work.",
+    href: "#features",
+  },
+];
+
+function ProofSection() {
+  return (
+    <section id="proof" className="border-y border-[#0a0d12]/8 bg-[#0a0d12]/[0.025] py-16 sm:py-20">
+      <div className="mx-auto max-w-[1200px] px-5 sm:px-6 lg:px-8">
+        <SectionIntro
+          eyebrow="Proof"
+          title="Trust comes from records, not promises."
+          description="Multica is built around the proof teams actually need: open source code, self-hosting, supported runtimes, and agent work that stays on the record."
+        />
+
+        <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {PROOF_POINTS.map((point) => (
+            <Link
+              key={point.label}
+              href={point.href}
+              className="group rounded-[6px] border border-[#0a0d12]/10 bg-white px-5 py-5 transition-colors hover:border-[#0a0d12]/22"
+            >
+              <p className="text-[1.45rem] font-semibold tracking-[-0.02em] text-[#0a0d12]">
+                {point.value}
+              </p>
+              <p className="mt-2 text-[13px] font-semibold text-[#0a0d12]/70">
+                {point.label}
+              </p>
+              <p className="mt-3 text-[13.5px] leading-6 text-[#0a0d12]/55">
+                {point.body}
+              </p>
+              <span className="mt-4 inline-flex items-center gap-1 text-[12.5px] font-semibold text-[#0a0d12]/45 transition-colors group-hover:text-[#0a0d12]">
+                View proof
+                <ArrowRight className="size-3.5" aria-hidden />
+              </span>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const RECENT_SHIPMENTS = [
+  {
+    version: "0.3.14",
+    date: "June 2, 2026",
+    title: "Japanese support and /skill command",
+    points: [
+      "App, site, and docs now support Japanese.",
+      "Chat can choose agent Skills with /skill.",
+      "Teams can add Skills without replacing existing ones.",
+    ],
+  },
+  {
+    version: "0.3.13",
+    date: "June 1, 2026",
+    title: "Skill search and CLI updates",
+    points: [
+      "CLI can search Skills and list PRs linked to an Issue.",
+      "Squad member roles can be changed from the CLI.",
+      "Agent lists can filter by runtime machine.",
+    ],
+  },
+  {
+    version: "0.3.12",
+    date: "May 29, 2026",
+    title: "Issue session resume",
+    points: [
+      "Agents continuing from an Issue comment resume the prior session.",
+      "Active agent work stays visible near the Issue title.",
+      "Agents can scan Issue discussions with richer previews.",
+    ],
+  },
+];
+
+function ChangelogSection() {
+  return (
+    <section id="changelog" className="py-16 sm:py-20">
+      <div className="mx-auto max-w-[1200px] px-5 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <SectionIntro
+            eyebrow="Recently shipped"
+            title="Shipping the infrastructure teams need for managed agents."
+            description="Recent releases keep pushing toward the same goal: more runtime visibility, better agent coordination, and stronger team memory."
+          />
+          <Link
+            href="/changelog"
+            className="inline-flex w-fit items-center gap-2 rounded-[8px] border border-[#0a0d12]/14 bg-white px-4 py-2.5 text-[13px] font-semibold text-[#0a0d12] transition-colors hover:bg-[#0a0d12]/[0.04]"
+          >
+            View changelog
+            <ArrowRight className="size-3.5" aria-hidden />
+          </Link>
+        </div>
+
+        <div className="mt-8 grid gap-4 lg:grid-cols-3">
+          {RECENT_SHIPMENTS.map((release) => (
+            <article
+              key={release.version}
+              className="rounded-[6px] border border-[#0a0d12]/10 bg-white px-5 py-5"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="rounded-[6px] bg-[#0a0d12]/[0.06] px-2 py-1 text-[12px] font-semibold text-[#0a0d12]/60">
+                  v{release.version}
+                </span>
+                <span className="text-[12px] font-medium text-[#0a0d12]/38">
+                  {release.date}
+                </span>
+              </div>
+              <h3 className="mt-4 text-[1.1rem] font-semibold tracking-[-0.01em] text-[#0a0d12]">
+                {release.title}
+              </h3>
+              <ul className="mt-4 space-y-2.5">
+                {release.points.map((point) => (
+                  <li
+                    key={point}
+                    className="flex gap-2.5 text-[13.5px] leading-6 text-[#0a0d12]/58"
+                  >
+                    <span className="mt-2 size-1.5 shrink-0 rounded-full bg-[#0a0d12]/30" />
+                    {point}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FinalCtaSection() {
+  return (
+    <section id="get-started" className="bg-[#0a0d12] py-16 text-white sm:py-20">
+      <div className="mx-auto flex max-w-[1200px] flex-col gap-7 px-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+        <div>
+          <p className="text-[12.5px] font-semibold uppercase tracking-[0.1em] text-white/45">
+            Start here
+          </p>
+          <h2 className="mt-3 max-w-[720px] text-[2rem] font-semibold leading-[1.08] tracking-[-0.03em] sm:text-[2.6rem]">
+            Manage agent work from one workspace.
+          </h2>
+          <p className="mt-4 max-w-[560px] text-[15.5px] leading-7 text-white/58">
+            Bring your agents, runtimes, issues, run records, and reusable
+            workflows into the same operating layer.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href="/download"
+            className="inline-flex items-center justify-center gap-2 rounded-[8px] bg-white px-5 py-3 text-[14px] font-semibold text-[#0a0d12] transition-colors hover:bg-white/90"
+          >
+            <Download className="size-4" aria-hidden />
+            Download Desktop
+          </Link>
+          <Link
+            href="/docs/getting-started/self-hosting"
+            className="inline-flex items-center justify-center rounded-[8px] border border-white/18 px-5 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-white/[0.08]"
+          >
+            Self-host Multica
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SectionIntro({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="max-w-[760px]">
+      <p className="text-[12.5px] font-semibold uppercase tracking-[0.1em] text-[#0a0d12]/38">
+        {eyebrow}
+      </p>
+      <h2 className="mt-3 text-[2rem] font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[2.45rem]">
+        {title}
+      </h2>
+      <p className="mt-4 max-w-[660px] text-[15.5px] leading-7 text-[#0a0d12]/58">
+        {description}
+      </p>
+    </div>
   );
 }
 

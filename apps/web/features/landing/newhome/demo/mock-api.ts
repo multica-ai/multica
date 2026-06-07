@@ -11,7 +11,15 @@ import {
   ISSUES,
   MEMBERS,
   PULL_REQUESTS,
+  RUNTIME_USAGE,
+  RUNTIME_USAGE_BY_AGENT,
+  RUNTIME_USAGE_BY_HOUR,
+  RUNTIMES,
   RUNNING_TASKS,
+  SKILLS,
+  SQUAD_MEMBER_STATUS,
+  SQUAD_MEMBERS,
+  SQUADS,
   TIMELINE,
   TRANSCRIPT_BY_ISSUE,
   WORKSPACE,
@@ -35,8 +43,42 @@ const handlers: Record<string, (...args: any[]) => Promise<unknown>> = {
   getWorkspace: () => Promise.resolve(WORKSPACE),
   listMembers: () => Promise.resolve(MEMBERS),
   listAgents: () => Promise.resolve(AGENTS),
-  listSquads: () => Promise.resolve([]),
-  listRuntimes: () => Promise.resolve([]),
+  listSquads: () => Promise.resolve(SQUADS),
+  getSquad: (id: string) =>
+    Promise.resolve(SQUADS.find((s) => s.id === id) ?? SQUADS[0]),
+  listSquadMembers: (id: string) => Promise.resolve(SQUAD_MEMBERS[id] ?? []),
+  getSquadMemberStatus: (id: string) =>
+    Promise.resolve(SQUAD_MEMBER_STATUS[id] ?? { members: [] }),
+  listRuntimes: () => Promise.resolve(RUNTIMES),
+  getRuntimeUsage: (runtimeId: string) =>
+    Promise.resolve(RUNTIME_USAGE.filter((row) => row.runtime_id === runtimeId)),
+  getRuntimeUsageByAgent: (runtimeId: string) => {
+    const agentIds = new Set(
+      AGENTS.filter((agent) => agent.runtime_id === runtimeId).map((agent) => agent.id),
+    );
+    return Promise.resolve(
+      RUNTIME_USAGE_BY_AGENT.filter((row) => agentIds.has(row.agent_id)),
+    );
+  },
+  getRuntimeUsageByHour: () => Promise.resolve(RUNTIME_USAGE_BY_HOUR),
+  getWorkspaceAgentRunCounts: () =>
+    Promise.resolve(
+      AGENTS.map((agent, index) => ({
+        agent_id: agent.id,
+        run_count: 12 + index * 4,
+      })),
+    ),
+  getWorkspaceAgentActivity30d: () =>
+    Promise.resolve(
+      AGENTS.flatMap((agent, agentIndex) =>
+        Array.from({ length: 7 }, (_, i) => ({
+          agent_id: agent.id,
+          bucket_at: new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000).toISOString(),
+          task_count: 1 + ((i + agentIndex) % 4),
+          failed_count: i === 1 && agentIndex === 1 ? 1 : 0,
+        })),
+      ),
+    ),
   getAgent: (id: string) =>
     Promise.resolve(AGENTS.find((a) => a.id === id) ?? AGENTS[0]),
 
@@ -55,7 +97,9 @@ const handlers: Record<string, (...args: any[]) => Promise<unknown>> = {
       })),
     );
   },
-  listSkills: () => Promise.resolve([]),
+  listSkills: () => Promise.resolve(SKILLS),
+  getSkill: (id: string) =>
+    Promise.resolve(SKILLS.find((skill) => skill.id === id) ?? SKILLS[0]),
   getAssigneeFrequency: () => Promise.resolve([]),
 
   listIssues: (params: AnyParams) => {
@@ -81,11 +125,13 @@ const handlers: Record<string, (...args: any[]) => Promise<unknown>> = {
     Promise.resolve({ total_tokens: 0, total_cost_usd: 0, runs: 0 }),
   listProjects: () => Promise.resolve({ projects: [] }),
   listLabels: () => Promise.resolve({ labels: [] }),
+  listLabelsForIssue: () => Promise.resolve({ labels: [] }),
   listIssuePullRequests: (issueId: string) =>
     Promise.resolve({ pull_requests: PULL_REQUESTS[issueId] ?? [] }),
   listTasksByIssue: (issueId: string) =>
     Promise.resolve(EXEC_LOG[issueId] ?? []),
-  listAgentTasks: () => Promise.resolve([]),
+  listAgentTasks: (agentId: string) =>
+    Promise.resolve(ALL_TASKS.filter((task) => task.agent_id === agentId)),
   getAgentTaskSnapshot: () => Promise.resolve(RUNNING_TASKS),
   getActiveTasksForIssue: (issueId: string) =>
     Promise.resolve({

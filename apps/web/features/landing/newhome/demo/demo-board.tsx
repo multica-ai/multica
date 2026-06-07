@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, LayoutList, Bot, Sparkles } from "lucide-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
@@ -62,10 +62,9 @@ export function DemoBoard() {
 
   // No status filter — show every column (backlog … blocked). Reset on mount in
   // case a previous session persisted a filter.
-  useState(() => {
+  useEffect(() => {
     useIssueViewStore.setState({ statusFilters: [] });
-    return true;
-  });
+  }, []);
 
   const adapter = useMemo<NavigationAdapter>(() => {
     const openFromPath = (path: string) => {
