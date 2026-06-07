@@ -38,6 +38,9 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  McpConnector,
+  CreateMcpConnectorRequest,
+  UpdateMcpConnectorRequest,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -188,6 +191,8 @@ import {
   EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+  McpConnectorListSchema,
+  EMPTY_MCP_CONNECTOR_LIST,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -777,6 +782,58 @@ export class ApiClient {
       { ...EMPTY_AGENT_TEMPLATE_DETAIL, slug },
       { endpoint: "GET /api/agent-templates/:slug" },
     );
+  }
+
+  // MCP connectors directory. Lists the global curated catalog UNION the
+  // workspace's own custom connectors. The list runs through the lenient
+  // schema with an empty-list fallback so a drifted row never white-screens
+  // the directory.
+  async listMcpConnectors(wsId: string): Promise<McpConnector[]> {
+    const search = new URLSearchParams();
+    search.set("workspace_id", wsId);
+    const raw = await this.fetch<unknown>(`/api/mcp-connectors?${search}`);
+    return parseWithFallback(
+      raw,
+      McpConnectorListSchema,
+      EMPTY_MCP_CONNECTOR_LIST,
+      { endpoint: "GET /api/mcp-connectors" },
+    );
+  }
+
+  // Authors a workspace-custom connector (admin-gated server-side). The
+  // mutation result is re-fetched by the caller via query invalidation, so
+  // the raw record is returned without a schema fallback here.
+  async createMcpConnector(
+    wsId: string,
+    data: CreateMcpConnectorRequest,
+  ): Promise<McpConnector> {
+    const search = new URLSearchParams();
+    search.set("workspace_id", wsId);
+    return this.fetch(`/api/mcp-connectors?${search}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateMcpConnector(
+    wsId: string,
+    id: string,
+    data: UpdateMcpConnectorRequest,
+  ): Promise<McpConnector> {
+    const search = new URLSearchParams();
+    search.set("workspace_id", wsId);
+    return this.fetch(`/api/mcp-connectors/${id}?${search}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteMcpConnector(wsId: string, id: string): Promise<void> {
+    const search = new URLSearchParams();
+    search.set("workspace_id", wsId);
+    await this.fetch(`/api/mcp-connectors/${id}?${search}`, {
+      method: "DELETE",
+    });
   }
 
   /** Creates an agent from a curated template. The server fetches every

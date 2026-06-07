@@ -13,6 +13,8 @@ import {
   SquadListSchema,
   SquadSchema,
   UserSchema,
+  McpConnectorListSchema,
+  EMPTY_MCP_CONNECTOR_LIST,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -268,5 +270,71 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+const baseConnector = {
+  id: "c1",
+  workspace_id: null,
+  slug: "github",
+  name: "GitHub",
+  icon: "github",
+  description: "Manage issues and PRs.",
+  popularity: 100,
+  input_schema: { fields: [{ key: "TOKEN", label: "Token", type: "password" }] },
+  mcp_template: { mcpServers: { github: { command: "npx" } } },
+  is_custom: false,
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+};
+
+describe("McpConnectorListSchema", () => {
+  it("parses a well-formed connector list", () => {
+    const parsed = parseWithFallback(
+      [baseConnector],
+      McpConnectorListSchema,
+      EMPTY_MCP_CONNECTOR_LIST,
+      { endpoint: "GET /api/mcp-connectors" },
+    );
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.slug).toBe("github");
+    expect(parsed[0]?.input_schema.fields?.[0]?.key).toBe("TOKEN");
+  });
+
+  it("coerces a null input_schema to an empty field set (no throw)", () => {
+    const parsed = McpConnectorListSchema.parse([
+      { ...baseConnector, input_schema: null },
+    ]);
+    expect(parsed[0]?.input_schema).toEqual({ fields: [] });
+  });
+
+  it("falls back to the empty list when slug is missing (drifted contract)", () => {
+    const { slug: _omit, ...noSlug } = baseConnector;
+    const parsed = parseWithFallback(
+      [noSlug],
+      McpConnectorListSchema,
+      EMPTY_MCP_CONNECTOR_LIST,
+      { endpoint: "GET /api/mcp-connectors" },
+    );
+    // A row missing the required `slug` drops the whole array to the fallback,
+    // never throws into the directory UI.
+    expect(parsed).toBe(EMPTY_MCP_CONNECTOR_LIST);
+  });
+
+  it("falls back to the empty list when the body is null (not an array)", () => {
+    const parsed = parseWithFallback(
+      null,
+      McpConnectorListSchema,
+      EMPTY_MCP_CONNECTOR_LIST,
+      { endpoint: "GET /api/mcp-connectors" },
+    );
+    expect(parsed).toBe(EMPTY_MCP_CONNECTOR_LIST);
+  });
+
+  it("keeps unknown server-side fields via .loose()", () => {
+    const parsed = McpConnectorListSchema.parse([
+      { ...baseConnector, future_field: "x" },
+    ]);
+    expect((parsed[0] as Record<string, unknown>).future_field).toBe("x");
   });
 });

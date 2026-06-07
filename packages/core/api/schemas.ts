@@ -16,6 +16,7 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  McpConnector,
   Squad,
   TimelineEntry,
   User,
@@ -877,3 +878,46 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
 };
+
+// MCP connector directory. Lenient by the same rules as the schemas above:
+// `input_schema` defaults to `{ fields: [] }` so the add-connector form never
+// receives a bare null, and `mcp_template` is kept as `z.unknown()` (it's an
+// arbitrary JSON fragment, merged client-side — schematising it would bit-rot
+// against every new server type). A row missing `slug`/`name`, or with
+// `input_schema: null`, drops to the fallback list rather than crashing the
+// directory.
+const McpConnectorInputFieldSchema = z.object({
+  key: z.string(),
+  label: z.string().default(""),
+  type: z.string().optional(),
+  required: z.boolean().optional(),
+  placeholder: z.string().optional(),
+  help: z.string().optional(),
+}).loose();
+
+const McpConnectorInputSchemaSchema = z.object({
+  fields: z.array(McpConnectorInputFieldSchema).default([]),
+}).loose();
+
+export const McpConnectorSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().nullable().default(null),
+  slug: z.string(),
+  name: z.string(),
+  icon: z.string().nullable().default(null),
+  description: z.string().nullable().default(null),
+  popularity: z.number().default(0),
+  // A null or missing input_schema must not take the directory down — coerce
+  // it to an empty field set so the form renders an "add directly" connector.
+  input_schema: McpConnectorInputSchemaSchema.nullish().transform(
+    (v) => v ?? { fields: [] },
+  ),
+  mcp_template: z.unknown(),
+  is_custom: z.boolean().default(false),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const McpConnectorListSchema = z.array(McpConnectorSchema);
+
+export const EMPTY_MCP_CONNECTOR_LIST: McpConnector[] = [];

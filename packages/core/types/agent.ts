@@ -667,3 +667,61 @@ export interface RuntimeLocalSkillsResult {
 export interface RuntimeLocalSkillImportResult {
   skill: Skill;
 }
+
+/** One field in a connector's `input_schema`, rendered by the add-connector
+ *  form. `key` is the placeholder name substituted into `mcp_template`
+ *  (`{{key}}`); `type` drives the input control. */
+export interface McpConnectorInputField {
+  key: string;
+  label: string;
+  /** Input control hint. Unknown values fall back to a text input. */
+  type?: string;
+  required?: boolean;
+  placeholder?: string;
+  help?: string;
+}
+
+/** Declarative form spec for a connector. The directory form renders one
+ *  control per `fields` entry; an empty/missing `fields` array means the
+ *  connector needs no input and can be added directly. */
+export interface McpConnectorInputSchema {
+  fields?: McpConnectorInputField[];
+}
+
+/** A directory connector — either a global curated entry (`is_custom: false`,
+ *  `workspace_id: null`) or a workspace-authored one (`is_custom: true`).
+ *  `mcp_template` is the JSON fragment merged into an agent's
+ *  `mcp_config.mcpServers` after `{{placeholder}}` substitution. */
+export interface McpConnector {
+  id: string;
+  workspace_id: string | null;
+  slug: string;
+  name: string;
+  icon: string | null;
+  description: string | null;
+  popularity: number;
+  input_schema: McpConnectorInputSchema;
+  mcp_template: unknown;
+  is_custom: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateMcpConnectorRequest {
+  slug: string;
+  name: string;
+  icon?: string | null;
+  description?: string | null;
+  popularity?: number;
+  input_schema?: McpConnectorInputSchema;
+  mcp_template: unknown;
+}
+
+export interface UpdateMcpConnectorRequest {
+  name?: string;
+  icon?: string | null;
+  description?: string | null;
+  popularity?: number;
+  input_schema?: McpConnectorInputSchema;
+  mcp_template?: unknown;
+}
