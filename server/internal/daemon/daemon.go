@@ -779,6 +779,9 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
+		if entry.DisplayName != "" { // CEREBRO-PATCH(daemon-firtal-gateway-runtime-name): per-entry display name beats auto-generated name
+			displayName = entry.DisplayName
+		}
 		runtimes = append(runtimes, map[string]any{
 			"name":         displayName,
 			"type":         name,
