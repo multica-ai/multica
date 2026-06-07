@@ -1120,10 +1120,15 @@ func (q *Queries) CreateRetryTask(ctx context.Context, id pgtype.UUID) (AgentTas
 
 const expireStaleQueuedTasks = `-- name: ExpireStaleQueuedTasks :many
 WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => $1::double precision)
-    ORDER BY created_at ASC
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.status = 'queued'
+      AND atq.created_at < now() - make_interval(secs => $1::double precision)
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_runtime rt
+          WHERE rt.id = atq.runtime_id
+            AND rt.paused_at IS NOT NULL
+      )
+    ORDER BY atq.created_at ASC
     LIMIT $2::int
     FOR UPDATE SKIP LOCKED
 )
@@ -1136,6 +1141,11 @@ FROM victims v
 WHERE t.id = v.id
   AND t.status = 'queued'
   AND t.created_at < now() - make_interval(secs => $1::double precision)
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_runtime rt
+      WHERE rt.id = t.runtime_id
+        AND rt.paused_at IS NOT NULL
+  )
 RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.original_user_id, t.delegating_agent_id, t.source_task_id, t.delegation_source, t.wait_reason, t.title, t.model_override
 `
 
@@ -1144,7 +1154,11 @@ type ExpireStaleQueuedTasksParams struct {
 	MaxPerTick int32   `json:"max_per_tick"`
 }
 
-// Fails tasks that have been sitting in 'queued' for longer than the TTL.
+// Fails tasks that have been sitting in 'queued' for longer than the TTL,
+// except queued tasks on paused runtimes. Runtime pause is a deliberate hold
+// state: queued work must wait for unpause and then be claimed normally.
+// CEREBRO-PATCH(paused-runtime-queued-ttl): protect deliberately paused queues
+// from the generic queued-TTL cleanup while keeping offline backlog draining.
 // This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
 // new dispatch-time admission gate that refuses to enqueue when the runtime
 // is offline, we still need to drain the historical 87k+ doomed rows and

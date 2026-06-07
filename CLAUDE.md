@@ -22,6 +22,7 @@ The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the
 Authoritative, agent-facing reference docs that stay true to the live code. Read the relevant one before touching that area.
 
 - **`docs/agents/permission-system.md`** — what an agent is allowed and denied at runtime today, and by which mechanism. **Read this before touching anything that grants, denies, gates, or approves an agent action** (tool access, credentials, repo checkout, web fetch, sandbox, mentions, group/autopilot scope, the tool-policy chain). It separates what is enforced **live today** from what is **off by default** — do not assume "the tool-policy chain is off" means "agents are ungated." If you change behavior it describes, update the doc in the same PR.
+- **`docs/agents/runtime-pause-resume.md`** — how paused runtimes hold queued work, how unpause resumes suspended work, and how queued TTL must treat paused runtimes. **Read this before touching runtime pause/unpause, task queue TTL/sweepers, claim routing, retry, or resume behavior.**
 
 ## Project Context
 
