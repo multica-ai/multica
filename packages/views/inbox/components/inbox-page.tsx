@@ -1334,7 +1334,11 @@ export function InboxPage() {
       )
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     return relevant[0]?.details?.comment_id ?? undefined;
-  }, [selectedChannel, items]);
+    // items intentionally omitted: snapshot at channel-select time so the
+    // read-mark that fires immediately after doesn't clear initialCommentId
+    // before ChannelDetail's auto-open effect has a chance to run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChannel]);
   // CEREBRO-PATCH(inbox-mobile-detail-title): Mobile detail header shows the selected message/chat/channel title next to Back (JEH-1515).
   const selectedDetailTitle = selectedChannel
     ? selectedChannel.kind === "channel"
