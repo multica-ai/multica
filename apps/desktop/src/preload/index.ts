@@ -92,6 +92,11 @@ const desktopAPI = {
       ipcRenderer.removeListener("invite:open", handler);
     };
   },
+  /** Sync the current JWT to the main process so it can inject Authorization
+   *  headers into <img> and other non-fetch browser requests. */
+  setAuthToken: (token: string) => ipcRenderer.invoke("auth:set-token", token),
+  /** Clear the JWT from the main process on logout. */
+  clearAuthToken: () => ipcRenderer.invoke("auth:clear-token"),
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   /** Download a file by URL through Electron's native download system.

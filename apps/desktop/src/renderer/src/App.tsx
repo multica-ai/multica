@@ -93,11 +93,14 @@ function AppContent() {
   }, [qc]);
 
   // Sync token and start the daemon whenever the user logs in.
+  // Also push the token to the main process so that webRequest header injection
+  // covers <img> and other non-fetch browser requests to the API server.
   useEffect(() => {
     if (!user) return;
     const token = localStorage.getItem("multica_token");
     if (!token) return;
     const userId = user.id;
+    void window.desktopAPI.setAuthToken(token);
     (async () => {
       try {
         await window.daemonAPI.syncToken(token, userId);
@@ -282,6 +285,7 @@ async function handleDaemonLogout() {
   // Drop any post-onboarding welcome signal so user B logging in next
   // doesn't inherit user A's pending modal state.
   useWelcomeStore.getState().reset();
+  void window.desktopAPI.clearAuthToken();
   try {
     await window.daemonAPI.clearToken();
   } catch {

@@ -18,6 +18,11 @@ interface DesktopAPI {
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */
   onInviteOpen: (callback: (invitationId: string) => void) => () => void;
+  /** Sync the current JWT to the main process so it can inject Authorization
+   *  headers into <img> and other non-fetch browser requests. */
+  setAuthToken: (token: string) => Promise<void>;
+  /** Clear the JWT from the main process on logout. */
+  clearAuthToken: () => Promise<void>;
   /** Open a URL in the default browser. */
   openExternal: (url: string) => Promise<void>;
   /** Download a file by URL through Electron's native download system.

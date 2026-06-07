@@ -12,6 +12,7 @@ import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
+import { applyAuthRequestHeaders } from "./auth-request-headers";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
   createElectronReloadPrompt,
@@ -66,6 +67,7 @@ let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
 };
+let currentAuthToken: string | null = null;
 
 // --- Deep link helpers ---------------------------------------------------
 
@@ -166,13 +168,24 @@ function createWindow(): void {
     },
   });
 
-  // Strip Origin header from WebSocket upgrade requests so the server's
-  // origin whitelist doesn't reject connections from localhost dev origins.
+  const apiBaseUrl = runtimeConfigResult.ok ? runtimeConfigResult.config.apiUrl : null;
+
+  // Combined request header handler:
+  // 1. Strip Origin from WebSocket upgrades (prevents server origin whitelist rejection).
+  // 2. Inject Authorization for all requests to the API server so that <img> tags,
+  //    iframes, and other non-fetch requests include the bearer token. Without this,
+  //    authenticated static file redirects return 401 and images fail to display.
   mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ["wss://*/*", "ws://*/*"] },
+    { urls: ["wss://*/*", "ws://*/*", "https://*/*", "http://*/*"] },
     (details, callback) => {
-      delete details.requestHeaders["Origin"];
-      callback({ requestHeaders: details.requestHeaders });
+      callback({
+        requestHeaders: applyAuthRequestHeaders(
+          details.requestHeaders,
+          details.url,
+          currentAuthToken,
+          apiBaseUrl,
+        ),
+      });
     },
   );
 
@@ -371,6 +384,15 @@ if (!gotTheLock) {
         return;
       }
       downloadURLSafely(mainWindow, url);
+    });
+
+    // IPC: keep currentAuthToken in sync so the webRequest header injector can
+    // attach Authorization to <img> and other non-fetch browser requests.
+    ipcMain.handle("auth:set-token", (_event, token: string) => {
+      currentAuthToken = token;
+    });
+    ipcMain.handle("auth:clear-token", () => {
+      currentAuthToken = null;
     });
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
