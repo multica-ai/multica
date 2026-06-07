@@ -42,3 +42,9 @@ describe("resolvePostAuthDestination", () => {
     expect(resolvePostAuthDestination([], true)).toBe(paths.newWorkspace());
   });
 });
+
+describe("paths.workspace", () => {
+  it("root points at the bare workspace route", () => {
+    expect(paths.workspace("acme").root()).toBe("/acme");
+  });
+});

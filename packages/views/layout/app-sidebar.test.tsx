@@ -1,9 +1,10 @@
+import * as React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, featureFlags, modalOpen, pins, sidebarState } = vi.hoisted(() => ({
+const { detail, deletePin, featureFlags, modalOpen, pins, sidebarState, workspaces } = vi.hoisted(() => ({
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
   featureFlags: { current: false },
@@ -22,6 +23,12 @@ const { detail, deletePin, featureFlags, modalOpen, pins, sidebarState } = vi.ho
     ],
   },
   sidebarState: { isMobile: false, setOpenMobile: vi.fn() },
+  workspaces: {
+    current: [
+      { id: "ws-1", name: "Acme", slug: "acme", avatar_url: null },
+      { id: "ws-2", name: "Beta", slug: "beta", avatar_url: null },
+    ],
+  },
 }));
 
 vi.mock("@dnd-kit/core", () => ({
@@ -80,9 +87,15 @@ vi.mock("../i18n", () => ({
 }));
 vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuContent: () => null,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuItem: ({
+    children,
+    render,
+  }: {
+    children: React.ReactNode;
+    render?: React.ReactElement<{ children?: React.ReactNode }>;
+  }) => (render ? React.cloneElement(render, undefined, children) : <>{children}</>),
   DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuSeparator: () => null,
   DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
@@ -112,7 +125,7 @@ vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "user-1" } }),
 }));
 vi.mock("@multica/core/paths", () => ({
-  paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
+  paths: { workspace: (slug: string) => ({ root: () => `/${slug}`, issues: () => `/${slug}/issues` }) },
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
@@ -172,6 +185,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
+    if (queryKey[0] === "workspaces") return { data: workspaces.current };
     return { data: [] };
   },
   useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: vi.fn() }),
@@ -185,6 +199,10 @@ describe("PinRow", () => {
     sidebarState.isMobile = false;
     sidebarState.setOpenMobile.mockReset();
     detail.current = { isPending: false, isError: false, data: null, error: null };
+    workspaces.current = [
+      { id: "ws-1", name: "Acme", slug: "acme", avatar_url: null },
+      { id: "ws-2", name: "Beta", slug: "beta", avatar_url: null },
+    ];
   });
 
   it("unpins missing details", async () => {
@@ -216,5 +234,14 @@ describe("PinRow", () => {
 
     expect(sidebarState.setOpenMobile).toHaveBeenCalledWith(false);
     expect(modalOpen).toHaveBeenCalledWith("new-message");
+  });
+
+  it("links workspace switcher entries to the workspace root", () => {
+    render(<AppSidebar />);
+
+    expect(screen.getByRole("link", { name: /Beta/ })).toHaveAttribute(
+      "href",
+      "/beta",
+    );
   });
 });
