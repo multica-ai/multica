@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { useT } from "../../../i18n";
 import { ConnectorDirectory } from "../mcp/connector-directory";
 import { ConnectorConfigForm } from "../mcp/connector-config-form";
+import { CustomConnectorEntry } from "../mcp/custom-connector-form";
 
 // `null` and the empty string are the two ways the user can mean "no
 // config" — the server stores either as a NULL column and the daemon
@@ -169,6 +170,7 @@ export function McpConfigTab({
           setSelectedConnector(connector);
           setDirectoryOpen(false);
         }}
+        customAction={<CustomConnectorEntry wsId={wsId} />}
       />
 
       {selectedConnector && (
