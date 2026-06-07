@@ -1,0 +1,52 @@
+# --- Hatchet worker image ---
+# A small, long-running container that registers with Hatchet (runs.firtal.com)
+# and hosts cron workflows for cerebro-owned background jobs.
+#
+# Today: one cron — FIR-43 daily USD→{DKK,EUR} reference-rate refresh feeding
+# cerebro_exchange_rates (FIR-40). Future cerebro crons land in the same image
+# as additional NewStandaloneTask registrations in cmd/cerebro_hatchet_worker.
+#
+# Deploy: see docs/cerebro-hatchet-worker.md.
+
+# --- Build stage ---
+FROM golang:1.26-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /src
+
+# Dependencies. The cerebro fork's server/go.mod has replace() directives
+# pointing at ../packages/cerebro-persona-sdk and ../packages/cerebro-pdf-text,
+# so those local modules must exist before `go mod download` runs.
+COPY server/go.mod server/go.sum ./server/
+COPY packages/cerebro-persona-sdk ./packages/cerebro-persona-sdk
+COPY packages/cerebro-pdf-text ./packages/cerebro-pdf-text
+RUN cd server && go mod download
+
+COPY server/ ./server/
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+RUN cd server && CGO_ENABLED=0 go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o bin/cerebro_hatchet_worker ./cmd/cerebro_hatchet_worker
+
+# --- Runtime stage ---
+FROM alpine:3.21
+
+# ca-certificates: Frankfurter HTTPS + Hatchet gRPC TLS.
+# tzdata: cron expressions evaluated in UTC; tzdata avoids a missing-zoneinfo
+# warning on first start.
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /app
+
+COPY --from=builder /src/server/bin/cerebro_hatchet_worker /app/cerebro_hatchet_worker
+
+# Run unprivileged. No volumes, no ports exposed — the worker is a pure
+# outbound-only Hatchet client.
+RUN addgroup -S app && adduser -S -G app app \
+    && chown -R app:app /app
+USER app
+
+ENTRYPOINT ["/app/cerebro_hatchet_worker"]
