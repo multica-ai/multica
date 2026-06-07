@@ -152,25 +152,37 @@ func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *side
 }
 
 // resolveSkillsDir returns the directory where skills should be written
-// based on the agent provider. manifest, when non-nil, is populated with
-// every intermediate directory we had to MkdirAll so CleanupSidecars can
-// rmdir them on local_directory teardown.
+// based on the agent provider, creating it. manifest, when non-nil, is
+// populated with every intermediate directory we had to MkdirAll so
+// CleanupSidecars can rmdir them on local_directory teardown.
 func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (string, error) {
-	var skillsDir string
+	skillsDir := skillsDirPath(workDir, provider)
+	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
+		return "", err
+	}
+	return skillsDir, nil
+}
+
+// skillsDirPath returns the provider-native skills parent directory under
+// workDir WITHOUT creating it or recording anything. resolveSkillsDir wraps
+// this with the MkdirAll/manifest bookkeeping; the reuse-path skill rollback
+// (removeReusedManagedSkillDirs) needs the bare path with no side effects so
+// it can match the managed skill roots the prior manifest recorded.
+func skillsDirPath(workDir, provider string) string {
 	switch provider {
 	case "claude":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.
-		skillsDir = filepath.Join(workDir, ".claude", "skills")
+		return filepath.Join(workDir, ".claude", "skills")
 	case "codebuddy":
 		// CodeBuddy mirrors Claude Code's project-level skill discovery
 		// from .codebuddy/skills/ in the workdir.
-		skillsDir = filepath.Join(workDir, ".codebuddy", "skills")
+		return filepath.Join(workDir, ".codebuddy", "skills")
 	case "copilot":
 		// GitHub Copilot CLI natively discovers project-level skills from
 		// .github/skills/<name>/SKILL.md (takes precedence over user-level
 		// skills in ~/.copilot/skills/).
 		// See: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
-		skillsDir = filepath.Join(workDir, ".github", "skills")
+		return filepath.Join(workDir, ".github", "skills")
 	case "opencode":
 		// OpenCode natively discovers project skills from .opencode/skills/ in
 		// the workdir. ConfigPaths.directories() walks up from the discovery
@@ -180,7 +192,7 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 		// `opencode run --dir <workDir>` + PWD override in opencodeBackend —
 		// without those, OpenCode walks from the daemon's inherited PWD and
 		// misses .opencode/skills + AGENTS.md entirely (MUL-2416).
-		skillsDir = filepath.Join(workDir, ".opencode", "skills")
+		return filepath.Join(workDir, ".opencode", "skills")
 	case "openclaw":
 		// OpenClaw's native skill scanner reads <workspaceDir>/skills/. The
 		// daemon pairs this with a per-task synthesized openclaw-config.json
@@ -188,39 +200,35 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 		// workDir, so writing here is what the CLI actually scans. Before
 		// MUL-2219 this used to fall back to .agent_context/skills/, which
 		// no openclaw scan path ever inspected.
-		skillsDir = filepath.Join(workDir, "skills")
+		return filepath.Join(workDir, "skills")
 	case "pi":
 		// Pi natively discovers skills from .pi/skills/ in the workdir.
-		skillsDir = filepath.Join(workDir, ".pi", "skills")
+		return filepath.Join(workDir, ".pi", "skills")
 	case "cursor":
 		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
-		skillsDir = filepath.Join(workDir, ".cursor", "skills")
+		return filepath.Join(workDir, ".cursor", "skills")
 	case "kimi":
 		// Kimi Code CLI auto-discovers project-level skills from .kimi/skills/
 		// in the workdir. See https://moonshotai.github.io/kimi-cli/en/customization/skills.html
-		skillsDir = filepath.Join(workDir, ".kimi", "skills")
+		return filepath.Join(workDir, ".kimi", "skills")
 	case "kiro":
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
-		// in the workdir. See https://kiro.dev/docs/cli/acp/
-		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+		// in the workdir.
+		return filepath.Join(workDir, ".kiro", "skills")
 	case "DeepSeek-TUI":
 		// DeepSeek-TUI auto-discovers project-level skills from .deepseek/skills/
 		// in the workdir.
-		skillsDir = filepath.Join(workDir, ".deepseek", "skills")
+		return filepath.Join(workDir, ".deepseek", "skills")
 	case "antigravity":
 		// Antigravity (`agy`) auto-discovers workspace-level skills from
 		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's
 		// workspace skill layout; see https://antigravity.google/docs/gcli-migration
 		// under "Workspace skills".
-		skillsDir = filepath.Join(workDir, ".agents", "skills")
+		return filepath.Join(workDir, ".agents", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
-		skillsDir = filepath.Join(workDir, ".agent_context", "skills")
+		return filepath.Join(workDir, ".agent_context", "skills")
 	}
-	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
-		return "", err
-	}
-	return skillsDir, nil
 }
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)

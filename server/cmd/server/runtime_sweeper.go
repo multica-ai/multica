@@ -36,8 +36,12 @@ const (
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this.
-	// The default agent timeout is 2h, so 2.5h gives a generous buffer.
+	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
+	// coarse server-side backstop keyed on started_at (it does NOT look at task
+	// activity) — mainly for runs whose daemon died without reporting. The
+	// daemon itself decides stuck-vs-long-running by activity (idle/tool
+	// watchdog), so this only needs to sit generously above any realistic single
+	// run rather than track a per-run wall-clock cap (MUL-3064).
 	runningTimeoutSeconds = 9000.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
@@ -46,9 +50,8 @@ const (
 	// tasks already on the queue when a runtime drops off (or that lost
 	// the race against a runtime that went offline mid-tick) need a
 	// time-bounded exit. 2 hours is conservatively above any reasonable
-	// "queued behind a long-running task" window for an online runtime
-	// (default agent timeout is 2h, sweeper interval is 30s) so we don't
-	// expire legitimately-pending work, while still draining the historical
+	// "queued behind a long-running task" window for an online runtime, so we
+	// don't expire legitimately-pending work, while still draining the historical
 	// 87k autopilot backlog within ~24h once enabled.
 	queuedTTLSeconds = 2 * 3600.0
 	// queuedExpireBatchSize caps how many queued rows a single sweeper tick

@@ -261,6 +261,7 @@ type AgentTaskResponse struct {
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
 	RelativeWorkDir         string               `json:"relative_work_dir,omitempty"`
 	TriggerCommentID        *string              `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerThreadID         string               `json:"trigger_thread_id,omitempty"`         // root comment ID for the triggering thread
 	TriggerCommentContent   string               `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerSummary          *string              `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType       string               `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment

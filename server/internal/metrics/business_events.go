@@ -239,13 +239,18 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 // `m = nil` (no metrics) safely; both sides are best-effort and never block
 // the request path.
 //
+// Operational / execution-lifecycle events flagged by analytics.IsMetricsOnly
+// (runtime_*, autopilot_run_*) still increment their Prometheus counter but are
+// NOT shipped to PostHog — Grafana already covers them and their high volume is
+// not worth the per-event PostHog ingestion cost. PostHog is reserved for
+// user/product-behaviour events.
+//
 // This is the canonical way to emit any of the funnel / community / commercial
 // PostHog events from server code. Direct analytics.Client.Capture(...) with
 // an event constructed from analytics.* is rejected by the lint test in
-// business_pairing_test.go — see that test for the allow-list of events whose
-// Prometheus side is handled by typed BusinessMetrics methods (multica_agent_task_*).
+// business_pairing_test.go.
 func RecordEvent(client analytics.Client, m *BusinessMetrics, ev analytics.Event) {
-	if client != nil {
+	if client != nil && !analytics.IsMetricsOnly(ev.Name) {
 		client.Capture(ev)
 	}
 	if m != nil {
@@ -344,11 +349,11 @@ func (m *BusinessMetrics) IncForEvent(ev analytics.Event) {
 	case analytics.EventContactSalesSubmitted:
 		m.events.contactSalesSubmitted.WithLabelValues(NormalizeContactSalesSource(stringProp(ev.Properties, "form_source"))).Inc()
 	default:
-		// AgentTask* events are intentionally not dispatched here — their
-		// Prometheus side is handled by typed BusinessMetrics.RecordTask*
-		// methods that take queue/run/total seconds the analytics event
-		// does not carry. The lint test allow-lists those names.
-		// Anything else is a missing case and the lint test will fail CI.
+		// agent_task_* lifecycle telemetry is recorded straight to Prometheus
+		// via the typed BusinessMetrics.RecordTask* methods (they take
+		// queue/run/total seconds that an analytics.Event does not carry), so
+		// there is no analytics.Event to dispatch here. Anything else reaching
+		// this default is a missing case and the lint test will fail CI.
 	}
 }
 

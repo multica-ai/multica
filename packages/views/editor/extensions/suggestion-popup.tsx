@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { computePosition, flip, offset, shift } from "@floating-ui/dom";
+import { autoUpdate, computePosition, flip, offset, shift, size } from "@floating-ui/dom";
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
@@ -36,10 +36,13 @@ export function createSuggestionPopupRender<
     let renderer: ReactRenderer<TRef> | null = null;
     let popup: HTMLDivElement | null = null;
     let removeOutsideListeners: (() => void) | null = null;
+    let removeAutoUpdate: (() => void) | null = null;
 
     const cleanup = () => {
       removeOutsideListeners?.();
       removeOutsideListeners = null;
+      removeAutoUpdate?.();
+      removeAutoUpdate = null;
       renderer?.destroy();
       renderer = null;
       popup?.remove();
@@ -99,11 +102,40 @@ export function createSuggestionPopupRender<
       computePosition(virtualEl, el, {
         placement: "bottom-start",
         strategy: "fixed",
-        middleware: [offset(4), flip(), shift({ padding: 8 })],
-      }).then(({ x, y }) => {
+        middleware: [
+          offset(6),
+          flip({ padding: 8 }),
+          shift({ padding: 8 }),
+          size({
+            padding: 8,
+            apply({ availableHeight }) {
+              el.style.maxHeight = `${Math.max(120, availableHeight)}px`;
+            },
+          }),
+        ],
+      }).then(({ x, y, placement }) => {
         if (popup !== el) return;
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
+        el.dataset.side = placement.startsWith("top") ? "top" : "bottom";
+      });
+    };
+
+    const trackPosition = (
+      el: HTMLDivElement,
+      clientRect: (() => DOMRect | null) | null | undefined,
+    ) => {
+      removeAutoUpdate?.();
+      removeAutoUpdate = null;
+      if (!clientRect) return;
+      const virtualEl = {
+        getBoundingClientRect: () => clientRect() ?? new DOMRect(),
+      };
+      removeAutoUpdate = autoUpdate(virtualEl, el, () => updatePosition(el, clientRect), {
+        ancestorResize: true,
+        ancestorScroll: true,
+        elementResize: true,
+        layoutShift: true,
       });
     };
 
@@ -122,12 +154,16 @@ export function createSuggestionPopupRender<
         doc.body.appendChild(popup);
 
         installOutsideListeners(props);
+        trackPosition(popup, props.clientRect);
         updatePosition(popup, props.clientRect);
       },
 
       onUpdate: (props: SuggestionProps<TItem, TSelected>) => {
         renderer?.updateProps(getProps(props));
-        if (popup) updatePosition(popup, props.clientRect);
+        if (popup) {
+          trackPosition(popup, props.clientRect);
+          updatePosition(popup, props.clientRect);
+        }
       },
 
       onKeyDown: (props: SuggestionKeyDownProps) => {

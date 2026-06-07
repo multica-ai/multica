@@ -8,15 +8,6 @@ import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -30,6 +21,12 @@ import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { ActorAvatar } from "../../common/actor-avatar";
+import {
+  PickerEmpty,
+  PickerItem,
+  PickerSection,
+  PropertyPicker,
+} from "../../issues/components/pickers/property-picker";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import {
@@ -48,13 +45,8 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
-import {
-  ContextAnchorButton,
-  ContextAnchorCard,
-  buildAnchorMarkdown,
-  useRouteAnchorCandidate,
-} from "./context-anchor";
 import { ChatResizeHandles } from "./chat-resize-handles";
+import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
@@ -214,11 +206,6 @@ export function ChatWindow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
   }, [isOpen, activeSessionId, currentHasUnread]);
 
-  // Focus-mode anchor: derived from route each render. Prepended to the
-  // outgoing message when focus is on; the anchor persists across sends
-  // (focus mode tracks the user's page, not a per-message attachment).
-  const { candidate: anchorCandidate } = useRouteAnchorCandidate(wsId);
-
   const { uploadWithToast } = useFileUpload(api);
 
   // Lazy-creates a chat_session the first time the user needs an id —
@@ -295,10 +282,7 @@ export function ChatWindow() {
         return;
       }
 
-      const focusOn = useChatStore.getState().focusMode;
-      const finalContent = focusOn && anchorCandidate
-        ? `${buildAnchorMarkdown(anchorCandidate)}\n\n${content}`
-        : content;
+      const finalContent = content;
 
       const isNewSession = !activeSessionId;
 
@@ -307,7 +291,6 @@ export function ChatWindow() {
         isNewSession,
         agentId: activeAgent.id,
         contentLength: finalContent.length,
-        hasAnchor: focusOn && !!anchorCandidate,
         attachmentCount: attachmentIds?.length ?? 0,
       });
 
@@ -377,7 +360,6 @@ export function ChatWindow() {
     [
       activeSessionId,
       activeAgent,
-      anchorCandidate,
       ensureSession,
       qc,
       setActiveSession,
@@ -479,6 +461,8 @@ export function ChatWindow() {
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
   };
+
+  const contextItems = useChatContextItems(wsId);
 
   return (
     <motion.div
@@ -589,8 +573,8 @@ export function ChatWindow() {
       {/* Status banner above the input — single mutually-exclusive slot.
        *  Priority: no-agent > offline / unstable. Agent presence is the
        *  hard prerequisite (you can't send anything without one), so it
-       *  always wins over a presence hint. ContextAnchorCard stays in
-       *  topSlot because that's per-message context, not session state.
+       *  always wins over a presence hint. Recent issue/project navigation
+       *  lives in the input action row; it is not message/session state.
        *
        *  We key off `noAgent` (the resolved-empty state) rather than
        *  `!activeAgent`, so the loading window between mount and the
@@ -611,7 +595,6 @@ export function ChatWindow() {
         disabled={isSessionArchived}
         noAgent={noAgent}
         agentName={activeAgent?.name}
-        topSlot={<ContextAnchorCard />}
         leftAdornment={
           <AgentDropdown
             agents={availableAgents}
@@ -620,7 +603,7 @@ export function ChatWindow() {
             onSelect={handleSelectAgent}
           />
         }
-        rightAdornment={<ContextAnchorButton />}
+        contextItems={contextItems}
       />
     </motion.div>
   );
@@ -631,7 +614,7 @@ export function ChatWindow() {
  * different agent = switch agent + start a fresh chat (session=null).
  * The current agent is marked with a check and not clickable.
  */
-function AgentDropdown({
+export function AgentDropdown({
   agents,
   activeAgent,
   userId,
@@ -644,13 +627,9 @@ function AgentDropdown({
 }) {
   const { t } = useT("chat");
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (open) inputRef.current?.focus();
-  }, [open]);
-
+  const [filter, setFilter] = useState("");
+  // Split into the user's own agents and everyone else so the menu groups
+  // them — matches the old AgentSelector layout.
   const { mine, others } = useMemo(() => {
     const mine: Agent[] = [];
     const others: Agent[] = [];
@@ -661,95 +640,86 @@ function AgentDropdown({
     return { mine, others };
   }, [agents, userId]);
 
-  const filteredMine = useMemo(() => {
-    if (!query) return mine;
-    const q = query.trim().toLowerCase();
-    return mine.filter(
-      (a) => a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q),
-    );
-  }, [mine, query]);
+  const query = filter.trim().toLowerCase();
+  const matches = (name: string) =>
+    !query || name.toLowerCase().includes(query) || matchesPinyin(name, query);
+  const filteredMine = mine.filter((agent) => matches(agent.name));
+  const filteredOthers = others.filter((agent) => matches(agent.name));
 
-  const filteredOthers = useMemo(() => {
-    if (!query) return others;
-    const q = query.trim().toLowerCase();
-    return others.filter(
-      (a) => a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q),
-    );
-  }, [others, query]);
-
-  const hasResults = filteredMine.length > 0 || filteredOthers.length > 0;
+  const handlePick = (agent: Agent) => {
+    onSelect(agent);
+    setOpen(false);
+  };
 
   if (!activeAgent) {
     return <span className="text-xs text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
   }
 
   return (
-    <DropdownMenu open={open} onOpenChange={(v) => { setOpen(v); if (!v) setQuery(""); }}>
-      <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
-        <ActorAvatar
-          actorType="agent"
-          actorId={activeAgent.id}
-          size={24}
-          enableHoverCard
-          showStatusDot
+    <PropertyPicker
+      open={open}
+      onOpenChange={setOpen}
+      width="w-64"
+      align="start"
+      side="top"
+      searchable
+      searchPlaceholder={t(($) => $.window.agent_filter_placeholder)}
+      onSearchChange={setFilter}
+      triggerRender={
+        <button
+          type="button"
+          className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent"
         />
-        <span className="text-xs font-medium max-w-28 truncate">{activeAgent.name}</span>
-        <ChevronDown className="size-3 text-muted-foreground shrink-0" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        side="top"
-        className="max-h-80 w-auto max-w-64"
-      >
-        <div className="px-2 py-1.5 border-b">
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key !== "Escape") e.stopPropagation(); }}
-            placeholder={t(($) => $.window.search_placeholder)}
-            className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+      }
+      trigger={
+        <>
+          <ActorAvatar
+            actorType="agent"
+            actorId={activeAgent.id}
+            size={24}
+            enableHoverCard
+            showStatusDot
           />
-        </div>
-        {filteredMine.length > 0 && (
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>{t(($) => $.window.my_agents)}</DropdownMenuLabel>
-            {filteredMine.map((agent) => (
-              <AgentMenuItem
-                key={agent.id}
-                agent={agent}
-                isCurrent={agent.id === activeAgent.id}
-                onSelect={onSelect}
-              />
-            ))}
-          </DropdownMenuGroup>
-        )}
-        {filteredMine.length > 0 && filteredOthers.length > 0 && <DropdownMenuSeparator />}
-        {filteredOthers.length > 0 && (
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>{t(($) => $.window.others)}</DropdownMenuLabel>
-            {filteredOthers.map((agent) => (
-              <AgentMenuItem
-                key={agent.id}
-                agent={agent}
-                isCurrent={agent.id === activeAgent.id}
-                onSelect={onSelect}
-              />
-            ))}
-          </DropdownMenuGroup>
-        )}
-        {!hasResults && (
-          <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-            {t(($) => $.window.no_match)}
-          </div>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <span className="text-xs font-medium max-w-28 truncate">{activeAgent.name}</span>
+          <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+        </>
+      }
+    >
+      {filteredMine.length === 0 && filteredOthers.length === 0 ? (
+        <PickerEmpty />
+      ) : (
+        <>
+          {filteredMine.length > 0 && (
+            <PickerSection label={t(($) => $.window.my_agents)}>
+              {filteredMine.map((agent) => (
+                <AgentPickerItem
+                  key={agent.id}
+                  agent={agent}
+                  isCurrent={agent.id === activeAgent.id}
+                  onSelect={handlePick}
+                />
+              ))}
+            </PickerSection>
+          )}
+          {filteredOthers.length > 0 && (
+            <PickerSection label={t(($) => $.window.others)}>
+              {filteredOthers.map((agent) => (
+                <AgentPickerItem
+                  key={agent.id}
+                  agent={agent}
+                  isCurrent={agent.id === activeAgent.id}
+                  onSelect={handlePick}
+                />
+              ))}
+            </PickerSection>
+          )}
+        </>
+      )}
+    </PropertyPicker>
   );
 }
 
-function AgentMenuItem({
+function AgentPickerItem({
   agent,
   isCurrent,
   onSelect,
@@ -759,9 +729,9 @@ function AgentMenuItem({
   onSelect: (agent: Agent) => void;
 }) {
   return (
-    <DropdownMenuItem
+    <PickerItem
+      selected={isCurrent}
       onClick={() => onSelect(agent)}
-      className="flex min-w-0 items-center gap-2"
     >
       <ActorAvatar
         actorType="agent"
@@ -771,8 +741,7 @@ function AgentMenuItem({
         showStatusDot
       />
       <span className="truncate flex-1">{agent.name}</span>
-      {isCurrent && <Check className="size-3.5 text-muted-foreground shrink-0" />}
-    </DropdownMenuItem>
+    </PickerItem>
   );
 }
 

@@ -4,8 +4,10 @@ package metrics_test
 // server/internal/analytics/events.go has a paired Prometheus counter
 // reachable through metrics.RecordEvent — and that every
 // h.Analytics.Capture(analytics.<Helper>(...)) call site goes through
-// metrics.RecordEvent (no naked Capture allowed except for the AgentTask*
-// allow-list whose Prometheus side is handled by typed PR2 methods).
+// metrics.RecordEvent (no naked Capture allowed). The agent task lifecycle is
+// no longer an analytics.Event — it is recorded straight to Prometheus via the
+// typed BusinessMetrics.RecordTask* methods — so there is no longer an
+// AgentTask* allow-list here.
 
 import (
 	"go/ast"
@@ -21,22 +23,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/metrics"
 )
 
-// taskMetricEvents are emitted via the typed PR2 methods (RecordTaskEnqueued,
-// RecordTaskDispatched, RecordTaskStarted, RecordTaskTerminal, RecordTaskFailed)
-// instead of the generic RecordEvent dispatcher because their Prometheus side
-// needs queue/run/total seconds that the analytics event does not carry.
-//
-// These names are still required to be paired — the lint test verifies they
-// have a typed RecordTask* hit in service/task.go.
-var taskMetricEvents = map[string]string{
-	analytics.EventAgentTaskQueued:     "RecordTaskEnqueued",
-	analytics.EventAgentTaskDispatched: "RecordTaskDispatched",
-	analytics.EventAgentTaskStarted:    "RecordTaskStarted",
-	analytics.EventAgentTaskCompleted:  "RecordTaskTerminal",
-	analytics.EventAgentTaskFailed:     "RecordTaskFailed",
-	analytics.EventAgentTaskCancelled:  "RecordTaskTerminal",
-}
-
 // frontendOnlyEvents are declared in events.go but emitted from the frontend,
 // not from server code. They still need a Prometheus counter (so a future
 // server-side emission point lights up the same label set) but the server
@@ -46,10 +32,13 @@ var frontendOnlyEvents = map[string]bool{
 }
 
 // TestEveryAnalyticsEventHasPrometheusCounter asserts that every Event*
-// constant declared in analytics/events.go either:
-//   - is dispatched by metrics.IncForEvent (verified by sending a synthetic
-//     event through RecordEvent and observing a counter delta), or
-//   - is in the typed taskMetricEvents allow-list.
+// constant declared in analytics/events.go is dispatched by
+// metrics.IncForEvent (verified by sending a synthetic event through
+// RecordEvent and observing a counter delta).
+//
+// Note: agent_task_* lifecycle telemetry is Prometheus-only via the typed
+// BusinessMetrics.RecordTask* methods and is no longer declared as an
+// analytics.Event, so there are no agent_task constants to exempt here.
 func TestEveryAnalyticsEventHasPrometheusCounter(t *testing.T) {
 	t.Parallel()
 
@@ -57,9 +46,6 @@ func TestEveryAnalyticsEventHasPrometheusCounter(t *testing.T) {
 
 	m := metrics.NewBusinessMetrics()
 	for name := range declared {
-		if _, allowed := taskMetricEvents[name]; allowed {
-			continue
-		}
 		// Build a minimal event with the required label properties that the
 		// dispatcher reads. Since IncForEvent reads via stringProp helpers,
 		// a nil Properties map is acceptable for events with empty label
@@ -78,11 +64,10 @@ func TestEveryAnalyticsEventHasPrometheusCounter(t *testing.T) {
 
 // TestNoNakedAnalyticsCaptureInHandlersOrServices walks every Go file under
 // server/internal/handler and server/internal/service and asserts that every
-// `<x>.Analytics.Capture(analytics.<Helper>(...))` call has been migrated to
-// metrics.RecordEvent. The only exception is the body of
-// `service/task.go`'s captureTaskEvent function — a function-granular
-// allow-list, not a whole-file one, so any new naked Capture added to the
-// same file fails CI.
+// `<x>.Analytics.Capture(analytics.<Helper>(...))` call goes through
+// metrics.RecordEvent. There are no exceptions: every server-side PostHog
+// event must flow through RecordEvent so the Prometheus and PostHog sides
+// cannot drift.
 func TestNoNakedAnalyticsCaptureInHandlersOrServices(t *testing.T) {
 	t.Parallel()
 
@@ -93,13 +78,10 @@ func TestNoNakedAnalyticsCaptureInHandlersOrServices(t *testing.T) {
 	}
 	// allowedFunctions is keyed by absolute file path, valued by the set of
 	// function names whose bodies are allowed to call Analytics.Capture
-	// directly. Granularity is per-function, not per-file: anything else
-	// in the same file still trips the check.
-	allowedFunctions := map[string]map[string]struct{}{
-		filepath.Join(repoRoot(t), "internal", "service", "task.go"): {
-			"captureTaskEvent": {},
-		},
-	}
+	// directly. Granularity is per-function, not per-file. Currently empty —
+	// no server code is permitted to call Analytics.Capture outside
+	// metrics.RecordEvent.
+	allowedFunctions := map[string]map[string]struct{}{}
 
 	var offenders []string
 	fset := token.NewFileSet()

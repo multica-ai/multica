@@ -18,7 +18,8 @@
     },
     "list_dropdown": {
       "bullet_list": "箇条書きリスト",
-      "ordered_list": "番号付きリスト"
+      "ordered_list": "番号付きリスト",
+      "task_list": "タスクリスト"
     },
     "sub_issue": {
       "tooltip": "選択範囲からサブイシューを作成",
@@ -56,7 +57,10 @@
     "group_issues": "イシュー",
     "all_members": "すべてのメンバー",
     "searching": "検索中...",
-    "no_results": "結果なし"
+    "no_results": "結果なし",
+    "group_current": "現在のページ",
+    "group_recent": "最近見た項目",
+    "group_search": "検索結果"
   },
   "code_block": {
     "copy_code": "コードをコピー",

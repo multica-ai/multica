@@ -7,8 +7,8 @@
   "input": {
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
     "placeholder_archived": "このセッションはアーカイブされています",
-    "placeholder_named": "{{name}} に指示してください…",
-    "placeholder_default": "やってほしいことを入力してください…",
+    "placeholder_named": "{{name}} にメッセージ…",
+    "placeholder_default": "メッセージを入力…",
     "send_tooltip": "送信",
     "stop_tooltip": "停止"
   },
@@ -74,7 +74,8 @@
     "my_agents": "マイエージェント",
     "others": "その他",
     "no_agents": "エージェントなし",
-    "history_group": "チャット履歴"
+    "history_group": "チャット履歴",
+    "agent_filter_placeholder": "エージェントを検索..."
   },
   "empty_state": {
     "first_time_title": "エージェントとチャット",
@@ -90,17 +91,6 @@
     "list_open": "オープンなタスクを優先度順にまとめて",
     "summarize_today": "今日やったことを要約して",
     "plan_next": "次に取り組むことを計画して"
-  },
-  "context_anchor": {
-    "tooltip_disabled": "このページに Multica へ共有できる内容はありません",
-    "tooltip_off": "Multica に現在表示中の内容を知らせる",
-    "tooltip_on_issue": "Multica は {{label}} を表示中だと把握しています · クリックでオフ",
-    "tooltip_on_project": "Multica はプロジェクト \"{{label}}\" を表示中だと把握しています · クリックでオフ",
-    "card_tooltip_issue_with_subtitle": "Multica は {{label}} を表示中だと把握しています — {{subtitle}}",
-    "card_tooltip_issue": "Multica は {{label}} を表示中だと把握しています",
-    "card_tooltip_project": "Multica はプロジェクト \"{{label}}\" を表示中だと把握しています",
-    "aria_stop": "現在のページの共有を停止",
-    "aria_start": "現在のページを Multica に共有"
   },
   "no_agent_banner": "チャットを始めるにはエージェントが必要です。",
   "offline_banner": {

@@ -13,12 +13,6 @@ const (
 	EventIssueExecuted                 = "issue_executed"
 	EventIssueCreated                  = "issue_created"
 	EventChatMessageSent               = "chat_message_sent"
-	EventAgentTaskQueued               = "agent_task_queued"
-	EventAgentTaskDispatched           = "agent_task_dispatched"
-	EventAgentTaskStarted              = "agent_task_started"
-	EventAgentTaskCompleted            = "agent_task_completed"
-	EventAgentTaskFailed               = "agent_task_failed"
-	EventAgentTaskCancelled            = "agent_task_cancelled"
 	EventAutopilotRunStarted           = "autopilot_run_started"
 	EventAutopilotRunCompleted         = "autopilot_run_completed"
 	EventAutopilotRunFailed            = "autopilot_run_failed"
@@ -36,6 +30,35 @@ const (
 )
 
 const EventSchemaVersion = 2
+
+// metricsOnlyEvents are operational / execution-lifecycle events that are
+// recorded to Prometheus (via metrics.IncForEvent, for Grafana) but are
+// deliberately NOT shipped to PostHog. They are high-volume runtime/autopilot
+// telemetry whose per-event PostHog ingestion cost is not justified — Grafana
+// already carries the equivalent counters. metrics.RecordEvent consults this
+// set and skips the PostHog Capture for these names while still incrementing
+// the counter. PostHog is reserved for user/product-behaviour events.
+//
+// Note: agent_task_* lifecycle events are also Prometheus-only, but their
+// Prometheus side is handled by typed BusinessMetrics.RecordTask* methods, so
+// they never build an analytics.Event in the first place and don't need an
+// entry here.
+var metricsOnlyEvents = map[string]struct{}{
+	EventRuntimeRegistered:     {},
+	EventRuntimeReady:          {},
+	EventRuntimeFailed:         {},
+	EventRuntimeOffline:        {},
+	EventAutopilotRunStarted:   {},
+	EventAutopilotRunCompleted: {},
+	EventAutopilotRunFailed:    {},
+}
+
+// IsMetricsOnly reports whether an event name is operational telemetry that
+// must be counted in Prometheus but not sent to PostHog. See metricsOnlyEvents.
+func IsMetricsOnly(name string) bool {
+	_, ok := metricsOnlyEvents[name]
+	return ok
+}
 
 const (
 	SourceOnboarding = "onboarding"
@@ -304,39 +327,6 @@ func ChatMessageSent(userID, workspaceID, chatSessionID, taskID, agentID, runtim
 			Provider:      provider,
 		}),
 	}
-}
-
-func AgentTaskQueued(ctx TaskContext) Event {
-	return agentTaskEvent(EventAgentTaskQueued, ctx, nil)
-}
-
-func AgentTaskDispatched(ctx TaskContext) Event {
-	return agentTaskEvent(EventAgentTaskDispatched, ctx, nil)
-}
-
-func AgentTaskStarted(ctx TaskContext) Event {
-	return agentTaskEvent(EventAgentTaskStarted, ctx, nil)
-}
-
-func AgentTaskCompleted(ctx TaskContext, durationMS int64) Event {
-	return agentTaskEvent(EventAgentTaskCompleted, ctx, map[string]any{
-		"duration_ms": durationMS,
-	})
-}
-
-func AgentTaskFailed(ctx TaskContext, durationMS int64, failureReason, errorType string, willRetry bool) Event {
-	return agentTaskEvent(EventAgentTaskFailed, ctx, map[string]any{
-		"duration_ms":    durationMS,
-		"failure_reason": failureReason,
-		"error_type":     errorType,
-		"will_retry":     willRetry,
-	})
-}
-
-func AgentTaskCancelled(ctx TaskContext, durationMS int64) Event {
-	return agentTaskEvent(EventAgentTaskCancelled, ctx, map[string]any{
-		"duration_ms": durationMS,
-	})
 }
 
 // AutopilotAssignee describes the autopilot's configured target. agent_id is
@@ -657,16 +647,6 @@ func AutopilotCreated(actorID, workspaceID, autopilotID, cadence, triggerKind st
 	}
 }
 
-func agentTaskEvent(name string, ctx TaskContext, extra map[string]any) Event {
-	props := withCoreProperties(extra, CoreProperties(ctx))
-	return Event{
-		Name:        name,
-		DistinctID:  distinctID(ctx.UserID, ctx.WorkspaceID, ctx.AgentID),
-		WorkspaceID: ctx.WorkspaceID,
-		Properties:  props,
-	}
-}
-
 func autopilotRunEvent(name, actorID, workspaceID, autopilotID, runID, cadence string, assignee AutopilotAssignee, triggerSource string, extra map[string]any) Event {
 	if extra == nil {
 		extra = map[string]any{}
@@ -731,20 +711,6 @@ func withCoreProperties(props map[string]any, core CoreProperties) map[string]an
 	}
 	props["is_demo"] = core.IsDemo
 	return props
-}
-
-func distinctID(userID, workspaceID, agentID string) string {
-	if userID != "" {
-		return userID
-	}
-	// Synthetic PostHog distinct IDs are namespace-prefixed; user UUIDs are not.
-	if agentID != "" {
-		return "agent:" + agentID
-	}
-	if workspaceID != "" {
-		return "workspace:" + workspaceID
-	}
-	return ""
 }
 
 func nonAgentUserID(distinct string) string {

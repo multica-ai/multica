@@ -18,7 +18,8 @@
     },
     "list_dropdown": {
       "bullet_list": "글머리 기호 목록",
-      "ordered_list": "번호 목록"
+      "ordered_list": "번호 목록",
+      "task_list": "체크리스트"
     },
     "sub_issue": {
       "tooltip": "선택 영역으로 하위 이슈 만들기",
@@ -56,7 +57,10 @@
     "group_issues": "이슈",
     "all_members": "모든 멤버",
     "searching": "검색 중...",
-    "no_results": "결과 없음"
+    "no_results": "결과 없음",
+    "group_current": "현재 페이지",
+    "group_recent": "최근 본 항목",
+    "group_search": "검색 결과"
   },
   "code_block": {
     "copy_code": "코드 복사",

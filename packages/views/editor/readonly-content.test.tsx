@@ -211,6 +211,52 @@ describe("ReadonlyContent line breaks", () => {
   });
 });
 
+describe("ReadonlyContent task lists", () => {
+  it("renders `- [ ]` / `- [x]` as checkboxes and preserves the checked state", () => {
+    const { container } = render(
+      <ReadonlyContent content={"- [ ] todo\n- [x] done"} />,
+    );
+
+    const boxes = container.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    expect(boxes).toHaveLength(2);
+    // The completed item must render checked, not just present.
+    expect(boxes[0]!.checked).toBe(false);
+    expect(boxes[1]!.checked).toBe(true);
+    // Checkboxes are display-only in readonly mode.
+    expect(boxes[1]!.disabled).toBe(true);
+  });
+
+  it("nests a child task list inside its parent item (not as a sibling)", () => {
+    const { container } = render(
+      <ReadonlyContent content={"- [ ] parent\n  - [x] child\n  - [ ] child2"} />,
+    );
+
+    // One top-level list with a single parent item.
+    const root = container.querySelector("ul.contains-task-list");
+    expect(root).not.toBeNull();
+    const topItems = root!.querySelectorAll(":scope > li.task-list-item");
+    expect(topItems).toHaveLength(1);
+
+    // The child list lives INSIDE the parent <li> — this is the structural
+    // assumption the readonly CSS depends on (no <div> body wrapper, so the
+    // parent item must stay a block, not flex, or the nested <ul> shares the
+    // parent's row). If remark-gfm ever wrapped the body, this fails loudly.
+    const parent = topItems[0]!;
+    const nested = parent.querySelector(":scope > ul.contains-task-list");
+    expect(nested).not.toBeNull();
+
+    const childItems = nested!.querySelectorAll(":scope > li.task-list-item");
+    expect(childItems).toHaveLength(2);
+    const childBoxes = nested!.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    expect(childBoxes[0]!.checked).toBe(true);
+    expect(childBoxes[1]!.checked).toBe(false);
+  });
+});
+
 describe("ReadonlyContent highlight Markdown", () => {
   // `==text==` is lowered to a raw <mark> by highlightToHtml; rehype-raw turns
   // it into an element and the sanitize schema must whitelist <mark> or it gets

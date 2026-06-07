@@ -59,7 +59,7 @@ import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { AgentDetailInspector } from "./agent-detail-inspector";
-import { AgentOverviewPane } from "./agent-overview-pane";
+import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { useT } from "../../i18n";
 
@@ -136,6 +136,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     setShowDuplicate(false);
     navigation.push(paths.agentDetail(created.id));
   };
+
+  // One-shot channel: the inspector's compact Lark status row asks the
+  // overview pane to focus a tab. The pane clears it after consuming.
+  const [tabNavIntent, setTabNavIntent] = useState<DetailTab | null>(null);
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
     if (!canEdit.allowed) return;
@@ -367,6 +371,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           allowedPrincipalsLoading={allowedPrincipalsLoading || allowedPrincipalsFetching}
           onUpdate={handleUpdate}
           onUpdateAllowedPrincipals={handleUpdateAllowedPrincipals}
+          onShowIntegrations={() => setTabNavIntent("integrations")}
         />
 
         <AgentOverviewPane
@@ -374,6 +379,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           runtimes={runtimes}
           canEdit={canEdit.allowed}
           onUpdate={handleUpdate}
+          navIntent={tabNavIntent}
+          onNavIntentHandled={() => setTabNavIntent(null)}
         />
       </div>
 

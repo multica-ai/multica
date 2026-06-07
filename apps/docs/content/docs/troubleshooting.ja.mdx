@@ -180,9 +180,9 @@ docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
 
 **考えられる原因**:
 
-1. **`rollup_task_usage_hourly()` が一切スケジュールされていない** — 使用量 / ランタイムのダッシュボードは派生テーブル `task_usage_hourly` から読み取り、このテーブルはその関数によって埋められます。同梱の `pgvector/pgvector:pg17` イメージには `pg_cron` が含まれておらず、バックエンドもプロセス内で rollup を実行しません。外部スケジューラのない新規セルフホストインストールでは、これがデフォルトの状態です。
-2. **`pg_cron` はインストールされているが誤ったデータベースを指している** — `pg_cron.database_name` のデフォルト値は `postgres` です。Multica のデータベース名が異なる場合、スケジュールされたジョブは `rollup_task_usage_hourly()` を一切見つけられません。
-3. **スケジューラは動作しているが rollup が静かにエラーを出している** — 例えば cron エントリ内部の DB ロール / search_path が誤っている。
+1. **`rollup_task_usage_hourly()` がクレームされていない** — 使用量 / ランタイムのダッシュボードは派生テーブル `task_usage_hourly` から読み取り、このテーブルはその関数によって埋められます。MUL-2957 以降、バックエンドは DB バックドのスケジューラー（`sys_cron_executions`）を介してこの rollup をインプロセスで実行します。古いビルド、未適用の migration `113`、またはレプリカが残っていない長時間のバックエンド停止があると、最近の SUCCESS 行のないテーブルが残ることがあります。
+2. **`pg_cron` は互換性のために構成されているが誤ったデータベースを指している** — `pg_cron.database_name` のデフォルトは `postgres` です。Multica データベース名が異なる場合、スケジュールされたジョブは `rollup_task_usage_hourly()` を一切見つけられません。インプロセススケジューラーはこれに依存しませんが、もしインプロセススケジューラーを除去して `pg_cron` に依存している場合、DB 名は一致しなければなりません。
+3. **ハンドラーがクレームされているが静かにエラーを出している** — マイグレーションが部分的にしか適用されていないために SQL 関数が欠落している、あるいは DB ロール / search_path が誤って構成されている、など。`sys_cron_executions` の FAILED 監査行を確認してください。
 
 **診断方法**:
 
@@ -191,24 +191,30 @@ docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
 SELECT count(*) AS raw_rows FROM task_usage;
 SELECT count(*) AS hourly_rows FROM task_usage_hourly;
 
--- Confirm pg_cron is (or isn't) available.
-SELECT * FROM pg_available_extensions WHERE name = 'pg_cron';
-SHOW shared_preload_libraries;
-
--- If pg_cron is installed, check the schedule + last run.
-SELECT jobname, schedule, database, active FROM cron.job;
-SELECT jobname, status, return_message, start_time, end_time
-  FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;
+-- Inspect the in-process scheduler's audit log.
+SELECT plan_time, status, attempt, runner_id,
+       error_code, error_msg, started_at, finished_at
+  FROM sys_cron_executions
+ WHERE job_name = 'rollup_task_usage_hourly'
+ ORDER BY plan_time DESC
+ LIMIT 20;
 
 -- Watermark — if this is 1970-01-01, the rollup has never run.
 SELECT watermark_at FROM task_usage_hourly_rollup_state;
+
+-- Compatibility path: if you previously registered pg_cron, confirm
+-- it is (or isn't) available and pointing at the right database.
+SELECT * FROM pg_available_extensions WHERE name = 'pg_cron';
+SHOW shared_preload_libraries;
+SELECT jobname, schedule, database, active FROM cron.job;
 ```
 
 **解決方法**:
 
-- rollup を手動で一度呼び出して動作するか確認してください: `SELECT rollup_task_usage_hourly();` — ダッシュボードを再読み込みしてください。数値が表示されれば、欠けているのはスケジューラだけです。
-- [セルフホストクイックスタート → 使用量 rollup のスケジューリング](/self-host-quickstart#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)からサポートされる方式のいずれかを選んでください: 外部 cron / systemd-timer / Kubernetes CronJob、または Postgres を `pg_cron` を含むイメージに置き換える。
-- スケジュール設定より前の履歴がすでにある場合は、バックエンドコンテナ内部で `backfill_task_usage_hourly` を実行し、ウォーターマーク以前のバケットを埋めてください。
+- 少なくとも 1 つのバックエンドレプリカでスケジューラーが実際に動作していることを確認してください — 30 秒ごとに `sys_cron_executions` の `rollup_task_usage_hourly` に SUCCESS 行が追加されているはずです。
+- SQL パスを検証するため、rollup を手動で一度呼び出してください: `SELECT rollup_task_usage_hourly();` — ダッシュボードを再読み込みしてください。数値が表示されれば SQL 関数は問題なく、スケジューラーのクレーム経路に問題があります。
+- migration `113_sys_cron_executions` がまだ適用されていない場合は、バックエンドを再起動してマイグレーションを実行するか、手動で `migrate up` を呼び出してください。
+- インプロセススケジューラー以前のレガシー `pg_cron` 履歴がある場合でも、SQL 関数は内部で advisory lock 4246 を保持するため二重書き込みは発生しません — オプションの `cron.unschedule` クリーンアップについては [セルフホストクイックスタート → 使用量ロールアップ](/self-host-quickstart#7-usage-rollup-no-operator-action-required) を参照してください。
 
 ## マイグレーション `103` が `refusing to drop legacy daily rollups` で失敗する
 
@@ -224,9 +230,11 @@ ERROR: refusing to drop legacy daily rollups:
 
 **考えられる原因**: これはマイグレーション `103` の fail-closed ガードです。`task_usage_hourly` が生の `task_usage` に追いつくまで、レガシーの daily rollup の削除を拒否します。既存の行が存在し、rollup のウォーターマークがまだ epoch に留まっているとき — つまり、まだどの履歴も hourly テーブルに rollup されていないとき — にこのガードが発動します。
 
+MUL-2957 以降、migrate コマンドは migration `103` を適用する直前に冪等な月別スライス backfill（advisory lock 4246 の下）を自動で実行するため、v0.3.4 → v0.3.5+ への直接アップグレードは単一の `migrate up` 呼び出しで完了します。それでもこのエラーが表示される場合は、MUL-2957 以前のバイナリを使用しているか、フック自体が失敗しています — 直前の `task_usage hourly rollup hook` 行で migrate ログを確認してください。
+
 **解決方法**:
 
-1. 同じデータベースに対して backfill を実行してください（冪等であり、中断しても安全で、再実行しても安全です）:
+1. MUL-2957 以前のバイナリを使用しており、まずバイナリをアップグレードできない場合は、同じデータベースに対してスタンドアロンの backfill を実行してください（冪等であり、中断しても安全で、再実行しても安全です）:
 
    ```bash
    # Docker Compose
@@ -239,7 +247,7 @@ ERROR: refusing to drop legacy daily rollups:
    ```
 
 2. アップグレードを再実行してください — バックエンドコンテナを再起動するだけで十分で、マイグレーションは起動時に実行されます。これでガードが最新のウォーターマークを確認し、`103` の適用を許可します。
-3. ウォーターマークが進み続けるように、継続的な rollup スケジュール（cron / `pg_cron`）を設定してください — [セルフホストクイックスタート → 使用量 rollup のスケジューリング](/self-host-quickstart#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)を参照してください。
+3. インプロセススケジューラーがウォーターマークを進め続けます — [セルフホストクイックスタート → 使用量ロールアップ](/self-host-quickstart#7-usage-rollup-no-operator-action-required) を参照してください。
 
 `--sleep-between-slices=2s` は、数年分の履歴を持つプロダクションデータベースにとって控えめなデフォルト値です。直近 N か月のみを保持し、それより古いバケットを永久に放棄してもかまわない場合は `--months-back N --force-partial` を使用してください。
 

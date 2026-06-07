@@ -143,6 +143,7 @@
     "section_properties": "Properties",
     "section_details": "Details",
     "section_skills": "Skills",
+    "section_integrations": "Integrations",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
     "prop_thinking": "Thinking",
@@ -241,6 +242,7 @@
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
+    "integrations": "Integrations",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -374,6 +376,10 @@
       "add_failed_toast": "Failed to add skill",
       "saved_toast": "Skills saved",
       "save_failed_toast": "Failed to save skills"
+    },
+    "integrations": {
+      "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
+      "members_note": "Only workspace owners and admins can bind a Lark Bot to an agent. You can view connected bots in Settings → Integrations."
     },
     "activity": {
       "section_now": "Now",

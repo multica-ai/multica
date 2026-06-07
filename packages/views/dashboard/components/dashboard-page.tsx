@@ -62,7 +62,6 @@ import {
   mergeAgentDashboardRows,
   aggregateByMember,
   type AgentDashboardRow,
-  type MemberDashboardRow,
 } from "../utils";
 
 // Period selector — mirrors the runtime detail page so users see the same

@@ -8,8 +8,8 @@
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
-    "placeholder_named": "Tell {{name}} what to do…",
-    "placeholder_default": "Tell me what to do…",
+    "placeholder_named": "Message {{name}}…",
+    "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
     "stop_tooltip": "Stop"
   },
@@ -82,7 +82,8 @@
     "active_group": "Active",
     "archived_group_one": "{{count}} archived chat",
     "archived_group_other": "{{count}} archived chats",
-    "history_group": "Chat history"
+    "history_group": "Chat history",
+    "agent_filter_placeholder": "Search agents..."
   },
   "empty_state": {
     "first_time_title": "Chat with your agents",
@@ -98,17 +99,6 @@
     "list_open": "List my open tasks by priority",
     "summarize_today": "Summarize what I did today",
     "plan_next": "Plan what to work on next"
-  },
-  "context_anchor": {
-    "tooltip_disabled": "Nothing to share with Multica on this page",
-    "tooltip_off": "Let Multica know what you're viewing",
-    "tooltip_on_issue": "Multica knows you're viewing {{label}} · Click to turn off",
-    "tooltip_on_project": "Multica knows you're viewing project \"{{label}}\" · Click to turn off",
-    "card_tooltip_issue_with_subtitle": "Multica knows you're viewing {{label}} — {{subtitle}}",
-    "card_tooltip_issue": "Multica knows you're viewing {{label}}",
-    "card_tooltip_project": "Multica knows you're viewing project \"{{label}}\"",
-    "aria_stop": "Stop sharing current page",
-    "aria_start": "Share current page with Multica"
   },
   "no_agent_banner": "You need an agent to start chatting.",
   "offline_banner": {

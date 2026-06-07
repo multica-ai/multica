@@ -74,7 +74,6 @@ import {
 } from "./agent-status-filter";
 import {
   buildRuntimeMachines,
-  type RuntimeMachine,
 } from "../../runtimes/components/runtime-machines";
 import { RuntimeMachineFilterDropdown } from "./runtime-machine-filter-dropdown";
 
@@ -104,8 +103,24 @@ const SORT_LABEL_KEY: Record<SortKey, "label_recent" | "label_name" | "label_run
   created: "label_created",
 };
 
+interface AgentsPageProps {
+  /** Desktop-only daemon id used to mark this machine in the runtime filter. */
+  localDaemonId?: string | null;
+  /** Desktop-only friendly device name for the local daemon. */
+  localMachineName?: string | null;
+  /**
+   * Desktop-only signal: this host always owns a local machine, even when
+   * no runtime has registered yet. When true, the filter includes a Local
+   * placeholder instead of hiding the section.
+   */
+  hasLocalMachine?: boolean;
+}
 
-export function AgentsPage() {
+export function AgentsPage({
+  localDaemonId,
+  localMachineName,
+  hasLocalMachine,
+}: AgentsPageProps = {}) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
@@ -265,8 +280,19 @@ export function AgentsPage() {
     () =>
       buildRuntimeMachines(runtimes, {
         now: machinesNow,
+        localDaemonId,
+        localMachineName,
+        currentUserId: currentUser?.id ?? null,
+        ensureLocalMachine: hasLocalMachine,
       }),
-    [runtimes, machinesNow],
+    [
+      runtimes,
+      machinesNow,
+      localDaemonId,
+      localMachineName,
+      currentUser?.id,
+      hasLocalMachine,
+    ],
   );
 
   // Reverse map: runtime_id → machine id.
@@ -298,14 +324,6 @@ export function AgentsPage() {
       setRuntimeMachineId(null);
     }
   }, [runtimeMachineId, machines]);
-
-  const selectedMachine = useMemo(
-    () =>
-      runtimeMachineId === null
-        ? null
-        : machines.find((machine) => machine.id === runtimeMachineId) ?? null,
-    [runtimeMachineId, machines],
-  );
 
   // Machine-scoped list: `inScope` narrowed by the selected runtime
   // machine, but NOT by the status chip or search.

@@ -201,6 +201,15 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 		return nil, err
 	}
 
+	// Don't cache an empty result. Zero models is almost always a transient
+	// failure (discovery CLI timeout, not-logged-in, network blip) rather than
+	// a runtime that genuinely has no models; caching it would keep the picker
+	// blank for the full TTL even after the cause clears. Skipping the cache
+	// lets the next request retry immediately. See #3729.
+	if len(models) == 0 {
+		return models, nil
+	}
+
 	modelCacheMu.Lock()
 	modelCache[key] = modelCacheEntry{models: models, expiresAt: time.Now().Add(modelCacheTTL)}
 	modelCacheMu.Unlock()
@@ -420,16 +429,24 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "models", "--verbose")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
-	if err != nil {
+	// Parse whatever the verbose command printed, even on a non-zero exit — a
+	// stale config entry can make `opencode models` exit non-zero while still
+	// listing the resolvable catalog (mirrors the pi path; see #3729/#3627).
+	out, _ := cmd.Output()
+	models := parseOpenCodeModels(string(out))
+	if len(models) == 0 {
+		// Verbose yielded nothing usable (unsupported flag, error text, or an
+		// empty list). Retry the plain command, which omits the per-model JSON
+		// but still prints the IDs.
 		cmd = exec.CommandContext(runCtx, executablePath, "models")
 		hideAgentWindow(cmd)
-		out, err = cmd.Output()
-		if err != nil {
-			return []Model{}, nil
-		}
+		out, _ = cmd.Output()
+		models = parseOpenCodeModels(string(out))
 	}
-	return parseOpenCodeModels(string(out)), nil
+	if len(models) == 0 {
+		return []Model{}, nil
+	}
+	return models, nil
 }
 
 // parseOpenCodeModels accepts the `opencode models` text output and
@@ -615,14 +632,20 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Newer pi fetches its catalog from each configured provider over the
+	// network, so discovery time scales with provider count — a multi-provider
+	// setup measured ~4.6-4.8s, right at the old 5s cap. When jitter pushed it
+	// over, the daemon killed the command before it printed anything and the
+	// model picker came back empty while the runtime stayed online. 15s matches
+	// the opencode discovery cap (see #3729, same class as #3627).
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
 	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
-	if err != nil {
+	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
 		return []Model{}, nil
 	}
 	text := string(stdout)
@@ -647,6 +670,14 @@ func parsePiModels(output string) []Model {
 		if line == "" {
 			continue
 		}
+		// pi interleaves human-readable diagnostics with the catalog when an
+		// agent config references stale patterns — e.g.
+		//   Warning: No models match pattern "opencode-go/mimo-v2-omni"
+		// Skip them before field-splitting; otherwise prose tokens are coined
+		// into bogus models like `No/models` or `Warning/`. See #3729.
+		if isPiDiscoveryNoise(line) {
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
@@ -664,6 +695,12 @@ func parsePiModels(output string) []Model {
 		} else if len(fields) >= 2 {
 			id = first + "/" + fields[1]
 		} else {
+			continue
+		}
+		// A real id has a non-empty provider and model on both sides of the
+		// slash. Drop anything that doesn't (e.g. a stray `something:` token),
+		// a cheap structural backstop on top of the diagnostic filter above.
+		if slash := strings.Index(id, "/"); slash <= 0 || slash == len(id)-1 {
 			continue
 		}
 		if seen[id] {
@@ -749,6 +786,26 @@ func qoderclicnModelLabel(id string) string {
 		return "Auto"
 	}
 	return strings.ReplaceAll(id, "-", " ")
+}
+
+// isPiDiscoveryNoise reports whether a `pi --list-models` line is a diagnostic
+// message rather than a catalog row. pi prints these alongside the table when
+// an agent config references stale provider/model patterns, e.g.
+//
+//	Warning: No models match pattern "opencode-go/mimo-v2-omni"
+//
+// The `Warning:` prefix is not guaranteed across versions, so the unmatched-
+// pattern message is also matched on its own. These are prose, not
+// `provider model` rows; without skipping them the field splitter coins bogus
+// models like `No/models`. See #3729.
+func isPiDiscoveryNoise(line string) bool {
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, "no models match pattern") {
+		return true
+	}
+	return strings.HasPrefix(lower, "warning:") ||
+		strings.HasPrefix(lower, "error:") ||
+		strings.HasPrefix(lower, "info:")
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,
@@ -1178,12 +1235,15 @@ func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, 
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return cursorStaticModels(), nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// 15s to match the other network-backed discovery paths (pi/opencode/ACP);
+	// cursor-agent fetches its frequently-changing catalog, so a tight cap can
+	// time out and fall back to the minimal static list. See #3729.
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
 	hideAgentWindow(cmd)
 	out, err := cmd.Output()
-	if err != nil {
+	if err != nil && len(out) == 0 {
 		return cursorStaticModels(), nil
 	}
 	models := parseCursorModels(string(out))
@@ -1280,7 +1340,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 		cmd := exec.CommandContext(runCtx, executablePath, jsonArgs...)
 		hideAgentWindow(cmd)
 		out, err := cmd.Output()
-		if err != nil {
+		if err != nil && len(out) == 0 {
 			continue
 		}
 		if models, ok := parseOpenclawAgentsJSON(out); ok {
@@ -1294,7 +1354,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	cmd := exec.CommandContext(runCtx, executablePath, "agents", "list")
 	hideAgentWindow(cmd)
 	out, err := cmd.Output()
-	if err != nil {
+	if err != nil && len(out) == 0 {
 		return []Model{}, nil
 	}
 	return parseOpenclawAgents(string(out)), nil

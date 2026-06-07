@@ -21,6 +21,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -324,7 +325,7 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
-	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
+	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
 		BusinessMetrics:    businessMetrics,
 		DaemonHub:          daemonHub,
@@ -366,6 +367,39 @@ func main() {
 	go uploadCleanupHandler.RunAttachmentUploadCleanup(sweepCtx, 0)
 	go runUsageHourlyRollup(sweepCtx, pool)
 
+	// Lark inbound supervisor: holds the §4.4 WS lease per installation
+	// and runs the EventConnector for each. Nil when the Lark master
+	// key is unset — self-host deployments that have not opted in to
+	// Lark do not pay any goroutine cost. Lifecycle is bound to
+	// sweepCtx so the Hub winds down alongside the other long-running
+	// workers, AFTER the HTTP server has drained.
+	if h.LarkHub != nil {
+		go h.LarkHub.Run(sweepCtx)
+	}
+
+	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
+	// `sys_cron_executions` table into the distributed lease + audit
+	// log for internal periodic jobs. The first job is
+	// `rollup_task_usage_hourly`, which replaces the previously
+	// operator-registered `pg_cron` entry (still safe to run
+	// concurrently — the SQL function holds advisory lock 4246).
+	//
+	// A failure to register the job is treated as fatal here only at
+	// the registration step (a duplicate name is the only realistic
+	// cause and indicates a code bug). Once running, the manager
+	// surfaces transient errors — DB unreachable, sys_cron_executions
+	// missing because of an unusual partial-migration state — by
+	// logging them on the tick that fails and retrying on the next
+	// cycle, so a temporary outage does not crash the server.
+	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
+	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
+		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
+	} else {
+		go func() {
+			_ = schedulerMgr.Run(sweepCtx)
+		}()
+	}
+
 	if metricsServer != nil {
 		go func() {
 			slog.Info("metrics server starting", "addr", metricsConfig.Addr)
@@ -406,6 +440,22 @@ func main() {
 	// final batch of queued heartbeat bumps.
 	sweepCancel()
 	heartbeatScheduler.Stop()
+
+	// Join the Lark Hub's per-installation supervisor goroutines so the
+	// lease renewer can issue a final release before process exit;
+	// otherwise the next replica would have to wait the full LeaseTTL
+	// before picking up the installation on the other side of the
+	// redeploy. The wait is bounded — if a supervisor is wedged (DB
+	// pool stalled, a future real EventConnector ignoring ctx, etc.)
+	// the fallback is the natural LeaseTTL expiry on the other side,
+	// which is strictly better than holding shutdown open forever.
+	if h.LarkHub != nil {
+		if !h.LarkHub.WaitWithTimeout(h.LarkHub.ShutdownTimeout()) {
+			slog.Warn("lark hub: supervisors did not exit within shutdown timeout; proceeding",
+				"timeout", h.LarkHub.ShutdownTimeout().String(),
+			)
+		}
+	}
 
 	if metricsServer != nil {
 		metricsShutdownCtx, metricsShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)

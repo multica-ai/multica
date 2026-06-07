@@ -165,7 +165,14 @@ const desktopAPI = {
 };
 
 interface DaemonStatus {
-  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
+  state:
+    | "running"
+    | "stopped"
+    | "starting"
+    | "stopping"
+    | "installing_cli"
+    | "cli_not_found"
+    | "auth_expired";
   pid?: number;
   uptime?: string;
   daemonId?: string;
@@ -175,6 +182,11 @@ interface DaemonStatus {
   profile?: string;
   serverUrl?: string;
 }
+
+type DaemonReauthResult =
+  | { ok: true }
+  | { ok: false; reason: "session_invalid" }
+  | { ok: false; reason: "transient"; message: string };
 
 const daemonAPI = {
   start: (): Promise<{ success: boolean; error?: string }> =>
@@ -198,6 +210,11 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:sync-token", token, userId),
   clearToken: (): Promise<void> =>
     ipcRenderer.invoke("daemon:clear-token"),
+  reauthenticate: (
+    token: string,
+    userId: string,
+  ): Promise<DaemonReauthResult> =>
+    ipcRenderer.invoke("daemon:reauthenticate", token, userId),
   isCliInstalled: (): Promise<boolean> =>
     ipcRenderer.invoke("daemon:is-cli-installed"),
   getPrefs: (): Promise<{ autoStart: boolean; autoStop: boolean }> =>

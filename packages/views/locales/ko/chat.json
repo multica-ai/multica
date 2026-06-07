@@ -8,8 +8,8 @@
   "input": {
     "placeholder_no_agent": "채팅을 시작하려면 에이전트를 만드세요",
     "placeholder_archived": "보관된 세션입니다",
-    "placeholder_named": "{{name}}에게 할 일을 알려주세요...",
-    "placeholder_default": "할 일을 알려주세요...",
+    "placeholder_named": "{{name}}에게 메시지 보내기…",
+    "placeholder_default": "메시지 입력…",
     "send_tooltip": "보내기",
     "stop_tooltip": "중지"
   },
@@ -77,7 +77,8 @@
     "my_agents": "내 에이전트",
     "others": "기타",
     "no_agents": "에이전트 없음",
-    "history_group": "채팅 기록"
+    "history_group": "채팅 기록",
+    "agent_filter_placeholder": "에이전트 검색..."
   },
   "empty_state": {
     "first_time_title": "에이전트와 채팅하기",
@@ -93,17 +94,6 @@
     "list_open": "열린 작업을 우선순위별로 정리해 줘",
     "summarize_today": "오늘 내가 한 일을 요약해 줘",
     "plan_next": "다음에 할 일을 계획해 줘"
-  },
-  "context_anchor": {
-    "tooltip_disabled": "이 페이지에서는 Multica에 공유할 내용이 없습니다",
-    "tooltip_off": "Multica에 현재 보고 있는 페이지 알려주기",
-    "tooltip_on_issue": "Multica가 {{label}}을(를) 보고 있음을 알고 있습니다 · 클릭해서 끄기",
-    "tooltip_on_project": "Multica가 프로젝트 \"{{label}}\"을(를) 보고 있음을 알고 있습니다 · 클릭해서 끄기",
-    "card_tooltip_issue_with_subtitle": "Multica가 {{label}}을(를) 보고 있음을 알고 있습니다 — {{subtitle}}",
-    "card_tooltip_issue": "Multica가 {{label}}을(를) 보고 있음을 알고 있습니다",
-    "card_tooltip_project": "Multica가 프로젝트 \"{{label}}\"을(를) 보고 있음을 알고 있습니다",
-    "aria_stop": "현재 페이지 공유 중지",
-    "aria_start": "현재 페이지를 Multica에 공유"
   },
   "no_agent_banner": "채팅을 시작하려면 에이전트가 필요합니다.",
   "offline_banner": {

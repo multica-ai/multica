@@ -552,6 +552,84 @@ type LocalCliUsage struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type LarkBindingToken struct {
+	TokenHash      string             `json:"token_hash"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkOpenID     string             `json:"lark_open_id"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type LarkChatSessionBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkChatID     string             `json:"lark_chat_id"`
+	LarkChatType   string             `json:"lark_chat_type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type LarkInboundAudit struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkChatID     pgtype.Text        `json:"lark_chat_id"`
+	EventType      string             `json:"event_type"`
+	LarkEventID    pgtype.Text        `json:"lark_event_id"`
+	LarkMessageID  pgtype.Text        `json:"lark_message_id"`
+	DropReason     string             `json:"drop_reason"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+}
+
+type LarkInboundMessageDedup struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	MessageID      string             `json:"message_id"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	ClaimToken     pgtype.UUID        `json:"claim_token"`
+}
+
+type LarkInstallation struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	AppID              string             `json:"app_id"`
+	AppSecretEncrypted []byte             `json:"app_secret_encrypted"`
+	TenantKey          pgtype.Text        `json:"tenant_key"`
+	BotOpenID          string             `json:"bot_open_id"`
+	InstallerUserID    pgtype.UUID        `json:"installer_user_id"`
+	Status             string             `json:"status"`
+	WsLeaseToken       pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt   pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstalledAt        pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	BotUnionID         pgtype.Text        `json:"bot_union_id"`
+	Region             string             `json:"region"`
+}
+
+type LarkOutboundCardMessage struct {
+	ID                pgtype.UUID        `json:"id"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	TaskID            pgtype.UUID        `json:"task_id"`
+	LarkChatID        string             `json:"lark_chat_id"`
+	LarkCardMessageID string             `json:"lark_card_message_id"`
+	Status            string             `json:"status"`
+	LastPatchedAt     pgtype.Timestamptz `json:"last_patched_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type LarkUserBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	MulticaUserID  pgtype.UUID        `json:"multica_user_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkOpenID     string             `json:"lark_open_id"`
+	UnionID        pgtype.Text        `json:"union_id"`
+	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+}
+
 type Member struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

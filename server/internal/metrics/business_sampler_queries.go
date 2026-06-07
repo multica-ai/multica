@@ -19,9 +19,10 @@ import (
 
 // queryActiveUsers fills snap.activeUsers with a count of distinct user_ids
 // that have either sent a chat message or had an agent task created for one
-// of their issues inside each rolling window. We deliberately skip Postgres
-// `now() - interval '$1'` substitution and instead pass a typed interval as
-// a bind parameter so the caller cannot inject SQL via the window string.
+// of their issues inside the short rolling window. We deliberately skip
+// Postgres `now() - interval '$1'` substitution and instead pass a typed
+// interval as a bind parameter so the caller cannot inject SQL via the
+// window string.
 //
 // Note on cardinality: there is intentionally NO `LIMIT` on the inner
 // distinct subquery — capping it would silently truncate the COUNT to 100
@@ -62,9 +63,9 @@ SELECT count(DISTINCT user_id) FROM (
 }
 
 // queryActiveWorkspaces counts distinct workspaces with chat or task
-// activity in each window. Mirrors queryActiveUsers and intentionally has
-// no inner LIMIT for the same reason: a LIMIT inside the distinct subquery
-// would truncate the COUNT and report a wrong value.
+// activity in the short window. Mirrors queryActiveUsers and intentionally
+// has no inner LIMIT for the same reason: a LIMIT inside the distinct
+// subquery would truncate the COUNT and report a wrong value.
 func (c *BusinessSamplerCollector) queryActiveWorkspaces(
 	ctx context.Context, tx pgx.Tx, snap *samplerSnapshot,
 ) error {
@@ -140,7 +141,19 @@ LIMIT 100
 func (c *BusinessSamplerCollector) queryTaskRunning(
 	ctx context.Context, tx pgx.Tx, snap *samplerSnapshot,
 ) error {
+	// Keep dispatched and running in separate UNION ALL branches so
+	// Postgres can match the existing dispatched partial index and the
+	// running-only partial index from migration 114 independently.
 	const stmt = `
+WITH in_flight AS (
+  SELECT chat_session_id, autopilot_run_id, issue_id, runtime_id
+  FROM agent_task_queue
+  WHERE status = 'dispatched'
+  UNION ALL
+  SELECT chat_session_id, autopilot_run_id, issue_id, runtime_id
+  FROM agent_task_queue
+  WHERE status = 'running'
+)
 SELECT
   CASE
     WHEN atq.chat_session_id IS NOT NULL THEN 'chat'
@@ -150,9 +163,8 @@ SELECT
   END AS source,
   COALESCE(ar.runtime_mode, 'unknown') AS runtime_mode,
   count(*) AS n
-FROM agent_task_queue atq
+FROM in_flight atq
 LEFT JOIN agent_runtime ar ON ar.id = atq.runtime_id
-WHERE atq.status IN ('dispatched', 'running')
 GROUP BY 1, 2
 LIMIT 100
 `

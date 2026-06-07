@@ -94,6 +94,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -1178,9 +1179,17 @@ export function IssueDetail({
   ]);
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
+  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
   useEffect(() => {
     if (issue) {
       recordVisit(wsId, issue.id);
+      recordRecentContext(wsId, {
+        type: "issue",
+        id: issue.id,
+        label: issue.identifier,
+        subtitle: issue.title,
+        status: issue.status,
+      });
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 

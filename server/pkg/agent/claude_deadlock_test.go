@@ -3,8 +3,8 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -22,6 +22,9 @@ func TestMain(m *testing.M) {
 	case "startup_stdout_burst":
 		runFakeClaudeStartupStdoutBurst()
 		os.Exit(0)
+	case "control_request":
+		runFakeClaudeControlRequest()
+		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown CLAUDE_FAKE_MODE: %q\n", mode)
 		os.Exit(2)
@@ -29,11 +32,11 @@ func TestMain(m *testing.M) {
 }
 
 // runFakeClaudeStartupStdoutBurst writes ~256 KiB to stdout BEFORE
-// reading any byte from stdin, then drains stdin and emits a stream-json
-// result. Reproduces the stdio deadlock: if the daemon writes the prompt
-// to stdin before a stdout reader is running, the child blocks writing
-// stdout and the daemon blocks writing stdin — neither side can progress
-// until the per-task context times out and the child is killed.
+// reading any byte from stdin, then reads the first stdin frame and emits a
+// stream-json result. Reproduces the stdio deadlock: if the daemon writes
+// the prompt to stdin before a stdout reader is running, the child blocks
+// writing stdout and the daemon blocks writing stdin — neither side can
+// progress until the per-task context times out and the child is killed.
 func runFakeClaudeStartupStdoutBurst() {
 	line := strings.Repeat("x", 1020)
 	bw := bufio.NewWriter(os.Stdout)
@@ -45,10 +48,42 @@ func runFakeClaudeStartupStdoutBurst() {
 	if err := bw.Flush(); err != nil {
 		os.Exit(12)
 	}
-	if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
+	if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
 		os.Exit(13)
 	}
 	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-deadlock","result":"done"}`)
+}
+
+func runFakeClaudeControlRequest() {
+	reader := bufio.NewReader(os.Stdin)
+	if _, err := reader.ReadString('\n'); err != nil {
+		fmt.Fprintf(os.Stderr, "read prompt: %v\n", err)
+		os.Exit(21)
+	}
+	fmt.Println(`{"type":"system","session_id":"sess-control"}`)
+	fmt.Println(`{"type":"control_request","request_id":"req-42","request":{"subtype":"tool_use","tool_name":"Bash","input":{"command":"pwd"}}}`)
+
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read control response: %v\n", err)
+		os.Exit(22)
+	}
+	var resp struct {
+		Type     string `json:"type"`
+		Response struct {
+			RequestID string `json:"request_id"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &resp); err != nil {
+		fmt.Fprintf(os.Stderr, "decode control response: %v\n", err)
+		os.Exit(23)
+	}
+	if resp.Type != "control_response" || resp.Response.RequestID != "req-42" {
+		fmt.Fprintf(os.Stderr, "unexpected control response: %s\n", line)
+		os.Exit(24)
+	}
+	fmt.Println(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"approved"}]}}`)
+	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-control","result":"done after control"}`)
 }
 
 // TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst verifies that the
@@ -109,5 +144,53 @@ func TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst(t *testing.T) {
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("timeout waiting for result — claude backend is deadlocked on writeClaudeInput because stdout is not being drained concurrently")
+	}
+}
+
+func TestClaudeExecuteRespondsToControlRequest(t *testing.T) {
+	t.Parallel()
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	backend, err := New("claude", Config{
+		ExecutablePath: self,
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "control_request"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "run a command", ExecOptions{Timeout: 8 * time.Second})
+	if err != nil {
+		t.Fatalf("execute returned error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.Output != "done after control" {
+			t.Fatalf("expected result output from fake claude, got %q", result.Output)
+		}
+		if result.SessionID != "sess-control" {
+			t.Fatalf("expected session id sess-control, got %q", result.SessionID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for result — claude backend did not answer control_request")
 	}
 }

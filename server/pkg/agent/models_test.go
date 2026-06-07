@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -437,6 +438,57 @@ exit 1
 	}
 }
 
+// TestCachedDiscoveryDoesNotCacheEmpty verifies that an empty discovery result
+// is not cached, so a transient failure (e.g. a `pi --list-models` timeout)
+// doesn't keep the model picker blank for the full TTL. A non-empty result is
+// still cached. See #3729.
+func TestCachedDiscoveryDoesNotCacheEmpty(t *testing.T) {
+	const emptyKey, nonEmptyKey = "test-cache-empty", "test-cache-nonempty"
+	// modelCache is a package-level global; clear our keys up front and on
+	// cleanup so the test stays hermetic under `go test -count=N` (a leftover
+	// non-empty entry from a prior run would otherwise skip the callback).
+	resetCache := func() {
+		modelCacheMu.Lock()
+		delete(modelCache, emptyKey)
+		delete(modelCache, nonEmptyKey)
+		modelCacheMu.Unlock()
+	}
+	resetCache()
+	t.Cleanup(resetCache)
+
+	emptyCalls := 0
+	empty := func() ([]Model, error) {
+		emptyCalls++
+		return []Model{}, nil
+	}
+	for i := 0; i < 2; i++ {
+		got, err := cachedDiscovery(emptyKey, empty)
+		if err != nil {
+			t.Fatalf("cachedDiscovery: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("expected empty result, got %+v", got)
+		}
+	}
+	if emptyCalls != 2 {
+		t.Fatalf("empty result must not be cached: expected fn called 2x, got %d", emptyCalls)
+	}
+
+	nonEmptyCalls := 0
+	nonEmpty := func() ([]Model, error) {
+		nonEmptyCalls++
+		return []Model{{ID: "provider/model"}}, nil
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := cachedDiscovery(nonEmptyKey, nonEmpty); err != nil {
+			t.Fatalf("cachedDiscovery: %v", err)
+		}
+	}
+	if nonEmptyCalls != 1 {
+		t.Fatalf("non-empty result must be cached: expected fn called 1x, got %d", nonEmptyCalls)
+	}
+}
+
 func TestParsePiModels(t *testing.T) {
 	input := `openai:gpt-4o
 anthropic:claude-opus-4-7
@@ -522,6 +574,106 @@ func TestListModelsQoderclicnFallsBackToStatic(t *testing.T) {
 	}
 	if got[0].ID != "Auto" || !got[0].Default {
 		t.Fatalf("expected Auto default first, got %+v", got[0])
+	}
+}
+
+// TestDiscoverPiModelsNonZeroExit verifies that discoverPiModels still returns
+// the resolvable catalog when `pi --list-models` exits non-zero. Pi exits
+// non-zero (and warns) when an agent config references stale provider/model
+// patterns that no longer match the local catalog. Before the fix the daemon
+// discarded the populated output on any non-zero exit and returned an empty
+// list, so the UI model picker was blank even though the runtime was online and
+// agents ran fine. See GitHub #3729.
+func TestDiscoverPiModelsNonZeroExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pi binary is a /bin/sh script")
+	}
+
+	const table = "provider         model        context  max-out  thinking  images\n" +
+		"glm-coding-plan  glm-4.7      202.8K   16.4K    no        no"
+	// The unmatched-pattern warning, with and without the `Warning:` prefix —
+	// the prefix is not guaranteed across pi versions, and the bare form is
+	// what slips past a naive guard into a bogus `No/models` model.
+	const prefixed = `Warning: No models match pattern "opencode-go/mimo-v2-omni"`
+	const bare = `No models match pattern "opencode-go/mimo-v2-pro"`
+
+	cases := []struct {
+		name   string
+		script string
+	}{
+		{
+			// Newer pi prints the catalog to stdout; the stale-pattern
+			// warning goes to stderr and the process exits non-zero.
+			name: "catalog on stdout",
+			script: "#!/bin/sh\n" +
+				"cat <<'EOF'\n" + table + "\nEOF\n" +
+				"echo " + strconv.Quote(prefixed) + " >&2\n" +
+				"exit 1\n",
+		},
+		{
+			// Older pi prints the catalog (and the warning) to stderr; same
+			// non-zero exit. The stderr fallback must still parse the catalog.
+			name: "catalog and prefixed warning on stderr",
+			script: "#!/bin/sh\n" +
+				"cat >&2 <<'EOF'\n" + table + "\n" + prefixed + "\nEOF\n" +
+				"exit 1\n",
+		},
+		{
+			// Same, but the warning has no `Warning:` prefix — must not leak in
+			// as a `No/models` row.
+			name: "catalog and bare warning on stderr",
+			script: "#!/bin/sh\n" +
+				"cat >&2 <<'EOF'\n" + table + "\n" + bare + "\nEOF\n" +
+				"exit 1\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakePath := filepath.Join(t.TempDir(), "pi")
+			writeTestExecutable(t, fakePath, []byte(tc.script))
+
+			models, err := discoverPiModels(context.Background(), fakePath)
+			if err != nil {
+				t.Fatalf("discoverPiModels: %v", err)
+			}
+			// Exactly the resolvable model — no warning line coined into a
+			// bogus entry, no header row.
+			if len(models) != 1 || models[0].ID != "glm-coding-plan/glm-4.7" {
+				t.Fatalf("expected exactly [glm-coding-plan/glm-4.7] despite non-zero exit, got %+v", models)
+			}
+		})
+	}
+}
+
+// TestDiscoverOpenCodeModelsFallsBackOnVerboseNoise verifies that a non-zero
+// `opencode models --verbose` whose stdout is unparseable noise still falls
+// back to the plain `opencode models` command instead of returning empty. The
+// earlier fix skipped the fallback whenever verbose printed any bytes, which
+// regressed this case. Mirrors the pi hardening in #3729.
+func TestDiscoverOpenCodeModelsFallsBackOnVerboseNoise(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake opencode binary is a /bin/sh script")
+	}
+
+	// `opencode models --verbose` => $2 == "--verbose": emit noise + exit 1.
+	// `opencode models`           => no $2: print the plain catalog.
+	script := "#!/bin/sh\n" +
+		"if [ \"$2\" = \"--verbose\" ]; then\n" +
+		"  echo 'panic: catalog sync failed'\n" +
+		"  exit 1\n" +
+		"fi\n" +
+		"echo 'openai/gpt-4o'\n"
+
+	fakePath := filepath.Join(t.TempDir(), "opencode")
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	models, err := discoverOpenCodeModels(context.Background(), fakePath)
+	if err != nil {
+		t.Fatalf("discoverOpenCodeModels: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "openai/gpt-4o" {
+		t.Fatalf("expected fallback to plain `opencode models` to yield [openai/gpt-4o], got %+v", models)
 	}
 }
 
