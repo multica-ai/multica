@@ -81,6 +81,12 @@ func (s *stubAPIClientWithRecorder) ListChatMessages(ctx context.Context, creds 
 func (s *stubAPIClientWithRecorder) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {
 	return nil, nil
 }
+func (s *stubAPIClientWithRecorder) AddMessageReaction(ctx context.Context, p AddReactionParams) (string, error) {
+	return "stub-reaction-id", nil
+}
+func (s *stubAPIClientWithRecorder) DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error {
+	return nil
+}
 
 // stubCredentialsResolver returns a fixed plaintext secret.
 type stubCredentialsResolver struct{ secret string }

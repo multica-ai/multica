@@ -224,6 +224,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				patcher := lark.NewPatcher(queries, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
 
+				// Typing indicator: shows a "processing" reaction on the user's
+				// message while the agent is working, then removes it before the
+				// reply is sent. Best-effort; failures are logged only.
+				typingIndicator := lark.NewTypingIndicatorManager(larkClient, installSvc, queries, slog.Default())
+				patcher.SetTypingIndicatorManager(typingIndicator)
+
 				// Inbound pipeline: lark_inbound_audit logger,
 				// channel-aware ChatSessionService, and the
 				// Dispatcher that orders identity / dedup / append /
@@ -263,6 +269,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// "noop" so operators can spot it.
 				connectorFactory, connectorLabel := buildLarkConnectorFactory(installSvc, larkClient)
 				h.LarkHub = lark.NewHub(queries, connectorFactory, dispatcher, lark.HubConfig{})
+				h.LarkHub.SetTypingIndicatorManager(typingIndicator)
 
 				// OutcomeReplier wires the outbound side of the
 				// EventEmitter contract: NeedsBinding / AgentOffline /
