@@ -28,6 +28,7 @@ import { PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
+const SIDEBAR_OPEN_STORAGE_KEY = "sidebar_open"
 const SIDEBAR_WIDTH_DEFAULT = 256
 const SIDEBAR_WIDTH_MIN = 200
 const SIDEBAR_WIDTH_MAX = 360
@@ -96,6 +97,23 @@ function SidebarProvider({
   // We use openProp and setOpenProp for control from outside the component.
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
+
+  // Hydrate the uncontrolled open state from localStorage after mount. We read
+  // in an effect (not lazy initial state) so SSR and the first client render
+  // agree, avoiding a hydration mismatch — the stored value is applied on the
+  // next tick. Only applies in uncontrolled mode; a controlled `open` owns it.
+  React.useEffect(() => {
+    if (openProp !== undefined) return
+    if (typeof window === "undefined") return
+    const stored = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY)
+    if (stored === "true" || stored === "false") {
+      _setOpen(stored === "true")
+    }
+    // Run once on mount: subsequent open changes go through setOpen, which
+    // persists directly. Re-reading storage would clobber user toggles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value
@@ -103,6 +121,11 @@ function SidebarProvider({
         setOpenProp(openState)
       } else {
         _setOpen(openState)
+        // Persist the uncontrolled open state so it survives reloads. Mirrors
+        // how SIDEBAR_WIDTH_STORAGE_KEY is persisted in this same layer.
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(openState))
+        }
       }
 
       // This sets the cookie to keep the sidebar state.

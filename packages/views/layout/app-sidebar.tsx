@@ -54,6 +54,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarTrigger,
+  useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -343,6 +345,8 @@ interface AppSidebarProps {
 
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
   const { t } = useT("layout");
+  const { state, toggleSidebar } = useSidebar();
+  const isCollapsed = state === "collapsed";
   const { pathname, push } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
@@ -467,27 +471,43 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [pathname]);
 
+  // Global ⌘/Ctrl+B shortcut: collapse/expand the sidebar to its icon rail.
+  // Mirrors the Cmd+K idiom in search-command.tsx.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "b" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [toggleSidebar]);
+
   return (
-      <Sidebar variant="inset">
+      <Sidebar variant="inset" collapsible="icon">
         {topSlot}
         {/* Workspace Switcher */}
         <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
           <SidebarMenu>
-            <SidebarMenuItem>
+            <SidebarMenuItem className="flex items-center gap-1">
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <SidebarMenuButton>
+                    <SidebarMenuButton
+                      tooltip={workspace?.name ?? "Multica"}
+                      aria-label={workspace?.name ?? "Multica"}
+                    >
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
                         {myInvitations.length > 0 && (
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
-                      <span className="flex-1 truncate font-medium">
+                      <span className="flex-1 truncate font-medium group-data-[collapsible=icon]:hidden">
                         {workspace?.name ?? "Multica"}
                       </span>
-                      <ChevronDown className="size-3 text-muted-foreground" />
+                      <ChevronDown className="size-3 text-muted-foreground group-data-[collapsible=icon]:hidden" />
                     </SidebarMenuButton>
                   }
                 />
@@ -590,11 +610,15 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
+              {/* Collapse toggle — hidden in icon mode where the SidebarRail
+                  and ⌘B handle expansion (a toggle inside a 3rem rail would
+                  overflow). */}
+              <SidebarTrigger className="group-data-[collapsible=icon]:hidden" />
             </SidebarMenuItem>
           </SidebarMenu>
           <SidebarMenu>
             {searchSlot && (
-              <SidebarMenuItem>
+              <SidebarMenuItem className="group-data-[collapsible=icon]:hidden">
                 {searchSlot}
               </SidebarMenuItem>
             )}
@@ -602,13 +626,15 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <SidebarMenuButton
                 className="text-muted-foreground"
                 onClick={() => openCreateIssueWithPreference()}
+                tooltip={t(($) => $.sidebar.new_issue)}
+                aria-label={t(($) => $.sidebar.new_issue)}
               >
                 <span className="relative">
                   <SquarePen />
                   <DraftDot />
                 </span>
-                <span>{t(($) => $.sidebar.new_issue)}</span>
-                <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
+                <span className="group-data-[collapsible=icon]:hidden">{t(($) => $.sidebar.new_issue)}</span>
+                <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -626,13 +652,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
-                        render={<AppLink href={href} />}
+                        render={<AppLink href={href} aria-label={t(($) => $.nav[item.labelKey])} />}
+                        tooltip={t(($) => $.nav[item.labelKey])}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
+                        <span className="group-data-[collapsible=icon]:hidden">{t(($) => $.nav[item.labelKey])}</span>
                         {item.key === "inbox" && unreadCount > 0 && (
-                          <span className="ml-auto text-xs">
+                          <span className="ml-auto text-xs group-data-[collapsible=icon]:hidden">
                             {unreadCount > 99 ? "99+" : unreadCount}
                           </span>
                         )}
@@ -644,7 +671,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {visiblePinned.length > 0 && (
+          {/* Pinned items hide entirely in icon mode: their sm rows, unpin
+              affordances, and @dnd-kit reordering don't fit a 3rem rail. Not
+              rendering the group also unmounts DndContext, so DnD is cleanly
+              disabled while collapsed rather than left half-broken. */}
+          {!isCollapsed && visiblePinned.length > 0 && (
             <Collapsible defaultOpen>
               <SidebarGroup className="group/pinned">
                 <SidebarGroupLabel
@@ -690,11 +721,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
-                        render={<AppLink href={href} />}
+                        render={<AppLink href={href} aria-label={t(($) => $.nav[item.labelKey])} />}
+                        tooltip={t(($) => $.nav[item.labelKey])}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
+                        <span className="group-data-[collapsible=icon]:hidden">{t(($) => $.nav[item.labelKey])}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -714,13 +746,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
-                        render={<AppLink href={href} />}
+                        render={<AppLink href={href} aria-label={t(($) => $.nav[item.labelKey])} />}
+                        tooltip={t(($) => $.nav[item.labelKey])}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
+                        <span className="group-data-[collapsible=icon]:hidden">{t(($) => $.nav[item.labelKey])}</span>
                         {item.key === "runtimes" && hasRuntimeUpdates && (
-                          <span className="ml-auto size-1.5 rounded-full bg-destructive" />
+                          <span className="ml-auto size-1.5 rounded-full bg-destructive group-data-[collapsible=icon]:hidden" />
                         )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -732,7 +765,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
-          <div className="flex justify-end">
+          <div className="flex justify-end group-data-[collapsible=icon]:justify-center">
             <HelpLauncher />
           </div>
         </SidebarFooter>
