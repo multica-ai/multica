@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"math/rand"
 	"os"
@@ -26,6 +27,11 @@ import (
 // URL is not present in the workspace's repo configuration after a fresh
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
+
+const (
+	taskSlotWaitTimeout     = 2 * time.Second
+	taskSlotCapacityBackoff = 5 * time.Second
+)
 
 // taskRunner executes a single agent task and returns the result.
 // Extracted as an interface so tests can inject a fake without spawning real
@@ -635,7 +641,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
 
-	taskWakeups := make(chan struct{}, 1)
+	taskWakeups := make(chan taskWakeup, 256)
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
@@ -1840,7 +1846,7 @@ func (d *Daemon) triggerRestart() {
 // loop so that a slow ClaimTask call (HTTP 30s timeout) for one runtime no
 // longer delays claims on every other runtime — that was the cross-workspace
 // stall mode reported in MUL-1744.
-func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) error {
+func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) error {
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
 	var taskWG sync.WaitGroup   // tracks in-flight handleTask goroutines
 	var pollerWG sync.WaitGroup // tracks runRuntimePoller goroutines
@@ -1905,10 +1911,23 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) erro
 			return ctx.Err()
 		case <-runtimeSetCh:
 			syncPollers()
-		case <-taskWakeups:
-			// Fan out to every runtime poller. Any of them might have a queued
-			// task; the per-poller wakeup channel coalesces (cap 1) so a burst
-			// of wake-ups doesn't pile up.
+		case wakeup := <-taskWakeups:
+			if wakeup.runtimeID != "" {
+				if h, ok := pollers[wakeup.runtimeID]; ok {
+					d.logger.Debug("task wakeup: signaling runtime poller", "runtime_id", wakeup.runtimeID)
+					select {
+					case h.wakeup <- struct{}{}:
+					default:
+					}
+				} else {
+					d.logger.Debug("task wakeup: runtime poller not found", "runtime_id", wakeup.runtimeID, "pollers", len(pollers))
+				}
+				continue
+			}
+
+			// A wakeup without a runtime_id is a catch-up signal (for example,
+			// immediately after the websocket connects). Fan it out so queued
+			// work that existed before the connection is still discovered.
 			d.logger.Debug("task wakeup: fanning out to pollers", "pollers", len(pollers))
 			for _, h := range pollers {
 				select {
@@ -1950,6 +1969,13 @@ func (d *Daemon) runRuntimePoller(
 	wakeup <-chan struct{},
 	taskWG *sync.WaitGroup,
 ) {
+	if offset := runtimePollOffset(rid, d.cfg.PollInterval); offset > 0 {
+		d.logger.Debug("poll: initial offset", "runtime_id", rid, "offset", offset)
+		if err := sleepWithContextOrWakeup(pollerCtx, offset, wakeup); err != nil {
+			return
+		}
+	}
+
 	for {
 		if pollerCtx.Err() != nil {
 			return
@@ -1958,14 +1984,16 @@ func (d *Daemon) runRuntimePoller(
 		// Acquire an execution slot before claiming. If at capacity, sleep
 		// without claiming so we don't push a task into `dispatched` and
 		// then race the 5-min server-side dispatch timeout while waiting.
-		var slot int
-		select {
-		case slot = <-sem:
-		case <-pollerCtx.Done():
+		slot, acquired, woke, err := waitForTaskSlot(pollerCtx, sem, wakeup, taskSlotWaitTimeout)
+		if err != nil {
 			return
-		default:
+		}
+		if !acquired {
 			d.logger.Debug("poll: at capacity", "runtime_id", rid, "running", d.cfg.MaxConcurrentTasks)
-			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+			if woke {
+				continue
+			}
+			if err := sleepWithContextOrWakeup(pollerCtx, capacityBackoff(d.cfg.PollInterval), wakeup); err != nil {
 				return
 			}
 			continue
@@ -2029,6 +2057,49 @@ func (d *Daemon) runRuntimePoller(
 			d.handleTask(parentCtx, t, slot)
 		}(*task, slot)
 		// Loop immediately: more tasks may already be queued for this runtime.
+	}
+}
+
+func runtimePollOffset(runtimeID string, interval time.Duration) time.Duration {
+	if interval <= 0 || runtimeID == "" {
+		return 0
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(runtimeID))
+	return time.Duration(h.Sum64() % uint64(interval))
+}
+
+func capacityBackoff(pollInterval time.Duration) time.Duration {
+	if pollInterval <= 0 || pollInterval > taskSlotCapacityBackoff {
+		return taskSlotCapacityBackoff
+	}
+	return pollInterval
+}
+
+func waitForTaskSlot(ctx context.Context, sem chan int, wakeup <-chan struct{}, wait time.Duration) (slot int, acquired, woke bool, err error) {
+	select {
+	case slot = <-sem:
+		return slot, true, false, nil
+	case <-ctx.Done():
+		return 0, false, false, ctx.Err()
+	default:
+	}
+
+	if wait <= 0 {
+		return 0, false, false, nil
+	}
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case slot = <-sem:
+		return slot, true, false, nil
+	case <-wakeup:
+		return 0, false, true, nil
+	case <-ctx.Done():
+		return 0, false, false, ctx.Err()
+	case <-timer.C:
+		return 0, false, false, nil
 	}
 }
 
