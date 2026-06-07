@@ -411,23 +411,27 @@ function CommentRow({
           />
         )}
         <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
-        <span className="cursor-pointer text-sm font-medium">
-          {getActorName(entry.actor_type, entry.actor_id)}
-        </span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="text-xs text-muted-foreground cursor-default">
-                {timeAgo(entry.created_at)}
-              </span>
-            }
-          />
-          <TooltipContent side="top">
-            {new Date(entry.created_at).toLocaleString()}
-          </TooltipContent>
-        </Tooltip>
-        {/* CEREBRO-PATCH(issue-comment-cost-row): FIR-39 per-comment cost badge. */}
-        <CommentCostBadge issueId={issueId} commentId={entry.id} authorType={entry.actor_type} />
+        {/* CEREBRO-PATCH(comment-meta-below-name): TECH-3032 — name row, time+cost sub-row. */}
+        <div className="flex flex-col gap-0.5">
+          <span className="cursor-pointer text-sm font-medium leading-none">
+            {getActorName(entry.actor_type, entry.actor_id)}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="text-xs text-muted-foreground cursor-default">
+                    {timeAgo(entry.created_at)}
+                  </span>
+                }
+              />
+              <TooltipContent side="top">
+                {new Date(entry.created_at).toLocaleString()}
+              </TooltipContent>
+            </Tooltip>
+            <CommentCostBadge issueId={issueId} commentId={entry.id} authorType={entry.actor_type} />
+          </div>
+        </div>
 
         <div className="ml-auto flex items-center gap-0.5">
           <QuickEmojiPicker
@@ -726,29 +730,35 @@ function CommentCardImpl({
               />
             )}
             <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
-            <span className="shrink-0 cursor-pointer text-sm font-medium">
-              {getActorName(entry.actor_type, entry.actor_id)}
-            </span>
-            {isQuestion && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/25 bg-background px-2 py-0.5 text-[11px] font-medium text-primary">
-                <MessageCircleQuestion className="h-3 w-3" />
-                {t(($) => $.comment.question_badge)}
-              </span>
-            )}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="shrink-0 text-xs text-muted-foreground cursor-default">
-                    {timeAgo(entry.created_at)}
+            {/* CEREBRO-PATCH(comment-meta-below-name-root): TECH-3032 — name row, time+cost sub-row (root). */}
+            <div className="flex shrink-0 flex-col gap-0.5">
+              <div className="flex items-center gap-1.5">
+                <span className="cursor-pointer text-sm font-medium leading-none">
+                  {getActorName(entry.actor_type, entry.actor_id)}
+                </span>
+                {isQuestion && (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/25 bg-background px-2 py-0.5 text-[11px] font-medium text-primary">
+                    <MessageCircleQuestion className="h-3 w-3" />
+                    {t(($) => $.comment.question_badge)}
                   </span>
-                }
-              />
-              <TooltipContent side="top">
-                {new Date(entry.created_at).toLocaleString()}
-              </TooltipContent>
-            </Tooltip>
-            {/* CEREBRO-PATCH(issue-comment-cost-root): FIR-39 per-comment cost badge on the thread root. */}
-            {open && <CommentCostBadge issueId={issueId} commentId={entry.id} authorType={entry.actor_type} />}
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="text-xs text-muted-foreground cursor-default">
+                        {timeAgo(entry.created_at)}
+                      </span>
+                    }
+                  />
+                  <TooltipContent side="top">
+                    {new Date(entry.created_at).toLocaleString()}
+                  </TooltipContent>
+                </Tooltip>
+                {open && <CommentCostBadge issueId={issueId} commentId={entry.id} authorType={entry.actor_type} />}
+              </div>
+            </div>
 
             {!open && contentPreview && (
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
