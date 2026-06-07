@@ -7,6 +7,24 @@ ORDER BY created_at ASC;
 SELECT * FROM agent_runtime
 WHERE id = $1;
 
+-- name: LockAgentRuntime :one
+-- Acquires a row-level exclusive lock on the runtime row. Used at the
+-- top of the cascade-delete transaction so that:
+--   1. PostgreSQL's FK validation on agent.runtime_id (FK ... ON DELETE
+--      RESTRICT) needs FOR KEY SHARE on the parent runtime row, which
+--      conflicts with FOR UPDATE — so any concurrent INSERT or UPDATE
+--      that would point a new/moved agent at this runtime blocks until
+--      our transaction finishes; and
+--   2. concurrent UPDATE/DELETE of the runtime row itself (e.g. another
+--      delete attempt) waits for us to commit.
+-- Combined with ListActiveAgentsByRuntimeForUpdate (which row-locks the
+-- existing active set) this closes the plan-compare → archive race that
+-- was possible at read-committed isolation between the snapshot and the
+-- bulk archive.
+SELECT * FROM agent_runtime
+WHERE id = $1
+FOR UPDATE;
+
 -- name: GetAgentRuntimeForWorkspace :one
 SELECT * FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2;
@@ -124,12 +142,14 @@ WHERE status = 'online'
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: FailTasksForOfflineRuntimes :many
--- Marks dispatched/running tasks as failed when their runtime is offline.
--- This cleans up orphaned tasks after a daemon crash or network partition.
+-- Marks dispatched/running/waiting_local_directory tasks as failed when
+-- their runtime is offline. This cleans up orphaned tasks after a daemon
+-- crash or network partition.
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
-    failure_reason = 'runtime_offline'
-WHERE status IN ('dispatched', 'running')
+    failure_reason = 'runtime_offline',
+    wait_reason = NULL
+WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
@@ -170,7 +190,7 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid[]))
-  AND status IN ('queued', 'dispatched', 'running')
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec

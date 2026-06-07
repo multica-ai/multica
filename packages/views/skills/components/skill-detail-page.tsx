@@ -5,7 +5,6 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
-  ChevronRight,
   HardDrive,
   Loader2,
   Lock,
@@ -26,7 +25,7 @@ import type {
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -36,6 +35,7 @@ import {
   skillDetailOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
@@ -57,6 +57,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { AppLink, useNavigation } from "../../navigation";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
 import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
@@ -165,7 +166,7 @@ function UsedBySection({ agents }: { agents: Agent[] }) {
           <ActorAvatar
             name={a.name}
             initials={a.name.slice(0, 2).toUpperCase()}
-            avatarUrl={a.avatar_url}
+            avatarUrl={resolvePublicFileUrl(a.avatar_url)}
             isAgent
             size={22}
           />
@@ -243,6 +244,7 @@ function OriginSidebarCard({
 
 export function SkillDetailPage({ skillId }: { skillId: string }) {
   const { t } = useT("skills");
+  const timeAgo = useTimeAgo();
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const paths = useWorkspacePaths();
@@ -510,6 +512,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             variant="ghost"
             size="xs"
             render={<AppLink href={paths.skills()} />}
+            nativeButton={false}
           >
             <ArrowLeft className="h-3 w-3" />
             {t(($) => $.detail.all_skills)}
@@ -550,47 +553,42 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* Topbar */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <Button
-          variant="ghost"
-          size="xs"
-          render={<AppLink href={paths.skills()} />}
-        >
-          <ArrowLeft className="h-3 w-3" />
-          {t(($) => $.detail.all_skills)}
-        </Button>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="truncate font-mono text-xs text-foreground">
-          {skill.name}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {!canEdit && (
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <Lock className="h-3 w-3" />
-              {t(($) => $.detail.read_only)}
-            </span>
-          )}
-          {canEdit && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setConfirmDelete(true)}
-                    className="text-muted-foreground hover:text-destructive"
-                    aria-label={t(($) => $.detail.delete_aria)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-      </div>
+      <BreadcrumbHeader
+        segments={[{ href: paths.skills(), label: t(($) => $.page.title) }]}
+        leaf={
+          <span className="truncate font-mono text-xs text-foreground">
+            {skill.name}
+          </span>
+        }
+        actions={
+          <>
+            {!canEdit && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Lock className="h-3 w-3" />
+                {t(($) => $.detail.read_only)}
+              </span>
+            )}
+            {canEdit && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => setConfirmDelete(true)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={t(($) => $.detail.delete_aria)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
+                <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
+              </Tooltip>
+            )}
+          </>
+        }
+      />
 
       {!canEdit && (
         <div className="px-4 pt-3">
@@ -613,9 +611,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       )}
 
       {/* Body: file tree | editor | sidebar */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
         {/* File tree */}
-        <aside className="flex w-56 shrink-0 flex-col border-r">
+        <aside className="flex max-h-44 w-full shrink-0 flex-col border-b md:max-h-none md:w-56 md:border-b-0 md:border-r">
           <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {t(($) => $.detail.files_label, { count: totalFileCount(skill) })}
@@ -671,9 +669,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         </aside>
 
         {/* Editor */}
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section className="flex min-h-[32rem] min-w-0 shrink-0 flex-col md:min-h-0 md:flex-1 md:shrink">
           {/* Name + description + subline */}
-          <div className="space-y-2 border-b px-5 py-4">
+          <div className="space-y-2 border-b px-4 py-4 sm:px-5">
             <Input
               value={name}
               readOnly={!canEdit}
@@ -726,7 +724,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                     <ActorAvatar
                       name={creator.name}
                       initials={creator.name.slice(0, 2).toUpperCase()}
-                      avatarUrl={creator.avatar_url}
+                      avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
                       size={14}
                     />
                     {t(($) => $.detail.subline.by_creator, { name: creator.name })}
@@ -770,7 +768,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             <div
               role="status"
               aria-live="polite"
-              className="flex items-center gap-2 border-t bg-muted/30 px-4 py-2"
+              className="flex flex-wrap items-center gap-2 border-t bg-muted/30 px-4 py-2"
             >
               <span className="h-1.5 w-1.5 rounded-full bg-brand" />
               <span className="text-xs text-muted-foreground">
@@ -809,7 +807,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         </section>
 
         {/* Sidebar */}
-        <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-muted/20 px-4 py-4">
+        <aside className="flex w-full shrink-0 flex-col gap-4 border-t bg-muted/20 px-4 py-4 md:w-72 md:overflow-y-auto md:border-l md:border-t-0">
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {t(($) => $.detail.sidebar.metadata)}

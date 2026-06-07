@@ -154,6 +154,55 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 	}
 }
 
+// TestBuildQuickCreatePromptParentPinning verifies that when the user
+// opened quick-create from "Add sub issue" on an existing issue, the prompt
+// instructs the agent to pass `--parent <uuid>` so the new issue is filed
+// as a sub-issue. The frontend already seeds parent_issue_id silently
+// through the manual→agent switch, so this is the last hop that has to
+// hold up — without the prompt instruction the agent would create a
+// standalone issue and the sub-issue relationship would be silently
+// dropped.
+func TestBuildQuickCreatePromptParentPinning(t *testing.T) {
+	const (
+		parentID         = "33333333-2222-1111-4444-555555555555"
+		parentIdentifier = "MUL-2534"
+	)
+	out := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt:     "fix the login button color",
+		ParentIssueID:         parentID,
+		ParentIssueIdentifier: parentIdentifier,
+	})
+	mustContain := []string{
+		"--parent \"" + parentID + "\"",
+		parentIdentifier,
+		"modal entry point is authoritative",
+		"filed as a sub-issue",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildQuickCreatePrompt with parent missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+
+	// When only the UUID is available (identifier lookup failed on claim),
+	// the agent must still get the --parent instruction so the sub-issue
+	// intent isn't silently dropped.
+	uuidOnly := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt: "fix the login button color",
+		ParentIssueID:     parentID,
+	})
+	if !strings.Contains(uuidOnly, "--parent \""+parentID+"\"") {
+		t.Errorf("buildQuickCreatePrompt with parent UUID only must still pin --parent, got:\n%s", uuidOnly)
+	}
+
+	// Without a parent, the prompt must NOT mention --parent at all — a
+	// plain quick-create run should not start filing sub-issues.
+	plain := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
+	if strings.Contains(plain, "--parent") {
+		t.Errorf("buildQuickCreatePrompt without parent must NOT mention --parent, got:\n%s", plain)
+	}
+}
+
 // TestBuildPromptSquadLeaderNoActionForMemberTrigger verifies that the
 // squad leader no_action prohibition is injected in the per-turn prompt
 // regardless of whether the triggering comment was posted by an agent or
@@ -200,67 +249,109 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
-// TestBuildPromptCommentTriggerPromotesThreadReads pins MUL-2387 + MUL-2421:
-// the per-turn prompt for a comment-triggered task must default the trigger
-// thread read to `--thread <id> --tail 30` (so long threads don't dump
-// hundreds of replies into the agent's context) and explain reply-cursor
-// pagination for older replies. --recent N stays as the cross-thread
-// fallback. Locking this in test stops the guidance from decaying back to
-// either the legacy full-flat-dump or the unbounded `--thread` recipe.
-func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
-	const (
-		issueID   = "issue-thread-1"
-		triggerID = "trigger-comment-1"
-	)
-	task := Task{
-		IssueID:               issueID,
-		TriggerCommentID:      triggerID,
-		TriggerCommentContent: "anything",
-		TriggerAuthorType:     "member",
-		TriggerAuthorName:     "Bohan",
-	}
-	out := BuildPrompt(task, "claude")
-
-	mustContain := []string{
-		// Thread-first read pinned by trigger comment id, capped via --tail 30.
-		"--thread " + triggerID,
-		"--tail 30",
-		"`multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json`",
-		// Reply cursor walks older replies inside the same thread.
-		"Next reply cursor:",
-		"--before-id <reply-id>",
-		// --recent stays as the cross-thread background fallback.
-		"--recent 20 --output json",
-		// Cursor walks via the stderr line the CLI emits, not invented flags.
-		"Next thread cursor",
-		"--before",
-		"--before-id",
-		// --since is preserved as an additional, combinable knob (now scoped
-		// to the post-MUL-2421 mode names).
-		"--since",
-		"may combine with `--thread --tail` or `--recent`",
-		// Discourage the unfiltered full dump on long-running issues.
-		"Avoid the unfiltered",
-		"wastes context",
-	}
-	for _, s := range mustContain {
-		if !strings.Contains(out, s) {
-			t.Errorf("buildCommentPrompt missing thread-first guidance %q\n--- output ---\n%s", s, out)
+func TestBuildChatPromptSlashSkills(t *testing.T) {
+	t.Run("injects selected skills block", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "please [/deploy](slash://skill/abc-123) this",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "abc-123", Name: "deploy"}},
+			},
 		}
-	}
+		out := buildChatPrompt(task)
+		if !strings.Contains(out, "Explicitly selected skills:\n- deploy\n") {
+			t.Fatalf("expected selected skills block, got:\n%s", out)
+		}
+		if !strings.Contains(out, "User message:\nplease [/deploy](slash://skill/abc-123) this") {
+			t.Fatalf("expected raw user message preserved, got:\n%s", out)
+		}
+	})
 
-	// The old "dump everything via --output json alone" prose is exactly the
-	// pattern this PR is replacing — guard against the legacy phrasing
-	// sneaking back in.
-	if strings.Contains(out, "returns all comments for the issue (server caps at 2000)") {
-		t.Errorf("buildCommentPrompt still carries the legacy full-dump phrasing")
-	}
-	// The pre-MUL-2421 unbounded `--thread` recipe (no --tail) is also a
-	// regression target: it dumps the entire thread on long threads, which
-	// is exactly what --tail 30 is meant to bound.
-	if strings.Contains(out, "--thread "+triggerID+" --output json") {
-		t.Errorf("buildCommentPrompt regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n--- output ---\n%s", out)
-	}
+	t.Run("ignores skills not belonging to agent", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/hacker-skill](slash://skill/evil-id)",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "good-id", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("should not inject block for unknown skill ID, got:\n%s", out)
+		}
+	})
+
+	t.Run("validates by ID not label", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/deploy](slash://skill/wrong-id)",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "real-id", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("matching label with wrong ID must not pass, got:\n%s", out)
+		}
+	})
+
+	t.Run("uses canonical name not label", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/spoofed-name](slash://skill/real-id)",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "real-id", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if !strings.Contains(out, "- deploy\n") {
+			t.Fatalf("expected canonical name 'deploy', got:\n%s", out)
+		}
+		if strings.Contains(out, "- spoofed-name\n") {
+			t.Fatalf("selected skills block must not use spoofed label, got:\n%s", out)
+		}
+		if !strings.Contains(out, "User message:\n[/spoofed-name](slash://skill/real-id)") {
+			t.Fatalf("expected raw user message with spoofed label preserved, got:\n%s", out)
+		}
+	})
+
+	t.Run("deduplicates skills", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/deploy](slash://skill/a) and [/deploy](slash://skill/a) again",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "a", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if strings.Count(out, "- deploy") != 1 {
+			t.Fatalf("expected exactly 1 '- deploy', got:\n%s", out)
+		}
+	})
+
+	t.Run("omits block when no valid skills", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "just a normal message",
+			Agent:         &AgentData{Skills: []SkillData{{ID: "a", Name: "deploy"}}},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("should not inject block when no slash links, got:\n%s", out)
+		}
+	})
+
+	t.Run("omits block when agent has no skills", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/deploy](slash://skill/abc-123)",
+			Agent:         &AgentData{},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("should not inject block for agent with no skills, got:\n%s", out)
+		}
+	})
 }
 
 // TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
@@ -308,5 +399,115 @@ func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
 	out := BuildPrompt(task, "claude")
 	if strings.Contains(out, "Squad leader no_action rule") {
 		t.Errorf("buildCommentPrompt must NOT inject squad leader no_action rule for non-squad-leader agents, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptNewCommentsHint pins that a comment-triggered task whose agent
+// ran before on this issue (NewCommentsSince set, NewCommentCount > 0) gets the
+// since-delta hint with the ISSUE-WIDE new-comment count, but is steered to read
+// the triggering (parent) thread first rather than blindly pulling every new
+// comment.
+func TestBuildPromptNewCommentsHint(t *testing.T) {
+	const (
+		issueID = "issue-new-1"
+		since   = "2026-05-28T11:00:00Z"
+	)
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
+		TriggerCommentContent: "please look",
+		TriggerAuthorType:     "member",
+		NewCommentCount:       3,
+		NewCommentsSince:      since,
+	}
+	out := BuildPrompt(task, "claude")
+
+	// Issue-wide count (reverted from the thread-scoped wording).
+	if !strings.Contains(out, "3 new comment(s) on this issue since your last run") {
+		t.Errorf("hint must report the issue-wide new-comment count, got:\n%s", out)
+	}
+	// Don't-blindly-read-all guidance.
+	if !strings.Contains(out, "blindly") {
+		t.Errorf("hint must discourage blindly reading every new comment, got:\n%s", out)
+	}
+	// Parent thread first: the --thread <trigger> read is the prioritized action.
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --since "+since+" --output json") {
+		t.Errorf("hint must point at the triggering (parent) thread --since read first, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--tail 30") {
+		t.Errorf("hint must offer the full-thread (--tail 30) option, got:\n%s", out)
+	}
+	// Issue-wide catch-up is demoted to an only-if-needed fallback.
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
+		t.Errorf("hint must keep the issue-wide --since catch-up as a fallback, got:\n%s", out)
+	}
+	// The old cursor-heavy paragraph must be gone.
+	if strings.Contains(out, "Next reply cursor") || strings.Contains(out, "--before-id") {
+		t.Errorf("the old cursor-pagination paragraph must not render, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptColdStartThreadRead pins the cold-start case: no prior run means
+// no since anchor (NewCommentsSince empty), so we suppress the delta hint and
+// instead point the agent at the triggering CONVERSATION (--thread <trigger>
+// --tail 30) rather than dumping the flat timeline.
+func TestBuildPromptColdStartThreadRead(t *testing.T) {
+	const issueID = "issue-cold-1"
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
+		TriggerCommentContent: "hi",
+		TriggerAuthorType:     "member",
+		NewCommentCount:       0,
+		NewCommentsSince:      "",
+	}
+	out := BuildPrompt(task, "claude")
+	if strings.Contains(out, "new comment(s) since your last run") {
+		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
+	}
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
+		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptResumedNoDeltaDoesNotForceThreadRead pins the warm/no-delta
+// path: when a prior provider session is actually being resumed, the triggering
+// comment is already embedded in the per-turn prompt, so the agent should not
+// be told to re-read the triggering thread's latest 30 replies by default.
+func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
+	const issueID = "issue-resumed-1"
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
+		TriggerCommentContent: "hi again",
+		TriggerAuthorType:     "member",
+		PriorSessionID:        "session-123",
+		NewCommentCount:       0,
+		NewCommentsSince:      "",
+	}
+	out := BuildPrompt(task, "claude")
+
+	for _, want := range []string{
+		"triggering comment is already included above",
+		"No other new comments on this issue since your last run",
+		"active thread anchor `thread-root-1` and triggering comment ID `trigger-1`",
+		"If your reply depends on thread context",
+		"do not rely only on resumed session memory",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resumed/no-delta prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	// The stale thread-scoped wording (since-delta used to be thread-scoped)
+	// must not reappear.
+	if strings.Contains(out, "scoped to the triggering thread") {
+		t.Errorf("resumed/no-delta prompt must not claim the delta is thread-scoped, got:\n%s", out)
+	}
+	if strings.Contains(out, "Read the triggering conversation first") {
+		t.Errorf("resumed/no-delta prompt must not use the cold-start forced-read wording, got:\n%s", out)
 	}
 }

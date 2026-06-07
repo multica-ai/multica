@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { Webhook, ChevronDown, ChevronRight, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
 
 interface WebhookPayloadPreviewProps {
@@ -66,12 +67,11 @@ export function WebhookPayloadPreview({
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(fullJSON);
+    if (await copyText(fullJSON)) {
       setCopied(true);
       toast.success(t(($) => $.webhook_payload.copied));
       setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       toast.error(t(($) => $.webhook_payload.copy_failed));
     }
   };

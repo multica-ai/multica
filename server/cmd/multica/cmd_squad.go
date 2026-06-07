@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"text/tabwriter"
 	"time"
 
@@ -52,10 +53,23 @@ func runSquadList(cmd *cobra.Command, _ []string) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tNAME\tLEADER ID\tMEMBERS")
 	for _, s := range squads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t-\n",
-			strVal(s, "id"), strVal(s, "name"), strVal(s, "leader_id"))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			strVal(s, "id"), strVal(s, "name"), strVal(s, "leader_id"),
+			memberCountDisplay(s))
 	}
 	return w.Flush()
+}
+
+func memberCountDisplay(m map[string]any) string {
+	v, ok := m["member_count"]
+	if !ok || v == nil {
+		return "-"
+	}
+	n, ok := v.(float64)
+	if !ok || n <= 0 {
+		return "-"
+	}
+	return strconv.Itoa(int(n))
 }
 
 // ── Get ─────────────────────────────────────────────────────────────────────
@@ -330,6 +344,56 @@ func runSquadMemberAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// ── Member Set Role ─────────────────────────────────────────────────────────
+
+var squadMemberSetRoleCmd = &cobra.Command{
+	Use:   "set-role <squad-id>",
+	Short: "Change a squad member's role",
+	Args:  exactArgs(1),
+	RunE:  runSquadMemberSetRole,
+}
+
+func runSquadMemberSetRole(cmd *cobra.Command, args []string) error {
+	memberID, _ := cmd.Flags().GetString("member-id")
+	memberType, _ := cmd.Flags().GetString("member-type")
+	role, _ := cmd.Flags().GetString("role")
+
+	if memberID == "" {
+		return fmt.Errorf("--member-id is required")
+	}
+	if memberType != "agent" && memberType != "member" {
+		return fmt.Errorf("--member-type must be 'agent' or 'member'")
+	}
+	if role == "" {
+		return fmt.Errorf("--role is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{
+		"member_type": memberType,
+		"member_id":   memberID,
+		"role":        role,
+	}
+
+	var result map[string]any
+	if err := client.PatchJSON(ctx, "/api/squads/"+args[0]+"/members/role", body, &result); err != nil {
+		return fmt.Errorf("set member role: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Fprintf(os.Stderr, "Member %s role updated to %s.\n", memberID, role)
+	return nil
+}
+
 // ── Member Remove ───────────────────────────────────────────────────────────
 
 var squadMemberRemoveCmd = &cobra.Command{
@@ -473,6 +537,12 @@ func init() {
 	squadMemberRemoveCmd.Flags().String("type", "agent", "Member type: agent or member")
 	squadMemberRemoveCmd.Flags().String("output", "table", "Output format: table or json")
 
+	// member set-role
+	squadMemberSetRoleCmd.Flags().String("member-id", "", "Member or agent ID (required)")
+	squadMemberSetRoleCmd.Flags().String("member-type", "agent", "Member type: agent or member")
+	squadMemberSetRoleCmd.Flags().String("role", "", "New role in the squad (required)")
+	squadMemberSetRoleCmd.Flags().String("output", "json", "Output format: table or json")
+
 	// activity
 	squadActivityCmd.Flags().String("reason", "", "Short explanation of the decision")
 	squadActivityCmd.Flags().String("output", "table", "Output format: table or json")
@@ -480,6 +550,7 @@ func init() {
 	squadMemberCmd.AddCommand(squadMemberListCmd)
 	squadMemberCmd.AddCommand(squadMemberAddCmd)
 	squadMemberCmd.AddCommand(squadMemberRemoveCmd)
+	squadMemberCmd.AddCommand(squadMemberSetRoleCmd)
 
 	squadCmd.AddCommand(squadListCmd)
 	squadCmd.AddCommand(squadGetCmd)

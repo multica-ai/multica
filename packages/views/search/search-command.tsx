@@ -43,6 +43,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import type { WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
@@ -57,55 +58,12 @@ import {
   DialogDescription,
 } from "@multica/ui/components/ui/dialog";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
+import { HighlightText } from "./highlight-text";
 import { useSearchStore } from "./search-store";
-
-function HighlightText({ text, query }: { text: string; query: string }) {
-  const parts = useMemo(() => {
-    if (!query.trim()) return [{ text, highlight: false }];
-    // Build regex that matches the full phrase OR individual terms
-    const terms = query.trim().split(/\s+/).filter(Boolean);
-    const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const patterns: string[] = [escaped];
-    if (terms.length > 1) {
-      for (const term of terms) {
-        const e = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        if (e && !patterns.includes(e)) patterns.push(e);
-      }
-    }
-    const regex = new RegExp(`(${patterns.join("|")})`, "gi");
-    const result: { text: string; highlight: boolean }[] = [];
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(text)) !== null) {
-      if (match.index > lastIndex) {
-        result.push({ text: text.slice(lastIndex, match.index), highlight: false });
-      }
-      result.push({ text: match[0], highlight: true });
-      lastIndex = regex.lastIndex;
-    }
-    if (lastIndex < text.length) {
-      result.push({ text: text.slice(lastIndex), highlight: false });
-    }
-    return result.length > 0 ? result : [{ text, highlight: false }];
-  }, [text, query]);
-
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.highlight ? (
-          <mark key={i} className="bg-yellow-200 dark:bg-yellow-900/60 text-inherit rounded-sm">
-            {part.text}
-          </mark>
-        ) : (
-          part.text
-        ),
-      )}
-    </>
-  );
-}
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see SearchCommand body).
@@ -264,8 +222,9 @@ export function SearchCommand() {
           icon: Link2,
           keywords: ["copy", "link", "share", "url", identifier.toLowerCase()],
           onSelect: () => {
-            void navigator.clipboard.writeText(getShareableUrl(pathname));
-            toast.success(t(($) => $.toast.link_copied));
+            void copyText(getShareableUrl(pathname)).then((ok) => {
+              if (ok) toast.success(t(($) => $.toast.link_copied));
+            });
             setOpen(false);
           },
         },
@@ -275,8 +234,9 @@ export function SearchCommand() {
           icon: Copy,
           keywords: ["copy", "id", "identifier", identifier.toLowerCase()],
           onSelect: () => {
-            void navigator.clipboard.writeText(identifier);
-            toast.success(t(($) => $.toast.copied_identifier, { identifier }));
+            void copyText(identifier).then((ok) => {
+              if (ok) toast.success(t(($) => $.toast.copied_identifier, { identifier }));
+            });
             setOpen(false);
           },
         },
@@ -571,7 +531,7 @@ export function SearchCommand() {
                     <ActorAvatarBase
                       name={member.name}
                       initials={memberInitials(member.name)}
-                      avatarUrl={member.avatar_url}
+                      avatarUrl={resolvePublicFileUrl(member.avatar_url)}
                       size={22}
                     />
                     <div className="min-w-0 flex-1">

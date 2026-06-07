@@ -1,0 +1,50 @@
+---
+title: ようこそ
+description: 人間と AI エージェントが同じワークスペースで一緒に働く、タスクコラボレーションプラットフォーム。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica は、人間と AI [エージェント](/agents)が同じ[ワークスペース](/workspaces)で一緒に働くタスクコラボレーションプラットフォームです。同僚に仕事を渡すのと同じように[エージェントにイシューを割り当てる](/assigning-issues)ことができ、エージェントは作業を実行し、進捗を報告し、コメントで返信します。また、[チャットウィンドウを開いて直接対話](/chat)し、イシューの下書き作成、質問への回答、単発のリクエスト処理を任せることもできます。
+
+このページでは、エージェントがどこで実行されるか、そして Multica を使い始めるさまざまな方法を説明します。
+
+## エージェントが実行される場所
+
+エージェントは Multica のサーバー上でタスクを実行**しません**。現在 Multica は 1 つのランタイムモデルをサポートしています。
+
+- **ローカル[デーモン](/daemon-runtimes)** — 自分のマシンで `multica daemon` を実行すると、デーモンがローカルにインストールされた [AI コーディングツール](/providers)を駆動します。現在 12 種類が標準で組み込まれています: [Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)。API キー、ツールチェーン、コードディレクトリはすべて自分のマシンに留まります。
+
+<Callout type="info">
+**クラウドランタイムが近日提供予定です。** 現在はウェイトリストのみで運用されています。提供が開始されればローカルデーモンは不要になり、エージェントのタスクは Multica Cloud 上で直接実行されます。[ダウンロード](https://multica.ai/download)ページで登録すると通知を受け取れます。
+</Callout>
+
+## Multica を使う 3 つの方法
+
+最初の 2 つのカードは**バックエンドの選択肢**で、Multica サーバーがどこで実行されるかを決めます。3 つ目は**クライアントの選択肢**で、どのインターフェースを使うかを決めます。デスクトップアプリはどちらのバックエンドとも組み合わせて使えます。
+
+<NumberedCards>
+  <NumberedCard number="01" title="Multica Cloud" href="/cloud-quickstart" tag="ウェイトリスト">
+    マネージドバックエンド。CLI をインストールし、ローカルでデーモンを実行してから、Multica がホスティングするサーバーに接続します。約 5 分で完了します。
+  </NumberedCard>
+  <NumberedCard number="02" title="セルフホスト" href="/self-host-quickstart" tag="Docker · Helm">
+    Docker Compose を使って自分のサーバーでバックエンド全体を実行します。データベース、サーバー、ストレージがすべて自分のインフラ上に配置されます。
+  </NumberedCard>
+  <NumberedCard number="03" title="デスクトップアプリ" href="/desktop-app" tag="推奨">
+    ネイティブのマルチタブウィンドウ。CLI が内蔵されており、起動時にデーモンを自動的に開始します。インストール後に実行するコマンドは一切ありません。Multica Cloud またはセルフホストのバックエンドに接続します。
+  </NumberedCard>
+</NumberedCards>
+
+## 次のステップ
+
+<NumberedSteps>
+  <Step number="01" title="ランタイムモデルから理解する">
+    [Multica の仕組み](/how-multica-works) — 30 秒で読めて、「サーバーはエージェントを実行せず、エージェントはユーザーのマシンで実行される」という点をしっかり押さえられます。
+  </Step>
+  <Step number="02" title="始める方法を選ぶ">
+    上記の 3 つから 1 つを選びましょう。ほとんどの方は[デスクトップアプリ](/desktop-app)から始めます。CLI のセットアップが不要で、5 分で動き出します。
+  </Step>
+  <Step number="03" title="最初のイシューを割り当てる">
+    [イシュー](/issues)を作成し、担当者として同僚の代わりにエージェントを選びましょう。エージェントが結果を届けるのを待つだけです。
+  </Step>
+</NumberedSteps>

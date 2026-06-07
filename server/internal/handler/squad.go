@@ -10,6 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -19,18 +21,31 @@ import (
 // ── Response types ──────────────────────────────────────────────────────────
 
 type SquadResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	Name         string  `json:"name"`
-	Description  string  `json:"description"`
-	Instructions string  `json:"instructions"`
-	AvatarURL    *string `json:"avatar_url"`
-	LeaderID     string  `json:"leader_id"`
-	CreatorID    string  `json:"creator_id"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
-	ArchivedAt   *string `json:"archived_at"`
-	ArchivedBy   *string `json:"archived_by"`
+	ID            string                       `json:"id"`
+	WorkspaceID   string                       `json:"workspace_id"`
+	Name          string                       `json:"name"`
+	Description   string                       `json:"description"`
+	Instructions  string                       `json:"instructions"`
+	AvatarURL     *string                      `json:"avatar_url"`
+	LeaderID      string                       `json:"leader_id"`
+	CreatorID     string                       `json:"creator_id"`
+	CreatedAt     string                       `json:"created_at"`
+	UpdatedAt     string                       `json:"updated_at"`
+	ArchivedAt    *string                      `json:"archived_at"`
+	ArchivedBy    *string                      `json:"archived_by"`
+	MemberCount   int                          `json:"member_count"`
+	MemberPreview []SquadMemberPreviewResponse `json:"member_preview"`
+}
+
+type SquadMemberPreviewResponse struct {
+	MemberType string `json:"member_type"`
+	MemberID   string `json:"member_id"`
+	Role       string `json:"role"`
+}
+
+type squadMemberSummary struct {
+	count   int
+	preview []SquadMemberPreviewResponse
 }
 
 type SquadMemberResponse struct {
@@ -46,18 +61,19 @@ type SquadMemberResponse struct {
 
 func squadToResponse(s db.Squad) SquadResponse {
 	return SquadResponse{
-		ID:           uuidToString(s.ID),
-		WorkspaceID:  uuidToString(s.WorkspaceID),
-		Name:         s.Name,
-		Description:  s.Description,
-		Instructions: s.Instructions,
-		AvatarURL:    textToPtr(s.AvatarUrl),
-		LeaderID:     uuidToString(s.LeaderID),
-		CreatorID:    uuidToString(s.CreatorID),
-		CreatedAt:    timestampToString(s.CreatedAt),
-		UpdatedAt:    timestampToString(s.UpdatedAt),
-		ArchivedAt:   timestampToPtr(s.ArchivedAt),
-		ArchivedBy:   uuidToPtr(s.ArchivedBy),
+		ID:            uuidToString(s.ID),
+		WorkspaceID:   uuidToString(s.WorkspaceID),
+		Name:          s.Name,
+		Description:   s.Description,
+		Instructions:  s.Instructions,
+		AvatarURL:     textToPtr(s.AvatarUrl),
+		LeaderID:      uuidToString(s.LeaderID),
+		CreatorID:     uuidToString(s.CreatorID),
+		CreatedAt:     timestampToString(s.CreatedAt),
+		UpdatedAt:     timestampToString(s.UpdatedAt),
+		ArchivedAt:    timestampToPtr(s.ArchivedAt),
+		ArchivedBy:    uuidToPtr(s.ArchivedBy),
+		MemberPreview: []SquadMemberPreviewResponse{},
 	}
 }
 
@@ -70,6 +86,26 @@ func squadMemberToResponse(m db.SquadMember) SquadMemberResponse {
 		Role:       m.Role,
 		CreatedAt:  timestampToString(m.CreatedAt),
 	}
+}
+
+func addSquadMemberPreview(summary *squadMemberSummary, memberType string, memberID pgtype.UUID, role string) {
+	summary.count++
+	if len(summary.preview) >= 3 {
+		return
+	}
+	summary.preview = append(summary.preview, SquadMemberPreviewResponse{
+		MemberType: memberType,
+		MemberID:   uuidToString(memberID),
+		Role:       role,
+	})
+}
+
+func applySquadMemberSummary(resp *SquadResponse, summary *squadMemberSummary) {
+	if summary == nil {
+		return
+	}
+	resp.MemberCount = summary.count
+	resp.MemberPreview = summary.preview
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -97,6 +133,28 @@ func (h *Handler) loadSquadInWorkspace(w http.ResponseWriter, r *http.Request) (
 	return squad, workspaceID, true
 }
 
+func (h *Handler) loadSquadMemberSummary(ctx context.Context, squadID pgtype.UUID) (*squadMemberSummary, error) {
+	rows, err := h.Queries.ListSquadMemberPreviewRowsBySquad(ctx, squadID)
+	if err != nil {
+		return nil, err
+	}
+	summary := &squadMemberSummary{}
+	for _, row := range rows {
+		addSquadMemberPreview(summary, row.MemberType, row.MemberID, row.Role)
+	}
+	return summary, nil
+}
+
+func (h *Handler) squadToResponseWithPreview(ctx context.Context, squad db.Squad) (SquadResponse, error) {
+	resp := squadToResponse(squad)
+	summary, err := h.loadSquadMemberSummary(ctx, squad.ID)
+	if err != nil {
+		return resp, err
+	}
+	applySquadMemberSummary(&resp, summary)
+	return resp, nil
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
@@ -110,9 +168,27 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list squads")
 		return
 	}
+
+	previewRows, err := h.Queries.ListSquadMemberPreviewRows(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list squad member preview")
+		return
+	}
+	summaries := make(map[string]*squadMemberSummary, len(squads))
+	for _, row := range previewRows {
+		squadID := uuidToString(row.SquadID)
+		summary := summaries[squadID]
+		if summary == nil {
+			summary = &squadMemberSummary{}
+			summaries[squadID] = summary
+		}
+		addSquadMemberPreview(summary, row.MemberType, row.MemberID, row.Role)
+	}
+
 	resp := make([]SquadResponse, len(squads))
 	for i, s := range squads {
 		resp[i] = squadToResponse(s)
+		applySquadMemberSummary(&resp[i], summaries[uuidToString(s.ID)])
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -188,8 +264,18 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		Role:       "leader",
 	})
 
-	resp := squadToResponse(squad)
+	resp, err := h.squadToResponseWithPreview(r.Context(), squad)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load squad member preview")
+		return
+	}
 	h.publish(protocol.EventSquadCreated, workspaceID, "member", uuidToString(member.UserID), map[string]any{"squad": resp})
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.SquadCreated(
+		uuidToString(member.UserID),
+		workspaceID,
+		uuidToString(squad.ID),
+		1,
+	))
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -198,7 +284,12 @@ func (h *Handler) GetSquad(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, squadToResponse(squad))
+	resp, err := h.squadToResponseWithPreview(r.Context(), squad)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load squad member preview")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +362,11 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := squadToResponse(updated)
+	resp, err := h.squadToResponseWithPreview(r.Context(), updated)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load squad member preview")
+		return
+	}
 	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{"squad": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -376,7 +471,7 @@ type SquadMemberStatusListResponse struct {
 	Members []SquadMemberStatusResponse `json:"members"`
 }
 
-// deriveSquadMemberStatus collapses runtime + task signals into the four
+// deriveSquadMemberStatus collapses runtime + task signals into the five
 // status buckets used by the squad UI. Mirrors the workload+availability
 // split in packages/core/agents/derive-presence.ts: working wins over
 // runtime health (an agent that is in the middle of dispatched/running
@@ -387,9 +482,11 @@ type SquadMemberStatusListResponse struct {
 // last_seen_at is within the last 5 minutes is reported as "unstable" so
 // the squad UI surfaces transient drops the same way the agent dot does.
 //
-// Archived agents always report `offline` regardless of any leftover
+// Archived agents always report `archived` regardless of any leftover
 // runtime row or task — they should appear in the list but never look
-// like they're still working. Per the RFC decision (see MUL-2319), we
+// like they're still working or merely offline (a leftover online
+// runtime row would otherwise read as "offline" and hide the fact that
+// the agent has been archived). Per the RFC decision (see MUL-2319), we
 // surface archived agents in this endpoint rather than filtering them
 // out in the SQL.
 func deriveSquadMemberStatus(
@@ -400,7 +497,7 @@ func deriveSquadMemberStatus(
 	now time.Time,
 ) string {
 	if archived {
-		return "offline"
+		return "archived"
 	}
 	if hasActiveTask {
 		return "working"
@@ -941,6 +1038,11 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
+		return
+	}
+
+	// Private-leader gate: deny if the actor cannot access the leader.
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, uuidToString(issue.WorkspaceID)) {
 		return
 	}
 

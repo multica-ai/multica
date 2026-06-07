@@ -15,6 +15,7 @@ import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
@@ -39,11 +40,8 @@ interface ChatInputProps {
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
   leftAdornment?: ReactNode;
-  /** Rendered just before the submit button — used for context-anchor action. */
-  rightAdornment?: ReactNode;
-  /** Rendered inside the rounded container, above the editor — attached
-   *  context cards, drafts, etc. */
-  topSlot?: ReactNode;
+  /** Chat @ suggestions: current/recent issue/project entries. */
+  contextItems?: MentionItem[];
 }
 
 export function ChatInput({
@@ -55,8 +53,7 @@ export function ChatInput({
   noAgent,
   agentName,
   leftAdornment,
-  rightAdornment,
-  topSlot,
+  contextItems,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -214,7 +211,6 @@ export function ChatInput({
         )}
         aria-disabled={noAgent || undefined}
       >
-        {topSlot}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
             // See the editorKey / draftKey split note above — editorKey
@@ -230,11 +226,15 @@ export function ChatInput({
             onSubmit={handleSend}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
             debounceMs={100}
+            mentionMode={contextItems ? "context" : "default"}
+            mentionContextItems={contextItems}
+            enableSlashCommands
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Mod+Enter submits. Bare Enter falls through to Tiptap's
-            // default, which continues lists/quotes and breaks paragraphs.
+            // Chat intentionally leaves submitOnEnter at its default false:
+            // Mod+Enter submits, while bare Enter falls through to Tiptap's
+            // default behavior for lists, quotes, and paragraph breaks.
             // Without this, Enter-as-send would steal the only key that
             // continues a bullet list, leaving users stuck after one item.
           />
@@ -245,7 +245,6 @@ export function ChatInput({
           </div>
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
-          {rightAdornment}
           {uploadEnabled && (
             <FileUploadButton
               size="sm"

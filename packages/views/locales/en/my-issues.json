@@ -7,6 +7,8 @@
   },
   "header": {
     "scope": {
+      "all_label": "All",
+      "all_description": "Assigned to me, created by me, or involving my agents and squads",
       "assigned_label": "Assigned",
       "assigned_description": "Issues assigned to me",
       "created_label": "Created",
@@ -30,9 +32,11 @@
     "card_properties": "Card properties",
     "view_board": "Board view",
     "view_list": "List view",
+    "view_swimlane": "Swimlane view",
     "view_label": "View",
     "view_board_short": "Board",
     "view_list_short": "List",
+    "view_swimlane_short": "Swimlane",
     "sort_manual": "Manual"
   },
   "errors": {

@@ -1,6 +1,6 @@
 import { forwardRef, useRef, useImperativeHandle } from "react";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import enCommon from "../../locales/en/common.json";
@@ -30,6 +30,9 @@ const TEST_RESOURCES = { en: { common: enCommon, chat: enChat } };
 const dropHandlers = vi.hoisted(() => ({
   onDrop: null as null | ((files: File[]) => void),
 }));
+const editorProps = vi.hoisted(() => ({
+  last: null as null | Record<string, unknown>,
+}));
 
 vi.mock("../../editor", () => ({
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
@@ -38,19 +41,23 @@ vi.mock("../../editor", () => ({
   },
   FileDropOverlay: () => null,
   ContentEditor: forwardRef(function MockContentEditor(
-    {
-      defaultValue,
-      onUpdate,
-      placeholder,
-      onUploadFile,
-    }: {
+    props: {
       defaultValue?: string;
       onUpdate?: (md: string) => void;
       placeholder?: string;
       onUploadFile?: (file: File) => Promise<UploadResult | null>;
+      mentionMode?: string;
+      mentionContextItems?: unknown[];
     },
     ref: React.Ref<unknown>,
   ) {
+    const {
+      defaultValue,
+      onUpdate,
+      placeholder,
+      onUploadFile,
+    } = props;
+    editorProps.last = props as unknown as Record<string, unknown>;
     const valueRef = useRef<string>(defaultValue ?? "");
     const uploadingRef = useRef(0);
     useImperativeHandle(ref, () => ({
@@ -94,7 +101,6 @@ vi.mock("@multica/core/chat", () => {
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1",
     inputDrafts: {} as Record<string, string>,
-    focusMode: false,
     setInputDraft: vi.fn(),
     clearInputDraft: vi.fn(),
   };
@@ -125,15 +131,30 @@ function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}
   return { onSend, onUploadFile };
 }
 
+describe("ChatInput @ context wiring", () => {
+  it("configures chat @ with current/recent issue/project context", () => {
+    const contextItems = [
+      { id: "issue-1", label: "MUL-1", type: "issue" as const, group: "current" as const },
+    ];
+
+    renderInput({ contextItems });
+
+    expect(editorProps.last?.mentionMode).toBe("context");
+    expect(editorProps.last?.mentionContextItems).toBe(contextItems);
+  });
+});
+
 describe("ChatInput attachment wiring", () => {
   it("routes dropped files through the editor's upload handler", async () => {
     const { onUploadFile } = renderInput();
     expect(dropHandlers.onDrop).not.toBeNull();
     const file = new File(["x"], "drop.png", { type: "image/png" });
-    dropHandlers.onDrop?.([file]);
-    // Microtask: the mock editor awaits onUploadFile before mutating its value.
-    await Promise.resolve();
-    await Promise.resolve();
+    await act(async () => {
+      dropHandlers.onDrop?.([file]);
+      // Microtask: the mock editor awaits onUploadFile before mutating its value.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(onUploadFile).toHaveBeenCalledWith(file);
   });
 
@@ -148,7 +169,11 @@ describe("ChatInput attachment wiring", () => {
     // mock editor appends the markdown link into its value and calls
     // onUpdate so the input flips out of the empty state.
     const file = new File(["x"], "drop.png", { type: "image/png" });
-    dropHandlers.onDrop?.([file]);
+    await act(async () => {
+      dropHandlers.onDrop?.([file]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     // Wait for the submit button to become enabled (onUpdate has fired and
     // React has re-rendered). SubmitButton has no aria-label, so we pick
@@ -181,7 +206,10 @@ describe("ChatInput attachment wiring", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "preview text" } });
 
     const file = new File(["x"], "slow.png", { type: "image/png" });
-    dropHandlers.onDrop?.([file]);
+    await act(async () => {
+      dropHandlers.onDrop?.([file]);
+      await Promise.resolve();
+    });
 
     // While the upload is pending the SubmitButton must be disabled.
     // Bypassing this would send the message with the attachment id
@@ -192,7 +220,10 @@ describe("ChatInput attachment wiring", () => {
       expect(sendButton).toBeDisabled();
     });
 
-    resolveUpload!(makeUpload({ id: "att-slow", link: "https://cdn.example/att-slow.png", filename: "slow.png" }));
+    await act(async () => {
+      resolveUpload!(makeUpload({ id: "att-slow", link: "https://cdn.example/att-slow.png", filename: "slow.png" }));
+      await Promise.resolve();
+    });
 
     let sendButton: HTMLElement;
     await waitFor(() => {
@@ -213,7 +244,7 @@ describe("ChatInput attachment wiring", () => {
     // only. Probe by counting buttons: with no upload, only the submit
     // button is in the action row.
     const buttons = screen.getAllByRole("button");
-    // The agent picker / context anchor adornments may render zero buttons
+    // The agent picker may render zero buttons
     // in this test (no leftAdornment passed). So a single button = submit.
     expect(buttons.length).toBe(1);
   });

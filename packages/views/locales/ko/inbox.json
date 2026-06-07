@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "인박스",
+    "back": "인박스"
+  },
+  "menu": {
+    "mark_all_read": "모두 읽음으로 표시",
+    "archive_all": "모두 보관",
+    "archive_all_read": "읽은 항목 모두 보관",
+    "archive_completed": "완료된 항목 보관"
+  },
+  "list": {
+    "empty": "알림이 없습니다",
+    "mark_done_tooltip": "완료로 표시",
+    "archive_tooltip": "보관",
+    "time": {
+      "just_now": "방금 전",
+      "minutes": "{{count}}분",
+      "hours": "{{count}}시간",
+      "days": "{{count}}일"
+    }
+  },
+  "detail": {
+    "select_prompt": "자세히 볼 알림을 선택하세요",
+    "empty": "인박스가 비어 있습니다",
+    "original_input": "원본 입력",
+    "edit_advanced": "고급 양식으로 수정",
+    "archive": "보관"
+  },
+  "types": {
+    "issue_assigned": "할당됨",
+    "unassigned": "할당 해제됨",
+    "assignee_changed": "담당자 변경됨",
+    "status_changed": "상태 변경됨",
+    "priority_changed": "우선순위 변경됨",
+    "start_date_changed": "시작일 변경됨",
+    "due_date_changed": "마감일 변경됨",
+    "new_comment": "새 댓글",
+    "mentioned": "멘션됨",
+    "review_requested": "리뷰 요청됨",
+    "task_completed": "작업 완료됨",
+    "task_failed": "작업 실패함",
+    "agent_blocked": "에이전트 막힘",
+    "agent_completed": "에이전트 완료됨",
+    "reaction_added": "반응 추가됨",
+    "quick_create_done": "에이전트로 생성됨",
+    "quick_create_failed": "에이전트 생성 실패"
+  },
+  "labels": {
+    "set_status_to": "상태 변경:",
+    "set_priority_to": "우선순위 변경:",
+    "assigned_to": "{{name}}님에게 할당",
+    "removed_assignee": "담당자 제거됨",
+    "set_start_date_to": "시작일: {{date}}",
+    "removed_start_date": "시작일 제거됨",
+    "set_due_date_to": "마감일: {{date}}",
+    "removed_due_date": "마감일 제거됨",
+    "reacted_to_comment": "내 댓글에 {{emoji}} 반응을 남겼습니다",
+    "created_with_agent": "에이전트가 생성: {{identifier}}",
+    "failed_with_detail": "실패: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "읽음 표시를 하지 못했습니다",
+    "archive_failed": "보관하지 못했습니다",
+    "mark_done_failed": "완료 표시를 하지 못했습니다",
+    "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",
+    "archive_all_failed": "모두 보관하지 못했습니다",
+    "archive_all_read_failed": "읽은 항목을 보관하지 못했습니다",
+    "archive_completed_failed": "완료된 항목을 보관하지 못했습니다"
+  }
+}

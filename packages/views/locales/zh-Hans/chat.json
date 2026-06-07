@@ -7,8 +7,8 @@
   "input": {
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
     "placeholder_archived": "此会话已归档",
-    "placeholder_named": "告诉 {{name}} 该做什么...",
-    "placeholder_default": "告诉我该做什么...",
+    "placeholder_named": "给 {{name}} 发消息…",
+    "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
     "stop_tooltip": "停止"
   },
@@ -23,7 +23,8 @@
     "process_steps_other": "{{count}} 步",
     "copy_action": "复制",
     "copied_toast": "已复制",
-    "copy_failed_toast": "复制失败"
+    "copy_failed_toast": "复制失败",
+    "loading_older": "正在加载更早的消息…"
   },
   "session_history": {
     "untitled": "无标题",
@@ -35,6 +36,21 @@
     },
     "row_delete_aria": "删除对话",
     "row_rename_aria": "重命名对话",
+    "row_stop_aria": "停止当前运行",
+    "stop_action": "停止",
+    "row_subtitle": {
+      "working": "运行中",
+      "completed": "已完成",
+      "new_reply": "新回复"
+    },
+    "stop_dialog": {
+      "title": "停止这次运行？",
+      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体任务。已产生的内容会保留在对话里。",
+      "description_default": "这会取消当前智能体任务。已产生的内容会保留在对话里。",
+      "cancel": "继续运行",
+      "confirm": "停止运行",
+      "confirming": "停止中..."
+    },
     "delete_dialog": {
       "title": "删除对话",
       "description_with_title": "\"{{title}}\" 及其消息会被永久删除，无法撤销。",
@@ -58,8 +74,8 @@
     "my_agents": "我的智能体",
     "others": "其他",
     "no_agents": "暂无智能体",
-    "active_group": "进行中",
-    "archived_group_other": "{{count}} 条已归档"
+    "history_group": "历史对话",
+    "agent_filter_placeholder": "搜索智能体..."
   },
   "empty_state": {
     "first_time_title": "和你的智能体对话",
@@ -76,17 +92,6 @@
     "summarize_today": "总结一下我今天做了什么",
     "plan_next": "规划接下来该做什么"
   },
-  "context_anchor": {
-    "tooltip_disabled": "当前页面没有可以共享给 Multica 的内容",
-    "tooltip_off": "让 Multica 知道你正在看的内容",
-    "tooltip_on_issue": "Multica 知道你正在看 {{label}}，点击关闭",
-    "tooltip_on_project": "Multica 知道你正在看项目 \"{{label}}\"，点击关闭",
-    "card_tooltip_issue_with_subtitle": "Multica 知道你正在看 {{label}} —— {{subtitle}}",
-    "card_tooltip_issue": "Multica 知道你正在看 {{label}}",
-    "card_tooltip_project": "Multica 知道你正在看项目 \"{{label}}\"",
-    "aria_stop": "停止共享当前页面",
-    "aria_start": "把当前页面共享给 Multica"
-  },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "offline_banner": {
     "fallback_name": "智能体",
@@ -98,6 +103,7 @@
       "offline": "离线",
       "reconnecting": "重连中",
       "queued": "排队中",
+      "waiting_local_directory": "等待本地目录释放",
       "starting_up": "启动中",
       "thinking": "思考中",
       "typing": "输入中"

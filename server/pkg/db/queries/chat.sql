@@ -65,8 +65,9 @@ FOR UPDATE;
 -- the same transaction that holds LockChatSessionForDelete and that has
 -- already cancelled any in-flight tasks (see CancelAgentTasksByChatSession)
 -- so the daemon does not keep running work whose result has nowhere to
--- land.
-DELETE FROM chat_session WHERE id = $1;
+-- land. workspace_id in the WHERE clause is a SQL-layer tenant guard; see
+-- DeleteIssue.
+DELETE FROM chat_session WHERE id = $1 AND workspace_id = $2;
 
 -- name: TouchChatSession :exec
 UPDATE chat_session SET updated_at = now()
@@ -81,6 +82,16 @@ RETURNING *;
 SELECT * FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC;
+
+-- name: ListChatMessagesPage :many
+SELECT * FROM chat_message
+WHERE chat_session_id = $1
+  AND (
+    sqlc.narg('before_created_at')::timestamptz IS NULL
+    OR (created_at, id) < (sqlc.narg('before_created_at')::timestamptz, sqlc.narg('before_id')::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $2;
 
 -- name: GetChatMessage :one
 SELECT * FROM chat_message
@@ -120,7 +131,7 @@ LIMIT 1;
 -- elapsed = now - task.created_at), so the pill survives refresh / reopen
 -- without "resetting to 0s".
 SELECT id, status, created_at FROM agent_task_queue
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY created_at DESC
 LIMIT 1;
 
@@ -133,7 +144,7 @@ FROM agent_task_queue atq
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
   AND cs.creator_id = $2
-  AND atq.status IN ('queued', 'dispatched', 'running')
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY atq.created_at DESC;
 
 -- name: MarkChatSessionRead :exec
@@ -147,3 +158,14 @@ WHERE id = $1;
 -- unread boundary stable across multiple incoming replies.
 UPDATE chat_session SET unread_since = now()
 WHERE id = $1 AND unread_since IS NULL;
+
+-- name: GetMostRecentUserChatMessage :one
+-- Returns the most recent role='user' message in a session. Used by the
+-- Lark `/issue` command parser: when the user types `/issue` with no
+-- title, the spec falls back to "use the previous user message as the
+-- title". Bot replies (role='assistant') are excluded — only human
+-- input qualifies as a fallback title source.
+SELECT * FROM chat_message
+WHERE chat_session_id = $1 AND role = 'user'
+ORDER BY created_at DESC
+LIMIT 1;

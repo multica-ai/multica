@@ -152,7 +152,7 @@ describe("ApiClient", () => {
     expect(headers["X-Client-OS"]).toBeUndefined();
   });
 
-  it("uses the Cloud Runtime node API contract and forwards bootstrap PAT on create", async () => {
+  it("uses the Cloud Runtime node API contract", async () => {
     const node = {
       id: "node-1",
       owner_id: "user-1",
@@ -195,7 +195,6 @@ describe("ApiClient", () => {
     expect(listCall[0]).toBe(
       "https://api.example.test/api/cloud-runtime/nodes?limit=20&offset=5",
     );
-    expect((listCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
     expect(createCall[0]).toBe(
       "https://api.example.test/api/cloud-runtime/nodes",
     );
@@ -206,7 +205,6 @@ describe("ApiClient", () => {
         name: "gpu-dev-01",
       }),
     });
-    expect((createCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
   });
 
   it("falls back when Cloud Runtime node responses drift", async () => {
@@ -234,21 +232,21 @@ describe("ApiClient", () => {
     ).resolves.toMatchObject({ id: "", status: "" });
   });
 
-  it("deleteCloudRuntimeNode sends DELETE with JSON body containing node id", async () => {
+  it("deleteCloudRuntimeNode sends DELETE with JSON body containing instance id", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(null, { status: 204 }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await client.deleteCloudRuntimeNode("node-abc-123");
+    await client.deleteCloudRuntimeNode("i-0123456789abcdef0");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, opts] = fetchMock.mock.calls[0]!;
     expect(url).toBe("https://api.example.test/api/cloud-runtime/nodes");
     expect(opts).toMatchObject({
       method: "DELETE",
-      body: JSON.stringify({ id: "node-abc-123" }),
+      body: JSON.stringify({ instance_id: "i-0123456789abcdef0" }),
     });
     expect((opts.headers as Record<string, string>)["Content-Type"]).toBe(
       "application/json",
@@ -361,6 +359,68 @@ describe("ApiClient", () => {
       await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
         PreviewUnsupportedError,
       );
+    });
+  });
+
+  describe("listChatMessagesPage deployment-order fallback", () => {
+    const jsonResponse = (body: unknown, status: number, statusText = "") =>
+      new Response(JSON.stringify(body), {
+        status,
+        statusText,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    it("falls back to the legacy full-list endpoint when the paged route 404s", async () => {
+      const legacy = [
+        { id: "m1", role: "user", content: "hi", created_at: "2026-06-01T00:00:00Z" },
+        { id: "m2", role: "assistant", content: "yo", created_at: "2026-06-01T00:00:01Z" },
+      ];
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404, "Not Found"))
+        .mockResolvedValueOnce(jsonResponse(legacy, 200));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const page = await client.listChatMessagesPage("session-1", { limit: 50 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0]![0]).toBe(
+        "https://api.example.test/api/chat/sessions/session-1/messages/page?limit=50",
+      );
+      expect(fetchMock.mock.calls[1]![0]).toBe(
+        "https://api.example.test/api/chat/sessions/session-1/messages",
+      );
+      expect(page).toEqual({ messages: legacy, limit: 50, has_more: false, next_cursor: null });
+    });
+
+    it("does NOT fall back on a cursor request — a 404 there propagates", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: "not found" }, 404, "Not Found"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.listChatMessagesPage("session-1", {
+          before: { created_at: "2026-06-01T00:00:00Z", id: "m1" },
+        }),
+      ).rejects.toBeInstanceOf(ApiError);
+      // Only the paged request fires; no legacy full-list call that would duplicate messages.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("propagates non-404 errors instead of masking them with the legacy list", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: "boom" }, 500, "Internal Server Error"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listChatMessagesPage("session-1")).rejects.toMatchObject({
+        status: 500,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 

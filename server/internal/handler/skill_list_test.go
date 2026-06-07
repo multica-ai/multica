@@ -111,6 +111,22 @@ func TestListAgentSkills_OmitsContent(t *testing.T) {
 	}
 }
 
+// TestGetSkill_MalformedUUIDReturns400 guards the handler UUID parsing
+// convention (CLAUDE.md → "Backend Handler UUID Parsing Convention"): raw
+// `id` URL params on the request boundary must be validated with
+// parseUUIDOrBadRequest, not the panic-prone parseUUID. Before the fix
+// the malformed input panicked in MustParseUUID and was rescued by the
+// chi Recoverer middleware as a 500.
+func TestGetSkill_MalformedUUIDReturns400(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/skills/not-a-uuid", nil)
+	req = withURLParam(req, "id", "not-a-uuid")
+	testHandler.GetSkill(w, req)
+	if w.Code != 400 {
+		t.Fatalf("GetSkill malformed uuid: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // insertHandlerTestSkill writes a skill row directly via SQL and registers a
 // cleanup hook. We bypass the create handler to keep the test focused on the
 // list/detail wire shape and to make it easy to inject a large body.

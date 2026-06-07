@@ -646,7 +646,7 @@ function Leaderboard({
   // applies inside an equal-bucket.
   const sortedRows = useMemo(() => {
     const metric = SORT_METRIC[sortBy];
-    return [...rows].sort((a, b) => metric(b) - metric(a));
+    return rows.toSorted((a, b) => metric(b) - metric(a));
   }, [rows, sortBy]);
 
   const maxValue = useMemo(() => {

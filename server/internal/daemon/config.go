@@ -15,32 +15,48 @@ import (
 )
 
 const (
-	DefaultServerURL                      = "ws://localhost:8080/ws"
-	DefaultPollInterval                   = 30 * time.Second
-	DefaultHeartbeatInterval              = 15 * time.Second
-	DefaultAgentTimeout                   = 2 * time.Hour
+	DefaultServerURL         = "ws://localhost:8080/ws"
+	DefaultPollInterval      = 30 * time.Second
+	DefaultHeartbeatInterval = 15 * time.Second
+	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
+	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdogs
+	// (DefaultAgentIdleWatchdog / DefaultAgentToolWatchdog), so a session that keeps emitting events is
+	// never killed merely for running long (MUL-3064). Operators who want a
+	// hard ceiling for cost/resource control can set MULTICA_AGENT_TIMEOUT.
+	DefaultAgentTimeout                   = 0
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
 	// on a stuck child process (e.g. `docker ps` against a frozen dockerd),
-	// in which case `cmd.Wait()` never returns and the task sits at "running"
-	// for its full DefaultAgentTimeout (2 h). The previous 5 min default
+	// in which case `cmd.Wait()` never returns. With no wall-clock cap
+	// (DefaultAgentTimeout = 0) such a run would otherwise sit at "running"
+	// forever, so this watchdog is its sole liveness net. The previous 5 min default
 	// killed legitimate long assistant outputs (e.g. RFC-length writeups)
 	// where the model streams a single message for many minutes without any
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
 	DefaultAgentIdleWatchdog = 30 * time.Minute
-	DefaultRuntimeName                    = "Local Agent"
-	DefaultWorkspaceSyncInterval          = 30 * time.Second
-	DefaultHealthPort                     = 19514
-	DefaultMaxConcurrentTasks             = 20
-	DefaultGCInterval                     = 1 * time.Hour
-	DefaultGCTTL                          = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
-	DefaultGCOrphanTTL                    = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
-	DefaultGCArtifactTTL                  = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
-	DefaultAutoUpdateCheckInterval        = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
+	// DefaultAgentToolWatchdog bounds how long a single tool call may stay in
+	// flight (tool_use emitted, no tool_result and no other message) before the
+	// idle watchdog force-stops the run. The idle watchdog ignores its normal
+	// window while a tool is in flight, because a real build/install/test
+	// legitimately runs silently for many minutes — but with no wall-clock cap
+	// (DefaultAgentTimeout = 0) a backend that emits tool_use and never the
+	// matching tool_result would otherwise run forever. This is the backstop for
+	// that stuck-tool case (MUL-3064). Set MULTICA_AGENT_TOOL_WATCHDOG=0 to
+	// disable, in which case an in-flight tool never force-stops the run.
+	DefaultAgentToolWatchdog       = 2 * time.Hour
+	DefaultRuntimeName             = "Local Agent"
+	DefaultWorkspaceSyncInterval   = 30 * time.Second
+	DefaultHealthPort              = 19514
+	DefaultMaxConcurrentTasks      = 20
+	DefaultGCInterval              = 1 * time.Hour
+	DefaultGCTTL                   = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL             = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCArtifactTTL           = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultAutoUpdateCheckInterval = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -61,7 +77,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -79,6 +95,7 @@ type Config struct {
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
 	ClaudeArgs                     []string
 	CodexArgs                      []string
 }
@@ -86,11 +103,13 @@ type Config struct {
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
-	ServerURL                      string
-	WorkspacesRoot                 string
-	PollInterval                   time.Duration
-	HeartbeatInterval              time.Duration
-	AgentTimeout                   time.Duration
+	ServerURL         string
+	WorkspacesRoot    string
+	PollInterval      time.Duration
+	HeartbeatInterval time.Duration
+	// AgentTimeout is a pointer so an explicit `--agent-timeout 0` (no cap) is
+	// distinguishable from "flag not passed". nil = use env/default.
+	AgentTimeout                   *time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	MaxConcurrentTasks             int
 	DaemonID                       string
@@ -164,6 +183,18 @@ func LoadConfig(overrides Overrides) (Config, error) {
 				Model: strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
+		if defaultCmd == "codex" && cmd == defaultCmd {
+			// Codex Desktop bundles its CLI inside the macOS app instead of
+			// installing it onto PATH.
+			for _, p := range codexDesktopAppBundlePaths() {
+				if _, err := os.Stat(p); err == nil {
+					return AgentEntry{
+						Path:  p,
+						Model: strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+		}
 		return AgentEntry{}, false
 	}
 
@@ -201,8 +232,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
+	// Antigravity has no `--model` flag and ModelSelectionSupported returns
+	// false for it (see server/pkg/agent/models.go). Pass an empty modelEnv
+	// so we don't seed AgentEntry.Model from an environment variable that
+	// the backend would silently ignore, and don't lead users to set it.
+	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
+		agents["antigravity"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -241,8 +279,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	if overrides.AgentTimeout > 0 {
-		agentTimeout = overrides.AgentTimeout
+	if overrides.AgentTimeout != nil {
+		agentTimeout = *overrides.AgentTimeout
 	}
 
 	codexSemanticInactivityTimeout, err := durationFromEnv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", DefaultCodexSemanticInactivityTimeout)
@@ -257,6 +295,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// route 0 through durationFromEnv so the operator can opt out without
 	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
 	agentIdleWatchdog, err := durationFromEnv("MULTICA_AGENT_IDLE_WATCHDOG", DefaultAgentIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// MULTICA_AGENT_TOOL_WATCHDOG=0 disables the in-flight-tool backstop; any
+	// positive duration overrides DefaultAgentToolWatchdog.
+	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", DefaultAgentToolWatchdog)
 	if err != nil {
 		return Config{}, err
 	}
@@ -409,6 +454,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
+		AgentToolWatchdog:              agentToolWatchdog,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
 	}, nil
@@ -537,7 +583,17 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
-	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
+	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "agy",
+}
+
+var codexDesktopAppBundlePaths = func() []string {
+	paths := []string{
+		"/Applications/Codex.app/Contents/Resources/codex",
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"))
+	}
+	return paths
 }
 
 // loginShellResolveTimeout caps how long the daemon will wait for the user's

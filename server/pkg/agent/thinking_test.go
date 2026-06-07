@@ -127,9 +127,11 @@ func TestRunCodexDebugModels_ArgvSeenByBinary(t *testing.T) {
 	script := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$@\" > '" + argvFile + "'\n" +
 		"echo '{\"models\":[]}'\n"
-	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake codex: %v", err)
-	}
+	// Use the ForkLock-protected helper instead of os.WriteFile: under
+	// t.Parallel() with the rest of this package, a sibling test's
+	// concurrent fork can inherit our still-open write fd, causing
+	// Linux ETXTBSY when we exec the file (Go #22315).
+	writeTestExecutable(t, fake, []byte(script))
 
 	raw, err := runCodexDebugModels(context.Background(), fake)
 	if err != nil {
@@ -255,6 +257,11 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"codex", "minimal", true},
 		{"codex", "xhigh", true},
 		{"codex", "max", false}, // Claude-only token rejected for Codex
+		{"opencode", "", true},
+		{"opencode", "max", true},
+		{"opencode", "fast-mode", true},  // custom opencode.json variant names are valid
+		{"opencode", ".hidden", false},   // reject suspicious / malformed names server-side
+		{"opencode", "bad value", false}, // spaces are not valid variant names
 		{"hermes", "", true},
 		{"hermes", "low", false}, // hermes has no thinking concept
 	}
@@ -369,6 +376,59 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 }
 
+func TestValidateThinkingLevel_OpenCodeEmptyModelUsesAdvertisedVariants(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	modelCacheMu.Lock()
+	delete(modelCache, "opencode")
+	modelCacheMu.Unlock()
+	defer func() {
+		modelCacheMu.Lock()
+		delete(modelCache, "opencode")
+		modelCacheMu.Unlock()
+	}()
+
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "opencode")
+	script := `#!/bin/sh
+if [ "$1" = "models" ]; then
+  cat <<'EOF'
+opencode/deepseek-v4
+{
+  "id": "deepseek-v4",
+  "reasoning": true,
+  "variants": {
+    "high": {},
+    "max": {}
+  }
+}
+EOF
+  exit 0
+fi
+echo "opencode 9.9.9"
+`
+	writeTestExecutable(t, fake, []byte(script))
+
+	ctx := context.Background()
+	ok, err := ValidateThinkingLevel(ctx, "opencode", fake, "", "max")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected empty-model opencode max to pass when any advertised model supports it")
+	}
+
+	ok, err = ValidateThinkingLevel(ctx, "opencode", fake, "", "xhigh")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ok {
+		t.Fatalf("xhigh should fail when no advertised OpenCode model exposes it")
+	}
+}
+
 // writeFakeClaudeHelpBinary writes a small shell script that mimics
 // `claude --help`, emitting the full effort superset line so per-model
 // projection has something to filter. Returns the path to the executable.
@@ -384,9 +444,10 @@ func writeFakeClaudeHelpBinary(t *testing.T) string {
 		"  --model <model>     Model to use\n" +
 		"  --effort <level>    Effort level for the current session (low, medium, high, xhigh, max)\n" +
 		"EOF\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude: %v", err)
-	}
+	// Same ForkLock rationale as TestRunCodexDebugModels_ArgvSeenByBinary —
+	// the parser tests that consume this helper exec the script in parallel,
+	// so a sibling fork can otherwise inherit our write fd and trip ETXTBSY.
+	writeTestExecutable(t, path, []byte(script))
 	return path
 }
 
@@ -647,4 +708,3 @@ func argIndexOf(slice []string, target string) int {
 	}
 	return -1
 }
-

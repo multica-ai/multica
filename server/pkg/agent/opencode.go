@@ -19,6 +19,7 @@ import (
 var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--format":                       blockedWithValue,  // json output format for daemon communication
 	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
+	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
 	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
 }
 
@@ -46,10 +47,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	execPath = resolved
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
 	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
@@ -66,6 +64,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.ThinkingLevel != "" {
+		args = append(args, "--variant", opts.ThinkingLevel)
 	}
 	if opts.SystemPrompt != "" {
 		args = append(args, "--prompt", opts.SystemPrompt)
@@ -102,6 +103,28 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// See packages/opencode/src/cli/cmd/run.ts in the upstream source.
 	if opts.Cwd != "" {
 		env = append(env, "PWD="+opts.Cwd)
+	}
+	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
+	// OpenCode's general inline-config injection mechanism that merges at
+	// "local" scope (after the project-config loop, before remote / managed
+	// configs). MCP is the only field we currently project there; if a
+	// future Multica field needs the same channel it would assemble a
+	// combined OpenCode config slice before the env append.
+	//
+	// This deliberately leaves <workdir>/opencode.json untouched — the
+	// workdir is reused across turns for the same (agent, issue), and any
+	// agent- or user-written model / tools / permission settings in it must
+	// survive across runs.
+	mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if mcpContent != "" {
+		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
+			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+		}
+		env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
 	}
 	cmd.Env = env
 

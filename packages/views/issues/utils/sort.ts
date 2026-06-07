@@ -11,7 +11,7 @@ export function sortIssues(
   field: SortField,
   direction: SortDirection
 ): Issue[] {
-  const sorted = [...issues].sort((a, b) => {
+  const sorted = issues.toSorted((a, b) => {
     switch (field) {
       case "priority":
         return (

@@ -9,11 +9,11 @@ import (
 
 // BuildPrompt constructs the task prompt for an agent CLI.
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
-// injected by execenv.InjectRuntimeConfig. The provider string is used by
-// comment-triggered tasks: Codex's per-turn reply template needs the
-// platform-aware "stdin or file" variant, every other provider gets a
-// lightweight inline template (or Windows file for any provider on
-// Windows).
+// injected by execenv.InjectRuntimeConfig. The provider string is threaded
+// through to comment-triggered tasks' per-turn reply template; that template
+// is provider-agnostic now (Linux/macOS → quoted-HEREDOC stdin, Windows →
+// file) because the shell-layer corruption it guards against is not specific
+// to any one provider (MUL-2904).
 func BuildPrompt(task Task, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
@@ -105,6 +105,18 @@ func buildQuickCreatePrompt(task Task) string {
 	} else {
 		b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
 	}
+	// parent — pinned by the modal when the user opened it from "Add sub
+	// issue" on an existing issue. Pass the UUID (never the identifier) so
+	// the create lands the sub-issue under the right parent even when the
+	// workspace prefix changes; the identifier is included in the prose
+	// purely as human-readable context for the agent.
+	if task.ParentIssueID != "" {
+		if task.ParentIssueIdentifier != "" {
+			fmt.Fprintf(&b, "- **parent**: required for this run. Pass `--parent %q` so the new issue is filed as a sub-issue of %s (the user opened quick-create from that issue's \"Add sub issue\" entry). Do not infer a different parent from the prompt text — the modal entry point is authoritative.\n", task.ParentIssueID, task.ParentIssueIdentifier)
+		} else {
+			fmt.Fprintf(&b, "- **parent**: required for this run. Pass `--parent %q` so the new issue is filed as a sub-issue of the parent the user picked in the quick-create modal. Do not infer a different parent from the prompt text — the modal entry point is authoritative.\n", task.ParentIssueID)
+		}
+	}
 	b.WriteString("- **status**: omit (defaults to `todo`).\n")
 	b.WriteString("- **attachments**: do NOT pass `--attachment`. The flag only accepts LOCAL file paths. Any image URL in the user input is already markdown — keep it inline in `--description` instead.\n\n")
 
@@ -147,7 +159,21 @@ func buildCommentPrompt(task Task, provider string) string {
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, read the triggering thread first: `multica issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 most recent replies in that thread (root is always included, even at `--tail 0`, so you keep the \"what is this about\" context without dragging hundreds of replies into your prompt). If 30 replies aren't enough, walk older replies in the same thread one page at a time by passing the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line back as `--before <ts> --before-id <reply-id>` on the next call. If you also need cross-thread background, `multica issue comment list %s --recent 20 --output json` pulls the 20 most recently active threads on the issue; under `--recent` the same `--before` / `--before-id` flags walk older *threads* (stderr label: `Next thread cursor`) instead of older replies. Avoid the unfiltered `--output json` form on long-running issues; it dumps the full flat timeline (cap 2000) and wastes context. `--since <RFC3339>` is still available for incremental polling and may combine with `--thread --tail` or `--recent`.\n\n", task.IssueID, task.TriggerCommentID, task.IssueID)
+	// Comment-reading pointer. Warm path with new comments: issue-wide
+	// since-delta count, but steer the agent to read the triggering thread
+	// first. Warm resumed path with no new comments: the trigger is already
+	// injected, so don't force a duplicate thread read. Cold path: read the
+	// triggering thread, not the flat timeline. Final fallback (no trigger id,
+	// shouldn't happen here): plain read.
+	if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount); hint != "" {
+		b.WriteString(hint)
+	} else if task.PriorSessionID != "" {
+		b.WriteString(execenv.BuildResumedCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID))
+	} else if cold := execenv.BuildColdCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID); cold != "" {
+		b.WriteString(cold)
+	} else {
+		fmt.Fprintf(&b, "Read the discussion: `multica issue comment list %s --output json` (long issue? use `--recent 20`).\n\n", task.IssueID)
+	}
 	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
@@ -157,6 +183,37 @@ func buildChatPrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
+	if task.Agent != nil && len(task.Agent.Skills) > 0 {
+		refs := ExtractSlashSkills(task.ChatMessage)
+		if len(refs) > 0 {
+			agentSkills := make(map[string]string, len(task.Agent.Skills))
+			for _, s := range task.Agent.Skills {
+				agentSkills[s.ID] = s.Name
+			}
+
+			selected := make([]string, 0, len(refs))
+			seen := make(map[string]struct{}, len(refs))
+			for _, ref := range refs {
+				name, ok := agentSkills[ref.ID]
+				if !ok {
+					continue
+				}
+				if _, ok := seen[ref.ID]; ok {
+					continue
+				}
+				seen[ref.ID] = struct{}{}
+				selected = append(selected, name)
+			}
+
+			if len(selected) > 0 {
+				b.WriteString("Explicitly selected skills:\n")
+				for _, name := range selected {
+					fmt.Fprintf(&b, "- %s\n", name)
+				}
+				b.WriteString("\n")
+			}
+		}
+	}
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments

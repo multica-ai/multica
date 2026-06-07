@@ -118,6 +118,12 @@ func (c *APIClient) setHeaders(req *http.Request) {
 }
 
 // GetJSON performs a GET request and decodes the JSON response.
+//
+// On an HTTP error response (status >= 400) the returned error is a
+// *HTTPError so callers can use errors.As to inspect the status code
+// (for example to recognize a 404 from a server that does not expose a
+// given endpoint and degrade gracefully). The error string format
+// ("GET <path> returned <code>: <body>") is preserved by HTTPError.Error().
 func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
 	if err != nil {
@@ -133,7 +139,12 @@ func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("GET %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
+		return &HTTPError{
+			Method:     http.MethodGet,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(data)),
+		}
 	}
 	if out == nil {
 		return nil
@@ -444,7 +455,8 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 // Downloads are limited to 100 MB to match the upload size limit.
 //
 // The URL may be absolute (a signed CloudFront/S3 URL) or relative
-// (a server-relative path like "/uploads/...") depending on how the
+// (a server-relative path like "/api/attachments/{id}/download" or
+// "/uploads/...") depending on how the
 // server is configured. Relative URLs are resolved against the client's
 // BaseURL and sent with the standard auth headers; absolute URLs are
 // used as-is so that their query-string signatures are not disturbed.

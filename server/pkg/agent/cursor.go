@@ -31,10 +31,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
 	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
@@ -396,12 +393,11 @@ var cursorBlockedArgs = map[string]blockedArgMode{
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
-// Usage: cursor-agent chat -p <prompt> --output-format stream-json
+// Usage: cursor-agent -p <prompt> --output-format stream-json
 //
 //	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
 func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
-		"chat",
 		"-p", prompt,
 		"--output-format", "stream-json",
 		"--yolo",
