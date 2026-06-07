@@ -6,8 +6,9 @@ import "encoding/json"
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path        string // path to CLI binary
+	Model       string // model override (optional)
+	DisplayName string // CEREBRO-PATCH(daemon-firtal-gateway-runtime-name): optional display name override sent to server
 }
 
 // Runtime represents a registered daemon runtime.
