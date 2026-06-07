@@ -161,7 +161,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
     });
     obs.observe(el);
     return () => { obs.disconnect(); cancelAnimationFrame(raf); };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!channel]); // re-run when channel data loads (containerRef div only mounts after channel resolves)
 
   // CEREBRO-PATCH(channels-slack-message-view): hide the floating agent-chat
   // bubble while the channel/DM is open — the ThreadSidePanel docks where the

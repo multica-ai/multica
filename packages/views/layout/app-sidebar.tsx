@@ -655,7 +655,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <DropdownMenuItem
                         key={ws.id}
                         render={
-                          <AppLink href={paths.workspace(ws.slug).issues()} />
+                          // CEREBRO-PATCH(start-page-workspace-switch): switch via workspace root so the selected start page is applied.
+                          <AppLink href={paths.workspace(ws.slug).root()} />
                         }
                       >
                         {/* CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — show each workspace's logo in the switcher list. */}

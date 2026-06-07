@@ -125,8 +125,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_persona_permissions: true,
   cerebro_skill_mention: true,
   cerebro_grants: false,
-  cerebro_tool_policy: false,
-  cerebro_simple_tool_policy: false,
+  cerebro_tool_policy: true,
+  cerebro_simple_tool_policy: true,
   // FIR-2594: surface the Multica platform actions (create issue, add comment,
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
   // so they are settable Allow/Ask/Deny on every layer. Default OFF — nothing

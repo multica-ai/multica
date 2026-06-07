@@ -254,6 +254,68 @@ func customerServiceMCPTools() []Tool {
 			description: "Vis Firtals intent-kategorier grupperet i familier.",
 			schema:      objectSchema([]string{}, map[string]any{}),
 		},
+		// Dixa realtime tools (added TECH-3020)
+		{
+			name:        "dixa_get_conversation",
+			description: "Hent Dixa-samtalemetadata: status, kanal, assignee og timestamps.",
+			schema: objectSchema([]string{"conversationId"}, map[string]any{
+				"conversationId": stringProp("Dixa samtale-ID."),
+			}),
+		},
+		{
+			name:        "dixa_list_messages",
+			description: "Hent alle beskeder (ind- og udgående + noter) i en Dixa-samtale.",
+			schema: objectSchema([]string{"conversationId"}, map[string]any{
+				"conversationId": stringProp("Dixa samtale-ID."),
+				"limit":          numberProp("Maks antal beskeder (standard 50)."),
+			}),
+		},
+		{
+			name:        "send_customer_message",
+			description: "Send et svar direkte til kunden i Dixa. Kræver eksplicit godkendelse — brug kun efter menneskelig bekræftelse.",
+			schema: objectSchema([]string{"conversationId", "message"}, map[string]any{
+				"conversationId": stringProp("Dixa samtale-ID."),
+				"message":        stringProp("Beskedtekst der sendes til kunden."),
+			}),
+		},
+		// Selveo order and product tools (added TECH-3020)
+		{
+			name:        "get_customer_orders_by_email",
+			description: "Hent ordrehistorik for en kunde baseret på billing-email (ikke kræver ordrenummer).",
+			schema: objectSchema([]string{"email"}, map[string]any{
+				"email": stringProp("Kundens email-adresse."),
+				"limit": numberProp("Maks antal ordrer."),
+			}),
+		},
+		{
+			name:        "search_products",
+			description: "Søg efter Selveo-produkter på navn.",
+			schema: objectSchema([]string{"searchTerm"}, map[string]any{
+				"searchTerm": stringProp("Søgeord (produktnavn)."),
+				"limit":      numberProp("Maks antal resultater (standard 10)."),
+			}),
+		},
+		{
+			name:        "get_product_stock_level",
+			description: "Hent lagerstatus per lager for et Selveo-produkt via SSIN.",
+			schema: objectSchema([]string{"productSsin"}, map[string]any{
+				"productSsin": stringProp("Selveo SSIN (produkt-ID)."),
+			}),
+		},
+		{
+			name:        "get_product_details",
+			description: "Hent fuld produktinfo fra Selveo: pris, mål, kategorier, leverandør og lagerstatus.",
+			schema: objectSchema([]string{"productSsin"}, map[string]any{
+				"productSsin": stringProp("Selveo SSIN (produkt-ID)."),
+			}),
+		},
+		{
+			name:        "get_order_confirmation",
+			description: "Hent ordrebekræftelsesmail fra intern API via increment-ID.",
+			schema: objectSchema([]string{"incrementId"}, map[string]any{
+				"incrementId": stringProp("Ordrenummer / increment-ID."),
+			}),
+		},
 	}
 
 	tools := make([]Tool, 0, len(defs))
