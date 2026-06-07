@@ -838,6 +838,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/{slug}", h.GetAgentTemplate)
 			})
 
+			// MCP connector directory. Global curated connectors plus
+			// workspace-custom ones, layered over the per-agent mcp_config
+			// JSONB. List is open to any member; create/update/delete are
+			// admin-gated and only ever touch workspace-custom rows.
+			r.Route("/api/mcp-connectors", func(r chi.Router) {
+				r.Get("/", h.ListMcpConnectors)
+				r.Post("/", h.CreateMcpConnector)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateMcpConnector)
+					r.Delete("/", h.DeleteMcpConnector)
+				})
+			})
+
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)
