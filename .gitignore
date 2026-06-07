@@ -16,6 +16,8 @@ dist-electron
 # env
 .env*
 !.env.example
+deploy/docker-server.env
+deploy/*.local.env
 
 # test coverage
 coverage
