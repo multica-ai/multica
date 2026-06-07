@@ -304,11 +304,51 @@ func mergeAgentEnv(existing, request map[string]string) (map[string]string, envA
 		}
 	}
 
+	sortEnvAudit(&audit)
+	return merged, audit
+}
+
+func patchAgentEnv(existing, set map[string]string, remove []string) (map[string]string, envAudit) {
+	merged := make(map[string]string, len(existing)+len(set))
+	for k, v := range existing {
+		merged[k] = v
+	}
+
+	audit := envAudit{}
+	for _, k := range remove {
+		if _, ok := merged[k]; ok {
+			delete(merged, k)
+			audit.removed = append(audit.removed, k)
+		}
+	}
+
+	for k, v := range set {
+		if v == envSentinel {
+			if _, ok := merged[k]; ok {
+				audit.preserved = append(audit.preserved, k)
+			}
+			continue
+		}
+		if old, ok := merged[k]; ok {
+			if old != v {
+				audit.changed = append(audit.changed, k)
+			}
+			merged[k] = v
+			continue
+		}
+		merged[k] = v
+		audit.added = append(audit.added, k)
+	}
+
+	sortEnvAudit(&audit)
+	return merged, audit
+}
+
+func sortEnvAudit(audit *envAudit) {
 	sort.Strings(audit.added)
 	sort.Strings(audit.removed)
 	sort.Strings(audit.changed)
 	sort.Strings(audit.preserved)
-	return merged, audit
 }
 
 // unmarshalCustomEnv decodes an agent's stored custom_env bytea into a

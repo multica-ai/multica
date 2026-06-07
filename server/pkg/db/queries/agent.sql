@@ -3,9 +3,26 @@ SELECT * FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY created_at ASC;
 
+-- name: ListAgentsForUpdate :many
+SELECT * FROM agent
+WHERE workspace_id = $1 AND archived_at IS NULL
+ORDER BY created_at ASC
+FOR UPDATE;
+
 -- name: ListAllAgents :many
 SELECT * FROM agent
 WHERE workspace_id = $1
+ORDER BY created_at ASC;
+
+-- name: ListAgentsByIDsForUpdate :many
+SELECT * FROM agent
+WHERE workspace_id = @workspace_id AND id = ANY(@agent_ids::uuid[])
+ORDER BY created_at ASC
+FOR UPDATE;
+
+-- name: ListAgentsByIDs :many
+SELECT * FROM agent
+WHERE workspace_id = @workspace_id AND id = ANY(@agent_ids::uuid[])
 ORDER BY created_at ASC;
 
 -- name: GetAgent :one
@@ -50,6 +67,13 @@ RETURNING *;
 -- set the column back to NULL, so the API layer routes "user picked Default"
 -- through this dedicated query.
 UPDATE agent SET thinking_level = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentModel :one
+-- Explicit NULL-clear for model. COALESCE-based UpdateAgent cannot set the
+-- column back to NULL, so "clear / use runtime default" persists as NULL.
+UPDATE agent SET model = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

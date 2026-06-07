@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,7 +11,16 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 )
+
+type txStarterFunc func(ctx context.Context) (pgx.Tx, error)
+
+func (f txStarterFunc) Begin(ctx context.Context) (pgx.Tx, error) {
+	return f(ctx)
+}
 
 // TestListWorkspaceAgentTaskSnapshot covers the agent presence snapshot endpoint:
 // every active task (queued/dispatched/running) PLUS each agent's most recent
@@ -190,6 +200,584 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestBulkUpdateAgents_SelectedAgentsAndFields(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, sourceRuntimeID, targetRuntimeID := createSetRuntimeWorkspace(t)
+	activeA := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-selected-a", false)
+	activeB := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-selected-b", false)
+	activeC := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-selected-c", false)
+	archived := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-selected-archived", true)
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/bulk-update", map[string]any{
+		"agent_ids":            []string{activeA, activeC},
+		"runtime_id":           targetRuntimeID,
+		"model":                " gpt-5.5 ",
+		"max_concurrent_tasks": 7,
+		"custom_args_patch": []map[string]string{
+			{"action": "add", "value": "--foo"},
+			{"action": "add", "value": "bar"},
+		},
+	}), "id", workspaceID)
+	testHandler.BulkUpdateAgents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BulkUpdateAgents selected: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp BulkUpdateAgentsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Updated != 2 {
+		t.Fatalf("updated = %d, want 2", resp.Updated)
+	}
+
+	for _, agentID := range []string{activeA, activeC} {
+		var runtimeID, model, customArgs string
+		var maxConcurrent int
+		if err := testPool.QueryRow(context.Background(), `SELECT runtime_id::text, model, max_concurrent_tasks, custom_args::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID, &model, &maxConcurrent, &customArgs); err != nil {
+			t.Fatalf("read selected agent %s: %v", agentID, err)
+		}
+		if runtimeID != targetRuntimeID || model != "gpt-5.5" || maxConcurrent != 7 || customArgs != `["--foo", "bar"]` {
+			t.Fatalf("selected agent %s changed incorrectly: runtime=%s model=%q max=%d args=%s", agentID, runtimeID, model, maxConcurrent, customArgs)
+		}
+	}
+
+	for _, agentID := range []string{activeB, archived} {
+		var runtimeID, model string
+		var maxConcurrent int
+		if err := testPool.QueryRow(context.Background(), `SELECT runtime_id::text, model, max_concurrent_tasks FROM agent WHERE id = $1`, agentID).Scan(&runtimeID, &model, &maxConcurrent); err != nil {
+			t.Fatalf("read untouched agent %s: %v", agentID, err)
+		}
+		if runtimeID != sourceRuntimeID || model != "old-model" || maxConcurrent != 1 {
+			t.Fatalf("untouched agent %s changed: runtime=%s model=%q max=%d", agentID, runtimeID, model, maxConcurrent)
+		}
+	}
+}
+
+func TestBulkUpdateAgents_ClearModelForSelectedAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, sourceRuntimeID, _ := createSetRuntimeWorkspace(t)
+	activeA := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-clear-model-a", false)
+	activeB := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-clear-model-b", false)
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/bulk-update", map[string]any{
+		"agent_ids": []string{activeA},
+		"model":     "",
+	}), "id", workspaceID)
+	testHandler.BulkUpdateAgents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BulkUpdateAgents clear model: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var cleared sql.NullString
+	if err := testPool.QueryRow(context.Background(), `SELECT model FROM agent WHERE id = $1`, activeA).Scan(&cleared); err != nil {
+		t.Fatalf("read cleared model: %v", err)
+	}
+	if cleared.Valid {
+		t.Fatalf("selected agent model = %q, want NULL", cleared.String)
+	}
+
+	var untouched string
+	if err := testPool.QueryRow(context.Background(), `SELECT model FROM agent WHERE id = $1`, activeB).Scan(&untouched); err != nil {
+		t.Fatalf("read untouched model: %v", err)
+	}
+	if untouched != "old-model" {
+		t.Fatalf("untouched agent model = %q, want old-model", untouched)
+	}
+}
+
+func TestBulkUpdateAgents_RejectsAgentArchivedBeforeBulkTransaction(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, sourceRuntimeID, targetRuntimeID := createSetRuntimeWorkspace(t)
+	agentID := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-race-archived", false)
+
+	origTxStarter := testHandler.TxStarter
+	t.Cleanup(func() { testHandler.TxStarter = origTxStarter })
+	archived := false
+	testHandler.TxStarter = txStarterFunc(func(ctx context.Context) (pgx.Tx, error) {
+		if !archived {
+			archived = true
+			if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now(), archived_by = $2 WHERE id = $1`, agentID, testUserID); err != nil {
+				t.Fatalf("archive agent before bulk transaction: %v", err)
+			}
+		}
+		return origTxStarter.Begin(ctx)
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/bulk-update", map[string]any{
+		"agent_ids":  []string{agentID},
+		"runtime_id": targetRuntimeID,
+	}), "id", workspaceID)
+	testHandler.BulkUpdateAgents(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("BulkUpdateAgents raced archive: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "is archived") {
+		t.Fatalf("BulkUpdateAgents raced archive: expected archived error, got %s", w.Body.String())
+	}
+
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(), `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read raced archived agent: %v", err)
+	}
+	if runtimeID != sourceRuntimeID {
+		t.Fatalf("archived agent runtime changed to %s, want %s", runtimeID, sourceRuntimeID)
+	}
+}
+
+func TestBulkUpdateAgents_DeduplicatesSelectedAgentIDsAfterUUIDNormalization(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, sourceRuntimeID, targetRuntimeID := createSetRuntimeWorkspace(t)
+	agentID := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-normalized-id", false)
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/bulk-update", map[string]any{
+		"agent_ids":  []string{strings.ToUpper(agentID), agentID},
+		"runtime_id": targetRuntimeID,
+	}), "id", workspaceID)
+	testHandler.BulkUpdateAgents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BulkUpdateAgents normalized ids: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp BulkUpdateAgentsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Updated != 1 {
+		t.Fatalf("updated = %d, want 1", resp.Updated)
+	}
+
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(), `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read normalized-id agent: %v", err)
+	}
+	if runtimeID != targetRuntimeID {
+		t.Fatalf("agent runtime = %s, want %s (source was %s)", runtimeID, targetRuntimeID, sourceRuntimeID)
+	}
+}
+
+func TestBulkUpdateAgents_PatchesCustomArgsForSelectedAgents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, sourceRuntimeID, _ := createSetRuntimeWorkspace(t)
+	activeA := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-args-a", false)
+	activeB := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-args-b", false)
+	archived := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-args-archived", true)
+	seeds := map[string]string{
+		activeA:  `["--permission-mode", "acceptEdits", "--remove-me"]`,
+		activeB:  `["--permission-mode", "--keep"]`,
+		archived: `["--permission-mode", "--remove-me"]`,
+	}
+	for agentID, args := range seeds {
+		if _, err := testPool.Exec(context.Background(), `UPDATE agent SET custom_args = $1::jsonb WHERE id = $2`, args, agentID); err != nil {
+			t.Fatalf("seed custom_args for %s: %v", agentID, err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/bulk-update", map[string]any{
+		"agent_ids": []string{activeA, activeB},
+		"custom_args_patch": []map[string]string{
+			{"action": "replace", "value": "--permission-mode", "replacement": "--mode"},
+			{"action": "remove", "value": "--remove-me"},
+			{"action": "add", "value": "--new"},
+		},
+	}), "id", workspaceID)
+	testHandler.BulkUpdateAgents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BulkUpdateAgents custom_args patch: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	cases := map[string]string{
+		activeA:  `["--mode", "acceptEdits", "--new"]`,
+		activeB:  `["--mode", "--keep", "--new"]`,
+		archived: `["--permission-mode", "--remove-me"]`,
+	}
+	for agentID, want := range cases {
+		var got string
+		if err := testPool.QueryRow(context.Background(), `SELECT custom_args::text FROM agent WHERE id = $1`, agentID).Scan(&got); err != nil {
+			t.Fatalf("read custom_args for %s: %v", agentID, err)
+		}
+		if got != want {
+			t.Fatalf("custom_args for %s = %s, want %s", agentID, got, want)
+		}
+	}
+}
+
+func TestBulkUpdateAgents_RejectsInvalidCustomArgsPatchPayloads(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, _, _ := createSetRuntimeWorkspace(t)
+	cases := []struct {
+		name      string
+		body      map[string]any
+		wantError string
+	}{
+		{
+			name: "empty patch",
+			body: map[string]any{
+				"custom_args_patch": []map[string]string{},
+			},
+			wantError: "custom_args_patch must not be empty",
+		},
+		{
+			name: "empty value",
+			body: map[string]any{
+				"custom_args_patch": []map[string]string{
+					{"action": "add", "value": " "},
+				},
+			},
+			wantError: "custom_args_patch contains an empty value",
+		},
+		{
+			name: "replace missing replacement",
+			body: map[string]any{
+				"custom_args_patch": []map[string]string{
+					{"action": "replace", "value": "--old"},
+				},
+			},
+			wantError: "custom_args_patch replace operation requires replacement",
+		},
+		{
+			name: "unknown action",
+			body: map[string]any{
+				"custom_args_patch": []map[string]string{
+					{"action": "rename", "value": "--old", "replacement": "--new"},
+				},
+			},
+			wantError: `custom_args_patch contains unknown action "rename"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/bulk-update", tc.body), "id", workspaceID)
+			testHandler.BulkUpdateAgents(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("BulkUpdateAgents invalid patch: expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			var resp map[string]string
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if resp["error"] != tc.wantError {
+				t.Fatalf("error = %q, want %q", resp["error"], tc.wantError)
+			}
+		})
+	}
+}
+
+func TestBulkUpdateAgents_PatchesEnvForAllActiveWithoutLeakingValues(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, sourceRuntimeID, _ := createSetRuntimeWorkspace(t)
+	activeA := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-a", false)
+	activeB := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-b", false)
+	archived := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-archived", true)
+	for _, agentID := range []string{activeA, activeB, archived} {
+		if _, err := testPool.Exec(context.Background(), `UPDATE agent SET custom_env = '{"KEEP":"old-secret","REMOVE":"remove-secret"}' WHERE id = $1`, agentID); err != nil {
+			t.Fatalf("seed custom_env for %s: %v", agentID, err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/bulk-update", map[string]any{
+		"env_set":    map[string]string{"KEEP": "rotated-secret", "NEW": "fresh-secret"},
+		"env_remove": []string{"REMOVE"},
+	}), "id", workspaceID)
+	testHandler.BulkUpdateAgents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BulkUpdateAgents env patch: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "rotated-secret") || strings.Contains(w.Body.String(), "fresh-secret") {
+		t.Fatalf("bulk response leaked env values: %s", w.Body.String())
+	}
+	var resp BulkUpdateAgentsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Updated != 2 {
+		t.Fatalf("updated = %d, want 2", resp.Updated)
+	}
+
+	for _, agentID := range []string{activeA, activeB} {
+		var stored string
+		if err := testPool.QueryRow(context.Background(), `SELECT custom_env::text FROM agent WHERE id = $1`, agentID).Scan(&stored); err != nil {
+			t.Fatalf("read custom_env for %s: %v", agentID, err)
+		}
+		var got map[string]string
+		if err := json.Unmarshal([]byte(stored), &got); err != nil {
+			t.Fatalf("decode custom_env for %s: %v", agentID, err)
+		}
+		want := map[string]string{"KEEP": "rotated-secret", "NEW": "fresh-secret"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("custom_env for %s = %v, want %v", agentID, got, want)
+		}
+
+		var details string
+		if err := testPool.QueryRow(context.Background(), `
+			SELECT details::text FROM activity_log
+			WHERE workspace_id = $1 AND action = 'agent_env_updated' AND details->>'agent_id' = $2
+			ORDER BY created_at DESC LIMIT 1
+		`, workspaceID, agentID).Scan(&details); err != nil {
+			t.Fatalf("expected agent_env_updated activity row for %s: %v", agentID, err)
+		}
+		for _, leak := range []string{"old-secret", "remove-secret", "rotated-secret", "fresh-secret"} {
+			if strings.Contains(details, leak) {
+				t.Fatalf("audit details leaked value %q: %s", leak, details)
+			}
+		}
+		for _, key := range []string{"KEEP", "NEW", "REMOVE"} {
+			if !strings.Contains(details, key) {
+				t.Fatalf("audit details missing key %q: %s", key, details)
+			}
+		}
+	}
+
+	var archivedEnv string
+	if err := testPool.QueryRow(context.Background(), `SELECT custom_env::text FROM agent WHERE id = $1`, archived).Scan(&archivedEnv); err != nil {
+		t.Fatalf("read archived custom_env: %v", err)
+	}
+	if !strings.Contains(archivedEnv, "old-secret") || !strings.Contains(archivedEnv, "remove-secret") {
+		t.Fatalf("archived agent env changed: %s", archivedEnv)
+	}
+}
+
+func TestBulkUpdateAgents_PatchesEnvForSelectedAgentsOnly(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, sourceRuntimeID, _ := createSetRuntimeWorkspace(t)
+	activeA := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-selected-a", false)
+	activeB := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-selected-b", false)
+	activeC := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-selected-c", false)
+	archived := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-selected-archived", true)
+	for _, agentID := range []string{activeA, activeB, activeC, archived} {
+		if _, err := testPool.Exec(context.Background(), `UPDATE agent SET custom_env = '{"KEEP":"old-secret","REMOVE":"remove-secret"}' WHERE id = $1`, agentID); err != nil {
+			t.Fatalf("seed custom_env for %s: %v", agentID, err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/bulk-update", map[string]any{
+		"agent_ids":  []string{activeA, activeC},
+		"env_set":    map[string]string{"KEEP": "rotated-secret", "NEW": "fresh-secret"},
+		"env_remove": []string{"REMOVE"},
+	}), "id", workspaceID)
+	testHandler.BulkUpdateAgents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BulkUpdateAgents selected env patch: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp BulkUpdateAgentsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Updated != 2 {
+		t.Fatalf("updated = %d, want 2", resp.Updated)
+	}
+
+	for _, agentID := range []string{activeA, activeC} {
+		var stored string
+		if err := testPool.QueryRow(context.Background(), `SELECT custom_env::text FROM agent WHERE id = $1`, agentID).Scan(&stored); err != nil {
+			t.Fatalf("read selected custom_env for %s: %v", agentID, err)
+		}
+		var got map[string]string
+		if err := json.Unmarshal([]byte(stored), &got); err != nil {
+			t.Fatalf("decode selected custom_env for %s: %v", agentID, err)
+		}
+		want := map[string]string{"KEEP": "rotated-secret", "NEW": "fresh-secret"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("selected custom_env for %s = %v, want %v", agentID, got, want)
+		}
+	}
+
+	for _, agentID := range []string{activeB, archived} {
+		var stored string
+		if err := testPool.QueryRow(context.Background(), `SELECT custom_env::text FROM agent WHERE id = $1`, agentID).Scan(&stored); err != nil {
+			t.Fatalf("read untouched custom_env for %s: %v", agentID, err)
+		}
+		var got map[string]string
+		if err := json.Unmarshal([]byte(stored), &got); err != nil {
+			t.Fatalf("decode untouched custom_env for %s: %v", agentID, err)
+		}
+		want := map[string]string{"KEEP": "old-secret", "REMOVE": "remove-secret"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("untouched custom_env for %s = %v, want %v", agentID, got, want)
+		}
+	}
+}
+
+func TestListBulkAgentEnvKeys_ReturnsKeysOnlyForTargets(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, sourceRuntimeID, _ := createSetRuntimeWorkspace(t)
+	activeA := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-keys-a", false)
+	activeB := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-keys-b", false)
+	activeC := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-keys-c", false)
+	archived := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-env-keys-archived", true)
+
+	seeds := map[string]string{
+		activeA:  `{"API_KEY":"secret-a"," API_KEY ":"secret-a-duplicate","SHARED":"shared-a"}`,
+		activeB:  `{"API_KEY":"secret-b","ONLY_B":"secret-b"}`,
+		activeC:  `{"ONLY_C":"secret-c"}`,
+		archived: `{"ARCHIVED_ONLY":"archived-secret"}`,
+	}
+	for agentID, env := range seeds {
+		if _, err := testPool.Exec(context.Background(), `UPDATE agent SET custom_env = $1::jsonb WHERE id = $2`, env, agentID); err != nil {
+			t.Fatalf("seed custom_env for %s: %v", agentID, err)
+		}
+	}
+
+	var revealCountBefore int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM activity_log WHERE workspace_id = $1 AND action = 'agent_env_revealed'`, workspaceID).Scan(&revealCountBefore); err != nil {
+		t.Fatalf("count reveal activity before: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/env-keys", map[string]any{
+		"agent_ids": []string{activeA, activeB},
+	}), "id", workspaceID)
+	testHandler.ListBulkAgentEnvKeys(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListBulkAgentEnvKeys selected: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "secret") {
+		t.Fatalf("env key summary leaked values: %s", w.Body.String())
+	}
+	var selectedResp BulkAgentEnvKeysResponse
+	if err := json.NewDecoder(w.Body).Decode(&selectedResp); err != nil {
+		t.Fatalf("decode selected response: %v", err)
+	}
+	selectedCounts := map[string]int{}
+	for _, item := range selectedResp.Keys {
+		selectedCounts[item.Key] = item.AgentCount
+	}
+	wantSelected := map[string]int{"API_KEY": 2, "ONLY_B": 1, "SHARED": 1}
+	if !reflect.DeepEqual(selectedCounts, wantSelected) {
+		t.Fatalf("selected key counts = %v, want %v", selectedCounts, wantSelected)
+	}
+
+	w = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/env-keys", map[string]any{}), "id", workspaceID)
+	testHandler.ListBulkAgentEnvKeys(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListBulkAgentEnvKeys all active: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var allResp BulkAgentEnvKeysResponse
+	if err := json.NewDecoder(w.Body).Decode(&allResp); err != nil {
+		t.Fatalf("decode all response: %v", err)
+	}
+	allCounts := map[string]int{}
+	for _, item := range allResp.Keys {
+		allCounts[item.Key] = item.AgentCount
+	}
+	if allCounts["ONLY_C"] != 1 {
+		t.Fatalf("all active key counts missing ONLY_C: %v", allCounts)
+	}
+	if _, ok := allCounts["ARCHIVED_ONLY"]; ok {
+		t.Fatalf("archived key leaked into active summary: %v", allCounts)
+	}
+
+	var revealCountAfter int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM activity_log WHERE workspace_id = $1 AND action = 'agent_env_revealed'`, workspaceID).Scan(&revealCountAfter); err != nil {
+		t.Fatalf("count reveal activity after: %v", err)
+	}
+	if revealCountAfter != revealCountBefore {
+		t.Fatalf("keys-only summary wrote reveal audit rows: before=%d after=%d", revealCountBefore, revealCountAfter)
+	}
+}
+
+func TestListBulkAgentEnvKeys_RejectsEmptySelectedList(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, _, _ := createSetRuntimeWorkspace(t)
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/agents/env-keys", map[string]any{
+		"agent_ids": []string{},
+	}), "id", workspaceID)
+	testHandler.ListBulkAgentEnvKeys(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("ListBulkAgentEnvKeys empty selected list: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "agent_ids must not be empty") {
+		t.Fatalf("unexpected response: %s", w.Body.String())
+	}
+}
+
+// TestBulkUpdateAgents_RejectsAgentActor extends the MUL-2600 lateral-movement
+// guard to the bulk surfaces: an authenticated agent process
+// (X-Actor-Source=task_token) must not bulk-edit agent configuration or
+// enumerate env keys, even though the host member is a workspace owner. A
+// rejected bulk-update must leave every agent untouched.
+func TestBulkUpdateAgents_RejectsAgentActor(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID, sourceRuntimeID, _ := createSetRuntimeWorkspace(t)
+	agentID := createSetRuntimeAgent(t, workspaceID, sourceRuntimeID, "bulk-actor-guard", false)
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET model = 'old-model' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("seed agent model: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		path string
+		fn   func(http.ResponseWriter, *http.Request)
+		body any
+	}{
+		{"bulk-update", "/agents/bulk-update", testHandler.BulkUpdateAgents, map[string]any{"model": "new-model"}},
+		{"env-keys", "/agents/env-keys", testHandler.ListBulkAgentEnvKeys, map[string]any{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := withURLParam(newRequest(http.MethodPost, "/api/workspaces/"+workspaceID+tc.path, tc.body), "id", workspaceID)
+			req.Header.Set("X-Actor-Source", "task_token")
+			req.Header.Del("X-Agent-ID")
+			req.Header.Del("X-Task-ID")
+			w := httptest.NewRecorder()
+			tc.fn(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected 403 from agent actor, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	var model string
+	if err := testPool.QueryRow(context.Background(), `SELECT coalesce(model, '') FROM agent WHERE id = $1`, agentID).Scan(&model); err != nil {
+		t.Fatalf("read agent model: %v", err)
+	}
+	if model != "old-model" {
+		t.Fatalf("rejected bulk-update mutated agent model: got %q, want \"old-model\"", model)
+	}
+}
+
 func TestWorkspaceAlwaysRedactSecrets(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -211,6 +799,87 @@ func TestWorkspaceAlwaysRedactSecrets(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpdateAgent_EmptyModelClearsToRuntimeDefault(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "single-clear-model", nil)
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET model = 'old-model' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("seed agent model: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPut, "/api/agents/"+agentID, map[string]any{
+		"model": "",
+	}), "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent clear model: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var modelIsNull bool
+	if err := testPool.QueryRow(context.Background(), `SELECT model IS NULL FROM agent WHERE id = $1`, agentID).Scan(&modelIsNull); err != nil {
+		t.Fatalf("read agent model: %v", err)
+	}
+	if !modelIsNull {
+		t.Fatalf("model was not cleared to NULL")
+	}
+}
+
+func createSetRuntimeWorkspace(t *testing.T) (workspaceID, sourceRuntimeID, targetRuntimeID string) {
+	t.Helper()
+	ctx := context.Background()
+	slug := fmt.Sprintf("set-runtime-%d", time.Now().UnixNano())
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, '', 'BULK')
+		RETURNING id
+	`, "Set Runtime Test", slug).Scan(&workspaceID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'owner')
+	`, workspaceID, testUserID); err != nil {
+		t.Fatalf("create workspace member: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+		VALUES ($1, 'Source Runtime', 'cloud', 'claude', 'online', 'source', '{}'::jsonb, now())
+		RETURNING id
+	`, workspaceID).Scan(&sourceRuntimeID); err != nil {
+		t.Fatalf("create source runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+		VALUES ($1, 'Target Runtime', 'cloud', 'codex', 'online', 'target', '{}'::jsonb, now())
+		RETURNING id
+	`, workspaceID).Scan(&targetRuntimeID); err != nil {
+		t.Fatalf("create target runtime: %v", err)
+	}
+	return workspaceID, sourceRuntimeID, targetRuntimeID
+}
+
+func createSetRuntimeAgent(t *testing.T, workspaceID, runtimeID, name string, archived bool) string {
+	t.Helper()
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id, model, archived_at
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4, 'old-model', CASE WHEN $5 THEN now() ELSE NULL END)
+		RETURNING id
+	`, workspaceID, name, runtimeID, testUserID, archived).Scan(&agentID); err != nil {
+		t.Fatalf("create agent %s: %v", name, err)
+	}
+	return agentID
 }
 
 // rawJSONResponse decodes the raw map so we can assert the literal
@@ -664,6 +1333,43 @@ func TestMergeAgentEnv_PureFunction(t *testing.T) {
 				t.Errorf("audit: got %+v, want %+v", audit, tc.audit)
 			}
 		})
+	}
+}
+
+func TestPatchAgentEnv_PureFunction(t *testing.T) {
+	got, audit := patchAgentEnv(
+		map[string]string{
+			"CHANGE":   "old",
+			"KEEP":     "same",
+			"PRESERVE": "real-secret",
+			"REMOVE":   "gone",
+		},
+		map[string]string{
+			"ADD":      "new",
+			"CHANGE":   "new",
+			"KEEP":     "same",
+			"PRESERVE": envSentinel,
+		},
+		[]string{"REMOVE", "MISSING"},
+	)
+
+	want := map[string]string{
+		"ADD":      "new",
+		"CHANGE":   "new",
+		"KEEP":     "same",
+		"PRESERVE": "real-secret",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("patched env = %v, want %v", got, want)
+	}
+	wantAudit := envAudit{
+		added:     []string{"ADD"},
+		removed:   []string{"REMOVE"},
+		changed:   []string{"CHANGE"},
+		preserved: []string{"PRESERVE"},
+	}
+	if !reflect.DeepEqual(audit, wantAudit) {
+		t.Fatalf("audit = %+v, want %+v", audit, wantAudit)
 	}
 }
 

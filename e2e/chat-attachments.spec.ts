@@ -83,12 +83,12 @@ test.describe("Chat attachments", () => {
     api.setWorkspaceSlug(ws.slug);
     api.setWorkspaceId(ws.id);
 
-    const userRow = await pgc.query(
-      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
-      ["e2e@multica.ai"],
+    const memberRow = await pgc.query(
+      `SELECT user_id FROM member WHERE workspace_id = $1 AND role = 'owner' LIMIT 1`,
+      [ws.id],
     );
-    if (userRow.rows.length === 0) throw new Error("e2e user missing");
-    const userId = userRow.rows[0].id as string;
+    if (memberRow.rows.length === 0) throw new Error("e2e workspace owner missing");
+    const userId = memberRow.rows[0].user_id as string;
 
     // Seed runtime + agent + chat_session.
     const runtimeIns = await pgc.query(

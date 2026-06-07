@@ -33,6 +33,128 @@ describe("ApiClient", () => {
     }
   });
 
+  it("bulkUpdateAgents POSTs selected ids and enabled fields to the workspace bulk endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ updated: 2 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const res = await client.bulkUpdateAgents("ws-1", {
+      agent_ids: ["agent-a", "agent-c"],
+      runtime_id: "rt-1",
+      model: "",
+      max_concurrent_tasks: 7,
+      custom_args_patch: [{ action: "add", value: "--foo" }],
+      env_set: { API_KEY: "secret" },
+      env_remove: ["OLD_KEY"],
+    });
+
+    expect(res).toEqual({ updated: 2 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/workspaces/ws-1/agents/bulk-update",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          agent_ids: ["agent-a", "agent-c"],
+          runtime_id: "rt-1",
+          model: "",
+          max_concurrent_tasks: 7,
+          custom_args_patch: [{ action: "add", value: "--foo" }],
+          env_set: { API_KEY: "secret" },
+          env_remove: ["OLD_KEY"],
+        }),
+      }),
+    );
+  });
+
+  it("bulkUpdateAgents POSTs custom arg patch operations without replacing the full args list", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ updated: 1 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const res = await client.bulkUpdateAgents("ws-1", {
+      custom_args_patch: [
+        { action: "replace", value: "--old", replacement: "--new" },
+        { action: "remove", value: "--remove-me" },
+      ],
+    });
+
+    expect(res).toEqual({ updated: 1 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/workspaces/ws-1/agents/bulk-update",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          custom_args_patch: [
+            { action: "replace", value: "--old", replacement: "--new" },
+            { action: "remove", value: "--remove-me" },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("bulkUpdateAgents falls back when the response shape is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ updated: "two" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.bulkUpdateAgents("ws-1", { model: "gpt-5.5" })).resolves.toEqual({ updated: 0 });
+  });
+
+  it("listBulkAgentEnvKeys POSTs target ids to the workspace env key summary endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ keys: [{ key: "API_KEY", agent_count: 2 }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const res = await client.listBulkAgentEnvKeys("ws-1", { agent_ids: ["agent-a", "agent-b"] });
+
+    expect(res).toEqual({ keys: [{ key: "API_KEY", agent_count: 2 }] });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/workspaces/ws-1/agents/env-keys",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ agent_ids: ["agent-a", "agent-b"] }),
+      }),
+    );
+  });
+
+  it("listBulkAgentEnvKeys falls back when the response shape is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ keys: [{ key: 123, agent_count: "two" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.listBulkAgentEnvKeys("ws-1", {})).resolves.toEqual({ keys: [] });
+  });
+
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {

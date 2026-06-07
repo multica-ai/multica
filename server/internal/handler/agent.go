@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -83,24 +85,8 @@ func agentToResponse(a db.Agent) AgentResponse {
 	// has_custom_env / key_count is what the UI gets — to read the values
 	// the caller must hit GET /api/agents/{id}/env (owner/admin only,
 	// audited).
-	envKeyCount := 0
-	if a.CustomEnv != nil {
-		var customEnv map[string]string
-		if err := json.Unmarshal(a.CustomEnv, &customEnv); err != nil {
-			slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(a.ID), "error", err)
-		}
-		envKeyCount = len(customEnv)
-	}
-
-	var customArgs []string
-	if a.CustomArgs != nil {
-		if err := json.Unmarshal(a.CustomArgs, &customArgs); err != nil {
-			slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(a.ID), "error", err)
-		}
-	}
-	if customArgs == nil {
-		customArgs = []string{}
-	}
+	envKeyCount := len(unmarshalCustomEnv(a))
+	customArgs := unmarshalCustomArgs(a)
 
 	var mcpConfig json.RawMessage
 	if a.McpConfig != nil {
@@ -133,6 +119,19 @@ func agentToResponse(a db.Agent) AgentResponse {
 		ArchivedAt:         timestampToPtr(a.ArchivedAt),
 		ArchivedBy:         uuidToPtr(a.ArchivedBy),
 	}
+}
+
+func unmarshalCustomArgs(a db.Agent) []string {
+	var customArgs []string
+	if a.CustomArgs != nil {
+		if err := json.Unmarshal(a.CustomArgs, &customArgs); err != nil {
+			slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(a.ID), "error", err)
+		}
+	}
+	if customArgs == nil {
+		return []string{}
+	}
+	return customArgs
 }
 
 // RepoData holds repository information included in claim responses so the
@@ -793,6 +792,39 @@ type UpdateAgentRequest struct {
 	ThinkingLevel *string `json:"thinking_level"`
 }
 
+type BulkUpdateAgentsRequest struct {
+	AgentIDs           []string                  `json:"agent_ids"`
+	RuntimeID          *string                   `json:"runtime_id"`
+	Model              *string                   `json:"model"`
+	MaxConcurrentTasks *int32                    `json:"max_concurrent_tasks"`
+	CustomArgsPatch    []BulkCustomArgsOperation `json:"custom_args_patch"`
+	EnvSet             map[string]string         `json:"env_set"`
+	EnvRemove          []string                  `json:"env_remove"`
+}
+
+type BulkCustomArgsOperation struct {
+	Action      string `json:"action"`
+	Value       string `json:"value"`
+	Replacement string `json:"replacement"`
+}
+
+type BulkUpdateAgentsResponse struct {
+	Updated int64 `json:"updated"`
+}
+
+type BulkAgentEnvKeysRequest struct {
+	AgentIDs []string `json:"agent_ids"`
+}
+
+type BulkAgentEnvKeySummary struct {
+	Key        string `json:"key"`
+	AgentCount int    `json:"agent_count"`
+}
+
+type BulkAgentEnvKeysResponse struct {
+	Keys []BulkAgentEnvKeySummary `json:"keys"`
+}
+
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
 // into unconditional redaction of secret-bearing fields (currently
 // `mcp_config`) on read responses, regardless of the caller's role.
@@ -989,8 +1021,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.MaxConcurrentTasks != nil {
 		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
 	}
+	shouldClearModel := false
 	if req.Model != nil {
-		params.Model = pgtype.Text{String: *req.Model, Valid: true}
+		model := strings.TrimSpace(*req.Model)
+		if model == "" {
+			shouldClearModel = true
+		} else {
+			params.Model = pgtype.Text{String: model, Valid: true}
+		}
 	}
 
 	// thinking_level handling (MUL-2339). Tri-state semantics:
@@ -1054,7 +1092,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// mcp_config / thinking_level: null/empty in the request means explicitly
+	// mcp_config / model / thinking_level: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL,
 	// so we use dedicated clear queries.
 	if shouldClearMcpConfig {
@@ -1062,6 +1100,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
+			return
+		}
+	}
+	if shouldClearModel {
+		updated, err = h.Queries.ClearAgentModel(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent model failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear model: "+err.Error())
 			return
 		}
 	}
@@ -1091,6 +1137,504 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) BulkUpdateAgents(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "id")
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+	if !ok {
+		return
+	}
+
+	actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID)
+	if actorType == "agent" {
+		writeError(w, http.StatusForbidden, "agents may not bulk-edit agent configuration")
+		return
+	}
+
+	var req BulkUpdateAgentsRequest
+	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	agentIDsProvided := rawFields["agent_ids"] != nil
+	if agentIDsProvided && len(req.AgentIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "agent_ids must not be empty")
+		return
+	}
+	customArgsPatchProvided := rawFields["custom_args_patch"] != nil
+	customArgsPatch, err := normalizeBulkCustomArgsPatch(req.CustomArgsPatch, customArgsPatchProvided)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	envSet, envRemove, err := normalizeBulkEnvPatch(req.EnvSet, req.EnvRemove)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	hasCustomArgsPatch := len(customArgsPatch) > 0
+	hasEnvPatch := len(envSet) > 0 || len(envRemove) > 0
+	hasAgentFieldUpdate := req.RuntimeID != nil || req.Model != nil || req.MaxConcurrentTasks != nil || hasCustomArgsPatch
+	if !hasAgentFieldUpdate && !hasEnvPatch {
+		writeError(w, http.StatusBadRequest, "at least one field update is required")
+		return
+	}
+	if req.MaxConcurrentTasks != nil && (*req.MaxConcurrentTasks < 1 || *req.MaxConcurrentTasks > 50) {
+		writeError(w, http.StatusBadRequest, "max_concurrent_tasks must be between 1 and 50")
+		return
+	}
+
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	var targetRuntime *db.AgentRuntime
+	if req.RuntimeID != nil {
+		runtimeID := strings.TrimSpace(*req.RuntimeID)
+		if runtimeID == "" {
+			writeError(w, http.StatusBadRequest, "runtime_id must not be empty")
+			return
+		}
+		runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+		if !ok {
+			return
+		}
+		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+			ID:          runtimeUUID,
+			WorkspaceID: workspaceUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
+			return
+		}
+		targetRuntime = &runtime
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		slog.Error("bulk agent update: begin tx failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to update agents")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	targets, err := bulkUpdateTargetsForMutation(r.Context(), qtx, workspaceUUID, req.AgentIDs, agentIDsProvided)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if targetRuntime != nil {
+		for _, target := range targets {
+			if target.ThinkingLevel.Valid && target.ThinkingLevel.String != "" && !agent.IsKnownThinkingValue(targetRuntime.Provider, target.ThinkingLevel.String) {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf(
+					"existing thinking_level %q on agent %q is not valid for runtime %q; clear or update it before changing runtime",
+					target.ThinkingLevel.String,
+					uuidToString(target.ID),
+					targetRuntime.Provider,
+				))
+				return
+			}
+		}
+	}
+	if len(targets) == 0 {
+		writeJSON(w, http.StatusOK, BulkUpdateAgentsResponse{Updated: 0})
+		return
+	}
+
+	updatedAgents := make([]db.Agent, 0, len(targets))
+	for _, target := range targets {
+		updated := target
+		if hasAgentFieldUpdate {
+			params := db.UpdateAgentParams{ID: target.ID}
+			shouldClearModel := false
+			shouldUpdateAgent := false
+			if targetRuntime != nil {
+				params.RuntimeID = targetRuntime.ID
+				params.RuntimeMode = pgtype.Text{String: targetRuntime.RuntimeMode, Valid: true}
+				shouldUpdateAgent = true
+			}
+			if req.MaxConcurrentTasks != nil {
+				params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
+				shouldUpdateAgent = true
+			}
+			if hasCustomArgsPatch {
+				patched := patchCustomArgs(unmarshalCustomArgs(updated), customArgsPatch)
+				customArgs, err := json.Marshal(patched)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to encode custom_args")
+					return
+				}
+				params.CustomArgs = customArgs
+				shouldUpdateAgent = true
+			}
+			if req.Model != nil {
+				model := strings.TrimSpace(*req.Model)
+				if model == "" {
+					shouldClearModel = true
+				} else {
+					params.Model = pgtype.Text{String: model, Valid: true}
+					shouldUpdateAgent = true
+				}
+			}
+
+			if shouldUpdateAgent {
+				updated, err = qtx.UpdateAgent(r.Context(), params)
+				if err != nil {
+					slog.Warn("bulk update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(target.ID), "workspace_id", workspaceID)...)
+					writeError(w, http.StatusInternalServerError, "failed to update agents")
+					return
+				}
+			}
+			if shouldClearModel {
+				updated, err = qtx.ClearAgentModel(r.Context(), updated.ID)
+				if err != nil {
+					slog.Warn("bulk clear agent model failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(updated.ID), "workspace_id", workspaceID)...)
+					writeError(w, http.StatusInternalServerError, "failed to clear model")
+					return
+				}
+			}
+		}
+
+		if hasEnvPatch {
+			merged, audit := patchAgentEnv(unmarshalCustomEnv(updated), envSet, envRemove)
+			envBytes, err := json.Marshal(merged)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to encode env")
+				return
+			}
+			updated, err = qtx.UpdateAgentCustomEnv(r.Context(), db.UpdateAgentCustomEnvParams{
+				ID:        updated.ID,
+				CustomEnv: envBytes,
+			})
+			if err != nil {
+				slog.Warn("bulk update agent env failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(updated.ID), "workspace_id", workspaceID)...)
+				writeError(w, http.StatusInternalServerError, "failed to update env")
+				return
+			}
+			details, _ := json.Marshal(map[string]any{
+				"agent_id":       uuidToString(updated.ID),
+				"agent_name":     updated.Name,
+				"bulk":           true,
+				"added_keys":     audit.added,
+				"removed_keys":   audit.removed,
+				"changed_keys":   audit.changed,
+				"preserved_keys": audit.preserved,
+			})
+			if _, err := qtx.CreateActivity(r.Context(), db.CreateActivityParams{
+				WorkspaceID: updated.WorkspaceID,
+				IssueID:     pgtype.UUID{},
+				ActorType:   pgtype.Text{String: "member", Valid: true},
+				ActorID:     member.UserID,
+				Action:      agentEnvActivityUpdated,
+				Details:     details,
+			}); err != nil {
+				slog.Error("bulk agent env audit write failed; rolling back update", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(updated.ID), "workspace_id", workspaceID)...)
+				writeError(w, http.StatusInternalServerError, "audit log write failed; env update rolled back")
+				return
+			}
+		}
+		updatedAgents = append(updatedAgents, updated)
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("bulk agent update: tx commit failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to update agents")
+		return
+	}
+
+	for _, updated := range updatedAgents {
+		resp := agentToResponse(updated)
+		if err := h.attachAgentSkills(r.Context(), &resp, updated.ID); err != nil {
+			slog.Warn("load agent skills after bulk update failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(updated.ID), "workspace_id", workspaceID)...)
+			continue
+		}
+		h.publish(protocol.EventAgentStatus, workspaceID, "member", uuidToString(member.UserID), map[string]any{"agent": broadcastAgentResponse(resp)})
+	}
+
+	writeJSON(w, http.StatusOK, BulkUpdateAgentsResponse{Updated: int64(len(updatedAgents))})
+}
+
+func (h *Handler) ListBulkAgentEnvKeys(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "id")
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
+		return
+	}
+
+	actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID)
+	if actorType == "agent" {
+		writeError(w, http.StatusForbidden, "agents may not inspect agent env keys")
+		return
+	}
+
+	var req BulkAgentEnvKeysRequest
+	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	agentIDsProvided := rawFields["agent_ids"] != nil
+	if agentIDsProvided && len(req.AgentIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "agent_ids must not be empty")
+		return
+	}
+
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	targets, err := h.bulkUpdateTargets(r.Context(), workspaceUUID, req.AgentIDs, agentIDsProvided)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	counts := map[string]int{}
+	for _, target := range targets {
+		seenForAgent := map[string]struct{}{}
+		for key := range unmarshalCustomEnv(target) {
+			trimmed := strings.TrimSpace(key)
+			if trimmed == "" {
+				continue
+			}
+			if _, ok := seenForAgent[trimmed]; ok {
+				continue
+			}
+			seenForAgent[trimmed] = struct{}{}
+			counts[trimmed]++
+		}
+	}
+
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	resp := BulkAgentEnvKeysResponse{Keys: make([]BulkAgentEnvKeySummary, 0, len(keys))}
+	for _, key := range keys {
+		resp.Keys = append(resp.Keys, BulkAgentEnvKeySummary{
+			Key:        key,
+			AgentCount: counts[key],
+		})
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) bulkUpdateTargets(ctx context.Context, workspaceID pgtype.UUID, agentIDs []string, agentIDsProvided bool) ([]db.Agent, error) {
+	if !agentIDsProvided {
+		return h.Queries.ListAgents(ctx, workspaceID)
+	}
+
+	agentUUIDs, agentIDLabels, err := parseBulkAgentIDs(agentIDs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := h.Queries.ListAgentsByIDs(ctx, db.ListAgentsByIDsParams{
+		WorkspaceID: workspaceID,
+		AgentIds:    agentUUIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]db.Agent, len(rows))
+	for _, row := range rows {
+		byID[uuidToString(row.ID)] = row
+	}
+
+	targets := make([]db.Agent, 0, len(agentUUIDs))
+	for i, agentID := range agentUUIDs {
+		id := agentIDLabels[i]
+		target, ok := byID[uuidToString(agentID)]
+		if !ok {
+			return nil, fmt.Errorf("agent_id %q is not in this workspace", id)
+		}
+		if target.ArchivedAt.Valid {
+			return nil, fmt.Errorf("agent_id %q is archived", id)
+		}
+		targets = append(targets, target)
+	}
+	return targets, nil
+}
+
+func bulkUpdateTargetsForMutation(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, agentIDs []string, agentIDsProvided bool) ([]db.Agent, error) {
+	if !agentIDsProvided {
+		return q.ListAgentsForUpdate(ctx, workspaceID)
+	}
+
+	agentUUIDs, agentIDLabels, err := parseBulkAgentIDs(agentIDs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.ListAgentsByIDsForUpdate(ctx, db.ListAgentsByIDsForUpdateParams{
+		WorkspaceID: workspaceID,
+		AgentIds:    agentUUIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]db.Agent, len(rows))
+	for _, row := range rows {
+		byID[uuidToString(row.ID)] = row
+	}
+
+	targets := make([]db.Agent, 0, len(agentUUIDs))
+	for i, agentID := range agentUUIDs {
+		id := agentIDLabels[i]
+		target, ok := byID[uuidToString(agentID)]
+		if !ok {
+			return nil, fmt.Errorf("agent_id %q is not in this workspace", id)
+		}
+		if target.ArchivedAt.Valid {
+			return nil, fmt.Errorf("agent_id %q is archived", id)
+		}
+		targets = append(targets, target)
+	}
+	return targets, nil
+}
+
+func parseBulkAgentIDs(agentIDs []string) ([]pgtype.UUID, []string, error) {
+	seen := map[string]struct{}{}
+	agentUUIDs := make([]pgtype.UUID, 0, len(agentIDs))
+	agentIDLabels := make([]string, 0, len(agentIDs))
+	for _, rawID := range agentIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return nil, nil, errors.New("agent_ids must not contain empty values")
+		}
+		agentID, err := util.ParseUUID(id)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid agent_id %q", id)
+		}
+		normalizedID := uuidToString(agentID)
+		if _, ok := seen[normalizedID]; ok {
+			continue
+		}
+		seen[normalizedID] = struct{}{}
+		agentUUIDs = append(agentUUIDs, agentID)
+		agentIDLabels = append(agentIDLabels, id)
+	}
+	return agentUUIDs, agentIDLabels, nil
+}
+
+func normalizeBulkEnvPatch(envSet map[string]string, envRemove []string) (map[string]string, []string, error) {
+	normalizedSet := map[string]string{}
+	for key, value := range envSet {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			return nil, nil, errors.New("env_set contains an empty key")
+		}
+		if _, exists := normalizedSet[trimmed]; exists {
+			return nil, nil, fmt.Errorf("env_set contains duplicate key %q", trimmed)
+		}
+		normalizedSet[trimmed] = value
+	}
+
+	seenRemove := map[string]struct{}{}
+	normalizedRemove := make([]string, 0, len(envRemove))
+	for _, key := range envRemove {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			return nil, nil, errors.New("env_remove contains an empty key")
+		}
+		if _, exists := normalizedSet[trimmed]; exists {
+			return nil, nil, fmt.Errorf("env key %q cannot be both set and removed", trimmed)
+		}
+		if _, exists := seenRemove[trimmed]; exists {
+			continue
+		}
+		seenRemove[trimmed] = struct{}{}
+		normalizedRemove = append(normalizedRemove, trimmed)
+	}
+	return normalizedSet, normalizedRemove, nil
+}
+
+func normalizeBulkCustomArgsPatch(ops []BulkCustomArgsOperation, provided bool) ([]BulkCustomArgsOperation, error) {
+	if !provided {
+		return nil, nil
+	}
+	if len(ops) == 0 {
+		return nil, errors.New("custom_args_patch must not be empty")
+	}
+
+	normalized := make([]BulkCustomArgsOperation, 0, len(ops))
+	for _, op := range ops {
+		action := strings.TrimSpace(op.Action)
+		value := strings.TrimSpace(op.Value)
+		replacement := strings.TrimSpace(op.Replacement)
+		if value == "" {
+			return nil, errors.New("custom_args_patch contains an empty value")
+		}
+		switch action {
+		case "add", "remove":
+			normalized = append(normalized, BulkCustomArgsOperation{
+				Action: action,
+				Value:  value,
+			})
+		case "replace":
+			if replacement == "" {
+				return nil, errors.New("custom_args_patch replace operation requires replacement")
+			}
+			normalized = append(normalized, BulkCustomArgsOperation{
+				Action:      action,
+				Value:       value,
+				Replacement: replacement,
+			})
+		default:
+			return nil, fmt.Errorf("custom_args_patch contains unknown action %q", action)
+		}
+	}
+	return normalized, nil
+}
+
+func patchCustomArgs(existing []string, ops []BulkCustomArgsOperation) []string {
+	out := append([]string(nil), existing...)
+	for _, op := range ops {
+		switch op.Action {
+		case "add":
+			if !stringSliceContains(out, op.Value) {
+				out = append(out, op.Value)
+			}
+		case "remove":
+			out = removeCustomArg(out, op.Value)
+		case "replace":
+			for i, value := range out {
+				if value == op.Value {
+					out[i] = op.Replacement
+				}
+			}
+		}
+	}
+	return out
+}
+
+func removeCustomArg(values []string, target string) []string {
+	out := values[:0]
+	for _, value := range values {
+		if value != target {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // attachAgentSkills populates resp.Skills from the agent_skill junction

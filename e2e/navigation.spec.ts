@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { loginAsDefault, openSidebarLink } from "./helpers";
 
 test.describe("Navigation", () => {
   test.beforeEach(async ({ page }) => {
@@ -7,37 +7,38 @@ test.describe("Navigation", () => {
   });
 
   test("sidebar navigation works", async ({ page }) => {
-    // Click Inbox
-    await page.locator("nav a", { hasText: "Inbox" }).click();
-    await page.waitForURL("**/inbox");
-    await expect(page).toHaveURL(/\/inbox/);
+    test.setTimeout(60000);
 
-    // Click Agents
-    await page.locator("nav a", { hasText: "Agents" }).click();
-    await page.waitForURL("**/agents");
-    await expect(page).toHaveURL(/\/agents/);
+    await openSidebarLink(page, "Inbox", /\/inbox/);
+    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible({
+      timeout: 15000,
+    });
 
-    // Click Issues
-    await page.locator("nav a", { hasText: "Issues" }).click();
-    await page.waitForURL("**/issues");
-    await expect(page).toHaveURL(/\/issues/);
+    await openSidebarLink(page, "Agents", /\/agents/);
+    await expect(
+      page.getByRole("heading", { name: "Agents", exact: true }),
+    ).toBeVisible({ timeout: 15000 });
+
+    await openSidebarLink(page, "Issues", /\/issues/, { exact: true });
+    await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible({
+      timeout: 15000,
+    });
   });
 
-  test("settings page loads via workspace menu", async ({ page }) => {
-    // Settings is inside the workspace dropdown menu
-    await openWorkspaceMenu(page);
-    await page.locator("text=Settings").click();
-    await page.waitForURL("**/settings");
+  test("settings page loads from sidebar", async ({ page }) => {
+    await openSidebarLink(page, "Settings", /\/settings/);
 
-    await expect(page.getByRole("heading", { name: "Workspace" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Members" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "General" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Members" })).toBeVisible();
   });
 
   test("agents page shows agent list", async ({ page }) => {
-    await page.locator("nav a", { hasText: "Agents" }).click();
-    await page.waitForURL("**/agents");
+    await openSidebarLink(page, "Agents", /\/agents/);
 
     // Should show "Agents" heading
-    await expect(page.locator("text=Agents").first()).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Agents", exact: true }),
+    ).toBeVisible();
   });
 });

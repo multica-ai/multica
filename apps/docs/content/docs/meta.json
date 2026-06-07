@@ -15,6 +15,7 @@
     "---Agents---",
     "agents",
     "agents-create",
+    "agents-runtime-model",
     "skills",
     "squads",
     "---How agents run---",

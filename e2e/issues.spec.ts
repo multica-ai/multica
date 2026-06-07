@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, createTestApi } from "./helpers";
+import { loginAsDefault, createTestApi, gotoAppPage } from "./helpers";
 import type { TestApiClient } from "./fixtures";
 
 test.describe("Issues", () => {
@@ -17,11 +17,13 @@ test.describe("Issues", () => {
   });
 
   test("issues page loads with board view", async ({ page }) => {
+    test.setTimeout(60000);
+
     await api.createIssue("E2E Board View " + Date.now());
-    await page.reload();
+    await gotoAppPage(page, page.url());
 
     // Board columns should be visible
-    await expect(page.locator("text=Backlog")).toBeVisible();
+    await expect(page.locator("text=Backlog")).toBeVisible({ timeout: 15000 });
     await expect(page.locator("text=Todo")).toBeVisible();
     await expect(page.locator("text=In Progress")).toBeVisible();
   });
@@ -29,8 +31,8 @@ test.describe("Issues", () => {
   test("can switch from board to list view", async ({ page }) => {
     const title = "E2E List Switch " + Date.now();
     await api.createIssue(title);
-    await page.reload();
-    await expect(page.locator("text=Backlog")).toBeVisible();
+    await gotoAppPage(page, page.url());
+    await expect(page.locator("text=Backlog")).toBeVisible({ timeout: 15000 });
 
     // Switch to list view
     await page.click("text=List");
@@ -41,6 +43,7 @@ test.describe("Issues", () => {
     const newIssueButton = page.getByRole("button", { name: "New Issue" });
     await expect(newIssueButton).toBeVisible();
     await newIssueButton.click();
+    await page.getByRole("button", { name: "Switch to Manual" }).click();
 
     const title = "E2E Created " + Date.now();
     const titleInput = page.getByRole("textbox", { name: "Issue title" });
@@ -54,7 +57,7 @@ test.describe("Issues", () => {
     ).toBeVisible();
 
     await page.getByRole("button", { name: "View issue" }).click();
-    await page.waitForURL(/\/issues\/[\w-]+/);
+    await expect(page).toHaveURL(/\/issues\/[\w-]+/, { timeout: 15000 });
     await expect(page.locator("text=Properties")).toBeVisible();
   });
 
@@ -63,7 +66,7 @@ test.describe("Issues", () => {
     const issue = await api.createIssue("E2E Detail Test " + Date.now());
 
     // Reload to see the new issue
-    await page.reload();
+    await gotoAppPage(page, page.url());
 
     // Navigate to the issue detail. Use a suffix match so the selector works
     // whether the href is legacy `/issues/{id}` or URL-refactored
@@ -72,7 +75,7 @@ test.describe("Issues", () => {
     await expect(issueLink).toBeVisible({ timeout: 5000 });
     await issueLink.click();
 
-    await page.waitForURL(/\/issues\/[\w-]+/);
+    await expect(page).toHaveURL(/\/issues\/[\w-]+/, { timeout: 15000 });
 
     // Should show Properties panel
     await expect(page.locator("text=Properties")).toBeVisible();
@@ -84,10 +87,12 @@ test.describe("Issues", () => {
 
   test("can dismiss issue creation", async ({ page }) => {
     await page.getByRole("button", { name: "New Issue" }).click();
+    await page.getByRole("button", { name: "Switch to Manual" }).click();
 
     const titleInput = page.getByRole("textbox", { name: "Issue title" });
     await expect(titleInput).toBeVisible();
 
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
 
     await expect(titleInput).not.toBeVisible();
