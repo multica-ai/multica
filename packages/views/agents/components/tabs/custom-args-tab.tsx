@@ -8,6 +8,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+import { splitCustomArgEntry } from "../../custom-args";
 
 interface ArgEntry {
   id: string;
@@ -18,13 +19,8 @@ function argsToEntries(args: string[]): ArgEntry[] {
   return args.map((value) => ({ id: createSafeId(), value }));
 }
 
-// Each row may contain a single arg ("--model") or several space-separated
-// tokens ("--model claude-sonnet-4"). We split on whitespace so users can
-// paste multi-token flags into one row without having to break them apart
-// manually. The placeholder + helper text explain this so users aren't
-// surprised when "--flag value" lands as two args at the back-end.
 function entriesToArgs(entries: ArgEntry[]): string[] {
-  return entries.flatMap((e) => e.value.trim().split(/\s+/)).filter(Boolean);
+  return entries.flatMap((e) => splitCustomArgEntry(e.value));
 }
 
 export function CustomArgsTab({

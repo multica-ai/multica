@@ -379,6 +379,45 @@ export interface UpdateAgentEnvRequest {
   custom_env: Record<string, string>;
 }
 
+export interface BulkUpdateAgentsRequest {
+  /** Omit to target every active agent in the workspace. */
+  agent_ids?: string[];
+  runtime_id?: string;
+  model?: string;
+  max_concurrent_tasks?: number;
+  custom_args_patch?: BulkCustomArgOperation[];
+  /**
+   * Env patch applied server-side without revealing existing env values.
+   * Values are secret-bearing; responses only return counts.
+   */
+  env_set?: Record<string, string>;
+  env_remove?: string[];
+}
+
+export interface BulkCustomArgOperation {
+  action: "add" | "replace" | "remove";
+  value: string;
+  replacement?: string;
+}
+
+export interface BulkUpdateAgentsResponse {
+  updated: number;
+}
+
+export interface BulkAgentEnvKeysRequest {
+  /** Omit to inspect every active agent in the workspace. */
+  agent_ids?: string[];
+}
+
+export interface BulkAgentEnvKeySummary {
+  key: string;
+  agent_count: number;
+}
+
+export interface BulkAgentEnvKeysResponse {
+  keys: BulkAgentEnvKeySummary[];
+}
+
 // Skills
 
 /**

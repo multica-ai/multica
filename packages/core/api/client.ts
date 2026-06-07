@@ -20,6 +20,10 @@ import type {
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
+  BulkUpdateAgentsRequest,
+  BulkUpdateAgentsResponse,
+  BulkAgentEnvKeysRequest,
+  BulkAgentEnvKeysResponse,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
@@ -134,6 +138,8 @@ import {
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
+  BulkAgentEnvKeysResponseSchema,
+  BulkUpdateAgentsResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
   CommentTriggerPreviewSchema,
@@ -144,6 +150,8 @@ import {
   DashboardRunTimeDailyListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  EMPTY_BULK_AGENT_ENV_KEYS_RESPONSE,
+  EMPTY_BULK_UPDATE_AGENTS_RESPONSE,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
@@ -872,6 +880,29 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/env`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+  }
+
+  async bulkUpdateAgents(workspaceId: string, body: BulkUpdateAgentsRequest): Promise<BulkUpdateAgentsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/agents/bulk-update`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(raw, BulkUpdateAgentsResponseSchema, EMPTY_BULK_UPDATE_AGENTS_RESPONSE, {
+      endpoint: "POST /api/workspaces/:id/agents/bulk-update",
+    });
+  }
+
+  async listBulkAgentEnvKeys(
+    workspaceId: string,
+    body: BulkAgentEnvKeysRequest,
+  ): Promise<BulkAgentEnvKeysResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/agents/env-keys`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(raw, BulkAgentEnvKeysResponseSchema, EMPTY_BULK_AGENT_ENV_KEYS_RESPONSE, {
+      endpoint: "POST /api/workspaces/:id/agents/env-keys",
     });
   }
 

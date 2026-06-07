@@ -8,6 +8,7 @@ import {
   Bot,
   Loader2,
   Lock,
+  Pencil,
   Plus,
   X,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import { toast } from "sonner";
 import type {
   Agent,
   AgentRuntime,
+  BulkUpdateAgentsRequest,
   CreateAgentRequest,
   MemberWithUser,
 } from "@multica/core/types";
@@ -79,7 +81,41 @@ import { availabilityConfig } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
 import { AgentListToolbar } from "./agent-list-toolbar";
+import {
+  BulkEditAgentsDialog,
+  type BulkCustomArgSummary,
+} from "./bulk-edit-agents-dialog";
 import { useT } from "../../i18n";
+
+type BulkEditTarget =
+  | { mode: "all"; agentIds: null; affects: number }
+  | { mode: "selected"; agentIds: string[]; affects: number };
+
+// Aggregates the most common exact custom-arg tokens across the targeted
+// (non-archived) agents so the bulk-edit dialog can offer them as "existing
+// args" suggestions. Names only; never reads env values.
+function buildBulkCustomArgOptions(
+  agents: Agent[],
+  target: BulkEditTarget | null,
+): BulkCustomArgSummary[] {
+  if (!target) return [];
+  const targetIds = target.agentIds === null ? null : new Set(target.agentIds);
+  const counts = new Map<string, number>();
+  for (const agent of agents) {
+    if (agent.archived_at) continue;
+    if (targetIds && !targetIds.has(agent.id)) continue;
+    const seenForAgent = new Set<string>();
+    for (const rawArg of agent.custom_args ?? []) {
+      const arg = rawArg.trim();
+      if (!arg || seenForAgent.has(arg)) continue;
+      seenForAgent.add(arg);
+      counts.set(arg, (counts.get(arg) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts, ([value, agentCount]) => ({ value, agentCount }))
+    .sort((a, b) => b.agentCount - a.agentCount || a.value.localeCompare(b.value))
+    .slice(0, 12);
+}
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Same conventions as the skills/autopilots lists (see list-grid.tsx):
@@ -180,9 +216,11 @@ export interface AgentsPageProps {
 function PageHeaderBar({
   totalCount,
   onCreate,
+  onBulkEditAll,
 }: {
   totalCount: number;
   onCreate: () => void;
+  onBulkEditAll?: () => void;
 }) {
   const { t } = useT("agents");
   return (
@@ -209,17 +247,33 @@ function PageHeaderBar({
       </div>
       {/* Quiet chrome button (outline, icon-only below md) — primary is
           reserved for the empty state's CTA. */}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-        aria-label={t(($) => $.page.new_agent)}
-        onClick={onCreate}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        <span className="hidden md:inline">{t(($) => $.page.new_agent)}</span>
-      </Button>
+      <div className="flex items-center gap-2">
+        {onBulkEditAll && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            onClick={onBulkEditAll}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">
+              {t(($) => $.bulk_edit.all_action)}
+            </span>
+          </Button>
+        )}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.new_agent)}
+          onClick={onCreate}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">{t(($) => $.page.new_agent)}</span>
+        </Button>
+      </div>
     </PageHeader>
   );
 }
@@ -650,9 +704,11 @@ function LoadingSkeleton() {
 function AgentBatchToolbar({
   rows,
   onClear,
+  onBulkEdit,
 }: {
   rows: AgentListRow[];
   onClear: () => void;
+  onBulkEdit: (rows: AgentListRow[]) => void;
 }) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
@@ -706,6 +762,17 @@ function AgentBatchToolbar({
           </button>
         </div>
 
+        {anyActive && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!allManageable || busy}
+            onClick={() => onBulkEdit(rows)}
+          >
+            <Pencil className="mr-1 size-3.5" />
+            {t(($) => $.bulk_edit.selected_action)}
+          </Button>
+        )}
         {anyActive && (
           <Button
             variant="ghost"
@@ -818,6 +885,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   );
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
+  );
+  const [bulkEditTarget, setBulkEditTarget] = useState<BulkEditTarget | null>(
+    null,
   );
 
   const rawScope = useAgentsViewStore((s) => s.scope);
@@ -1024,6 +1094,53 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const selectedRows = rows.filter((row) => selectedIds.has(row.agent.id));
   const allSelected = rows.length > 0 && selectedRows.length === rows.length;
   const someSelected = selectedRows.length > 0 && !allSelected;
+
+  const handleBulkEditAgents = useCallback(
+    async (request: BulkUpdateAgentsRequest) => {
+      if (!bulkEditTarget) return;
+      const body: BulkUpdateAgentsRequest = bulkEditTarget.agentIds
+        ? { ...request, agent_ids: bulkEditTarget.agentIds }
+        : request;
+      try {
+        const { updated } = await api.bulkUpdateAgents(wsId, body);
+        qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+        setSelectedIds(new Set());
+        toast.success(t(($) => $.bulk_edit.applied_toast, { count: updated }));
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? e.message : t(($) => $.bulk_edit.failed_toast),
+        );
+        throw e;
+      }
+    },
+    [bulkEditTarget, wsId, qc, t],
+  );
+
+  const bulkCustomArgOptions = useMemo(
+    () => buildBulkCustomArgOptions(agents, bulkEditTarget),
+    [agents, bulkEditTarget],
+  );
+
+  const {
+    data: bulkEnvKeyResponse,
+    isLoading: bulkEnvKeysLoading,
+    isError: bulkEnvKeysError,
+  } = useQuery({
+    queryKey: [
+      "workspaces",
+      wsId,
+      "agent-env-keys",
+      bulkEditTarget?.mode ?? "closed",
+      bulkEditTarget?.agentIds?.join(",") ?? "all",
+    ],
+    queryFn: () =>
+      api.listBulkAgentEnvKeys(
+        wsId,
+        bulkEditTarget?.agentIds ? { agent_ids: bulkEditTarget.agentIds } : {},
+      ),
+    enabled: !!bulkEditTarget && isWorkspaceAdmin,
+  });
+
   const handleToggleAll = () => {
     setSelectedIds(
       allSelected ? new Set() : new Set(rows.map((r) => r.agent.id)),
@@ -1060,6 +1177,16 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setShowCreate(true)}
+        onBulkEditAll={
+          isWorkspaceAdmin && totalCount > 0
+            ? () =>
+                setBulkEditTarget({
+                  mode: "all",
+                  agentIds: null,
+                  affects: totalCount,
+                })
+            : undefined
+        }
       />
 
       {isLoading ? (
@@ -1204,7 +1331,35 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       <AgentBatchToolbar
         rows={selectedRows}
         onClear={() => setSelectedIds(new Set())}
+        onBulkEdit={(targetRows) =>
+          setBulkEditTarget({
+            mode: "selected",
+            agentIds: targetRows.map((r) => r.agent.id),
+            affects: targetRows.length,
+          })
+        }
       />
+
+      {bulkEditTarget && (
+        <BulkEditAgentsDialog
+          title={
+            bulkEditTarget.mode === "selected"
+              ? t(($) => $.bulk_edit.dialog_title_selected)
+              : t(($) => $.bulk_edit.dialog_title_all)
+          }
+          runtimes={runtimes}
+          runtimesLoading={runtimesLoading}
+          members={members}
+          currentUserId={currentUser?.id ?? null}
+          affects={bulkEditTarget.affects}
+          envKeyOptions={bulkEnvKeyResponse?.keys ?? []}
+          envKeysLoading={bulkEnvKeysLoading}
+          envKeysError={bulkEnvKeysError}
+          customArgOptions={bulkCustomArgOptions}
+          onApply={handleBulkEditAgents}
+          onClose={() => setBulkEditTarget(null)}
+        />
+      )}
 
       {showCreate && (
         <CreateAgentDialog

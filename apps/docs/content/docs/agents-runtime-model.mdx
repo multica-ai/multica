@@ -1,0 +1,101 @@
+---
+title: Bulk edit agents
+description: Update runtime, model, concurrency, CLI args, or environment keys for selected agents or every active agent in a workspace.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bulk edit lets workspace owners and admins update shared launch settings across selected agents, or across every active agent in a workspace.
+
+Each field is opt-in. Disabled fields are left unchanged, so you can update only the model, only CLI args, only environment keys, or any supported combination.
+
+## What you can change
+
+| Field | Behavior |
+|---|---|
+| Runtime | Moves targeted agents to another runtime in the same workspace |
+| Model | Pins a model, or clears the override when left empty |
+| Max concurrent tasks | Replaces the per-agent concurrency limit |
+| Custom args | Adds, replaces, or removes exact CLI argument tokens |
+| Environment variables | Sets/replaces key values or removes keys without reading existing values |
+
+An agent's runtime decides which AI coding tool runs its tasks. The optional **model** field is passed to that tool when it supports per-agent model selection.
+
+Multica does not store a workspace-wide active provider. Each agent points to a runtime, and the selected runtime's provider is used for new tasks.
+
+Changing runtime or model only affects **new tasks**. Tasks that were already claimed or running continue with the runtime and model resolved when they started.
+
+<Callout type="warning">
+Bulk edit changes agent launch configuration. It does not change retry, failover, billing, token refresh, or account-management behavior.
+</Callout>
+
+## Bulk edit selected agents
+
+1. Go to the **Agents** page.
+2. Select the active agents you want to update.
+3. Click **Bulk edit selected**.
+4. Enable only the fields you want to change.
+5. Review the affected-agent count.
+6. Click **Apply**.
+
+Selected archived agents are rejected by the server. If an agent is archived before the update is applied, the server refuses that target instead of changing an archived agent.
+
+## Bulk edit all active agents
+
+Workspace owners and admins can update every active agent at once:
+
+1. Go to the **Agents** page.
+2. Click **Bulk edit agents** in the header.
+3. Enable only the fields you want to change.
+4. Enter the new values or operations.
+5. Review the affected-agent count.
+6. Click **Apply**.
+
+This updates every **non-archived** agent in the workspace. Archived agents are left unchanged.
+
+<Callout type="info">
+The count shown before applying is the current number of active agents in the UI. The success toast uses the server-returned update count, which is the authoritative number of agents changed.
+</Callout>
+
+## Runtime and model
+
+When you update runtime or model, Multica stores:
+
+| Field | Meaning |
+|---|---|
+| `runtime_id` | The runtime that will claim new tasks for the agent |
+| `runtime_mode` | The runtime mode copied from the selected runtime |
+| `model` | The optional model to pass to that runtime's provider |
+
+`runtime_id` is the provider source for new tasks. The model is optional; leaving it empty lets the runtime or CLI choose its default.
+
+The target runtime must belong to the workspace. Workspace owners and admins can use any workspace runtime in the bulk action.
+
+## Custom args
+
+Custom arg operations apply to each targeted agent's existing `custom_args`:
+
+- **Add** appends the arg when it is not already present.
+- **Replace** changes exact matching arg tokens.
+- **Remove** deletes exact matching arg tokens.
+
+Multi-token input is split the same way as the agent **Custom Args** tab. For example, `--max-turns 100` becomes two args: `--max-turns` and `100`.
+
+## Environment keys
+
+The bulk dialog can suggest existing environment keys, but it never loads existing values. This keeps secret values out of the bulk UI.
+
+- **Set / replace** adds a missing key or replaces an existing value.
+- **Remove** deletes a key from agents where it exists.
+- If the same key appears more than once in the form, the last operation wins.
+
+Local presets can remember field choices, runtime, model, custom arg operations, and environment key operations for the current browser and workspace. Presets do **not** save environment values; values must be entered again after loading a preset.
+
+## Permissions
+
+Bulk edit is available to workspace owners and admins. Individual agent updates still follow the normal agent-management rules: workspace owners and admins can manage any agent, and an agent owner can manage their own agent.
+
+## Next
+
+- [Create and configure an agent](/agents-create) — all agent settings
+- [AI coding tools matrix](/providers) — provider capabilities and model-selection differences
