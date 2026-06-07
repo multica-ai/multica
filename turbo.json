@@ -3,6 +3,9 @@
   "globalEnv": [
     "DATABASE_URL",
     "PORT",
+    "BACKEND_PORT",
+    "API_PORT",
+    "SERVER_PORT",
     "FRONTEND_PORT",
     "FRONTEND_ORIGIN",
     "NEXT_PUBLIC_API_URL",
