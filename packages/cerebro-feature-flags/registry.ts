@@ -13,6 +13,11 @@ export type CerebroFlagKey =
   | "cerebro_mcp_guide"
   | "cerebro_channels"
   | "cerebro_chat_message_cost"
+  // FIR-39: per-comment cost badge on issues + channels (mirror of the chat
+  // per-reply badge from FIR-31). One run can post multiple comments; cost is
+  // pinned to the run's last comment so it sums to the issue total chip
+  // already shown in the sidebar without double-counting.
+  | "cerebro_comment_cost"
   | "cerebro_web_push"
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
@@ -82,7 +87,9 @@ export type CerebroFlagKey =
   // instead of leaving the user on a warning banner with Create disabled.
   | "cerebro_quick_create_version_autoswitch"
   // TECH-2947: personal focus list pinned to the top of the inbox.
-  | "cerebro_focus_list";
+  | "cerebro_focus_list"
+  // Interactive terminal (cerebro-terminal): per-runtime presentation mode + xterm.js panel.
+  | "cerebro_interactive_terminal";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -99,6 +106,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_mcp_guide: true,
   cerebro_channels: true,
   cerebro_chat_message_cost: true,
+  cerebro_comment_cost: true,
   cerebro_web_push: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
@@ -212,6 +220,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // a lightweight to-do surface for ADHD-friendly task tracking. Off hides
   // the panel and the backend endpoints reject requests.
   cerebro_focus_list: true,
+  cerebro_interactive_terminal: false,
 };
 
 /**
@@ -330,6 +339,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Show the spend ($) of each assistant reply in the chat footer, next to \"Replied in …\". Hover for the token/model breakdown. Off hides the per-reply badge (the session-total chip in the header stays).",
+  },
+  {
+    key: "cerebro_comment_cost",
+    label: "Per-comment issue & channel cost",
+    group: "issues",
+    description:
+      "Show the spend ($) of each agent comment on issues and channels, with a token/model breakdown on hover. A run that posts progress + a result places the badge on the run's last comment, so per-comment numbers sum to the issue total already shown in the sidebar (JEH-736) without double-counting. Off hides the per-comment badge.",
   },
   {
     key: "cerebro_web_push",
@@ -639,6 +655,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "In the \"Create with agent\" modal, when the picked agent's daemon runs a multica CLI below the quick-create minimum, automatically switch to manual create (carrying the typed prompt, project, and parent over) instead of leaving the user on a warning banner with Create disabled. Off restores the warning-only behaviour. FIR-33.",
+  },
+  {
+    key: "cerebro_interactive_terminal",
+    label: "Interactive terminal",
+    group: "agents",
+    description:
+      "Enable the per-runtime presentation_mode toggle and the in-app xterm.js terminal panel. Runtimes flipped to 'interactive' stream a live shell to the Multica UI so the user can watch and take over an agent session.",
   },
 ];
 

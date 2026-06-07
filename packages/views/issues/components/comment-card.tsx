@@ -44,6 +44,8 @@ import { attachmentReferencedInContent, collectActiveAttachmentIds } from "./com
 import { AttachmentList } from "@multica/cerebro-attachments/views";
 // CEREBRO-PATCH(comment-reminder-menu): FIR-2643 — "Remind me" on a comment lives in cerebro-inbox.
 import { useCommentReminder } from "@multica/cerebro-inbox";
+// CEREBRO-PATCH(issue-comment-cost-badge-import): FIR-39 per-comment cost badge.
+import { CommentCostBadge } from "@multica/cerebro-channels";
 import type { Attachment, TimelineEntry } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -424,6 +426,8 @@ function CommentRow({
             {new Date(entry.created_at).toLocaleString()}
           </TooltipContent>
         </Tooltip>
+        {/* CEREBRO-PATCH(issue-comment-cost-row): FIR-39 per-comment cost badge. */}
+        <CommentCostBadge issueId={issueId} commentId={entry.id} authorType={entry.actor_type} />
 
         <div className="ml-auto flex items-center gap-0.5">
           <QuickEmojiPicker
@@ -743,6 +747,8 @@ function CommentCardImpl({
                 {new Date(entry.created_at).toLocaleString()}
               </TooltipContent>
             </Tooltip>
+            {/* CEREBRO-PATCH(issue-comment-cost-root): FIR-39 per-comment cost badge on the thread root. */}
+            {open && <CommentCostBadge issueId={issueId} commentId={entry.id} authorType={entry.actor_type} />}
 
             {!open && contentPreview && (
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">

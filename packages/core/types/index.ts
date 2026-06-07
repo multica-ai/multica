@@ -78,6 +78,8 @@ export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferen
 // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 export thread move response type.
 // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 export MoveCommentsToThreadResponse.
 export type { Comment, CommentType, CommentAuthorType, Reaction, MoveCommentToSubIssueResponse, MoveCommentsToThreadResponse } from "./comment";
+// CEREBRO-PATCH(issue-comment-cost-types): FIR-39 per-comment cost badge response types.
+export type { IssueCommentCost, IssueCommentCosts } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type {
   TimelineEntry,

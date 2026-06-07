@@ -73,6 +73,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "DELETE /api/cerebro/terminal/sessions/{sessionId}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/workflows/{id}",
       "gate": "workspace_member"
     },
@@ -479,6 +483,10 @@
     {
       "id": "POST /api/cerebro/status-models/",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cerebro/terminal/sessions",
+      "gate": "workspace_member"
     },
     {
       "id": "POST /api/cerebro/workflows/",
@@ -1159,6 +1167,10 @@
     {
       "id": "PUT /api/cerebro/status-models/{id}",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
+      "gate": "workspace_member"
     },
     {
       "id": "PUT /api/cerebro/workflows/{id}",

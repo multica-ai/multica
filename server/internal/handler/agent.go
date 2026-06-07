@@ -281,6 +281,7 @@ type AgentTaskResponse struct {
 	// CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
 	// CEREBRO-PATCH(agent): persona integration additions.
 	// CEREBRO-PATCH(runtime-tools-config-claim-resp): runtime-level tools_config surfaced at claim so daemon can merge with agent.mcp_config (9031).
+	PresentationMode string `json:"presentation_mode,omitempty"` // CEREBRO-PATCH(agent-task-presentation-mode): pass interactive terminal mode through to daemon
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in

@@ -75,6 +75,8 @@ import (
 	cerebrotasks "github.com/multica-ai/multica/server/internal/cerebro/tasks"
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler import
 	cerebrosharetoken "github.com/multica-ai/multica/server/internal/cerebro/sharetoken"
+	// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal handler import
+	cerebroterminal "github.com/multica-ai/multica/server/internal/cerebro/terminal"
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST handler import
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model handler import
@@ -394,6 +396,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler
 	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
+	// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal handler instance
+	cerebroTerminalBroker := cerebroterminal.NewBroker()
+	cerebroTerminalHandler := cerebroterminal.New(cerebroTerminalBroker, pool)
+	// CEREBRO-PATCH(cerebro-terminal-bridge): connect daemonws hub to terminal broker so daemons can mirror agent stdout into adopted broker sessions.
+	cerebroTerminalBridge := cerebroterminal.NewDaemonBridge(cerebroTerminalBroker, daemonHub, cerebroQueries)
+	daemonHub.SetMessageHandler(cerebroTerminalBridge.HandleMessage)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 v2b — pass upstream queries so per-issue custom status mirrors onto the upstream issue row, and pass the pool so the two writes commit atomically (Mia review).
@@ -945,6 +953,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/rerun", h.RerunIssue)
 					r.Get("/task-runs", h.ListTasksByIssue)
 					r.Get("/usage", h.GetIssueUsage)
+					// CEREBRO-PATCH(comment-cost-route): FIR-39 per-comment cost badge.
+					r.Get("/comment-costs", h.GetIssueCommentCosts)
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
@@ -1408,6 +1418,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/snooze", cerebroFocusListHandler.Snooze)
 			})
 			r.Mount("/api/cerebro/agent-passes", cerebroagentpass.NewAdminRoutes(cerebroQueries)) // CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin API.
+			// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal endpoints.
+			r.Route("/api/cerebro/terminal", func(r chi.Router) {
+				r.Post("/sessions", cerebroTerminalHandler.CreateSession)
+				r.Get("/sessions", cerebroTerminalHandler.ListSessions)
+				r.Delete("/sessions/{sessionId}", cerebroTerminalHandler.DeleteSession)
+				r.Get("/sessions/{sessionId}/ws", cerebroTerminalHandler.AttachWS)
+				r.Get("/runtimes/{runtimeId}/presentation-mode", cerebroTerminalHandler.GetPresentationMode)
+				r.Put("/runtimes/{runtimeId}/presentation-mode", cerebroTerminalHandler.SetPresentationMode)
+				// CEREBRO-PATCH(cerebro-terminal-active-session): GET endpoint for runtime-keyed session lookup
+				r.Get("/runtimes/{runtimeId}/session", cerebroTerminalHandler.GetActiveSession)
+			})
 			// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST surface (PR 2/3).
 			r.Route("/api/cerebro/workflows", func(r chi.Router) {
 				r.Get("/", cerebroWorkflowsHandler.List)

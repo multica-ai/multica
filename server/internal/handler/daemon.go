@@ -1486,6 +1486,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if len(rt.ToolsConfig) > 0 {
 			resp.RuntimeToolsConfig = json.RawMessage(rt.ToolsConfig)
 		}
+		resp.PresentationMode = rt.PresentationMode // CEREBRO-PATCH(daemon-claim-presentation-mode): forward presentation_mode to daemon
 		auditDetails, _ := json.Marshal(map[string]any{
 			"task_id":                uuidToString(task.ID),
 			"runtime_id":             uuidToString(task.RuntimeID),

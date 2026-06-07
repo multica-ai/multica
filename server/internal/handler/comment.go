@@ -971,6 +971,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(comment-cost-link): FIR-39 pin agent comment to its task.
+	h.linkCommentToTaskIfAgent(r, comment.ID, issue.ID, issue.WorkspaceID, authorType)
+
 	// Link uploaded attachments to this comment.
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, attachmentIDs)

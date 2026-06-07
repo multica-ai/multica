@@ -34,11 +34,10 @@ func TestBuildLogoPrompt(t *testing.T) {
 
 func logoGateway(t *testing.T) *httptest.Server {
 	t.Helper()
-	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("png-bytes"))
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]any{"images": []string{dataURL}}},
+			"data": []map[string]any{
+				{"b64_json": base64.StdEncoding.EncodeToString([]byte("png-bytes"))},
 			},
 		})
 	}))

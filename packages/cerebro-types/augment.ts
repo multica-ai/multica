@@ -17,6 +17,14 @@ declare module "@multica/core/types/workspace" {
   interface Workspace {
     avatar_url?: string | null;
   }
+  // TECH-3002: workspace accent color. Stored in workspace.settings so the
+  // existing PATCH /workspaces/:id endpoint handles it — no schema migration.
+  // Two fields let auto-extraction and manual override coexist without
+  // either silently overwriting the other.
+  interface WorkspaceSettings {
+    accent_color_auto?: string;   // hex extracted from logo (set on logo save)
+    accent_color_manual?: string; // user's explicit override from color picker
+  }
 }
 
 // FIR-1550 v2b: per-issue custom_status pin joined onto the upstream Issue

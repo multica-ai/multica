@@ -60,6 +60,7 @@ import type {
   CreateRuntimeSetupTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  IssueCommentCosts, // CEREBRO-PATCH(issue-comment-cost-client): FIR-39
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -236,6 +237,9 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
 } from "./schemas";
+// CEREBRO-PATCH(api-client-active-terminal-session): inline zod schema for active terminal session lookup.
+import { z } from "zod";
+const ActiveTerminalSessionSchema = z.object({ session_id: z.string(), attach_path: z.string(), created_at: z.string() }).loose();
 
 /** Identifies the calling client to the server.
  *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
@@ -2178,6 +2182,30 @@ export class ApiClient {
     );
   }
 
+  // CEREBRO-PATCH(api-client-terminal): cerebro interactive-terminal endpoints.
+  async getRuntimePresentationMode(runtimeId: string): Promise<{ runtime_id: string; presentation_mode: "headless" | "interactive" }> {
+    return this.fetch(`/api/cerebro/terminal/runtimes/${runtimeId}/presentation-mode`);
+  }
+  async setRuntimePresentationMode(runtimeId: string, mode: "headless" | "interactive"): Promise<{ runtime_id: string; presentation_mode: "headless" | "interactive" }> {
+    return this.fetch(`/api/cerebro/terminal/runtimes/${runtimeId}/presentation-mode`, { method: "PUT", body: JSON.stringify({ presentation_mode: mode }) });
+  }
+  async createTerminalSession(runtimeId: string, command?: string[]): Promise<{ id: string; runtime_id: string; command: string[]; created_at: string; attach_path: string }> {
+    return this.fetch(`/api/cerebro/terminal/sessions`, { method: "POST", body: JSON.stringify({ runtime_id: runtimeId, command }) });
+  }
+  async deleteTerminalSession(sessionId: string): Promise<void> {
+    await this.fetch(`/api/cerebro/terminal/sessions/${sessionId}`, { method: "DELETE" });
+  }
+  terminalAttachUrl(attachPath: string): string {
+    const base = this.baseUrl.replace(/^http/, "ws");
+    return `${base}${attachPath}`;
+  }
+  // CEREBRO-PATCH(api-client-active-terminal-session): runtime-keyed lookup of a daemon-published terminal session.
+  async getActiveTerminalSession(runtimeId: string): Promise<{ session_id: string; attach_path: string; created_at: string } | null> {
+    const raw = await this.fetch<unknown>(`/api/cerebro/terminal/runtimes/${runtimeId}/session`);
+    if (raw === undefined) return null; // 204 No Content path
+    return parseWithFallback(raw, ActiveTerminalSessionSchema, null, { endpoint: "GET /api/cerebro/terminal/runtimes/:id/session" });
+  }
+
   async updateRuntimeSandbox(
     runtimeId: string,
     sandboxEnabled: boolean | null,
@@ -2458,6 +2486,11 @@ export class ApiClient {
 
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
     return this.fetch(`/api/issues/${issueId}/usage`);
+  }
+
+  // CEREBRO-PATCH(issue-comment-cost-client): FIR-39 per-comment cost badge.
+  async getIssueCommentCosts(issueId: string): Promise<IssueCommentCosts> {
+    return this.fetch(`/api/issues/${issueId}/comment-costs`);
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {

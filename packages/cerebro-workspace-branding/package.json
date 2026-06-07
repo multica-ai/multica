@@ -11,7 +11,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@multica/core": "workspace:*"
+    "@multica/core": "workspace:*",
+    "@tanstack/react-query": "catalog:"
   },
   "peerDependencies": {
     "react": "catalog:"

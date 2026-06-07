@@ -380,6 +380,7 @@ var catalog = []Capability{
 			"PATCH /api/runtimes/{runtimeId}/sandbox-policy",
 			"PATCH /api/runtimes/{runtimeId}/persona-sandbox",
 			"PATCH /api/runtimes/{runtimeId}/tools-config",
+			"PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
 			"PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
 			"POST /api/runtimes/{runtimeId}/tools/scan-now",
 			"POST /api/runtimes/{runtimeId}/local-skills",
@@ -833,6 +834,12 @@ var excluded = map[string]string{
 	"POST /api/cerebro/focus-list/{id}/done":   "self_only — caller's own focus list",
 	"POST /api/cerebro/focus-list/{id}/snooze": "self_only — caller's own focus list",
 	"POST /api/cerebro/focus-list/reorder":     "self_only — caller's own focus list",
+
+	// cerebro interactive terminal — human watch/take-over of a live agent
+	// session. Workspace-member gated UI action, not an agent-governable
+	// capability; there is no agent tool that opens or closes a PTY session.
+	"POST /api/cerebro/terminal/sessions":               "interactive-terminal — human opens a live agent session to watch/take over; UI-only, no agent tool equivalent",
+	"DELETE /api/cerebro/terminal/sessions/{sessionId}": "interactive-terminal — human closes a live agent session; UI-only, no agent tool equivalent",
 	"POST /api/invitations/{id}/accept":            "self_only — caller accepting their own invitation",
 	"POST /api/invitations/{id}/decline":           "self_only — caller declining their own invitation",
 	"POST /api/persona/approvals/{id}/approve":     "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",

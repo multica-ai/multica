@@ -125,6 +125,11 @@ type Task struct {
 	// CEREBRO-PATCH(types): persona integration additions.
 	// CEREBRO-PATCH(daemon-task-model-override): per-task model override
 	// CEREBRO-PATCH(daemon-task-runtime-tools-config): runtime-level MCP defaults JSON (9031). Merged with Agent.McpConfig in runTask.
+	// CEREBRO-PATCH(daemon-task-presentation-mode): receive runtime
+	// presentation_mode from claim response. "interactive" tells the daemon
+	// to mirror agent stdout to the cerebro terminal broker so a browser
+	// can watch the run live. Empty / "headless" = no mirroring.
+	PresentationMode string `json:"presentation_mode,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

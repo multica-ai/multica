@@ -226,7 +226,7 @@ function FocusListRow({
         onDrop();
       }}
       onDragEnd={onDragEnd}
-      className={`group/row flex min-h-8 items-center gap-1.5 px-3 py-1 ${
+      className={`group/row flex min-h-8 items-start gap-1.5 px-3 py-1 ${
         isDragging ? "opacity-40" : ""
       } ${isDragOver ? "border-t-2 border-brand" : ""}`}
     >
@@ -282,15 +282,15 @@ function FocusListRow({
       ) : (
         <button
           type="button"
-          className={`flex-1 truncate text-left text-sm ${
+          className={`flex-1 text-left text-sm ${
             isDone ? "text-muted-foreground/60 line-through" : ""
           }`}
           onClick={() => setEditing(true)}
           title="Click to edit"
         >
           {item.issue_id ? (
-            <span className="flex items-center gap-1 min-w-0">
-              <span className="truncate">{item.text}</span>
+            <span className="flex items-center gap-1 min-w-0 flex-wrap">
+              <span>{item.text}</span>
               {issueTitle && (
                 <span className="shrink-0 rounded bg-accent px-1 py-0.5 text-xs text-muted-foreground max-w-28 truncate">
                   {issueTitle}

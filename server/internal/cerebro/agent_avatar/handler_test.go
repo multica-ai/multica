@@ -91,15 +91,15 @@ func TestBuildPrompt(t *testing.T) {
 		women := []string{"Sara", "Mia", "Sofie", "Charlotte - Senior Backend Developer"}
 		for _, n := range women {
 			got := buildPrompt(n, "")
-			if !strings.Contains(got, "portrait of a woman ") {
-				t.Fatalf("%q should render a woman: %s", n, got)
+			if !strings.Contains(got, "portrait of a young woman ") {
+				t.Fatalf("%q should render a young woman: %s", n, got)
 			}
 		}
 		men := []string{"Lars - Head of Legal", "Preben", "Brian - Senior Developer"}
 		for _, n := range men {
 			got := buildPrompt(n, "")
-			if !strings.Contains(got, "portrait of a man ") {
-				t.Fatalf("%q should render a man: %s", n, got)
+			if !strings.Contains(got, "portrait of a young man ") {
+				t.Fatalf("%q should render a young man: %s", n, got)
 			}
 		}
 	})
@@ -108,7 +108,7 @@ func TestBuildPrompt(t *testing.T) {
 		// An unrecognised name must not force a gender; instead the first name is
 		// handed to the model so it can infer the gender itself.
 		got := buildPrompt("Zephyrax", "")
-		if !strings.Contains(got, "portrait of a person ") {
+		if !strings.Contains(got, "portrait of a young person ") {
 			t.Fatalf("unknown name should use a neutral subject: %s", got)
 		}
 		if !strings.Contains(got, `first name "Zephyrax"`) {
@@ -228,72 +228,51 @@ func TestGatewayConfigFromEnvUsesAvatarModelDefault(t *testing.T) {
 
 func TestCallGatewayPostsToDataRegistryAndDecodesImage(t *testing.T) {
 	wantImage := []byte("png-bytes")
-	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(wantImage)
+	b64Image := base64.StdEncoding.EncodeToString(wantImage)
 
-	// The Data Registry gateway proxies OpenRouter, which returns each image as
-	// an {"type":"image_url","image_url":{"url":"data:…"}} object. A few
-	// providers emit a bare string instead, so both shapes must decode.
-	cases := []struct {
-		name   string
-		images any
-	}{
-		{
-			name: "openrouter_object_form",
-			images: []map[string]any{
-				{"type": "image_url", "image_url": map[string]any{"url": dataURL}},
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != gatewayImagesPath {
+			t.Fatalf("path = %q, want %q", r.URL.Path, gatewayImagesPath)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer rk_test" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		if got := r.Header.Get("x-trace-name"); got != "agent-avatar-generate" {
+			t.Fatalf("x-trace-name = %q", got)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["model"] != defaultAvatarModel {
+			t.Fatalf("model = %v, want %v", body["model"], defaultAvatarModel)
+		}
+		if body["prompt"] != "make an avatar" {
+			t.Fatalf("prompt = %v", body["prompt"])
+		}
+		if body["output_format"] != "b64_json" {
+			t.Fatalf("output_format = %v", body["output_format"])
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"b64_json": b64Image},
 			},
-		},
-		{
-			name:   "bare_string_form",
-			images: []string{dataURL},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != gatewayChatCompletionsPath {
-					t.Fatalf("path = %q", r.URL.Path)
-				}
-				if got := r.Header.Get("Authorization"); got != "Bearer rk_test" {
-					t.Fatalf("Authorization = %q", got)
-				}
-				if got := r.Header.Get("x-trace-name"); got != "agent-avatar-generate" {
-					t.Fatalf("x-trace-name = %q", got)
-				}
-
-				var body map[string]any
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-					t.Fatalf("decode body: %v", err)
-				}
-				if body["model"] != "openai/gpt-5-image-mini" {
-					t.Fatalf("model = %v", body["model"])
-				}
-				messages, ok := body["messages"].([]any)
-				if !ok || len(messages) != 1 {
-					t.Fatalf("messages = %#v", body["messages"])
-				}
-
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"choices": []map[string]any{
-						{"message": map[string]any{"images": tc.images}},
-					},
-				})
-			}))
-			defer server.Close()
-
-			got, err := callGateway(context.Background(), server.Client(), gatewayConfig{
-				baseURL: server.URL,
-				apiKey:  "rk_test",
-				model:   "openai/gpt-5-image-mini",
-			}, "make an avatar")
-			if err != nil {
-				t.Fatalf("callGateway returned error: %v", err)
-			}
-			if string(got) != string(wantImage) {
-				t.Fatalf("image = %q, want %q", got, wantImage)
-			}
 		})
+	}))
+	defer server.Close()
+
+	got, err := callGateway(context.Background(), server.Client(), gatewayConfig{
+		baseURL: server.URL,
+		apiKey:  "rk_test",
+		model:   defaultAvatarModel,
+	}, "make an avatar")
+	if err != nil {
+		t.Fatalf("callGateway returned error: %v", err)
+	}
+	if string(got) != string(wantImage) {
+		t.Fatalf("image = %q, want %q", got, wantImage)
 	}
 }
 
@@ -336,11 +315,10 @@ func (s *fakeAgentStore) UpdateAgent(_ context.Context, arg db.UpdateAgentParams
 
 func TestGenerateForAgentStoresAndUpdatesOnlyAvatarURL(t *testing.T) {
 	wantImage := []byte("png-bytes")
-	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(wantImage)
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]any{"images": []string{dataURL}}},
+			"data": []map[string]any{
+				{"b64_json": base64.StdEncoding.EncodeToString(wantImage)},
 			},
 		})
 	}))
@@ -382,11 +360,10 @@ func TestGenerateForAgentStoresAndUpdatesOnlyAvatarURL(t *testing.T) {
 
 func TestBackfillStartsBackgroundJobAndTracksProgress(t *testing.T) {
 	wantImage := []byte("png-bytes")
-	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(wantImage)
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]any{"images": []string{dataURL}}},
+			"data": []map[string]any{
+				{"b64_json": base64.StdEncoding.EncodeToString(wantImage)},
 			},
 		})
 	}))
@@ -439,11 +416,10 @@ func TestBackfillStartsBackgroundJobAndTracksProgress(t *testing.T) {
 }
 
 func TestBackfillForceRegeneratesAllExceptExcluded(t *testing.T) {
-	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("png-bytes"))
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{
-				{"message": map[string]any{"images": []string{dataURL}}},
+			"data": []map[string]any{
+				{"b64_json": base64.StdEncoding.EncodeToString([]byte("png-bytes"))},
 			},
 		})
 	}))

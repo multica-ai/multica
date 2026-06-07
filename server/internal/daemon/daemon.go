@@ -164,6 +164,12 @@ type Daemon struct {
 	runUpdateFn func(targetVersion string) (string, error)
 
 	traceUploader *traceupload.Manager // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender; nil when flag off
+
+	// CEREBRO-PATCH(daemon-ws-write-accessor): expose write channel for cerebro term frames.
+	wsWrites atomic.Pointer[chan []byte]
+	// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to interactive terminal sink.
+	cerebroTermSinkMu sync.RWMutex
+	cerebroTermSink   func(taskID string, text string)
 }
 
 // New creates a new Daemon instance.
@@ -2731,6 +2737,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
+	// CEREBRO-PATCH(daemon-attach-interactive-terminal): mirror agent stream to broker when interactive.
+	if task.PresentationMode == "interactive" {
+		teardown := d.cerebroAttachTerminal(ctx, task)
+		defer teardown()
+	}
 
 	// task.Repos is the authoritative repo list for this task — when the
 	// claimed task belongs to a project with github_repo resources the server
@@ -3512,6 +3523,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
 				lastActivityAt.Store(time.Now().UnixNano())
+				// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to interactive terminal sink.
+				if sink := d.getCerebroTermSink(); sink != nil {
+					sink(taskID, formatMessageAsText(msg))
+				}
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend

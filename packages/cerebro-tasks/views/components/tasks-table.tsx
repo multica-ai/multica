@@ -3,8 +3,10 @@
 import { Fragment, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useNavigation } from "@multica/views/navigation";
+import { TranscriptButton } from "@multica/views/common/task-transcript";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
+import type { AgentTask } from "@multica/core/types";
 import type { ColumnId, CerebroTask, GroupBy } from "../../core/types";
 
 interface TasksTableProps {
@@ -117,6 +119,9 @@ export function TasksTable({
               {visibleColumns.duration && <th className="px-3 py-2 text-left font-medium">Varighed</th>}
               {visibleColumns.cost && <th className="px-3 py-2 text-right font-medium">Kost</th>}
               {visibleColumns.triggered_by && <th className="px-3 py-2 text-left font-medium">Startet af</th>}
+              <th className="w-9 px-2 py-2 text-right font-medium">
+                <span className="sr-only">Run-detaljer</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -208,7 +213,7 @@ function bucketize(tasks: CerebroTask[], groupBy: GroupBy): Group[] {
 }
 
 function countVisibleColumns(visibleColumns: Record<ColumnId, boolean>): number {
-  return Object.values(visibleColumns).filter(Boolean).length;
+  return Object.values(visibleColumns).filter(Boolean).length + 1;
 }
 
 function GroupHeader({
@@ -269,6 +274,8 @@ function Row({
     task.chat_title ||
     task.issue_title ||
     (task.chat_session_id ? "Chat task" : "Uden titel");
+  const transcriptTask = toAgentTask(task);
+  const showTranscript = task.status !== "queued";
 
   return (
     <tr
@@ -384,6 +391,19 @@ function Row({
           {task.triggered_by_name ?? "—"}
         </td>
       )}
+      <td className="px-2 py-2 text-right">
+        {showTranscript ? (
+          <TranscriptButton
+            task={transcriptTask}
+            agentName={task.agent_name}
+            isLive={task.status === "running" || task.status === "dispatched"}
+            title="Vis run-detaljer"
+            className="ml-auto"
+          />
+        ) : (
+          <span className="inline-block h-6 w-6" aria-hidden="true" />
+        )}
+      </td>
     </tr>
   );
 }
@@ -404,6 +424,8 @@ function MobileTaskCard({
     task.chat_title ||
     task.issue_title ||
     (task.chat_session_id ? "Chat task" : "Uden titel");
+  const transcriptTask = toAgentTask(task);
+  const showTranscript = task.status !== "queued";
   const issueLabel = task.issue_number ? `#${task.issue_number}` : null;
   const context = [
     task.issue_title ? [issueLabel, task.issue_title].filter(Boolean).join(" ") : null,
@@ -411,12 +433,19 @@ function MobileTaskCard({
   ].filter(Boolean);
 
   return (
-    <button
-      type="button"
+    <div
+      role={target ? "button" : undefined}
+      tabIndex={target ? 0 : undefined}
       onClick={() => {
         if (target) push(target);
       }}
-      disabled={!target}
+      onKeyDown={(e) => {
+        if (!target) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          push(target);
+        }
+      }}
       className={cn(
         "w-full rounded-md border bg-background p-3 text-left transition-colors",
         target ? "hover:bg-accent/40" : "opacity-70",
@@ -434,6 +463,15 @@ function MobileTaskCard({
         <span className="shrink-0 text-[11px] text-muted-foreground">
           {formatDuration(startedISO, endedISO)}
         </span>
+        {showTranscript && (
+          <TranscriptButton
+            task={transcriptTask}
+            agentName={task.agent_name}
+            isLive={task.status === "running" || task.status === "dispatched"}
+            title="Vis run-detaljer"
+            className="-mr-1"
+          />
+        )}
       </div>
 
       <div className="mt-2 flex min-w-0 items-center gap-2">
@@ -453,8 +491,42 @@ function MobileTaskCard({
         )}
         {task.triggered_by_name && <span>Startet af {task.triggered_by_name}</span>}
       </div>
-    </button>
+    </div>
   );
+}
+
+function toAgentTask(task: CerebroTask): AgentTask {
+  return {
+    id: task.task_id,
+    agent_id: task.agent_id,
+    runtime_id: "",
+    issue_id: task.issue_id ?? "",
+    status: toAgentTaskStatus(task.status),
+    priority: 0,
+    dispatched_at: task.dispatched_at ?? null,
+    started_at: task.started_at ?? null,
+    completed_at: task.completed_at ?? null,
+    result: null,
+    error: null,
+    created_at: task.created_at,
+    chat_session_id: task.chat_session_id,
+    title: task.task_title ?? task.chat_title ?? task.issue_title,
+  };
+}
+
+function toAgentTaskStatus(status: string): AgentTask["status"] {
+  switch (status) {
+    case "queued":
+    case "dispatched":
+    case "waiting_local_directory":
+    case "running":
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return status;
+    default:
+      return "queued";
+  }
 }
 
 function rowTarget(task: CerebroTask, workspaceSlug: string): string | null {
