@@ -18,6 +18,7 @@ import {
 } from "@multica/core/i18n";
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
+import { useAccentStore, type Accent } from "@multica/core/theme";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
@@ -102,6 +103,8 @@ export function PreferencesTab() {
   const { t, i18n } = useT("settings");
   const localeAdapter = useLocaleAdapter();
   const user = useAuthStore((s) => s.user);
+  const accent = useAccentStore((s) => s.accent);
+  const setAccent = useAccentStore((s) => s.setAccent);
 
   // i18next.language can be a region-tagged BCP-47 string (e.g. "en-US",
   // "zh-Hans-CN") returned by intl-localematcher. Normalize to a supported
@@ -116,6 +119,22 @@ export function PreferencesTab() {
     { value: "light" as const, label: t(($) => $.preferences.theme.light) },
     { value: "dark" as const, label: t(($) => $.preferences.theme.dark) },
     { value: "system" as const, label: t(($) => $.preferences.theme.system) },
+  ];
+
+  // Swatch colour mirrors the brand token each accent stamps in tokens.css
+  // (`data-accent`). Default = the stock brand violet; blue = Atlassian blue.
+  // Applied live by the accent store + AccentSync — no reload, unlike language.
+  const accentOptions: { value: Accent; label: string; swatch: string }[] = [
+    {
+      value: "default",
+      label: t(($) => $.preferences.accent.default),
+      swatch: "oklch(0.55 0.22 286)",
+    },
+    {
+      value: "blue",
+      label: t(($) => $.preferences.accent.blue),
+      swatch: "oklch(0.48 0.2 264)",
+    },
   ];
 
   const languageOptions: { value: SupportedLocale; label: string }[] = [
@@ -196,6 +215,51 @@ export function PreferencesTab() {
                   ) : (
                     <WindowMockup variant={opt.value} />
                   )}
+                </div>
+                <span
+                  className={cn(
+                    "text-sm transition-colors",
+                    active
+                      ? "font-medium text-foreground"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  {opt.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">
+          {t(($) => $.preferences.accent.title)}
+        </h2>
+        <div className="flex gap-6" role="radiogroup">
+          {accentOptions.map((opt) => {
+            const active = accent === opt.value;
+            return (
+              <button
+                type="button"
+                key={opt.value}
+                role="radio"
+                aria-checked={active}
+                onClick={() => setAccent(opt.value)}
+                className="group flex flex-col items-center gap-2"
+              >
+                <div
+                  className={cn(
+                    "flex aspect-[4/3] w-36 items-center justify-center overflow-hidden rounded-lg ring-1 transition-all",
+                    active
+                      ? "ring-2 ring-brand"
+                      : "ring-border hover:ring-2 hover:ring-border"
+                  )}
+                >
+                  <span
+                    className="size-8 rounded-full"
+                    style={{ backgroundColor: opt.swatch }}
+                  />
                 </div>
                 <span
                   className={cn(

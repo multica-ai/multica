@@ -6,6 +6,11 @@
       "dark": "Dark",
       "system": "System"
     },
+    "accent": {
+      "title": "Accent",
+      "default": "Default",
+      "blue": "Blue"
+    },
     "language": {
       "title": "Language",
       "english": "English",

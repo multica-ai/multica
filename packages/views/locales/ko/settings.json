@@ -6,6 +6,11 @@
       "dark": "다크",
       "system": "시스템"
     },
+    "accent": {
+      "title": "강조 색상",
+      "default": "기본",
+      "blue": "파랑"
+    },
     "language": {
       "title": "언어",
       "english": "English",

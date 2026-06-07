@@ -6,6 +6,11 @@
       "dark": "深色",
       "system": "跟随系统"
     },
+    "accent": {
+      "title": "强调色",
+      "default": "默认",
+      "blue": "蓝色"
+    },
     "language": {
       "title": "语言",
       "english": "English",

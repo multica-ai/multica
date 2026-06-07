@@ -6,6 +6,11 @@
       "dark": "ダーク",
       "system": "システム"
     },
+    "accent": {
+      "title": "アクセント",
+      "default": "デフォルト",
+      "blue": "ブルー"
+    },
     "language": {
       "title": "言語",
       "english": "English",

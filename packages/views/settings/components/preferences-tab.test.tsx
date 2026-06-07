@@ -13,6 +13,10 @@ const mockReload = vi.hoisted(() => vi.fn());
 const mockToastWarning = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockSetUser = vi.hoisted(() => vi.fn());
+const mockSetAccent = vi.hoisted(() => vi.fn());
+const accentRef = vi.hoisted(() => ({
+  current: "default" as "default" | "blue",
+}));
 const userRef = vi.hoisted(() => ({
   current: null as { id: string; timezone?: string | null } | null,
 }));
@@ -39,6 +43,22 @@ vi.mock("@multica/core/i18n/react", async () => {
 vi.mock("@multica/core/api", () => ({
   api: { updateMe: mockUpdateMe },
 }));
+
+vi.mock("@multica/core/theme", () => {
+  type AccentState = {
+    accent: "default" | "blue";
+    setAccent: typeof mockSetAccent;
+  };
+  const state = (): AccentState => ({
+    accent: accentRef.current,
+    setAccent: mockSetAccent,
+  });
+  const useAccentStore = Object.assign(
+    (sel?: (s: AccentState) => unknown) => (sel ? sel(state()) : state()),
+    { getState: state },
+  );
+  return { useAccentStore };
+});
 
 vi.mock("sonner", () => ({
   toast: { warning: mockToastWarning, error: mockToastError },
@@ -164,6 +184,49 @@ describe("PreferencesTab — Language switcher", () => {
       vi.advanceTimersByTime(2500);
     });
     expect(mockReload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PreferencesTab — Accent picker", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+    accentRef.current = "default";
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders an Accent radiogroup with Default + Blue options", () => {
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByRole("radio", { name: enSettings.preferences.accent.default }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: enSettings.preferences.accent.blue }),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking Blue calls setAccent('blue')", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(
+      screen.getByRole("radio", { name: enSettings.preferences.accent.blue }),
+    );
+
+    expect(mockSetAccent).toHaveBeenCalledWith("blue");
+  });
+
+  it("reflects the active accent from the store on the radio", () => {
+    accentRef.current = "blue";
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByRole("radio", { name: enSettings.preferences.accent.blue }),
+    ).toHaveAttribute("aria-checked", "true");
   });
 });
 
