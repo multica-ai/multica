@@ -174,6 +174,7 @@ UPDATE workspace SET
     settings = COALESCE($5, settings),
     repos = COALESCE($6, repos),
     issue_prefix = COALESCE($7, issue_prefix),
+    -- CEREBRO-PATCH(workspace-avatar-url-query): FIR-2580 — persist logo URL via UpdateWorkspace.
     avatar_url = COALESCE($8, avatar_url),
     updated_at = now()
 WHERE id = $1

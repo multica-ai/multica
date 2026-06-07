@@ -77,6 +77,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/wakeups/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/wakeups/{id}/cancel",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/workflows/{id}",
       "gate": "workspace_member"
     },
@@ -1315,6 +1323,10 @@
       "exempt": "local-only \u2014 writes to MCP repo binding on disk, no remote call"
     },
     {
+      "id": "cancel_wakeup",
+      "gate": "via:POST /api/cerebro/wakeups/{id}/cancel"
+    },
+    {
       "id": "complete_work",
       "gate": "via:PUT /api/work-sessions/{id}/complete"
     },
@@ -1459,6 +1471,10 @@
       "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
     },
     {
+      "id": "list_wakeups",
+      "exempt": "read-only \u2014 wraps GET /api/cerebro/wakeups"
+    },
+    {
       "id": "move_artifact",
       "gate": "via:PUT /api/artifacts/{id}/folder"
     },
@@ -1497,6 +1513,10 @@
     {
       "id": "search_issues",
       "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+    },
+    {
+      "id": "schedule_wakeup",
+      "gate": "via:POST /api/cerebro/wakeups"
     },
     {
       "id": "set_artifact_folder",
@@ -2255,6 +2275,22 @@
     {
       "id": "version",
       "exempt": "local-only \u2014 prints build metadata"
+    },
+    {
+      "id": "wakeup cancel",
+      "gate": "via:POST /api/cerebro/wakeups/{id}/cancel"
+    },
+    {
+      "id": "wakeup create",
+      "gate": "via:POST /api/cerebro/wakeups"
+    },
+    {
+      "id": "wakeup get",
+      "exempt": "read-only \u2014 wraps GET /api/cerebro/wakeups/{id}"
+    },
+    {
+      "id": "wakeup list",
+      "exempt": "read-only \u2014 wraps GET /api/cerebro/wakeups"
     },
     {
       "id": "workspace get",

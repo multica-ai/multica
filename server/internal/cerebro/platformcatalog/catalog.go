@@ -339,6 +339,16 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:         "schedule_agent_wakeup",
+		Title:       "Schedule agent wakeup",
+		Category:    CategoryAgents,
+		Description: "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
+		Ops: []string{
+			"POST /api/cerebro/wakeups/",
+			"POST /api/cerebro/wakeups/{id}/cancel",
+		},
+	},
+	{
 		Key:         "manage_agent_passes",
 		Title:       "Manage agent passes",
 		Category:    CategoryAgents,
@@ -828,9 +838,9 @@ var excluded = map[string]string{
 	"POST /api/inbox/{id}/run-private-agent":       "self_only — caller running their own private agent from their inbox",
 
 	// cerebro focus-list — personal task queue, caller's own items only.
-	"POST /api/cerebro/focus-list/":        "self_only — caller's own focus list",
-	"PATCH /api/cerebro/focus-list/{id}":   "self_only — caller's own focus list",
-	"DELETE /api/cerebro/focus-list/{id}":  "self_only — caller's own focus list",
+	"POST /api/cerebro/focus-list/":            "self_only — caller's own focus list",
+	"PATCH /api/cerebro/focus-list/{id}":       "self_only — caller's own focus list",
+	"DELETE /api/cerebro/focus-list/{id}":      "self_only — caller's own focus list",
 	"POST /api/cerebro/focus-list/{id}/done":   "self_only — caller's own focus list",
 	"POST /api/cerebro/focus-list/{id}/snooze": "self_only — caller's own focus list",
 	"POST /api/cerebro/focus-list/reorder":     "self_only — caller's own focus list",
@@ -840,11 +850,11 @@ var excluded = map[string]string{
 	// capability; there is no agent tool that opens or closes a PTY session.
 	"POST /api/cerebro/terminal/sessions":               "interactive-terminal — human opens a live agent session to watch/take over; UI-only, no agent tool equivalent",
 	"DELETE /api/cerebro/terminal/sessions/{sessionId}": "interactive-terminal — human closes a live agent session; UI-only, no agent tool equivalent",
-	"POST /api/invitations/{id}/accept":            "self_only — caller accepting their own invitation",
-	"POST /api/invitations/{id}/decline":           "self_only — caller declining their own invitation",
-	"POST /api/persona/approvals/{id}/approve":     "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
-	"POST /api/persona/approvals/{id}/deny":        "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
-	"POST /api/channels/{id}/read":                 "self_only — caller marking a channel read",
+	"POST /api/invitations/{id}/accept":                 "self_only — caller accepting their own invitation",
+	"POST /api/invitations/{id}/decline":                "self_only — caller declining their own invitation",
+	"POST /api/persona/approvals/{id}/approve":          "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
+	"POST /api/persona/approvals/{id}/deny":             "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
+	"POST /api/channels/{id}/read":                      "self_only — caller marking a channel read",
 
 	// chat sessions — the caller's own AI chat, not an admin-governed action.
 	"POST /api/chat/sessions/":                             "personal-chat — caller's own AI chat session",

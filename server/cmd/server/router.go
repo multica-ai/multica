@@ -43,6 +43,8 @@ import (
 	cerebrogrants "github.com/multica-ai/multica/server/internal/cerebro/grants"
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy handler import
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API.
+	cerebrowakeup "github.com/multica-ai/multica/server/internal/cerebro/wakeup"
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler import
 	cerebrosandboxprofile "github.com/multica-ai/multica/server/internal/cerebro/sandboxprofile"
 	// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject CRUD + assignment handler import
@@ -321,7 +323,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	mentionGate := cerebromentiongate.New(queries, cerebroGroupPermissionsHandler.Service) // CEREBRO-PATCH(router-mention-trigger-gate): JEH-1917.
 	h.MentionTriggerGate = mentionGate
 	channelListenSvc.AgentTriggerGate = mentionGate.ChannelListenGate()
-	h.CommentTargetGuard = cerebrocommentguard.New(cerebroQueries) // CEREBRO-PATCH(router-comment-target-guard): FIR-2674 — gated by the cerebro_comment_target_guard feature flag (registry.ts), resolved per workspace; default off.
+	h.CommentTargetGuard = cerebrocommentguard.New(cerebroQueries)                 // CEREBRO-PATCH(router-comment-target-guard): FIR-2674 — gated by the cerebro_comment_target_guard feature flag (registry.ts), resolved per workspace; default off.
 	h.ChannelCreateGuard = cerebrochannels.NewCreateGuard(cerebroQueries, queries) // CEREBRO-PATCH(router-channel-create-guard): FIR-2660 — gated by the cerebro_channel_create_restricted feature flag (registry.ts); default off so any member/agent can still create until an admin turns it on.
 	// CEREBRO-PATCH(router-private-agent-run-request): FIR-2385 — member tag of an unowned private agent → owner inbox run-request.
 	h.PrivateAgentRunRequester = cerebroprivateagentrun.New(cerebroQueries, bus)
@@ -414,6 +416,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
 	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list handler instance
 	cerebroFocusListHandler := cerebrofocuslist.New(cerebroQueries)
+	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API handler.
+	cerebroWakeupHandler := cerebrowakeup.NewHandler(cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus))
 
 	r := chi.NewRouter()
 
@@ -926,6 +930,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
 					r.Put("/", cerebroIdentityHandler.Update)
 				})
+			})
+
+			// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup scheduling API.
+			r.Route("/api/cerebro/wakeups", func(r chi.Router) {
+				r.Get("/", cerebroWakeupHandler.List)
+				r.Post("/", cerebroWakeupHandler.Create)
+				r.Get("/{id}", cerebroWakeupHandler.Get)
+				r.Post("/{id}/cancel", cerebroWakeupHandler.Cancel)
 			})
 
 			// Issues

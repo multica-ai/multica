@@ -111,7 +111,7 @@ UPDATE workspace
 SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{tasks_paused}', to_jsonb($1::boolean), true),
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url
 `
 
 type SetWorkspaceTasksPausedParams struct {
@@ -135,6 +135,7 @@ func (q *Queries) SetWorkspaceTasksPaused(ctx context.Context, arg SetWorkspaceT
 		&i.Repos,
 		&i.IssuePrefix,
 		&i.IssueCounter,
+		&i.AvatarUrl,
 	)
 	return i, err
 }
