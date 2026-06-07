@@ -1,14 +1,31 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
+
+// McpConfigTab now mounts the connector directory (a TanStack Query consumer),
+// so every render needs a QueryClient + I18n provider in scope.
+function Providers({ children }: { children: ReactNode }) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return (
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        {children}
+      </I18nProvider>
+    </QueryClientProvider>
+  );
+}
 
 vi.mock("sonner", () => ({
   toast: {
@@ -48,9 +65,9 @@ function renderTab(
 ) {
   const agent = { ...baseAgent, ...overrides };
   const result = render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+    <Providers>
       <McpConfigTab agent={agent} onSave={onSave} />
-    </I18nProvider>,
+    </Providers>,
   );
   return { ...result, onSave };
 }
@@ -162,9 +179,9 @@ describe("McpConfigTab", () => {
     const agent = { ...baseAgent, mcp_config: initial };
 
     const { rerender } = render(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <Providers>
         <McpConfigTab agent={agent} onSave={vi.fn()} />
-      </I18nProvider>,
+      </Providers>,
     );
 
     const editor = screen.getByLabelText(
@@ -173,12 +190,12 @@ describe("McpConfigTab", () => {
     expect(editor.value).toBe(JSON.stringify(initial, null, 2));
 
     rerender(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <Providers>
         <McpConfigTab
           agent={{ ...agent, mcp_config: updated }}
           onSave={vi.fn()}
         />
-      </I18nProvider>,
+      </Providers>,
     );
 
     // Editor follows the new prop and the dirty hint is NOT shown — if it
@@ -195,9 +212,9 @@ describe("McpConfigTab", () => {
     const agent = { ...baseAgent, mcp_config: initial };
 
     const { rerender } = render(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <Providers>
         <McpConfigTab agent={agent} onSave={vi.fn()} />
-      </I18nProvider>,
+      </Providers>,
     );
 
     const editor = screen.getByLabelText(
@@ -208,12 +225,12 @@ describe("McpConfigTab", () => {
     expect(editor.value).toBe(draft);
 
     rerender(
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <Providers>
         <McpConfigTab
           agent={{ ...agent, mcp_config: updated }}
           onSave={vi.fn()}
         />
-      </I18nProvider>,
+      </Providers>,
     );
 
     expect(editor.value).toBe(draft);

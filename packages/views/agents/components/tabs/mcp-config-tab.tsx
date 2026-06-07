@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eraser, Loader2, Lock, Save } from "lucide-react";
-import type { Agent } from "@multica/core/types";
+import { Eraser, Loader2, Lock, Plug, Save } from "lucide-react";
+import type { Agent, McpConnector } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+import { ConnectorDirectory } from "../mcp/connector-directory";
+import { ConnectorConfigForm } from "../mcp/connector-config-form";
 
 // `null` and the empty string are the two ways the user can mean "no
 // config" — the server stores either as a NULL column and the daemon
@@ -28,6 +30,18 @@ export function McpConfigTab({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("agents");
+  // The agent always carries its own workspace id; reading it from the prop
+  // avoids depending on `WorkspaceIdProvider` context here (rule: workspace-
+  // scoped data takes wsId explicitly, not via the provider hook).
+  const wsId = agent.workspace_id;
+
+  // Connector directory + schema-driven add flow. Picking a connector in the
+  // directory selects it, which opens the per-connector config form; the form
+  // merges into the agent's current `mcp_config` and saves through the same
+  // `onSave` path as the raw editor.
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [selectedConnector, setSelectedConnector] =
+    useState<McpConnector | null>(null);
 
   const redacted = agent.mcp_config_redacted === true;
   const original = useMemo(() => configToText(agent.mcp_config), [agent.mcp_config]);
@@ -134,6 +148,44 @@ export function McpConfigTab({
       <div className="flex items-start justify-between gap-3">
         <p className="text-xs text-muted-foreground">
           {t(($) => $.tab_body.mcp_config.intro)}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setDirectoryOpen(true)}
+          className="shrink-0"
+        >
+          <Plug className="h-3 w-3" />
+          Browse connectors
+        </Button>
+      </div>
+
+      <ConnectorDirectory
+        wsId={wsId}
+        open={directoryOpen}
+        onOpenChange={setDirectoryOpen}
+        onSelect={(connector) => {
+          setSelectedConnector(connector);
+          setDirectoryOpen(false);
+        }}
+      />
+
+      {selectedConnector && (
+        <ConnectorConfigForm
+          connector={selectedConnector}
+          currentConfig={agent.mcp_config}
+          open
+          onOpenChange={(open) => {
+            if (!open) setSelectedConnector(null);
+          }}
+          onSave={onSave}
+        />
+      )}
+
+      <div className="flex items-center justify-between gap-3 pt-1">
+        <p className="text-xs font-medium text-muted-foreground">
+          Advanced (JSON)
         </p>
         {trimmed !== "" && (
           <Button
