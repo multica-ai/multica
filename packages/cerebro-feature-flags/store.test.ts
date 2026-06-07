@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveFlag } from "./store";
 import { CEREBRO_FLAG_DEFAULTS } from "./registry";
 
-// cerebro_grants defaults to OFF in the registry — a good probe for the
+// cerebro_grants defaults to OFF in the registry - a good probe for the
 // workspace-override precedence (FIR-2505).
 const KEY = "cerebro_grants" as const;
 

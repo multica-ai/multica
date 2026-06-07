@@ -110,7 +110,7 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full")}
     >
-      {/* CEREBRO-PATCH(web-firtal-bar-reserve): CerebroFirtalPortalBar owns the portal-bar body state client-side. Do not reserve pt-12 server-side; installed PWAs can keep stale body padding across reloads, and a global reservation pushes the app shell down before we know whether bar.js actually loaded. TECH-2903. */}
+      {/* CEREBRO-PATCH(web-firtal-bar-reserve): CerebroFirtalPortalBar owns the portal-bar body state client-side. Do not reserve pt-12 server-side; installed PWAs can keep stale body padding across reloads, and a global reservation pushes the app shell down before we know whether bar.js actually loaded. TECH-2903/TECH-2971. */}
       <body className="h-full overflow-hidden">
         {/* CEREBRO-PATCH(web-serwist): wrap with SerwistProvider for service worker */}
         <SerwistProvider

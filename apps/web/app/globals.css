@@ -25,36 +25,35 @@
 @source "../../../packages/cerebro-*/**/*.{ts,tsx}";
 
 /*
- * TECH-2903: the workspace sidebar is `position: fixed; inset-y-0`, so
- * bar.js' body padding does not push it down. Once the Firtal portal top bar
- * has actually loaded, shift the fixed sidebar below the 48px portal bar so
- * the bar can never cover the workspace switcher at the sidebar's top edge.
- * The body[data-firtal-bar="on"] attribute is owned by CerebroFirtalPortalBar.
+ * TECH-2903 / TECH-2971: the workspace sidebar is `position: fixed; inset-y-0`,
+ * so bar.js' body padding does not push it down. Once bar.js loads and sets
+ * data-firtal-bar="visible", shift the fixed sidebar below the 48px portal bar.
+ * When the bar is collapsed (bar.js sets "hidden"), the sidebar returns to
+ * top:0 automatically. The attribute is owned by CerebroFirtalPortalBar +
+ * bar.js — "visible" on load, "hidden" when user collapses.
  */
-body[data-firtal-bar="on"] [data-slot="sidebar-container"] {
+body[data-firtal-bar="visible"] [data-slot="sidebar-container"] {
   top: 3rem;
   height: calc(100svh - 3rem);
 }
 
 /*
- * TECH-2911: bar.js reserves 48px on body when the portal bar is active.
+ * TECH-2911: bar.js reserves 48px on body when the portal bar is visible.
  * The sidebar-wrapper (SidebarProvider root) is h-svh, so without an explicit
  * height limit it can extend below the visible viewport and drag
  * absolutely-positioned children like the chat input bar off-screen.
  */
-body[data-firtal-bar="on"] [data-slot="sidebar-wrapper"] {
+body[data-firtal-bar="visible"] [data-slot="sidebar-wrapper"] {
   height: calc(100svh - 3rem);
   min-height: calc(100svh - 3rem);
 }
 
 /*
- * TECH-2911 follow-up: belt-and-braces for the portal-bar inactive state.
- * bar.js writes body.style.paddingTop inline. Installed PWA sessions can keep
- * an old document alive long enough for that inline value to survive a route
- * transition or service-worker-driven refresh. Until CerebroFirtalPortalBar
- * confirms that bar.js loaded and sets data-firtal-bar="on", force the app
- * shell back to zero top padding. !important beats stale inline padding.
+ * TECH-2911 follow-up: when the bar is not visible (collapsed, disabled, or
+ * not yet loaded), force padding to zero. !important beats stale inline
+ * padding that bar.js may have left if interrupted before clearPush() ran,
+ * or that a PWA document carried over from a previous session.
  */
-body:not([data-firtal-bar="on"]) {
+body:not([data-firtal-bar="visible"]) {
   padding-top: 0 !important;
 }
