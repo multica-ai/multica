@@ -590,7 +590,7 @@ describe("IssueDetail (shared)", () => {
     // is more useful than navigation in the inline Inbox pane where you're
     // already viewing the issue.
     const triggers = await screen.findAllByRole("button", {
-      name: "Vis fuld kontekst for opgaven",
+      name: "View full task context",
     });
     expect(triggers.length).toBeGreaterThanOrEqual(1);
     fireEvent.click(triggers[0]!);
@@ -606,7 +606,7 @@ describe("IssueDetail (shared)", () => {
     // one is actually visible at runtime, but jsdom keeps both in the
     // tree. We only need one of them to drive the sheet for this test.
     const triggers = await screen.findAllByRole("button", {
-      name: "Vis fuld kontekst for opgaven",
+      name: "View full task context",
     });
     expect(triggers.length).toBeGreaterThanOrEqual(1);
     fireEvent.click(triggers[0]!);
