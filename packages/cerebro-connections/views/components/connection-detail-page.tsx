@@ -74,6 +74,8 @@ interface FormBodyProps {
   existingConn?: Connection;
   onSave: (form: typeof EMPTY_FORM, authType: AuthType) => Promise<void>;
   isSaving: boolean;
+  // Which secret fields had a value on load (server masks them as "***")
+  secretsSet?: { bearerToken: boolean; apiKey: boolean; cfSecret: boolean };
 }
 
 function ConnectionFormBody({
@@ -83,6 +85,7 @@ function ConnectionFormBody({
   existingConn,
   onSave,
   isSaving,
+  secretsSet,
 }: FormBodyProps) {
   const wsId = useWorkspaceId();
   const router = useNavigation();
@@ -358,11 +361,16 @@ function ConnectionFormBody({
 
             {authType === "bearer" && (
               <div className="space-y-1.5">
-                <Label htmlFor="conn-bearer">Bearer token</Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="conn-bearer">Bearer token</Label>
+                  {secretsSet?.bearerToken && !form.bearer_token && (
+                    <Badge variant="secondary" className="text-xs font-normal">Set</Badge>
+                  )}
+                </div>
                 <Input
                   id="conn-bearer"
                   type="password"
-                  placeholder={isEdit ? "Leave blank to keep current value" : ""}
+                  placeholder={secretsSet?.bearerToken && !form.bearer_token ? "•••••••• — type to replace" : ""}
                   value={form.bearer_token}
                   onChange={field("bearer_token")}
                   autoComplete="off"
@@ -373,11 +381,16 @@ function ConnectionFormBody({
             {authType === "apikey" && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="conn-apikey">API key</Label>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="conn-apikey">API key</Label>
+                    {secretsSet?.apiKey && !form.api_key && (
+                      <Badge variant="secondary" className="text-xs font-normal">Set</Badge>
+                    )}
+                  </div>
                   <Input
                     id="conn-apikey"
                     type="password"
-                    placeholder={isEdit ? "Leave blank to keep current" : ""}
+                    placeholder={secretsSet?.apiKey && !form.api_key ? "•••••••• — type to replace" : ""}
                     value={form.api_key}
                     onChange={field("api_key")}
                     autoComplete="off"
@@ -415,10 +428,16 @@ function ConnectionFormBody({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="conn-cf-secret">Client Secret</Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="conn-cf-secret">Client Secret</Label>
+                  {secretsSet?.cfSecret && !form.cf_access_secret && (
+                    <Badge variant="secondary" className="text-xs font-normal">Set</Badge>
+                  )}
+                </div>
                 <Input
                   id="conn-cf-secret"
                   type="password"
+                  placeholder={secretsSet?.cfSecret && !form.cf_access_secret ? "•••••••• — type to replace" : ""}
                   value={form.cf_access_secret}
                   onChange={field("cf_access_secret")}
                   autoComplete="off"
@@ -532,6 +551,12 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
     );
   }
 
+  const secretsSet = {
+    bearerToken: conn.auth_config.bearer_token === "***",
+    apiKey: conn.auth_config.api_key === "***",
+    cfSecret: conn.auth_config.cf_access_secret === "***",
+  };
+
   const initialForm = {
     name: conn.name,
     display_name: conn.display_name,
@@ -566,6 +591,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
       initial={initialForm}
       initialAuthType={detectAuthType(conn.auth_config)}
       existingConn={conn}
+      secretsSet={secretsSet}
       onSave={(form, authType) => {
         return handleSave(form, authType).catch(() => {
           toast.error("Something went wrong. Please try again.");

@@ -1,16 +1,18 @@
 package connections
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 )
 
-const testTimeout = 10 * time.Second
+const testTimeout = 15 * time.Second
 
 type testConnectionRequest struct {
 	URL          string     `json:"url"`
@@ -56,24 +58,74 @@ func addAuthHeaders(httpReq *http.Request, auth AuthConfig) {
 	}
 }
 
+// testMCPConnection implements the MCP Streamable HTTP protocol:
+// 1. POST initialize to get Mcp-Session-Id
+// 2. POST tools/list with that session ID
+// Handles both application/json and text/event-stream responses.
 func testMCPConnection(ctx context.Context, client *http.Client, url string, auth AuthConfig) testConnectionResult {
-	payload, _ := json.Marshal(map[string]any{
+	// Step 1: initialize
+	initPayload, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
-		"method":  "tools/list",
-		"params":  map[string]any{},
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]any{},
+			"clientInfo": map[string]any{
+				"name":    "cerebro-connection-test",
+				"version": "1.0",
+			},
+		},
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+
+	initReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(initPayload))
 	if err != nil {
 		return testConnectionResult{Reachable: false, Error: fmt.Sprintf("build request: %s", err)}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	addAuthHeaders(req, auth)
+	initReq.Header.Set("Content-Type", "application/json")
+	initReq.Header.Set("Accept", "application/json, text/event-stream")
+	addAuthHeaders(initReq, auth)
 
-	resp, err := client.Do(req)
+	initResp, err := client.Do(initReq)
 	if err != nil {
 		return testConnectionResult{Reachable: false, Error: fmt.Sprintf("connect: %s", err)}
+	}
+	defer initResp.Body.Close()
+
+	if initResp.StatusCode >= 400 {
+		return testConnectionResult{
+			Reachable:  true,
+			StatusCode: initResp.StatusCode,
+			Error:      fmt.Sprintf("server returned %d on initialize", initResp.StatusCode),
+		}
+	}
+
+	// Drain init response body so connection can be reused.
+	sessionID := initResp.Header.Get("Mcp-Session-Id")
+	_, _ = io.Copy(io.Discard, initResp.Body)
+
+	// Step 2: tools/list
+	toolsPayload, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/list",
+		"params":  map[string]any{},
+	})
+
+	toolsReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(toolsPayload))
+	if err != nil {
+		return testConnectionResult{Reachable: true, StatusCode: initResp.StatusCode, Error: fmt.Sprintf("build tools/list: %s", err)}
+	}
+	toolsReq.Header.Set("Content-Type", "application/json")
+	toolsReq.Header.Set("Accept", "application/json, text/event-stream")
+	if sessionID != "" {
+		toolsReq.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	addAuthHeaders(toolsReq, auth)
+
+	resp, err := client.Do(toolsReq)
+	if err != nil {
+		return testConnectionResult{Reachable: true, StatusCode: initResp.StatusCode, Error: fmt.Sprintf("tools/list: %s", err)}
 	}
 	defer resp.Body.Close()
 
@@ -85,6 +137,33 @@ func testMCPConnection(ctx context.Context, client *http.Client, url string, aut
 		}
 	}
 
+	ct := resp.Header.Get("Content-Type")
+	var body []byte
+	if strings.Contains(ct, "text/event-stream") {
+		body = extractSSEData(resp.Body)
+	} else {
+		body, _ = io.ReadAll(resp.Body)
+	}
+
+	return parseToolsResponse(body, resp.StatusCode)
+}
+
+// extractSSEData reads SSE lines and concatenates the first data: payload that looks like JSON-RPC.
+func extractSSEData(r io.Reader) []byte {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "data:") {
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if strings.HasPrefix(payload, "{") {
+				return []byte(payload)
+			}
+		}
+	}
+	return nil
+}
+
+func parseToolsResponse(body []byte, statusCode int) testConnectionResult {
 	var rpc struct {
 		Result *struct {
 			Tools []struct {
@@ -96,20 +175,20 @@ func testMCPConnection(ctx context.Context, client *http.Client, url string, aut
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&rpc); err != nil {
-		return testConnectionResult{Reachable: true, StatusCode: resp.StatusCode}
+	if err := json.Unmarshal(body, &rpc); err != nil {
+		return testConnectionResult{Reachable: true, StatusCode: statusCode}
 	}
 	if rpc.Error != nil {
-		return testConnectionResult{Reachable: true, StatusCode: resp.StatusCode, Error: rpc.Error.Message}
+		return testConnectionResult{Reachable: true, StatusCode: statusCode, Error: rpc.Error.Message}
 	}
 	if rpc.Result == nil {
-		return testConnectionResult{Reachable: true, StatusCode: resp.StatusCode}
+		return testConnectionResult{Reachable: true, StatusCode: statusCode}
 	}
 	tools := make([]toolInfo, 0, len(rpc.Result.Tools))
 	for _, t := range rpc.Result.Tools {
 		tools = append(tools, toolInfo{Name: t.Name, Description: t.Description})
 	}
-	return testConnectionResult{Reachable: true, StatusCode: resp.StatusCode, Tools: tools}
+	return testConnectionResult{Reachable: true, StatusCode: statusCode, Tools: tools}
 }
 
 func testAPIConnection(ctx context.Context, client *http.Client, url string, auth AuthConfig) testConnectionResult {
