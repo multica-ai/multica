@@ -121,6 +121,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		// an empty catalog so the daemon's model_list endpoint succeeds
 		// without populating a misleading dropdown.
 		return []Model{}, nil
+	case "qoderclicn":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverQoderclicnModels(ctx, executablePath)
+		})
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -295,6 +299,20 @@ func geminiStaticModels() []Model {
 func cursorStaticModels() []Model {
 	return []Model{
 		{ID: "auto", Label: "Auto", Provider: "cursor", Default: true},
+	}
+}
+
+func qoderclicnStaticModels() []Model {
+	return []Model{
+		{ID: "Auto", Label: "Auto", Default: true},
+		{ID: "Qwen3.7-Max", Label: "Qwen3.7 Max"},
+		{ID: "Qwen3.7-Plus", Label: "Qwen3.7 Plus"},
+		{ID: "Qwen3.6-Flash", Label: "Qwen3.6 Flash"},
+		{ID: "DeepSeek-V4-Pro", Label: "DeepSeek V4 Pro"},
+		{ID: "DeepSeek-V4-Flash", Label: "DeepSeek V4 Flash"},
+		{ID: "GLM-5.1", Label: "GLM-5.1"},
+		{ID: "Kimi-K2.6", Label: "Kimi K2.6"},
+		{ID: "MiniMax-M2.7", Label: "MiniMax M2.7"},
 	}
 }
 
@@ -506,6 +524,78 @@ func parsePiModels(output string) []Model {
 		models = append(models, Model{ID: id, Label: id, Provider: provider})
 	}
 	return models
+}
+
+// discoverQoderclicnModels runs `qoderclicn --model-list` and parses its
+// line-oriented catalog. On any failure, return a conservative static
+// fallback so model selection remains usable when the CLI is unavailable or
+// the account is not logged in.
+func discoverQoderclicnModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "qoderclicn"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return qoderclicnStaticModels(), nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "--model-list")
+	hideAgentWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return qoderclicnStaticModels(), nil
+	}
+	models := parseQoderclicnModels(string(out))
+	if len(models) == 0 {
+		return qoderclicnStaticModels(), nil
+	}
+	return models, nil
+}
+
+// parseQoderclicnModels accepts `qoderclicn --model-list` output:
+//
+//	MODEL
+//	Auto
+//	Qwen3.7-Max
+//	...
+//
+// qoderclicn does not group by upstream provider, so Provider is left empty.
+func parseQoderclicnModels(output string) []Model {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var models []Model
+	seen := map[string]bool{}
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.EqualFold(line, "model") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		id := fields[0]
+		if !isOpenclawIdentifier(id) {
+			continue
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		models = append(models, Model{
+			ID:      id,
+			Label:   qoderclicnModelLabel(id),
+			Default: strings.EqualFold(id, "auto"),
+		})
+	}
+	return models
+}
+
+func qoderclicnModelLabel(id string) string {
+	if strings.EqualFold(id, "auto") {
+		return "Auto"
+	}
+	return strings.ReplaceAll(id, "-", " ")
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,

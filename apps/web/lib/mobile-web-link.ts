@@ -6,10 +6,16 @@ export type SearchParams = Record<string, string | string[] | undefined>;
 
 const MOBILE_USER_AGENT_PATTERN =
   /\b(Android|BlackBerry|iPhone|iPad|iPod|IEMobile|Mobi|Mobile Safari|Opera Mini|Windows Phone|webOS)\b/i;
+const WECHAT_USER_AGENT_PATTERN = /\bMicroMessenger\b/i;
 
 export function isMobileUserAgent(userAgent?: string | null): boolean {
   if (!userAgent) return false;
   return MOBILE_USER_AGENT_PATTERN.test(userAgent);
+}
+
+export function isWeChatUserAgent(userAgent?: string | null): boolean {
+  if (!userAgent) return false;
+  return WECHAT_USER_AGENT_PATTERN.test(userAgent);
 }
 
 export function buildIssueWebHref({
@@ -28,6 +34,21 @@ export function buildIssueWebHref({
   const queryString = buildQueryString(searchParams);
 
   return `${origin}${path}${queryString ? `?${queryString}` : ""}`;
+}
+
+export function buildIssueMobileAppHref({
+  workspaceSlug,
+  issueId,
+  searchParams,
+}: {
+  workspaceSlug: string;
+  issueId: string;
+  searchParams?: SearchParams;
+}): string {
+  const path = `${encodeURIComponent(workspaceSlug)}/issues/${encodeURIComponent(issueId)}`;
+  const queryString = buildQueryString(searchParams);
+
+  return `wujieai-multicam://${path}${queryString ? `?${queryString}` : ""}`;
 }
 
 function getRequestOrigin(headers: HeaderReader): string {

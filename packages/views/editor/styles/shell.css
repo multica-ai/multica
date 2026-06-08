@@ -35,6 +35,25 @@
   vertical-align: middle;
 }
 
+/* Code block NodeViews are block content. Keeping them inline makes browser
+   text selection inside the nested <pre> start from the wrong block edge. */
+.rich-text-editor .code-block-wrapper {
+  display: block;
+  max-width: 100%;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rich-text-editor .code-block-header {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rich-text-editor .code-block-header button {
+  pointer-events: auto;
+}
+
 /* Block-level NodeViews (fileCard) need to override the inline default above */
 .rich-text-editor .file-card-node {
   display: block !important;

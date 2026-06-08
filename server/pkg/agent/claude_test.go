@@ -271,6 +271,49 @@ func TestClaudePermissionNotGrantedMatcherIgnoresNormalOutput(t *testing.T) {
 	}
 }
 
+func TestClaudePermissionNotGrantedMatcherIgnoresSourceCode(t *testing.T) {
+	t.Parallel()
+
+	source := `func isClaudePermissionNotGranted(s string) bool {
+	return strings.Contains(s, "Claude requested permissions") &&
+		strings.Contains(s, "you haven't granted it yet")
+}`
+
+	if isClaudePermissionNotGranted(source) {
+		t.Fatal("source code containing guard literals should not match permission-not-granted text")
+	}
+}
+
+func TestClaudePermissionNotGrantedMatcherIgnoresStringLiteral(t *testing.T) {
+	t.Parallel()
+
+	source := `Content: mustMarshal(t, "Claude requested permissions to write to /tmp/example.txt, but you haven't granted it yet."),`
+
+	if isClaudePermissionNotGranted(source) {
+		t.Fatal("source string literal containing permission text should not match permission-not-granted text")
+	}
+}
+
+func TestClaudePermissionNotGrantedMatcherIgnoresMarkdownCodeBlock(t *testing.T) {
+	t.Parallel()
+
+	markdown := "The daemon currently checks this fixture:\n\n```text\nClaude requested permissions to write to /tmp/example.txt, but you haven't granted it yet.\n```\n"
+
+	if isClaudePermissionNotGranted(markdown) {
+		t.Fatal("markdown code block containing permission text should not match permission-not-granted text")
+	}
+}
+
+func TestClaudePermissionNotGrantedMatcherIgnoresInlineDiagnosticQuote(t *testing.T) {
+	t.Parallel()
+
+	diagnostic := "The issue describes `Claude requested permissions to write to /tmp/example.txt` and `you haven't granted it yet` as trigger phrases."
+
+	if isClaudePermissionNotGranted(diagnostic) {
+		t.Fatal("inline diagnostic quotes containing trigger phrases should not match permission-not-granted text")
+	}
+}
+
 func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 	t.Parallel()
 

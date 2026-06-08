@@ -4261,3 +4261,113 @@ base_url = "https://p2.example/v1"
 		}
 	}
 }
+
+// TestReuseRefreshesCodexAuthMethodFromOfficialAuthToAPIKeyProvider proves
+// that Reuse() refreshes more than model_provider/base_url: switching from an
+// official Codex auth-backed config to a custom API-key provider must also
+// refresh preferred_auth_method, while auth.json remains shared rather than a
+// stale per-task copy.
+func TestReuseRefreshesCodexAuthMethodFromOfficialAuthToAPIKeyProvider(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"refresh_token":"official-v1"}`), 0o644); err != nil {
+		t.Fatalf("seed shared auth.json: %v", err)
+	}
+	officialConfig := `model_provider = "openai"
+model = "gpt-5.5"
+preferred_auth_method = "chatgpt"
+
+[model_providers.openai]
+name = "OpenAI"
+requires_openai_auth = true
+`
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(officialConfig), 0o644); err != nil {
+		t.Fatalf("seed shared official config.toml: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-auth-method-switch",
+		TaskID:         "f1a2b3c4-d5e6-7890-abcd-ef1234567892",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "auth-method-switch"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	data, err := os.ReadFile(filepath.Join(env.CodexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read per-task config.toml after Prepare: %v", err)
+	}
+	s := string(data)
+	for _, want := range []string{`model_provider = "openai"`, `preferred_auth_method = "chatgpt"`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("per-task config.toml missing initial %q, got:\n%s", want, s)
+		}
+	}
+
+	authPath := filepath.Join(env.CodexHome, "auth.json")
+	authData, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("read per-task auth.json after Prepare: %v", err)
+	}
+	if string(authData) != `{"refresh_token":"official-v1"}` {
+		t.Fatalf("per-task auth.json = %q, want shared official auth", authData)
+	}
+
+	customConfig := `model_provider = "custom"
+model = "gpt-5.5"
+preferred_auth_method = "apikey"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://custom.example/v1"
+`
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(customConfig), 0o644); err != nil {
+		t.Fatalf("rotate shared config.toml to custom API key provider: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"refresh_token":"official-v2"}`), 0o644); err != nil {
+		t.Fatalf("rotate shared auth.json: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "auth-method-switch"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err = os.ReadFile(filepath.Join(reused.CodexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read per-task config.toml after Reuse: %v", err)
+	}
+	s = string(data)
+	for _, want := range []string{`model_provider = "custom"`, `preferred_auth_method = "apikey"`, "https://custom.example/v1"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("per-task config.toml missing %q after auth-method switch, got:\n%s", want, s)
+		}
+	}
+	for _, bad := range []string{`model_provider = "openai"`, `preferred_auth_method = "chatgpt"`, `[model_providers.openai]`} {
+		if strings.Contains(s, bad) {
+			t.Errorf("per-task config.toml still contains stale official auth config %q, got:\n%s", bad, s)
+		}
+	}
+
+	authData, err = os.ReadFile(filepath.Join(reused.CodexHome, "auth.json"))
+	if err != nil {
+		t.Fatalf("read per-task auth.json after Reuse: %v", err)
+	}
+	if string(authData) != `{"refresh_token":"official-v2"}` {
+		t.Errorf("per-task auth.json = %q, want refreshed shared auth", authData)
+	}
+}

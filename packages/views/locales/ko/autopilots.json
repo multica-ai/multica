@@ -73,6 +73,8 @@
     "field_agent": "에이전트",
     "field_output_mode": "출력 모드",
     "field_project": "프로젝트",
+    "field_manual_options": "수동 실행 옵션",
+    "manual_options_empty": "수동 옵션 없음",
     "no_project": "프로젝트 없음",
     "project_unavailable": "프로젝트를 사용할 수 없습니다",
     "field_prompt": "프롬프트",
@@ -89,6 +91,12 @@
       "confirm": "삭제",
       "deleting": "삭제하는 중..."
     }
+  },
+  "manual_run": {
+    "title": "옵션으로 실행",
+    "cancel": "취소",
+    "confirm": "실행",
+    "running": "실행 중..."
   },
   "run_status": {
     "issue_created": "이슈 생성됨",
@@ -246,6 +254,11 @@
     "section_project": "프로젝트",
     "no_project": "프로젝트 없음",
     "section_output_mode": "출력 모드",
+    "section_manual_options": "수동 실행 옵션",
+    "manual_option_placeholder": "production",
+    "manual_option_add": "옵션 추가",
+    "manual_option_remove": "옵션 제거",
+    "manual_options_empty": "옵션을 추가하기 전에는 지금 실행이 바로 실행됩니다.",
     "section_schedule": "일정",
     "section_trigger_kind": "트리거",
     "trigger_kind_schedule": "일정",

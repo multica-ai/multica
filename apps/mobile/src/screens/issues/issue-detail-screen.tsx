@@ -2047,7 +2047,7 @@ const TimelineItem = memo(function TimelineItem({
   isLastReply?: boolean;
 }) {
   const { t } = useTranslation();
-  const actor = resolveActorName(entry.actor_type, entry.actor_id);
+  const actor = entry.actor_display_name ?? resolveActorName(entry.actor_type, entry.actor_id);
   const isOwnComment = entry.type === "comment" && entry.actor_type === "member" && entry.actor_id === userId;
   const isEditing = editingCommentId === entry.id;
   const [openMenu, setOpenMenu] = useState<"actions" | null>(null);

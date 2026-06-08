@@ -276,6 +276,25 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
+  it("keeps readonly code block chrome separate from selectable code text", () => {
+    const { container } = render(
+      <ReadonlyContent content={["```bash", "pnpm test", "```"].join("\n")} />,
+    );
+
+    const wrapper = container.querySelector(".code-block-wrapper");
+    const header = container.querySelector(".code-block-header");
+    const pre = container.querySelector("pre");
+    const copyButton = screen.getByTitle("Copy code");
+
+    expect(wrapper?.className).toContain("select-text");
+    expect(header?.className).toContain("select-none");
+    expect(pre?.className).toContain("select-text");
+    expect(copyButton.className).toContain("pointer-events-auto");
+
+    const mouseDown = fireEvent.mouseDown(copyButton);
+    expect(mouseDown).toBe(false);
+  });
+
   it("keeps editor code literal by disabling font ligatures", () => {
     const codeCss = readFileSync("editor/styles/code.css", "utf8");
 
@@ -284,6 +303,7 @@ describe("ReadonlyContent code styling", () => {
     expect(codeCss).toContain(".rich-text-editor pre code");
     expect(codeCss).toContain("font-variant-ligatures: none;");
     expect(codeCss).toContain('font-feature-settings: "liga" 0;');
+    expect(codeCss).toContain("user-select: text;");
   });
 });
 

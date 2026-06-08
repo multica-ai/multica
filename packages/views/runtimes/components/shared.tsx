@@ -24,6 +24,17 @@ export function ProviderChip({ provider }: { provider: string }) {
   );
 }
 
+export function providerLabel(provider: string): string {
+  switch (provider) {
+    case "qoderclicn":
+      return "Qoder";
+    case "DeepSeek-TUI":
+      return "DeepSeek-TUI";
+    default:
+      return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
+}
+
 // Maps each derived 4-state runtime health to a semantic colour class.
 // The mapping intentionally reuses our existing tokens (success/warning/
 // muted-foreground/destructive) instead of introducing runtime-specific
