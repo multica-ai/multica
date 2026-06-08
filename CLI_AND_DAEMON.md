@@ -702,11 +702,13 @@ multica daemon status --output json
 
 ## Error Messages
 
-The CLI funnels every error through a single user-facing translation layer
-(`server/internal/cli/errors.go`) so that what you see on the terminal is a
-short, actionable sentence rather than a raw Go error, an HTTP status line, or
-an internal `resolve issue: ...` chain. The underlying detail is still
-available on demand (see `--debug`).
+The CLI funnels command errors returned to the top-level handler through a
+single user-facing translation layer (`server/internal/cli/errors.go`) so that
+what you see on the terminal is a short, actionable sentence rather than a raw
+Go error, an HTTP status line, or an internal `resolve issue: ...` chain. (A
+few commands print their own output or run deliberate fast probes — for example
+`setup`'s short `/health` reachability check — and don't go through this
+layer.) The underlying detail is still available on demand (see `--debug`).
 
 ### What you see
 

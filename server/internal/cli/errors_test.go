@@ -342,3 +342,66 @@ func TestFormatErrorActionableHints(t *testing.T) {
 		}
 	}
 }
+
+// TestUserMessageError proves the command-level user-facing wrapper: the
+// custom message is shown by default (overriding the generic kind copy),
+// ExitCodeFor still classifies by the underlying typed error, and --debug
+// still exposes the full original chain. This is the mechanism that makes the
+// `multica login` failure guidance visible without losing classification.
+func TestUserMessageError(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	const hint = "Could not sign in with that token — make sure it is valid and not expired, then run `multica login --token <token>` again."
+
+	t.Run("wrapped HTTPError (invalid token -> 401)", func(t *testing.T) {
+		underlying := &HTTPError{Method: "GET", Path: "/api/me", StatusCode: 401, Body: `{"error":"unauthorized"}`}
+		err := WithUserMessage(hint, underlying)
+
+		// Default output shows the command hint, not the generic 401 line.
+		got := FormatError(err, false)
+		if got != hint {
+			t.Errorf("FormatError(false) = %q, want the login hint", got)
+		}
+		if strings.Contains(got, "session has expired") {
+			t.Errorf("default output leaked the generic 401 copy: %q", got)
+		}
+
+		// Exit code still classifies by the underlying *HTTPError (401 -> auth).
+		if code := ExitCodeFor(err); code != ExitAuth {
+			t.Errorf("ExitCodeFor = %d, want ExitAuth(%d)", code, ExitAuth)
+		}
+
+		// --debug keeps the full original chain (verb + http detail).
+		dbg := FormatError(err, true)
+		if !strings.Contains(dbg, "[debug]") || !strings.Contains(dbg, "/api/me") || !strings.Contains(dbg, "401") {
+			t.Errorf("debug output lost the raw chain: %q", dbg)
+		}
+
+		// errors.As still reaches the underlying typed error.
+		var he *HTTPError
+		if !errors.As(err, &he) || he.StatusCode != 401 {
+			t.Errorf("errors.As did not reach the underlying *HTTPError")
+		}
+	})
+
+	t.Run("wrapped NetworkError classifies as network", func(t *testing.T) {
+		underlying := &NetworkError{Kind: KindNetworkTimeout, Op: "GET /api/me", Err: errors.New("context deadline exceeded")}
+		err := WithUserMessage("Sign-in did not complete: the server did not accept the new credential. Run `multica login` again.", underlying)
+
+		if code := ExitCodeFor(err); code != ExitNetwork {
+			t.Errorf("ExitCodeFor = %d, want ExitNetwork(%d)", code, ExitNetwork)
+		}
+		got := FormatError(err, false)
+		if !strings.Contains(got, "Sign-in did not complete") {
+			t.Errorf("FormatError(false) = %q, want the sign-in hint", got)
+		}
+		if strings.Contains(got, "timed out") {
+			t.Errorf("default output leaked the generic network copy: %q", got)
+		}
+	})
+
+	t.Run("nil error returns nil", func(t *testing.T) {
+		if WithUserMessage("x", nil) != nil {
+			t.Errorf("WithUserMessage(_, nil) should be nil")
+		}
+	})
+}
