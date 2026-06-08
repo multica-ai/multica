@@ -78,6 +78,8 @@ export interface ListIssuesParams {
   sort_direction?: "asc" | "desc";
   /** When true, only return archived issues. Default: false (excludes archived). */
   archived?: boolean;
+  /** When true, include archived issues alongside non-archived ones (no archived_at filter). */
+  include_archived?: boolean;
 }
 
 export interface IssueActorRef {

@@ -1043,8 +1043,12 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
 
-		// Archived filter: default excludes archived issues; archived=true shows only archived.
-		if r.URL.Query().Get("archived") == "true" {
+		// Archived filter: default excludes archived issues.
+		// include_archived=true → no filter (show all issues regardless of archive status).
+		// archived=true → only archived issues.
+		if r.URL.Query().Get("include_archived") == "true" {
+			// No filter — show both archived and non-archived.
+		} else if r.URL.Query().Get("archived") == "true" {
 			where = append(where, "i.archived_at IS NOT NULL")
 		} else {
 			where = append(where, "i.archived_at IS NULL")

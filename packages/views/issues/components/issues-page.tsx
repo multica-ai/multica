@@ -57,7 +57,7 @@ export function IssuesPage() {
     const base: IssueListFilter = {};
     if (scope === "members") base.assignee_types = ["member"];
     if (scope === "agents") base.assignee_types = ["agent", "squad"];
-    if (showArchived) base.archived = true;
+    if (showArchived) base.include_archived = true;
     return buildIssueListServerFilter(
       base,
       {

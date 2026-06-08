@@ -413,28 +413,36 @@ export function useArchiveIssue() {
   return useMutation({
     mutationFn: (id: string) => api.archiveIssue(id),
     onMutate: (id) => {
-      // Fire-and-forget — keeps onMutate synchronous so the cache update
-      // lands in the same tick as mutate().
       qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      qc.cancelQueries({ queryKey: issueKeys.detail(wsId, id) });
-      const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
       const archivedAt = new Date().toISOString();
-      qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
-        old ? { ...old, archived_at: archivedAt } : old,
-      );
-      // Also patch list caches so the list page reflects the change immediately.
+      // Patch ALL detail queries for this issue (may be keyed by UUID or identifier).
+      const allDetails = qc.getQueriesData<Issue>({ queryKey: [...issueKeys.all(wsId), "detail"] });
+      const prevDetails: Array<[readonly unknown[], Issue]> = [];
+      for (const [key, cached] of allDetails) {
+        if (cached && cached.id === id) {
+          prevDetails.push([key, cached]);
+          qc.cancelQueries({ queryKey: key });
+          qc.setQueryData<Issue>(key, { ...cached, archived_at: archivedAt });
+        }
+      }
       for (const [key, cached] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
         if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, { archived_at: archivedAt }));
       }
-      return { prevDetail, id };
+      return { prevDetails, id };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prevDetail) {
-        qc.setQueryData(issueKeys.detail(wsId, ctx.id), ctx.prevDetail);
+      if (ctx?.prevDetails) {
+        for (const [key, prev] of ctx.prevDetails) {
+          qc.setQueryData(key, prev);
+        }
       }
     },
     onSettled: (_data, _err, vars) => {
-      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars) });
+      // Invalidate all detail queries that might hold this issue.
+      const allDetails = qc.getQueriesData<Issue>({ queryKey: [...issueKeys.all(wsId), "detail"] });
+      for (const [key, cached] of allDetails) {
+        if (cached && cached.id === vars) qc.invalidateQueries({ queryKey: key });
+      }
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -448,27 +456,34 @@ export function useUnarchiveIssue() {
   return useMutation({
     mutationFn: (id: string) => api.unarchiveIssue(id),
     onMutate: (id) => {
-      // Fire-and-forget — keeps onMutate synchronous so the cache update
-      // lands in the same tick as mutate().
       qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      qc.cancelQueries({ queryKey: issueKeys.detail(wsId, id) });
-      const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
-      qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
-        old ? { ...old, archived_at: null, archived_by: null } : old,
-      );
-      // Also patch list caches so the list page reflects the change immediately.
+      // Patch ALL detail queries for this issue (may be keyed by UUID or identifier).
+      const allDetails = qc.getQueriesData<Issue>({ queryKey: [...issueKeys.all(wsId), "detail"] });
+      const prevDetails: Array<[readonly unknown[], Issue]> = [];
+      for (const [key, cached] of allDetails) {
+        if (cached && cached.id === id) {
+          prevDetails.push([key, cached]);
+          qc.cancelQueries({ queryKey: key });
+          qc.setQueryData<Issue>(key, { ...cached, archived_at: null, archived_by: null });
+        }
+      }
       for (const [key, cached] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
         if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, { archived_at: null, archived_by: null }));
       }
-      return { prevDetail, id };
+      return { prevDetails, id };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prevDetail) {
-        qc.setQueryData(issueKeys.detail(wsId, ctx.id), ctx.prevDetail);
+      if (ctx?.prevDetails) {
+        for (const [key, prev] of ctx.prevDetails) {
+          qc.setQueryData(key, prev);
+        }
       }
     },
     onSettled: (_data, _err, vars) => {
-      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars) });
+      const allDetails = qc.getQueriesData<Issue>({ queryKey: [...issueKeys.all(wsId), "detail"] });
+      for (const [key, cached] of allDetails) {
+        if (cached && cached.id === vars) qc.invalidateQueries({ queryKey: key });
+      }
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });

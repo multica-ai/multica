@@ -105,6 +105,7 @@ export type IssueListFilter = Pick<
   | "involves_user_id"
   | "priorities"
   | "archived"
+  | "include_archived"
 > & {
   statuses?: readonly IssueStatus[];
 };

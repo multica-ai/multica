@@ -772,6 +772,7 @@ export class ApiClient {
     if (params?.sort_by) search.set("sort", params.sort_by);
     if (params?.sort_direction) search.set("direction", params.sort_direction);
     if (params?.archived) search.set("archived", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
