@@ -22,26 +22,26 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID                 string                  `json:"id"`
-	WorkspaceID        string                  `json:"workspace_id"`
-	Number             int32                   `json:"number"`
-	Identifier         string                  `json:"identifier"`
-	Title              string                  `json:"title"`
-	Description        *string                 `json:"description"`
-	Status             string                  `json:"status"`
-	Priority           string                  `json:"priority"`
-	AssigneeType       *string                 `json:"assignee_type"`
-	AssigneeID         *string                 `json:"assignee_id"`
-	CreatorType        string                  `json:"creator_type"`
-	CreatorID          string                  `json:"creator_id"`
-	ParentIssueID      *string                 `json:"parent_issue_id"`
-	ProjectID          *string                 `json:"project_id"`
-	Position           float64                 `json:"position"`
-	DueDate            *string                 `json:"due_date"`
-	CreatedAt          string                  `json:"created_at"`
-	UpdatedAt          string                  `json:"updated_at"`
-	Reactions          []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments        []AttachmentResponse    `json:"attachments,omitempty"`
+	ID            string                  `json:"id"`
+	WorkspaceID   string                  `json:"workspace_id"`
+	Number        int32                   `json:"number"`
+	Identifier    string                  `json:"identifier"`
+	Title         string                  `json:"title"`
+	Description   *string                 `json:"description"`
+	Status        string                  `json:"status"`
+	Priority      string                  `json:"priority"`
+	AssigneeType  *string                 `json:"assignee_type"`
+	AssigneeID    *string                 `json:"assignee_id"`
+	CreatorType   string                  `json:"creator_type"`
+	CreatorID     string                  `json:"creator_id"`
+	ParentIssueID *string                 `json:"parent_issue_id"`
+	ProjectID     *string                 `json:"project_id"`
+	Position      float64                 `json:"position"`
+	DueDate       *string                 `json:"due_date"`
+	CreatedAt     string                  `json:"created_at"`
+	UpdatedAt     string                  `json:"updated_at"`
+	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -120,6 +120,23 @@ type SearchIssueResponse struct {
 	IssueResponse
 	MatchSource    string  `json:"match_source"`
 	MatchedSnippet *string `json:"matched_snippet,omitempty"`
+}
+
+// IssueDependencyResponse is the JSON response for an issue dependency.
+type IssueDependencyResponse struct {
+	ID               string `json:"id"`
+	IssueID          string `json:"issue_id"`
+	DependsOnIssueID string `json:"depends_on_issue_id"`
+	Type             string `json:"type"`
+}
+
+func issueDependencyToResponse(dep db.IssueDependency) IssueDependencyResponse {
+	return IssueDependencyResponse{
+		ID:               uuidToString(dep.ID),
+		IssueID:          uuidToString(dep.IssueID),
+		DependsOnIssueID: uuidToString(dep.DependsOnIssueID),
+		Type:             dep.Type,
+	}
 }
 
 // extractSnippet extracts a snippet of text around the first occurrence of query.
@@ -242,7 +259,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 
 	escapedPhrase := escapeLike(phrase)
-	phraseParam := nextArg(escapedPhrase)               // $1
+	phraseParam := nextArg(escapedPhrase) // $1
 	phraseContains := "'%' || " + phraseParam + " || '%'"
 	phraseStartsWith := phraseParam + " || '%'"
 
@@ -706,6 +723,15 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func isValidIssueDependencyType(value string) bool {
+	switch value {
+	case "blocks", "blocked_by", "related":
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
@@ -727,17 +753,105 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) ListIssueDependencies(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+	deps, err := h.Queries.ListIssueDependencies(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issue dependencies")
+		return
+	}
+	resp := make([]IssueDependencyResponse, len(deps))
+	for i, dep := range deps {
+		resp[i] = issueDependencyToResponse(dep)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dependencies": resp,
+	})
+}
+
+type CreateIssueDependencyRequest struct {
+	DependsOnIssueID string `json:"depends_on_issue_id"`
+	Type             string `json:"type"`
+}
+
+func (h *Handler) CreateIssueDependency(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	var req CreateIssueDependencyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.DependsOnIssueID == "" {
+		writeError(w, http.StatusBadRequest, "depends_on_issue_id is required")
+		return
+	}
+	if req.Type == "" {
+		req.Type = "blocked_by"
+	}
+	if !isValidIssueDependencyType(req.Type) {
+		writeError(w, http.StatusBadRequest, "invalid dependency type")
+		return
+	}
+	if req.DependsOnIssueID == id {
+		writeError(w, http.StatusBadRequest, "an issue cannot depend on itself")
+		return
+	}
+
+	dependsOn, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          parseUUID(req.DependsOnIssueID),
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || !dependsOn.ID.Valid {
+		writeError(w, http.StatusBadRequest, "depends_on issue not found in this workspace")
+		return
+	}
+
+	existing, err := h.Queries.ListIssueDependencies(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load issue dependencies")
+		return
+	}
+	for _, dep := range existing {
+		if uuidToString(dep.DependsOnIssueID) == uuidToString(dependsOn.ID) && dep.Type == req.Type {
+			writeJSON(w, http.StatusOK, issueDependencyToResponse(dep))
+			return
+		}
+	}
+
+	created, err := h.Queries.CreateIssueDependency(r.Context(), db.CreateIssueDependencyParams{
+		IssueID:          issue.ID,
+		DependsOnIssueID: dependsOn.ID,
+		Type:             req.Type,
+	})
+	if err != nil {
+		slog.Warn("create issue dependency failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "depends_on_issue_id", req.DependsOnIssueID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create issue dependency")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, issueDependencyToResponse(created))
+}
+
 type CreateIssueRequest struct {
-	Title              string   `json:"title"`
-	Description        *string  `json:"description"`
-	Status             string   `json:"status"`
-	Priority           string   `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
-	DueDate            *string  `json:"due_date"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
+	Title         string   `json:"title"`
+	Description   *string  `json:"description"`
+	Status        string   `json:"status"`
+	Priority      string   `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	DueDate       *string  `json:"due_date"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -831,20 +945,25 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
 	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-		WorkspaceID:        parseUUID(workspaceID),
-		Title:              req.Title,
-		Description:        ptrToText(req.Description),
-		Status:             status,
-		Priority:           priority,
-		AssigneeType:       assigneeType,
-		AssigneeID:         assigneeID,
-		CreatorType:        creatorType,
-		CreatorID:          parseUUID(actualCreatorID),
-		ParentIssueID:      parentIssueID,
-		Position:           0,
-		DueDate:            dueDate,
-		Number:             issueNumber,
-		ProjectID:          func() pgtype.UUID { if req.ProjectID != nil { return parseUUID(*req.ProjectID) }; return pgtype.UUID{} }(),
+		WorkspaceID:   parseUUID(workspaceID),
+		Title:         req.Title,
+		Description:   ptrToText(req.Description),
+		Status:        status,
+		Priority:      priority,
+		AssigneeType:  assigneeType,
+		AssigneeID:    assigneeID,
+		CreatorType:   creatorType,
+		CreatorID:     parseUUID(actualCreatorID),
+		ParentIssueID: parentIssueID,
+		Position:      0,
+		DueDate:       dueDate,
+		Number:        issueNumber,
+		ProjectID: func() pgtype.UUID {
+			if req.ProjectID != nil {
+				return parseUUID(*req.ProjectID)
+			}
+			return pgtype.UUID{}
+		}(),
 	})
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -893,16 +1012,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title              *string  `json:"title"`
-	Description        *string  `json:"description"`
-	Status             *string  `json:"status"`
-	Priority           *string  `json:"priority"`
-	AssigneeType       *string  `json:"assignee_type"`
-	AssigneeID         *string  `json:"assignee_id"`
-	Position           *float64 `json:"position"`
-	DueDate            *string  `json:"due_date"`
-	ParentIssueID      *string  `json:"parent_issue_id"`
-	ProjectID          *string  `json:"project_id"`
+	Title         *string  `json:"title"`
+	Description   *string  `json:"description"`
+	Status        *string  `json:"status"`
+	Priority      *string  `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	Position      *float64 `json:"position"`
+	DueDate       *string  `json:"due_date"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {

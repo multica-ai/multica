@@ -89,6 +89,18 @@ SELECT * FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC;
 
+-- name: ListIssueDependencies :many
+SELECT * FROM issue_dependency
+WHERE issue_id = $1
+ORDER BY type ASC, id ASC;
+
+-- name: CreateIssueDependency :one
+INSERT INTO issue_dependency (
+    issue_id, depends_on_issue_id, type
+) VALUES (
+    $1, $2, $3
+) RETURNING *;
+
 -- name: CountCreatedIssueAssignees :many
 -- Count assignees on issues created by a specific user.
 SELECT

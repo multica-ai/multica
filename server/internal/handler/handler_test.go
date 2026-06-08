@@ -252,6 +252,78 @@ func TestIssueCRUD(t *testing.T) {
 	}
 }
 
+func TestIssueDependencies(t *testing.T) {
+	createIssue := func(title string) IssueResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+			"title": title,
+		})
+		testHandler.CreateIssue(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var issue IssueResponse
+		json.NewDecoder(w.Body).Decode(&issue)
+		return issue
+	}
+
+	prereq := createIssue("Dependency prerequisite")
+	blocked := createIssue("Dependency blocked issue")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+blocked.ID+"/dependencies", map[string]any{
+		"depends_on_issue_id": prereq.ID,
+		"type":                "blocked_by",
+	})
+	req = withURLParam(req, "id", blocked.ID)
+	testHandler.CreateIssueDependency(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssueDependency: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueDependencyResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	if created.IssueID != blocked.ID {
+		t.Fatalf("CreateIssueDependency: expected issue_id %s, got %s", blocked.ID, created.IssueID)
+	}
+	if created.DependsOnIssueID != prereq.ID {
+		t.Fatalf("CreateIssueDependency: expected depends_on_issue_id %s, got %s", prereq.ID, created.DependsOnIssueID)
+	}
+	if created.Type != "blocked_by" {
+		t.Fatalf("CreateIssueDependency: expected type blocked_by, got %s", created.Type)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+blocked.ID+"/dependencies", nil)
+	req = withURLParam(req, "id", blocked.ID)
+	testHandler.ListIssueDependencies(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssueDependencies: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var listResp map[string][]IssueDependencyResponse
+	json.NewDecoder(w.Body).Decode(&listResp)
+	deps := listResp["dependencies"]
+	if len(deps) != 1 {
+		t.Fatalf("ListIssueDependencies: expected 1 dependency, got %d", len(deps))
+	}
+	if deps[0].DependsOnIssueID != prereq.ID {
+		t.Fatalf("ListIssueDependencies: expected depends_on_issue_id %s, got %s", prereq.ID, deps[0].DependsOnIssueID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+blocked.ID+"/dependencies", map[string]any{
+		"depends_on_issue_id": prereq.ID,
+		"type":                "blocked_by",
+	})
+	req = withURLParam(req, "id", blocked.ID)
+	testHandler.CreateIssueDependency(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("CreateIssueDependency duplicate: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestCommentCRUD(t *testing.T) {
 	// Create an issue first
 	w := httptest.NewRecorder()
@@ -656,11 +728,11 @@ func TestResolveActor(t *testing.T) {
 	})
 
 	tests := []struct {
-		name            string
-		agentIDHeader   string
-		taskIDHeader    string
-		wantActorType   string
-		wantIsAgent     bool
+		name          string
+		agentIDHeader string
+		taskIDHeader  string
+		wantActorType string
+		wantIsAgent   bool
 	}{
 		{
 			name:          "no headers returns member",

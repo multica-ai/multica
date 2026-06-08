@@ -59,6 +59,27 @@ var issueStatusCmd = &cobra.Command{
 	RunE:  runIssueStatus,
 }
 
+// Dependency subcommands.
+
+var issueDependencyCmd = &cobra.Command{
+	Use:   "dependency",
+	Short: "Work with issue dependencies",
+}
+
+var issueDependencyListCmd = &cobra.Command{
+	Use:   "list <issue-id>",
+	Short: "List dependencies for an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueDependencyList,
+}
+
+var issueDependencyAddCmd = &cobra.Command{
+	Use:   "add <issue-id>",
+	Short: "Add a dependency to an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueDependencyAdd,
+}
+
 // Comment subcommands.
 
 var issueCommentCmd = &cobra.Command{
@@ -114,6 +135,10 @@ var validIssueStatuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
 }
 
+var validIssueDependencyTypes = []string{
+	"blocks", "blocked_by", "related",
+}
+
 func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
@@ -121,10 +146,14 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueDependencyCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
 	issueCmd.AddCommand(issueSearchCmd)
+
+	issueDependencyCmd.AddCommand(issueDependencyListCmd)
+	issueDependencyCmd.AddCommand(issueDependencyAddCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
@@ -170,6 +199,12 @@ func init() {
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member or agent)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue dependency
+	issueDependencyListCmd.Flags().String("output", "table", "Output format: table or json")
+	issueDependencyAddCmd.Flags().String("depends-on", "", "Issue ID this issue depends on (required)")
+	issueDependencyAddCmd.Flags().String("type", "blocked_by", "Dependency type: blocks, blocked_by, or related")
+	issueDependencyAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment list
 	issueCommentListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -554,6 +589,95 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+func runIssueDependencyList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+args[0]+"/dependencies", &result); err != nil {
+		return fmt.Errorf("list dependencies: %w", err)
+	}
+
+	depsRaw, _ := result["dependencies"].([]any)
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, depsRaw)
+	}
+
+	headers := []string{"ID", "ISSUE", "DEPENDS ON", "TYPE"}
+	rows := make([][]string, 0, len(depsRaw))
+	for _, raw := range depsRaw {
+		dep, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, []string{
+			truncateID(strVal(dep, "id")),
+			truncateID(strVal(dep, "issue_id")),
+			truncateID(strVal(dep, "depends_on_issue_id")),
+			strVal(dep, "type"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runIssueDependencyAdd(cmd *cobra.Command, args []string) error {
+	dependsOn, _ := cmd.Flags().GetString("depends-on")
+	if dependsOn == "" {
+		return fmt.Errorf("--depends-on is required")
+	}
+	typ, _ := cmd.Flags().GetString("type")
+	valid := false
+	for _, candidate := range validIssueDependencyTypes {
+		if candidate == typ {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("invalid dependency type %q; valid values: %s", typ, strings.Join(validIssueDependencyTypes, ", "))
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{
+		"depends_on_issue_id": dependsOn,
+		"type":                typ,
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+args[0]+"/dependencies", body, &result); err != nil {
+		return fmt.Errorf("add dependency: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"ID", "ISSUE", "DEPENDS ON", "TYPE"}
+		rows := [][]string{{
+			truncateID(strVal(result, "id")),
+			truncateID(strVal(result, "issue_id")),
+			truncateID(strVal(result, "depends_on_issue_id")),
+			strVal(result, "type"),
+		}}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 // ---------------------------------------------------------------------------

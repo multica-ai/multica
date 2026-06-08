@@ -162,6 +162,32 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 	return i, err
 }
 
+const createIssueDependency = `-- name: CreateIssueDependency :one
+INSERT INTO issue_dependency (
+    issue_id, depends_on_issue_id, type
+) VALUES (
+    $1, $2, $3
+) RETURNING id, issue_id, depends_on_issue_id, type
+`
+
+type CreateIssueDependencyParams struct {
+	IssueID          pgtype.UUID `json:"issue_id"`
+	DependsOnIssueID pgtype.UUID `json:"depends_on_issue_id"`
+	Type             string      `json:"type"`
+}
+
+func (q *Queries) CreateIssueDependency(ctx context.Context, arg CreateIssueDependencyParams) (IssueDependency, error) {
+	row := q.db.QueryRow(ctx, createIssueDependency, arg.IssueID, arg.DependsOnIssueID, arg.Type)
+	var i IssueDependency
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.DependsOnIssueID,
+		&i.Type,
+	)
+	return i, err
+}
+
 const deleteIssue = `-- name: DeleteIssue :exec
 DELETE FROM issue WHERE id = $1
 `
@@ -312,6 +338,37 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 			&i.UpdatedAt,
 			&i.Number,
 			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueDependencies = `-- name: ListIssueDependencies :many
+SELECT id, issue_id, depends_on_issue_id, type FROM issue_dependency
+WHERE issue_id = $1
+ORDER BY type ASC, id ASC
+`
+
+func (q *Queries) ListIssueDependencies(ctx context.Context, issueID pgtype.UUID) ([]IssueDependency, error) {
+	rows, err := q.db.Query(ctx, listIssueDependencies, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueDependency{}
+	for rows.Next() {
+		var i IssueDependency
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.DependsOnIssueID,
+			&i.Type,
 		); err != nil {
 			return nil, err
 		}
