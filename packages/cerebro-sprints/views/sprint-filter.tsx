@@ -1,6 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { projectTreeOptions } from "@multica/core/projects/nesting";
+import type { ProjectTreeItem } from "@multica/core/types";
 import {
   Select,
   SelectContent,
@@ -8,8 +10,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
-
-import { projectSprintsOptions } from "../core/queries";
 
 interface Props {
   workspaceId: string;
@@ -20,15 +20,24 @@ interface Props {
   className?: string;
 }
 
+function flatten(nodes: ProjectTreeItem[]): ProjectTreeItem[] {
+  const out: ProjectTreeItem[] = [];
+  for (const node of nodes) {
+    out.push(node);
+    if (node.children?.length) out.push(...flatten(node.children));
+  }
+  return out;
+}
+
 /**
- * SprintFilter is a board/list filter widget for picking a sprint. The host
- * surface owns the actual filtering — this just selects the id. Renders
- * nothing when the project has no sprints.
+ * SprintFilter is a board/list filter widget for picking a sprint sub-project.
+ * The host surface owns the actual filtering — this just selects the project id.
+ * Renders nothing when the project has no sprint children.
  */
 export function SprintFilter({ workspaceId, projectId, value, onChange, className }: Props) {
-  const sprintsQuery = useQuery(projectSprintsOptions(workspaceId, projectId));
-  const sprints = sprintsQuery.data?.sprints ?? [];
-  if (sprintsQuery.isLoading || sprints.length === 0) return null;
+  const treeQuery = useQuery(projectTreeOptions(workspaceId));
+  const sprints = flatten(treeQuery.data ?? []).filter((project) => project.parent_project_id === projectId);
+  if (treeQuery.isLoading || sprints.length === 0) return null;
 
   return (
     <div className={className}>
@@ -43,7 +52,7 @@ export function SprintFilter({ workspaceId, projectId, value, onChange, classNam
           <SelectItem value="__all__">All sprints</SelectItem>
           {sprints.map((s) => (
             <SelectItem key={s.id} value={s.id}>
-              {s.name}
+              {s.title}
             </SelectItem>
           ))}
         </SelectContent>

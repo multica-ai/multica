@@ -92,7 +92,7 @@ import { RestrictedLock, ProjectAccessTab } from "@multica/cerebro-access/views"
 // CEREBRO-PATCH(project-detail-group-access): JEH-1009 group-access section in Access tab.
 import { ProjectGroupAccessSection } from "@multica/cerebro-groups/views";
 // CEREBRO-PATCH(project-detail-sprints): FIR-2666 project sprint tab + feature flag gate.
-import { SprintsTab } from "@multica/cerebro-sprints/views";
+import { SprintFilter, SprintsTab } from "@multica/cerebro-sprints/views";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useT } from "../../i18n";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
@@ -341,8 +341,15 @@ function ProjectIssuesSurface({
   const labelFilters = useViewStore((s) => s.labelFilters);
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of filter on project pages.
   const onBehalfOfFilters = useViewStore((s) => s.onBehalfOfFilters);
+  // CEREBRO-PATCH(project-detail-sprint-filter): FIR-2666 filter project board/list by sprint sub-project.
+  const sprintsFlag = useFeatureFlag("cerebro_sprints");
+  const [selectedSprintProjectId, setSelectedSprintProjectId] = useState("");
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
+  const effectiveFilter = useMemo<MyIssuesFilter>(
+    () => (selectedSprintProjectId ? { ...filter, project_id: selectedSprintProjectId } : filter),
+    [filter, selectedSprintProjectId],
+  );
 
   const sort = useMemo(
     () => ({
@@ -354,7 +361,7 @@ function ProjectIssuesSurface({
 
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
-      ...filter,
+      ...effectiveFilter,
       statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
       priorities: priorityFilters,
       assignee_filters: assigneeFilters,
@@ -364,7 +371,7 @@ function ProjectIssuesSurface({
       // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 project board on-behalf-of filter.
       on_behalf_of_ids: onBehalfOfFilters,
     }),
-    [assigneeFilters, creatorFilters, filter, includeNoAssignee, labelFilters, onBehalfOfFilters, priorityFilters, statusFilters],
+    [assigneeFilters, creatorFilters, effectiveFilter, includeNoAssignee, labelFilters, onBehalfOfFilters, priorityFilters, statusFilters],
   );
   const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
     wsId,
@@ -375,7 +382,7 @@ function ProjectIssuesSurface({
   );
   const statusIssuesQuery = useQuery({
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 project list on-behalf-of filter.
-    ...myIssueListOptions(wsId, scope, { ...filter, on_behalf_of_ids: onBehalfOfFilters }, undefined, sort),
+    ...myIssueListOptions(wsId, scope, { ...effectiveFilter, on_behalf_of_ids: onBehalfOfFilters }, undefined, sort),
     enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
@@ -383,7 +390,7 @@ function ProjectIssuesSurface({
     enabled: usesAssigneeBoard,
   });
   const ganttIssuesQuery = useQuery({
-    ...projectGanttIssuesOptions(wsId, projectId),
+    ...projectGanttIssuesOptions(wsId, selectedSprintProjectId || projectId),
     enabled: usesGantt,
   });
   const ganttIssues = ganttIssuesQuery.data ?? [];
@@ -396,6 +403,18 @@ function ProjectIssuesSurface({
     // CEREBRO-PATCH(project-detail-status-model): FIR-1550 provide the project's status-model presentation to header + board
     <CerebroStatusModelProvider projectId={projectId}>
       <IssuesHeader scopedIssues={projectIssues} allowGantt />
+      {/* CEREBRO-PATCH(project-detail-sprint-filter): FIR-2666 sprint selector for project board/list. */}
+      {sprintsFlag && (viewMode === "board" || viewMode === "list") && (
+        <div className="border-b px-4 py-2">
+          <SprintFilter
+            workspaceId={wsId}
+            projectId={projectId}
+            value={selectedSprintProjectId}
+            onChange={setSelectedSprintProjectId}
+            className="max-w-64"
+          />
+        </div>
+      )}
       <ProjectIssuesContent
         projectId={projectId}
         projectIssues={projectIssues}
@@ -403,7 +422,7 @@ function ProjectIssuesSurface({
         assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
         scope={scope}
-        filter={filter}
+        filter={effectiveFilter}
         sort={sort}
         ganttIssues={ganttIssues}
       />
