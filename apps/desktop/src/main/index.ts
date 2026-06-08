@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, nativeImage, Notification } from "electron";
 import { homedir } from "os";
 import { join } from "path";
+import { readFileSync } from "fs";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
@@ -340,6 +341,21 @@ if (!gotTheLock) {
       },
     });
 
+    function readCoStrictAuth(): { token?: string } {
+      try {
+        const authPath = join(homedir(), ".costrict", "share", "auth.json");
+        const data = JSON.parse(readFileSync(authPath, "utf-8"));
+        if (typeof data.access_token === "string" && data.access_token) {
+          return { token: data.access_token };
+        }
+      } catch {
+        // Missing or malformed auth.json — treat as unauthenticated.
+      }
+      return {};
+    }
+
+    const coStrictAuth = readCoStrictAuth();
+
     electronApp.setAppUserModelId(
       is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
     );
@@ -388,6 +404,11 @@ if (!gotTheLock) {
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    // Sync IPC: expose cs-cloud auth token to renderer before first render.
+    ipcMain.on("costrict:auth:get", (event) => {
+      event.returnValue = coStrictAuth;
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen
