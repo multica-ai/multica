@@ -258,7 +258,10 @@ func ensureSkillFrontmatter(content, slug, description string) string {
 		// Frontmatter has a name but the YAML is invalid (e.g. unquoted
 		// colon in the description). Strip and re-synthesize so runtimes
 		// like Codex don't hard-reject the whole skill at load time.
-		body := stripFrontmatter(content)
+		// frontmatterParts returns the full content as the body when it
+		// can't find a closing delimiter, so the malformed block is kept
+		// rather than silently dropped.
+		_, body, _ := frontmatterParts(content)
 		return synthesizeFrontmatter(body, slug, description)
 	}
 	// Frontmatter exists but lacks a parseable `name`. Inject one as the
@@ -286,44 +289,53 @@ func synthesizeFrontmatter(body, slug, description string) string {
 
 // isFrontmatterValidYAML reports whether the opening YAML frontmatter block of
 // content parses as a YAML mapping. Returns false when there is no frontmatter,
-// the block has no closing delimiter, or unmarshalling fails.
+// the block has no closing delimiter, is empty, or unmarshalling fails.
 func isFrontmatterValidYAML(content string) bool {
-	fmBody := frontmatterBody(content)
-	if fmBody == "" {
+	fmBody, _, ok := frontmatterParts(content)
+	if !ok || strings.TrimSpace(fmBody) == "" {
 		return false
 	}
 	var m map[string]any
 	return yaml.Unmarshal([]byte(fmBody), &m) == nil
 }
 
-// frontmatterBody returns the YAML body between the opening and closing `---`
-// delimiters. Returns empty string when the delimiters are missing.
-func frontmatterBody(content string) string {
-	fmStart, ok := frontmatterBodyStart(content)
+// frontmatterParts splits content into the raw YAML frontmatter body (the text
+// between the opening `---` line and the closing `---` line) and the document
+// body that follows the closing delimiter. ok is false when content has no
+// opening delimiter or no closing delimiter line; in that case body is the full
+// content so callers can keep a malformed block instead of dropping it.
+//
+// A closing delimiter is a line whose only content is `---`, terminated by
+// `\n`, `\r\n`, or end-of-file. Centralizing the rule here keeps the validity
+// check and the re-synthesis path from disagreeing on where a block ends (e.g.
+// for EOF- or CRLF-terminated frontmatter), which previously left a stale block
+// behind when the two definitions diverged.
+func frontmatterParts(content string) (fmBody, body string, ok bool) {
+	start, ok := frontmatterBodyStart(content)
 	if !ok {
-		return ""
+		return "", content, false
 	}
-	remaining := content[fmStart:]
-	closeIdx := strings.Index(remaining, "\n---")
-	if closeIdx < 0 {
-		return ""
+	rest := content[start:]
+	for searchFrom := 0; ; {
+		nl := strings.Index(rest[searchFrom:], "\n---")
+		if nl < 0 {
+			return "", content, false
+		}
+		closeAt := searchFrom + nl
+		after := rest[closeAt+len("\n---"):]
+		switch {
+		case after == "" || after == "\r":
+			return rest[:closeAt], "", true
+		case strings.HasPrefix(after, "\n"):
+			return rest[:closeAt], after[len("\n"):], true
+		case strings.HasPrefix(after, "\r\n"):
+			return rest[:closeAt], after[len("\r\n"):], true
+		default:
+			// Not a standalone delimiter line (e.g. "----" or "--- text");
+			// keep scanning for the real close.
+			searchFrom = closeAt + len("\n---")
+		}
 	}
-	return remaining[:closeIdx]
-}
-
-// stripFrontmatter removes the leading YAML frontmatter block including its
-// `---` delimiters and the following blank line. When there is no frontmatter
-// the input is returned unchanged.
-func stripFrontmatter(content string) string {
-	fmStart, ok := frontmatterBodyStart(content)
-	if !ok {
-		return content
-	}
-	closeIdx := strings.Index(content[fmStart:], "\n---\n")
-	if closeIdx < 0 {
-		return content
-	}
-	return content[fmStart+closeIdx+4:] // past \n---\n
 }
 
 // frontmatterBodyStart returns the byte offset where the YAML body begins
