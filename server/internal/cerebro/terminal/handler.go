@@ -4,17 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cerebro/runtime"
 )
 
@@ -209,31 +212,32 @@ func (h *Handler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// AttachWS upgrades to a WebSocket bound to one session.
-//
-// Wire format — JSON frames:
-//
-//	{"type":"stdout","data":"<base64>"}     server → client
-//	{"type":"stdin","data":"<base64>"}      client → server
-//	{"type":"exit","code":<int>}            server → client (terminal frame)
-//
-// Base64 avoids interpreting child output as text; the frontend decodes
-// before feeding xterm.js.
+// CEREBRO-PATCH(terminal-ws-auth): browsers cannot send Authorization headers on WebSocket
+// upgrades. AttachWS therefore handles auth internally: cookie → first-message → error.
+// This allows PAT-authenticated users (no multica_auth cookie) to attach via the first
+// JSON message {"type":"auth","payload":{"token":"<token>"}} and receive {"type":"auth_ack"}.
+// Authorization is workspace-membership-based (not session-owner) so workspace members can
+// watch agent-owned sessions (e.g. Jesper watching Sara's terminal).
 func (h *Handler) AttachWS(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		writeJSONError(w, http.StatusUnauthorized, "missing user")
-		return
-	}
 	sessionID := chi.URLParam(r, "sessionId")
 	s := h.Broker.Get(sessionID)
 	if s == nil {
 		writeJSONError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	if s.OwnerUserID != userID {
-		writeJSONError(w, http.StatusForbidden, "not owner")
-		return
+
+	// Try cookie auth before upgrading — avoids a round-trip for OAuth users.
+	var userID string
+	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
+		uid, aerr := h.authenticateWS(r.Context(), cookie.Value)
+		if aerr != nil {
+			writeJSONError(w, http.StatusUnauthorized, "invalid auth cookie")
+			return
+		}
+		userID = uid
+	} else if hdr := r.Header.Get("X-User-ID"); hdr != "" {
+		// Non-browser clients that reach here through the auth middleware.
+		userID = hdr
 	}
 
 	upgrader := websocket.Upgrader{CheckOrigin: h.CheckOrigin}
@@ -243,6 +247,28 @@ func (h *Handler) AttachWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+
+	if userID == "" {
+		// PAT users: no cookie — read first message for token.
+		tokenStr, aerr := h.readWSAuthMessage(conn)
+		if aerr != nil {
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_error","error":"auth failed"}`)) //nolint:errcheck
+			return
+		}
+		uid, aerr := h.authenticateWS(r.Context(), tokenStr)
+		if aerr != nil {
+			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_error","error":"invalid token"}`)) //nolint:errcheck
+			return
+		}
+		userID = uid
+		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_ack"}`)) //nolint:errcheck
+	}
+
+	if !h.userInWorkspace(r.Context(), userID, s.WorkspaceID) {
+		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"auth_error","error":"no workspace access"}`)) //nolint:errcheck
+		return
+	}
+
 	slog.Info("terminal: ws attached", "session", sessionID, "user", userID)
 
 	sub, write, detach := s.Attach()
@@ -250,6 +276,59 @@ func (h *Handler) AttachWS(w http.ResponseWriter, r *http.Request) {
 
 	servePump(r.Context(), conn, s, sub, write)
 	slog.Info("terminal: ws detached", "session", sessionID)
+}
+
+// CEREBRO-PATCH(terminal-ws-auth): authenticateWS validates a bearer token (PAT or JWT).
+func (h *Handler) authenticateWS(ctx context.Context, tokenString string) (string, error) {
+	if strings.HasPrefix(tokenString, "mul_") {
+		hash := auth.HashToken(tokenString)
+		var userID string
+		err := h.DB.QueryRow(ctx,
+			`SELECT user_id::text FROM personal_access_tokens WHERE hash = $1 AND (expires_at IS NULL OR expires_at > now())`,
+			hash).Scan(&userID)
+		if err != nil {
+			return "", fmt.Errorf("invalid PAT")
+		}
+		return userID, nil
+	}
+	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return auth.JWTSecret(), nil
+	})
+	if err != nil || !token.Valid {
+		return "", fmt.Errorf("invalid JWT")
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", fmt.Errorf("invalid claims")
+	}
+	sub, _ := claims["sub"].(string)
+	if sub == "" {
+		return "", fmt.Errorf("missing sub")
+	}
+	return sub, nil
+}
+
+// readWSAuthMessage reads the first WebSocket frame and expects an auth message.
+func (h *Handler) readWSAuthMessage(conn *websocket.Conn) (string, error) {
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
+	defer conn.SetReadDeadline(time.Time{})               //nolint:errcheck
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		return "", fmt.Errorf("read timeout or error")
+	}
+	var msg struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Token string `json:"token"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil || msg.Type != "auth" || msg.Payload.Token == "" {
+		return "", fmt.Errorf("expected auth message")
+	}
+	return msg.Payload.Token, nil
 }
 
 // servePump is the per-connection bidirectional pump.

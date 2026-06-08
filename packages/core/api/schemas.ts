@@ -294,6 +294,52 @@ const RuntimeToolViewSchema = z.object({
 
 export const RuntimeToolsListSchema = z.array(RuntimeToolViewSchema).default([]);
 
+// CEREBRO-PATCH(runtime-agnostic-tool-access-schema): TECH-3071 read-only
+// server-computed effective access preview for runtime tools.
+const RuntimeToolStringStateSchema = z.object({
+  effective: z.string().default("unknown"),
+  reason: z.string().default(""),
+}).loose();
+
+const RuntimeToolEffectiveAccessSchema = z.object({
+  descriptor: z.object({
+    tool_key: z.string().default(""),
+    display_name: z.string().default(""),
+    description: z.string().optional().default(""),
+    source: z.string().default("platform"),
+    risk_class: z.string().default("read"),
+    protocols: z.array(z.string()).default([]),
+    recommended_default_policy: z.string().default("allow"),
+  }).loose(),
+  inventory: z.object({
+    runtime_id: z.string().default(""),
+    tool_name: z.string().default(""),
+    source: z.string().default("cloud"),
+    mcp_server_name: z.string().optional().default(""),
+    enabled: z.boolean().default(false),
+  }).loose(),
+  policy: RuntimeToolStringStateSchema.extend({
+    decided_by: z.string().optional().default(""),
+    capped_by: z.string().optional().default(""),
+  }).loose(),
+  runtime_grant: RuntimeToolStringStateSchema,
+  protocol: RuntimeToolStringStateSchema.extend({
+    required_protocols: z.array(z.string()).default([]),
+    runtime_protocols: z.array(z.string()).default([]),
+    selected_protocol: z.string().optional().default(""),
+    supports_ask: z.boolean().default(false),
+    unsupported_message: z.string().optional().default(""),
+  }).loose(),
+  credential: RuntimeToolStringStateSchema,
+  exposure_effective: z.object({
+    effective: z.boolean().default(false),
+    reason: z.string().default(""),
+  }).loose(),
+  layers: z.record(z.string(), z.string()).optional().default({}),
+}).loose();
+
+export const RuntimeToolEffectiveAccessListSchema = z.array(RuntimeToolEffectiveAccessSchema).default([]);
+
 const RuntimeToolGroupGrantSchema = z.object({
   runtime_id: z.string().default(""),
   tool_name: z.string().min(1),

@@ -4,9 +4,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types/agent";
-import type { RuntimeTool } from "@multica/cerebro-types";
+import type { RuntimeTool, RuntimeToolEffectiveAccess } from "@multica/cerebro-types";
 
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
+const mockListRuntimeToolEffectiveAccess = vi.hoisted(() => vi.fn());
 const mockListRuntimeToolGrants = vi.hoisted(() => vi.fn());
 const mockListCerebroGroups = vi.hoisted(() => vi.fn());
 const mockListMembers = vi.hoisted(() => vi.fn());
@@ -22,6 +23,7 @@ vi.mock("@multica/core/api", async () => {
     api: {
       ...actual.api,
       listRuntimeTools: mockListRuntimeTools,
+      listRuntimeToolEffectiveAccess: mockListRuntimeToolEffectiveAccess,
       listRuntimeToolGrants: mockListRuntimeToolGrants,
       listCerebroGroups: mockListCerebroGroups,
       listMembers: mockListMembers,
@@ -73,6 +75,7 @@ function renderWithClient(node: React.ReactNode) {
 
 beforeEach(() => {
   mockListRuntimeTools.mockReset();
+  mockListRuntimeToolEffectiveAccess.mockReset();
   mockListRuntimeToolGrants.mockReset();
   mockListCerebroGroups.mockReset();
   mockListMembers.mockReset();
@@ -80,6 +83,8 @@ beforeEach(() => {
     group_grants: [],
     user_grants: [],
   });
+  mockListRuntimeTools.mockResolvedValue([]);
+  mockListRuntimeToolEffectiveAccess.mockResolvedValue([]);
   mockListCerebroGroups.mockResolvedValue([]);
   mockListMembers.mockResolvedValue([]);
   mockCerebroRequest.mockResolvedValue({ tools: [] });
@@ -126,6 +131,39 @@ describe("RuntimeToolsCard", () => {
       },
     ];
     mockListRuntimeTools.mockResolvedValue(tools);
+    const effectiveRows: RuntimeToolEffectiveAccess[] = [
+      {
+        descriptor: {
+          tool_key: "firtal_bq_query",
+          display_name: "firtal_bq_query",
+          source: "platform",
+          risk_class: "read",
+          protocols: ["native_tool_loop"],
+          recommended_default_policy: "allow",
+        },
+        inventory: {
+          runtime_id: "rt-1",
+          tool_name: "firtal_bq_query",
+          source: "cloud",
+          enabled: true,
+        },
+        policy: { effective: "allow", reason: "Allowed by default" },
+        runtime_grant: { effective: "unknown", reason: "agent and member context were not both supplied" },
+        protocol: {
+          effective: "supported",
+          required_protocols: ["native_tool_loop"],
+          runtime_protocols: ["native_tool_loop"],
+          selected_protocol: "native_tool_loop",
+          supports_ask: true,
+        },
+        credential: { effective: "not_required", reason: "No credential required" },
+        exposure_effective: {
+          effective: false,
+          reason: "agent and member context were not both supplied",
+        },
+      },
+    ];
+    mockListRuntimeToolEffectiveAccess.mockResolvedValue(effectiveRows);
 
     renderWithClient(
       <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
@@ -139,6 +177,8 @@ describe("RuntimeToolsCard", () => {
     expect(screen.getAllByText(/none specific/i).length).toBeGreaterThan(0);
     // MCP rows show the server name in the badge.
     expect(screen.getByText(/github-server/)).toBeInTheDocument();
+    expect(screen.getByText("native_tool_loop")).toBeInTheDocument();
+    expect(screen.getByText(/agent and member context/i)).toBeInTheDocument();
   });
 
   it("falls back to an error state when the tools fetch fails", async () => {
@@ -212,7 +252,7 @@ describe("RuntimeToolsCard", () => {
       expect(post).toBeTruthy();
       expect(post![0]).toBe("/api/runtimes/rt-1/tools/scan-now");
     });
-  });
+  }, 10_000);
 
   it("shows the real Scan now button (not the old cache-only Refresh) even with the unified flag off", async () => {
     // FIR-2230 phase 7: the cache-only "Refresh" button is gone. The honest

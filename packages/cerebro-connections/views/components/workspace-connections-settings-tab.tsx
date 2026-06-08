@@ -23,7 +23,7 @@ export function useCerebroConnectionsSettingsTabs(): ExtraSettingsTab[] {
   return [
     {
       value: "connections",
-      label: "Forbindelser",
+      label: "Connections",
       icon: Cable,
       content: <ConnectionsSettingsTab />,
     },

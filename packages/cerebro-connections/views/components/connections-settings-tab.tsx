@@ -46,7 +46,7 @@ export function ConnectionsSettingsTab() {
   if (!wsId || isMemberLoading) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-        Indlæser…
+        Loading…
       </div>
     );
   }
@@ -56,9 +56,9 @@ export function ConnectionsSettingsTab() {
     return (
       <div className="flex flex-col items-center justify-center gap-2 p-6 text-center">
         <ShieldOff className="size-8 text-muted-foreground" />
-        <h2 className="text-base font-medium">Adgang nægtet</h2>
+        <h2 className="text-base font-medium">Access denied</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Kun workspace-owners og -admins kan administrere forbindelser.
+          Only workspace owners and admins can manage connections.
         </p>
       </div>
     );
@@ -78,9 +78,9 @@ export function ConnectionsSettingsTab() {
     if (!deleting) return;
     try {
       await deleteConn.mutateAsync(deleting.id);
-      toast.success(`"${deleting.display_name}" er slettet.`);
+      toast.success(`"${deleting.display_name}" deleted.`);
     } catch {
-      toast.error("Sletning fejlede. Prøv igen.");
+      toast.error("Delete failed. Please try again.");
     } finally {
       setDeleting(undefined);
     }
@@ -90,36 +90,36 @@ export function ConnectionsSettingsTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold">Forbindelser</h2>
+          <h2 className="text-base font-semibold">Connections</h2>
           <p className="text-sm text-muted-foreground">
-            API- og MCP-endpoints (eksternt eller internt Sliplane) der er
-            tilgængelige for alle runtimes i dette workspace.
+            API and MCP endpoints (external or internal Sliplane paths) available
+            to all runtimes in this workspace.
           </p>
         </div>
         <Button size="sm" onClick={openCreate}>
           <Plus className="mr-1 size-4" />
-          Ny forbindelse
+          New connection
         </Button>
       </div>
 
       {isLoading ? (
-        <div className="text-sm text-muted-foreground">Indlæser forbindelser…</div>
+        <div className="text-sm text-muted-foreground">Loading connections…</div>
       ) : connections.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-md border border-dashed p-8 text-center">
           <Cable className="size-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            Ingen forbindelser endnu. Klik <strong>Ny forbindelse</strong> for at
-            registrere en MCP- eller API-endpoint.
+            No connections yet. Click <strong>New connection</strong> to register
+            an MCP or API endpoint.
           </p>
         </div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Navn</TableHead>
+              <TableHead>Name</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>URL</TableHead>
-              <TableHead>Aktiv</TableHead>
+              <TableHead>Active</TableHead>
               <TableHead className="w-20" />
             </TableRow>
           </TableHeader>
@@ -136,7 +136,7 @@ export function ConnectionsSettingsTab() {
                   </Badge>
                   {conn.internal && (
                     <Badge variant="secondary" className="ml-1 text-xs">
-                      intern
+                      internal
                     </Badge>
                   )}
                 </TableCell>
@@ -149,7 +149,7 @@ export function ConnectionsSettingsTab() {
                     onCheckedChange={(enabled) =>
                       void toggleConn.mutateAsync({ conn, enabled })
                     }
-                    aria-label={conn.enabled ? "Deaktiver" : "Aktiver"}
+                    aria-label={conn.enabled ? "Disable" : "Enable"}
                   />
                 </TableCell>
                 <TableCell>
@@ -158,7 +158,7 @@ export function ConnectionsSettingsTab() {
                       variant="ghost"
                       size="icon"
                       onClick={() => openEdit(conn)}
-                      aria-label="Rediger"
+                      aria-label="Edit"
                     >
                       <Pencil className="size-4" />
                     </Button>
@@ -166,7 +166,7 @@ export function ConnectionsSettingsTab() {
                       variant="ghost"
                       size="icon"
                       onClick={() => setDeleting(conn)}
-                      aria-label="Slet"
+                      aria-label="Delete"
                     >
                       <Trash2 className="size-4 text-destructive" />
                     </Button>
@@ -188,19 +188,19 @@ export function ConnectionsSettingsTab() {
       <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(undefined)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Slet forbindelsen?</AlertDialogTitle>
+            <AlertDialogTitle>Delete connection?</AlertDialogTitle>
             <AlertDialogDescription>
-              Dette fjerner <strong>{deleting?.display_name}</strong> permanent.
-              Runtimes mister adgang med det samme. Handlingen kan ikke fortrydes.
+              This permanently removes <strong>{deleting?.display_name}</strong>.
+              Runtimes lose access immediately. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Annuller</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => void confirmDelete()}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Slet
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

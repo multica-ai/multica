@@ -112,11 +112,23 @@ export function useTerminalSession({
       ws = socket;
       wsRef.current = socket;
 
+      // CEREBRO-PATCH(terminal-ws-auth): browsers cannot send Authorization
+      // headers on WebSocket upgrades. If we have a bearer token (PAT users),
+      // send it as the first message and wait for auth_ack before marking
+      // "connected". Cookie-auth users have no stored token — the server reads
+      // the multica_auth cookie directly and goes straight to the stream pump.
+      const token = api.getToken();
+
       socket.onopen = () => {
         if (cancelled) return;
         setExitCode(null);
         setError(null);
-        setStatus("connected");
+        if (token) {
+          socket.send(JSON.stringify({ type: "auth", payload: { token } }));
+          // status transitions to "connected" on auth_ack — see onmessage below.
+        } else {
+          setStatus("connected");
+        }
       };
       socket.onerror = () => {
         if (cancelled) return;
@@ -141,6 +153,18 @@ export function useTerminalSession({
         try {
           frame = JSON.parse(ev.data) as TerminalFrame;
         } catch {
+          return;
+        }
+        if (frame.type === "auth_ack") {
+          if (!cancelled) setStatus("connected");
+          return;
+        }
+        if (frame.type === "auth_error") {
+          if (!cancelled) {
+            setError(frame.error ?? "auth failed");
+            setStatus("error");
+          }
+          socket.close();
           return;
         }
         if (frame.type === "stdout" && typeof frame.data === "string") {

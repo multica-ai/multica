@@ -1,6 +1,7 @@
 export {
   ToolPolicyTable,
   type ToolPolicyTableProps,
+  type ToolPolicyTabFilter,
   type ToolPolicyView,
 } from "./tool-policy-table";
 export {

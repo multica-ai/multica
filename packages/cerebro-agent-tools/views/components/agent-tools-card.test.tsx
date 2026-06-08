@@ -7,9 +7,11 @@ import type { Agent } from "@multica/core/types";
 import type {
   AgentToolOverride,
   RuntimeTool,
+  RuntimeToolEffectiveAccess,
 } from "@multica/cerebro-types";
 
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
+const mockListRuntimeToolEffectiveAccess = vi.hoisted(() => vi.fn());
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 const mockUseFeatureFlag = vi.hoisted(() => vi.fn(() => false));
 
@@ -26,6 +28,7 @@ vi.mock("@multica/core/api", async () => {
     api: {
       ...actual.api,
       listRuntimeTools: mockListRuntimeTools,
+      listRuntimeToolEffectiveAccess: mockListRuntimeToolEffectiveAccess,
       cerebroRequest: mockCerebroRequest,
     },
   };
@@ -108,11 +111,55 @@ const overrides: AgentToolOverride[] = [
   },
 ];
 
+function effectiveAccess(
+  tool: RuntimeTool,
+  effective: boolean,
+  reason = effective ? "allowed by policy, runtime grants, protocol, and credential checks" : "blocked by policy",
+): RuntimeToolEffectiveAccess {
+  return {
+    descriptor: {
+      tool_key: tool.name,
+      display_name: tool.name,
+      description: tool.description,
+      source: tool.source === "mcp" ? "mcp" : "platform",
+      risk_class: "read",
+      protocols: tool.source === "mcp" ? ["mcp_stdio"] : ["native_tool_loop"],
+      recommended_default_policy: "allow",
+    },
+    inventory: {
+      runtime_id: tool.runtime_id,
+      tool_name: tool.name,
+      source: tool.source,
+      mcp_server_name: tool.mcp_server_name,
+      enabled: tool.enabled,
+    },
+    policy: { effective: "allow", reason: "Allowed by default" },
+    runtime_grant: { effective: effective ? "allow" : "deny", reason },
+    protocol: {
+      effective: "supported",
+      required_protocols: [],
+      runtime_protocols: ["native_tool_loop", "mcp_stdio"],
+      selected_protocol: tool.source === "mcp" ? "mcp_stdio" : "native_tool_loop",
+      supports_ask: false,
+    },
+    credential: { effective: "not_required", reason: "No credential required" },
+    exposure_effective: { effective, reason },
+    layers: {},
+  };
+}
+
+const effectiveRows = [
+  effectiveAccess(runtimeTools[0]!, true),
+  effectiveAccess(runtimeTools[1]!, false, "Agent override lukker tool'et"),
+  effectiveAccess(runtimeTools[2]!, true, "Agent override åbner tool'et"),
+];
+
 function renderWithClient(
   node: React.ReactNode,
   data: {
     tools?: RuntimeTool[];
     overrides?: AgentToolOverride[];
+    effective?: RuntimeToolEffectiveAccess[];
   } = {},
 ) {
   const qc = new QueryClient({
@@ -129,6 +176,10 @@ function renderWithClient(
       data.overrides,
     );
   }
+  qc.setQueryData(
+    ["cerebro", "runtime-tool-effective-access", "rt-1", "agent", "agent-1"],
+    data.effective ?? effectiveRows,
+  );
   return render(
     <QueryClientProvider client={qc}>{node}</QueryClientProvider>,
   );
@@ -136,6 +187,8 @@ function renderWithClient(
 
 beforeEach(() => {
   mockListRuntimeTools.mockReset();
+  mockListRuntimeToolEffectiveAccess.mockReset();
+  mockListRuntimeToolEffectiveAccess.mockResolvedValue(effectiveRows);
   mockCerebroRequest.mockReset();
   mockCerebroRequest.mockResolvedValue(overrides);
   mockUseFeatureFlag.mockReturnValue(false);
@@ -202,6 +255,28 @@ describe("AgentToolsCard", () => {
     expect(screen.getByText("slack_post_message")).toBeInTheDocument();
     // The forced-off row is hidden.
     expect(screen.queryByText("github_create_issue")).not.toBeInTheDocument();
+  });
+
+  it("lets server-computed deny win over a force-on agent override", () => {
+    renderWithClient(
+      <AgentToolsCard agent={agent} canEdit={true} runtimeName="sara-mac-mini" />,
+      {
+        tools: runtimeTools,
+        overrides,
+        effective: [
+          effectiveRows[0]!,
+          effectiveRows[1]!,
+          effectiveAccess(runtimeTools[2]!, false, "Denied by workspace"),
+        ],
+      },
+    );
+
+    const slackRow = screen
+      .getByText("slack_post_message")
+      .closest("tr") as HTMLTableRowElement;
+    expect(slackRow).toHaveTextContent("Tving på");
+    expect(slackRow).toHaveTextContent("Inaktiv");
+    expect(slackRow).toHaveTextContent("Denied by workspace");
   });
 
   it("hides row actions when canEdit is false", () => {

@@ -27,6 +27,7 @@ import { api } from "@multica/core/api";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import type {
   RuntimeTool,
+  RuntimeToolEffectiveAccess,
   RuntimeToolGrants,
 } from "@multica/cerebro-types";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -61,6 +62,9 @@ const runtimeToolsKey = (runtimeId: string) =>
 const runtimeToolGrantsKey = (runtimeId: string) =>
   ["cerebro", "runtime-tool-grants", runtimeId] as const;
 
+const runtimeToolEffectiveAccessKey = (runtimeId: string) =>
+  ["cerebro", "runtime-tool-effective-access", runtimeId] as const;
+
 const workspaceMembersKey = (wsId: string) =>
   ["workspace", "members", wsId] as const;
 
@@ -87,6 +91,11 @@ export function RuntimeToolsCard({
   const grantsQuery = useQuery({
     queryKey: runtimeToolGrantsKey(runtime.id),
     queryFn: () => api.listRuntimeToolGrants(runtime.id),
+  });
+
+  const effectiveAccessQuery = useQuery({
+    queryKey: runtimeToolEffectiveAccessKey(runtime.id),
+    queryFn: () => api.listRuntimeToolEffectiveAccess(runtime.id),
   });
 
   const groupsQuery = useQuery(groupListOptions(wsId));
@@ -154,11 +163,20 @@ export function RuntimeToolsCard({
     return map;
   }, [grants]);
 
+  const effectiveAccessByTool = useMemo(() => {
+    const map = new Map<string, RuntimeToolEffectiveAccess>();
+    for (const row of effectiveAccessQuery.data ?? []) {
+      map.set(row.inventory.tool_name || row.descriptor.tool_key, row);
+    }
+    return map;
+  }, [effectiveAccessQuery.data]);
+
   const toggleMutation = useMutation({
     mutationFn: ({ toolName, enabled }: { toolName: string; enabled: boolean }) =>
       api.setRuntimeToolEnabled(runtime.id, toolName, enabled),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: runtimeToolsKey(runtime.id) });
+      qc.invalidateQueries({ queryKey: runtimeToolEffectiveAccessKey(runtime.id) });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Couldn't change tool status");
@@ -180,6 +198,7 @@ export function RuntimeToolsCard({
         : api.removeRuntimeToolGroupGrant(runtime.id, toolName, groupId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: runtimeToolGrantsKey(runtime.id) });
+      qc.invalidateQueries({ queryKey: runtimeToolEffectiveAccessKey(runtime.id) });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Couldn't update group access");
@@ -201,6 +220,7 @@ export function RuntimeToolsCard({
         : api.removeRuntimeToolUserGrant(runtime.id, toolName, userId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: runtimeToolGrantsKey(runtime.id) });
+      qc.invalidateQueries({ queryKey: runtimeToolEffectiveAccessKey(runtime.id) });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Couldn't update user access");
@@ -217,6 +237,7 @@ export function RuntimeToolsCard({
     await Promise.all([
       qc.invalidateQueries({ queryKey: runtimeToolsKey(runtime.id) }),
       qc.invalidateQueries({ queryKey: runtimeToolGrantsKey(runtime.id) }),
+      qc.invalidateQueries({ queryKey: runtimeToolEffectiveAccessKey(runtime.id) }),
       qc.invalidateQueries({ queryKey: toolPolicyKeys.all(wsId) }),
     ]);
   }
@@ -322,6 +343,7 @@ export function RuntimeToolsCard({
             toolsQuery={toolsQuery}
             filteredTools={filteredTools}
             grantsByTool={grantsByTool}
+            effectiveAccessByTool={effectiveAccessByTool}
             groups={groups}
             members={members}
             canEdit={canEdit}
@@ -408,6 +430,7 @@ interface RuntimeToolsBodyProps {
       users: RuntimeToolGrants["user_grants"];
     }
   >;
+  effectiveAccessByTool: Map<string, RuntimeToolEffectiveAccess>;
   groups: CerebroGroup[];
   members: MemberWithUser[];
   canEdit: boolean;
@@ -480,6 +503,7 @@ function RuntimeToolsBody(props: RuntimeToolsBodyProps) {
             <th className="px-4 py-2.5 text-left font-medium">Tool</th>
             <th className="px-4 py-2.5 text-left font-medium">Source</th>
             <th className="px-4 py-2.5 text-left font-medium">Active</th>
+            <th className="px-4 py-2.5 text-left font-medium">Server preview</th>
             <th className="px-4 py-2.5 text-left font-medium">Groups</th>
             <th className="px-4 py-2.5 text-left font-medium">Users</th>
           </tr>
@@ -501,6 +525,7 @@ interface RuntimeToolRowProps extends RuntimeToolsBodyProps {
 function RuntimeToolRow({
   tool,
   grantsByTool,
+  effectiveAccessByTool,
   groups,
   members,
   canEdit,
@@ -510,6 +535,7 @@ function RuntimeToolRow({
   togglePending,
 }: RuntimeToolRowProps) {
   const grants = grantsByTool.get(tool.name) ?? { groups: [], users: [] };
+  const access = effectiveAccessByTool.get(tool.name);
   const selectedGroupIds = new Set(grants.groups.map((g) => g.group_id));
   const selectedUserIds = new Set(grants.users.map((u) => u.user_id));
 
@@ -533,6 +559,9 @@ function RuntimeToolRow({
           disabled={!canEdit || togglePending}
           aria-label={`Turn ${tool.name} ${tool.enabled ? "off" : "on"}`}
         />
+      </td>
+      <td className="px-4 py-3 align-top">
+        <EffectiveAccessPreview access={access} />
       </td>
       <td className="px-4 py-3 align-top">
         <GroupPicker
@@ -581,6 +610,49 @@ function SourceBadge({
     default:
       return <Badge variant="outline">{source || "unknown"}</Badge>;
   }
+}
+
+function EffectiveAccessPreview({
+  access,
+}: {
+  access?: RuntimeToolEffectiveAccess;
+}) {
+  if (!access) {
+    return <span className="text-xs text-muted-foreground">Ikke beregnet</span>;
+  }
+  const effective = access.exposure_effective.effective;
+  const reason = access.exposure_effective.reason;
+  return (
+    <div className="max-w-[280px] space-y-1">
+      <div className="flex flex-wrap items-center gap-1">
+        <Badge
+          variant={effective ? "secondary" : "outline"}
+          className={cn(
+            "text-[11px]",
+            effective
+              ? "text-emerald-700 dark:text-emerald-300"
+              : "text-muted-foreground",
+          )}
+        >
+          {effective ? "Eksponeret" : "Lukket"}
+        </Badge>
+        {access.protocol.selected_protocol ? (
+          <Badge variant="outline" className="font-mono text-[10px]">
+            {access.protocol.selected_protocol}
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="font-mono text-[10px]">
+            {access.protocol.effective}
+          </Badge>
+        )}
+      </div>
+      {reason && (
+        <div className="text-[11px] leading-snug text-muted-foreground">
+          {reason}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function GroupPicker({

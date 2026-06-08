@@ -841,6 +841,7 @@ var excluded = map[string]string{
 	"POST /api/inbox/archive-all":                  "self_only — caller's own inbox",
 	"POST /api/inbox/archive-all-read":             "self_only — caller's own inbox",
 	"POST /api/inbox/archive-completed":            "self_only — caller's own inbox",
+	"POST /api/inbox/add-issue":                    "self_only — caller manually adding an issue to their own inbox",
 	"POST /api/inbox/mark-all-read":                "self_only — caller's own inbox",
 	"POST /api/inbox/notifications/archive-all":    "self_only — caller's own inbox",
 	"POST /api/inbox/notifications/mark-all-read":  "self_only — caller's own inbox",

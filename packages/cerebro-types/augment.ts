@@ -158,6 +158,52 @@ export interface RuntimeTool {
   last_scanned_at: string | null;
 }
 
+export interface RuntimeToolEffectiveAccess {
+  descriptor: {
+    tool_key: string;
+    display_name: string;
+    description?: string;
+    source: string;
+    risk_class: string;
+    protocols: string[];
+    recommended_default_policy: string;
+  };
+  inventory: {
+    runtime_id: string;
+    tool_name: string;
+    source: string;
+    mcp_server_name?: string;
+    enabled: boolean;
+  };
+  policy: {
+    effective: string;
+    reason: string;
+    decided_by?: string;
+    capped_by?: string;
+  };
+  runtime_grant: {
+    effective: string;
+    reason: string;
+  };
+  protocol: {
+    effective: string;
+    required_protocols: string[];
+    runtime_protocols: string[];
+    selected_protocol?: string;
+    supports_ask: boolean;
+    unsupported_message?: string;
+  };
+  credential: {
+    effective: string;
+    reason: string;
+  };
+  exposure_effective: {
+    effective: boolean;
+    reason: string;
+  };
+  layers?: Record<string, string>;
+}
+
 export interface RuntimeToolGroupGrant {
   runtime_id: string;
   tool_name: string;

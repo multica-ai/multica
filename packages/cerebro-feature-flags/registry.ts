@@ -94,7 +94,17 @@ export type CerebroFlagKey =
   // TECH-3077: skill metadata — category/domain/tag filtering, data-domain links, impact analysis.
   | "cerebro_skill_metadata"
   // TECH-3077: skill self-learning — observation recording, pattern extraction, auto change-requests.
-  | "cerebro_skill_learning";
+  | "cerebro_skill_learning"
+  // TECH-3099: sub-issue comment guard — three checks extending cerebro_comment_target_guard.
+  // All default OFF; each is independently toggled so workspaces can adopt them one by one.
+  | "cerebro_sub_issue_no_owner_mention"
+  | "cerebro_sub_issue_require_agent_tag"
+  | "cerebro_sub_issue_no_split_session"
+  // FIR-2563: per-workspace toggle for the approval enforcement gate. When off,
+  // the server-side gate lets every tool call through for this workspace without
+  // an inbox ask or a deny — even when CEREBRO_APPROVAL_GATE_ENABLED is true on
+  // the server. Defaults ON so existing workspaces keep their current behaviour.
+  | "cerebro_approval_gate";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -229,6 +239,15 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
   // infrastructure is in place.
   cerebro_skill_learning: false,
+  // TECH-3099: sub-issue comment guard checks — all OFF by default.
+  cerebro_sub_issue_no_owner_mention: false,
+  cerebro_sub_issue_require_agent_tag: false,
+  cerebro_sub_issue_no_split_session: false,
+  // FIR-2563: ON by default. When the server gate is active
+  // (CEREBRO_APPROVAL_GATE_ENABLED=true), this per-workspace flag lets an admin
+  // disable enforcement for their workspace without a server restart. Off = all
+  // tool calls are allowed through for this workspace regardless of policy rows.
+  cerebro_approval_gate: true,
 };
 
 /**
@@ -665,6 +684,27 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Enable the per-runtime presentation_mode toggle and the in-app xterm.js terminal panel. Runtimes flipped to 'interactive' stream a live shell to the Multica UI so the user can watch and take over an agent session.",
   },
   {
+    key: "cerebro_sub_issue_no_owner_mention",
+    label: "Block owner @mention on sub-issues",
+    group: "issues",
+    description:
+      "Reject an agent comment on a sub-issue that @mentions the workspace owner directly. Agents must post status on the parent issue instead of mentioning the owner from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+  },
+  {
+    key: "cerebro_sub_issue_require_agent_tag",
+    label: "Require parent-agent tag on sub-issues",
+    group: "issues",
+    description:
+      "Reject an agent comment on a sub-issue that mentions no agent at all. Forces the agent to tag the parent agent (mention://agent/…) so it stays in the loop. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+  },
+  {
+    key: "cerebro_sub_issue_no_split_session",
+    label: "Block split-session across parent and sub-issue",
+    group: "issues",
+    description:
+      "Reject an agent comment on a sub-issue when the same task session (X-Task-ID) has already posted on the parent issue, preventing a single conversation from being split across both. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+  },
+  {
     key: "cerebro_display_currency",
     label: "Display currency",
     group: "workspace",
@@ -678,6 +718,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Enable the Connections settings tab where admins can register API and MCP endpoints (external or internal Sliplane paths) available to all runtimes, with per-layer tool-policy permissions. TECH-3108.",
+  },
+  // FIR-2563: per-workspace approval gate toggle.
+  {
+    key: "cerebro_approval_gate",
+    label: "Tool approval enforcement",
+    group: "permissions",
+    description:
+      "When on, the server enforces the per-tool Allow / Ask / Block policy for every agent tool call — tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off lets all tool calls through for this workspace without an inbox ask, even when the server gate is active. Requires the server's CEREBRO_APPROVAL_GATE_ENABLED flag to have any effect. FIR-2563.",
   },
 ];
 

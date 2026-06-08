@@ -53,6 +53,27 @@ type RuntimeToolsAdminService interface {
 	DeleteAgentOverride(ctx context.Context, agentID pgtype.UUID, toolName string) error
 }
 
+// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 resolves the read-only
+// effective access preview for a runtime's tool inventory. It does not mutate
+// grants or gate execution.
+type RuntimeToolAccessService interface {
+	ListEffectiveTools(ctx context.Context, q RuntimeToolAccessQuery) ([]RuntimeToolEffectiveAccessView, error)
+}
+
+type RuntimeToolAccessQuery struct {
+	WorkspaceID         pgtype.UUID
+	RuntimeID           pgtype.UUID
+	RuntimeMode         string
+	RuntimeProvider     string
+	RuntimeCapabilities []byte
+	AgentID             pgtype.UUID
+	UserID              pgtype.UUID
+}
+
+func (h *Handler) SetRuntimeToolAccess(svc RuntimeToolAccessService) {
+	h.runtimeToolAccess = svc
+}
+
 // RuntimeToolView is the wire shape returned by the admin tool endpoints.
 // Mirrors runtimetools.Tool but only exposes fields the UI needs and uses
 // plain types (no pgtype.X) for stable JSON.
@@ -93,6 +114,66 @@ type AgentToolOverrideView struct {
 	ToolName  string `json:"tool_name"`
 	Enabled   bool   `json:"enabled"`
 	UpdatedAt string `json:"updated_at"`
+}
+
+type RuntimeToolEffectiveAccessView struct {
+	Descriptor        RuntimeToolDescriptorView        `json:"descriptor"`
+	Inventory         RuntimeToolInventoryStateView    `json:"inventory"`
+	Policy            RuntimeToolPolicyStateView       `json:"policy"`
+	RuntimeGrant      RuntimeToolGrantStateView        `json:"runtime_grant"`
+	Protocol          RuntimeToolProtocolStateView     `json:"protocol"`
+	Credential        RuntimeToolCredentialStateView   `json:"credential"`
+	ExposureEffective RuntimeToolExposureEffectiveView `json:"exposure_effective"`
+	Layers            map[string]string                `json:"layers,omitempty"`
+}
+
+type RuntimeToolDescriptorView struct {
+	ToolKey                  string   `json:"tool_key"`
+	DisplayName              string   `json:"display_name"`
+	Description              string   `json:"description,omitempty"`
+	Source                   string   `json:"source"`
+	RiskClass                string   `json:"risk_class"`
+	Protocols                []string `json:"protocols"`
+	RecommendedDefaultPolicy string   `json:"recommended_default_policy"`
+}
+
+type RuntimeToolInventoryStateView struct {
+	RuntimeID     string `json:"runtime_id"`
+	ToolName      string `json:"tool_name"`
+	Source        string `json:"source"`
+	MCPServerName string `json:"mcp_server_name,omitempty"`
+	Enabled       bool   `json:"enabled"`
+}
+
+type RuntimeToolPolicyStateView struct {
+	Effective string `json:"effective"`
+	Reason    string `json:"reason"`
+	DecidedBy string `json:"decided_by,omitempty"`
+	CappedBy  string `json:"capped_by,omitempty"`
+}
+
+type RuntimeToolGrantStateView struct {
+	Effective string `json:"effective"`
+	Reason    string `json:"reason"`
+}
+
+type RuntimeToolProtocolStateView struct {
+	Effective          string   `json:"effective"`
+	RequiredProtocols  []string `json:"required_protocols"`
+	RuntimeProtocols   []string `json:"runtime_protocols"`
+	SelectedProtocol   string   `json:"selected_protocol,omitempty"`
+	SupportsAsk        bool     `json:"supports_ask"`
+	UnsupportedMessage string   `json:"unsupported_message,omitempty"`
+}
+
+type RuntimeToolCredentialStateView struct {
+	Effective string `json:"effective"`
+	Reason    string `json:"reason"`
+}
+
+type RuntimeToolExposureEffectiveView struct {
+	Effective bool   `json:"effective"`
+	Reason    string `json:"reason"`
 }
 
 // SetRuntimeToolsAdmin wires the service into the handler. Called after
@@ -147,6 +228,14 @@ func (h *Handler) requireToolsAdmin(w http.ResponseWriter) bool {
 	return true
 }
 
+func (h *Handler) requireRuntimeToolAccess(w http.ResponseWriter) bool {
+	if h.runtimeToolAccess == nil {
+		writeError(w, http.StatusServiceUnavailable, "runtime tool access preview not enabled")
+		return false
+	}
+	return true
+}
+
 // ListRuntimeTools handles GET /api/runtimes/{runtimeId}/tools.
 func (h *Handler) ListRuntimeTools(w http.ResponseWriter, r *http.Request) {
 	if !h.requireToolsAdmin(w) {
@@ -162,6 +251,62 @@ func (h *Handler) ListRuntimeTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, tools)
+}
+
+// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071
+// ListRuntimeToolEffectiveAccess handles GET /api/runtimes/{runtimeId}/tools/effective.
+// It returns the server-computed read-only access preview for the runtime's tool
+// inventory. Query params:
+//
+//	agent_id optional — include the agent layer and default user_id to the owner.
+//	user_id  optional — include the member/user ceiling and runtime grant result.
+func (h *Handler) ListRuntimeToolEffectiveAccess(w http.ResponseWriter, r *http.Request) {
+	if !h.requireToolsAdmin(w) || !h.requireRuntimeToolAccess(w) {
+		return
+	}
+	rtID, _, ok := h.loadRuntimeForAdmin(w, r)
+	if !ok {
+		return
+	}
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), rtID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	var agentID pgtype.UUID
+	var userID pgtype.UUID
+	if raw := r.URL.Query().Get("agent_id"); raw != "" {
+		agentID = parseUUID(raw)
+		agent, err := h.Queries.GetAgent(r.Context(), agentID)
+		if err != nil || !agent.WorkspaceID.Valid || agent.WorkspaceID != rt.WorkspaceID {
+			writeError(w, http.StatusBadRequest, "agent does not belong to this workspace")
+			return
+		}
+		if agent.RuntimeID.Valid && agent.RuntimeID != rt.ID {
+			writeError(w, http.StatusBadRequest, "agent is not assigned to this runtime")
+			return
+		}
+		userID = agent.OwnerID
+	}
+	if raw := r.URL.Query().Get("user_id"); raw != "" {
+		userID = parseUUID(raw)
+	}
+
+	rows, err := h.runtimeToolAccess.ListEffectiveTools(r.Context(), RuntimeToolAccessQuery{
+		WorkspaceID:         rt.WorkspaceID,
+		RuntimeID:           rt.ID,
+		RuntimeMode:         rt.RuntimeMode,
+		RuntimeProvider:     rt.Provider,
+		RuntimeCapabilities: marshalRuntimeCapabilities(normalizedRuntimeCapabilities(rt.Provider, rt.Capabilities, rt.ToolsConfig)),
+		AgentID:             agentID,
+		UserID:              userID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list effective tool access: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 // SetRuntimeToolEnabled handles PATCH /api/runtimes/{runtimeId}/tools/{toolName}.

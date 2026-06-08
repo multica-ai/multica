@@ -30,6 +30,14 @@ interface Props {
   existing?: Connection;
 }
 
+type AuthType = "none" | "bearer" | "apikey";
+
+function detectAuthType(auth: Connection["auth_config"]): AuthType {
+  if (auth.bearer_token) return "bearer";
+  if (auth.api_key) return "apikey";
+  return "none";
+}
+
 const EMPTY_FORM = {
   name: "",
   display_name: "",
@@ -67,17 +75,29 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
       : { ...EMPTY_FORM },
   );
 
+  const [authType, setAuthType] = useState<AuthType>(() =>
+    existing ? detectAuthType(existing.auth_config) : "none",
+  );
+
   function field(k: keyof typeof form) {
     return (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value }));
   }
 
+  function handleAuthTypeChange(v: AuthType) {
+    setAuthType(v);
+    // Clear the other auth fields when switching type
+    if (v !== "bearer") setForm((f) => ({ ...f, bearer_token: "" }));
+    if (v !== "apikey") setForm((f) => ({ ...f, api_key: "", api_key_header: "" }));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const auth_config = {
-      ...(form.bearer_token ? { bearer_token: form.bearer_token } : {}),
-      ...(form.api_key ? { api_key: form.api_key } : {}),
-      ...(form.api_key_header ? { api_key_header: form.api_key_header } : {}),
+      ...(authType === "bearer" && form.bearer_token ? { bearer_token: form.bearer_token } : {}),
+      ...(authType === "apikey" && form.api_key
+        ? { api_key: form.api_key, ...(form.api_key_header ? { api_key_header: form.api_key_header } : {}) }
+        : {}),
       ...(form.cf_access_id ? { cf_access_id: form.cf_access_id } : {}),
       ...(form.cf_access_secret ? { cf_access_secret: form.cf_access_secret } : {}),
     };
@@ -92,7 +112,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
           enabled: form.enabled,
         };
         await update.mutateAsync(input);
-        toast.success("Forbindelsen er opdateret.");
+        toast.success("Connection updated.");
       } else {
         const input: CreateConnectionInput = {
           name: form.name,
@@ -104,11 +124,11 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
           endpoint_permissions: [],
         };
         await create.mutateAsync(input);
-        toast.success("Forbindelsen er oprettet.");
+        toast.success("Connection created.");
       }
       onOpenChange(false);
     } catch {
-      toast.error("Noget gik galt. Prøv igen.");
+      toast.error("Something went wrong. Please try again.");
     }
   }
 
@@ -118,13 +138,13 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Rediger forbindelse" : "Ny forbindelse"}</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit connection" : "New connection"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           {!isEdit && (
             <div className="space-y-1">
               <Label htmlFor="conn-name">
-                Navn <span className="text-muted-foreground text-xs">(uændreligt efter oprettelse)</span>
+                Name <span className="text-muted-foreground text-xs">(cannot change after creation)</span>
               </Label>
               <Input
                 id="conn-name"
@@ -135,13 +155,13 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
                 required
               />
               <p className="text-xs text-muted-foreground">
-                Kun små bogstaver, tal, bindestreg og underscore. Max 64 tegn.
+                Lowercase letters, numbers, hyphens and underscores only. Max 64 characters.
               </p>
             </div>
           )}
 
           <div className="space-y-1">
-            <Label htmlFor="conn-display-name">Visningsnavn</Label>
+            <Label htmlFor="conn-display-name">Display name</Label>
             <Input
               id="conn-display-name"
               placeholder="Customer Service MCP"
@@ -187,56 +207,76 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
               onCheckedChange={(v) => setForm((f) => ({ ...f, internal: v }))}
             />
             <Label htmlFor="conn-internal">
-              Intern Sliplane-sti{" "}
+              Internal Sliplane path{" "}
               <span className="text-muted-foreground text-xs">
-                (*.internal — ikke tilgængelig udefra)
+                (*.internal — not reachable from outside)
               </span>
             </Label>
           </div>
 
-          <fieldset className="space-y-2 rounded-md border p-3">
-            <legend className="px-1 text-sm font-medium text-muted-foreground">
-              Autentificering (valgfrit)
-            </legend>
-
+          {/* Authentication — pick one type */}
+          <div className="space-y-3 rounded-md border p-3">
             <div className="space-y-1">
-              <Label htmlFor="conn-bearer">Bearer-token</Label>
-              <Input
-                id="conn-bearer"
-                type="password"
-                placeholder={isEdit ? "Uændret (*** = gemt)" : ""}
-                value={form.bearer_token}
-                onChange={field("bearer_token")}
-                autoComplete="off"
-              />
+              <Label htmlFor="conn-auth-type">Authentication</Label>
+              <Select value={authType} onValueChange={(v) => handleAuthTypeChange(v as AuthType)}>
+                <SelectTrigger id="conn-auth-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="bearer">Bearer token</SelectItem>
+                  <SelectItem value="apikey">API key</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            {authType === "bearer" && (
               <div className="space-y-1">
-                <Label htmlFor="conn-apikey">API-nøgle</Label>
+                <Label htmlFor="conn-bearer">Bearer token</Label>
                 <Input
-                  id="conn-apikey"
+                  id="conn-bearer"
                   type="password"
-                  placeholder={isEdit ? "Uændret" : ""}
-                  value={form.api_key}
-                  onChange={field("api_key")}
+                  placeholder={isEdit ? "Unchanged (*** = saved)" : ""}
+                  value={form.bearer_token}
+                  onChange={field("bearer_token")}
                   autoComplete="off"
                 />
               </div>
-              <div className="space-y-1">
-                <Label htmlFor="conn-apikey-header">Header-navn</Label>
-                <Input
-                  id="conn-apikey-header"
-                  placeholder="X-API-Key"
-                  value={form.api_key_header}
-                  onChange={field("api_key_header")}
-                />
-              </div>
-            </div>
+            )}
 
+            {authType === "apikey" && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="conn-apikey">API key</Label>
+                  <Input
+                    id="conn-apikey"
+                    type="password"
+                    placeholder={isEdit ? "Unchanged" : ""}
+                    value={form.api_key}
+                    onChange={field("api_key")}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="conn-apikey-header">Header name</Label>
+                  <Input
+                    id="conn-apikey-header"
+                    placeholder="X-API-Key"
+                    value={form.api_key_header}
+                    onChange={field("api_key_header")}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Cloudflare Access — separate from auth, added when the endpoint is
+              behind Cloudflare Access (network layer, not API auth) */}
+          <div className="space-y-3 rounded-md border p-3">
+            <p className="text-sm font-medium">Cloudflare Access <span className="text-xs font-normal text-muted-foreground">(optional — only for CF-protected endpoints)</span></p>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <Label htmlFor="conn-cf-id">CF Access Client ID</Label>
+                <Label htmlFor="conn-cf-id">Client ID</Label>
                 <Input
                   id="conn-cf-id"
                   value={form.cf_access_id}
@@ -245,7 +285,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="conn-cf-secret">CF Access Client Secret</Label>
+                <Label htmlFor="conn-cf-secret">Client Secret</Label>
                 <Input
                   id="conn-cf-secret"
                   type="password"
@@ -255,7 +295,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
                 />
               </div>
             </div>
-          </fieldset>
+          </div>
 
           {isEdit && (
             <div className="flex items-center gap-2">
@@ -264,16 +304,16 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
                 checked={form.enabled}
                 onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
               />
-              <Label htmlFor="conn-enabled">Aktiv</Label>
+              <Label htmlFor="conn-enabled">Active</Label>
             </div>
           )}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Annuller
+              Cancel
             </Button>
             <Button type="submit" disabled={isPending}>
-              {isPending ? "Gemmer…" : isEdit ? "Gem ændringer" : "Opret forbindelse"}
+              {isPending ? "Saving…" : isEdit ? "Save changes" : "Create connection"}
             </Button>
           </div>
         </form>

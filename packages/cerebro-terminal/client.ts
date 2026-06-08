@@ -14,7 +14,10 @@ export interface TerminalSessionInfo {
 
 export type TerminalFrame =
   | { type: "stdout"; data: string /* base64 */ }
-  | { type: "exit"; code: number; error?: string };
+  | { type: "exit"; code: number; error?: string }
+  // CEREBRO-PATCH(terminal-ws-auth): auth handshake frames sent by server before streaming starts.
+  | { type: "auth_ack" }
+  | { type: "auth_error"; error?: string };
 
 export type TerminalOutgoing = { type: "stdin"; data: string /* base64 */ };
 
