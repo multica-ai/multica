@@ -8,8 +8,10 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -70,13 +72,39 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s returned %d: %s", e.Method, e.Path, e.StatusCode, strings.TrimSpace(e.Body))
 }
 
+// defaultHTTPTimeout is the per-request timeout for the CLI's HTTP client.
+// It can be overridden with the MULTICA_HTTP_TIMEOUT environment variable
+// (see httpTimeout). 30s is chosen over the historical 15s because complex
+// networks (notably in mainland China) routinely need more than 15s to
+// complete the TLS handshake plus request round-trip, which surfaced as an
+// opaque "context deadline exceeded" to users.
+const defaultHTTPTimeout = 30 * time.Second
+
+// httpTimeout returns the HTTP client timeout, honoring MULTICA_HTTP_TIMEOUT.
+// The value may be a Go duration string ("45s", "2m") or a plain integer
+// number of seconds ("45"). Invalid or non-positive values fall back to the
+// default.
+func httpTimeout() time.Duration {
+	v := strings.TrimSpace(os.Getenv("MULTICA_HTTP_TIMEOUT"))
+	if v == "" {
+		return defaultHTTPTimeout
+	}
+	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		return d
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return defaultHTTPTimeout
+}
+
 // NewAPIClient creates a new API client for ctrl commands.
 func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 	return &APIClient{
 		BaseURL:     strings.TrimRight(baseURL, "/"),
 		WorkspaceID: workspaceID,
 		Token:       token,
-		HTTPClient:  &http.Client{Timeout: 15 * time.Second},
+		HTTPClient:  &http.Client{Timeout: httpTimeout()},
 	}
 }
 
@@ -132,6 +160,7 @@ func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
@@ -163,6 +192,7 @@ func (c *APIClient) GetJSONWithHeaders(ctx context.Context, path string, out any
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return nil, err
 	}
@@ -189,6 +219,7 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
@@ -215,6 +246,7 @@ func (c *APIClient) DeleteJSONWithBody(ctx context.Context, path string, body an
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
@@ -242,6 +274,7 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
@@ -277,6 +310,7 @@ func (c *APIClient) PutJSON(ctx context.Context, path string, body any, out any)
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
@@ -307,6 +341,7 @@ func (c *APIClient) PatchJSON(ctx context.Context, path string, body any, out an
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
@@ -365,6 +400,7 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return "", err
 	}
@@ -414,8 +450,8 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	c.setHeaders(req)
 
 	// Use a client that respects the context deadline for slow uploads
-	// (e.g. avatar uploads with 5MB files). The default 15s HTTP client
-	// timeout shadows any longer context deadline.
+	// (e.g. avatar uploads with 5MB files). The default HTTP client timeout
+	// shadows any longer context deadline.
 	httpClient := c.HTTPClient
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
@@ -427,6 +463,7 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	}
 
 	resp, err := httpClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return "", "", err
 	}
@@ -478,6 +515,7 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	}
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return nil, err
 	}
@@ -499,6 +537,7 @@ func (c *APIClient) HealthCheck(ctx context.Context) (string, error) {
 		return "", err
 	}
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return "", err
 	}
