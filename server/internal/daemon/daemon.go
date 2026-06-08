@@ -2066,10 +2066,11 @@ func newTaskSlotSemaphore(maxConcurrentTasks int) chan int {
 // trivially testable; the polling goroutine in watchTaskCancellation is just
 // I/O around it.
 //
-// Two cases trigger cancellation:
+// Two signal families trigger cancellation:
 //
-//  1. status == "cancelled" — the server moved the task to cancelled
-//     (issue reassigned, user cancel, ...).
+//  1. Any non-active server status means the server has already moved the task
+//     out of the execution window, so the local agent should stop instead of
+//     spending more tokens and later failing its terminal callback.
 //  2. err is a 404 with "task not found" — the task row was deleted while
 //     the agent was running. Without this we'd let the local agent keep
 //     emitting tool calls against a dead task for its full timeout window.
@@ -2081,7 +2082,12 @@ func shouldInterruptAgent(status string, err error) bool {
 	if err != nil {
 		return isTaskNotFoundError(err)
 	}
-	return status == "cancelled"
+	switch status {
+	case "", "dispatched", "waiting_local_directory", "running":
+		return false
+	default:
+		return true
+	}
 }
 
 // watchTaskCancellation polls the server for the task's status on the given
