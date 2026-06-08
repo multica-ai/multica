@@ -85,8 +85,12 @@ func (d *Daemon) cerebroAttachTerminal(_ context.Context, task Task) func() {
 	})
 	if err != nil {
 		d.logger.Debug("cerebro term_attach marshal failed", "error", err, "task_id", task.ID)
-	} else if !d.enqueueCerebroFrame(attachFrame) {
-		d.logger.Debug("cerebro term_attach dropped: ws not connected", "task_id", task.ID)
+	} else {
+		// CEREBRO-PATCH(daemon-cerebro-term-reattach): persist frame so runTaskWakeupConnection can re-emit on WS connect.
+		d.cerebroActiveAttach.Store(&attachFrame)
+		if !d.enqueueCerebroFrame(attachFrame) {
+			d.logger.Debug("cerebro term_attach dropped: ws not connected; will retry on reconnect", "task_id", task.ID)
+		}
 	}
 
 	pump := newCerebroTermPump(d, task.ID, task.RuntimeID)
@@ -100,6 +104,8 @@ func (d *Daemon) cerebroAttachTerminal(_ context.Context, task Task) func() {
 	return func() {
 		pump.stop()
 		d.setCerebroTermSink(nil)
+		// CEREBRO-PATCH(daemon-cerebro-term-reattach): clear on task end so WS reconnects don't re-adopt a finished task.
+		d.cerebroActiveAttach.Store(nil)
 		exitFrame, err := marshalCerebroDaemonFrame(frameTermExit, map[string]any{
 			"task_id": task.ID,
 			"code":    0,

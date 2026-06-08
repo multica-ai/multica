@@ -170,6 +170,8 @@ type Daemon struct {
 	// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to interactive terminal sink.
 	cerebroTermSinkMu sync.RWMutex
 	cerebroTermSink   func(taskID string, text string)
+	// CEREBRO-PATCH(daemon-cerebro-term-reattach): in-flight attach frame re-emitted on WS reconnect.
+	cerebroActiveAttach atomic.Pointer[[]byte]
 }
 
 // New creates a new Daemon instance.

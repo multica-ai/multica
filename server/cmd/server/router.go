@@ -487,6 +487,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	})
 	// CEREBRO-PATCH(cerebro-dictation-ws-auth): browsers cannot attach Authorization headers to WebSocket upgrades.
 	r.Get("/api/workspaces/{id}/cerebro/dictation/stream", cerebroDictationHandler.Stream)
+	// CEREBRO-PATCH(terminal-ws-auth): terminal session WS handles its own auth (cookie or
+	// first-message) and must be outside all auth middleware so browsers can upgrade.
+	r.Get("/api/cerebro/terminal/sessions/{sessionId}/ws", cerebroTerminalHandler.AttachWS)
 
 	// Local file serving (when using local storage)
 	if local, ok := store.(*storage.LocalStorage); ok {
@@ -1476,7 +1479,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/sessions", cerebroTerminalHandler.CreateSession)
 				r.Get("/sessions", cerebroTerminalHandler.ListSessions)
 				r.Delete("/sessions/{sessionId}", cerebroTerminalHandler.DeleteSession)
-				r.Get("/sessions/{sessionId}/ws", cerebroTerminalHandler.AttachWS)
+				// /sessions/{sessionId}/ws is registered at the top level (outside auth middleware) to support browser WebSocket upgrades.
 				r.Get("/runtimes/{runtimeId}/presentation-mode", cerebroTerminalHandler.GetPresentationMode)
 				r.Put("/runtimes/{runtimeId}/presentation-mode", cerebroTerminalHandler.SetPresentationMode)
 				// CEREBRO-PATCH(cerebro-terminal-active-session): GET endpoint for runtime-keyed session lookup

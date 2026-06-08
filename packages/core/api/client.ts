@@ -406,6 +406,13 @@ export class ApiClient {
     this.token = token;
   }
 
+  // CEREBRO-PATCH(terminal-ws-auth): exposes the stored bearer token so the
+  // terminal WS hook can send it as a first-message auth frame (browsers cannot
+  // set Authorization headers on WebSocket upgrades).
+  getToken(): string | null {
+    return this.token;
+  }
+
   private readCsrfToken(): string | null {
     if (typeof document === "undefined") return null;
     const match = document.cookie
