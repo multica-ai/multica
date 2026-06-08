@@ -7,7 +7,7 @@ import {
 } from "../agents/queries";
 import { labelKeys } from "../labels/queries";
 import type { Issue, ListIssuesCache } from "../types";
-import { findIssueLocation, removeIssueFromBuckets } from "./cache-helpers";
+import { findIssueLocation, isListIssuesCache, removeIssueFromBuckets } from "./cache-helpers";
 import { issueKeys } from "./queries";
 import { useRecentIssuesStore } from "./stores/recent-issues-store";
 
@@ -51,6 +51,7 @@ export function collectDeletedIssueCacheMetadata(
   for (const [, data] of qc.getQueriesData<ListIssuesCache>({
     queryKey: issueKeys.list(wsId),
   })) {
+    if (!isListIssuesCache(data)) continue;
     collectParentFromListCache(parentIssueIds, data, issueId);
   }
 
@@ -81,7 +82,7 @@ export function pruneDeletedIssueFromListCaches(
     queryKey: issueKeys.list(wsId),
   })) {
     qc.setQueryData<ListIssuesCache>(key, (old) =>
-      old ? removeIssueFromBuckets(old, issueId) : old,
+      isListIssuesCache(old) ? removeIssueFromBuckets(old, issueId) : old,
     );
   }
 

@@ -39,7 +39,6 @@ import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { highlightToHtml } from "./utils/highlight-markdown";
-import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import { Attachment as AttachmentRenderer } from "./attachment";
@@ -52,12 +51,11 @@ import "./styles/index.css";
 
 const lowlight = createLowlight(common);
 
-// Code fences that the `code` renderer returns as a non-<code> React element
-// (Mermaid diagram, HTML preview iframe). The `pre` renderer below unwraps
-// these so the default <pre><code> envelope doesn't clamp their styles.
-// Anchored to whole class tokens so `language-htmlbars` / `language-mermaidx`
-// don't accidentally match and lose their <pre> wrapper.
-const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
+// Code fences that the `code` renderer returns as a non-<code> React element.
+// The `pre` renderer below unwraps these so the default <pre><code> envelope
+// doesn't clamp their styles. Anchored to whole class tokens so
+// `language-htmlbars` does not accidentally match and lose its <pre> wrapper.
+const PRE_UNWRAP_RE = /(^|\s)language-html(\s|$)/;
 
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
@@ -229,14 +227,11 @@ function buildComponents(): Partial<Components> {
         node?.position &&
         node.position.start.line !== node.position.end.line;
 
-      if (isBlock && lang === "mermaid") {
-        return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
-      }
       if (isBlock && lang === "html") {
-        // Like Mermaid, return the React element directly here and rely on
-        // the `pre` renderer below to unwrap it — react-markdown otherwise
-        // wraps `code` children in a `<pre>` whose monospace + overflow
-        // styles would clamp the preview iframe.
+        // Return the React element directly here and rely on the `pre`
+        // renderer below to unwrap it — react-markdown otherwise wraps `code`
+        // children in a `<pre>` whose monospace + overflow styles would clamp
+        // the preview iframe.
         return <HtmlBlockPreview html={String(children).replace(/\n$/, "")} />;
       }
 
@@ -271,16 +266,14 @@ function buildComponents(): Partial<Components> {
     },
 
     // Pre — pass through (CSS handles styling via .rich-text-editor pre).
-    // Special-case Mermaid / HtmlBlockPreview returned from the `code`
-    // renderer above so the outer `<pre>` does not wrap them — this is the
-    // standard two-layer pattern used to escape react-markdown's default
-    // `<pre><code>` envelope.
+    // Special-case HtmlBlockPreview returned from the `code` renderer above
+    // so the outer `<pre>` does not wrap it — this is the standard two-layer
+    // pattern used to escape react-markdown's default `<pre><code>` envelope.
     pre: ({ children }) => {
       // react-markdown calls `pre` BEFORE invoking the `code` renderer —
       // `children` is the unrendered `<code>` element from the AST. So we
       // identify "this block was meant to be unwrapped" by inspecting the
-      // child's className (`language-mermaid`, `language-html`), not by
-      // checking `children.type === MermaidDiagram`, which never matches.
+      // child's className (`language-html`), not by checking `children.type`.
       //
       // Match by exact class token: a substring `includes("language-html")`
       // would also fire on neighboring languages like `language-htmlbars`

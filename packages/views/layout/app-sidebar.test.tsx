@@ -1,11 +1,14 @@
+import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, pins } = vi.hoisted(() => ({
+const { approvalCount, detail, deletePin, openCreateIssueWithPreference, pins } = vi.hoisted(() => ({
+  approvalCount: { current: 0 },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
+  openCreateIssueWithPreference: vi.fn(),
   pins: {
     current: [
       {
@@ -35,16 +38,45 @@ vi.mock("@dnd-kit/sortable", () => ({
 }));
 vi.mock("@dnd-kit/utilities", () => ({ CSS: { Transform: { toString: () => undefined } } }));
 vi.mock("@multica/ui/components/ui/sidebar", () => ({
-  Sidebar: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarGroupContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarMenuButton: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
-  SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Sidebar: ({ children }: { children: React.ReactNode }) => <aside>{children}</aside>,
+  SidebarContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SidebarFooter: ({ children }: { children: React.ReactNode }) => <footer>{children}</footer>,
+  SidebarGroup: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
+  SidebarGroupContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SidebarHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>,
+  SidebarMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SidebarMenuButton: ({
+    children,
+    className,
+    isActive,
+    render,
+    ...props
+  }: {
+    children: React.ReactNode;
+    className?: string;
+    isActive?: boolean;
+    render?: React.ReactElement<Record<string, unknown> & { children?: React.ReactNode; className?: string }>;
+  }) => {
+    const button = (
+      <button
+        type="button"
+        className={className}
+        data-active={isActive ? "true" : undefined}
+        {...props}
+      >
+        {children}
+      </button>
+    );
+    return render
+      ? React.cloneElement(render, {
+          children,
+          className,
+          "data-active": isActive ? "true" : undefined,
+        })
+      : button;
+  },
+  SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SidebarRail: () => null,
 }));
 vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
@@ -64,7 +96,13 @@ vi.mock("@multica/ui/components/ui/collapsible", () => ({
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+  TooltipTrigger: ({
+    children,
+    render,
+  }: {
+    children: React.ReactNode;
+    render?: React.ReactElement<{ children?: React.ReactNode }>;
+  }) => render ? React.cloneElement(render, { children }) : <button type="button">{children}</button>,
 }));
 vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
 vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
@@ -110,10 +148,13 @@ vi.mock("@multica/core/api", async (importOriginal) => {
   };
 });
 vi.mock("@multica/core/inbox/queries", () => ({ deduplicateInboxItems: (items: unknown[]) => items, inboxKeys: { list: () => ["inbox"] } }));
-vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
+vi.mock("@multica/core/issues/queries", () => ({
+  issueAttentionCountOptions: () => ({ queryKey: ["attention-count"] }),
+  issueDetailOptions: () => ({ queryKey: ["issue"] }),
+}));
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: { getState: () => ({ lastMode: "agent" }) },
-  openCreateIssueWithPreference: vi.fn(),
+  openCreateIssueWithPreference,
 }));
 vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: () => false }));
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
@@ -129,19 +170,22 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useMutation: () => ({ isPending: false, mutate: vi.fn() }),
-  useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
-    if (queryKey[0] === "pins") return { data: pins.current };
-    if (queryKey[0] === "issue") return detail.current;
-    return { data: [] };
-  },
+	  useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
+	    if (queryKey[0] === "pins") return { data: pins.current };
+	    if (queryKey[0] === "issue") return detail.current;
+	    if (queryKey[0] === "attention-count") return { data: approvalCount.current };
+	    return { data: [] };
+	  },
   useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: vi.fn() }),
 }));
 
 describe("PinRow", () => {
-  beforeEach(() => {
-    deletePin.mockReset();
-    detail.current = { isPending: false, isError: false, data: null, error: null };
-  });
+	beforeEach(() => {
+    approvalCount.current = 0;
+	    deletePin.mockReset();
+    openCreateIssueWithPreference.mockReset();
+	    detail.current = { isPending: false, isError: false, data: null, error: null };
+	  });
 
   it("unpins missing details", async () => {
     detail.current = { isPending: false, isError: true, data: null, error: new ApiError("missing", 404, "Not Found") };
@@ -155,9 +199,28 @@ describe("PinRow", () => {
     await waitFor(() => expect(deletePin).not.toHaveBeenCalled());
   });
 
-  it("renders loaded details", async () => {
-    detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
+	  it("renders loaded details", async () => {
+	    detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
+	    render(<AppSidebar />);
+	    expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
+	  });
+
+  it("shows the inbox badge from approval-gate attention count", () => {
+    approvalCount.current = 7;
     render(<AppSidebar />);
-    expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
+
+    const badge = screen.getByTestId("sidebar-inbox-approval-count");
+    expect(badge).toHaveTextContent("7");
+    expect(badge).toHaveClass("rounded-full", "bg-destructive", "text-white");
   });
-});
+
+  it("uses compact header actions for search and new task", async () => {
+    render(<AppSidebar searchSlot={<button type="button" aria-label="Search" />} />);
+
+    expect(screen.getByRole("button", { name: "New Task" })).toBeInTheDocument();
+    expect(screen.queryByText("New Issue")).not.toBeInTheDocument();
+    screen.getByRole("button", { name: "Search" }).click();
+    screen.getByRole("button", { name: "New Task" }).click();
+    expect(openCreateIssueWithPreference).toHaveBeenCalledTimes(1);
+  });
+	});

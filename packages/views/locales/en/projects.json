@@ -58,13 +58,13 @@
     "section_progress": "Progress",
     "section_description": "Description",
     "description_placeholder": "Add description...",
-    "empty_issues_title": "No issues linked",
-    "empty_issues_hint": "Create a new issue or assign existing ones to this project.",
-    "empty_issues_new_button": "New Issue",
-    "no_issues_yet": "No issues yet",
+    "empty_issues_title": "No tasks linked",
+    "empty_issues_hint": "Create a new task or assign existing ones to this project.",
+    "empty_issues_new_button": "New Task",
+    "no_issues_yet": "No tasks yet",
     "toast_link_copied": "Link copied",
     "toast_project_deleted": "Project deleted",
-    "toast_move_issue_failed": "Failed to move issue"
+    "toast_move_issue_failed": "Failed to move task"
   },
   "resources": {
     "section_header": "Resources",
@@ -105,7 +105,7 @@
   },
   "delete_dialog": {
     "title": "Delete project",
-    "description": "This will delete the project. Issues will not be deleted but will be unlinked.",
+    "description": "This will delete the project. Tasks will not be deleted but will be unlinked.",
     "confirm": "Delete",
     "cancel": "Cancel"
   },

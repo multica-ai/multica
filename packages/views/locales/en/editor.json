@@ -21,9 +21,9 @@
       "ordered_list": "Ordered List"
     },
     "sub_issue": {
-      "tooltip": "Create sub-issue from selection",
+      "tooltip": "Create sub-task from selection",
       "created": "Created {{identifier}}",
-      "create_failed": "Failed to create sub-issue"
+      "create_failed": "Failed to create sub-task"
     }
   },
   "image": {
@@ -53,7 +53,7 @@
   },
   "mention": {
     "group_users": "Users",
-    "group_issues": "Issues",
+    "group_issues": "Tasks",
     "all_members": "All members",
     "searching": "Searching...",
     "no_results": "No results"

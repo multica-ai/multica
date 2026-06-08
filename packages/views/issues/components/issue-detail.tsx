@@ -5,30 +5,33 @@ import { Virtuoso } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
-import {
-  Archive,
-  Calendar,
-  CalendarClock,
-  CalendarDays,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  CircleCheck,
-  MoreHorizontal,
-  PanelRight,
-  Pin,
-  PinOff,
-  Plus,
-  Tag,
-  Users,
-} from "lucide-react";
+import Archive from "lucide-react/dist/esm/icons/archive.mjs";
+import Calendar from "lucide-react/dist/esm/icons/calendar.mjs";
+import CalendarClock from "lucide-react/dist/esm/icons/calendar-clock.mjs";
+import CalendarDays from "lucide-react/dist/esm/icons/calendar-days.mjs";
+import Check from "lucide-react/dist/esm/icons/check.mjs";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
+import ChevronLeft from "lucide-react/dist/esm/icons/chevron-left.mjs";
+import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
+import CircleCheck from "lucide-react/dist/esm/icons/circle-check.mjs";
+import MoreHorizontal from "lucide-react/dist/esm/icons/more-horizontal.mjs";
+import PanelRight from "lucide-react/dist/esm/icons/panel-right.mjs";
+import PencilLine from "lucide-react/dist/esm/icons/pencil-line.mjs";
+import Pin from "lucide-react/dist/esm/icons/pin.mjs";
+import PinOff from "lucide-react/dist/esm/icons/pin-off.mjs";
+import Plus from "lucide-react/dist/esm/icons/plus.mjs";
+import Tag from "lucide-react/dist/esm/icons/tag.mjs";
+import Users from "lucide-react/dist/esm/icons/users.mjs";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
+import { TitleEditor } from "../../editor/title-editor";
+import { useFileDropZone } from "../../editor/use-file-drop-zone";
+import { FileDropOverlay } from "../../editor/file-drop-overlay";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -47,7 +50,14 @@ import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { PriorityIcon } from "./priority-icon";
+import { StatusIcon } from "./status-icon";
+import { AssigneePicker } from "./pickers/assignee-picker";
+import { DueDatePicker } from "./pickers/due-date-picker";
+import { LabelPicker } from "./pickers/label-picker";
+import { PriorityPicker } from "./pickers/priority-picker";
+import { StartDatePicker } from "./pickers/start-date-picker";
+import { StatusPicker } from "./pickers/status-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
@@ -64,7 +74,14 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import {
+  issueListOptions,
+  issueDetailOptions,
+  childIssuesOptions,
+  issueUsageOptions,
+  issueAttachmentsOptions,
+  isIssueApprovalRequired,
+} from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -630,6 +647,50 @@ function SubIssueRow({ child }: { child: Issue }) {
           )
         }
       />
+    </div>
+  );
+}
+
+function IssueDecisionBar({
+  onUpdate,
+  t,
+}: {
+  onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
+  t: ActivityT;
+}) {
+  return (
+    <div className="@container/decision rounded-lg border bg-card/95 px-4 py-3 shadow-lg shadow-black/10 backdrop-blur supports-[backdrop-filter]:bg-card/85 @md/decision:px-5 @md/decision:py-4">
+      <div className="flex flex-col gap-3 @lg/decision:flex-row @lg/decision:items-center @lg/decision:justify-between">
+        <div className="min-w-0 @lg/decision:flex-1">
+          <h2 className="text-base font-semibold leading-tight @lg/decision:text-lg">
+            {t(($) => $.detail.decision_required_title)}
+          </h2>
+          <p className="mt-1 text-sm leading-snug text-muted-foreground">
+            {t(($) => $.detail.decision_required_description)}
+          </p>
+        </div>
+        <div className="grid gap-2 @sm/decision:grid-cols-2 @lg/decision:flex @lg/decision:shrink-0 @lg/decision:items-center">
+          <Button
+            type="button"
+            size="sm"
+            className="justify-center gap-2 whitespace-nowrap"
+            onClick={() => onUpdate({ status: "done" })}
+          >
+            <Check className="h-4 w-4" />
+            {t(($) => $.detail.decision_approve)}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="justify-center gap-2 whitespace-nowrap"
+            onClick={() => onUpdate({ status: "in_progress" })}
+          >
+            <PencilLine className="h-4 w-4" />
+            {t(($) => $.detail.decision_request_changes)}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1725,6 +1786,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           data-tab-scroll-root
           className="relative flex-1 overflow-y-auto"
         >
+        {isIssueApprovalRequired(issue) && (
+          <div className="sticky top-0 z-30 bg-background/95 px-8 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+            <div className="mx-auto w-full max-w-4xl">
+              <IssueDecisionBar onUpdate={handleUpdateField} t={t} />
+            </div>
+          </div>
+        )}
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
             key={`title-${id}`}

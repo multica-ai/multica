@@ -1,26 +1,26 @@
 {
   "page": {
-    "breadcrumb": "My Issues",
+    "breadcrumb": "My Tasks",
     "workspace_fallback": "Workspace",
-    "empty_title": "No issues assigned to you",
-    "empty_description": "Issues you create or are assigned to will appear here."
+    "empty_title": "No tasks assigned to you",
+    "empty_description": "Tasks you create or are assigned to will appear here."
   },
   "header": {
     "scope": {
       "all_label": "All",
       "all_description": "Assigned to me, created by me, or involving my agents and squads",
       "assigned_label": "Assigned",
-      "assigned_description": "Issues assigned to me",
+      "assigned_description": "Tasks assigned to me",
       "created_label": "Created",
-      "created_description": "Issues I created",
+      "created_description": "Tasks I created",
       "agents_label": "My Agents and Squads",
-      "agents_description": "Issues assigned to my agents"
+      "agents_description": "Tasks assigned to my agents"
     },
     "filter_button": "Filter",
     "filter_status": "Status",
     "filter_priority": "Priority",
-    "issue_count_one": "{{count}} issue",
-    "issue_count_other": "{{count}} issues",
+    "issue_count_one": "{{count}} task",
+    "issue_count_other": "{{count}} tasks",
     "reset_filters": "Reset all filters",
     "display_settings": "Display settings",
     "grouping": "Grouping",
@@ -40,6 +40,6 @@
     "sort_manual": "Manual"
   },
   "errors": {
-    "move_failed": "Failed to move issue"
+    "move_failed": "Failed to move task"
   }
 }

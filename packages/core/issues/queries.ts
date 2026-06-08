@@ -15,6 +15,12 @@ export interface IssueSortParam {
   sort_direction?: ListIssuesParams["sort_direction"];
 }
 
+export function isIssueApprovalRequired(
+  issue: Pick<Issue, "status">,
+): boolean {
+  return issue.status === "in_review";
+}
+
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
   /** PREFIX for invalidation — no sort. */
@@ -22,6 +28,10 @@ export const issueKeys = {
   /** FULL KEY for queryOptions — includes sort. */
   listSorted: (wsId: string, sort?: IssueSortParam) =>
     [...issueKeys.list(wsId), sort ?? {}] as const,
+  attentionCount: (wsId: string) =>
+    [...issueKeys.list(wsId), "attention-count"] as const,
+  attentionList: (wsId: string) =>
+    [...issueKeys.list(wsId), "attention-list"] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -236,6 +246,49 @@ export function issueListOptions(wsId: string, sort?: IssueSortParam) {
     queryFn: () => fetchFirstPages({}, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
+  });
+}
+
+export function issueAttentionCountOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueKeys.attentionCount(wsId),
+    queryFn: async () => {
+      const res = await api.listIssues({
+        status: "in_review",
+        limit: 1,
+        offset: 0,
+      });
+      return res.total;
+    },
+  });
+}
+
+export const ISSUE_ATTENTION_PAGE_LIMIT = 100;
+export const ISSUE_ATTENTION_MAX_ISSUES = 10_000;
+
+async function fetchAttentionIssues() {
+  const issues: Issue[] = [];
+  let offset = 0;
+  while (offset < ISSUE_ATTENTION_MAX_ISSUES) {
+    const res = await api.listIssues({
+      status: "in_review",
+      limit: ISSUE_ATTENTION_PAGE_LIMIT,
+      offset,
+      sort_by: "created_at",
+      sort_direction: "desc",
+    });
+    issues.push(...res.issues);
+    if (res.issues.length < ISSUE_ATTENTION_PAGE_LIMIT) break;
+    if (issues.length >= res.total) break;
+    offset += ISSUE_ATTENTION_PAGE_LIMIT;
+  }
+  return issues;
+}
+
+export function issueAttentionListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueKeys.attentionList(wsId),
+    queryFn: fetchAttentionIssues,
   });
 }
 

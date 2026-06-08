@@ -6,19 +6,23 @@ import type { NodeViewProps } from "@tiptap/react";
 import { Code as CodeIcon, Copy, Check, Eye } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
-import { MermaidDiagram } from "../mermaid-diagram";
 import { CodeBlockIframe } from "../code-block-iframe";
 
 // Coalesces fast keystrokes before re-rendering live previews.
-// `mermaid.initialize()` mutates a process-global config, so back-to-back
-// renders during typing can race a concurrent ReadonlyContent render
-// (e.g. a comment card) and clobber its theme variables. 200ms keeps the
-// "live preview" feel while making concurrent inits unlikely in practice.
 // HTML preview reuses the same debounce: re-keying iframe.srcDoc on every
 // keystroke causes the iframe to re-load and flicker.
 const PREVIEW_DEBOUNCE_MS = 200;
 
 const HTML_PREVIEW_HEIGHT = "h-[480px]";
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -38,24 +42,20 @@ function CodeBlockView({ node }: NodeViewProps) {
   // it would break editing.
   const [view, setView] = useState<"preview" | "source">("preview");
   const language = node.attrs.language || "";
-  const isMermaid = language === "mermaid";
   const isHtml = language === "html";
-  const chart = node.textContent;
-  const debouncedChart = useDebouncedValue(
-    isMermaid ? chart : "",
-    PREVIEW_DEBOUNCE_MS,
-  );
+  const source = node.textContent;
   const debouncedHtml = useDebouncedValue(
-    isHtml ? chart : "",
+    isHtml ? source : "",
     PREVIEW_DEBOUNCE_MS,
   );
 
   const handleCopy = async () => {
     const text = node.textContent;
     if (!text) return;
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (await copyText(text)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const showHtmlPreview = isHtml && view === "preview";
@@ -64,14 +64,6 @@ function CodeBlockView({ node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper className="code-block-wrapper group/code relative my-2">
-      {isMermaid && debouncedChart.trim() && (
-        <div
-          contentEditable={false}
-          className="mermaid-diagram-preview mb-1"
-        >
-          <MermaidDiagram chart={debouncedChart} />
-        </div>
-      )}
       {isHtml && showHtmlPreview && (
         // CSS-hidden when toggled off so the `<pre>` below stays mounted —
         // unmounting either side would either lose ProseMirror bindings

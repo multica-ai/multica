@@ -35,7 +35,7 @@ catalog:
   mermaid: "^11.14.0"
 
   # Icons
-  lucide-react: "^1.0.1"
+  lucide-react: "^1.17.0"
 
   # i18n
   i18next: "^26.0.8"

@@ -2,10 +2,12 @@
 
 import {
   createContext,
+  lazy,
   use,
   useEffect,
   useState,
   useCallback,
+  Suspense,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -19,9 +21,14 @@ import {
   subscribeToCurrentSlug,
 } from "../platform/workspace-storage";
 import { createLogger } from "../logger";
-import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
 type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
+
+const RealtimeSyncRuntime = lazy(() =>
+  import("./realtime-sync-runtime").then((mod) => ({
+    default: mod.RealtimeSyncRuntime,
+  })),
+);
 
 interface WSContextValue {
   subscribe: (event: WSEventType, handler: EventHandler) => () => void;
@@ -115,11 +122,6 @@ export function WSProvider({
     identityOS,
   ]);
 
-  const stores: RealtimeSyncStores = { authStore };
-
-  // Centralized WS -> store sync (uses state so it re-subscribes when WS changes)
-  useRealtimeSync(wsClient, stores, onToast);
-
   const subscribe = useCallback(
     (event: WSEventType, handler: EventHandler) => {
       if (!wsClient) return () => {};
@@ -139,6 +141,15 @@ export function WSProvider({
   return (
     <WSContext.Provider value={{ subscribe, onReconnect: onReconnectCb }}>
       {children}
+      {wsClient ? (
+        <Suspense fallback={null}>
+          <RealtimeSyncRuntime
+            wsClient={wsClient}
+            authStore={authStore}
+            onToast={onToast}
+          />
+        </Suspense>
+      ) : null}
     </WSContext.Provider>
   );
 }

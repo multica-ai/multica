@@ -1,5 +1,10 @@
 import { useState, useCallback } from "react";
-import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+  type QueryKey,
+} from "@tanstack/react-query";
 import { api } from "../api";
 import {
   issueKeys,
@@ -35,6 +40,14 @@ import type {
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
+
+function invalidateIssueAttentionQueries(
+  qc: QueryClient,
+  wsId: string,
+) {
+  qc.invalidateQueries({ queryKey: issueKeys.attentionCount(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.attentionList(wsId) });
+}
 
 // ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
@@ -202,6 +215,7 @@ export function useCreateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      invalidateIssueAttentionQueries(qc, wsId);
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
@@ -285,6 +299,9 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      if (vars.status !== undefined) {
+        invalidateIssueAttentionQueries(qc, wsId);
+      }
       if (
         vars.status !== undefined ||
         Object.prototype.hasOwnProperty.call(vars, "project_id")
@@ -388,6 +405,7 @@ export function useDeleteIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      invalidateIssueAttentionQueries(qc, wsId);
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
@@ -453,6 +471,9 @@ export function useBatchUpdateIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      if (_vars.updates.status !== undefined) {
+        invalidateIssueAttentionQueries(qc, wsId);
+      }
       if (
         _vars.updates.status !== undefined ||
         Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")
@@ -570,6 +591,7 @@ export function useBatchDeleteIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      invalidateIssueAttentionQueries(qc, wsId);
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {

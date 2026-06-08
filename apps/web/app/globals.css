@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "../../../packages/ui/styles/tokens.css";
@@ -7,9 +7,23 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@source "../../../packages/ui/**/*.{ts,tsx}";
-@source "../../../packages/core/**/*.{ts,tsx}";
-@source "../../../packages/views/**/*.{ts,tsx}";
+@source "./**/*.{ts,tsx}";
+@source "../components/**/*.{ts,tsx}";
+@source "../config/**/*.{ts,tsx}";
+@source "../lib/**/*.{ts,tsx}";
+@source "../../../packages/ui/components/**/*.{ts,tsx}";
+@source "../../../packages/ui/lib/**/*.{ts,tsx}";
+@source "../../../packages/views/auth/**/*.{ts,tsx}";
+@source "../../../packages/views/chat/**/*.{ts,tsx}";
+@source "../../../packages/views/common/**/*.{ts,tsx}";
+@source "../../../packages/views/i18n/**/*.{ts,tsx}";
+@source "../../../packages/views/inbox/**/*.{ts,tsx}";
+@source "../../../packages/views/issues/**/*.{ts,tsx}";
+@source "../../../packages/views/layout/**/*.{ts,tsx}";
+@source "../../../packages/views/navigation/**/*.{ts,tsx}";
+@source "../../../packages/views/projects/**/*.{ts,tsx}";
+@source "../../../packages/views/search/**/*.{ts,tsx}";
+@source "../../../packages/views/workspace/**/*.{ts,tsx}";
 
 /* Font stack. `--font-inter` is the next/font Inter family (+ its synthetic
    size-adjusted fallback), set on <html> by inter.variable in app/layout.tsx.
@@ -24,6 +38,11 @@
    block, so ko users still get Korean fonts for Hangul). Kept in sync with
    apps/desktop/src/renderer/src/globals.css. */
 :root {
+  --font-inter: Inter;
+  --font-geist-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-source-serif-4: "Source Serif 4", Georgia, Cambria, "Times New Roman",
+    Times, serif;
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
     "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo",
     "Malgun Gothic", "Noto Sans CJK KR", sans-serif;

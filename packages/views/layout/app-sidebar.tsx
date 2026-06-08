@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
-import { HelpLauncher } from "./help-launcher";
 import {
   DndContext,
   PointerSensor,
@@ -20,7 +19,6 @@ import {
   ListTodo,
   Bot,
   Monitor,
-  ChevronDown,
   ChevronRight,
   Settings,
   LogOut,
@@ -69,14 +67,13 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
-import { issueDetailOptions } from "@multica/core/issues/queries";
+import { issueAttentionCountOptions, issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
@@ -99,7 +96,6 @@ function isNavActive(pathname: string, href: string): boolean {
 const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
-const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
@@ -354,15 +350,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
 
   const wsId = workspace?.id;
-  const { data: inboxItems = EMPTY_INBOX } = useQuery({
-    queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
-    queryFn: () => api.listInbox(),
+  const { data: approvalAttentionCount = 0 } = useQuery({
+    ...issueAttentionCountOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  const unreadCount = React.useMemo(
-    () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
-    [inboxItems],
-  );
+  const newTaskLabel = t(($) => $.sidebar.new_issue) || "New Task";
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
@@ -469,142 +461,141 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
           <SidebarMenu>
             <SidebarMenuItem>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuButton>
-                      <span className="relative">
-                        <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
-                        {myInvitations.length > 0 && (
-                          <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
-                        )}
-                      </span>
-                      <span className="flex-1 truncate font-medium">
-                        {workspace?.name ?? "Multica"}
-                      </span>
-                      <ChevronDown className="size-3 text-muted-foreground" />
-                    </SidebarMenuButton>
-                  }
-                />
-                <DropdownMenuContent
-                  className="w-auto min-w-56"
-                  align="start"
-                  side="bottom"
-                  sideOffset={4}
-                >
-                  <div className="flex items-center gap-2.5 px-2 py-1.5">
-                    <ActorAvatar
-                      name={user?.name ?? ""}
-                      initials={(user?.name ?? "U").charAt(0).toUpperCase()}
-                      avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
-                      size={32}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium leading-tight">
-                        {user?.name}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground leading-tight">
-                        {user?.email}
-                      </p>
+              <div className="flex items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <SidebarMenuButton className="min-w-0 flex-1">
+                        <span className="relative">
+                          <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
+                          {myInvitations.length > 0 && (
+                            <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
+                          )}
+                        </span>
+                        <span className="flex-1 truncate font-medium">
+                          {workspace?.name ?? "Multica"}
+                        </span>
+                      </SidebarMenuButton>
+                    }
+                  />
+                  <DropdownMenuContent
+                    className="w-auto min-w-56"
+                    align="start"
+                    side="bottom"
+                    sideOffset={4}
+                  >
+                    <div className="flex items-center gap-2.5 px-2 py-1.5">
+                      <ActorAvatar
+                        name={user?.name ?? ""}
+                        initials={(user?.name ?? "U").charAt(0).toUpperCase()}
+                        avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
+                        size={32}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium leading-tight">
+                          {user?.name}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground leading-tight">
+                          {user?.email}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">
-                      {t(($) => $.sidebar.workspaces_label)}
-                    </DropdownMenuLabel>
-                    {workspaces.map((ws) => (
-                      <DropdownMenuItem
-                        key={ws.id}
-                        render={
-                          <AppLink href={paths.workspace(ws.slug).issues()} />
-                        }
-                      >
-                        <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
-                        <span className="flex-1 truncate">{ws.name}</span>
-                        {ws.id === workspace?.id && (
-                          <Check className="h-3.5 w-3.5 text-primary" />
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                    {!workspaceCreationDisabled && (
-                      <DropdownMenuItem
-                        onClick={() =>
-                          useModalStore.getState().open("create-workspace")
-                        }
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        {t(($) => $.sidebar.create_workspace)}
-                      </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel className="text-xs text-muted-foreground">
+                        {t(($) => $.sidebar.workspaces_label)}
+                      </DropdownMenuLabel>
+                      {workspaces.map((ws) => (
+                        <DropdownMenuItem
+                          key={ws.id}
+                          render={
+                            <AppLink href={paths.workspace(ws.slug).issues()} />
+                          }
+                        >
+                          <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
+                          <span className="flex-1 truncate">{ws.name}</span>
+                          {ws.id === workspace?.id && (
+                            <Check className="h-3.5 w-3.5 text-primary" />
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                      {!workspaceCreationDisabled && (
+                        <DropdownMenuItem
+                          onClick={() =>
+                            useModalStore.getState().open("create-workspace")
+                          }
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          {t(($) => $.sidebar.create_workspace)}
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuGroup>
+                    {myInvitations.length > 0 && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-xs text-muted-foreground">
+                            {t(($) => $.sidebar.pending_invitations_label)}
+                          </DropdownMenuLabel>
+                          {myInvitations.map((inv) => (
+                            <div key={inv.id} className="flex items-center gap-2 px-2 py-1.5">
+                              <WorkspaceAvatar name={inv.workspace_name ?? "W"} size="sm" />
+                              <span className="flex-1 truncate text-sm">{inv.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback)}</span>
+                              <button
+                                type="button"
+                                className="text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                disabled={acceptInvitationMut.isPending}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  acceptInvitationMut.mutate(inv.id);
+                                }}
+                              >
+                                {t(($) => $.sidebar.invitation_join)}
+                              </button>
+                              <button
+                                type="button"
+                                className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                                disabled={declineInvitationMut.isPending}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  declineInvitationMut.mutate(inv.id);
+                                }}
+                              >
+                                {t(($) => $.sidebar.invitation_decline)}
+                              </button>
+                            </div>
+                          ))}
+                        </DropdownMenuGroup>
+                      </>
                     )}
-                  </DropdownMenuGroup>
-                  {myInvitations.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuGroup>
-                        <DropdownMenuLabel className="text-xs text-muted-foreground">
-                          {t(($) => $.sidebar.pending_invitations_label)}
-                        </DropdownMenuLabel>
-                        {myInvitations.map((inv) => (
-                          <div key={inv.id} className="flex items-center gap-2 px-2 py-1.5">
-                            <WorkspaceAvatar name={inv.workspace_name ?? "W"} size="sm" />
-                            <span className="flex-1 truncate text-sm">{inv.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback)}</span>
-                            <button
-                              type="button"
-                              className="text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                              disabled={acceptInvitationMut.isPending}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                acceptInvitationMut.mutate(inv.id);
-                              }}
-                            >
-                              {t(($) => $.sidebar.invitation_join)}
-                            </button>
-                            <button
-                              type="button"
-                              className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
-                              disabled={declineInvitationMut.isPending}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                declineInvitationMut.mutate(inv.id);
-                              }}
-                            >
-                              {t(($) => $.sidebar.invitation_decline)}
-                            </button>
-                          </div>
-                        ))}
-                      </DropdownMenuGroup>
-                    </>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem variant="destructive" onClick={logout}>
-                      <LogOut className="h-3.5 w-3.5" />
-                      {t(($) => $.sidebar.log_out)}
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </SidebarMenuItem>
-          </SidebarMenu>
-          <SidebarMenu>
-            {searchSlot && (
-              <SidebarMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem variant="destructive" onClick={logout}>
+                        <LogOut className="h-3.5 w-3.5" />
+                        {t(($) => $.sidebar.log_out)}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 {searchSlot}
-              </SidebarMenuItem>
-            )}
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                className="text-muted-foreground"
-                onClick={() => openCreateIssueWithPreference()}
-              >
-                <span className="relative">
-                  <SquarePen />
-                  <DraftDot />
-                </span>
-                <span>{t(($) => $.sidebar.new_issue)}</span>
-                <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
-              </SidebarMenuButton>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <SidebarMenuButton
+                        aria-label={newTaskLabel}
+                        className="relative size-8 shrink-0 justify-center p-0 text-muted-foreground"
+                        onClick={() => openCreateIssueWithPreference()}
+                      />
+                    }
+                  >
+                    <SquarePen className="size-4" />
+                    <DraftDot />
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {newTaskLabel}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarHeader>
@@ -626,9 +617,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       >
                         <item.icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "inbox" && unreadCount > 0 && (
-                          <span className="ml-auto text-xs">
-                            {unreadCount > 99 ? "99+" : unreadCount}
+                        {item.key === "inbox" && approvalAttentionCount > 0 && (
+                          <span
+                            data-testid="sidebar-inbox-approval-count"
+                            className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-destructive text-[10px] font-semibold leading-none text-white tabular-nums"
+                          >
+                            {approvalAttentionCount > 99 ? "99+" : approvalAttentionCount}
                           </span>
                         )}
                       </SidebarMenuButton>
@@ -726,11 +720,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
         </SidebarContent>
 
-        <SidebarFooter className="p-2">
-          <div className="flex justify-end">
-            <HelpLauncher />
-          </div>
-        </SidebarFooter>
+        <SidebarFooter className="p-2" />
         <SidebarRail />
       </Sidebar>
   );

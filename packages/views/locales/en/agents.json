@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "Agents",
-    "tagline": "AI teammates that pick up issues, comment, and update status.",
+    "tagline": "AI teammates that pick up tasks, comment, and update status.",
     "learn_more": "Learn more →",
     "new_agent": "New agent",
     "search_placeholder": "Search agents…",
@@ -39,7 +39,7 @@
   },
   "empty": {
     "title": "No agents yet",
-    "description": "Create an agent and assign it issues, like any teammate. Local agents run on your machine; cloud agents run on Multica's runtime."
+    "description": "Create an agent and assign it tasks, like any teammate. Local agents run on your machine; cloud agents run on Multica's runtime."
   },
   "no_matches": {
     "title": "No matches",
@@ -359,18 +359,18 @@
       "success_pct": "{{percent}}% success",
       "avg_duration": "avg {{value}}",
       "failed_count": "{{count}} failed",
-      "source_issue": "Issue",
+      "source_issue": "Task",
       "source_chat": "Chat",
       "source_autopilot": "Autopilot",
       "source_untracked": "Untracked",
       "source_quick_create": "Quick create",
-      "source_creating_issue": "Creating issue",
+      "source_creating_issue": "Creating task",
       "source_chat_session": "Chat session",
       "source_autopilot_run": "Autopilot run",
-      "issue_short_fallback": "Issue {{prefix}}…",
+      "issue_short_fallback": "Task {{prefix}}…",
       "triggered_by": "Triggered by",
-      "open_issue_aria": "Open issue",
-      "open_issue_tooltip": "Open issue",
+      "open_issue_aria": "Open task",
+      "open_issue_tooltip": "Open task",
       "transcript_tooltip": "View transcript",
       "cancel_task_aria": "Cancel task",
       "cancel_task_tooltip": "Cancel task",

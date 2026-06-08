@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { lazy, Suspense, useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
@@ -11,7 +11,11 @@ import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
-import { PageviewTracker } from "./pageview-tracker";
+import { resolveBrowserApiBaseUrl } from "@/config/client-api-url";
+
+const PageviewTracker = lazy(() =>
+  import("./pageview-tracker").then((mod) => ({ default: mod.PageviewTracker })),
+);
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -61,9 +65,10 @@ export function WebProviders({
     [],
   );
   const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
+  const apiBaseUrl = resolveBrowserApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
   return (
     <CoreProvider
-      apiBaseUrl={process.env.NEXT_PUBLIC_API_URL}
+      apiBaseUrl={apiBaseUrl}
       wsUrl={deriveWsUrl()}
       cookieAuth={cookieAuth}
       onLogin={setLoggedInCookie}

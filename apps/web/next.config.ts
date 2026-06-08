@@ -26,6 +26,10 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
 
 const nextConfig: NextConfig = {
   ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
+  outputFileTracingRoot: resolve(__dirname, "../.."),
+  outputFileTracingIncludes: {
+    "/*": ["../../packages/views/locales/**/*.json"],
+  },
   transpilePackages: ["@multica/core", "@multica/ui", "@multica/views"],
   ...(allowedDevOrigins && allowedDevOrigins.length > 0
     ? { allowedDevOrigins }
@@ -75,6 +79,9 @@ const nextConfig: NextConfig = {
 // dynamic-import `.source/source.config.mjs` under the Turbopack Node evaluator
 // (see fumadocs#2658). `dev`/`build` scripts pass `--webpack` to opt out.
 // Drop the flag once fumadocs-mdx ships a Turbopack-compatible loader.
-const withMDX = createMDX() as (config: NextConfig) => NextConfig;
+const withMDX =
+  process.env.NODE_ENV === "development"
+    ? ((config: NextConfig) => config)
+    : (createMDX() as (config: NextConfig) => NextConfig);
 
 export default withMDX(nextConfig);

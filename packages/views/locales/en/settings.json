@@ -55,24 +55,24 @@
   },
   "notifications": {
     "title": "Inbox Notifications",
-    "description": "Control which events generate inbox notifications. Muted event types are silently filtered — you can still see them by visiting the issue directly.",
+    "description": "Control which events generate inbox notifications. Muted event types are silently filtered — you can still see them by visiting the task directly.",
     "toast_failed": "Failed to update notification settings",
     "groups": {
       "assignments": {
         "label": "Assignments",
-        "description": "When you are assigned or unassigned from an issue"
+        "description": "When you are assigned or unassigned from a task"
       },
       "status_changes": {
         "label": "Status changes",
-        "description": "When an issue you follow changes status (e.g. todo, in progress, done)"
+        "description": "When a task you follow changes status (e.g. todo, in progress, done)"
       },
       "comments": {
         "label": "Comments & Mentions",
-        "description": "New comments on issues you follow, or when someone @mentions you"
+        "description": "New comments on tasks you follow, or when someone @mentions you"
       },
       "updates": {
         "label": "Priority & Due date",
-        "description": "When priority or due date changes on issues you follow"
+        "description": "When priority or due date changes on tasks you follow"
       },
       "agent_activity": {
         "label": "Agent activity",
@@ -133,10 +133,10 @@
     "context_label": "Context",
     "context_placeholder": "Background information and context for AI agents working in this workspace",
     "slug_label": "Slug",
-    "issue_prefix_label": "Issue prefix",
-    "issue_prefix_hint": "Used in issue numbers like {{example}}.",
-    "prefix_confirm_title": "Change issue prefix?",
-    "prefix_confirm_description": "All issues will be renumbered from {{oldPrefix}}-N to {{newPrefix}}-N. External references — pull request titles, branch names, links in docs and chat — that use {{oldPrefix}}-N will stop resolving.",
+    "issue_prefix_label": "Task prefix",
+    "issue_prefix_hint": "Used in task numbers like {{example}}.",
+    "prefix_confirm_title": "Change task prefix?",
+    "prefix_confirm_description": "All tasks will be renumbered from {{oldPrefix}}-N to {{newPrefix}}-N. External references — pull request titles, branch names, links in docs and chat — that use {{oldPrefix}}-N will stop resolving.",
     "save": "Save",
     "saving": "Saving...",
     "manage_hint": "Only admins and owners can update workspace settings.",
@@ -162,7 +162,7 @@
   },
   "delete_workspace_dialog": {
     "title": "Delete workspace",
-    "description": "This cannot be undone. All issues, agents, and data will be permanently removed.",
+    "description": "This cannot be undone. All tasks, agents, and data will be permanently removed.",
     "type_to_confirm_prefix": "To confirm, type",
     "type_to_confirm_suffix": " below.",
     "cancel": "Cancel",
@@ -181,8 +181,8 @@
     "master_description_off": "GitHub features are turned off. The PR sidebar, co-author trailer, and auto-link are paused. Data on the backend is not deleted.",
     "section_connection": "Connection",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "Link issues to pull requests automatically. When a PR with",
-    "connection_description_suffix": "in its branch, title, or body is merged, the corresponding issue moves to",
+    "connection_description_prefix": "Link tasks to pull requests automatically. When a PR with",
+    "connection_description_suffix": "in its branch, title, or body is merged, the corresponding task moves to",
     "connection_description_done": "Done",
     "connection_identifier_example": "MUL-123",
     "connected_to": "Connected to {{login}}",
@@ -206,12 +206,12 @@
     "toast_disconnected": "GitHub App disconnected",
     "section_features": "Features",
     "feature_pr_sidebar_label": "Pull Request sidebar",
-    "feature_pr_sidebar_description": "Show linked pull requests inside the issue detail sidebar.",
+    "feature_pr_sidebar_description": "Show linked pull requests inside the task detail sidebar.",
     "feature_co_author_label": "Co-authored-by trailer",
     "feature_co_author_description_prefix": "Append",
     "feature_co_author_description_suffix": "to commits authored by agents.",
-    "feature_auto_link_label": "Auto-link issues and PRs",
-    "feature_auto_link_description": "Match PR titles, bodies, and branch names against issue identifiers and create the link automatically.",
+    "feature_auto_link_label": "Auto-link tasks and PRs",
+    "feature_auto_link_description": "Match PR titles, bodies, and branch names against task identifiers and create the link automatically.",
     "section_repositories": "Repositories",
     "repositories_shortcut_label": "Repository URLs live in the Repositories tab",
     "repositories_shortcut_link": "Manage repositories →",
@@ -219,7 +219,7 @@
   },
   "lark": {
     "section_title": "Lark",
-    "page_description": "Connect each Multica Agent to a Lark (飞书) PersonalAgent Bot. Members can DM the Bot, @ it in groups, and type /issue to spin up a new Multica issue.",
+    "page_description": "Connect each Multica Agent to a Lark (飞书) PersonalAgent Bot. Members can DM the Bot, @ it in groups, and type /issue to spin up a new Multica task.",
     "not_enabled_title": "Lark integration not enabled",
     "not_enabled_description_prefix": "Set",
     "not_enabled_description_suffix": "on the server to enable Lark Bot installations.",
@@ -340,7 +340,7 @@
       },
       "member": {
         "label": "Member",
-        "description": "Create and work on issues"
+        "description": "Create and work on tasks"
       }
     }
   }

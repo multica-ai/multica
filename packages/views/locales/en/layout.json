@@ -1,8 +1,8 @@
 {
   "nav": {
     "inbox": "Inbox",
-    "my_issues": "My Issues",
-    "issues": "Issues",
+    "my_issues": "My Tasks",
+    "issues": "Tasks",
     "projects": "Projects",
     "autopilots": "Autopilot",
     "agents": "Agents",
@@ -31,7 +31,7 @@
     "invitation_join": "Join",
     "invitation_decline": "Decline",
     "log_out": "Log out",
-    "new_issue": "New Issue",
+    "new_issue": "New Task",
     "new_issue_shortcut": "C",
     "pinned_label": "Pinned",
     "workspace_group": "Workspace",

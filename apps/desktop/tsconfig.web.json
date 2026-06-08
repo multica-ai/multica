@@ -5,7 +5,8 @@
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.tsx",
     "src/preload/*.d.ts",
-    "test/setup.ts"
+    "test/setup.ts",
+    "../../packages/views/lucide-direct-icons.d.ts"
   ],
   "compilerOptions": {
     "composite": true,

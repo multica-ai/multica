@@ -22,7 +22,7 @@
     "archived": "Archived"
   },
   "execution_mode": {
-    "create_issue": "Create Issue",
+    "create_issue": "Create Task",
     "run_only": "Run Only"
   },
   "relative_date": {
@@ -91,7 +91,7 @@
     }
   },
   "run_status": {
-    "issue_created": "Issue Created",
+    "issue_created": "Task Created",
     "running": "Running",
     "skipped": "Skipped",
     "completed": "Completed",
@@ -105,7 +105,7 @@
     "api": "API"
   },
   "run": {
-    "issue_linked": "Issue linked",
+    "issue_linked": "Task linked",
     "view_log": "View execution log",
     "skipped_group": {
       "label": "Skipped",
@@ -267,12 +267,12 @@
     "next_run_label": "Next run:",
     "output_modes": {
       "create_issue": {
-        "label": "Create issue",
-        "description": "Each run creates a tracked issue"
+        "label": "Create task",
+        "description": "Each run creates a tracked task"
       },
       "run_only": {
         "label": "Run only",
-        "description": "Silent run, no issue created"
+        "description": "Silent run, no task created"
       }
     },
     "frequency_long": {

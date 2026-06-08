@@ -40,7 +40,8 @@ function ActorAvatar({
         // Squads (a group, non-human) get a square tile so they don't read as
         // a single person; everyone else stays round.
         isSquad ? "rounded-md" : "rounded-full",
-        (!avatarUrl || imgError) && "bg-muted text-muted-foreground",
+        isAgent && "bg-brand/15 text-brand",
+        (!isAgent && (!avatarUrl || imgError)) && "bg-muted text-muted-foreground",
         className
       )}
       style={{ width: size, height: size, fontSize: size * 0.45 }}
@@ -50,7 +51,7 @@ function ActorAvatar({
         <img
           src={avatarUrl}
           alt={name}
-          className="h-full w-full object-cover"
+          className={cn("h-full w-full object-cover", isAgent && "mix-blend-multiply")}
           onError={() => setImgError(true)}
         />
       ) : isSystem ? (

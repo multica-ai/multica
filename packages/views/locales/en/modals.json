@@ -8,17 +8,17 @@
   },
   "create_workspace": {
     "title": "Create a new workspace",
-    "description": "Workspaces are shared environments where teams can work on projects and issues."
+    "description": "Workspaces are shared environments where teams can work on projects and tasks."
   },
   "delete_issue": {
-    "title": "Delete issue",
-    "description": "This will permanently delete this issue and all its comments. This action cannot be undone.",
-    "hint": "Any workspace member can delete issues.",
+    "title": "Delete task",
+    "description": "This will permanently delete this task and all its comments. This action cannot be undone.",
+    "hint": "Any workspace member can delete tasks.",
     "cancel": "Cancel",
     "confirm": "Delete",
     "deleting": "Deleting...",
-    "toast_deleted": "Issue deleted",
-    "toast_delete_failed": "Failed to delete issue"
+    "toast_deleted": "Task deleted",
+    "toast_delete_failed": "Failed to delete task"
   },
   "feedback": {
     "title": "Feedback",
@@ -33,22 +33,22 @@
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
-    "search_placeholder": "Search issues...",
+    "search_placeholder": "Search tasks...",
     "searching": "Searching...",
-    "no_results": "No issues found.",
-    "prompt_to_search": "Type to search issues"
+    "no_results": "No tasks found.",
+    "prompt_to_search": "Type to search tasks"
   },
   "set_parent": {
-    "title": "Set parent issue",
-    "description": "Search for an issue to set as the parent of this issue",
-    "toast_failed": "Failed to update issue",
-    "toast_success": "Set {{identifier}} as parent issue"
+    "title": "Set parent task",
+    "description": "Search for a task to set as the parent of this task",
+    "toast_failed": "Failed to update task",
+    "toast_success": "Set {{identifier}} as parent task"
   },
   "add_child": {
-    "title": "Add sub-issue",
-    "description": "Search for an issue to add as a sub-issue",
-    "toast_failed": "Failed to add sub-issue",
-    "toast_success": "Added {{identifier}} as sub-issue"
+    "title": "Add sub-task",
+    "description": "Search for a task to add as a sub-task",
+    "toast_failed": "Failed to add sub-task",
+    "toast_success": "Added {{identifier}} as sub-task"
   },
   "backlog_hint": {
     "toast_status_failed": "Failed to update status"
@@ -126,44 +126,44 @@
     "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work."
   },
   "create_issue": {
-    "sr_manual": "New Issue",
-    "sr_agent": "Quick create issue",
+    "sr_manual": "New Task",
+    "sr_agent": "Quick create task",
     "manual_breadcrumb": "Create manually",
     "agent_breadcrumb": "Create with agent",
-    "title_placeholder": "Issue title",
+    "title_placeholder": "Task title",
     "description_placeholder": "Add description...",
     "more_options_aria": "More options",
     "title_required": "Enter a title to create",
-    "submit": "Create Issue",
+    "submit": "Create Task",
     "submitting": "Creating...",
-    "toast_created": "Issue created",
-    "view_issue": "View issue",
-    "toast_failed": "Failed to create issue",
-    "toast_duplicate_title": "Duplicate issue",
-    "toast_duplicate_view": "View existing issue",
-    "toast_link_subissues_all_failed": "Failed to link sub-issues",
-    "toast_link_subissues_partial": "Failed to link {{failed}} of {{total}} sub-issues",
+    "toast_created": "Task created",
+    "view_issue": "View task",
+    "toast_failed": "Failed to create task",
+    "toast_duplicate_title": "Duplicate task",
+    "toast_duplicate_view": "View existing task",
+    "toast_link_subissues_all_failed": "Failed to link sub-tasks",
+    "toast_link_subissues_partial": "Failed to link {{failed}} of {{total}} sub-tasks",
     "switch_to_agent": "Switch to Agent",
     "switch_to_agent_tooltip": "Switch to create with agent — describe in one line and let the agent file it",
     "switch_to_manual": "Switch to Manual",
     "switch_to_manual_tooltip": "Switch to manual create — fill the fields yourself",
     "create_another": "Create another",
     "remove_parent_aria": "Remove parent",
-    "remove_subissue_aria": "Remove sub-issue {{identifier}}",
-    "subissue_of": "Sub-issue of {{identifier}}",
-    "subissue_chip": "Sub-issue: {{identifier}}",
+    "remove_subissue_aria": "Remove sub-task {{identifier}}",
+    "subissue_of": "Sub-task of {{identifier}}",
+    "subissue_chip": "Sub-task: {{identifier}}",
     "parent_with_id": "Parent: {{identifier}}",
     "set_start_date": "Set start date...",
-    "set_parent": "Set parent issue...",
-    "add_subissue": "Add sub-issue...",
+    "set_parent": "Set parent task...",
+    "add_subissue": "Add sub-task...",
     "remove_parent": "Remove parent",
     "set_parent_picker": {
-      "title": "Set parent issue",
-      "description": "Search for an issue to set as the parent of the new issue"
+      "title": "Set parent task",
+      "description": "Search for a task to set as the parent of the new task"
     },
     "add_subissue_picker": {
-      "title": "Add sub-issue",
-      "description": "Search for an issue to add as a sub-issue of the new issue"
+      "title": "Add sub-task",
+      "description": "Search for a task to add as a sub-task of the new task"
     },
     "agent": {
       "created_by": "Created by",
@@ -186,7 +186,7 @@
       "error_agent_unavailable_fallback": "Agent is unavailable. Pick another agent.",
       "error_daemon_version": "This agent's daemon CLI ({{current}}) is below the required {{min}}. Upgrade the daemon to use Create with agent.",
       "error_unknown": "Failed to submit. Try again.",
-      "sub_issue_of": "Sub-issue of {{identifier}}"
+      "sub_issue_of": "Sub-task of {{identifier}}"
     }
   }
 }

@@ -10,7 +10,7 @@ import {
   LocaleAdapterProvider,
   UserLocaleSync,
 } from "../i18n/react";
-import { WSProvider } from "../realtime";
+import { WSProvider } from "../realtime/provider";
 import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";

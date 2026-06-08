@@ -6,8 +6,21 @@ import { isMac, formatShortcut, modKey } from "@multica/core/platform";
 import { useSearchStore } from "./search-store";
 import { useT } from "../i18n";
 
-export function SearchTrigger() {
+export function SearchTrigger({ variant = "default" }: { variant?: "default" | "icon" }) {
   const { t } = useT("search");
+  if (variant === "icon") {
+    return (
+      <SidebarMenuButton
+        aria-label={t(($) => $.title)}
+        title={t(($) => $.title)}
+        className="size-8 shrink-0 justify-center p-0 text-muted-foreground"
+        onClick={() => useSearchStore.getState().setOpen(true)}
+      >
+        <Search className="size-4" />
+      </SidebarMenuButton>
+    );
+  }
+
   return (
     <SidebarMenuButton
       className="text-muted-foreground"

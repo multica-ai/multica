@@ -32,7 +32,7 @@
     "filters": {
       "all": "All",
       "online": "Online",
-      "issues": "Issues"
+      "issues": "Problems"
     },
     "section_local": "Local",
     "section_remote": "Remote",
@@ -51,9 +51,9 @@
       "runtimes_hint_one": "{{count}} online",
       "runtimes_hint_other": "{{count}} online",
       "health": "Health",
-      "health_clear": "No issues",
-      "health_issues_one": "{{count}} issue",
-      "health_issues_other": "{{count}} issues",
+      "health_clear": "No problems",
+      "health_issues_one": "{{count}} problem",
+      "health_issues_other": "{{count}} problems",
       "workload": "Workload",
       "workload_value_idle": "Idle",
       "workload_idle": "All idle",

@@ -6,10 +6,14 @@ import type { ApiClient } from "../api/client";
 import type { Issue, ListIssuesParams, ListIssuesResponse } from "../types";
 import {
   CHILDREN_BY_PARENTS_CHUNK_SIZE,
+  ISSUE_ATTENTION_PAGE_LIMIT,
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
+  issueAttentionCountOptions,
+  issueAttentionListOptions,
   issueKeys,
+  isIssueApprovalRequired,
   projectGanttIssuesOptions,
 } from "./queries";
 
@@ -136,6 +140,125 @@ describe("projectGanttIssuesOptions", () => {
   it("uses the project-scoped Gantt cache key", () => {
     const options = projectGanttIssuesOptions(WS_ID, PROJECT_ID);
     expect(options.queryKey).toEqual(issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+});
+
+describe("issueAttentionCountOptions", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("returns the server total for tasks awaiting an approval gate", async () => {
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockResolvedValue({
+        issues: [makeIssue(1)],
+        total: 7,
+      });
+    installFakeApi(listIssues);
+
+    const count = await qc.fetchQuery(issueAttentionCountOptions(WS_ID));
+
+    expect(listIssues).toHaveBeenCalledTimes(1);
+    expect(listIssues).toHaveBeenCalledWith({
+      status: "in_review",
+      limit: 1,
+      offset: 0,
+    });
+    expect(count).toBe(7);
+  });
+
+  it("uses a list-prefixed cache key so status updates invalidate it", () => {
+    const options = issueAttentionCountOptions(WS_ID);
+
+    expect(options.queryKey).toEqual(issueKeys.attentionCount(WS_ID));
+    expect(options.queryKey.slice(0, issueKeys.list(WS_ID).length)).toEqual(issueKeys.list(WS_ID));
+  });
+});
+
+describe("issueAttentionListOptions", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("fetches all tasks awaiting an approval gate in created order", async () => {
+    const total = ISSUE_ATTENTION_PAGE_LIMIT + 3;
+    const firstPage = Array.from({ length: ISSUE_ATTENTION_PAGE_LIMIT }, (_, i) => ({
+      ...makeIssue(i),
+      status: "in_review" as const,
+    }));
+    const secondPage = Array.from({ length: 3 }, (_, i) => ({
+      ...makeIssue(ISSUE_ATTENTION_PAGE_LIMIT + i),
+      status: "in_review" as const,
+    }));
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        if (!params) throw new Error("expected params");
+        const offset = params.offset ?? 0;
+        if (offset === 0) return { issues: firstPage, total };
+        if (offset === ISSUE_ATTENTION_PAGE_LIMIT) return { issues: secondPage, total };
+        throw new Error(`unexpected offset ${offset}`);
+      });
+    installFakeApi(listIssues);
+
+    const issues = await qc.fetchQuery(issueAttentionListOptions(WS_ID));
+
+    expect(listIssues).toHaveBeenCalledTimes(2);
+    expect(listIssues).toHaveBeenNthCalledWith(1, {
+      status: "in_review",
+      limit: ISSUE_ATTENTION_PAGE_LIMIT,
+      offset: 0,
+      sort_by: "created_at",
+      sort_direction: "desc",
+    });
+    expect(listIssues).toHaveBeenNthCalledWith(2, {
+      status: "in_review",
+      limit: ISSUE_ATTENTION_PAGE_LIMIT,
+      offset: ISSUE_ATTENTION_PAGE_LIMIT,
+      sort_by: "created_at",
+      sort_direction: "desc",
+    });
+    expect(issues).toHaveLength(total);
+  });
+
+  it("uses a list-prefixed cache key so status updates invalidate it", () => {
+    const options = issueAttentionListOptions(WS_ID);
+
+    expect(options.queryKey).toEqual(issueKeys.attentionList(WS_ID));
+    expect(options.queryKey.slice(0, issueKeys.list(WS_ID).length)).toEqual(issueKeys.list(WS_ID));
+  });
+});
+
+describe("isIssueApprovalRequired", () => {
+  it("treats in_review tasks as awaiting an approval decision", () => {
+    expect(isIssueApprovalRequired({
+      ...makeIssue(1),
+      status: "in_review",
+    })).toBe(true);
+
+    expect(isIssueApprovalRequired({
+      ...makeIssue(3),
+      status: "in_progress",
+    })).toBe(false);
   });
 });
 

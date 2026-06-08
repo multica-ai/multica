@@ -8,6 +8,12 @@ import { PAGINATED_STATUSES } from "./queries";
 
 const EMPTY_BUCKET: IssueStatusBucket = { issues: [], total: 0 };
 
+export function isListIssuesCache(value: unknown): value is ListIssuesCache {
+  if (!value || typeof value !== "object") return false;
+  const byStatus = (value as { byStatus?: unknown }).byStatus;
+  return !!byStatus && typeof byStatus === "object";
+}
+
 export function getBucket(
   resp: ListIssuesCache,
   status: IssueStatus,

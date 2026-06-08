@@ -210,6 +210,18 @@ describe("onIssueMetadataChanged", () => {
     expect(list?.byStatus.todo?.issues[0]?.metadata).toEqual({ pr_number: 2 });
   });
 
+  it("invalidates attention caches without treating them as list buckets", () => {
+    qc.setQueryData(issueKeys.attentionCount(WS_ID), 51);
+    qc.setQueryData(issueKeys.attentionList(WS_ID), [baseIssue]);
+
+    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { pipeline_status: "waiting_review" });
+
+    expect(qc.getQueryData(issueKeys.attentionCount(WS_ID))).toBe(51);
+    expect(qc.getQueryData(issueKeys.attentionList(WS_ID))).toEqual([baseIssue]);
+    expectInvalidated(qc, issueKeys.attentionCount(WS_ID));
+    expectInvalidated(qc, issueKeys.attentionList(WS_ID));
+  });
+
   it("leaves untouched caches as undefined (no spurious writes)", () => {
     onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { foo: "bar" });
 

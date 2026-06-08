@@ -7,6 +7,7 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
+const mockUpload = vi.hoisted(() => vi.fn());
 const mockInvalidateQueries = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
   current: {
@@ -65,6 +66,10 @@ vi.mock("@multica/core/api", () => ({
   api: { updateWorkspace: mockUpdateWorkspace, getBaseUrl: () => "http://127.0.0.1:8080" },
 }));
 
+vi.mock("@multica/core/hooks/use-file-upload", () => ({
+  useFileUpload: () => ({ upload: mockUpload, uploading: false }),
+}));
+
 vi.mock("@multica/core/auth", () => {
   const useAuthStore = Object.assign(
     (sel?: (s: { user: { id: string } }) => unknown) =>
@@ -100,7 +105,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
-describe("WorkspaceTab — issue prefix editing", () => {
+describe("WorkspaceTab — task prefix editing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     workspaceRef.current = {
@@ -116,13 +121,14 @@ describe("WorkspaceTab — issue prefix editing", () => {
     mockUpdateWorkspace.mockImplementation(
       async (
         _id: string,
-        payload: { issue_prefix?: string; name?: string },
+        payload: { issue_prefix?: string; name?: string; avatar_url?: string },
       ) => ({
         ...workspaceRef.current,
         ...payload,
         issue_prefix: payload.issue_prefix ?? workspaceRef.current.issue_prefix,
       }),
     );
+    mockUpload.mockResolvedValue({ link: "/uploads/workspace-logo.png" });
   });
 
   it("renders the current prefix in the input", () => {
@@ -157,8 +163,8 @@ describe("WorkspaceTab — issue prefix editing", () => {
       "workspace-1",
       expect.not.objectContaining({ issue_prefix: expect.anything() }),
     );
-    expect(screen.queryByText(/Change issue prefix/i)).toBeNull();
-    // Non-prefix saves must NOT invalidate the issue cache — would
+    expect(screen.queryByText(/Change task prefix/i)).toBeNull();
+    // Non-prefix saves must NOT invalidate the task cache — would
     // trigger an unnecessary workspace-wide refetch on every name edit.
     expect(mockInvalidateQueries).not.toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ["issues", "workspace-1"] }),
@@ -179,7 +185,7 @@ describe("WorkspaceTab — issue prefix editing", () => {
     expect(mockUpdateWorkspace).not.toHaveBeenCalled();
 
     // Dialog body mentions both the old and new prefix in the warning.
-    await screen.findByText(/Change issue prefix/i);
+    await screen.findByText(/Change task prefix/i);
     expect(screen.getByText(/TES-N/)).toBeTruthy();
     expect(screen.getByText(/NEW-N/)).toBeTruthy();
 
@@ -192,8 +198,8 @@ describe("WorkspaceTab — issue prefix editing", () => {
       "workspace-1",
       expect.objectContaining({ issue_prefix: "NEW" }),
     );
-    // Issue identifiers (`MUL-123`) are recomputed from the workspace
-    // prefix at read time, so cached issues display the stale OLD-N key
+    // Task identifiers (`MUL-123`) are recomputed from the workspace
+    // prefix at read time, so cached tasks display the stale OLD-N key
     // until invalidated. Without this the confirm dialog's promise that
     // "all issues will be renumbered to NEW-N" is a lie.
     expect(mockInvalidateQueries).toHaveBeenCalledWith(
@@ -211,7 +217,7 @@ describe("WorkspaceTab — issue prefix editing", () => {
 
     await user.click(screen.getByRole("button", { name: /^Save$/ }));
 
-    await screen.findByText(/Change issue prefix/i);
+    await screen.findByText(/Change task prefix/i);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(mockUpdateWorkspace).not.toHaveBeenCalled();
@@ -233,5 +239,20 @@ describe("WorkspaceTab — issue prefix editing", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
     expect(screen.getByPlaceholderText("TES")).toBeDisabled();
+  });
+
+  it("uploads a logo and persists the returned upload URL", async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["logo"], "logo.png", { type: "image/png" });
+    await user.upload(input, file);
+
+    await waitFor(() => expect(mockUpload).toHaveBeenCalledWith(file));
+    expect(mockUpdateWorkspace).toHaveBeenCalledWith(
+      "workspace-1",
+      expect.objectContaining({ avatar_url: "/uploads/workspace-logo.png" }),
+    );
   });
 });

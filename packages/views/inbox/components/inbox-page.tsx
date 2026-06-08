@@ -8,6 +8,10 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
+  issueAttentionListOptions,
+  isIssueApprovalRequired,
+} from "@multica/core/issues/queries";
+import {
   inboxListOptions,
   deduplicateInboxItems,
   useInboxUnreadCount,
@@ -21,20 +25,19 @@ import {
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
 
-import { IssueDetail } from "../../issues/components";
+import { IssueDetail } from "../../issues/components/issue-detail";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
-import { useNavigation } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { toast } from "sonner";
-import {
-  MoreHorizontal,
-  Inbox,
-  CheckCheck,
-  Archive,
-  BookCheck,
-  ListChecks,
-  ArrowLeft,
-} from "lucide-react";
-import type { InboxItem } from "@multica/core/types";
+import MoreHorizontal from "lucide-react/dist/esm/icons/more-horizontal.mjs";
+import Inbox from "lucide-react/dist/esm/icons/inbox.mjs";
+import CheckCheck from "lucide-react/dist/esm/icons/check-check.mjs";
+import Archive from "lucide-react/dist/esm/icons/archive.mjs";
+import BookCheck from "lucide-react/dist/esm/icons/book-check.mjs";
+import ListChecks from "lucide-react/dist/esm/icons/list-checks.mjs";
+import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
+import ListFilter from "lucide-react/dist/esm/icons/list-filter.mjs";
+import type { InboxItem, Issue } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   ResizablePanelGroup,
@@ -56,10 +59,45 @@ import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
 
+const APPROVAL_GATE_INBOX_PREFIX = "approval-gate:";
+
+function isApprovalGateInboxItem(item: InboxItem): boolean {
+  return item.id.startsWith(APPROVAL_GATE_INBOX_PREFIX);
+}
+
+function issueCreatorActorType(issue: Issue): InboxItem["actor_type"] {
+  return issue.creator_type === "member" || issue.creator_type === "agent"
+    ? issue.creator_type
+    : "system";
+}
+
+function issueToApprovalGateInboxItem(issue: Issue): InboxItem {
+  const actorType = issueCreatorActorType(issue);
+  return {
+    id: `${APPROVAL_GATE_INBOX_PREFIX}${issue.id}`,
+    workspace_id: issue.workspace_id,
+    recipient_type: "member",
+    recipient_id: issue.creator_id,
+    actor_type: actorType,
+    actor_id: actorType === "system" ? null : issue.creator_id,
+    type: "review_requested",
+    severity: "action_required",
+    issue_id: issue.id,
+    title: issue.title,
+    body: issue.description,
+    issue_status: issue.status,
+    read: false,
+    archived: false,
+    created_at: issue.updated_at || issue.created_at,
+    details: { identifier: issue.identifier },
+  };
+}
+
 export function InboxPage() {
   const { t } = useT("inbox");
   const { searchParams, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
+  const approvalOnly = searchParams.get("filter") === "approvals";
   const wsPaths = useWorkspacePaths();
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
@@ -72,8 +110,20 @@ export function InboxPage() {
   const wsId = useWorkspaceId();
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
+  const { data: approvalIssues = [], isLoading: approvalLoading } = useQuery({
+    ...issueAttentionListOptions(wsId),
+    enabled: !!wsId,
+  });
+  const approvalItems = useMemo(
+    () => approvalIssues.filter(isIssueApprovalRequired).map(issueToApprovalGateInboxItem),
+    [approvalIssues],
+  );
+  const displayItems = useMemo(
+    () => approvalOnly ? approvalItems : deduplicateInboxItems([...approvalItems, ...items]),
+    [approvalItems, approvalOnly, items],
+  );
 
-  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+  const selected = displayItems.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
 
   // Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -87,9 +137,13 @@ export function InboxPage() {
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
     const inboxPath = wsPaths.inbox();
-    const url = key ? `${inboxPath}?issue=${key}` : inboxPath;
+    const params = new URLSearchParams();
+    if (approvalOnly) params.set("filter", "approvals");
+    if (key) params.set("issue", key);
+    const qs = params.toString();
+    const url = qs ? `${inboxPath}?${qs}` : inboxPath;
     replace(url);
-  }, [replace, wsPaths]);
+  }, [approvalOnly, replace, wsPaths]);
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page
@@ -99,6 +153,7 @@ export function InboxPage() {
   // too — clear the selection and stay on /inbox instead.
   useEffect(() => {
     if (loading) return;
+    if (approvalOnly) return;
     if (!selectedKey) return;
     if (selected) return;
     if (lastResolvedKeyRef.current === selectedKey) {
@@ -106,7 +161,15 @@ export function InboxPage() {
       return;
     }
     replace(wsPaths.issueDetail(selectedKey));
-  }, [loading, selectedKey, selected, replace, wsPaths, setSelectedKey]);
+  }, [approvalOnly, loading, selectedKey, selected, replace, wsPaths, setSelectedKey]);
+
+  useEffect(() => {
+    if (!approvalOnly) return;
+    if (approvalLoading) return;
+    if (selected) return;
+    const next = approvalItems[0] ?? null;
+    setSelectedKey(next ? (next.issue_id ?? next.id) : "");
+  }, [approvalItems, approvalLoading, approvalOnly, selected, setSelectedKey]);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
@@ -133,8 +196,10 @@ export function InboxPage() {
   const markReadMutate = markReadMutation.mutate;
   const selectedId = selected?.id;
   const selectedRead = selected?.read;
+  const selectedIsApprovalGate = selected ? isApprovalGateInboxItem(selected) : false;
   useEffect(() => {
     if (!selectedId || selectedRead) return;
+    if (selectedIsApprovalGate) return;
     markReadMutate(selectedId, {
       onError: (err) =>
         toast.error(
@@ -143,11 +208,15 @@ export function InboxPage() {
             : t(($) => $.errors.mark_read_failed),
         ),
     });
-  }, [selectedId, selectedRead, markReadMutate, t]);
+  }, [selectedId, selectedRead, selectedIsApprovalGate, markReadMutate, t]);
 
   const handleSelect = (item: InboxItem) => {
     setSelectedKey(item.issue_id ?? item.id);
   };
+
+  const approvalFilterHref = approvalOnly
+    ? wsPaths.inbox()
+    : `${wsPaths.inbox()}?filter=approvals`;
 
   const handleArchive = (id: string) => {
     const idx = items.findIndex((i) => i.id === id);
@@ -232,59 +301,94 @@ export function InboxPage() {
           </span>
         )}
       </div>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground"
-            />
-          }
+      <div className="flex items-center gap-1">
+        <Button
+          variant={approvalOnly ? "secondary" : "ghost"}
+          size="sm"
+          render={<AppLink href={approvalFilterHref} />}
+          nativeButton={false}
+          className="h-7 gap-1.5 rounded-md px-2 text-xs text-muted-foreground data-[state=on]:text-foreground"
+          data-state={approvalOnly ? "on" : "off"}
+          aria-pressed={approvalOnly}
         >
-          <MoreHorizontal className="h-4 w-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-auto">
-          <DropdownMenuItem onClick={handleMarkAllRead}>
-            <CheckCheck className="h-4 w-4" />
-            {t(($) => $.menu.mark_all_read)}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleArchiveAll}>
-            <Archive className="h-4 w-4" />
-            {t(($) => $.menu.archive_all)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleArchiveAllRead}>
-            <BookCheck className="h-4 w-4" />
-            {t(($) => $.menu.archive_all_read)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleArchiveCompleted}>
-            <ListChecks className="h-4 w-4" />
-            {t(($) => $.menu.archive_completed)}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          <ListFilter className="h-3.5 w-3.5" />
+          {t(($) => $.filters.approvals_only)}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+              />
+            }
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto">
+            <DropdownMenuItem onClick={handleMarkAllRead}>
+              <CheckCheck className="h-4 w-4" />
+              {t(($) => $.menu.mark_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleArchiveAll}>
+              <Archive className="h-4 w-4" />
+              {t(($) => $.menu.archive_all)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleArchiveAllRead}>
+              <BookCheck className="h-4 w-4" />
+              {t(($) => $.menu.archive_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleArchiveCompleted}>
+              <ListChecks className="h-4 w-4" />
+              {t(($) => $.menu.archive_completed)}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </PageHeader>
   );
 
-  const listBody = items.length === 0 ? (
+  const listBody = approvalOnly && approvalLoading ? (
+    <div className="space-y-1 p-2">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+          <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </div>
+      ))}
+    </div>
+  ) : displayItems.length === 0 ? (
     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
       <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-      <p className="text-sm">{t(($) => $.list.empty)}</p>
+      <p className="text-sm">
+        {approvalOnly ? t(($) => $.list.empty_approvals) : t(($) => $.list.empty)}
+      </p>
     </div>
   ) : (
     <div>
-      {items.map((item) => (
+      {displayItems.map((item) => (
         <InboxListItem
           key={item.id}
           item={item}
           isSelected={(item.issue_id ?? item.id) === selectedKey}
           onClick={() => handleSelect(item)}
           onArchive={() => handleArchive(item.id)}
+          canArchive={!isApprovalGateInboxItem(item)}
         />
       ))}
     </div>
   );
+
+  const emptyDetailText = displayItems.length === 0
+    ? approvalOnly
+      ? t(($) => $.list.empty_approvals)
+      : t(($) => $.detail.empty)
+    : t(($) => $.detail.select_prompt);
 
   const detailContent = selected?.issue_id ? (
     // Key by issue_id (not inbox-item id): a new comment/reaction generates a
@@ -306,7 +410,8 @@ export function InboxPage() {
           setSelectedKey("");
         }}
         onDone={() => {
-          handleArchive(selected.id);
+          if (isApprovalGateInboxItem(selected)) setSelectedKey("");
+          else handleArchive(selected.id);
         }}
       />
     </ErrorBoundary>
@@ -471,11 +576,7 @@ export function InboxPage() {
         {detailContent ?? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
-            <p className="text-sm">
-              {items.length === 0
-                ? t(($) => $.detail.empty)
-                : t(($) => $.detail.select_prompt)}
-            </p>
+            <p className="text-sm">{emptyDetailText}</p>
           </div>
         )}
       </div>

@@ -9,12 +9,12 @@
     "headline_emphasis": "one workspace.",
     "lede": "Assign them work like you'd assign a colleague — they pick it up, update status, and comment when done.",
     "lede_web": "Desktop bundles the runtime — nothing to install. Continue on web to connect your own CLI.",
-    "lede_desktop": "By the end, a real agent will be replying to your first issue.",
+    "lede_desktop": "By the end, a real agent will be replying to your first task.",
     "download_desktop": "Download Desktop",
     "continue_on_web": "Continue on web",
     "start_exploring": "Start exploring",
     "skip_existing": "I've done this before",
-    "illustration_caption": "Every issue, every thread, every decision — shared by your team and agents.",
+    "illustration_caption": "Every task, every thread, every decision — shared by your team and agents.",
     "illustration": {
       "card1_actor_name": "You",
       "card1_actor_initial": "N",
@@ -145,7 +145,7 @@
     "eyebrow": "Your first agent",
     "headline": "Meet your first teammate.",
     "lede_prefix": "Your answers point to a ",
-    "lede_suffix": ". Pick whichever of the four fits you — each template ships ready to take its first issue. You can retune its instructions from the agent settings page later.",
+    "lede_suffix": ". Pick whichever of the four fits you — each template ships ready to take its first task. You can retune its instructions from the agent settings page later.",
     "footer_hint": "One agent is enough to start. Add more from the sidebar later.",
     "create_action": "Create {{name}}",
     "create_failed": "Failed to create agent",
@@ -154,17 +154,17 @@
       "coding": {
         "label": "Coding Agent",
         "blurb": "Writes, refactors, and ships code. Reads your repo.",
-        "instructions": "You are a Coding Agent on a product team. Pick up coding issues — implement features, fix bugs, write tests, and open pull requests. Read the repository before you start, follow existing code conventions, and keep diffs focused. Ask for clarification when the acceptance criteria are ambiguous."
+        "instructions": "You are a Coding Agent on a product team. Pick up coding tasks — implement features, fix bugs, write tests, and open pull requests. Read the repository before you start, follow existing code conventions, and keep diffs focused. Ask for clarification when the acceptance criteria are ambiguous."
       },
       "planning": {
         "label": "Planning Agent",
         "blurb": "Breaks down work, drafts specs, keeps the board tidy.",
-        "instructions": "You are a Planning Agent. Turn loose ideas and open issues into scoped, ready-to-execute work: break them down into subtasks, write acceptance criteria, and propose owners and sequencing. Prefer clarity over speed. When blocked by missing context, ask one specific question rather than guessing."
+        "instructions": "You are a Planning Agent. Turn loose ideas and open tasks into scoped, ready-to-execute work: break them down into subtasks, write acceptance criteria, and propose owners and sequencing. Prefer clarity over speed. When blocked by missing context, ask one specific question rather than guessing."
       },
       "writing": {
         "label": "Writing Agent",
         "blurb": "Drafts, summarizes, researches. Long-form friendly.",
-        "instructions": "You are a Writing Agent. Draft documents, summarize long content, and research topics on the web when needed. Structure your output as finished prose a reader can use directly — not an outline. Cite sources when you draw from them. Match the tone the user establishes in the issue."
+        "instructions": "You are a Writing Agent. Draft documents, summarize long content, and research topics on the web when needed. Structure your output as finished prose a reader can use directly — not an outline. Cite sources when you draw from them. Match the tone the user establishes in the task."
       },
       "assistant": {
         "label": "Assistant",
@@ -176,12 +176,12 @@
     "about_headline": "An AI teammate that lives in your workspace.",
     "about_body": "Agents show up in every assignee picker, just like any other colleague — except they can work 24/7 on whatever runtime you give them.",
     "ways_eyebrow": "Ways to work with an agent",
-    "way_assign_title": "Assign it an issue",
+    "way_assign_title": "Assign it a task",
     "way_assign_body": "It picks up the task and reports back in the thread.",
     "way_mention_title": "@mention in a comment",
     "way_mention_body": "Pull it into a conversation for a quick take.",
     "way_chat_title": "Chat one-on-one",
-    "way_chat_body": "Ask quick questions without creating an issue.",
+    "way_chat_body": "Ask quick questions without creating a task.",
     "way_autopilot_title": "Put it on Autopilot",
     "way_autopilot_body": "Daily triage, weekly digest, monthly audit — on a schedule.",
     "add_more_hint": "Add more agents anytime. A small team of specialized agents beats one jack-of-all-trades.",
@@ -200,7 +200,7 @@
     "runtime": {
       "greeting": "Hi, welcome to Multica",
       "subtitle": "I'm your first Agent assistant.",
-      "capabilities": "Ask me anything about how to use Multica. You can also have me get things done in your workspace — create issues, set up cron tasks, build new agents…",
+      "capabilities": "Ask me anything about how to use Multica. You can also have me get things done in your workspace — create tasks, set up cron tasks, build new agents…",
       "section_label": "Pick one or more tasks to start with:",
       "assign_empty": "Pick one or more",
       "assign_count": "Assign {{count}} task to me →",
@@ -210,7 +210,7 @@
           "subtitle": "Let me explain in 1–2 paragraphs what Multica is and what it can do."
         },
         "tour": {
-          "subtitle": "I'll walk you through how issue, agent, squad, autopilot fit together."
+          "subtitle": "I'll walk you through how task, agent, squad, autopilot fit together."
         },
         "welcome_page": {
           "subtitle": "I'll build you a single-file HTML slide deck — tailored to your role, ready to copy and open in a browser."
@@ -248,14 +248,14 @@
     "eyebrow_resume": "Pick up or start fresh",
     "headline_first": "Name your workspace.",
     "headline_resume": "Continue with {{name}}, or start another.",
-    "lede_first": "A workspace is where your issues, agents, and projects live. You can invite teammates or spin up more workspaces later.",
+    "lede_first": "A workspace is where your tasks, agents, and projects live. You can invite teammates or spin up more workspaces later.",
     "lede_resume": "Resume setup with the workspace you already have, or create a new one alongside it — you can belong to any number of workspaces.",
     "name_label": "Workspace name",
     "name_placeholder": "Acme Inc, My Lab, Side Projects…",
     "url_label": "URL",
     "slug_placeholder": "acme",
-    "issue_prefix_label": "Issue prefix",
-    "issue_prefix_prefix": "Issues will look like ",
+    "issue_prefix_label": "Task prefix",
+    "issue_prefix_prefix": "Tasks will look like ",
     "issue_prefix_suffix": ". You can change this later in settings.",
     "create_new_title": "Create a new workspace",
     "create_new_subtitle": "Start fresh — a separate space for a different side of your work.",
@@ -280,22 +280,22 @@
     "side_next_eyebrow": "What's next",
     "side_preview_name": "Your workspace",
     "side_preview_slug": "workspace",
-    "perk_assign": "Assign issues to agents like you would a teammate",
-    "perk_chat": "Chat with any agent without creating an issue",
+    "perk_assign": "Assign tasks to agents like you would a teammate",
+    "perk_chat": "Chat with any agent without creating a task",
     "perk_invite": "Invite teammates — they see only this workspace",
     "perk_switch": "Switch to other workspaces anytime from the top-left",
     "next_runtime": "Connect a computer so your agents have somewhere to run",
     "next_agent": "Create Multica Helper from your connected runtime",
-    "next_starter": "Open one onboarding issue for your next step",
+    "next_starter": "Open one onboarding task for your next step",
     "preview": {
       "inbox_label": "Inbox",
       "inbox_meta": "your notifications",
-      "issues_label": "Issues",
+      "issues_label": "Tasks",
       "issues_meta": "shared task board",
       "agents_label": "Agents",
       "agents_meta": "your AI teammates",
       "projects_label": "Projects",
-      "projects_meta": "group related issues",
+      "projects_meta": "group related tasks",
       "autopilot_label": "Autopilot",
       "autopilot_meta": "scheduled automation",
       "runtimes_label": "Runtimes",

@@ -1,13 +1,20 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";
-import { ModalRegistry } from "../modals/registry";
-import { SourceBackfillModal } from "../onboarding";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
 import { NavigationProgress } from "./navigation-progress";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
+
+const ModalRegistry = lazy(() =>
+  import("../modals/registry").then((m) => ({ default: m.ModalRegistry })),
+);
+const SourceBackfillModal = lazy(() =>
+  import("../onboarding/source-backfill-modal").then((m) => ({
+    default: m.SourceBackfillModal,
+  })),
+);
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -39,11 +46,27 @@ export function DashboardLayout({
         <SidebarInset className="relative overflow-hidden">
           <NavigationProgress />
           {children}
-          <ModalRegistry />
-          <SourceBackfillModal />
+          <DashboardOverlays />
           {extra}
         </SidebarInset>
       </SidebarProvider>
     </DashboardGuard>
+  );
+}
+
+function DashboardOverlays() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
+  return (
+    <Suspense fallback={null}>
+      <ModalRegistry />
+      <SourceBackfillModal />
+    </Suspense>
   );
 }

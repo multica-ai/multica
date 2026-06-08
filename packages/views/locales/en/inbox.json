@@ -9,8 +9,12 @@
     "archive_all_read": "Archive all read",
     "archive_completed": "Archive completed"
   },
+  "filters": {
+    "approvals_only": "Approvals only"
+  },
   "list": {
     "empty": "No notifications",
+    "empty_approvals": "No tasks need approval",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
     "time": {

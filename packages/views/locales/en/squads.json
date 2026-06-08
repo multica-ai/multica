@@ -11,7 +11,7 @@
   },
   "archive_dialog": {
     "title": "Archive this squad?",
-    "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
+    "description": "\"{{name}}\" will be archived. Tasks currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
     "cancel": "Cancel",
     "confirm": "Archive",
     "archiving": "Archiving…"
@@ -69,7 +69,7 @@
     "more_members_other": "+{{count}} more"
   },
   "instructions_tab": {
-    "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
+    "description": "Squad instructions are injected into the leader agent's prompt whenever it works on a task assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save"
   }

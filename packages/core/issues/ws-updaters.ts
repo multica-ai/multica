@@ -1,23 +1,30 @@
-import type { QueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
 import { projectKeys } from "../projects/queries";
 import {
   addIssueToBuckets,
   findIssueLocation,
+  isListIssuesCache,
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
 import type { Issue, IssueLabelsResponse, IssueMetadata, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
+function issueListCacheEntries(qc: QueryClient, wsId: string): [QueryKey, ListIssuesCache][] {
+  return qc
+    .getQueriesData<unknown>({ queryKey: issueKeys.list(wsId) })
+    .filter((entry): entry is [QueryKey, ListIssuesCache] => isListIssuesCache(entry[1]));
+}
+
 export function onIssueCreated(
   qc: QueryClient,
   wsId: string,
   issue: Issue,
 ) {
-  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
-    if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
+  for (const [key, data] of issueListCacheEntries(qc, wsId)) {
+    qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
   }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
@@ -44,7 +51,7 @@ export function onIssueUpdated(
   // Look up the OLD parent before mutating list state, so we can keep
   // the parent's children cache in sync (powers the sub-issues list
   // shown on the parent issue page).
-  const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+  const listQueries = issueListCacheEntries(qc, wsId);
   const firstListData = listQueries[0]?.[1];
   const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
   const oldParentId =
@@ -117,8 +124,8 @@ export function onIssueLabelsChanged(
   issueId: string,
   labels: Label[],
 ) {
-  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
-    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
+  for (const [key, data] of issueListCacheEntries(qc, wsId)) {
+    qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
   }
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
@@ -160,13 +167,15 @@ export function onIssueMetadataChanged(
   issueId: string,
   metadata: IssueMetadata,
 ) {
-  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
-    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
+  for (const [key, data] of issueListCacheEntries(qc, wsId)) {
+    qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
   }
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.attentionCount(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.attentionList(wsId) });
 }
 
 export function onIssueDeleted(
