@@ -26,6 +26,52 @@ func TestAutopilotErrorType(t *testing.T) {
 	}
 }
 
+func TestIsNoProgressTaskFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		task db.AgentTaskQueue
+		want bool
+	}{
+		{
+			name: "classified codex semantic inactivity",
+			task: db.AgentTaskQueue{
+				FailureReason: pgtype.Text{String: "codex_semantic_inactivity", Valid: true},
+			},
+			want: true,
+		},
+		{
+			name: "codex app-server no progress marker",
+			task: db.AgentTaskQueue{
+				Error: pgtype.Text{String: "codex app-server no progress timeout after 30s", Valid: true},
+			},
+			want: true,
+		},
+		{
+			name: "codex semantic inactivity marker",
+			task: db.AgentTaskQueue{
+				Error: pgtype.Text{String: "codex semantic inactivity timeout after 5m", Valid: true},
+			},
+			want: true,
+		},
+		{
+			name: "ordinary agent failure",
+			task: db.AgentTaskQueue{
+				FailureReason: pgtype.Text{String: "agent_error", Valid: true},
+				Error:         pgtype.Text{String: "tests failed", Valid: true},
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isNoProgressTaskFailure(tc.task); got != tc.want {
+				t.Fatalf("isNoProgressTaskFailure() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildIssueDescription_NoTriggerPayload(t *testing.T) {
 	s := &AutopilotService{}
 	ap := db.Autopilot{Description: pgtype.Text{String: "do the thing", Valid: true}}

@@ -438,6 +438,83 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 	}
 }
 
+// SyncRunFromLinkedIssueTask closes a create_issue autopilot run when the
+// issue task fails before producing agent progress. create_issue tasks are
+// linked through issue_id rather than autopilot_run_id, so SyncRunFromTask
+// cannot see them directly.
+func (s *AutopilotService) SyncRunFromLinkedIssueTask(ctx context.Context, task db.AgentTaskQueue) {
+	if task.AutopilotRunID.Valid || !task.IssueID.Valid || task.Status != "failed" {
+		return
+	}
+	if !isNoProgressTaskFailure(task) {
+		return
+	}
+	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("failed to check active tasks for autopilot issue failure",
+			"issue_id", util.UUIDToString(task.IssueID),
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		return
+	}
+	if hasActive {
+		return
+	}
+
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil || !issue.OriginType.Valid || issue.OriginType.String != "autopilot" {
+		return
+	}
+	run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID)
+	if err != nil {
+		return
+	}
+	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+	if err != nil {
+		return
+	}
+
+	reason := taskFailureReasonForAutopilotRun(task)
+	updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+		ID:            run.ID,
+		FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
+	})
+	if err != nil {
+		slog.Warn("failed to fail autopilot run from linked issue task",
+			"run_id", util.UUIDToString(run.ID),
+			"issue_id", util.UUIDToString(issue.ID),
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		return
+	}
+	s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
+	s.publishRunDone(util.UUIDToString(issue.WorkspaceID), updatedRun, "failed")
+}
+
+func isNoProgressTaskFailure(task db.AgentTaskQueue) bool {
+	if task.FailureReason.Valid && task.FailureReason.String == "codex_semantic_inactivity" {
+		return true
+	}
+	if !task.Error.Valid {
+		return false
+	}
+	errText := strings.ToLower(task.Error.String)
+	return strings.Contains(errText, "codex app-server no progress timeout") ||
+		strings.Contains(errText, "codex semantic inactivity timeout")
+}
+
+func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {
+	if task.Error.Valid && strings.TrimSpace(task.Error.String) != "" {
+		return task.Error.String
+	}
+	if task.FailureReason.Valid && strings.TrimSpace(task.FailureReason.String) != "" {
+		return task.FailureReason.String
+	}
+	return "task failed before agent progress"
+}
+
 // handleDispatchSkip recognises an errDispatchSkipped returned from a
 // dispatch function and rewrites the in-flight run to `skipped` (instead of
 // `failed`). Returns the updated run on a real skip, nil otherwise — callers

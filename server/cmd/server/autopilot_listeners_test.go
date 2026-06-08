@@ -122,6 +122,97 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 	}
 }
 
+func TestAutopilotCreateIssueTaskNoProgressFailureUpdatesRun(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	registerAutopilotListeners(bus, autopilotSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Create-issue no-progress listener",
+		Description:        pgtype.Text{String: "VEN-661 regression test", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: "No-progress issue", Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if !run.IssueID.Valid {
+		t.Fatal("create_issue dispatch did not link an issue")
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, run.IssueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, run.IssueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, run.IssueID)
+	})
+
+	tasks, err := queries.ListTasksByIssue(ctx, run.IssueID)
+	if err != nil {
+		t.Fatalf("ListTasksByIssue: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected one issue task, got %d", len(tasks))
+	}
+	taskID := tasks[0].ID
+	if tasks[0].AutopilotRunID.Valid {
+		t.Fatal("create_issue issue task unexpectedly has autopilot_run_id; test must exercise linked issue lookup")
+	}
+	if run.Status != "issue_created" {
+		t.Fatalf("expected pre-failure run status issue_created, got %q", run.Status)
+	}
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now(), max_attempts = 1 WHERE id = $1`,
+		taskID,
+	); err != nil {
+		t.Fatalf("mark task dispatched: %v", err)
+	}
+	task, err := queries.StartAgentTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("StartAgentTask: %v", err)
+	}
+
+	const errMsg = "codex app-server no progress timeout after 30s"
+	if _, err := taskSvc.FailTask(ctx, task.ID, errMsg, "", "", "codex_semantic_inactivity"); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+
+	updatedRun, err := queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if updatedRun.Status != "failed" {
+		t.Fatalf("expected run status failed, got %q", updatedRun.Status)
+	}
+	if !updatedRun.FailureReason.Valid || !strings.Contains(updatedRun.FailureReason.String, "no progress timeout") {
+		t.Fatalf("expected no-progress failure reason, got %+v", updatedRun.FailureReason)
+	}
+}
+
 // TestAutopilotDispatchSkipsWhenRuntimeOffline locks in the MUL-1899
 // admission gate: when the assignee agent's runtime is not online we must
 // record a `skipped` autopilot_run with a failure_reason and NOT enqueue an
