@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Second ApplicationSet plugin workload, dedicated to the development agentfarm
+# server. Runs alongside the tools-server generator in the tools cluster, in its
+# own namespace, reading dev-server-specific SSM paths. The `namespace:` directive
+# also renames the base Namespace object to agentrunner-dev-generator.
+namespace: agentrunner-dev-generator
+
+resources:
+  - ../../../base/agentrunner-generator
+
+images:
+  - name: ghcr.io/g2crowd/applicationset-fs-plugin
+    newTag: "latest"
+
+patches:
+  # Point the plugin's bearer-token ESO at the dev-server plugin token (sibling
+  # of the tools token under /agentfarm/tools/, read by this tools-cluster pod).
+  - target:
+      kind: ExternalSecret
+      name: agentrunner-generator-token
+    patch: |
+      - op: replace
+        path: /spec/data/0/remoteRef/key
+        value: /agentfarm/tools/plugin-token-dev
+  # Sweep the dev-server registry subtree (one key per enabled slug) instead of
+  # the tools registry. Distinct path segment => no overlap with the tools sweep.
+  - target:
+      kind: ExternalSecret
+      name: agentrunner-registry
+    patch: |
+      - op: replace
+        path: /spec/dataFrom/0/find/path
+        value: /agentfarm/tools/agentrunner-dev
+      - op: replace
+        path: /spec/dataFrom/0/find/name/regexp
+        value: "^/agentfarm/tools/agentrunner-dev/[^/]+$"
+      - op: replace
+        path: /spec/dataFrom/0/rewrite/0/regexp/source
+        value: "/agentfarm/tools/agentrunner-dev/(.*)"

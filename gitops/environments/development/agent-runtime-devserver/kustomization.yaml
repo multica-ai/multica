@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Per-workspace runner workload for the *development* agentfarm server, kept
+# separate from the tools-server runners (gitops/environments/development/
+# agent-runtime). Both pipelines deploy into the same development cluster, so
+# this overlay repoints the runner secret tree to a dev-server subtree and pins
+# the server URL. The agentrunner-dev-appset (g2crowd/configuration) sources this
+# path and patches PLACEHOLDER -> the workspace slug per Application.
+resources:
+  - ../../../base/agent-runtime
+
+images:
+  - name: ghcr.io/g2crowd/agentrunner-runtime
+    newTag: "9af4dc79"
+
+patches:
+  # Repoint both the per-workspace (dataFrom/0, PLACEHOLDER kept for the appset)
+  # and the shared (dataFrom/1) secret sweeps to the dev-server subtree. The
+  # appset only patches dataFrom/0, so the shared path MUST be repointed here or
+  # dev-server runners would read the tools-server runners' shared secrets.
+  - target:
+      kind: ExternalSecret
+      name: agentrunner-secrets
+    patch: |
+      - op: replace
+        path: /spec/dataFrom/0/find/path
+        value: /agentfarm/development/agentrunner-dev/PLACEHOLDER
+      - op: replace
+        path: /spec/dataFrom/0/find/name/regexp
+        value: "^/agentfarm/development/agentrunner-dev/PLACEHOLDER/[^/]+$"
+      - op: replace
+        path: /spec/dataFrom/0/rewrite/0/regexp/source
+        value: "/agentfarm/development/agentrunner-dev/PLACEHOLDER/(.*)"
+      - op: replace
+        path: /spec/dataFrom/1/find/path
+        value: /agentfarm/development/agentrunner-dev/shared
+      - op: replace
+        path: /spec/dataFrom/1/find/name/regexp
+        value: "^/agentfarm/development/agentrunner-dev/shared/[^/]+$"
+      - op: replace
+        path: /spec/dataFrom/1/rewrite/0/regexp/source
+        value: "/agentfarm/development/agentrunner-dev/shared/(.*)"
+  # Point the runner at the development agentfarm server. The image defaults
+  # MULTICA_SERVER_URL to the tools/prod URL; this static env (which takes
+  # precedence over envFrom) overrides it for the dev-server pipeline.
+  - target:
+      kind: Deployment
+      name: agentrunner
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: agentrunner
+      spec:
+        template:
+          spec:
+            containers:
+              - name: opencode
+                env:
+                  - name: MULTICA_SERVER_URL
+                    value: https://agentfarm.development.g2.com
