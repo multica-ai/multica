@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -46,10 +47,17 @@ func isUndefinedTable(err error) bool {
 // the feature packages whose policy it resolves.
 const connectionToolKeyPrefix = "connection:"
 
-// connectionToolSource labels per-tool connection rows so the UI can separate
-// them from the capability-wide connection row and from per-repo rows (both also
-// carry a non-empty resource_pattern).
-const connectionToolSource = "connection-tool"
+// connectionToolSource labels per-tool rows for MCP (mcp_http) connections, and
+// connectionEndpointSource labels per-endpoint+method rows for REST (api)
+// connections. Both carry a non-empty resource_pattern (the tool name, or
+// "<METHOD> <path>"), so the UI separates them from the capability-wide
+// connection row and from per-repo rows. Only MCP tools are runtime-enforced via
+// --disallowedTools today; API rows are config-only (CRUD control) until an
+// API-call enforcement path is designed — see DeniedConnectionTools.
+const (
+	connectionToolSource     = "connection-tool"
+	connectionEndpointSource = "connection-endpoint"
+)
 
 // connectionTool is one tool discovered on a connection, persisted on the
 // workspace_connection.tools JSON array.
@@ -58,12 +66,31 @@ type connectionTool struct {
 	Description string `json:"description,omitempty"`
 }
 
+// endpointPermission mirrors connections.EndpointPermission: one REST path and
+// the HTTP methods configured on it. Used to synthesize per-endpoint+method rows
+// for API connections.
+type endpointPermission struct {
+	Path    string   `json:"path"`
+	Methods []string `json:"methods"`
+}
+
 // connectionRow pairs a connection's policy key with the human label its tools
-// group under (the connection display name) and the tools themselves.
+// group under (the connection display name), the connection kind ("mcp_http" or
+// "api"), and the per-tool rows (MCP tools, or synthesized "<METHOD> <path>"
+// entries for API endpoints).
 type connectionRow struct {
 	name        string
 	displayName string
+	kind        string
 	tools       []connectionTool
+}
+
+// sourceForKind maps a connection type to the row Source the UI groups on.
+func sourceForKind(kind string) string {
+	if kind == "api" {
+		return connectionEndpointSource
+	}
+	return connectionToolSource
 }
 
 // appendConnectionToolRows discovers the workspace's enabled MCP connections and
@@ -93,13 +120,14 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 
 	for _, conn := range conns {
 		toolKey := connectionToolKeyPrefix + conn.name
+		source := sourceForKind(conn.kind)
 		for _, t := range conn.tools {
 			row := TableRow{
 				ToolKey:         toolKey,
 				ResourcePattern: t.Name,
 				Title:           t.Name,
 				Category:        conn.displayName,
-				Source:          connectionToolSource,
+				Source:          source,
 				Layers:          map[Layer]Setting{},
 			}
 			if cell, ok := settings[repoPolicyKey{toolKey, t.Name}]; ok {
@@ -117,15 +145,16 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 	return out, nil
 }
 
-// discoverConnectionTools returns each enabled MCP connection in the workspace
-// together with its persisted tool list, ordered by created_at so the UI order is
-// stable. API connections are skipped — their per-endpoint control is a separate
-// surface.
+// discoverConnectionTools returns each enabled connection in the workspace with
+// its per-tool rows, ordered by created_at so the UI order is stable. For MCP
+// (mcp_http) connections the rows are the persisted tools/list. For REST (api)
+// connections the rows are synthesized per endpoint+method ("<METHOD> <path>")
+// from endpoint_permissions, so the same Configure sheet drives CRUD control.
 func (s *Store) discoverConnectionTools(ctx context.Context, workspaceID pgtype.UUID) ([]connectionRow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT name, display_name, tools
+		SELECT name, display_name, type, tools, endpoint_permissions
 		FROM workspace_connection
-		WHERE workspace_id = $1 AND enabled = true AND type = 'mcp_http'
+		WHERE workspace_id = $1 AND enabled = true AND type IN ('mcp_http', 'api')
 		ORDER BY created_at ASC
 	`, workspaceID)
 	if err != nil {
@@ -138,22 +167,49 @@ func (s *Store) discoverConnectionTools(ctx context.Context, workspaceID pgtype.
 
 	var out []connectionRow
 	for rows.Next() {
-		var name, displayName string
-		var toolsRaw []byte
-		if err := rows.Scan(&name, &displayName, &toolsRaw); err != nil {
+		var name, displayName, kind string
+		var toolsRaw, endpointsRaw []byte
+		if err := rows.Scan(&name, &displayName, &kind, &toolsRaw, &endpointsRaw); err != nil {
 			return nil, fmt.Errorf("toolpolicy: scan connection: %w", err)
 		}
 		var tools []connectionTool
-		_ = json.Unmarshal(toolsRaw, &tools)
+		if kind == "api" {
+			tools = endpointMethodTools(endpointsRaw)
+		} else {
+			_ = json.Unmarshal(toolsRaw, &tools)
+		}
 		if len(tools) == 0 {
 			continue
 		}
-		out = append(out, connectionRow{name: name, displayName: displayName, tools: tools})
+		out = append(out, connectionRow{name: name, displayName: displayName, kind: kind, tools: tools})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("toolpolicy: iterate connections: %w", err)
 	}
 	return out, nil
+}
+
+// endpointMethodTools expands an api connection's endpoint_permissions JSON into
+// one synthetic tool per (method, path) — the unit the CRUD-control sheet gates.
+// The resource_pattern is "<METHOD> <path>" (e.g. "POST /orders").
+func endpointMethodTools(raw []byte) []connectionTool {
+	var eps []endpointPermission
+	if json.Unmarshal(raw, &eps) != nil {
+		return nil
+	}
+	var tools []connectionTool
+	for _, ep := range eps {
+		if ep.Path == "" {
+			continue
+		}
+		for _, m := range ep.Methods {
+			if m == "" {
+				continue
+			}
+			tools = append(tools, connectionTool{Name: m + " " + ep.Path})
+		}
+	}
+	return tools
 }
 
 // DeniedConnectionTools resolves, for the given chain context, every MCP
@@ -190,26 +246,27 @@ func (s *Store) DeniedConnectionTools(ctx context.Context, in TableQuery) ([]str
 // DisallowedMCPTools is the claim-time adapter that satisfies the handler's
 // ConnectionToolDenyResolver seam. It resolves the agent owner (the user
 // ceiling) so user/group-layer denies are honoured, then returns the denied
-// connection tools as --disallowedTools tokens. Best-effort: on any error it
-// returns nil (fail-open) so a transient DB issue never blocks a claim — the
-// admin UI still shows the intended Deny, and the next claim re-resolves.
-func (s *Store) DisallowedMCPTools(ctx context.Context, workspaceID, runtimeID, agentID pgtype.UUID) []string {
+// connection tools as --disallowedTools tokens.
+//
+// It FAILS CLOSED: any resolve error is returned, not swallowed, so the caller
+// withholds the connections this claim rather than silently letting a denied
+// tool through. A genuinely absent owner (agent with no owner_id) is not an
+// error — the user layer is simply dropped.
+func (s *Store) DisallowedMCPTools(ctx context.Context, workspaceID, runtimeID, agentID pgtype.UUID) ([]string, error) {
 	var ownerID pgtype.UUID
 	if agentID.Valid {
-		// Best-effort owner lookup; a missing owner just drops the user layer.
-		_ = s.pool.QueryRow(ctx,
+		err := s.pool.QueryRow(ctx,
 			`SELECT owner_id FROM agent WHERE id = $1`, agentID).Scan(&ownerID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("toolpolicy: load agent owner: %w", err)
+		}
 	}
-	tokens, err := s.DeniedConnectionTools(ctx, TableQuery{
+	return s.DeniedConnectionTools(ctx, TableQuery{
 		WorkspaceID: workspaceID,
 		RuntimeID:   runtimeID,
 		AgentID:     agentID,
 		UserID:      ownerID,
 	})
-	if err != nil {
-		return nil
-	}
-	return tokens
 }
 
 // mcpToolToken builds Claude Code's namespaced MCP tool identifier. Claude Code

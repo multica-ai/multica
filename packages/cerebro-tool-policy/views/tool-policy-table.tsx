@@ -213,16 +213,21 @@ export function ToolPolicyTable({
   // connection tools (source "connection-tool") are surfaced through the
   // per-connection "Konfigurer" sheet — so they are excluded from the repo set.
   const allCapRows = useMemo(() => rows.filter((r) => !r.resource_pattern), [rows]);
+  // Per-connection sub-rows (MCP tools or API endpoint+method) are surfaced
+  // through the "Konfigurer" sheet, not as repo groups — so they're excluded
+  // from the repo set.
+  const isConnectionSubRow = (r: ToolPolicyRow) =>
+    r.source === "connection-tool" || r.source === "connection-endpoint";
   const allRepoRows = useMemo(
-    () => rows.filter((r) => r.resource_pattern && r.source !== "connection-tool"),
+    () => rows.filter((r) => r.resource_pattern && !isConnectionSubRow(r)),
     [rows],
   );
-  // Connection tool rows grouped by their connection capability key
+  // Connection sub-rows grouped by their connection capability key
   // ("connection:<name>") so each connection row can hand its tools to the sheet.
   const connectionToolsByKey = useMemo(() => {
     const map = new Map<string, ToolPolicyRow[]>();
     for (const r of rows) {
-      if (r.source !== "connection-tool") continue;
+      if (!isConnectionSubRow(r)) continue;
       const list = map.get(r.tool_key) ?? [];
       list.push(r);
       map.set(r.tool_key, list);

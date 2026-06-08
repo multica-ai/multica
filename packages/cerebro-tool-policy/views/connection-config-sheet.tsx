@@ -71,6 +71,11 @@ export function ConnectionConfigSheet({
 
   const busy = setPolicy.isPending || clearPolicy.isPending;
 
+  // API connections expose endpoint+method rows ("POST /orders"); MCP connections
+  // expose tools. Adapt the copy so a REST connection doesn't read as "tools".
+  const isApi = toolRows.some((r) => r.source === "connection-endpoint");
+  const unitLabel = isApi ? "endpoint" : "tool";
+
   const sorted = useMemo(
     () =>
       [...toolRows].sort((a, b) =>
@@ -119,10 +124,13 @@ export function ConnectionConfigSheet({
         className="flex w-full max-w-xl flex-col gap-0 p-0 sm:max-w-xl"
       >
         <SheetHeader className="border-b">
-          <SheetTitle>{connectionLabel} — tools</SheetTitle>
+          <SheetTitle>
+            {connectionLabel} — {isApi ? "endpoints" : "tools"}
+          </SheetTitle>
           <SheetDescription>
-            Allow or deny each underlying tool individually. A per-tool choice
-            can only tighten the connection-wide setting, never loosen it.
+            Allow or deny each {unitLabel} individually
+            {isApi ? " (HTTP method + path)" : ""}. A per-{unitLabel} choice can
+            only tighten the connection-wide setting, never loosen it.
           </SheetDescription>
         </SheetHeader>
 
@@ -133,7 +141,7 @@ export function ConnectionConfigSheet({
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search tools…"
+              placeholder={`Search ${unitLabel}s…`}
               className="h-8 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
@@ -152,12 +160,13 @@ export function ConnectionConfigSheet({
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
           {toolRows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No tools discovered yet. Test the connection to fetch its tool
-              list, then reopen this sheet.
+              {isApi
+                ? "No endpoints configured yet. Add endpoint permissions on the connection, then reopen this sheet."
+                : "No tools discovered yet. Test the connection to fetch its tool list, then reopen this sheet."}
             </p>
           ) : filtered.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No tools match the search.
+              No {unitLabel}s match the search.
             </p>
           ) : (
             filtered.map((r) => {

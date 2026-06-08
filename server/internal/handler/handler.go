@@ -420,7 +420,7 @@ type WorkspaceConnectionsInjector interface {
 //
 // CEREBRO-PATCH(handler-connection-tool-deny-iface): TECH-3156 seam.
 type ConnectionToolDenyResolver interface {
-	DisallowedMCPTools(ctx context.Context, workspaceID, runtimeID, agentID pgtype.UUID) []string
+	DisallowedMCPTools(ctx context.Context, workspaceID, runtimeID, agentID pgtype.UUID) ([]string, error)
 }
 
 // CEREBRO-PATCH(handler-bool-helpers): cerebro per-runtime sandbox toggle uses
