@@ -31,6 +31,13 @@ import (
 // char_length and the front-end's String.prototype.length-with-counter UX.
 const maxAgentDescriptionLength = 255
 
+const (
+	maxFixedRepoPaths              = 16
+	maxFixedRepoPathLength         = 4096
+	maxFixedRepoCleanupScriptBytes = 4096
+	defaultFixedRepoVcsType        = "git"
+)
+
 type AgentResponse struct {
 	ID            string          `json:"id"`
 	WorkspaceID   string          `json:"workspace_id"`
@@ -50,13 +57,17 @@ type AgentResponse struct {
 	// across the API surface. Reading values requires the dedicated, audited
 	// `GET /api/agents/{id}/env` endpoint; writing requires `PUT` to the
 	// same path. agent-actor tokens are denied there. See MUL-2600.
-	HasCustomEnv       bool   `json:"has_custom_env"`
-	CustomEnvKeyCount  int    `json:"custom_env_key_count"`
-	McpConfigRedacted  bool   `json:"mcp_config_redacted"`
-	Visibility         string `json:"visibility"`
-	Status             string `json:"status"`
-	MaxConcurrentTasks int32  `json:"max_concurrent_tasks"`
-	Model              string `json:"model"`
+	HasCustomEnv           bool     `json:"has_custom_env"`
+	CustomEnvKeyCount      int      `json:"custom_env_key_count"`
+	McpConfigRedacted      bool     `json:"mcp_config_redacted"`
+	Visibility             string   `json:"visibility"`
+	Status                 string   `json:"status"`
+	MaxConcurrentTasks     int32    `json:"max_concurrent_tasks"`
+	Model                  string   `json:"model"`
+	FixedRepoEnabled       bool     `json:"fixed_repo_enabled"`
+	FixedRepoPaths         []string `json:"fixed_repo_paths"`
+	FixedRepoVcsType       string   `json:"fixed_repo_vcs_type"`
+	FixedRepoCleanupScript *string  `json:"fixed_repo_cleanup_script"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -107,32 +118,115 @@ func agentToResponse(a db.Agent) AgentResponse {
 		mcpConfig = json.RawMessage(a.McpConfig)
 	}
 
-	return AgentResponse{
-		ID:                 uuidToString(a.ID),
-		WorkspaceID:        uuidToString(a.WorkspaceID),
-		RuntimeID:          uuidToString(a.RuntimeID),
-		Name:               a.Name,
-		Description:        a.Description,
-		Instructions:       a.Instructions,
-		AvatarURL:          textToPtr(a.AvatarUrl),
-		RuntimeMode:        a.RuntimeMode,
-		RuntimeConfig:      rc,
-		CustomArgs:         customArgs,
-		McpConfig:          mcpConfig,
-		HasCustomEnv:       envKeyCount > 0,
-		CustomEnvKeyCount:  envKeyCount,
-		Visibility:         a.Visibility,
-		Status:             a.Status,
-		MaxConcurrentTasks: a.MaxConcurrentTasks,
-		Model:              a.Model.String,
-		ThinkingLevel:      a.ThinkingLevel.String,
-		OwnerID:            uuidToPtr(a.OwnerID),
-		Skills:             []AgentSkillSummary{},
-		CreatedAt:          timestampToString(a.CreatedAt),
-		UpdatedAt:          timestampToString(a.UpdatedAt),
-		ArchivedAt:         timestampToPtr(a.ArchivedAt),
-		ArchivedBy:         uuidToPtr(a.ArchivedBy),
+	fixedRepoVcsType := a.FixedRepoVcsType
+	if fixedRepoVcsType == "" {
+		fixedRepoVcsType = defaultFixedRepoVcsType
 	}
+
+	return AgentResponse{
+		ID:                     uuidToString(a.ID),
+		WorkspaceID:            uuidToString(a.WorkspaceID),
+		RuntimeID:              uuidToString(a.RuntimeID),
+		Name:                   a.Name,
+		Description:            a.Description,
+		Instructions:           a.Instructions,
+		AvatarURL:              textToPtr(a.AvatarUrl),
+		RuntimeMode:            a.RuntimeMode,
+		RuntimeConfig:          rc,
+		CustomArgs:             customArgs,
+		McpConfig:              mcpConfig,
+		HasCustomEnv:           envKeyCount > 0,
+		CustomEnvKeyCount:      envKeyCount,
+		Visibility:             a.Visibility,
+		Status:                 a.Status,
+		MaxConcurrentTasks:     a.MaxConcurrentTasks,
+		Model:                  a.Model.String,
+		FixedRepoEnabled:       a.FixedRepoEnabled,
+		FixedRepoPaths:         decodeStringSliceJSON(a.FixedRepoPaths),
+		FixedRepoVcsType:       fixedRepoVcsType,
+		FixedRepoCleanupScript: textToPtr(a.FixedRepoCleanupScript),
+		ThinkingLevel:          a.ThinkingLevel.String,
+		OwnerID:                uuidToPtr(a.OwnerID),
+		Skills:                 []AgentSkillSummary{},
+		CreatedAt:              timestampToString(a.CreatedAt),
+		UpdatedAt:              timestampToString(a.UpdatedAt),
+		ArchivedAt:             timestampToPtr(a.ArchivedAt),
+		ArchivedBy:             uuidToPtr(a.ArchivedBy),
+	}
+}
+
+func isKnownFixedRepoVcsType(v string) bool {
+	switch v {
+	case "git", "perforce", "none", "custom":
+		return true
+	default:
+		return false
+	}
+}
+
+func decodeStringSliceJSON(raw []byte) []string {
+	if len(raw) == 0 {
+		return []string{}
+	}
+	var out []string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		slog.Warn("failed to unmarshal fixed_repo_paths", "error", err)
+		return []string{}
+	}
+	if out == nil {
+		return []string{}
+	}
+	return out
+}
+
+func encodeStringSliceJSON(values []string) []byte {
+	data, err := json.Marshal(values)
+	if err != nil {
+		return []byte("[]")
+	}
+	return data
+}
+
+func normalizeFixedRepoPaths(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func validateFixedRepoConfig(enabled bool, paths []string, vcsType string, cleanupScript *string, runtimeMode string) error {
+	if vcsType == "" {
+		vcsType = defaultFixedRepoVcsType
+	}
+	if !isKnownFixedRepoVcsType(vcsType) {
+		return fmt.Errorf("fixed_repo_vcs_type %q is not supported", vcsType)
+	}
+	if len(paths) > maxFixedRepoPaths {
+		return fmt.Errorf("fixed_repo_paths must contain %d paths or fewer", maxFixedRepoPaths)
+	}
+	for _, p := range paths {
+		if utf8.RuneCountInString(p) > maxFixedRepoPathLength {
+			return fmt.Errorf("fixed_repo_paths entries must be %d characters or fewer", maxFixedRepoPathLength)
+		}
+	}
+	if cleanupScript != nil && utf8.RuneCountInString(*cleanupScript) > maxFixedRepoCleanupScriptBytes {
+		return fmt.Errorf("fixed_repo_cleanup_script must be %d characters or fewer", maxFixedRepoCleanupScriptBytes)
+	}
+	if !enabled {
+		return nil
+	}
+	if runtimeMode != "local" {
+		return fmt.Errorf("fixed_repo_enabled requires a local runtime")
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("fixed_repo_paths is required when fixed_repo_enabled is true")
+	}
+	return nil
 }
 
 // RepoData holds repository information included in claim responses so the
@@ -565,19 +659,23 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	Instructions       string            `json:"instructions"`
-	AvatarURL          *string           `json:"avatar_url"`
-	RuntimeID          string            `json:"runtime_id"`
-	RuntimeConfig      any               `json:"runtime_config"`
-	CustomEnv          map[string]string `json:"custom_env"`
-	CustomArgs         []string          `json:"custom_args"`
-	McpConfig          json.RawMessage   `json:"mcp_config"`
-	Visibility         string            `json:"visibility"`
-	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
-	Model              string            `json:"model"`
-	ThinkingLevel      string            `json:"thinking_level"`
+	Name                   string            `json:"name"`
+	Description            string            `json:"description"`
+	Instructions           string            `json:"instructions"`
+	AvatarURL              *string           `json:"avatar_url"`
+	RuntimeID              string            `json:"runtime_id"`
+	RuntimeConfig          any               `json:"runtime_config"`
+	CustomEnv              map[string]string `json:"custom_env"`
+	CustomArgs             []string          `json:"custom_args"`
+	McpConfig              json.RawMessage   `json:"mcp_config"`
+	Visibility             string            `json:"visibility"`
+	MaxConcurrentTasks     int32             `json:"max_concurrent_tasks"`
+	Model                  string            `json:"model"`
+	ThinkingLevel          string            `json:"thinking_level"`
+	FixedRepoEnabled       bool              `json:"fixed_repo_enabled"`
+	FixedRepoPaths         []string          `json:"fixed_repo_paths"`
+	FixedRepoVcsType       string            `json:"fixed_repo_vcs_type"`
+	FixedRepoCleanupScript *string           `json:"fixed_repo_cleanup_script"`
 	// Template records which template slug was used to seed this agent
 	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
 	// the caller didn't come from a template picker — the `agent_created`
@@ -677,6 +775,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fixedRepoPaths := normalizeFixedRepoPaths(req.FixedRepoPaths)
+	fixedRepoVcsType := req.FixedRepoVcsType
+	if fixedRepoVcsType == "" {
+		fixedRepoVcsType = defaultFixedRepoVcsType
+	}
+	if err := validateFixedRepoConfig(req.FixedRepoEnabled, fixedRepoPaths, fixedRepoVcsType, req.FixedRepoCleanupScript, runtime.RuntimeMode); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal — Step 4 of
 	// onboarding always lands in this branch. A non-fatal read: if the
@@ -708,22 +816,26 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:        wsUUID,
-		Name:               req.Name,
-		Description:        req.Description,
-		Instructions:       req.Instructions,
-		AvatarUrl:          ptrToText(req.AvatarURL),
-		RuntimeMode:        runtime.RuntimeMode,
-		RuntimeConfig:      rc,
-		RuntimeID:          runtime.ID,
-		Visibility:         req.Visibility,
-		MaxConcurrentTasks: req.MaxConcurrentTasks,
-		OwnerID:            parseUUID(ownerID),
-		CustomEnv:          ce,
-		CustomArgs:         ca,
-		McpConfig:          mc,
-		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
-		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		WorkspaceID:            wsUUID,
+		Name:                   req.Name,
+		Description:            req.Description,
+		Instructions:           req.Instructions,
+		AvatarUrl:              ptrToText(req.AvatarURL),
+		RuntimeMode:            runtime.RuntimeMode,
+		RuntimeConfig:          rc,
+		RuntimeID:              runtime.ID,
+		Visibility:             req.Visibility,
+		MaxConcurrentTasks:     req.MaxConcurrentTasks,
+		OwnerID:                parseUUID(ownerID),
+		CustomEnv:              ce,
+		CustomArgs:             ca,
+		McpConfig:              mc,
+		Model:                  pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		ThinkingLevel:          pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		FixedRepoEnabled:       req.FixedRepoEnabled,
+		FixedRepoPaths:         encodeStringSliceJSON(fixedRepoPaths),
+		FixedRepoVcsType:       fixedRepoVcsType,
+		FixedRepoCleanupScript: ptrToText(req.FixedRepoCleanupScript),
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -778,12 +890,16 @@ type UpdateAgentRequest struct {
 	// actually unchanged, and so a client that round-tripped a
 	// previously-returned masked map cannot silently overwrite real
 	// secret values with literal `****`. See MUL-2600.
-	CustomArgs         *[]string        `json:"custom_args"`
-	McpConfig          *json.RawMessage `json:"mcp_config"`
-	Visibility         *string          `json:"visibility"`
-	Status             *string          `json:"status"`
-	MaxConcurrentTasks *int32           `json:"max_concurrent_tasks"`
-	Model              *string          `json:"model"`
+	CustomArgs             *[]string        `json:"custom_args"`
+	McpConfig              *json.RawMessage `json:"mcp_config"`
+	Visibility             *string          `json:"visibility"`
+	Status                 *string          `json:"status"`
+	MaxConcurrentTasks     *int32           `json:"max_concurrent_tasks"`
+	Model                  *string          `json:"model"`
+	FixedRepoEnabled       *bool            `json:"fixed_repo_enabled"`
+	FixedRepoPaths         *[]string        `json:"fixed_repo_paths"`
+	FixedRepoVcsType       *string          `json:"fixed_repo_vcs_type"`
+	FixedRepoCleanupScript *string          `json:"fixed_repo_cleanup_script"`
 	// ThinkingLevel is treated as a tri-state per-MUL-2339:
 	//   - field omitted → no change (leave existing value alone)
 	//   - field present with "" → explicit clear (use runtime default)
@@ -952,6 +1068,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// request doesn't move the agent, we still need to load the *current*
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
+	targetRuntimeMode := existing.RuntimeMode
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -979,6 +1096,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
+		targetRuntimeMode = runtime.RuntimeMode
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
@@ -1047,6 +1165,45 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	nextFixedRepoEnabled := existing.FixedRepoEnabled
+	if req.FixedRepoEnabled != nil {
+		nextFixedRepoEnabled = *req.FixedRepoEnabled
+		params.FixedRepoEnabled = pgtype.Bool{Bool: *req.FixedRepoEnabled, Valid: true}
+	}
+
+	nextFixedRepoPaths := decodeStringSliceJSON(existing.FixedRepoPaths)
+	if req.FixedRepoPaths != nil {
+		nextFixedRepoPaths = normalizeFixedRepoPaths(*req.FixedRepoPaths)
+		params.FixedRepoPaths = encodeStringSliceJSON(nextFixedRepoPaths)
+	}
+
+	nextFixedRepoVcsType := existing.FixedRepoVcsType
+	if nextFixedRepoVcsType == "" {
+		nextFixedRepoVcsType = defaultFixedRepoVcsType
+	}
+	if req.FixedRepoVcsType != nil {
+		nextFixedRepoVcsType = *req.FixedRepoVcsType
+		if nextFixedRepoVcsType == "" {
+			nextFixedRepoVcsType = defaultFixedRepoVcsType
+		}
+		params.FixedRepoVcsType = pgtype.Text{String: nextFixedRepoVcsType, Valid: true}
+	}
+
+	nextCleanupScript := textToPtr(existing.FixedRepoCleanupScript)
+	rawCleanupScript, hasCleanupScript := rawFields["fixed_repo_cleanup_script"]
+	shouldClearFixedRepoCleanupScript := hasCleanupScript && bytes.Equal(bytes.TrimSpace(rawCleanupScript), []byte("null"))
+	if shouldClearFixedRepoCleanupScript {
+		nextCleanupScript = nil
+	} else if req.FixedRepoCleanupScript != nil {
+		nextCleanupScript = req.FixedRepoCleanupScript
+		params.FixedRepoCleanupScript = pgtype.Text{String: *req.FixedRepoCleanupScript, Valid: true}
+	}
+
+	if err := validateFixedRepoConfig(nextFixedRepoEnabled, nextFixedRepoPaths, nextFixedRepoVcsType, nextCleanupScript, targetRuntimeMode); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
@@ -1070,6 +1227,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
+			return
+		}
+	}
+	if shouldClearFixedRepoCleanupScript {
+		updated, err = h.Queries.ClearAgentFixedRepoCleanupScript(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent fixed_repo_cleanup_script failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear fixed_repo_cleanup_script: "+err.Error())
 			return
 		}
 	}
