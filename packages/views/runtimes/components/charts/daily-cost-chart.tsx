@@ -13,6 +13,8 @@ import {
 } from "@multica/ui/components/ui/chart";
 import type { DailyCostStackData } from "../../utils";
 import { useT } from "../../../i18n";
+// CEREBRO-PATCH(display-currency-daily-chart): FIR-40 — labels in workspace currency.
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 
 // Three-segment stack (input / output / cache write) — keeps the user's
 // attention on what's actually driving spend. Cache reads are excluded
@@ -31,6 +33,10 @@ export const costStackConfig = {
 
 export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
   const { t } = useT("runtimes");
+  // CEREBRO-PATCH(display-currency-daily-chart): FIR-40 — the chart domain stays
+  // USD (conversion is linear, so bar proportions are unchanged); only the
+  // labels are converted. USD keeps its exact "$5" axis ticks.
+  const { formatUsd, currency } = useCostFormatter();
   // No internal empty-state — the parent decides what to show in place of
   // the chart (often a diagnostic explaining *why* there's no cost). Letting
   // recharts render an empty axis would be both ugly and uninformative.
@@ -49,7 +55,7 @@ export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
           tickLine={false}
           axisLine={false}
           tickMargin={8}
-          tickFormatter={(v: number) => `$${v}`}
+          tickFormatter={(v: number) => (currency === "USD" ? `$${v}` : formatUsd(v))}
           width={50}
         />
         <ChartTooltip
@@ -57,7 +63,7 @@ export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
             <ChartTooltipContent
               formatter={(value, name) =>
                 typeof value === "number"
-                  ? `$${value.toFixed(2)} ${name}`
+                  ? `${formatUsd(value)} ${name}`
                   : `${value} ${name}`
               }
               footer={(payload) => {
@@ -71,7 +77,7 @@ export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
                   <div className="flex items-center justify-between gap-2 font-medium">
                     <span>{t(($) => $.charts.tooltip_total)}</span>
                     <span className="font-mono tabular-nums">
-                      ${total.toFixed(2)}
+                      {formatUsd(total)}
                     </span>
                   </div>
                 );

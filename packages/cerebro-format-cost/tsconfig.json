@@ -1,0 +1,11 @@
+{
+  "extends": "@multica/tsconfig/base.json",
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "types": [],
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

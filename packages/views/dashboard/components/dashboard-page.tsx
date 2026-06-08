@@ -12,6 +12,8 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
+// CEREBRO-PATCH(display-currency-dashboard): FIR-40 cost shown in workspace currency.
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
@@ -98,11 +100,6 @@ const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = []
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
 
-function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
-}
-
 // Weekly aggregation is locked to UTC: the dashboard daily rollup buckets
 // data by UTC `bucket_date` (and the raw fallback queries by `DATE(...)`,
 // also UTC), so any other zone for client-side week boundaries would put
@@ -157,6 +154,9 @@ function Segmented<T extends string | number>({
 export function DashboardPage() {
   const { t } = useT("usage");
   const wsId = useWorkspaceId();
+  // CEREBRO-PATCH(display-currency-dashboard): FIR-40 — fmtMoney now converts to
+  // the workspace display currency (compact: drops decimals >= 100 as before).
+  const { formatUsdCompact: fmtMoney } = useCostFormatter();
   const [dim, setDim] = useState<Dim>("daily");
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);

@@ -497,6 +497,21 @@ type CerebroCredentialBinding struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroExchangeRate struct {
+	BaseCurrency   string             `json:"base_currency"`
+	TargetCurrency string             `json:"target_currency"`
+	Rate           pgtype.Numeric     `json:"rate"`
+	FetchedAt      pgtype.Timestamptz `json:"fetched_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroWorkspaceSetting struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	DisplayCurrency string             `json:"display_currency"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy       pgtype.UUID        `json:"updated_by"`
+}
+
 type CerebroFeatureFlag struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`

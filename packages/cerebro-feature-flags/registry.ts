@@ -86,6 +86,9 @@ export type CerebroFlagKey =
   // create when the picked agent's daemon CLI is below the quick-create gate,
   // instead of leaving the user on a warning banner with Create disabled.
   | "cerebro_quick_create_version_autoswitch"
+  // FIR-40: per-workspace display currency (USD/DKK/EUR) for cost — settings
+  // tab + display-time conversion. Off => cost shows in raw USD as before.
+  | "cerebro_display_currency"
   // TECH-2947: personal focus list pinned to the top of the inbox.
   | "cerebro_focus_list"
   // Interactive terminal (cerebro-terminal): per-runtime presentation mode + xterm.js panel.
@@ -216,6 +219,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // stranding the user on a warning banner. Off restores the warning-only
   // behaviour.
   cerebro_quick_create_version_autoswitch: true,
+  cerebro_display_currency: true,
   // TECH-2947: ON by default. Personal focus list at the top of the inbox —
   // a lightweight to-do surface for ADHD-friendly task tracking. Off hides
   // the panel and the backend endpoints reject requests.
@@ -662,6 +666,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Enable the per-runtime presentation_mode toggle and the in-app xterm.js terminal panel. Runtimes flipped to 'interactive' stream a live shell to the Multica UI so the user can watch and take over an agent session.",
+  },
+  {
+    key: "cerebro_display_currency",
+    label: "Display currency",
+    group: "workspace",
+    description:
+      "Let a workspace show cost in a chosen display currency (USD, DKK, EUR). Cost is always stored in USD and converted at display time with a cached daily rate; a Currency settings tab picks the workspace currency. Off shows raw USD everywhere as before. FIR-40.",
   },
 ];
 

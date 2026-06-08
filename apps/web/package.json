@@ -31,6 +31,7 @@
     "@multica/cerebro-chat": "workspace:*",
     "@multica/cerebro-credentials": "workspace:*",
     "@multica/cerebro-dashboard": "workspace:*",
+    "@multica/cerebro-display-currency": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-firtal-welcome": "workspace:*",
     "@multica/cerebro-focus-list": "workspace:*",

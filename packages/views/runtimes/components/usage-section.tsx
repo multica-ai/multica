@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
+// CEREBRO-PATCH(display-currency-usage-section): FIR-40 cost in workspace currency.
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import type { RuntimeUsage } from "@multica/core/types";
 import {
@@ -90,11 +92,6 @@ function Segmented<T extends string | number>({
   );
 }
 
-function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
-}
-
 // ---------------------------------------------------------------------------
 // Top-level orchestrator. Owns the time window, fetches a 180-day usage
 // cache once, slices it into "current" / "prior" windows for delta math,
@@ -108,6 +105,9 @@ function fmtMoney(n: number): string {
 
 export function UsageSection({ runtimeId }: { runtimeId: string }) {
   const { t } = useT("runtimes");
+  // CEREBRO-PATCH(display-currency-usage-section): FIR-40 — fmtMoney converts to
+  // the workspace display currency (compact rounding preserved).
+  const { formatUsdCompact: fmtMoney } = useCostFormatter();
   const { data: usage = [], isLoading: loading } = useQuery(
     runtimeUsageOptions(runtimeId, 180),
   );

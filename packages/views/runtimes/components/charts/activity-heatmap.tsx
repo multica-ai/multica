@@ -3,6 +3,8 @@ import type { RuntimeUsage } from "@multica/core/types";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { estimateCost } from "../../utils";
 import { useT } from "../../../i18n";
+// CEREBRO-PATCH(display-currency-heatmap): FIR-40 cost in workspace currency.
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 
 // 26 weeks (~6 months) gives the heatmap real presence in the wider chart
 // card and turns "long-view" into a meaningful tab — a 13-week strip looked
@@ -23,11 +25,6 @@ function getHeatmapColor(level: number): string {
   if (level === 0) return "var(--color-muted)";
   const opacities = ["20%", "45%", "70%", "100%"];
   return `color-mix(in oklch, var(--color-chart-1) ${opacities[level - 1]}, transparent)`;
-}
-
-function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
 }
 
 function fmtDate(iso: string): string {
@@ -261,6 +258,9 @@ function InsightsRow({ insights }: { insights: Insights }) {
     totalCost,
     windowDays,
   } = insights;
+  // CEREBRO-PATCH(display-currency-heatmap): FIR-40 — fmtMoney converts to the
+  // workspace display currency (compact rounding preserved).
+  const { formatUsdCompact: fmtMoney } = useCostFormatter();
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3 sm:grid-cols-4">
       <Insight

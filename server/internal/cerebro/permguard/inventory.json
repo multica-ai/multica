@@ -1269,6 +1269,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PUT /api/workspaces/{id}/display-currency",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "PUT /api/workspaces/{id}/cost-optimization/{key}",
       "gate": "workspace_admin"
     },
