@@ -1495,6 +1495,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.RuntimeToolsConfig = daemonmcp.Merge(resp.RuntimeToolsConfig, connMCP)
 			}
 		}
+		// CEREBRO-PATCH(cerebro-connection-tool-deny-claim): TECH-3156 resolve per-tool
+		// connection denies for this agent so the daemon passes them as
+		// --disallowedTools and a denied tool is never callable.
+		if h.ConnectionToolDeny != nil {
+			resp.DisallowedMCPTools = h.ConnectionToolDeny.DisallowedMCPTools(r.Context(), rt.WorkspaceID, task.RuntimeID, task.AgentID)
+		}
 		resp.PresentationMode = rt.PresentationMode // CEREBRO-PATCH(daemon-claim-presentation-mode): forward presentation_mode to daemon
 		auditDetails, _ := json.Marshal(map[string]any{
 			"task_id":                uuidToString(task.ID),

@@ -3095,6 +3095,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	} else {
 		mcpConfig = task.RuntimeToolsConfig
 	}
+	// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 — pass per-tool connection
+	// denies as Claude Code --disallowedTools so a denied MCP tool is never callable.
+	// AskUserQuestion is kept (it is denied in the base args) so a last-wins parser
+	// does not silently re-enable it. Claude-only: other providers lack this flag.
+	if provider == "claude" && len(task.DisallowedMCPTools) > 0 {
+		denied := append([]string{"AskUserQuestion"}, task.DisallowedMCPTools...)
+		customArgs = append(customArgs, "--disallowedTools", strings.Join(denied, " "))
+	}
 	thinkingLevel := ""
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel

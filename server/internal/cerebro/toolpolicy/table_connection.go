@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -153,6 +154,70 @@ func (s *Store) discoverConnectionTools(ctx context.Context, workspaceID pgtype.
 		return nil, fmt.Errorf("toolpolicy: iterate connections: %w", err)
 	}
 	return out, nil
+}
+
+// DeniedConnectionTools resolves, for the given chain context, every MCP
+// connection tool whose effective verdict is Deny, and returns them as Claude
+// Code --disallowedTools tokens ("mcp__<connection>__<tool>"). The daemon passes
+// these at spawn so a denied tool is never callable — the runtime half of the
+// per-tool permission feature (TECH-3156).
+//
+// It reuses the same Table resolution the admin UI reads from, so the runtime
+// enforcement and the screen can never drift: a tool the screen shows as Deny is
+// exactly a tool that ends up on this list.
+func (s *Store) DeniedConnectionTools(ctx context.Context, in TableQuery) ([]string, error) {
+	rows, err := s.Table(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, r := range rows {
+		if r.Source != connectionToolSource {
+			continue
+		}
+		if r.Effective.Setting != SettingDeny {
+			continue
+		}
+		connName := strings.TrimPrefix(r.ToolKey, connectionToolKeyPrefix)
+		if connName == "" || r.ResourcePattern == "" {
+			continue
+		}
+		out = append(out, mcpToolToken(connName, r.ResourcePattern))
+	}
+	return out, nil
+}
+
+// DisallowedMCPTools is the claim-time adapter that satisfies the handler's
+// ConnectionToolDenyResolver seam. It resolves the agent owner (the user
+// ceiling) so user/group-layer denies are honoured, then returns the denied
+// connection tools as --disallowedTools tokens. Best-effort: on any error it
+// returns nil (fail-open) so a transient DB issue never blocks a claim — the
+// admin UI still shows the intended Deny, and the next claim re-resolves.
+func (s *Store) DisallowedMCPTools(ctx context.Context, workspaceID, runtimeID, agentID pgtype.UUID) []string {
+	var ownerID pgtype.UUID
+	if agentID.Valid {
+		// Best-effort owner lookup; a missing owner just drops the user layer.
+		_ = s.pool.QueryRow(ctx,
+			`SELECT owner_id FROM agent WHERE id = $1`, agentID).Scan(&ownerID)
+	}
+	tokens, err := s.DeniedConnectionTools(ctx, TableQuery{
+		WorkspaceID: workspaceID,
+		RuntimeID:   runtimeID,
+		AgentID:     agentID,
+		UserID:      ownerID,
+	})
+	if err != nil {
+		return nil
+	}
+	return tokens
+}
+
+// mcpToolToken builds Claude Code's namespaced MCP tool identifier. Claude Code
+// exposes an MCP server's tools as "mcp__<server>__<tool>", and the connection
+// name is the server key the daemon injects into --mcp-config (connections.Store
+// BuildMCPConfig), so the two match by construction.
+func mcpToolToken(connectionName, tool string) string {
+	return "mcp__" + connectionName + "__" + tool
 }
 
 // loadConnectionPolicySettings fetches every explicit per-layer setting authored
