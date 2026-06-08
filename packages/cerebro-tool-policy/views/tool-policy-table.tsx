@@ -68,6 +68,7 @@ import {
   type ToolSetting,
 } from "../core";
 import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
+import { ConnectionRowConfigure } from "./connection-row-configure";
 
 /**
  * The five surfaces (FIR-2284 Bid 5). Each page renders the same catalog but
@@ -199,10 +200,27 @@ export function ToolPolicyTable({
   const editLayer: ToolLayer = VIEW_EDIT_LAYER[view];
 
   const rows = query.data ?? [];
-  // Capability-wide rows (the flat catalog) vs. per-repo rows (collapsible
-  // groups). A repo row is any row scoped to a resource (non-empty pattern).
+  // Capability-wide rows (the flat catalog) vs. per-resource rows. A per-resource
+  // row carries a non-empty pattern: repos render as collapsible groups, while
+  // connection tools (source "connection-tool") are surfaced through the
+  // per-connection "Konfigurer" sheet — so they are excluded from the repo set.
   const allCapRows = useMemo(() => rows.filter((r) => !r.resource_pattern), [rows]);
-  const allRepoRows = useMemo(() => rows.filter((r) => r.resource_pattern), [rows]);
+  const allRepoRows = useMemo(
+    () => rows.filter((r) => r.resource_pattern && r.source !== "connection-tool"),
+    [rows],
+  );
+  // Connection tool rows grouped by their connection capability key
+  // ("connection:<name>") so each connection row can hand its tools to the sheet.
+  const connectionToolsByKey = useMemo(() => {
+    const map = new Map<string, ToolPolicyRow[]>();
+    for (const r of rows) {
+      if (r.source !== "connection-tool") continue;
+      const list = map.get(r.tool_key) ?? [];
+      list.push(r);
+      map.set(r.tool_key, list);
+    }
+    return map;
+  }, [rows]);
 
   // tabFilter narrows which rows this instance shows. TanStack Query deduplicates
   // the underlying fetch, so multiple ToolPolicyTable instances on the same page
@@ -350,6 +368,15 @@ export function ToolPolicyTable({
                             variant="outline"
                           />
                         ) : null}
+                        {row.source === "connection" ? (
+                          <ConnectionRowConfigure
+                            connectionKey={row.tool_key}
+                            connectionLabel={row.title || row.tool_key}
+                            toolRows={connectionToolsByKey.get(row.tool_key) ?? []}
+                            editLayer={editLayer}
+                            subjectId={subjectId}
+                          />
+                        ) : null}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -384,6 +411,15 @@ export function ToolPolicyTable({
                         toolKey={row.tool_key}
                         agentId={subjectId}
                         variant="outline"
+                      />
+                    ) : null}
+                    {row.source === "connection" ? (
+                      <ConnectionRowConfigure
+                        connectionKey={row.tool_key}
+                        connectionLabel={row.title || row.tool_key}
+                        toolRows={connectionToolsByKey.get(row.tool_key) ?? []}
+                        editLayer={editLayer}
+                        subjectId={subjectId}
                       />
                     ) : null}
                     <DecisionControl
