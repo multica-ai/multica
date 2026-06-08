@@ -42,6 +42,14 @@ export interface ActivityEntry {
   created_at: string;
 }
 
+export interface MessageFlowEntry {
+  sender_id: string;
+  sender_name: string;
+  recipient_id: string;
+  recipient_name: string;
+  count: number;
+}
+
 export interface RecentTask {
   task_id: string;
   agent_id: string;
@@ -78,6 +86,9 @@ export interface DashboardOverview {
   timeline: DayBucket[];
   top_agents: TopActor[];
   top_members: TopActor[];
+  top_message_senders: TopActor[];
+  top_message_recipients: TopActor[];
+  message_flow: MessageFlowEntry[];
   activity_feed: ActivityEntry[];
   recent_tasks: RecentTask[];
 }

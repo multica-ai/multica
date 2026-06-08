@@ -94,6 +94,14 @@ type topActor struct {
 	Count int    `json:"count"`
 }
 
+type messageFlowEntry struct {
+	SenderID      string `json:"sender_id"`
+	SenderName    string `json:"sender_name"`
+	RecipientID   string `json:"recipient_id"`
+	RecipientName string `json:"recipient_name"`
+	Count         int    `json:"count"`
+}
+
 type activityEntry struct {
 	ID          string          `json:"id"`
 	IssueID     string          `json:"issue_id,omitempty"`
@@ -125,27 +133,30 @@ type recentTask struct {
 }
 
 type overviewResponse struct {
-	Range              string          `json:"range"`
-	PeriodStart        string          `json:"period_start"`
-	PeriodEnd          string          `json:"period_end"`
-	IssuesCreated      kpi             `json:"issues_created"`
-	IssuesCompleted    kpi             `json:"issues_completed"`
-	ChatMessages       kpi             `json:"chat_messages"`
-	ChannelMessages    kpi             `json:"channel_messages"`
-	ChannelsActive     kpi             `json:"channels_active"`
-	TasksCompleted     kpi             `json:"tasks_completed"`
-	TasksFailed        kpi             `json:"tasks_failed"`
-	AgentsActive       kpi             `json:"agents_active"`
-	MembersActive      kpi             `json:"members_active"`
-	SpendCents         kpi             `json:"spend_cents"`
-	IssuesByStatus     []bucket        `json:"issues_by_status"`
-	IssuesByPriority   []bucket        `json:"issues_by_priority"`
-	IssuesByOnBehalfOf []topActor      `json:"issues_by_on_behalf_of"`
-	Timeline           []dayBucket     `json:"timeline"`
-	TopAgents          []topActor      `json:"top_agents"`
-	TopMembers         []topActor      `json:"top_members"`
-	ActivityFeed       []activityEntry `json:"activity_feed"`
-	RecentTasks        []recentTask    `json:"recent_tasks"`
+	Range                 string          `json:"range"`
+	PeriodStart           string          `json:"period_start"`
+	PeriodEnd             string          `json:"period_end"`
+	IssuesCreated         kpi             `json:"issues_created"`
+	IssuesCompleted       kpi             `json:"issues_completed"`
+	ChatMessages          kpi             `json:"chat_messages"`
+	ChannelMessages       kpi             `json:"channel_messages"`
+	ChannelsActive        kpi             `json:"channels_active"`
+	TasksCompleted        kpi             `json:"tasks_completed"`
+	TasksFailed           kpi             `json:"tasks_failed"`
+	AgentsActive          kpi             `json:"agents_active"`
+	MembersActive         kpi             `json:"members_active"`
+	SpendCents            kpi             `json:"spend_cents"`
+	IssuesByStatus        []bucket        `json:"issues_by_status"`
+	IssuesByPriority      []bucket        `json:"issues_by_priority"`
+	IssuesByOnBehalfOf    []topActor      `json:"issues_by_on_behalf_of"`
+	Timeline              []dayBucket     `json:"timeline"`
+	TopAgents             []topActor      `json:"top_agents"`
+	TopMembers            []topActor      `json:"top_members"`
+	TopMessageSenders     []topActor         `json:"top_message_senders"`
+	TopMessageRecipients  []topActor         `json:"top_message_recipients"`
+	MessageFlow           []messageFlowEntry `json:"message_flow"`
+	ActivityFeed          []activityEntry    `json:"activity_feed"`
+	RecentTasks           []recentTask       `json:"recent_tasks"`
 }
 
 // Overview returns the full dashboard payload for the current workspace.
@@ -470,6 +481,64 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		}
 		mu.Lock()
 		out.TopMembers = top
+		mu.Unlock()
+		return nil
+	})
+
+	// --- Message flow: sender→recipient pairs (TECH-3093) ---
+	runOne(func(c context.Context) error {
+		rows, err := h.Cerebro.DashboardMessageFlowInPeriod(c, cerebrodb.DashboardMessageFlowInPeriodParams{
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+		})
+		if err != nil {
+			return err
+		}
+		var flow []messageFlowEntry
+		for _, row := range rows {
+			flow = append(flow, messageFlowEntry{
+				SenderID:      util.UUIDToString(row.SenderID),
+				SenderName:    row.SenderName,
+				RecipientID:   util.UUIDToString(row.RecipientID),
+				RecipientName: row.RecipientName,
+				Count:         int(row.Count),
+			})
+		}
+		mu.Lock()
+		out.MessageFlow = flow
+		mu.Unlock()
+		return nil
+	})
+
+	// --- Top message senders / recipients (TECH-3093) ---
+	runOne(func(c context.Context) error {
+		rows, err := h.Cerebro.DashboardTopMessageSendersInPeriod(c, cerebrodb.DashboardTopMessageSendersInPeriodParams{
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+		})
+		if err != nil {
+			return err
+		}
+		var top []topActor
+		for _, row := range rows {
+			top = append(top, topActor{ID: util.UUIDToString(row.ActorID), Name: row.Name, Count: int(row.Count)})
+		}
+		mu.Lock()
+		out.TopMessageSenders = top
+		mu.Unlock()
+		return nil
+	})
+	runOne(func(c context.Context) error {
+		rows, err := h.Cerebro.DashboardTopMessageRecipientsInPeriod(c, cerebrodb.DashboardTopMessageRecipientsInPeriodParams{
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+		})
+		if err != nil {
+			return err
+		}
+		var top []topActor
+		for _, row := range rows {
+			top = append(top, topActor{ID: util.UUIDToString(row.ActorID), Name: row.Name, Count: int(row.Count)})
+		}
+		mu.Lock()
+		out.TopMessageRecipients = top
 		mu.Unlock()
 		return nil
 	})
