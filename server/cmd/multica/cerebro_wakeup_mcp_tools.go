@@ -9,10 +9,24 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
+
+// formatWakeupTime parses an RFC3339 timestamp and returns it in Europe/Copenhagen time.
+func formatWakeupTime(rfc3339 string) string {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(rfc3339))
+	if err != nil {
+		return rfc3339
+	}
+	loc, err := time.LoadLocation("Europe/Copenhagen")
+	if err != nil {
+		return t.UTC().Format("2006-01-02 15:04:05 UTC")
+	}
+	return t.In(loc).Format("2006-01-02 15:04:05 MST")
+}
 
 func registerWakeupTools(srv *mcp.Server, client *cli.APIClient) {
 	srv.RegisterTool(mcp.Tool{
@@ -67,12 +81,12 @@ func registerWakeupTools(srv *mcp.Server, client *cli.APIClient) {
 		if err := client.PostJSON(ctx, "/api/cerebro/wakeups", body, &result); err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
-		// CEREBRO-PATCH(wakeup-comment-reminder): instruct agent to post a comment confirming the scheduled wakeup time.
+		// CEREBRO-PATCH(wakeup-comment-reminder): instruct agent to post a comment confirming the scheduled wakeup time in local timezone.
 		data, _ := json.MarshalIndent(result, "", "  ")
-		fireTime := optString(args, "fire_at")
 		instruction := "\n\nIMPORTANT: You MUST now post a comment on the issue confirming the wakeup was scheduled."
-		if fireTime != "" {
-			instruction = fmt.Sprintf("\n\nIMPORTANT: You MUST now post a comment on the issue stating that a wakeup has been scheduled for %s.", fireTime)
+		if fireTime := optString(args, "fire_at"); fireTime != "" {
+			displayTime := formatWakeupTime(fireTime)
+			instruction = fmt.Sprintf("\n\nIMPORTANT: You MUST now post a comment on the issue stating that a wakeup has been scheduled for %s.", displayTime)
 		}
 		return mcp.TextResult(string(data) + instruction), nil
 	})
