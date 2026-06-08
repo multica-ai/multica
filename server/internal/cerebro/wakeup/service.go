@@ -139,6 +139,10 @@ func (s *Service) Cancel(ctx context.Context, workspaceID, id pgtype.UUID) (cere
 	return row, nil
 }
 
+func (s *Service) CancelByIssueID(ctx context.Context, issueID pgtype.UUID) error {
+	return s.Cerebro.CancelPendingWakeupsByIssueID(ctx, issueID)
+}
+
 func (s *Service) ClaimDueTime(ctx context.Context, limit int32) ([]cerebrodb.CerebroAgentWakeup, error) {
 	return s.Cerebro.ClaimDueTimeWakeups(ctx, limit)
 }
