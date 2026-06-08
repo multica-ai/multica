@@ -10,6 +10,12 @@
 import { Wrench } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@multica/ui/components/ui/tabs";
 import { ToolPolicyTable } from "./tool-policy-table";
 
 // Mirrors @multica/views ExtraSettingsTab structurally. Defined locally so this
@@ -25,6 +31,12 @@ export interface ExtraSettingsTab {
 // WorkspacePermissionsTab is the Settings-tab body: the per-tool catalog editing
 // the workspace root layer — the default below every runtime, agent, group, and
 // user. The workspace id is both the view subject and the layer's subject_id.
+//
+// Tools are grouped into four tabs:
+//   Repos        — per-repository read/checkout/push permissions
+//   Runtime      — runtime and daemon tools
+//   Multica      — all other platform tools (issues, comments, agents, etc.)
+//   Connections  — workspace connection tools (one row per configured connection)
 export function WorkspacePermissionsTab() {
   const wsId = useWorkspaceId();
   return (
@@ -36,7 +48,26 @@ export function WorkspacePermissionsTab() {
           and member below can only tighten what is set here — never loosen it.
         </p>
       </div>
-      <ToolPolicyTable wsId={wsId} view="workspace" subjectId={wsId} />
+      <Tabs defaultValue="multica">
+        <TabsList>
+          <TabsTrigger value="multica">Multica</TabsTrigger>
+          <TabsTrigger value="runtime">Runtime</TabsTrigger>
+          <TabsTrigger value="repos">Repos</TabsTrigger>
+          <TabsTrigger value="connections">Connections</TabsTrigger>
+        </TabsList>
+        <TabsContent value="multica" className="mt-4">
+          <ToolPolicyTable wsId={wsId} view="workspace" subjectId={wsId} tabFilter="multica" />
+        </TabsContent>
+        <TabsContent value="runtime" className="mt-4">
+          <ToolPolicyTable wsId={wsId} view="workspace" subjectId={wsId} tabFilter="runtime" />
+        </TabsContent>
+        <TabsContent value="repos" className="mt-4">
+          <ToolPolicyTable wsId={wsId} view="workspace" subjectId={wsId} tabFilter="repos" />
+        </TabsContent>
+        <TabsContent value="connections" className="mt-4">
+          <ToolPolicyTable wsId={wsId} view="workspace" subjectId={wsId} tabFilter="connections" />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
