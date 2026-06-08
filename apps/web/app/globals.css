@@ -13,17 +13,7 @@
 @source "../lib/**/*.{ts,tsx}";
 @source "../../../packages/ui/components/**/*.{ts,tsx}";
 @source "../../../packages/ui/lib/**/*.{ts,tsx}";
-@source "../../../packages/views/auth/**/*.{ts,tsx}";
-@source "../../../packages/views/chat/**/*.{ts,tsx}";
-@source "../../../packages/views/common/**/*.{ts,tsx}";
-@source "../../../packages/views/i18n/**/*.{ts,tsx}";
-@source "../../../packages/views/inbox/**/*.{ts,tsx}";
-@source "../../../packages/views/issues/**/*.{ts,tsx}";
-@source "../../../packages/views/layout/**/*.{ts,tsx}";
-@source "../../../packages/views/navigation/**/*.{ts,tsx}";
-@source "../../../packages/views/projects/**/*.{ts,tsx}";
-@source "../../../packages/views/search/**/*.{ts,tsx}";
-@source "../../../packages/views/workspace/**/*.{ts,tsx}";
+@source "../../../packages/views/**/*.{ts,tsx}";
 
 /* Font stack. `--font-inter` is the next/font Inter family (+ its synthetic
    size-adjusted fallback), set on <html> by inter.variable in app/layout.tsx.

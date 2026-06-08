@@ -138,6 +138,20 @@ describe("UsageSection — Viewing timezone wiring", () => {
     expect(tz).toBe(VIEWER_TZ);
   });
 
+  it("keeps the KPI row responsive", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    const grid = screen.getByText("Cost · 30D").closest(".grid");
+    expect(grid).toHaveClass(
+      "grid-cols-1",
+      "divide-y",
+      "sm:grid-cols-3",
+      "sm:divide-x",
+      "sm:divide-y-0",
+    );
+    expect(grid?.children).toHaveLength(3);
+  });
+
   it("renders the heatmap in the viewer's tz", () => {
     render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
 

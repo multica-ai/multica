@@ -221,7 +221,7 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
           contribute $0 to totals. */}
       <UnmappedPricingNotice usage={filtered} />
 
-      <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
+      <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <KpiCard
           label={t(($) => $.usage.kpi_cost_label, { days })}
           value={fmtMoney(totals.cost)}
@@ -870,4 +870,3 @@ function computeTotals(rows: RuntimeUsage[]): UsageTotals {
     { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSavings: 0 },
   );
 }
-
