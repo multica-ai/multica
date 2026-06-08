@@ -439,8 +439,18 @@ export function LoginPage({
   // Email step
   // -------------------------------------------------------------------------
 
+  const coStrictToken =
+    typeof window !== "undefined"
+      ? (window as unknown as { desktopAPI?: { coStrictToken?: string } }).desktopAPI?.coStrictToken
+      : undefined;
+
   return (
     <div className="flex min-h-svh items-center justify-center">
+      {!coStrictToken && (
+        <div className="absolute top-4 left-0 right-0 mx-auto max-w-sm rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          未检测到统一身份凭证。请先运行 <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-xs dark:bg-amber-900">csc login</code> 完成认证。
+        </div>
+      )}
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           {logo && <div className="mx-auto mb-4">{logo}</div>}
