@@ -1,6 +1,10 @@
 # --- Build stage ---
 FROM golang:1.26-alpine AS builder
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
 RUN apk add --no-cache git
 
 WORKDIR /src
