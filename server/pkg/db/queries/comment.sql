@@ -15,6 +15,17 @@ WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3 AND deleted_at IS 
 ORDER BY created_at ASC, id ASC
 LIMIT $4;
 
+-- name: GetLatestAgentCommentSince :one
+SELECT * FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND author_type = 'agent'
+  AND author_id = $3
+  AND created_at >= $4
+  AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: ListRootCommentsForIssue :many
 -- Top-level comments only, in issue chronological order, each annotated with
 -- per-thread orientation stats: reply_count (number of descendants) and

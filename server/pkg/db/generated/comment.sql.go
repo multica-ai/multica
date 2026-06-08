@@ -203,6 +203,52 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 	return i, err
 }
 
+const getLatestAgentCommentSince = `-- name: GetLatestAgentCommentSince :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at, resolved_at, resolved_by_type, resolved_by_id FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND author_type = 'agent'
+  AND author_id = $3
+  AND created_at >= $4
+  AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestAgentCommentSinceParams struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetLatestAgentCommentSince(ctx context.Context, arg GetLatestAgentCommentSinceParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getLatestAgentCommentSince,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.AuthorID,
+		arg.CreatedAt,
+	)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.DeletedAt,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+	)
+	return i, err
+}
+
 const getThreadRoot = `-- name: GetThreadRoot :one
 WITH RECURSIVE root_of AS (
     SELECT c.id, c.parent_id

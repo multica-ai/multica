@@ -225,12 +225,15 @@ func TestRedisLocalSkillImportStore_PreservesCreatorID(t *testing.T) {
 
 	name := "Review Helper"
 	desc := "Desc"
-	req, err := store.Create(ctx, "runtime-1", "user-42", "review-helper", &name, &desc)
+	req, err := store.Create(ctx, "runtime-1", "user-42", "review-helper", &name, &desc, true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if req.CreatorID != "user-42" {
 		t.Fatalf("creator id lost on create")
+	}
+	if !req.Overwrite {
+		t.Fatalf("overwrite lost on create")
 	}
 
 	got, err := store.Get(ctx, req.ID)
@@ -249,6 +252,9 @@ func TestRedisLocalSkillImportStore_PreservesCreatorID(t *testing.T) {
 	if got.Description == nil || *got.Description != desc {
 		t.Fatalf("description lost: %v", got.Description)
 	}
+	if !got.Overwrite {
+		t.Fatalf("overwrite lost round trip")
+	}
 }
 
 func TestRedisLocalSkillImportStore_PopPendingAcrossInstances(t *testing.T) {
@@ -258,7 +264,7 @@ func TestRedisLocalSkillImportStore_PopPendingAcrossInstances(t *testing.T) {
 	nodeA := NewRedisLocalSkillImportStore(rdb)
 	nodeB := NewRedisLocalSkillImportStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-import", "user-1", "review-helper", nil, nil)
+	req, err := nodeA.Create(ctx, "runtime-import", "user-1", "review-helper", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -365,7 +371,7 @@ func TestRedisLocalSkillImportStore_PopPendingBatch(t *testing.T) {
 	// Create 5 pending imports.
 	ids := make([]string, 5)
 	for i := range ids {
-		req, err := store.Create(ctx, "runtime-batch", "user-1", fmt.Sprintf("skill-%d", i), nil, nil)
+		req, err := store.Create(ctx, "runtime-batch", "user-1", fmt.Sprintf("skill-%d", i), nil, nil, false)
 		if err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}

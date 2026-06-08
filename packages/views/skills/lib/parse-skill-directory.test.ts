@@ -68,4 +68,77 @@ describe("parseSkillDirectory", () => {
       },
     ]);
   });
+
+  it("skips cache, dependency, binary, and license supporting files", async () => {
+    const skills = await parseSkillDirectory(
+      makeFileList([
+        makeDirectoryFile("---\nname: clean\n---\nbody", "SKILL.md", "clean/SKILL.md"),
+        makeDirectoryFile("guide", "guide.md", "clean/references/guide.md"),
+        makeDirectoryFile("compiled", "tool.cpython-312.pyc", "clean/scripts/__pycache__/tool.cpython-312.pyc"),
+        makeDirectoryFile("dependency", "index.js", "clean/node_modules/pkg/index.js"),
+        makeDirectoryFile("png", "logo.png", "clean/assets/logo.png"),
+        makeDirectoryFile("license", "LICENSE", "clean/LICENSE"),
+      ]),
+    );
+
+    expect(skills).toEqual([
+      {
+        name: "clean",
+        description: "",
+        content: "---\nname: clean\n---\nbody",
+        files: [{ path: "references/guide.md", content: "guide" }],
+      },
+    ]);
+  });
+
+  it("keeps top-level dot directory formats detectable", async () => {
+    const skills = await parseSkillDirectory(
+      makeFileList([
+        makeDirectoryFile("---\nname: Summarize\n---\nbody", "summarize.md", ".claude/commands/summarize.md"),
+      ]),
+    );
+
+    expect(skills).toEqual([
+      {
+        name: "Summarize",
+        description: "",
+        content: "---\nname: Summarize\n---\nbody",
+      },
+    ]);
+  });
+
+  it("keeps dot directory formats detectable under an uploaded repo root", async () => {
+    const skills = await parseSkillDirectory(
+      makeFileList([
+        makeDirectoryFile("---\nname: Summarize\n---\nbody", "summarize.md", "repo/.claude/commands/summarize.md"),
+      ]),
+    );
+
+    expect(skills).toEqual([
+      {
+        name: "Summarize",
+        description: "",
+        content: "---\nname: Summarize\n---\nbody",
+      },
+    ]);
+  });
+
+  it("skips unrelated dot directories after the uploaded root is stripped", async () => {
+    const skills = await parseSkillDirectory(
+      makeFileList([
+        makeDirectoryFile("---\nname: clean\n---\nbody", "SKILL.md", "repo/SKILL.md"),
+        makeDirectoryFile("workflow", "ci.yml", "repo/.github/workflows/ci.yml"),
+        makeDirectoryFile("guide", "guide.md", "repo/references/guide.md"),
+      ]),
+    );
+
+    expect(skills).toEqual([
+      {
+        name: "clean",
+        description: "",
+        content: "---\nname: clean\n---\nbody",
+        files: [{ path: "references/guide.md", content: "guide" }],
+      },
+    ]);
+  });
 });

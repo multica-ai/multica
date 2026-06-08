@@ -2,6 +2,10 @@ import {
   FILE_CARD_URL_PATTERN,
   isAllowedFileCardHref,
 } from "@multica/ui/markdown/file-cards";
+export {
+  parseMobileIssueLink,
+  type MobileIssueLinkTarget,
+} from "../../navigation/issue-links";
 
 const FILE_CARD_LINE_RE = new RegExp(
   `^!file\\[([^\\]]*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
@@ -20,12 +24,6 @@ const MOBILE_FILE_CARD_RE =
 export type MobileFileCard = {
   filename: string;
   href: string;
-};
-
-export type MobileIssueLinkTarget = {
-  commentId?: string;
-  issueId: string;
-  workspaceSlug: string;
 };
 
 export function preprocessMobileMarkdown(content: string): string {
@@ -110,41 +108,6 @@ export function getIssueMentionId(href: string): string | null {
   }
 }
 
-export function parseMobileIssueLink(
-  href: string,
-  allowedBaseUrls: readonly (string | undefined)[],
-): MobileIssueLinkTarget | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(href);
-  } catch {
-    return null;
-  }
-
-  if (!/^https?:$/i.test(parsed.protocol)) return null;
-
-  const allowedOrigins = new Set<string>();
-  for (const baseUrl of allowedBaseUrls) {
-    if (!baseUrl) continue;
-    try {
-      allowedOrigins.add(new URL(baseUrl).origin);
-    } catch {
-      // Ignore invalid runtime config values.
-    }
-  }
-  if (!allowedOrigins.has(parsed.origin)) return null;
-
-  const parts = parsed.pathname.split("/").filter(Boolean);
-  if (parts.length !== 3 || parts[1] !== "issues") return null;
-
-  const workspaceSlug = safeDecodeURIComponent(parts[0] ?? "");
-  const issueId = safeDecodeURIComponent(parts[2] ?? "");
-  if (!workspaceSlug || !issueId) return null;
-
-  const commentId = parsed.searchParams.get("comment")?.trim() || undefined;
-  return { workspaceSlug, issueId, commentId };
-}
-
 export function isMentionHref(href: string): boolean {
   return /^mention:\/\/(all|member|agent|squad|issue)\/.+/.test(href);
 }
@@ -155,6 +118,48 @@ export function isSafeHttpUrl(href: string): boolean {
 
 export function isInlineFileLinkTitle(title?: string): boolean {
   return title === INLINE_FILE_LINK_TITLE;
+}
+
+export function fillTableColumnWidths({
+  maxWidth,
+  viewportWidth,
+  widths,
+}: {
+  maxWidth: number;
+  viewportWidth: number;
+  widths: number[];
+}): number[] {
+  if (widths.length === 0 || viewportWidth <= 0) return widths;
+
+  const totalWidth = widths.reduce((total, width) => total + width, 0);
+  if (totalWidth >= viewportWidth) return widths;
+
+  const filledWidths = [...widths];
+  let remainingWidth = viewportWidth - totalWidth;
+  let expandableIndexes = filledWidths
+    .map((width, index) => ({ index, width }))
+    .filter(({ width }) => width < maxWidth)
+    .map(({ index }) => index);
+
+  while (remainingWidth > 0 && expandableIndexes.length > 0) {
+    const increment = remainingWidth / expandableIndexes.length;
+    let distributedWidth = 0;
+
+    expandableIndexes = expandableIndexes.filter((index) => {
+      const width = filledWidths[index] ?? 0;
+      const availableWidth = maxWidth - width;
+      const appliedWidth = Math.min(availableWidth, increment);
+      const nextWidth = width + appliedWidth;
+      filledWidths[index] = nextWidth;
+      distributedWidth += appliedWidth;
+      return nextWidth < maxWidth;
+    });
+
+    if (distributedWidth <= 0) break;
+    remainingWidth -= distributedWidth;
+  }
+
+  return filledWidths;
 }
 
 function preprocessInlineFileLinks(
@@ -245,12 +250,4 @@ function unescapeAttr(value: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, "&");
-}
-
-function safeDecodeURIComponent(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }

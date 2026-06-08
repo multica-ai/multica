@@ -57,7 +57,6 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
   const [view, setView] = useState<"preview" | "source">("preview");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [_fullscreen, setFullscreen] = useState(false);
 
   const handleCopy = async () => {
     if (!html) return;
@@ -92,15 +91,16 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
   };
 
   return (
-    <div className={cn("code-block-wrapper group/code relative my-2", className)}>
+    <div className={cn("code-block-wrapper group/code relative my-2 select-text", className)}>
       <div
-        className="absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
+        className="code-block-header pointer-events-none absolute top-0 right-0 z-10 flex select-none items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
       >
         <span className="text-xs text-muted-foreground select-none">{HTML_LANGUAGE_LABEL}</span>
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={toggleView}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title={
             view === "preview"
               ? t(($) => $.code_block.show_source)
@@ -121,8 +121,9 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         {view === "preview" && (
           <button
             type="button"
-            onClick={() => setFullscreen(true)}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setPreviewOpen(true)}
+            className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title={t(($) => $.code_block.fullscreen)}
             aria-label={t(($) => $.code_block.fullscreen)}
           >
@@ -131,8 +132,9 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         )}
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => setPreviewOpen(true)}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title={t(($) => $.attachment.preview)}
           aria-label={t(($) => $.attachment.preview)}
         >
@@ -141,8 +143,9 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         {slug && (
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={handleOpenInNewTab}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title={t(($) => $.attachment.open_in_new_tab)}
             aria-label={t(($) => $.attachment.open_in_new_tab)}
           >
@@ -151,8 +154,9 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         )}
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={handleDownload}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title={t(($) => $.image.download)}
           aria-label={t(($) => $.image.download)}
         >
@@ -160,8 +164,9 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         </button>
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title={t(($) => $.code_block.copy_code)}
           aria-label={t(($) => $.code_block.copy_code)}
         >

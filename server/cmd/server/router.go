@@ -187,6 +187,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
 	daemonHub.SetHeartbeatHandler(h.HandleDaemonWSHeartbeat)
+	daemonHub.SetNotificationDeliveryResultHandler(h.HandleNotificationDeliveryResult)
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
@@ -370,6 +371,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/me/notification-webhooks/{webhookId}/test", h.TestMyNotificationWebhook)
 		r.Get("/api/me/notification-preferences", h.GetMyNotificationPreferences)
 		r.Patch("/api/me/notification-preferences", h.UpdateMyNotificationPreference)
+		r.Put("/api/me/mobile-push/registrations", h.UpsertMyMobilePushRegistration)
+		r.Delete("/api/me/mobile-push/registrations/{installationId}", h.DisableMyMobilePushRegistration)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
@@ -712,6 +715,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListSkills)
 				r.Post("/", h.CreateSkill)
 				r.Post("/import", h.ImportSkill)
+				r.Post("/import/discover", h.DiscoverImportSkills)
 				r.Post("/batch-import", h.BatchImportSkills)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSkill)

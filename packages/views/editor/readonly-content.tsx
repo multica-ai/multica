@@ -58,8 +58,6 @@ const lowlight = createLowlight(common);
 // Anchored to whole class tokens so `language-htmlbars` / `language-mermaidx`
 // don't accidentally match and lose their <pre> wrapper.
 const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
-const LANGUAGE_CLASS_RE = /(^|\s)language-([^\s]+)(\s|$)/;
-
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
 // ---------------------------------------------------------------------------
@@ -157,27 +155,8 @@ function ReadonlyLink({
   );
 }
 
-function getTextContent(node: React.ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") {
-    return String(node);
-  }
-  if (Array.isArray(node)) {
-    return node.map(getTextContent).join("");
-  }
-  if (isValidElement(node)) {
-    const props = node.props as { children?: React.ReactNode };
-    return getTextContent(props.children);
-  }
-  return "";
-}
-
-function ReadonlyCodeBlock({ children }: { children: React.ReactNode }) {
+function CodeBlockHeader({ language, code }: { language?: string; code: string }) {
   const [copied, setCopied] = useState(false);
-  const childProps = isValidElement(children)
-    ? (children.props as { className?: string; children?: React.ReactNode })
-    : undefined;
-  const language = childProps?.className?.match(LANGUAGE_CLASS_RE)?.[2] ?? "text";
-  const code = getTextContent(childProps?.children ?? children).replace(/\n$/, "");
 
   const handleCopy = async () => {
     if (!code) return;
@@ -191,23 +170,19 @@ function ReadonlyCodeBlock({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="code-block-wrapper group/code relative my-2">
-      <div className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100">
-        <span className="text-xs text-muted-foreground select-none">
-          {language}
-        </span>
+    <div className="code-block-header flex select-none items-center justify-between rounded-t-md border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+      <span>{language || "text"}</span>
+      <div className="flex items-center gap-1">
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="pointer-events-auto flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
           title="Copy code"
           aria-label="Copy code"
         >
-          {copied ? (
-            <Check className="h-3.5 w-3.5" />
-          ) : (
-            <Copy className="h-3.5 w-3.5" />
-          )}
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
         </button>
         <button
           type="button"
@@ -220,9 +195,27 @@ function ReadonlyCodeBlock({ children }: { children: React.ReactNode }) {
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
-      <pre>{children}</pre>
     </div>
   );
+}
+
+/**
+ * Extract plain text from a react-markdown AST node's children.
+ * Used by the `code` component to ensure code block / inline code content
+ * is always rendered as plain text, even if a preprocessing or parsing
+ * layer accidentally wrapped part of it in an interactive element.
+ */
+function extractTextFromAst(node: any): string {
+  if (!node?.children) return "";
+  return (node.children as any[])
+    .map((n: any) => {
+      if (n.type === "text") return n.value as string;
+      // Recurse into element children (e.g. <a> wrapping text)
+      if (n.children) return extractTextFromAst(n);
+      return "";
+    })
+    .join("")
+    .replace(/\n$/, "");
 }
 
 function buildComponents(): Partial<Components> {
@@ -278,24 +271,28 @@ function buildComponents(): Partial<Components> {
         node?.position &&
         node.position.start.line !== node.position.end.line;
 
+      // Extract plain text from AST node to avoid rendering interactive
+      // elements (e.g. <a> links) inside code blocks/inline code.
+      const codeText = extractTextFromAst(node);
+
       if (isBlock && lang === "mermaid") {
-        return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+        return <MermaidDiagram chart={codeText} />;
       }
       if (isBlock && lang === "html") {
         // Like Mermaid, return the React element directly here and rely on
         // the `pre` renderer below to unwrap it — react-markdown otherwise
         // wraps `code` children in a `<pre>` whose monospace + overflow
         // styles would clamp the preview iframe.
-        return <HtmlBlockPreview html={String(children).replace(/\n$/, "")} />;
+        return <HtmlBlockPreview html={codeText} />;
       }
 
       if (!isBlock && !lang) {
-        // Inline code — CSS handles styling via .rich-text-editor code
-        return <code {...props}>{children}</code>;
+        // Inline code — always render as plain text, never interactive
+        return <code {...props}>{codeText || children}</code>;
       }
 
       // Block code — highlight with lowlight, output hljs classes
-      const code = String(children).replace(/\n$/, "");
+      const code = codeText || String(children).replace(/\n$/, "");
       try {
         const tree = lang
           ? lowlight.highlight(lang, code)
@@ -314,7 +311,7 @@ function buildComponents(): Partial<Components> {
       }
       return (
         <code className={cn("hljs", className)} {...props}>
-          {children}
+          {code}
         </code>
       );
     },
@@ -340,7 +337,26 @@ function buildComponents(): Partial<Components> {
           return <>{children}</>;
         }
       }
-      return <ReadonlyCodeBlock>{children}</ReadonlyCodeBlock>;
+      // Extract text content and language for header bar
+      const codeEl = (node?.children ?? []).find(
+        (child: any) => child.type === "element" && child.tagName === "code"
+      ) as any;
+      const codeText = codeEl
+        ? (codeEl.children as any[])
+            .filter((n: any) => n.type === "text")
+            .map((n: any) => n.value as string)
+            .join("")
+            .replace(/\n$/, "")
+        : "";
+      const classNames: string[] = codeEl?.properties?.className ?? [];
+      const langClass = classNames.find((cls: string) => cls.startsWith("language-"));
+      const language = langClass?.replace("language-", "");
+      return (
+        <div className="code-block-wrapper my-2 overflow-hidden rounded-md border border-border select-text">
+          {codeText && <CodeBlockHeader language={language} code={codeText} />}
+          <pre className="!mt-0 !rounded-t-none !border-0 select-text">{children}</pre>
+        </div>
+      );
     },
   };
 }

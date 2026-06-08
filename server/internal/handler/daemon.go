@@ -1179,6 +1179,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		resp.Agent = &TaskAgentData{
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
+			Description:   agent.Description,
 			Visibility:    agent.Visibility,
 			OwnerID:       uuidToString(agent.OwnerID),
 			Instructions:  merged.Instructions,
@@ -2298,7 +2299,8 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, taskToResponse(*task, uuidToString(issue.WorkspaceID)))
 }
 
-// ListTasksByIssue returns all tasks (any status) for an issue — used for execution history.
+// ListTasksByIssue returns tasks for an issue that belong to agents owned by
+// the requesting user (or agents with no owner). Used for execution history.
 func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -2306,7 +2308,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.Queries.ListTasksByIssue(r.Context(), issue.ID)
+	userID := parseUUID(requestUserID(r))
+
+	tasks, err := h.Queries.ListTasksByIssueForOwner(r.Context(), db.ListTasksByIssueForOwnerParams{
+		IssueID: issue.ID,
+		OwnerID: userID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
 		return
@@ -2316,7 +2323,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	for i, t := range tasks {
 		resp[i] = taskToSlimResponse(t, uuidToString(issue.WorkspaceID))
 	}
-	localRuns, err := h.listLocalCLIRunsByIssue(r, issue)
+	localRuns, err := h.listLocalCLIRunsByIssue(r, issue, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list local runs")
 		return

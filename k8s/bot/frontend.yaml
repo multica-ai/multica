@@ -21,9 +21,14 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: multica-bot-secrets
           env:
             - name: HOSTNAME
               value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
           resources:
             requests:
               cpu: 100m

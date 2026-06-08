@@ -223,6 +223,7 @@
     "clear_history_description": "This will permanently delete all comments and task run records. This action cannot be undone.",
     "clear_history_cancel": "Cancel",
     "clear_history_confirm": "Clear",
+    "clear_history_failed": "Failed to clear history",
     "workdir_path_copied": "Workdir path copied",
     "workdir_path_copy_failed": "Failed to copy workdir path",
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
@@ -288,6 +289,7 @@
     "update_failed": "Failed to update comment",
     "send_failed": "Failed to send comment",
     "send_reply_failed": "Failed to send reply",
+    "login_required": "Please log in to continue",
     "delete_failed": "Failed to delete comment",
     "reply_count_one": "{{count}} reply",
     "reply_count_other": "{{count}} replies",

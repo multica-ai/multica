@@ -73,6 +73,8 @@
     "field_agent": "智能体",
     "field_output_mode": "输出模式",
     "field_project": "关联项目",
+    "field_manual_options": "手动触发选项",
+    "manual_options_empty": "未配置手动选项",
     "no_project": "不关联项目",
     "project_unavailable": "项目不可用",
     "field_prompt": "Prompt",
@@ -89,6 +91,12 @@
       "confirm": "删除",
       "deleting": "删除中..."
     }
+  },
+  "manual_run": {
+    "title": "选择运行选项",
+    "cancel": "取消",
+    "confirm": "运行",
+    "running": "运行中..."
   },
   "run_status": {
     "issue_created": "已创建 issue",
@@ -253,6 +261,11 @@
     "section_project": "关联项目",
     "no_project": "不关联项目",
     "section_output_mode": "输出模式",
+    "section_manual_options": "手动触发选项",
+    "manual_option_placeholder": "production",
+    "manual_option_add": "添加选项",
+    "manual_option_remove": "移除选项",
+    "manual_options_empty": "未添加选项时，「立即运行」会直接触发。",
     "section_schedule": "时间表",
     "section_trigger_kind": "触发方式",
     "trigger_kind_schedule": "时间表",

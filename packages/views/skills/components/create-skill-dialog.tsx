@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, useRef, useState } from "react";
+import { type ChangeEvent, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -14,21 +14,30 @@ import {
   X as XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
-import type { BatchImportSkillsResponse, CreateSkillRequest, Skill } from "@multica/core/types";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError } from "@multica/core/api";
+import type {
+  CreateSkillRequest,
+  DiscoveredImportSkill,
+  Skill,
+} from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { isImeComposing } from "@multica/core/utils";
 import {
+  skillListOptions,
   skillDetailOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import {
   Dialog,
+  DialogDescription,
   DialogContent,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   Tooltip,
   TooltipContent,
@@ -56,6 +65,136 @@ function seedAfterCreate(
   qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
   qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
   qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+}
+
+function buildConflictKey(name: string): string {
+  return name.trim();
+}
+
+type SkillConflictItem = {
+  key: string;
+  name: string;
+  description?: string;
+};
+
+type SkillImportBatchResult = {
+  created: Skill[];
+  skipped: string[];
+  failed: string[];
+};
+
+type ExistingSkillConflict = {
+  name: string;
+  description?: string;
+};
+
+function useExistingSkillsByName(wsId: string): Map<string, ExistingSkillConflict> {
+  const workspaceSkillsQuery = useQuery(skillListOptions(wsId));
+  return useMemo(() => {
+    const byName = new Map<string, ExistingSkillConflict>();
+    for (const skill of workspaceSkillsQuery.data ?? []) {
+      byName.set(buildConflictKey(skill.name), skill);
+    }
+    return byName;
+  }, [workspaceSkillsQuery.data]);
+}
+
+function SkillConflictDialog({
+  open,
+  title,
+  description,
+  skills,
+  existingByName,
+  overwriteKeys,
+  onToggle,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  skills: SkillConflictItem[];
+  existingByName: Map<string, ExistingSkillConflict>;
+  overwriteKeys: Set<string>;
+  onToggle: (key: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useT("skills");
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onCancel()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-72 space-y-2 overflow-y-auto">
+          {skills.map((skill) => {
+            const checked = overwriteKeys.has(skill.key);
+            const existing = existingByName.get(buildConflictKey(skill.name));
+
+            return (
+              <label
+                key={skill.key}
+                className="flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-accent/40"
+              >
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={() => onToggle(skill.key)}
+                  className="mt-0.5"
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{skill.name}</span>
+                    <Badge variant={checked ? "secondary" : "outline"}>
+                      {checked
+                        ? t(($) => $.runtime_import.conflict_overwrite_badge)
+                        : t(($) => $.runtime_import.conflict_skip_badge)}
+                    </Badge>
+                  </div>
+                  <div className="grid gap-1 text-xs text-muted-foreground">
+                    <span className="truncate">
+                      {t(($) => $.runtime_import.conflict_local_label)}:{" "}
+                      {skill.description ||
+                        t(($) => $.runtime_import.conflict_no_description)}
+                    </span>
+                    <span className="truncate">
+                      {t(($) => $.runtime_import.conflict_existing_label)}:{" "}
+                      {existing?.description ||
+                        t(($) => $.runtime_import.conflict_no_description)}
+                    </span>
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onCancel}>
+            {t(($) => $.runtime_import.conflict_cancel_button)}
+          </Button>
+          <Button type="button" onClick={onConfirm}>
+            {t(($) => $.runtime_import.conflict_confirm_button)}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function getImportConflict(body: unknown): SkillConflictItem | null {
+  if (!body || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.name !== "string" || !record.name.trim()) return null;
+  return {
+    key: "url-import",
+    name: record.name,
+    description:
+      typeof record.description === "string" ? record.description : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -258,9 +397,12 @@ function LocalDirectoryForm({
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
   const [parsedSkills, setParsedSkills] = useState<CreateSkillRequest[]>([]);
-  const [batchResult, setBatchResult] = useState<BatchImportSkillsResponse | null>(null);
+  const [batchResult, setBatchResult] = useState<SkillImportBatchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [conflicts, setConflicts] = useState<SkillConflictItem[]>([]);
+  const [overwriteKeys, setOverwriteKeys] = useState<Set<string>>(new Set());
+  const workspaceSkillsByName = useExistingSkillsByName(wsId);
 
   const handleDirectorySelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
@@ -277,6 +419,8 @@ function LocalDirectoryForm({
         return;
       }
       setParsedSkills(skills);
+      setConflicts([]);
+      setOverwriteKeys(new Set());
     } catch (err) {
       setParsedSkills([]);
       setError(err instanceof Error ? err.message : t(($) => $.create.local.parse_failed));
@@ -286,25 +430,63 @@ function LocalDirectoryForm({
     }
   };
 
+  const runImportParsedSkills = async (
+    skillsToImport: CreateSkillRequest[],
+    skippedConflicts: SkillConflictItem[],
+  ) => {
+    const skippedNames = skippedConflicts.map((skill) => skill.name);
+    if (skillsToImport.length === 0) {
+      setBatchResult({
+        created: [],
+        skipped: skippedNames,
+        failed: [],
+      });
+      await qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+      toast.success(
+        t(($) => $.create.local.toast_imported, {
+          count: 0,
+        }),
+      );
+      return;
+    }
+    const result = await api.batchImportSkills({ skills: skillsToImport });
+    setBatchResult({
+      created: result.created,
+      skipped: [...skippedNames, ...result.skipped],
+      failed: [],
+    });
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
+    ]);
+    for (const skill of result.created) {
+      qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
+    }
+    toast.success(
+      t(($) => $.create.local.toast_imported, {
+        count: result.created.length,
+      }),
+    );
+  };
+
   const importParsedSkills = async () => {
     if (parsedSkills.length === 0) return;
     setLoading(true);
     setError("");
     try {
-      const result = await api.batchImportSkills({ skills: parsedSkills });
-      setBatchResult(result);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
-        qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
-      ]);
-      for (const skill of result.created) {
-        qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
+      const detectedConflicts = parsedSkills
+        .map((skill, index) => ({
+          key: `${skill.name}-${index}`,
+          name: skill.name,
+          description: skill.description,
+        }))
+        .filter((skill) => workspaceSkillsByName.has(buildConflictKey(skill.name)));
+      if (detectedConflicts.length > 0) {
+        setConflicts(detectedConflicts);
+        setOverwriteKeys(new Set());
+        return;
       }
-      toast.success(
-        t(($) => $.create.local.toast_imported, {
-          count: result.created.length,
-        }),
-      );
+      await runImportParsedSkills(parsedSkills, []);
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.create.local.import_failed));
     } finally {
@@ -313,15 +495,69 @@ function LocalDirectoryForm({
   };
 
   const handleDone = () => {
-    if (batchResult?.created.length === 1) {
+    if (
+      batchResult?.created.length === 1 &&
+      batchResult.skipped.length === 0 &&
+      batchResult.failed.length === 0
+    ) {
       onCreated(batchResult.created[0]!);
       return;
     }
     onBulkDone();
   };
 
+  const toggleConflictOverwrite = (key: string) => {
+    setOverwriteKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleConfirmConflicts = async () => {
+    const conflictKeys = new Set(conflicts.map((skill) => skill.key));
+    const skillsToImport = parsedSkills
+      .map((skill, index) => ({ skill, key: `${skill.name}-${index}` }))
+      .filter(({ key }) => !conflictKeys.has(key) || overwriteKeys.has(key))
+      .map(({ skill, key }) => ({
+        ...skill,
+        overwrite: overwriteKeys.has(key) || undefined,
+      }));
+    const skippedConflicts = conflicts.filter((skill) => !overwriteKeys.has(skill.key));
+
+    setConflicts([]);
+    setOverwriteKeys(new Set());
+    setLoading(true);
+    setError("");
+    try {
+      await runImportParsedSkills(skillsToImport, skippedConflicts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(($) => $.create.local.import_failed));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelConflicts = () => {
+    setConflicts([]);
+    setOverwriteKeys(new Set());
+  };
+
   return (
     <>
+      <SkillConflictDialog
+        open={conflicts.length > 0}
+        title={t(($) => $.runtime_import.conflict_dialog_title)}
+        description={t(($) => $.create.local.conflict_dialog_description)}
+        skills={conflicts}
+        existingByName={workspaceSkillsByName}
+        overwriteKeys={overwriteKeys}
+        onToggle={toggleConflictOverwrite}
+        onCancel={handleCancelConflicts}
+        onConfirm={handleConfirmConflicts}
+      />
+
       <input
         ref={inputRef}
         type="file"
@@ -413,12 +649,20 @@ function LocalDirectoryForm({
               {t(($) => $.create.local.import_summary, {
                 created: batchResult.created.length,
                 skipped: batchResult.skipped.length,
+                failed: batchResult.failed.length,
               })}
             </p>
             {batchResult.skipped.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 {t(($) => $.create.local.skipped_names, {
                   names: batchResult.skipped.join(", "),
+                })}
+              </p>
+            )}
+            {batchResult.failed.length > 0 && (
+              <p className="text-xs text-destructive">
+                {t(($) => $.create.local.failed_names, {
+                  names: batchResult.failed.join(", "),
                 })}
               </p>
             )}
@@ -485,6 +729,11 @@ function LocalDirectoryForm({
 
 type DetectedSource = "clawhub" | "skills.sh" | "github" | "gitee" | null;
 
+type DiscoveredSkillSelection = {
+  key: string;
+  skill: DiscoveredImportSkill;
+};
+
 function detectUrlSource(url: string): DetectedSource {
   const u = url.trim().toLowerCase();
   if (u.includes("clawhub.ai")) return "clawhub";
@@ -523,11 +772,111 @@ function SourceCard({
   );
 }
 
+function buildDiscoveredSkillKey(name: string, index: number): string {
+  return `${name}-${index}`;
+}
+
+function selectedDiscoveredSkills(
+  skills: DiscoveredImportSkill[],
+  selectedKeys: Set<string>,
+): DiscoveredSkillSelection[] {
+  return skills
+    .map((skill, index) => ({
+      key: buildDiscoveredSkillKey(skill.name, index),
+      skill,
+    }))
+    .filter(({ key }) => selectedKeys.has(key));
+}
+
+function importConflictItemsFromDiscovered(
+  skills: DiscoveredSkillSelection[],
+): SkillConflictItem[] {
+  return skills.map(({ key, skill }) => ({
+    key,
+    name: skill.name,
+    description: skill.description,
+  }));
+}
+
+function SkillCandidateList({
+  skills,
+  selectedKeys,
+  onToggle,
+  emptyText,
+}: {
+  skills: DiscoveredImportSkill[];
+  selectedKeys: Set<string>;
+  onToggle: (key: string) => void;
+  emptyText: string;
+}) {
+  const { t } = useT("skills");
+  if (skills.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
+        {emptyText}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {skills.map((skill, index) => {
+        const key = buildDiscoveredSkillKey(skill.name, index);
+        const checked = selectedKeys.has(key);
+        return (
+          <div
+            key={key}
+            role="button"
+            tabIndex={0}
+            onClick={() => onToggle(key)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggle(key);
+              }
+            }}
+            className={cn(
+              "flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 transition-colors",
+              checked ? "border-primary bg-primary/5" : "hover:bg-accent/40",
+            )}
+          >
+            <Checkbox
+              checked={checked}
+              tabIndex={-1}
+              className="pointer-events-none mt-0.5"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{skill.name}</div>
+              {skill.description && (
+                <div className="truncate text-xs text-muted-foreground">
+                  {skill.description}
+                </div>
+              )}
+              <div className="truncate font-mono text-xs text-muted-foreground">
+                {skill.source_path}
+              </div>
+            </div>
+            {(skill.files?.length ?? 0) > 0 && (
+              <Badge variant="outline" className="shrink-0">
+                {t(($) => $.create.local.file_count, {
+                  count: skill.files?.length ?? 0,
+                })}
+              </Badge>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function UrlForm({
   onCreated,
+  onBulkDone,
   onCancel,
 }: {
   onCreated: (skill: Skill) => void;
+  onBulkDone: () => void;
   onCancel: () => void;
 }) {
   const { t } = useT("skills");
@@ -537,11 +886,28 @@ function UrlForm({
   const [giteeToken, setGiteeToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [conflict, setConflict] = useState<SkillConflictItem | null>(null);
+  const [conflicts, setConflicts] = useState<SkillConflictItem[]>([]);
+  const [overwriteKeys, setOverwriteKeys] = useState<Set<string>>(new Set());
+  const [discoveredSkills, setDiscoveredSkills] = useState<DiscoveredImportSkill[]>([]);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [batchResult, setBatchResult] = useState<SkillImportBatchResult | null>(null);
   const source = detectUrlSource(url);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
+  const workspaceSkillsByName = useExistingSkillsByName(wsId);
 
-  const submit = async () => {
+  const resetUrlState = () => {
+    setError("");
+    setConflict(null);
+    setConflicts([]);
+    setOverwriteKeys(new Set());
+    setDiscoveredSkills([]);
+    setSelectedKeys(new Set());
+    setBatchResult(null);
+  };
+
+  const runLegacyImport = async (overwrite = false) => {
     const trimmed = url.trim();
     if (!trimmed) return;
     setLoading(true);
@@ -551,14 +917,185 @@ function UrlForm({
       const skill = await api.importSkill({
         url: trimmed,
         ...(source === "gitee" && token ? { gitee_token: token } : {}),
+        overwrite: overwrite || undefined,
       });
       seedAfterCreate(qc, wsId, skill);
       toast.success(t(($) => $.create.url.toast_imported));
       onCreated(skill);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const importConflict = getImportConflict(err.body);
+        if (importConflict) {
+          setConflict(importConflict);
+          setOverwriteKeys(new Set());
+          return;
+        }
+      }
       setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
       setLoading(false);
     }
+  };
+
+  const runURLImports = async (
+    skillsToImport: DiscoveredSkillSelection[],
+    overwriteKeysToApply: Set<string>,
+    skippedConflicts: SkillConflictItem[],
+  ) => {
+    const created: Skill[] = [];
+    const skipped = skippedConflicts.map((skill) => skill.name);
+    const failed: string[] = [];
+    for (const { key, skill } of skillsToImport) {
+      try {
+        const imported = await api.importSkill({
+          url: skill.source_url,
+          ...(source === "gitee" && giteeToken.trim()
+            ? { gitee_token: giteeToken.trim() }
+            : {}),
+          overwrite: overwriteKeysToApply.has(key) || undefined,
+        });
+        created.push(imported);
+        seedAfterCreate(qc, wsId, imported);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          const importConflict = getImportConflict(err.body);
+          skipped.push(importConflict?.name || skill.name);
+          continue;
+        }
+        const message = err instanceof Error ? err.message : t(($) => $.create.url.fallback_error);
+        failed.push(`${skill.name}: ${message}`);
+      }
+    }
+    setBatchResult({ created, skipped, failed });
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
+    ]);
+    toast.success(
+      t(($) => $.create.local.toast_imported, {
+        count: created.length,
+      }),
+    );
+  };
+
+  const discover = async () => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    if (source === "clawhub" || source === "skills.sh") {
+      await runLegacyImport(false);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setConflict(null);
+    setConflicts([]);
+    setBatchResult(null);
+    try {
+      const token = giteeToken.trim();
+      const result = await api.discoverImportSkills({
+        url: trimmed,
+        ...(source === "gitee" && token ? { gitee_token: token } : {}),
+      });
+      if (result.skills.length === 0) {
+        setDiscoveredSkills([]);
+        setSelectedKeys(new Set());
+        setError(t(($) => $.create.url.no_skills_error));
+        return;
+      }
+      setDiscoveredSkills(result.skills);
+      setSelectedKeys(new Set(result.skills.map((skill, index) => buildDiscoveredSkillKey(skill.name, index))));
+      if (result.skills.length === 1) {
+        await importSelectedSkills(result.skills, new Set([buildDiscoveredSkillKey(result.skills[0]!.name, 0)]));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const importSelectedSkills = async (
+    sourceSkills = discoveredSkills,
+    sourceSelectedKeys = selectedKeys,
+  ) => {
+    const selected = selectedDiscoveredSkills(sourceSkills, sourceSelectedKeys);
+    if (selected.length === 0) return;
+    setLoading(true);
+    setError("");
+    try {
+      const detectedConflicts = importConflictItemsFromDiscovered(selected).filter((skill) =>
+        workspaceSkillsByName.has(buildConflictKey(skill.name)),
+      );
+      if (detectedConflicts.length > 0) {
+        setConflicts(detectedConflicts);
+        setOverwriteKeys(new Set());
+        return;
+      }
+      await runURLImports(selected, new Set(), []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmConflict = async () => {
+    if (!conflict) return;
+    const shouldOverwrite = overwriteKeys.has(conflict.key);
+    setConflict(null);
+    if (!shouldOverwrite) {
+      setLoading(false);
+      setError(t(($) => $.runtime_import.conflict_skipped));
+      return;
+    }
+    await runLegacyImport(true);
+  };
+
+  const handleCancelConflict = () => {
+    setConflict(null);
+    setOverwriteKeys(new Set());
+    setLoading(false);
+  };
+
+  const handleConfirmConflicts = async () => {
+    const selected = selectedDiscoveredSkills(discoveredSkills, selectedKeys);
+    const conflictKeys = new Set(conflicts.map((skill) => skill.key));
+    const skillsToImport = selected
+      .filter(({ key }) => !conflictKeys.has(key) || overwriteKeys.has(key))
+      .map(({ key, skill }) => ({ key, skill }));
+    const skippedConflicts = conflicts.filter((skill) => !overwriteKeys.has(skill.key));
+
+    setConflicts([]);
+    setOverwriteKeys(new Set());
+    setLoading(true);
+    setError("");
+    try {
+      await runURLImports(skillsToImport, overwriteKeys, skippedConflicts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleSelected = (key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleDone = () => {
+    if (
+      batchResult?.created.length === 1 &&
+      batchResult.skipped.length === 0 &&
+      batchResult.failed.length === 0
+    ) {
+      onCreated(batchResult.created[0]!);
+      return;
+    }
+    onBulkDone();
   };
 
   const submittingLabel = (() => {
@@ -572,6 +1109,47 @@ function UrlForm({
 
   return (
     <>
+      <SkillConflictDialog
+        open={conflict != null}
+        title={t(($) => $.runtime_import.conflict_dialog_title)}
+        description={t(($) => $.create.url.conflict_dialog_description)}
+        skills={conflict ? [conflict] : []}
+        existingByName={workspaceSkillsByName}
+        overwriteKeys={overwriteKeys}
+        onToggle={(key) =>
+          setOverwriteKeys((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+          })
+        }
+        onCancel={handleCancelConflict}
+        onConfirm={handleConfirmConflict}
+      />
+      <SkillConflictDialog
+        open={conflicts.length > 0}
+        title={t(($) => $.runtime_import.conflict_dialog_title)}
+        description={t(($) => $.create.url.conflict_dialog_description)}
+        skills={conflicts}
+        existingByName={workspaceSkillsByName}
+        overwriteKeys={overwriteKeys}
+        onToggle={(key) =>
+          setOverwriteKeys((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+          })
+        }
+        onCancel={() => {
+          setConflicts([]);
+          setOverwriteKeys(new Set());
+          setLoading(false);
+        }}
+        onConfirm={handleConfirmConflicts}
+      />
+
       <div
         ref={scrollRef}
         style={fadeStyle}
@@ -587,12 +1165,12 @@ function UrlForm({
             value={url}
             onChange={(e) => {
               setUrl(e.target.value);
-              setError("");
+              resetUrlState();
             }}
             placeholder="https://clawhub.ai/owner/skill"
             className="font-mono text-sm"
             onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
+              if (e.key === "Enter") discover();
             }}
           />
         </div>
@@ -609,12 +1187,12 @@ function UrlForm({
               value={giteeToken}
               onChange={(e) => {
                 setGiteeToken(e.target.value);
-                setError("");
+                resetUrlState();
               }}
               placeholder={t(($) => $.create.url.gitee_token_placeholder)}
               className="font-mono text-sm"
               onKeyDown={(e) => {
-                if (e.key === "Enter") submit();
+                if (e.key === "Enter") discover();
               }}
             />
             <p className="text-xs text-muted-foreground">
@@ -655,6 +1233,62 @@ function UrlForm({
           </div>
         </div>
 
+        {!batchResult && discoveredSkills.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.create.local.detected_count, {
+                  count: discoveredSkills.length,
+                })}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={discover}
+                disabled={loading}
+              >
+                {t(($) => $.create.url.rescan)}
+              </Button>
+            </div>
+            <SkillCandidateList
+              skills={discoveredSkills}
+              selectedKeys={selectedKeys}
+              onToggle={toggleSelected}
+              emptyText={t(($) => $.create.url.no_skills_error)}
+            />
+          </div>
+        )}
+
+        {batchResult && (
+          <div className="space-y-3 rounded-lg border px-4 py-3">
+            <p className="text-sm font-medium">
+              {t(($) => $.create.local.import_complete)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t(($) => $.create.local.import_summary, {
+                created: batchResult.created.length,
+                skipped: batchResult.skipped.length,
+                failed: batchResult.failed.length,
+              })}
+            </p>
+            {batchResult.skipped.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.create.local.skipped_names, {
+                  names: batchResult.skipped.join(", "),
+                })}
+              </p>
+            )}
+            {batchResult.failed.length > 0 && (
+              <p className="text-xs text-destructive">
+                {t(($) => $.create.local.failed_names, {
+                  names: batchResult.failed.join(", "),
+                })}
+              </p>
+            )}
+          </div>
+        )}
+
         {error && (
           <div
             role="alert"
@@ -672,33 +1306,64 @@ function UrlForm({
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-2 border-t bg-muted/30 px-5 py-3">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onCancel}
-          disabled={loading}
-        >
-          {t(($) => $.create.url.cancel)}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          onClick={submit}
-          disabled={!url.trim() || loading}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" />
-              {submittingLabel}
-            </>
-          ) : (
-            <>
-              <Download className="h-3 w-3" />
-              {submittingLabel}
-            </>
-          )}
-        </Button>
+        {batchResult ? (
+          <Button type="button" size="sm" onClick={handleDone}>
+            {t(($) => $.create.local.done)}
+          </Button>
+        ) : (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onCancel}
+              disabled={loading}
+            >
+              {t(($) => $.create.url.cancel)}
+            </Button>
+            {discoveredSkills.length > 0 ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => importSelectedSkills()}
+                disabled={loading || selectedKeys.size === 0}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {t(($) => $.create.local.importing)}
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-3 w-3" />
+                    {t(($) => $.create.local.import_button, {
+                      count: selectedKeys.size,
+                    })}
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                onClick={discover}
+                disabled={!url.trim() || loading}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {submittingLabel}
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-3 w-3" />
+                    {submittingLabel}
+                  </>
+                )}
+              </Button>
+            )}
+          </>
+        )}
       </div>
     </>
   );
@@ -794,6 +1459,7 @@ export function CreateSkillDialog({
         {method === "url" && (
           <UrlForm
             onCreated={handleCreated}
+            onBulkDone={onClose}
             onCancel={() => setMethod("chooser")}
           />
         )}

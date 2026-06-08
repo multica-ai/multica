@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net/url"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const (
@@ -26,8 +28,11 @@ const (
 	dingTalkDeliveryMaxAttempts   = 3
 	emailDeliveryMaxAttempts      = 3
 	webhookDeliveryMaxAttempts    = 3
+	getuiDeliveryMaxAttempts      = 3
+	getuiPushTTL                  = 2 * time.Hour
 	dingTalkMarkdownTitleLimit    = 80
 	dingTalkMarkdownTextLimit     = 1800
+	openclawWeixinAckTimeout      = 2 * time.Minute
 )
 
 var dingtalkMentionLinkPattern = regexp.MustCompile(`\[@([^\]]+)\]\(mention://[^)]+\)`)
@@ -46,7 +51,9 @@ type notificationEventPayload struct {
 	Summary         string `json:"summary,omitempty"`
 	Body            string `json:"body"`
 	Link            string `json:"link"`
+	IssueID         string `json:"issue_id"`
 	IssueIdentifier string `json:"issue_identifier"`
+	CommentID       string `json:"comment_id"`
 	ActorName       string `json:"actor_name,omitempty"`
 	RenderMode      string `json:"render_mode,omitempty"`
 }
@@ -69,6 +76,20 @@ type emailDeliveryPayload struct {
 type customWebhookDeliveryPayload struct {
 	WebhookEndpointID string          `json:"webhook_endpoint_id"`
 	NotificationEvent json.RawMessage `json:"notification_event"`
+}
+
+type mobilePushDeliveryPayload struct {
+	RegistrationID    string          `json:"registration_id"`
+	Provider          string          `json:"provider"`
+	ProviderClientID  string          `json:"provider_client_id"`
+	NotificationEvent json.RawMessage `json:"notification_event"`
+}
+
+type mobilePushDispatchConfig struct {
+	Getui      notifyutil.GetuiConfig
+	GetuiReady bool
+	APNS       notifyutil.APNSConfig
+	APNSReady  bool
 }
 
 func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService, daemonHub *daemonws.Hub) {
@@ -99,6 +120,24 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 			dingtalkReady = false
 		}
 	}
+	getuiCfg, err := notifyutil.LoadGetuiConfig()
+	getuiReady := err == nil
+	if err != nil && !errors.Is(err, notifyutil.ErrGetuiNotConfigured) {
+		slog.Warn("notification dispatcher: failed to load getui config", "error", err)
+	}
+	apnsCfg, err := notifyutil.LoadAPNSConfig()
+	apnsReady := err == nil
+	if err != nil && !errors.Is(err, notifyutil.ErrAPNSNotConfigured) {
+		slog.Warn("notification dispatcher: failed to load apns config", "error", err)
+	}
+	mobilePushCfg := mobilePushDispatchConfig{
+		Getui:      getuiCfg,
+		GetuiReady: getuiReady,
+		APNS:       apnsCfg,
+		APNSReady:  apnsReady,
+	}
+
+	timedOutOpenclawDeliveries := sweepTimedOutOpenclawWeixinDeliveries(ctx, queries)
 
 	deliveries, err := queries.ListNotificationDeliveriesByStatus(ctx, "pending")
 	if err != nil {
@@ -108,6 +147,9 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 
 	dispatched := 0
 	for _, delivery := range deliveries {
+		if _, ok := timedOutOpenclawDeliveries[util.UUIDToString(delivery.ID)]; ok {
+			continue
+		}
 		if dispatched >= notificationDispatchBatchSize {
 			break
 		}
@@ -127,6 +169,13 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 		case "openclaw_weixin":
 			dispatched++
 			processOpenclawWeixinDelivery(ctx, queries, daemonHub, delivery)
+		case "mobile_push":
+			provider := mobilePushDeliveryProvider(ctx, queries, delivery)
+			if !mobilePushProviderReady(provider, mobilePushCfg) {
+				continue
+			}
+			dispatched++
+			processMobilePushDelivery(ctx, queries, mobilePushCfg, delivery)
 		}
 	}
 }
@@ -350,6 +399,140 @@ func processCustomWebhookDelivery(ctx context.Context, queries *db.Queries, deli
 	}
 }
 
+func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg mobilePushDispatchConfig, delivery db.NotificationDelivery) {
+	claimed, err := queries.ClaimNotificationDelivery(ctx, db.ClaimNotificationDeliveryParams{
+		ID:       delivery.ID,
+		Status:   "pending",
+		Status_2: "pending",
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		slog.Warn("notification dispatcher: failed to claim mobile push delivery",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var payload mobilePushDeliveryPayload
+	if err := json.Unmarshal(claimed.PayloadSnapshot, &payload); err != nil {
+		finalizeFailedMobilePushDelivery(ctx, queries, claimed, errors.New("invalid mobile push delivery payload"))
+		return
+	}
+	registrationID := strings.TrimSpace(payload.RegistrationID)
+	if registrationID == "" && claimed.TargetType == "mobile_push_registration" && claimed.TargetID.Valid {
+		registrationID = util.UUIDToString(claimed.TargetID)
+	}
+	if registrationID == "" {
+		finalizeFailedMobilePushDelivery(ctx, queries, claimed, errors.New("missing mobile push registration id"))
+		return
+	}
+
+	registrationUUID, err := util.ParseUUID(registrationID)
+	if err != nil {
+		finalizeFailedMobilePushDelivery(ctx, queries, claimed, fmt.Errorf("invalid mobile push registration id: %w", err))
+		return
+	}
+	registration, err := queries.GetMobilePushRegistration(ctx, registrationUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			cancelMobilePushDelivery(ctx, queries, claimed, "mobile push registration not found")
+			return
+		}
+		finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
+		return
+	}
+	if !registration.Enabled {
+		cancelMobilePushDelivery(ctx, queries, claimed, "mobile push registration is disabled")
+		return
+	}
+
+	var eventPayload notificationEventPayload
+	if len(payload.NotificationEvent) > 0 {
+		if err := json.Unmarshal(payload.NotificationEvent, &eventPayload); err != nil {
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, errors.New("invalid nested notification payload"))
+			return
+		}
+	}
+	eventPayload = hydrateNotificationActorName(ctx, queries, claimed, eventPayload)
+
+	title := buildMobilePushTitle(eventPayload)
+	body := buildMobilePushBody(eventPayload, title)
+	clickURL := buildMobilePushClickURL(eventPayload)
+
+	switch {
+	case registration.Provider == "getui" && registration.Platform == "android":
+		if !cfg.GetuiReady {
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, notifyutil.ErrGetuiNotConfigured)
+			return
+		}
+		notifyID := mobilePushNotifyIDForIssue(eventPayload.IssueID)
+		requestID := strings.ReplaceAll(util.UUIDToString(claimed.ID), "-", "")
+		if len(requestID) > 32 {
+			requestID = requestID[:32]
+		}
+		if _, err := cfg.Getui.PushSingleByCID(ctx, notifyutil.GetuiPushMessage{
+			CID:       registration.ProviderClientID,
+			RequestID: requestID,
+			Title:     title,
+			Body:      body,
+			ClickURL:  clickURL,
+			NotifyID:  notifyID,
+			TTL:       int64(getuiPushTTL / time.Millisecond),
+		}); err != nil {
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
+			return
+		}
+	case registration.Provider == "apns" && registration.Platform == "ios":
+		if !cfg.APNSReady {
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, notifyutil.ErrAPNSNotConfigured)
+			return
+		}
+		if _, err := cfg.APNS.SendPush(ctx, notifyutil.APNSPushMessage{
+			DeviceToken: registration.ProviderClientID,
+			RequestID:   util.UUIDToString(claimed.ID),
+			Title:       title,
+			Body:        body,
+			ClickURL:    clickURL,
+			CollapseID:  mobilePushCollapseIDForIssue(eventPayload.IssueID),
+		}); err != nil {
+			if errors.Is(err, notifyutil.ErrAPNSDeviceTokenInvalid) {
+				if disableErr := queries.DisableMobilePushRegistration(ctx, db.DisableMobilePushRegistrationParams{
+					UserID:         registration.UserID,
+					InstallationID: registration.InstallationID,
+					Provider:       registration.Provider,
+				}); disableErr != nil {
+					slog.Warn("notification dispatcher: failed to disable invalid apns registration",
+						"mobile_push_registration_id", util.UUIDToString(registration.ID),
+						"error", disableErr,
+					)
+				}
+				cancelMobilePushDelivery(ctx, queries, claimed, err.Error())
+				return
+			}
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
+			return
+		}
+	default:
+		cancelMobilePushDelivery(ctx, queries, claimed, "unsupported mobile push registration")
+		return
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        claimed.ID,
+		Status:    "sent",
+		LastError: pgtype.Text{},
+		SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark mobile push delivery sent",
+			"delivery_id", util.UUIDToString(claimed.ID),
+			"error", err,
+		)
+	}
+}
+
 func buildCustomWebhookPayload(
 	delivery db.NotificationDelivery,
 	event db.NotificationEvent,
@@ -422,6 +605,47 @@ func finalizeFailedCustomWebhookDelivery(ctx context.Context, queries *db.Querie
 	)
 }
 
+func finalizeFailedMobilePushDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
+	nextStatus := "pending"
+	if delivery.AttemptCount >= getuiDeliveryMaxAttempts {
+		nextStatus = "failed"
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        delivery.ID,
+		Status:    nextStatus,
+		LastError: util.StrToText(truncateError(dispatchErr)),
+		SentAt:    pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark mobile push delivery failure",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	slog.Warn("notification dispatcher: mobile push delivery failed",
+		"delivery_id", util.UUIDToString(delivery.ID),
+		"status", nextStatus,
+		"attempt_count", delivery.AttemptCount,
+		"error", dispatchErr,
+	)
+}
+
+func cancelMobilePushDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, reason string) {
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        delivery.ID,
+		Status:    "cancelled",
+		LastError: util.StrToText(reason),
+		SentAt:    pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to cancel mobile push delivery",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+	}
+}
+
 func finalizeFailedEmailDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
 	nextStatus := "pending"
 	if delivery.AttemptCount >= emailDeliveryMaxAttempts {
@@ -447,6 +671,89 @@ func finalizeFailedEmailDelivery(ctx context.Context, queries *db.Queries, deliv
 		"attempt_count", delivery.AttemptCount,
 		"error", dispatchErr,
 	)
+}
+
+func buildMobilePushTitle(event notificationEventPayload) string {
+	title := strings.TrimSpace(event.Title)
+	identifier := strings.TrimSpace(event.IssueIdentifier)
+	if title == "" {
+		title = EventTypeLabel(event.Type)
+	}
+	if identifier != "" && title != "" && title != identifier && !strings.HasPrefix(title, identifier+" ") && !strings.HasPrefix(title, identifier+" ·") {
+		return identifier + " · " + title
+	}
+	return firstValue(title, identifier, "Multica")
+}
+
+func buildMobilePushBody(event notificationEventPayload, title string) string {
+	body := ExtractSummary(event.Summary, event.Body, title, defaultIMSummaryMaxChars)
+	if body != "" && body != title {
+		return body
+	}
+	if actorName := strings.TrimSpace(event.ActorName); actorName != "" {
+		return "From: " + actorName
+	}
+	return "You have a new notification."
+}
+
+func buildMobilePushClickURL(event notificationEventPayload) string {
+	issueID := strings.TrimSpace(event.IssueID)
+	if issueID == "" {
+		return ""
+	}
+	clickURL := "wujieai-multicam://issues/" + issueID
+	if commentID := strings.TrimSpace(event.CommentID); commentID != "" {
+		clickURL += "?commentId=" + url.QueryEscape(commentID)
+	}
+	return clickURL
+}
+
+func mobilePushNotifyIDForIssue(issueID string) *int {
+	issueUUID, err := util.ParseUUID(strings.TrimSpace(issueID))
+	if err != nil {
+		return nil
+	}
+
+	h := fnv.New32a()
+	_, _ = h.Write(issueUUID.Bytes[:])
+	notifyID := int(h.Sum32() & 0x7fffffff)
+	return &notifyID
+}
+
+func mobilePushCollapseIDForIssue(issueID string) string {
+	issueUUID, err := util.ParseUUID(strings.TrimSpace(issueID))
+	if err != nil {
+		return ""
+	}
+	return "issue-" + util.UUIDToString(issueUUID)
+}
+
+func mobilePushDeliveryProvider(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) string {
+	var payload mobilePushDeliveryPayload
+	if err := json.Unmarshal(delivery.PayloadSnapshot, &payload); err == nil {
+		if provider := strings.ToLower(strings.TrimSpace(payload.Provider)); provider != "" {
+			return provider
+		}
+	}
+	if delivery.TargetType != "mobile_push_registration" || !delivery.TargetID.Valid {
+		return ""
+	}
+	registration, err := queries.GetMobilePushRegistration(ctx, delivery.TargetID)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(registration.Provider))
+}
+
+func mobilePushProviderReady(provider string, cfg mobilePushDispatchConfig) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "getui":
+		return cfg.GetuiReady
+	case "apns":
+		return cfg.APNSReady
+	default:
+		return cfg.GetuiReady || cfg.APNSReady
+	}
 }
 
 func loadDingTalkDispatchContext(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) (dingtalkDeliveryPayload, notificationEventPayload, db.ExternalAccountBinding, error) {
@@ -853,20 +1160,10 @@ type openclawWeixinDeliveryPayload struct {
 	NotificationEvent json.RawMessage `json:"notification_event"`
 }
 
-// openclawWeixinDaemonPayload is the WS frame payload sent to the daemon.
-type openclawWeixinDaemonPayload struct {
-	Type     string `json:"type"`
-	WechatID string `json:"wechat_id"`
-	Channel  string `json:"channel"`
-	Content  string `json:"content"`
-	Title    string `json:"title"`
-	Link     string `json:"link"`
-}
-
 func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, daemonHub *daemonws.Hub, delivery db.NotificationDelivery) {
 	claimed, err := queries.ClaimNotificationDelivery(ctx, db.ClaimNotificationDeliveryParams{
 		ID:       delivery.ID,
-		Status:   "pending",
+		Status:   "awaiting_ack",
 		Status_2: "pending",
 	})
 	if err != nil {
@@ -963,17 +1260,19 @@ func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, dae
 	recipientID := util.UUIDToString(event.RecipientUserID)
 
 	// Build the WS frame to send to the daemon
-	daemonPayload := openclawWeixinDaemonPayload{
-		Type:     "openclaw_weixin",
-		WechatID: wechatID,
-		Channel:  channel,
-		Content:  content,
-		Title:    title,
-		Link:     link,
+	daemonPayload := protocol.NotificationDeliverPayload{
+		DeliveryID:      util.UUIDToString(claimed.ID),
+		Type:            "openclaw_weixin",
+		Channel:         channel,
+		WechatID:        wechatID,
+		OpenClawChannel: channel,
+		Content:         content,
+		Title:           title,
+		Link:            link,
 	}
-	frame, err := json.Marshal(map[string]any{
-		"type":    "notification:deliver",
-		"payload": daemonPayload,
+	frame, err := json.Marshal(protocol.Message{
+		Type:    protocol.EventNotificationDeliver,
+		Payload: marshalNotificationRaw(daemonPayload),
 	})
 	if err != nil {
 		finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("failed to marshal daemon frame"))
@@ -985,19 +1284,6 @@ func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, dae
 		finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("no online daemon for user"))
 		return
 	}
-
-	// Mark as sent (fire-and-forget; daemon will execute openclaw message send)
-	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
-		ID:        claimed.ID,
-		Status:    "sent",
-		LastError: pgtype.Text{},
-		SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-	}); err != nil {
-		slog.Warn("notification dispatcher: failed to mark openclaw_weixin delivery sent",
-			"delivery_id", util.UUIDToString(claimed.ID),
-			"error", err,
-		)
-	}
 }
 
 func finalizeFailedOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
@@ -1006,12 +1292,16 @@ func finalizeFailedOpenclawWeixinDelivery(ctx context.Context, queries *db.Queri
 		nextStatus = "failed"
 	}
 
-	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+	if _, err := queries.CompleteNotificationDeliveryIfStatus(ctx, db.CompleteNotificationDeliveryIfStatusParams{
 		ID:        delivery.ID,
 		Status:    nextStatus,
 		LastError: util.StrToText(truncateError(dispatchErr)),
 		SentAt:    pgtype.Timestamptz{},
+		Status_2:  "awaiting_ack",
 	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
 		slog.Warn("notification dispatcher: failed to mark openclaw_weixin delivery failure",
 			"delivery_id", util.UUIDToString(delivery.ID),
 			"error", err,
@@ -1025,4 +1315,31 @@ func finalizeFailedOpenclawWeixinDelivery(ctx context.Context, queries *db.Queri
 		"attempt_count", delivery.AttemptCount,
 		"error", dispatchErr,
 	)
+}
+
+func sweepTimedOutOpenclawWeixinDeliveries(ctx context.Context, queries *db.Queries) map[string]struct{} {
+	timedOut := map[string]struct{}{}
+	deliveries, err := queries.ListTimedOutNotificationDeliveries(ctx, db.ListTimedOutNotificationDeliveriesParams{
+		Channel:        "openclaw_weixin",
+		Status:         "awaiting_ack",
+		TimeoutSeconds: int32(openclawWeixinAckTimeout / time.Second),
+		Limit:          int32(notificationDispatchBatchSize),
+	})
+	if err != nil {
+		slog.Warn("notification dispatcher: failed to list timed out openclaw_weixin deliveries", "error", err)
+		return timedOut
+	}
+	for _, delivery := range deliveries {
+		timedOut[util.UUIDToString(delivery.ID)] = struct{}{}
+		finalizeFailedOpenclawWeixinDelivery(ctx, queries, delivery, errors.New("daemon delivery ack timeout"))
+	}
+	return timedOut
+}
+
+func marshalNotificationRaw(v any) json.RawMessage {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return data
 }

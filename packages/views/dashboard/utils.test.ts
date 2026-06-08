@@ -10,7 +10,54 @@ import {
   formatDuration,
   mergeDailyRunTimeRows,
   mergeAgentDashboardRows,
+  aggregateByMember,
 } from "./utils";
+
+function agentCostRow({
+  agentId,
+  source = "agent",
+  displayName,
+  ownerId,
+  tokens,
+  nonCachedTokens = tokens,
+  cachedTokens = 0,
+  inputTokens = nonCachedTokens,
+  outputTokens = 0,
+  cacheReadTokens = cachedTokens,
+  cacheWriteTokens = 0,
+  cost,
+  taskCount,
+}: {
+  agentId: string;
+  source?: "agent" | "local";
+  displayName?: string;
+  ownerId?: string;
+  tokens: number;
+  nonCachedTokens?: number;
+  cachedTokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  cost: number;
+  taskCount: number;
+}) {
+  return {
+    agentId,
+    source,
+    displayName,
+    ownerId,
+    tokens,
+    nonCachedTokens,
+    cachedTokens,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    cost,
+    taskCount,
+  };
+}
 
 describe("aggregateDailyCost", () => {
   it("collapses multiple rows per day into one stack and sorts by date asc", () => {
@@ -96,6 +143,40 @@ describe("aggregateAgentTokens", () => {
     expect(rows[0]?.taskCount).toBe(5);
     // big-spender across two models — verify cost > small-spender's.
     expect(rows[0]!.cost).toBeGreaterThan(rows[1]!.cost);
+  });
+
+  it("tracks processed, non-cached, cached, and breakdown token metrics", () => {
+    const rows = aggregateAgentTokens([
+      {
+        agent_id: "agent-cache-heavy",
+        model: "claude-sonnet-4-6",
+        input_tokens: 100,
+        output_tokens: 25,
+        cache_read_tokens: 900,
+        cache_write_tokens: 50,
+        task_count: 1,
+      },
+      {
+        agent_id: "agent-cache-heavy",
+        model: "gpt-5-codex",
+        input_tokens: 20,
+        output_tokens: 5,
+        cache_read_tokens: 30,
+        cache_write_tokens: 10,
+        task_count: 1,
+      },
+    ]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      tokens: 1140,
+      nonCachedTokens: 210,
+      cachedTokens: 930,
+      inputTokens: 120,
+      outputTokens: 30,
+      cacheReadTokens: 930,
+      cacheWriteTokens: 60,
+    });
   });
 });
 
@@ -186,12 +267,12 @@ describe("mergeAgentDashboardRows", () => {
     // aggregator sums per-row task_count and lands at 2; the run-time
     // rollup correctly reports the underlying distinct count of 1.
     const tokenRows = [
-      {
+      agentCostRow({
         agentId: "agent-a",
         tokens: 3_000_000,
         cost: 12,
         taskCount: 2, // overcounted because (model-1: 1) + (model-2: 1)
-      },
+      }),
     ];
     const runTimeRows = [
       {
@@ -212,7 +293,7 @@ describe("mergeAgentDashboardRows", () => {
     // rollup is silent on this agent. Keep the token-side estimate
     // instead of dropping the agent from the table entirely.
     const merged = mergeAgentDashboardRows(
-      [{ agentId: "agent-b", tokens: 100, cost: 0.5, taskCount: 1 }],
+      [agentCostRow({ agentId: "agent-b", tokens: 100, cost: 0.5, taskCount: 1 })],
       [],
     );
     expect(merged[0]!.taskCount).toBe(1);
@@ -236,9 +317,9 @@ describe("mergeAgentDashboardRows", () => {
   it("sorts by cost desc with run-time as a tiebreaker", () => {
     const merged = mergeAgentDashboardRows(
       [
-        { agentId: "low", tokens: 100, cost: 1, taskCount: 1 },
-        { agentId: "high", tokens: 100, cost: 9, taskCount: 1 },
-        { agentId: "zero-cost-long", tokens: 0, cost: 0, taskCount: 0 },
+        agentCostRow({ agentId: "low", tokens: 100, cost: 1, taskCount: 1 }),
+        agentCostRow({ agentId: "high", tokens: 100, cost: 9, taskCount: 1 }),
+        agentCostRow({ agentId: "zero-cost-long", tokens: 0, cost: 0, taskCount: 0 }),
       ],
       [
         { agent_id: "zero-cost-long", total_seconds: 1000, task_count: 5, failed_count: 0 },
@@ -252,15 +333,21 @@ describe("mergeAgentDashboardRows", () => {
       [],
       [],
       [
-        {
+        agentCostRow({
           agentId: "local:user-1:codex",
           source: "local",
           displayName: "Pat-local-codex",
           ownerId: "user-1",
           tokens: 3_000_000,
+          nonCachedTokens: 500_000,
+          cachedTokens: 2_500_000,
+          inputTokens: 300_000,
+          outputTokens: 100_000,
+          cacheReadTokens: 2_500_000,
+          cacheWriteTokens: 100_000,
           cost: 12,
           taskCount: 2,
-        },
+        }),
       ],
       [
         {
@@ -279,6 +366,9 @@ describe("mergeAgentDashboardRows", () => {
       source: "local",
       seconds: 900,
       taskCount: 1,
+      tokens: 3_000_000,
+      nonCachedTokens: 500_000,
+      cachedTokens: 2_500_000,
     });
   });
 
@@ -308,6 +398,61 @@ describe("mergeAgentDashboardRows", () => {
       tokens: 0,
       cost: 0,
     });
+  });
+});
+
+describe("aggregateByMember", () => {
+  it("sums processed, non-cached, cached, and breakdown token metrics by owner", () => {
+    const members = aggregateByMember([
+      {
+        agentId: "agent-a",
+        source: "agent",
+        ownerId: "user-1",
+        displayName: "Agent A",
+        tokens: 1000,
+        nonCachedTokens: 250,
+        cachedTokens: 750,
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 750,
+        cacheWriteTokens: 100,
+        cost: 1,
+        seconds: 60,
+        taskCount: 1,
+      },
+      {
+        agentId: "agent-b",
+        source: "agent",
+        ownerId: "user-1",
+        displayName: "Agent B",
+        tokens: 500,
+        nonCachedTokens: 400,
+        cachedTokens: 100,
+        inputTokens: 250,
+        outputTokens: 75,
+        cacheReadTokens: 100,
+        cacheWriteTokens: 75,
+        cost: 2,
+        seconds: 30,
+        taskCount: 2,
+      },
+    ]);
+
+    expect(members).toHaveLength(1);
+    expect(members[0]).toMatchObject({
+      ownerId: "user-1",
+      tokens: 1500,
+      nonCachedTokens: 650,
+      cachedTokens: 850,
+      inputTokens: 350,
+      outputTokens: 125,
+      cacheReadTokens: 850,
+      cacheWriteTokens: 175,
+      cost: 3,
+      seconds: 90,
+      taskCount: 3,
+    });
+    expect(members[0]!.agents.map((r) => r.agentId)).toEqual(["agent-a", "agent-b"]);
   });
 });
 

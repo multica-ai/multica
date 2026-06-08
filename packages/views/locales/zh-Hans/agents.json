@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "我的",
-    "all": "全部"
+    "all": "全部",
+    "default": "默认"
   },
   "sort": {
     "label_recent": "最近活跃",
@@ -28,7 +29,7 @@
     "offline": "离线"
   },
   "workload": {
-    "working": "处理中",
+    "working": "工作中",
     "queued": "排队中",
     "idle": "空闲"
   },

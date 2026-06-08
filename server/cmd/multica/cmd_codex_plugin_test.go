@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -91,8 +93,43 @@ func TestRunCodexPluginBindPostsBinding(t *testing.T) {
 	if err := runCodexPluginBind(cmd, []string{"OPE-1493"}); err != nil {
 		t.Fatalf("runCodexPluginBind() error = %v", err)
 	}
-	if posted["source_key"] != "thread-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
+	if posted["source_key"] != "codex_app_plugin:session-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
 		t.Fatalf("posted body = %+v", posted)
+	}
+	contextDir, _ := posted["context_dir"].(string)
+	if !strings.Contains(contextDir, "codex_session_id=session-1") {
+		t.Fatalf("context_dir = %q, want codex_session_id", contextDir)
+	}
+}
+
+func TestRunCodexPluginBindRejectsThreadlessBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
+			json.NewEncoder(w).Encode(map[string]any{"id": "11111111-1111-4111-8111-111111111111", "identifier": "OPE-1493"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/11111111-1111-4111-8111-111111111111/local-runs":
+			json.NewEncoder(w).Encode(map[string]any{"id": "run-1", "issue_id": "11111111-1111-4111-8111-111111111111", "status": "running"})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	cmd := testCodexPluginBindCommand(srv.URL)
+	err := runCodexPluginBind(cmd, []string{"OPE-1493"})
+	if err == nil || !strings.Contains(err.Error(), "top_comment_id") {
+		t.Fatalf("runCodexPluginBind() error = %v, want missing top_comment_id", err)
+	}
+
+	state, err := codexPluginReadHookState(cmd)
+	if err != nil {
+		t.Fatalf("codexPluginReadHookState() error = %v", err)
+	}
+	if len(state.Bindings) != 0 {
+		t.Fatalf("state bindings = %+v, want none", state.Bindings)
 	}
 }
 
@@ -217,7 +254,7 @@ func TestRunCodexPluginMCPServerCallsSessionBind(t *testing.T) {
 		t.Fatalf("runCodexPluginMCPServer() error = %v", err)
 	}
 
-	if posted["source_key"] != "thread-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
+	if posted["source_key"] != "codex_app_plugin:session-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
 		t.Fatalf("posted body = %+v", posted)
 	}
 
@@ -532,6 +569,171 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 	}
 }
 
+func TestCodexPluginHookStateHandlesEmptyFileAndWritesAtomically(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("config", "", "")
+	path, err := codexPluginStatePath(cmd)
+	if err != nil {
+		t.Fatalf("codexPluginStatePath() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create state dir: %v", err)
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write empty state: %v", err)
+	}
+	state, err := codexPluginReadHookState(cmd)
+	if err != nil {
+		t.Fatalf("codexPluginReadHookState(empty) error = %v", err)
+	}
+	if len(state.Bindings) != 0 || len(state.Prompts) != 0 || len(state.SyncedTurns) != 0 {
+		t.Fatalf("empty state = %+v", state)
+	}
+
+	state.Bindings = []codexPluginHookBinding{{
+		IssueID:        "issue-1",
+		BindingID:      "binding-1",
+		CodexSessionID: "session-1",
+	}}
+	if err := codexPluginWriteHookState(cmd, state); err != nil {
+		t.Fatalf("codexPluginWriteHookState() error = %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written state: %v", err)
+	}
+	var decoded codexPluginHookState
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("written state is not valid json: %v; data=%q", err, string(data))
+	}
+	if len(decoded.Bindings) != 1 || decoded.Bindings[0].BindingID != "binding-1" {
+		t.Fatalf("decoded state = %+v", decoded)
+	}
+}
+
+func TestCodexPluginHooksRequireBoundSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	const issueID = "11111111-1111-4111-8111-111111111111"
+
+	var posted []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "OPE-1493"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "OPE-1493"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/local-runs":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":             "binding-1",
+				"issue_id":       issueID,
+				"status":         "running",
+				"top_comment_id": "comment-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/local-runs/binding-1/messages":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode posted message: %v", err)
+			}
+			posted = append(posted, body)
+			json.NewEncoder(w).Encode(map[string]any{
+				"task_id": "binding-1",
+				"seq":     len(posted),
+				"type":    body["type"],
+				"content": body["content"],
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	bindCmd := testCodexPluginBindCommand(srv.URL)
+	if err := runCodexPluginBind(bindCmd, []string{"OPE-1493"}); err != nil {
+		t.Fatalf("runCodexPluginBind() error = %v", err)
+	}
+
+	otherPromptCmd := testCodexPluginHookCommand(srv.URL)
+	otherPromptCmd.SetIn(strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"session-2","turn_id":"turn-1","cwd":"/tmp/project","prompt":"SHOULD NOT SYNC","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(otherPromptCmd, nil); err != nil {
+		t.Fatalf("other UserPromptSubmit hook error = %v", err)
+	}
+	if len(posted) != 0 {
+		t.Fatalf("other session posted = %+v, want none", posted)
+	}
+
+	otherStopCmd := testCodexPluginHookCommand(srv.URL)
+	otherStopCmd.SetIn(strings.NewReader(`{"hook_event_name":"Stop","session_id":"session-2","turn_id":"turn-1","cwd":"/tmp/project","last_assistant_message":"should not sync","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(otherStopCmd, nil); err != nil {
+		t.Fatalf("other Stop hook error = %v", err)
+	}
+	if len(posted) != 0 {
+		t.Fatalf("other session stop posted = %+v, want none", posted)
+	}
+
+	boundPromptCmd := testCodexPluginHookCommand(srv.URL)
+	boundPromptCmd.SetIn(strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"session-1","turn_id":"turn-2","cwd":"/tmp/project","prompt":"SYNC","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(boundPromptCmd, nil); err != nil {
+		t.Fatalf("bound UserPromptSubmit hook error = %v", err)
+	}
+	if len(posted) != 1 || posted[0]["content"] != "SYNC" {
+		t.Fatalf("bound session posted = %+v", posted)
+	}
+}
+
+func TestCodexPluginHookDoesNotFallbackToSingleBindingWithoutSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	const issueID = "11111111-1111-4111-8111-111111111111"
+
+	var posted []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "OPE-1493"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/local-runs":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":             "binding-1",
+				"issue_id":       issueID,
+				"status":         "running",
+				"top_comment_id": "comment-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/local-runs/binding-1/messages":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode posted message: %v", err)
+			}
+			posted = append(posted, body)
+			json.NewEncoder(w).Encode(map[string]any{"task_id": "binding-1", "seq": len(posted)})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	bindCmd := testCodexPluginBindCommand(srv.URL)
+	_ = bindCmd.Flags().Set("codex-session-id", "")
+	_ = bindCmd.Flags().Set("project-folder", "/tmp/project")
+	if err := runCodexPluginBind(bindCmd, []string{"OPE-1493"}); err != nil {
+		t.Fatalf("runCodexPluginBind() error = %v", err)
+	}
+
+	promptCmd := testCodexPluginHookCommand(srv.URL)
+	promptCmd.SetIn(strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"session-1","turn_id":"turn-1","cwd":"/tmp/project","prompt":"SHOULD NOT SYNC","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(promptCmd, nil); err != nil {
+		t.Fatalf("UserPromptSubmit hook error = %v", err)
+	}
+	if len(posted) != 0 {
+		t.Fatalf("single binding fallback posted = %+v, want none", posted)
+	}
+}
+
 func TestCodexPluginStopHookSkipsExplicitConversationSync(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
@@ -699,7 +901,7 @@ func testCodexPluginBindCommand(serverURL string) *cobra.Command {
 	cmd.Flags().String("profile", "", "")
 	cmd.Flags().String("config", "", "")
 	cmd.Flags().String("codex-thread-id", "thread-1", "")
-	cmd.Flags().String("codex-session-id", "", "")
+	cmd.Flags().String("codex-session-id", "session-1", "")
 	cmd.Flags().String("project-folder", "/tmp/project", "")
 	cmd.Flags().String("branch", "feat/OPE-1493-codex-plugin", "")
 	cmd.Flags().String("source", "codex_app_plugin", "")

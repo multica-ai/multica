@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "Mine",
-    "all": "All"
+    "all": "All",
+    "default": "Defaults"
   },
   "sort": {
     "label_recent": "Recent activity",

@@ -332,6 +332,60 @@ func TestHeartbeatRejectsUnauthorizedRuntime(t *testing.T) {
 	}
 }
 
+func TestNotificationDeliveryResultHandlerInvoked(t *testing.T) {
+	hub := NewHub()
+	called := make(chan protocol.NotificationDeliveryResultPayload, 1)
+	hub.SetNotificationDeliveryResultHandler(func(_ context.Context, identity ClientIdentity, payload protocol.NotificationDeliveryResultPayload) error {
+		if identity.UserID != "user-1" || identity.WorkspaceID != "ws-1" {
+			t.Fatalf("identity = %#v, want user/workspace", identity)
+		}
+		called <- payload
+		return nil
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{
+			UserID:      "user-1",
+			WorkspaceID: "ws-1",
+			RuntimeIDs:  []string{"runtime-1"},
+		})
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	frame, err := json.Marshal(protocol.Message{
+		Type: protocol.EventNotificationDeliveryResult,
+		Payload: mustMarshalRaw(protocol.NotificationDeliveryResultPayload{
+			DeliveryID: "delivery-1",
+			Channel:    "openclaw_weixin",
+			Success:    false,
+			Error:      "exit status 1",
+			Output:     "uv_cwd",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+
+	select {
+	case payload := <-called:
+		if payload.DeliveryID != "delivery-1" || payload.Channel != "openclaw_weixin" || payload.Success {
+			t.Fatalf("unexpected payload: %#v", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("notification delivery result handler was not invoked")
+	}
+}
+
 func attachDaemonTestClient(hub *Hub, runtimeID string) *client {
 	c := &client{
 		send:     make(chan []byte, 2),

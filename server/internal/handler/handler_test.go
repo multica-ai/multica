@@ -1320,6 +1320,224 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 	}
 }
 
+func TestCreateAndUpdateAutopilotManualOptions(t *testing.T) {
+	ctx := context.Background()
+	var autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Manual options autopilot",
+		"assignee_id":    agentID,
+		"execution_mode": "run_only",
+		"manual_options": []string{" production ", "test", "production", ""},
+		"description":    "manual option fixture",
+		"assignee_type":  "agent",
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created autopilot: %v", err)
+	}
+	autopilotID = created.ID
+	if got, want := strings.Join(created.ManualOptions, ","), "production,test"; got != want {
+		t.Fatalf("created manual_options = %q, want %q", got, want)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"manual_options": []string{"staging"},
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAutopilot set manual_options: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated autopilot: %v", err)
+	}
+	if got, want := strings.Join(updated.ManualOptions, ","), "staging"; got != want {
+		t.Fatalf("updated manual_options = %q, want %q", got, want)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
+		"manual_options": []string{},
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.UpdateAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAutopilot clear manual_options: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cleared AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&cleared); err != nil {
+		t.Fatalf("decode cleared autopilot: %v", err)
+	}
+	if len(cleared.ManualOptions) != 0 {
+		t.Fatalf("cleared manual_options = %#v, want empty", cleared.ManualOptions)
+	}
+}
+
+func TestTriggerAutopilotManualOptionsPayloadValidation(t *testing.T) {
+	ctx := context.Background()
+	var autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Manual trigger validation",
+		"assignee_id":    agentID,
+		"execution_mode": "run_only",
+		"manual_options": []string{"production", "test"},
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created autopilot: %v", err)
+	}
+	autopilotID = created.ID
+
+	assertRunCount := func(want int) {
+		t.Helper()
+		var count int
+		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM autopilot_run WHERE autopilot_id = $1`, autopilotID).Scan(&count); err != nil {
+			t.Fatalf("count runs: %v", err)
+		}
+		if count != want {
+			t.Fatalf("run count = %d, want %d", count, want)
+		}
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("TriggerAutopilot missing payload: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	assertRunCount(0)
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, map[string]any{
+		"trigger_payload": "staging",
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("TriggerAutopilot invalid payload: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	assertRunCount(0)
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, map[string]any{
+		"trigger_payload": "production",
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("TriggerAutopilot valid payload: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var run AutopilotRunResponse
+	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
+		t.Fatalf("decode autopilot run: %v", err)
+	}
+	if run.Source != "manual" {
+		t.Fatalf("run source = %q, want manual", run.Source)
+	}
+	if run.TriggerPayload != "production" {
+		t.Fatalf("run trigger_payload = %#v, want production", run.TriggerPayload)
+	}
+	assertRunCount(1)
+
+	var storedPayload string
+	if err := testPool.QueryRow(ctx, `
+		SELECT trigger_payload::text
+		FROM autopilot_run
+		WHERE autopilot_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, autopilotID).Scan(&storedPayload); err != nil {
+		t.Fatalf("load stored payload: %v", err)
+	}
+	if storedPayload != `"production"` {
+		t.Fatalf("stored trigger_payload = %s, want JSON string", storedPayload)
+	}
+}
+
+func TestTriggerAutopilotRejectsPayloadWithoutManualOptions(t *testing.T) {
+	ctx := context.Background()
+	var autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Manual trigger no options",
+		"assignee_id":    agentID,
+		"execution_mode": "run_only",
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created autopilot: %v", err)
+	}
+	autopilotID = created.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("TriggerAutopilot without payload: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, map[string]any{
+		"trigger_payload": "production",
+	})
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("TriggerAutopilot unexpected payload: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestCreateIssueRejectsNonexistentMemberAssignee covers the bug where any
 // well-formed UUID was accepted as assignee_id without checking workspace
 // membership.

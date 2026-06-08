@@ -27,7 +27,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MoreHorizontal } from "lucide-react-native";
+import { ChevronRight, MoreHorizontal } from "lucide-react-native";
 import Svg, { Path } from "react-native-svg";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
@@ -40,12 +40,14 @@ import {
 } from "@multica/core/issues/mutations";
 import {
   useIssueAttachments,
+  useChildIssueProgress,
   useIssueDetail,
   useIssueList,
   useIssueSubscribers,
   useIssueTaskRuns,
   useIssueTimelineEntries,
   useLiveIssueTasks,
+  useOptionalIssueDetail,
 } from "@multica/core/issues/hooks";
 import {
   useActorName,
@@ -69,14 +71,15 @@ import type {
 } from "@multica/core/types";
 import { Button, EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { MarkdownText } from "../../components/ui/markdown";
-import { parseMobileIssueLink } from "../../components/ui/markdown-utils";
+import { isSafeHttpUrl } from "../../components/ui/markdown-utils";
+import { ImagePreviewModal, type PreviewImageItem } from "../../components/ui/image-preview-modal";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import type { RootStackParamList } from "../../navigation/root-navigator";
+import { buildMobileIssueWebHref, parseMobileIssueLink } from "../../navigation/issue-links";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { uploadMobileAsset, type MobileUploadAsset } from "../../platform/upload";
 import { colors, radii, spacing } from "../../theme/tokens";
 import { MOBILE_ENV } from "../../runtime/env";
-import { ImagePreviewModal } from "./image-preview-modal";
 import {
   createDraftCommentAttachment,
   type DraftCommentAttachment,
@@ -161,6 +164,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const { data: workspaces = [] } = useWorkspaceList();
   const mentionTargets = useWorkspaceMentionTargets(workspace.id);
   const { data: issue, isError, isLoading } = useIssueDetail(workspace.id, issueId);
+  const { data: parentIssue, isLoading: parentIssueLoading } = useOptionalIssueDetail(
+    workspace.id,
+    issue?.parent_issue_id,
+  );
+  const { data: childProgress } = useChildIssueProgress(workspace.id);
   const { data: allIssues = [] } = useIssueList(workspace.id);
   const issueMentionTargets = useMemo(
     () => allIssues.map(issueToMentionTarget),
@@ -203,13 +211,16 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const [issueMenuOpen, setIssueMenuOpen] = useState(false);
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
   const [liveTaskError, setLiveTaskError] = useState<string | null>(null);
+  const [copyToastMessage, setCopyToastMessage] = useState<string | null>(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
+  const copyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didScrollToCommentRef = useRef<string | null>(null);
 
   useEffect(() => () => {
     previewAbortRef.current?.abort();
+    if (copyToastTimerRef.current) clearTimeout(copyToastTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -445,6 +456,46 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     void copyCommentContent(content);
   }, [copyCommentContent]);
 
+  const showCopyToast = useCallback((message: string) => {
+    if (copyToastTimerRef.current) clearTimeout(copyToastTimerRef.current);
+    setCopyToastMessage(message);
+    copyToastTimerRef.current = setTimeout(() => {
+      setCopyToastMessage(null);
+      copyToastTimerRef.current = null;
+    }, 1800);
+  }, []);
+
+  const copyLinkToClipboard = useCallback((href: string) => {
+    try {
+      Clipboard.setString(href);
+      showCopyToast(t("issues.link_copied"));
+    } catch {
+      showCopyToast(t("issues.unable_to_copy_link"));
+    }
+  }, [showCopyToast, t]);
+
+  const buildIssueHref = useCallback((targetCommentId?: string) => {
+    if (!issue) return null;
+    return buildMobileIssueWebHref({
+      baseUrl: MOBILE_ENV.webBaseUrl,
+      commentId: targetCommentId,
+      issueId: issue.identifier || issue.id,
+      workspaceSlug: workspace.slug,
+    });
+  }, [issue, workspace.slug]);
+
+  const copyIssueLink = useCallback(() => {
+    const href = buildIssueHref();
+    if (!href) return;
+    copyLinkToClipboard(href);
+  }, [buildIssueHref, copyLinkToClipboard]);
+
+  const copyCommentLinkById = useCallback((targetCommentId: string) => {
+    const href = buildIssueHref(targetCommentId);
+    if (!href) return;
+    copyLinkToClipboard(href);
+  }, [buildIssueHref, copyLinkToClipboard]);
+
   const openIssueDetail = useCallback((targetIssueId: string, targetCommentId?: string) => {
     navigation.push("IssueDetail", {
       issueId: targetIssueId,
@@ -471,10 +522,18 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       MOBILE_ENV.webBaseUrl,
       MOBILE_ENV.apiBaseUrl,
     ]);
-    if (!target) return false;
+    if (!target) {
+      if (!isSafeHttpUrl(href)) return false;
+      navigation.navigate("ExternalWeb", { url: href });
+      return true;
+    }
 
     const targetWorkspace = workspaces.find((item) => item.slug === target.workspaceSlug);
-    if (!targetWorkspace) return false;
+    if (!targetWorkspace) {
+      if (!isSafeHttpUrl(href)) return false;
+      navigation.navigate("ExternalWeb", { url: href });
+      return true;
+    }
 
     if (targetWorkspace.id === workspace.id) {
       openIssueDetail(target.issueId, target.commentId);
@@ -499,6 +558,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     return true;
   }, [
     openIssueDetail,
+    navigation,
     switchWorkspaceAndOpenIssue,
     t,
     workspace.id,
@@ -669,6 +729,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           onSaveEdit={saveCommentEditById}
           onStartEdit={startCommentEdit}
           onCopyComment={copyCommentByContent}
+          onCopyCommentLink={copyCommentLinkById}
           onIssueMentionPress={openIssueMention}
           onLinkPress={handleMarkdownLinkPress}
           resolveActorName={getActorName}
@@ -696,6 +757,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     openReplyComposer,
     cancelCommentEdit,
     copyCommentByContent,
+    copyCommentLinkById,
     deleteCommentById,
     openIssueMention,
     saveCommentEditById,
@@ -707,8 +769,15 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     listRef.current?.scrollToEnd({ animated: true });
   }, []);
 
+  const scrollToTop = useCallback(() => {
+    listRef.current?.scrollToOffset({ animated: true, offset: 0 });
+  }, []);
+
+  const childIssueCount = issue ? childProgress?.get(issue.id)?.total ?? 0 : 0;
+
   const listHeader = useMemo(() => {
     if (!issue) return null;
+    const hasIssueRelations = Boolean(issue.parent_issue_id) || childIssueCount > 0;
     return (
       <View style={styles.listHeader}>
         <View style={styles.section}>
@@ -742,19 +811,50 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             </Pressable>
           )}
           {issueEditError ? <Text style={styles.errorText}>{issueEditError}</Text> : null}
-          <Pressable
-            accessibilityHint={t("issues.edit_description_hint")}
-            accessibilityRole="button"
-            onPress={openDescriptionEditor}
-            style={({ pressed }) => [
-              styles.editableDescription,
-              pressed && styles.buttonPressed,
-            ]}
-          >
-            <View style={styles.descriptionHeader}>
+          {hasIssueRelations ? (
+            <View style={styles.issueRelationsBlock}>
+              {issue.parent_issue_id ? (
+                <IssueRelationRow
+                  disabled={!parentIssue}
+                  label={t("issues.parent_issue")}
+                  meta={parentIssue?.identifier}
+                  onPress={() => {
+                    if (parentIssue) {
+                      navigation.push("IssueDetail", { issueId: parentIssue.id });
+                    }
+                  }}
+                  title={
+                    parentIssue
+                      ? parentIssue.title
+                      : parentIssueLoading
+                        ? t("issues.loading_parent_issue")
+                        : t("issues.unable_to_load_parent_issue")
+                  }
+                />
+              ) : null}
+              {childIssueCount > 0 ? (
+                <IssueRelationRow
+                  label={t("issues.child_issues")}
+                  onPress={() => navigation.navigate("IssueProperties", { issueId })}
+                  separated={Boolean(issue.parent_issue_id)}
+                  title={t("issues.child_issue_count", { count: childIssueCount })}
+                />
+              ) : null}
+            </View>
+          ) : null}
+          <View style={styles.editableDescription}>
+            <Pressable
+              accessibilityHint={t("issues.edit_description_hint")}
+              accessibilityRole="button"
+              onPress={openDescriptionEditor}
+              style={({ pressed }) => [
+                styles.descriptionHeader,
+                pressed && styles.buttonPressed,
+              ]}
+            >
               <Text style={styles.descriptionLabel}>{t("issues.description")}</Text>
               <Text style={styles.editHintText}>{t("issues.tap_to_edit")}</Text>
-            </View>
+            </Pressable>
             {issue.description ? (
               <MarkdownText
                 content={issue.description}
@@ -766,7 +866,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             ) : (
               <Text style={styles.emptyText}>{t("issues.no_description")}</Text>
             )}
-          </Pressable>
+          </View>
           <View style={styles.issueEngagementRow}>
             <Pressable
               accessibilityRole="button"
@@ -863,11 +963,14 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     issueEditError,
     isSubscribed,
     issueId,
+    childIssueCount,
     handleMarkdownLinkPress,
     navigation,
     openAttachmentPreview,
     openDescriptionEditor,
     openIssueDetail,
+    parentIssue,
+    parentIssueLoading,
     pickDocument,
     pickImage,
     saveTitleEdit,
@@ -973,6 +1076,10 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       parentIssueIdentifier: issue.identifier,
     });
   }, [issue, navigation]);
+  const copyIssueLinkFromMenu = useCallback(() => {
+    setIssueMenuOpen(false);
+    copyIssueLink();
+  }, [copyIssueLink]);
 
   if (isLoading) return <LoadingState />;
   if (isError || !issue) return <EmptyState title={t("issues.unable_to_load")} />;
@@ -981,6 +1088,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     <Screen padded={false} safeArea={false}>
       <ScreenTitleBar
         onBack={() => navigation.goBack()}
+        onTitleDoublePress={scrollToTop}
         right={(
           <HeaderIconButton
             label={t("issues.issue_actions")}
@@ -993,6 +1101,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       />
       <IssueActionsMenu
         onClose={() => setIssueMenuOpen(false)}
+        onCopyIssueLink={copyIssueLinkFromMenu}
         onCreateChildIssue={openCreateChildIssue}
         onOpenProperties={openIssueProperties}
         open={issueMenuOpen}
@@ -1086,6 +1195,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         open={Boolean(attachmentPreview)}
         preview={attachmentPreview}
       />
+      <CopyToast bottomInset={insets.bottom} message={copyToastMessage} />
     </Screen>
   );
 }
@@ -1157,12 +1267,14 @@ export function IssueTaskRunsScreen({ navigation, route }: TaskRunsProps) {
 
 function IssueActionsMenu({
   onClose,
+  onCopyIssueLink,
   onCreateChildIssue,
   onOpenProperties,
   open,
   topInset,
 }: {
   onClose: () => void;
+  onCopyIssueLink: () => void;
   onCreateChildIssue: () => void;
   onOpenProperties: () => void;
   open: boolean;
@@ -1179,6 +1291,7 @@ function IssueActionsMenu({
           styles.issueActionsDropdown,
           { top: Math.max(topInset, spacing.sm) + 44 },
         ]}>
+          <DropdownItem label={t("issues.copy_link")} onPress={onCopyIssueLink} />
           <DropdownItem label={t("issues.action_properties")} onPress={onOpenProperties} />
           <DropdownItem label={t("issues.create_child_action")} onPress={onCreateChildIssue} />
         </View>
@@ -1207,6 +1320,47 @@ function IssueShortcutButton({
     >
       <Text numberOfLines={1} style={styles.issueShortcutLabel}>{label}</Text>
       <Text style={styles.issueShortcutCount}>{count}</Text>
+    </Pressable>
+  );
+}
+
+function IssueRelationRow({
+  disabled = false,
+  label,
+  meta,
+  onPress,
+  separated = false,
+  title,
+}: {
+  disabled?: boolean;
+  label: string;
+  meta?: string;
+  onPress: () => void;
+  separated?: boolean;
+  title: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.issueRelationRow,
+        separated && styles.issueRelationRowSeparated,
+        pressed && styles.buttonPressed,
+        disabled && styles.disabledAction,
+      ]}
+    >
+      <View style={styles.issueRelationContent}>
+        <Text numberOfLines={1} style={styles.issueRelationLabel}>{label}</Text>
+        <View style={styles.issueRelationTitleRow}>
+          {meta ? (
+            <Text numberOfLines={1} style={styles.issueRelationMeta}>{meta}</Text>
+          ) : null}
+          <Text numberOfLines={1} style={styles.issueRelationTitle}>{title}</Text>
+        </View>
+      </View>
+      <ChevronRight color={colors.mutedForeground} size={16} />
     </Pressable>
   );
 }
@@ -1853,6 +2007,7 @@ const TimelineItem = memo(function TimelineItem({
   onCancelEdit,
   onChangeEdit,
   onCopyComment,
+  onCopyCommentLink,
   onDelete,
   onExpandComment,
   onOpenAttachment,
@@ -1875,6 +2030,7 @@ const TimelineItem = memo(function TimelineItem({
   onCancelEdit?: () => void;
   onChangeEdit?: (content: string) => void;
   onCopyComment?: (content: string) => void;
+  onCopyCommentLink?: (commentId: string) => void;
   onDelete?: (commentId: string) => void;
   onExpandComment?: (commentId: string) => void;
   onOpenAttachment?: (attachment: Attachment, attachmentGroup: Attachment[]) => void;
@@ -1891,7 +2047,7 @@ const TimelineItem = memo(function TimelineItem({
   isLastReply?: boolean;
 }) {
   const { t } = useTranslation();
-  const actor = resolveActorName(entry.actor_type, entry.actor_id);
+  const actor = entry.actor_display_name ?? resolveActorName(entry.actor_type, entry.actor_id);
   const isOwnComment = entry.type === "comment" && entry.actor_type === "member" && entry.actor_id === userId;
   const isEditing = editingCommentId === entry.id;
   const [openMenu, setOpenMenu] = useState<"actions" | null>(null);
@@ -1910,15 +2066,6 @@ const TimelineItem = memo(function TimelineItem({
     () => isCommentCollapsed ? createCommentPreview(commentContent) : commentContent,
     [commentContent, isCommentCollapsed],
   );
-
-  function openActionsMenuAtPress(event: GestureResponderEvent) {
-    if (!isComment || isEditing || !hasCommentActions) return;
-    setActionsMenuAnchor({
-      x: event.nativeEvent.pageX,
-      y: event.nativeEvent.pageY,
-    });
-    setOpenMenu("actions");
-  }
 
   function closeActionsMenu() {
     setOpenMenu(null);
@@ -1941,6 +2088,13 @@ const TimelineItem = memo(function TimelineItem({
           label={t("issues.copy")}
           onPress={() => {
             onCopyComment?.(entry.content ?? "");
+            closeActionsMenu();
+          }}
+        />
+        <DropdownItem
+          label={t("issues.copy_link")}
+          onPress={() => {
+            onCopyCommentLink?.(entry.id);
             closeActionsMenu();
           }}
         />
@@ -1970,7 +2124,7 @@ const TimelineItem = memo(function TimelineItem({
   function renderActionsMenuModal() {
     if (openMenu !== "actions" || !actionsMenuAnchor) return null;
     const menuWidth = 132;
-    const menuHeight = 44 + (onReply ? 44 : 0) + (isOwnComment ? 72 : 0);
+    const menuHeight = 80 + (onReply ? 44 : 0) + (isOwnComment ? 72 : 0);
     const left = Math.max(spacing.md, Math.min(actionsMenuAnchor.x - menuWidth / 2, windowWidth - menuWidth - spacing.md));
     const top = Math.max(spacing.md, Math.min(actionsMenuAnchor.y + spacing.xs, windowHeight - menuHeight - spacing.md));
 
@@ -2082,9 +2236,7 @@ const TimelineItem = memo(function TimelineItem({
   );
 
   return (
-    <Pressable
-      delayLongPress={320}
-      onLongPress={isComment && !isEditing ? openActionsMenuAtPress : undefined}
+    <View
       style={[
         styles.timelineItem,
         variant === "threadRoot" && styles.timelineItemThreadRoot,
@@ -2102,9 +2254,30 @@ const TimelineItem = memo(function TimelineItem({
           {content}
         </View>
       ) : content}
-    </Pressable>
+    </View>
   );
 });
+
+function CopyToast({
+  bottomInset,
+  message,
+}: {
+  bottomInset: number;
+  message: string | null;
+}) {
+  if (!message) return null;
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.copyToast,
+        { bottom: Math.max(bottomInset, spacing.lg) + spacing.xl },
+      ]}
+    >
+      <Text style={styles.copyToastText}>{message}</Text>
+    </View>
+  );
+}
 
 function HeaderIconButton({
   children,
@@ -2296,11 +2469,15 @@ function AttachmentPreviewModal({
   const imageAttachments = useMemo(() => (
     preview?.imageAttachments?.length ? preview.imageAttachments : attachment && canPreviewImage ? [attachment] : []
   ), [attachment, canPreviewImage, preview?.imageAttachments]);
+  const previewImages = useMemo(
+    () => imageAttachments.map(attachmentToPreviewImage),
+    [imageAttachments],
+  );
 
   if (canPreviewImage) {
     return (
       <ImagePreviewModal
-        imageAttachments={imageAttachments}
+        images={previewImages}
         initialIndex={preview?.imageIndex ?? 0}
         onClose={onClose}
         open={open}
@@ -2546,6 +2723,15 @@ function formatBytes(bytes: number) {
 function isImageAttachment(attachment: Attachment) {
   const contentType = attachment.content_type.toLowerCase();
   return contentType.startsWith("image/") || /\.(avif|gif|heic|heif|jpe?g|png|webp)$/i.test(attachment.filename);
+}
+
+function attachmentToPreviewImage(attachment: Attachment): PreviewImageItem {
+  return {
+    contentType: attachment.content_type,
+    filename: attachment.filename,
+    id: attachment.id,
+    uri: attachment.download_url || attachment.url,
+  };
 }
 
 function isTextPreviewAttachment(attachment: Attachment) {
@@ -2820,6 +3006,58 @@ const styles = StyleSheet.create({
   emptyText: {
     color: colors.mutedForeground,
     fontSize: 14,
+  },
+  issueRelationsBlock: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginHorizontal: -spacing.sm,
+    overflow: "hidden",
+  },
+  issueRelationRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 58,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  issueRelationRowSeparated: {
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  issueRelationContent: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  issueRelationLabel: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "500",
+    lineHeight: 16,
+  },
+  issueRelationTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  issueRelationMeta: {
+    color: colors.mutedForeground,
+    flexShrink: 0,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  issueRelationTitle: {
+    color: colors.foreground,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 19,
+    minWidth: 0,
   },
   issueEngagementRow: {
     alignItems: "center",
@@ -3331,6 +3569,28 @@ const styles = StyleSheet.create({
   },
   menuModalOverlay: {
     flex: 1,
+  },
+  copyToast: {
+    alignSelf: "center",
+    backgroundColor: colors.foreground,
+    borderRadius: radii.md,
+    elevation: 4,
+    left: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    position: "absolute",
+    right: spacing.lg,
+    shadowColor: "#000000",
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.14,
+    shadowRadius: 8,
+  },
+  copyToastText: {
+    color: colors.primaryForeground,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+    textAlign: "center",
   },
   dropdownItem: {
     minHeight: 36,

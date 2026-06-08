@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/agenttmpl"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/skillbundle"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -360,10 +361,11 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 
 		files := make([]CreateSkillFileRequest, 0, len(imp.files))
 		for _, f := range imp.files {
-			if !validateFilePath(f.path) {
+			path, ok := skillbundle.NormalizePath(f.path)
+			if !ok || skillbundle.ShouldSkipFile(path) {
 				continue
 			}
-			files = append(files, CreateSkillFileRequest{Path: f.path, Content: f.content})
+			files = append(files, CreateSkillFileRequest{Path: path, Content: f.content})
 		}
 
 		// Record provenance: which template seeded this skill, plus the

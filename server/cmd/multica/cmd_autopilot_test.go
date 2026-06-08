@@ -40,6 +40,13 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newAutopilotTriggerTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "trigger"}
+	cmd.Flags().String("payload", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
 func TestResolveAgent(t *testing.T) {
 	agentsResp := []map[string]any{
 		{"id": "11111111-1111-1111-1111-111111111111", "name": "Lambda"},
@@ -229,6 +236,45 @@ func TestRunAutopilotUpdateSendsProjectIDChanges(t *testing.T) {
 			t.Fatalf("project_id = %#v, want nil", got)
 		}
 	})
+}
+
+func TestRunAutopilotTriggerSendsManualPayload(t *testing.T) {
+	const autopilotID = "33333333-3333-3333-3333-333333333333"
+
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID+"/trigger" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":              "run-1",
+			"autopilot_id":    autopilotID,
+			"source":          "manual",
+			"status":          "running",
+			"trigger_payload": body["trigger_payload"],
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newAutopilotTriggerTestCmd()
+	_ = cmd.Flags().Set("payload", "production")
+	if err := runAutopilotTrigger(cmd, []string{autopilotID}); err != nil {
+		t.Fatalf("runAutopilotTrigger: %v", err)
+	}
+	if got := body["trigger_payload"]; got != "production" {
+		t.Fatalf("trigger_payload = %#v, want production", got)
+	}
 }
 
 func TestUUIDRegexp(t *testing.T) {

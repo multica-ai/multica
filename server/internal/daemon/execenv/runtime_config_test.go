@@ -16,6 +16,123 @@ import (
 // that remains is the `--status todo` vs `--status backlog` rule for
 // creating sub-issues, which is unrelated to the notification path.
 
+func TestBuildMetaSkillContentPromotesRoleFrontmatterAfterIdentity(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		AgentID:   "agent-1",
+		AgentName: "Dev Agent",
+		AgentInstructions: "system defaults\n\npersonal defaults\n\n---\n" +
+			"name: developer\n" +
+			"description: |\n" +
+			"  Implements features.\n" +
+			"---\n\n" +
+			"# Developer Agent\n\nRole body.",
+	}
+
+	out := buildMetaSkillContent("claude", ctx)
+	identityIdx := strings.Index(out, "## Agent Identity")
+	frontmatterIdx := strings.Index(out, "---\nname: developer\n")
+	systemIdx := strings.Index(out, "system defaults")
+	bodyIdx := strings.Index(out, "# Developer Agent")
+	if identityIdx < 0 || frontmatterIdx < 0 || systemIdx < 0 || bodyIdx < 0 {
+		t.Fatalf("missing expected sections:\n%s", out)
+	}
+	if !(identityIdx < frontmatterIdx && frontmatterIdx < systemIdx && systemIdx < bodyIdx) {
+		t.Fatalf("role frontmatter was not promoted after Agent Identity; indexes identity=%d frontmatter=%d system=%d body=%d\n%s",
+			identityIdx, frontmatterIdx, systemIdx, bodyIdx, out)
+	}
+	if strings.Count(out, "---\nname: developer\n") != 1 {
+		t.Fatalf("expected existing role frontmatter once, got %d\n%s", strings.Count(out, "---\nname: developer\n"), out)
+	}
+}
+
+func TestBuildMetaSkillContentSynthesizesRoleFrontmatterWhenMissing(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		AgentID:           "agent-2",
+		AgentName:         "Tester Agent",
+		AgentDescription:  "Runs regression tests",
+		AgentInstructions: "# Tester Agent\n\nValidate releases.",
+	}
+
+	out := buildMetaSkillContent("claude", ctx)
+	want := "---\nname: \"Tester Agent\"\ndescription: \"Runs regression tests\"\n---"
+	if !strings.Contains(out, want) {
+		t.Fatalf("missing synthesized role frontmatter %q\n%s", want, out)
+	}
+	if strings.Count(out, `name: "Tester Agent"`) != 1 {
+		t.Fatalf("expected synthesized name once, got %d\n%s", strings.Count(out, `name: "Tester Agent"`), out)
+	}
+	if frontmatterIdx, bodyIdx := strings.Index(out, want), strings.Index(out, "# Tester Agent"); frontmatterIdx < 0 || bodyIdx < 0 || frontmatterIdx > bodyIdx {
+		t.Fatalf("synthesized frontmatter should appear before role body\n%s", out)
+	}
+}
+
+func TestBuildMetaSkillContentDoesNotSynthesizeDuplicateRoleFrontmatter(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		AgentName:        "Architect Agent",
+		AgentDescription: "Fallback description should not override.",
+		AgentInstructions: "---\n" +
+			"name: architect\n" +
+			"description: Existing description.\n" +
+			"model: inherit\n" +
+			"---\n\n" +
+			"# Architect Agent",
+	}
+
+	out := buildMetaSkillContent("claude", ctx)
+	if strings.Count(out, "name:") != 1 {
+		t.Fatalf("expected one role name, got %d\n%s", strings.Count(out, "name:"), out)
+	}
+	if strings.Contains(out, "Fallback description should not override") {
+		t.Fatalf("synthesized description should not override existing frontmatter\n%s", out)
+	}
+	if !strings.Contains(out, "model: inherit") {
+		t.Fatalf("existing frontmatter fields should be preserved\n%s", out)
+	}
+}
+
+func TestInjectRuntimeConfigRoleFrontmatterProviderFiles(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		provider string
+		filename string
+	}{
+		{"codebuddy", "CODEBUDDY.md"},
+		{"codex", "AGENTS.md"},
+		{"claude", "CLAUDE.md"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+
+			if _, err := InjectRuntimeConfig(dir, tc.provider, TaskContextForEnv{
+				IssueID:          "issue-1",
+				AgentName:        "Runtime Agent",
+				AgentDescription: "Shared runtime role.",
+				AgentInstructions: "---\n" +
+					"name: runtime-agent\n" +
+					"---\n\n" +
+					"# Runtime Agent",
+			}); err != nil {
+				t.Fatalf("InjectRuntimeConfig: %v", err)
+			}
+
+			data, err := os.ReadFile(filepath.Join(dir, tc.filename))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.filename, err)
+			}
+			out := string(data)
+			if !strings.Contains(out, "---\nname: runtime-agent\n---") {
+				t.Fatalf("%s missing normalized role frontmatter\n%s", tc.filename, out)
+			}
+		})
+	}
+}
+
 func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

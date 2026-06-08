@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -41,7 +40,7 @@ func TestEnsureDaemonID_Persists(t *testing.T) {
 	}
 }
 
-func TestEnsureDaemonID_SharedAcrossProfiles(t *testing.T) {
+func TestEnsureDaemonID_IsolatedByProfile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -53,15 +52,24 @@ func TestEnsureDaemonID_SharedAcrossProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("staging profile: %v", err)
 	}
-	if defaultID != stagingID {
-		t.Fatalf("profiles should share one machine id, got default=%s staging=%s", defaultID, stagingID)
+	if defaultID == stagingID {
+		t.Fatalf("different profiles should get distinct daemon ids, both were %s", defaultID)
 	}
 
-	// Profile-scoped file must not be created under the new layout — the
-	// only source of truth is ~/.multica/daemon.id.
+	// Default profile stores at ~/.multica/daemon.id
+	defaultFile := filepath.Join(home, ".multica", "daemon.id")
+	if data, err := os.ReadFile(defaultFile); err != nil {
+		t.Fatalf("default daemon.id not written: %v", err)
+	} else if strings.TrimSpace(string(data)) != defaultID {
+		t.Fatalf("default file contents %q differ from returned UUID %q", data, defaultID)
+	}
+
+	// Named profile stores at ~/.multica/profiles/staging/daemon.id
 	profileFile := filepath.Join(home, ".multica", "profiles", "staging", "daemon.id")
-	if _, err := os.Stat(profileFile); !os.IsNotExist(err) {
-		t.Fatalf("profile-scoped daemon.id should not be created, stat err: %v", err)
+	if data, err := os.ReadFile(profileFile); err != nil {
+		t.Fatalf("profile daemon.id not written: %v", err)
+	} else if strings.TrimSpace(string(data)) != stagingID {
+		t.Fatalf("profile file contents %q differ from returned UUID %q", data, stagingID)
 	}
 }
 
@@ -94,11 +102,11 @@ func TestEnsureDaemonID_IsolatedByExplicitConfigPath(t *testing.T) {
 	}
 }
 
-func TestEnsureDaemonID_PromotesPreChangeProfileFile(t *testing.T) {
+func TestEnsureDaemonID_ReusesExistingProfileFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Seed a per-profile daemon.id the way pre-#1220 daemons laid it out.
+	// Seed a per-profile daemon.id (either pre-existing or from earlier run).
 	legacyID := uuid.Must(uuid.NewV7()).String()
 	profileDir := filepath.Join(home, ".multica", "profiles", "staging")
 	if err := os.MkdirAll(profileDir, 0o755); err != nil {
@@ -108,24 +116,13 @@ func TestEnsureDaemonID_PromotesPreChangeProfileFile(t *testing.T) {
 		t.Fatalf("seed legacy id: %v", err)
 	}
 
-	// First call on the post-change daemon with the matching profile must
-	// reuse the pre-change UUID so existing runtime rows continue to match
-	// without needing a merge round-trip.
+	// EnsureDaemonID with matching profile should find and reuse the existing file.
 	got, err := EnsureDaemonID("staging", "")
 	if err != nil {
 		t.Fatalf("EnsureDaemonID: %v", err)
 	}
 	if got != legacyID {
-		t.Fatalf("expected promoted UUID %s, got %s", legacyID, got)
-	}
-
-	// The canonical file now holds that same UUID.
-	data, err := os.ReadFile(filepath.Join(home, ".multica", "daemon.id"))
-	if err != nil {
-		t.Fatalf("read canonical file: %v", err)
-	}
-	if strings.TrimSpace(string(data)) != legacyID {
-		t.Fatalf("canonical file %q != promoted %q", data, legacyID)
+		t.Fatalf("expected reused UUID %s, got %s", legacyID, got)
 	}
 }
 
@@ -156,10 +153,11 @@ func TestEnsureDaemonID_RegeneratesCorruptFile(t *testing.T) {
 	}
 }
 
-func TestLegacyDaemonUUIDs_ScansProfileDirs(t *testing.T) {
+func TestLegacyDaemonUUIDs_AlwaysReturnsNil(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
+	// Set up multiple profile daemon.id files (active identities in the new design).
 	uuidA := uuid.Must(uuid.NewV7()).String()
 	uuidB := uuid.Must(uuid.NewV7()).String()
 	for name, id := range map[string]string{"prod": uuidA, "desktop-multica": uuidB} {
@@ -172,24 +170,13 @@ func TestLegacyDaemonUUIDs_ScansProfileDirs(t *testing.T) {
 		}
 	}
 
-	// A profile directory with a corrupt file must be skipped, not fail.
-	corruptDir := filepath.Join(home, ".multica", "profiles", "corrupt")
-	if err := os.MkdirAll(corruptDir, 0o755); err != nil {
-		t.Fatalf("mkdir corrupt: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(corruptDir, "daemon.id"), []byte("not-a-uuid"), 0o600); err != nil {
-		t.Fatalf("seed corrupt: %v", err)
-	}
-
+	// LegacyDaemonUUIDs must NOT return these active profile IDs.
 	got, err := LegacyDaemonUUIDs()
 	if err != nil {
 		t.Fatalf("LegacyDaemonUUIDs: %v", err)
 	}
-	sort.Strings(got)
-	want := []string{uuidA, uuidB}
-	sort.Strings(want)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LegacyDaemonUUIDs = %v, want %v", got, want)
+	if got != nil {
+		t.Fatalf("LegacyDaemonUUIDs should return nil (deprecated), got %v", got)
 	}
 }
 
@@ -203,6 +190,38 @@ func TestLegacyDaemonUUIDs_MissingProfilesDirIsNil(t *testing.T) {
 	}
 	if ids != nil {
 		t.Fatalf("expected nil on missing profiles dir, got %v", ids)
+	}
+}
+
+func TestLegacyDaemonUUIDs_DoesNotCausesCrossProfileMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Simulate two active profiles with their own daemon.id
+	profileA := "default"
+	profileB := "member"
+	idA, err := EnsureDaemonID("", "")
+	if err != nil {
+		t.Fatalf("EnsureDaemonID default: %v", err)
+	}
+	idB, err := EnsureDaemonID(profileB, "")
+	if err != nil {
+		t.Fatalf("EnsureDaemonID member: %v", err)
+	}
+
+	// LegacyDaemonUUIDs must not return either active daemon ID
+	legacyUUIDs, err := LegacyDaemonUUIDs()
+	if err != nil {
+		t.Fatalf("LegacyDaemonUUIDs: %v", err)
+	}
+
+	for _, legacyID := range legacyUUIDs {
+		if legacyID == idA {
+			t.Fatalf("LegacyDaemonUUIDs returned active %s profile daemon_id %s", profileA, idA)
+		}
+		if legacyID == idB {
+			t.Fatalf("LegacyDaemonUUIDs returned active %s profile daemon_id %s", profileB, idB)
+		}
 	}
 }
 

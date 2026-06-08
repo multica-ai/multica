@@ -45,6 +45,7 @@ import type {
   UpdateSkillRequest,
   SetAgentSkillsRequest,
   BatchImportSkillsResponse,
+  DiscoverImportSkillsResponse,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -126,6 +127,7 @@ import type {
   AutopilotRun,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
+  TriggerAutopilotRequest,
   CreateAutopilotTriggerRequest,
   UpdateAutopilotTriggerRequest,
   ListAutopilotsResponse,
@@ -162,6 +164,8 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  MobilePushRegistrationResponse,
+  UpsertMobilePushRegistrationRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -176,6 +180,8 @@ import { parseWithFallback } from "./schema";
 import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
+  AutopilotResponseSchema,
+  AutopilotRunResponseSchema,
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
@@ -193,6 +199,8 @@ import {
   EMPTY_AGENT_RUN_DETAIL,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  EMPTY_AUTOPILOT,
+  EMPTY_AUTOPILOT_RUN,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
@@ -200,8 +208,12 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
+  EMPTY_DISCOVER_IMPORT_SKILLS_RESPONSE,
+  EMPTY_GET_AUTOPILOT_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_LABELS_RESPONSE,
+  EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE,
+  EMPTY_LIST_AUTOPILOTS_RESPONSE,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD,
@@ -212,8 +224,12 @@ import {
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
+  GetAutopilotResponseSchema,
+  DiscoverImportSkillsResponseSchema,
   IssueLabelsResponseSchema,
   LabelSchema,
+  ListAutopilotRunsResponseSchema,
+  ListAutopilotsResponseSchema,
   ListIssuesResponseSchema,
   ListLabelsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
@@ -244,6 +260,8 @@ import {
   EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+  EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE,
+  MobilePushRegistrationResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1915,6 +1933,32 @@ export class ApiClient {
     return this.fetch("/api/inbox/archive-completed", { method: "POST" });
   }
 
+  async upsertMobilePushRegistration(
+    request: UpsertMobilePushRegistrationRequest,
+  ): Promise<MobilePushRegistrationResponse> {
+    const response = await this.fetch("/api/me/mobile-push/registrations", {
+      method: "PUT",
+      body: JSON.stringify(request),
+    });
+    return parseWithFallback(
+      response,
+      MobilePushRegistrationResponseSchema,
+      EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE,
+      { endpoint: "PUT /api/me/mobile-push/registrations" },
+    );
+  }
+
+  async disableMobilePushRegistration(
+    installationId: string,
+    provider = "getui",
+  ): Promise<void> {
+    const search = new URLSearchParams({ provider });
+    await this.fetch(
+      `/api/me/mobile-push/registrations/${encodeURIComponent(installationId)}?${search}`,
+      { method: "DELETE" },
+    );
+  }
+
   // Notification preferences
   async getNotificationPreferences(): Promise<NotificationPreferenceResponse> {
     return this.fetch("/api/notification-preferences");
@@ -2129,10 +2173,20 @@ export class ApiClient {
     await this.fetch(`/api/skills/${id}`, { method: "DELETE" });
   }
 
-  async importSkill(data: { url: string; gitee_token?: string }): Promise<Skill> {
+  async importSkill(data: { url: string; gitee_token?: string; overwrite?: boolean }): Promise<Skill> {
     return this.fetch("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async discoverImportSkills(data: { url: string; gitee_token?: string }): Promise<DiscoverImportSkillsResponse> {
+    const raw = await this.fetch<unknown>("/api/skills/import/discover", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, DiscoverImportSkillsResponseSchema, EMPTY_DISCOVER_IMPORT_SKILLS_RESPONSE, {
+      endpoint: "POST /api/skills/import/discover",
     });
   }
 
@@ -2690,53 +2744,81 @@ export class ApiClient {
   async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/autopilots?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
+    return parseWithFallback(raw, ListAutopilotsResponseSchema, EMPTY_LIST_AUTOPILOTS_RESPONSE, {
+      endpoint: "GET /api/autopilots",
+    }) as ListAutopilotsResponse;
   }
 
   async getAutopilot(id: string): Promise<GetAutopilotResponse> {
-    return this.fetch(`/api/autopilots/${id}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}`);
+    return parseWithFallback(raw, GetAutopilotResponseSchema, EMPTY_GET_AUTOPILOT_RESPONSE, {
+      endpoint: "GET /api/autopilots/:id",
+    }) as GetAutopilotResponse;
   }
 
   async createAutopilot(data: CreateAutopilotRequest): Promise<Autopilot> {
-    return this.fetch("/api/autopilots", {
+    const raw = await this.fetch<unknown>("/api/autopilots", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, AutopilotResponseSchema, EMPTY_AUTOPILOT, {
+      endpoint: "POST /api/autopilots",
+    }) as Autopilot;
   }
 
   async updateAutopilot(id: string, data: UpdateAutopilotRequest): Promise<Autopilot> {
-    return this.fetch(`/api/autopilots/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, AutopilotResponseSchema, { ...EMPTY_AUTOPILOT, id }, {
+      endpoint: "PATCH /api/autopilots/:id",
+    }) as Autopilot;
   }
 
   async deleteAutopilot(id: string): Promise<void> {
     await this.fetch(`/api/autopilots/${id}`, { method: "DELETE" });
   }
 
-  async triggerAutopilot(id: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${id}/trigger`, { method: "POST" });
+  async triggerAutopilot(id: string, data?: TriggerAutopilotRequest): Promise<AutopilotRun> {
+    const init: RequestInit = { method: "POST" };
+    if (data) {
+      init.body = JSON.stringify(data);
+    }
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/trigger`, init);
+    return parseWithFallback(raw, AutopilotRunResponseSchema, { ...EMPTY_AUTOPILOT_RUN, autopilot_id: id }, {
+      endpoint: "POST /api/autopilots/:id/trigger",
+    }) as AutopilotRun;
   }
 
   async listAutopilotRuns(id: string, params?: { limit?: number; offset?: number }): Promise<ListAutopilotRunsResponse> {
     const search = new URLSearchParams();
     if (params?.limit) search.set("limit", params.limit.toString());
     if (params?.offset) search.set("offset", params.offset.toString());
-    return this.fetch(`/api/autopilots/${id}/runs?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/runs?${search}`);
+    return parseWithFallback(raw, ListAutopilotRunsResponseSchema, EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE, {
+      endpoint: "GET /api/autopilots/:id/runs",
+    }) as ListAutopilotRunsResponse;
   }
 
   // Returns a single run including its full trigger_payload. List responses
   // omit trigger_payload to keep them small (a webhook envelope can be
   // up to 256 KiB × limit rows), so the detail view fetches via this route.
   async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    return parseWithFallback(raw, AutopilotRunResponseSchema, { ...EMPTY_AUTOPILOT_RUN, id: runId, autopilot_id: autopilotId }, {
+      endpoint: "GET /api/autopilots/:id/runs/:runId",
+    }) as AutopilotRun;
   }
 
   async cancelAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}/cancel`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/runs/${runId}/cancel`, {
       method: "POST",
     });
+    return parseWithFallback(raw, AutopilotRunResponseSchema, { ...EMPTY_AUTOPILOT_RUN, id: runId, autopilot_id: autopilotId }, {
+      endpoint: "POST /api/autopilots/:id/runs/:runId/cancel",
+    }) as AutopilotRun;
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {

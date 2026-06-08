@@ -68,7 +68,7 @@ type Config struct {
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	ConfigPath                     string                // explicit config path (empty = profile/default resolution)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity, qoderclicn, mmx
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	LocalNotificationEnabled       bool                  // enable local system notifications after task completion/failure
@@ -255,8 +255,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
 		agents["antigravity"] = e
 	}
+	if e, ok := probe("MULTICA_QODERCLICN_PATH", "qoderclicn", "MULTICA_QODERCLICN_MODEL"); ok {
+		agents["qoderclicn"] = e
+	}
+	if e, ok := probe("MULTICA_MMX_PATH", "mmx", "MULTICA_MMX_MODEL"); ok {
+		agents["mmx"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, DeepSeek-TUI (deepseek-tui), or agy and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, DeepSeek-TUI (deepseek-tui), agy, qoderclicn, or mmx and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -352,15 +358,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// server uses these at register time to merge any pre-UUID runtime rows
 	// for this machine into the new UUID-keyed row and delete the stale ones.
 	legacyDaemonIDs := LegacyDaemonIDs(host, profile)
-	// Pre-change (#1220) daemon identity was stored per profile, which means
-	// the same machine could end up with multiple leftover daemon.id files
-	// — e.g. ~/.multica/daemon.id (default) plus ~/.multica/profiles/<x>/
-	// daemon.id. Surface those UUIDs so the server can merge their runtime
-	// rows into the canonical machine UUID. Fatal-free: a broken profiles
-	// dir shouldn't block startup.
-	if uuids, err := LegacyDaemonUUIDs(); err == nil {
-		legacyDaemonIDs = append(legacyDaemonIDs, uuids...)
-	}
 	// Strip anything that collides with the resolved daemon_id (e.g. when
 	// the user explicitly pins MULTICA_DAEMON_ID=<hostname>, or when the
 	// canonical id was itself promoted from a pre-change profile file).
@@ -649,7 +646,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 var defaultAgentCommandNames = []string{
 	"claude", "cbc", "codex", "opencode", "openclaw", "hermes",
 	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
-	"deepseek-tui", "deepseek", "agy",
+	"deepseek-tui", "deepseek", "agy", "qoderclicn",
 }
 
 var codexDesktopAppBundlePaths = func() []string {

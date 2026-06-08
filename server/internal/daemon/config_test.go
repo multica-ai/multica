@@ -482,6 +482,120 @@ func TestLoadConfigDeepseekFallsBackToLegacyWrapper(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDetectsQoderclicnFromPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := t.TempDir()
+	qoderclicnPath := filepath.Join(binDir, "qoderclicn")
+	if err := os.WriteFile(qoderclicnPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake qoderclicn: %v", err)
+	}
+
+	t.Setenv("PATH", binDir)
+	t.Setenv("SHELL", "")
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_QODERCLICN_MODEL", "GLM-5.1")
+	pinNonQoderclicnAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["qoderclicn"]
+	if !ok {
+		t.Fatalf("qoderclicn runtime missing from agents: %+v", cfg.Agents)
+	}
+	if entry.Path != "qoderclicn" {
+		t.Fatalf("qoderclicn path = %q, want qoderclicn", entry.Path)
+	}
+	if entry.Model != "GLM-5.1" {
+		t.Fatalf("qoderclicn model = %q, want GLM-5.1", entry.Model)
+	}
+}
+
+func TestLoadConfigQoderclicnHonoursEnvPathOverride(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := t.TempDir()
+	qoderclicnPath := filepath.Join(binDir, "custom-qoder")
+	if err := os.WriteFile(qoderclicnPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake qoderclicn: %v", err)
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", "")
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_QODERCLICN_PATH", qoderclicnPath)
+	pinNonQoderclicnAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["qoderclicn"]
+	if !ok {
+		t.Fatalf("qoderclicn runtime missing from agents: %+v", cfg.Agents)
+	}
+	if entry.Path != qoderclicnPath {
+		t.Fatalf("qoderclicn path = %q, want %q", entry.Path, qoderclicnPath)
+	}
+}
+
+func TestLoadConfigDetectsQoderclicnViaLoginShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	sh := "/bin/sh"
+	if _, err := os.Stat(sh); err != nil {
+		t.Skipf("no /bin/sh available: %v", err)
+	}
+	binDir := t.TempDir()
+	qoderclicnPath := filepath.Join(binDir, "qoderclicn")
+	if err := os.WriteFile(qoderclicnPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake qoderclicn: %v", err)
+	}
+
+	t.Setenv("PATH", "/usr/bin:/bin")
+	if _, err := lookPathInPath("qoderclicn"); err == nil {
+		t.Skip("PATH leak — qoderclicn already visible to daemon without shell help")
+	}
+	rc := filepath.Join(t.TempDir(), "sh.rc")
+	if err := os.WriteFile(rc, []byte("export PATH=\""+binDir+":$PATH\"\n"), 0o644); err != nil {
+		t.Fatalf("write rc: %v", err)
+	}
+	t.Setenv("SHELL", sh)
+	t.Setenv("ENV", rc)
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonQoderclicnAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["qoderclicn"]
+	if !ok {
+		t.Fatalf("qoderclicn runtime missing from agents: %+v", cfg.Agents)
+	}
+	wantCanonical, err := filepath.EvalSymlinks(qoderclicnPath)
+	if err != nil {
+		t.Fatalf("eval symlinks for expected path: %v", err)
+	}
+	if entry.Path != wantCanonical {
+		t.Fatalf("qoderclicn path = %q, want canonical %q", entry.Path, wantCanonical)
+	}
+}
+
 // TestLoadConfig_AutoUpdate_NoFlagWinsOverCloudDefault keeps the legacy CLI
 // flag working: --no-auto-update (translated into overrides.DisableAutoUpdate)
 // forces auto-update off even when the cloud default and env var would enable.
@@ -761,6 +875,30 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 		"MULTICA_COPILOT_PATH",
 		"MULTICA_KIMI_PATH",
 		"MULTICA_KIRO_PATH",
+		"MULTICA_QODERCLICN_PATH",
+	} {
+		t.Setenv(name, filepath.Join(missingDir, strings.ToLower(name)))
+	}
+}
+
+func pinNonQoderclicnAgentsToMissingPaths(t *testing.T) {
+	t.Helper()
+	missingDir := t.TempDir()
+	for _, name := range []string{
+		"MULTICA_CLAUDE_PATH",
+		"MULTICA_CODEBUDDY_PATH",
+		"MULTICA_CODEX_PATH",
+		"MULTICA_OPENCODE_PATH",
+		"MULTICA_OPENCLAW_PATH",
+		"MULTICA_HERMES_PATH",
+		"MULTICA_GEMINI_PATH",
+		"MULTICA_PI_PATH",
+		"MULTICA_CURSOR_PATH",
+		"MULTICA_COPILOT_PATH",
+		"MULTICA_KIMI_PATH",
+		"MULTICA_KIRO_PATH",
+		"MULTICA_DEEPSEEK_PATH",
+		"MULTICA_ANTIGRAVITY_PATH",
 	} {
 		t.Setenv(name, filepath.Join(missingDir, strings.ToLower(name)))
 	}

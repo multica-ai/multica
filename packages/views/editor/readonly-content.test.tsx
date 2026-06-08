@@ -315,7 +315,7 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
-  it("renders ordinary code blocks with the screenshot-style floating toolbar", async () => {
+  it("keeps readonly code block chrome separate from selectable code text", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -324,28 +324,35 @@ describe("ReadonlyContent code styling", () => {
 
     const { container, getByTitle } = render(
       <ReadonlyContent
-        content={["```ts", "const value = 1;", "```"].join("\n")}
+        content={["```bash", "pnpm test", "```"].join("\n")}
       />,
     );
 
     const wrapper = container.querySelector(".code-block-wrapper");
+    const header = container.querySelector(".code-block-header");
+    const pre = container.querySelector("pre");
+    const copyButton = screen.getByTitle("Copy code");
+
     expect(wrapper).not.toBeNull();
-    expect(wrapper?.className).toContain("group/code");
-    expect(wrapper?.querySelector(".code-block-header")?.className).toContain(
-      "absolute top-0 right-0",
-    );
-    expect(wrapper?.querySelector("pre code.language-ts")).not.toBeNull();
-    expect(wrapper?.textContent).toContain("ts");
+    expect(wrapper?.className).toContain("select-text");
+    expect(header?.className).toContain("select-none");
+    expect(pre?.className).toContain("select-text");
+    expect(copyButton.className).toContain("pointer-events-auto");
+    expect(wrapper?.querySelector("pre code.language-bash")).not.toBeNull();
+    expect(wrapper?.textContent).toContain("bash");
 
     const deleteButton = getByTitle("Delete");
     expect(deleteButton).toBeDisabled();
     expect(deleteButton).toHaveAttribute("aria-disabled", "true");
     expect(deleteButton.className).toContain("cursor-default");
 
-    fireEvent.click(getByTitle("Copy code"));
+    const mouseDown = fireEvent.mouseDown(copyButton);
+    expect(mouseDown).toBe(false);
+
+    fireEvent.click(copyButton);
 
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith("const value = 1;");
+      expect(writeText).toHaveBeenCalledWith("pnpm test");
     });
   });
 
@@ -367,6 +374,7 @@ describe("ReadonlyContent code styling", () => {
     expect(codeCss).toContain(".rich-text-editor pre code");
     expect(codeCss).toContain("font-variant-ligatures: none;");
     expect(codeCss).toContain('font-feature-settings: "liga" 0;');
+    expect(codeCss).toContain("user-select: text;");
   });
 });
 
