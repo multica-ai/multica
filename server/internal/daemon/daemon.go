@@ -2788,6 +2788,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
+	if slot < len(d.cfg.AvailableSlots) {
+		agentEnv["MULTICA_TASK_SLOT_VALUE"] = d.cfg.AvailableSlots[slot]
+	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
 	}
@@ -2835,13 +2838,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Bedrock). These are set per-agent via the agent settings UI.
 	// Critical internal variables are blocklisted to prevent accidental or
 	// malicious override of daemon-set values.
+	//
+	// Values support ${VAR} interpolation against the already-resolved agentEnv,
+	// falling back to the daemon process environment. This lets values reference
+	// daemon-injected variables such as MULTICA_TASK_ID — for example:
+	//   ANTHROPIC_API_KEY = ${MULTICA_TASK_ID}-sk-xxx
 	if task.Agent != nil {
 		for k, v := range task.Agent.CustomEnv {
 			if isBlockedEnvKey(k) {
 				d.logger.Warn("custom_env: blocked key skipped", "key", k)
 				continue
 			}
-			agentEnv[k] = v
+			agentEnv[k] = os.Expand(v, func(name string) string {
+				if val, ok := agentEnv[name]; ok {
+					return val
+				}
+				return os.Getenv(name)
+			})
 		}
 	}
 	backend, err := agent.New(provider, agent.Config{
