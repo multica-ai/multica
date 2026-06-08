@@ -92,6 +92,7 @@ export function CerebroWakeupSection({ issueId }: { issueId: string }) {
                 <p className="text-muted-foreground truncate">{w.prompt}</p>
               </div>
               <Tooltip>
+                {/* CEREBRO-PATCH(wakeup-cancel-tooltip-render): Use Base UI render prop; TooltipTrigger does not accept button props directly. */}
                 <TooltipTrigger
                   render={
                     <button
