@@ -208,7 +208,7 @@ describe("GroupsTab (list)", () => {
     fireEvent.change(screen.getByLabelText("Group name"), {
       target: { value: "Design" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Opret gruppe/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Create group/i }));
 
     await waitFor(() => {
       expect(mockCreateGroup).toHaveBeenCalledWith("ws-1", {
