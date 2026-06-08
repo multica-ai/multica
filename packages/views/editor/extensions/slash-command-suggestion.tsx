@@ -23,10 +23,20 @@ import { createSuggestionPopupRender } from "./suggestion-popup";
 
 const MAX_ITEMS = 20;
 
+/** Known built-in command ids — the keys under editor `slash_command.commands`. */
+export type BuiltinCommandKey = "note";
+
 export interface SlashCommandItem {
   id: string;
   label: string;
-  description: string;
+  /** Raw description (skill picker). Built-in commands use descriptionKey. */
+  description?: string;
+  /**
+   * For built-in commands: the i18n key under editor `slash_command.commands`.
+   * When set, the menu renders the translated copy instead of `description`,
+   * so the visible string stays localized (the typed `/label` does not).
+   */
+  descriptionKey?: BuiltinCommandKey;
 }
 
 interface SlashCommandListProps {
@@ -107,27 +117,37 @@ export const SlashCommandList = forwardRef<
     );
   }
 
+  // Built-in commands carry an i18n key so the visible description stays
+  // localized; skills carry a raw description string from their config.
+  const describe = (item: SlashCommandItem): string | undefined =>
+    item.descriptionKey === "note"
+      ? t(($) => $.slash_command.commands.note)
+      : item.description;
+
   return (
     <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[300px] overflow-y-auto">
-      {items.map((item, index) => (
-        <button
-          key={item.id}
-          ref={(el) => {
-            itemRefs.current[index] = el;
-          }}
-          className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs transition-colors ${
-            selectedIndex === index ? "bg-accent" : "hover:bg-accent/50"
-          }`}
-          onClick={() => selectItem(index)}
-        >
-          <span className="font-medium">/{item.label}</span>
-          {item.description && (
-            <span className="truncate text-muted-foreground">
-              {item.description}
-            </span>
-          )}
-        </button>
-      ))}
+      {items.map((item, index) => {
+        const description = describe(item);
+        return (
+          <button
+            key={item.id}
+            ref={(el) => {
+              itemRefs.current[index] = el;
+            }}
+            className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs transition-colors ${
+              selectedIndex === index ? "bg-accent" : "hover:bg-accent/50"
+            }`}
+            onClick={() => selectItem(index)}
+          >
+            <span className="font-medium">/{item.label}</span>
+            {description && (
+              <span className="truncate text-muted-foreground">
+                {description}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 });
@@ -227,21 +247,15 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
  * `noteCommentPrefix` in server/internal/handler/comment.go.
  */
 export const BUILTIN_COMMANDS: SlashCommandItem[] = [
-  {
-    id: "note",
-    label: "note",
-    description: "Add a note — won't trigger the assigned agent",
-  },
+  { id: "note", label: "note", descriptionKey: "note" },
 ];
 
+// Match on the command label as a prefix only — the description is for display,
+// not search. With a single command this keeps the menu predictable (typing
+// `/no` surfaces `note`; an unrelated `/deploy` shows nothing).
 export function buildBuiltinCommandItems(query: string): SlashCommandItem[] {
   const q = query.toLowerCase();
-  return BUILTIN_COMMANDS.filter(
-    (c) =>
-      !q ||
-      c.label.toLowerCase().includes(q) ||
-      c.description.toLowerCase().includes(q),
-  );
+  return BUILTIN_COMMANDS.filter((c) => c.label.toLowerCase().startsWith(q));
 }
 
 export function createBuiltinCommandSuggestion(): Omit<

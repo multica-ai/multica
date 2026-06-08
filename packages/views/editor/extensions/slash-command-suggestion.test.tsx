@@ -346,18 +346,39 @@ describe("buildBuiltinCommandItems", () => {
     expect(buildBuiltinCommandItems("")).toEqual(BUILTIN_COMMANDS);
   });
 
-  it("includes /note while the query is a prefix of it", () => {
+  it("includes /note while the query is a prefix of the label", () => {
     expect(buildBuiltinCommandItems("no").map((c) => c.id)).toEqual(["note"]);
     expect(buildBuiltinCommandItems("NOTE").map((c) => c.id)).toEqual(["note"]);
   });
 
-  it("matches against the description as well as the label", () => {
-    expect(buildBuiltinCommandItems("agent").map((c) => c.id)).toEqual([
-      "note",
-    ]);
+  it("matches the label as a prefix only — not the description", () => {
+    // "agent" appears in the description but is not a label prefix.
+    expect(buildBuiltinCommandItems("agent")).toEqual([]);
+    // A non-prefix substring of the label does not match either.
+    expect(buildBuiltinCommandItems("ote")).toEqual([]);
   });
 
   it("returns nothing for a query that matches no command", () => {
     expect(buildBuiltinCommandItems("deploy")).toEqual([]);
+  });
+});
+
+describe("SlashCommandList built-in command rendering", () => {
+  it("renders the localized description for a built-in command", () => {
+    const { getByText } = render(
+      <I18nWrapper>
+        <SlashCommandList
+          items={buildBuiltinCommandItems("")}
+          query=""
+          command={vi.fn()}
+          hideOnEmpty
+        />
+      </I18nWrapper>,
+    );
+
+    expect(getByText("/note")).toBeInTheDocument();
+    expect(
+      getByText("Add a note — won't trigger the assigned agent"),
+    ).toBeInTheDocument();
   });
 });
