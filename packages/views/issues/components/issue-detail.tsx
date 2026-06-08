@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -56,6 +56,7 @@ import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
+import { IssueJumpFab } from "./issue-jump-fab";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
@@ -391,6 +392,10 @@ function TimelineSkeleton() {
 // as badly as N blocks of 1 would. Older entries fold behind a "Show N more
 // activities" line that expands in place.
 const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
+const JUMP_SCROLL_MIN_RANGE = 300;
+const JUMP_NEAR_EDGE_THRESHOLD = 120;
+const JUMP_PROGRAMMATIC_SCROLL_TIMEOUT_MS = 3000;
+type JumpScrollAction = "to-comment-box" | "to-top";
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
@@ -720,7 +725,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [jumpScrollAction, setJumpScrollAction] = useState<JumpScrollAction | null>(null);
+  const pendingJumpScrollActionRef = useRef<JumpScrollAction | null>(null);
+  const jumpScrollRafRef = useRef<number | null>(null);
+  const jumpProgrammaticScrollRef = useRef(false);
+  const jumpProgrammaticScrollTimeoutRef = useRef<number | null>(null);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -1066,6 +1077,161 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
 
   const loading = issueLoading;
+
+
+  const clearJumpProgrammaticScrollTimeout = useCallback(() => {
+    if (jumpProgrammaticScrollTimeoutRef.current === null) return;
+    window.clearTimeout(jumpProgrammaticScrollTimeoutRef.current);
+    jumpProgrammaticScrollTimeoutRef.current = null;
+  }, []);
+
+  const updateJumpScrollState = useCallback(() => {
+    if (!scrollContainerEl) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerEl;
+    const maxScrollTop = scrollHeight - clientHeight;
+    const distanceFromBottom = maxScrollTop - scrollTop;
+    if (maxScrollTop <= JUMP_SCROLL_MIN_RANGE) {
+      pendingJumpScrollActionRef.current = null;
+      jumpProgrammaticScrollRef.current = false;
+      setJumpScrollAction(null);
+      return;
+    }
+
+    const pendingJumpScrollAction = pendingJumpScrollActionRef.current;
+    if (pendingJumpScrollAction === "to-comment-box") {
+      if (distanceFromBottom <= JUMP_NEAR_EDGE_THRESHOLD) {
+        pendingJumpScrollActionRef.current = null;
+        jumpProgrammaticScrollRef.current = false;
+        clearJumpProgrammaticScrollTimeout();
+        setJumpScrollAction("to-top");
+        return;
+      }
+
+      setJumpScrollAction(null);
+      return;
+    }
+
+    if (pendingJumpScrollAction === "to-top") {
+      if (scrollTop <= JUMP_NEAR_EDGE_THRESHOLD) {
+        pendingJumpScrollActionRef.current = null;
+        jumpProgrammaticScrollRef.current = false;
+        clearJumpProgrammaticScrollTimeout();
+        setJumpScrollAction(distanceFromBottom > JUMP_NEAR_EDGE_THRESHOLD ? "to-comment-box" : null);
+        return;
+      }
+
+      setJumpScrollAction(null);
+      return;
+    }
+
+    if (jumpProgrammaticScrollRef.current) return;
+
+    const canJumpToTop = scrollTop > JUMP_NEAR_EDGE_THRESHOLD;
+    const canJumpToCommentBox = distanceFromBottom > JUMP_NEAR_EDGE_THRESHOLD;
+
+    if (canJumpToCommentBox) {
+      setJumpScrollAction("to-comment-box");
+      return;
+    }
+
+    if (canJumpToTop) {
+      setJumpScrollAction("to-top");
+      return;
+    }
+
+    setJumpScrollAction(null);
+  }, [clearJumpProgrammaticScrollTimeout, scrollContainerEl]);
+
+  const scheduleJumpScrollStateUpdate = useCallback(() => {
+    if (jumpScrollRafRef.current !== null) return;
+    jumpScrollRafRef.current = window.requestAnimationFrame(() => {
+      jumpScrollRafRef.current = null;
+      updateJumpScrollState();
+    });
+  }, [updateJumpScrollState]);
+
+  const finishJumpProgrammaticScroll = useCallback(() => {
+    if (!scrollContainerEl) return;
+
+    jumpProgrammaticScrollRef.current = false;
+    clearJumpProgrammaticScrollTimeout();
+    updateJumpScrollState();
+  }, [clearJumpProgrammaticScrollTimeout, scrollContainerEl, updateJumpScrollState]);
+
+  const clearPendingJumpScrollAction = useCallback(() => {
+    pendingJumpScrollActionRef.current = null;
+    finishJumpProgrammaticScroll();
+  }, [finishJumpProgrammaticScroll]);
+
+  const beginJumpProgrammaticScroll = useCallback((action: JumpScrollAction) => {
+    pendingJumpScrollActionRef.current = action;
+    jumpProgrammaticScrollRef.current = true;
+    clearJumpProgrammaticScrollTimeout();
+    jumpProgrammaticScrollTimeoutRef.current = window.setTimeout(clearPendingJumpScrollAction, JUMP_PROGRAMMATIC_SCROLL_TIMEOUT_MS);
+  }, [clearJumpProgrammaticScrollTimeout, clearPendingJumpScrollAction]);
+
+  useLayoutEffect(() => {
+    if (!scrollContainerEl) return;
+
+    updateJumpScrollState();
+    scrollContainerEl.addEventListener("scroll", scheduleJumpScrollStateUpdate, { passive: true });
+    scrollContainerEl.addEventListener("scrollend", finishJumpProgrammaticScroll);
+    window.addEventListener("resize", scheduleJumpScrollStateUpdate);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(scheduleJumpScrollStateUpdate);
+      resizeObserver.observe(scrollContainerEl);
+      if (scrollContainerEl.firstElementChild) {
+        resizeObserver.observe(scrollContainerEl.firstElementChild);
+      }
+    }
+
+    const timeout = window.setTimeout(updateJumpScrollState, 250);
+
+    return () => {
+      scrollContainerEl.removeEventListener("scroll", scheduleJumpScrollStateUpdate);
+      scrollContainerEl.removeEventListener("scrollend", finishJumpProgrammaticScroll);
+      window.removeEventListener("resize", scheduleJumpScrollStateUpdate);
+      resizeObserver?.disconnect();
+      if (jumpScrollRafRef.current !== null) {
+        window.cancelAnimationFrame(jumpScrollRafRef.current);
+        jumpScrollRafRef.current = null;
+      }
+      clearJumpProgrammaticScrollTimeout();
+      pendingJumpScrollActionRef.current = null;
+      jumpProgrammaticScrollRef.current = false;
+      window.clearTimeout(timeout);
+    };
+  }, [clearJumpProgrammaticScrollTimeout, finishJumpProgrammaticScroll, scrollContainerEl, scheduleJumpScrollStateUpdate, updateJumpScrollState, items.length]);
+
+
+  const handleJumpScroll = useCallback((action: JumpScrollAction) => {
+    if (!scrollContainerEl) return;
+
+    beginJumpProgrammaticScroll(action);
+
+    if (action === "to-top") {
+      scrollContainerEl.scrollTo({ top: 0, behavior: "smooth" });
+      setJumpScrollAction(null);
+      return;
+    }
+
+    if (virtuosoRef.current && items.length > 0) {
+      virtuosoRef.current.scrollToIndex({
+        index: items.length - 1,
+        align: "end",
+        behavior: "smooth",
+      });
+      setJumpScrollAction(null);
+      return;
+    }
+
+    const maxScrollTop = scrollContainerEl.scrollHeight - scrollContainerEl.clientHeight;
+    scrollContainerEl.scrollTo({ top: maxScrollTop, behavior: "smooth" });
+    setJumpScrollAction(null);
+  }, [beginJumpProgrammaticScroll, items.length, scrollContainerEl]);
 
   // Deep-link landing. Semantically equivalent to navigating to
   // `#comment-${id}`: find the element with that id, scrollIntoView it.
@@ -1634,7 +1800,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : [];
 
   const detailContent = (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="relative flex h-full min-w-0 flex-1 flex-col">
         <BreadcrumbHeader
           segments={breadcrumbSegments}
           leaf={
@@ -1732,6 +1898,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div
           ref={setScrollContainerEl}
           data-tab-scroll-root
+          data-testid="issue-detail-scroll-container"
           className="relative flex-1 overflow-y-auto"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
@@ -1991,6 +2158,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 ) : (
                   <div className="mt-4">
                     <Virtuoso
+                      ref={virtuosoRef}
                       key={`${wsId}:${id}`}
                       customScrollParent={scrollContainerEl}
                       data={items}
@@ -2028,6 +2196,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
+        {jumpScrollAction === "to-top" && (
+          <IssueJumpFab
+            direction="up"
+            position="top"
+            onClick={() => handleJumpScroll("to-top")}
+            label={t(($) => $.detail.jump_to_top_short)}
+            ariaLabel={t(($) => $.detail.jump_to_top)}
+          />
+        )}
+        {jumpScrollAction === "to-comment-box" && (
+          <IssueJumpFab
+            direction="down"
+            position="bottom"
+            onClick={() => handleJumpScroll("to-comment-box")}
+            label={t(($) => $.detail.jump_to_comment_box_short)}
+            ariaLabel={t(($) => $.detail.jump_to_comment_box)}
+          />
+        )}
       </div>
   );
 

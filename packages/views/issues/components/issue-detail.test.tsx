@@ -309,6 +309,7 @@ vi.mock("@multica/core/issues/stores", () => ({
 // it by default) so tests can assert the deep-link effect dispatched a
 // native scroll on the target node.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
+const virtuosoScrollToIndexSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
@@ -316,10 +317,8 @@ vi.mock("react-virtuoso", () => ({
     ref: any,
   ) {
     useImperativeHandle(ref, () => ({
-      // Real Virtuoso ref methods are not exercised by tests in this file
-      // since the cold-path uses native scrollIntoView on the DOM node.
       scrollIntoView: vi.fn(),
-      scrollToIndex: vi.fn(),
+      scrollToIndex: virtuosoScrollToIndexSpy,
     }));
     return (
       <div data-testid="virtuoso-mock">
@@ -335,12 +334,25 @@ vi.mock("react-virtuoso", () => ({
 // with a spy so the deep-link effect's call can be observed.
 beforeEach(() => {
   scrollIntoViewSpy.mockClear();
+  virtuosoScrollToIndexSpy.mockClear();
+  Object.defineProperty(window, "requestAnimationFrame", {
+    configurable: true,
+    writable: true,
+    value: (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0),
+  });
+  Object.defineProperty(window, "cancelAnimationFrame", {
+    configurable: true,
+    writable: true,
+    value: (id: number) => window.clearTimeout(id),
+  });
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
     writable: true,
     value: scrollIntoViewSpy,
   });
 });
+
+const flushAnimationFrame = () => new Promise((resolve) => window.setTimeout(resolve, 0));
 
 // Mock modals
 vi.mock("@multica/core/modals", () => ({
@@ -1073,6 +1085,162 @@ describe("IssueDetail (shared)", () => {
         );
       });
     });
+  });
+
+  it("shows an issue-scoped jump pill whenever scrollable content is far from the comment box", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
+    const scrollTo = vi.fn();
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
+    Object.defineProperty(scrollContainer, "scrollTo", { configurable: true, value: scrollTo });
+
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+
+    const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
+    expect(jumpToCommentBox).toHaveTextContent("Comment");
+    expect(jumpToCommentBox).toHaveClass("absolute", "bottom-2");
+    expect(jumpToCommentBox).not.toHaveClass("fixed", "right-2", "bottom-14");
+    fireEvent.click(jumpToCommentBox);
+    expect(virtuosoScrollToIndexSpy).toHaveBeenCalledWith({
+      index: 1,
+      align: "end",
+      behavior: "smooth",
+    });
+    expect(scrollTo).not.toHaveBeenCalledWith({ top: 1500, behavior: "smooth" });
+
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 500 });
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+    expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
+
+    fireEvent(scrollContainer, new Event("scrollend"));
+    await flushAnimationFrame();
+    expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
+
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 1450 });
+    fireEvent.scroll(scrollContainer);
+
+    const jumpToTop = await screen.findByRole("button", { name: "Jump to top" });
+    expect(jumpToTop).toHaveTextContent("Top");
+    expect(jumpToTop).toHaveClass("absolute", "top-8", "sm:top-4");
+    fireEvent.click(jumpToTop);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+  });
+
+  it("does not show the jump pill for non-scrollable content", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
+
+    fireEvent.scroll(scrollContainer);
+
+    expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Jump to top" })).not.toBeInTheDocument();
+  });
+
+  it("does not show the jump pill for short scroll ranges", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 600 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
+
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+
+    expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Jump to top" })).not.toBeInTheDocument();
+  });
+
+  it("shows only one jump pill from the middle of a long thread", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 2500 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 900 });
+
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+
+    const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
+    expect(jumpToCommentBox).toHaveTextContent("Comment");
+    expect(jumpToCommentBox).toHaveClass("bottom-2");
+    expect(screen.queryByRole("button", { name: "Jump to top" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the comment-box jump pill visible while scrolling down until the comment box is nearby", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+
+    expect(await screen.findByRole("button", { name: "Jump to comment box" })).toBeInTheDocument();
+
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 500 });
+    fireEvent.scroll(scrollContainer);
+
+    expect(await screen.findByRole("button", { name: "Jump to comment box" })).toBeInTheDocument();
+
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 1450 });
+    fireEvent.scroll(scrollContainer);
+
+    expect(await screen.findByRole("button", { name: "Jump to top" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
+  });
+
+  it("renders the jump pill as a mobile-friendly touch target", async () => {
+    mockViewport.isMobile = true;
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+
+    const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
+    expect(jumpToCommentBox).toHaveTextContent("Comment");
+    expect(jumpToCommentBox).toHaveClass("min-h-10", "max-w-[calc(100%-2rem)]", "touch-manipulation");
+    expect(jumpToCommentBox).toHaveClass("bottom-2");
+    expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
   });
 
   it("sends empty description when editor is cleared", async () => {
