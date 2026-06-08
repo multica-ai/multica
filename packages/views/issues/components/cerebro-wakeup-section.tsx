@@ -92,15 +92,13 @@ export function CerebroWakeupSection({ issueId }: { issueId: string }) {
                 <p className="text-muted-foreground truncate">{w.prompt}</p>
               </div>
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="shrink-0 mt-0.5 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
-                    onClick={() => handleCancel(w.id)}
-                    aria-label="Annuller wakeup"
-                  >
-                    <X className="!size-3" />
-                  </button>
+                <TooltipTrigger
+                  type="button"
+                  className="shrink-0 mt-0.5 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
+                  onClick={() => handleCancel(w.id)}
+                  aria-label="Annuller wakeup"
+                >
+                  <X className="!size-3" />
                 </TooltipTrigger>
                 <TooltipContent side="left">Annuller</TooltipContent>
               </Tooltip>
