@@ -2066,10 +2066,17 @@ func newTaskSlotSemaphore(maxConcurrentTasks int) chan int {
 // trivially testable; the polling goroutine in watchTaskCancellation is just
 // I/O around it.
 //
-// Two cases trigger cancellation:
+// Two conditions trigger cancellation:
 //
-//  1. status == "cancelled" — the server moved the task to cancelled
-//     (issue reassigned, user cancel, ...).
+//  1. status is a terminal state — "completed", "failed", or "cancelled"
+//     (isAgentTaskTerminal). The server has already finalized the task: user
+//     cancel, issue reassignment, the runtime offline sweeper flipping
+//     running → failed during a disconnect, or a duplicate execution that
+//     already completed it. Letting the local agent run on is pure waste —
+//     CompleteAgentTask only accepts status == "running", so its eventual
+//     CompleteTask/FailTask callback is guaranteed to fail and just adds log
+//     noise. Reusing isAgentTaskTerminal keeps this set in lockstep with the
+//     GC's notion of a terminal task.
 //  2. err is a 404 with "task not found" — the task row was deleted while
 //     the agent was running. Without this we'd let the local agent keep
 //     emitting tool calls against a dead task for its full timeout window.
@@ -2081,12 +2088,7 @@ func shouldInterruptAgent(status string, err error) bool {
 	if err != nil {
 		return isTaskNotFoundError(err)
 	}
-	switch status {
-	case "cancelled", "failed", "completed":
-		return true
-	default:
-		return false
-	}
+	return isAgentTaskTerminal(status)
 }
 
 // watchTaskCancellation polls the server for the task's status on the given
@@ -2110,7 +2112,7 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 				if err != nil {
 					taskLog.Info("task gone server-side, interrupting agent", "error", err)
 				} else {
-					taskLog.Info("task cancelled by server, interrupting agent")
+					taskLog.Info("task reached terminal state server-side, interrupting agent", "status", status)
 				}
 				close(cancelled)
 				return
@@ -2182,8 +2184,9 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	// Create a cancellable context so we can interrupt the running agent
-	// when the server signals the task should stop — either status moves
-	// to "cancelled" or the task row is deleted (404).
+	// when the server signals the task should stop — either the task reached
+	// a terminal state (completed/failed/cancelled) or the task row is
+	// deleted (404).
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
@@ -2240,10 +2243,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	_ = d.client.ReportProgress(ctx, task.ID, "Finishing task", 2, 2)
 
-	// Final pre-completion check: if the server already moved the task to
-	// "cancelled" or deleted the row outright, skip reporting — the
-	// complete/fail callbacks would fail anyway. Reuse shouldInterruptAgent
-	// so this guard honors the same signals as the in-flight watcher.
+	// Final pre-completion check: if the server already moved the task to a
+	// terminal state (completed/failed/cancelled) or deleted the row
+	// outright, skip reporting — the complete/fail callbacks would fail
+	// anyway. Reuse shouldInterruptAgent so this guard honors the same
+	// signals as the in-flight watcher.
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
 		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
 		return
@@ -2345,10 +2349,10 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
 		}
 		// Start polling once we actually park. shouldInterruptAgent inside
-		// watchTaskCancellation already handles both server-side cancel
-		// (status=cancelled) and the row-deleted reassignment case (404),
-		// which is the full set of "this task shouldn't run anymore"
-		// signals we need to react to during the wait.
+		// watchTaskCancellation already handles both server-side terminal
+		// states (completed/failed/cancelled) and the row-deleted
+		// reassignment case (404), which is the full set of "this task
+		// shouldn't run anymore" signals we need to react to during the wait.
 		watcherOnce.Do(func() {
 			cancelledByPoll = d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
 			go func() {
@@ -2362,15 +2366,15 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	}
 	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
 	if err != nil {
-		// If the wait was cut short because the server cancelled the task
-		// (or deleted the row), the row is already in a terminal state —
-		// return silently the same way the run-phase poller does at
-		// lines ~2104. Issuing FailTask here would be a no-op at best
+		// If the wait was cut short because the server finalized the task
+		// (terminal state) or deleted the row, the row is already in a
+		// terminal state — return silently the same way the run-phase poller
+		// does at lines ~2104. Issuing FailTask here would be a no-op at best
 		// and a confusing redundant log line at worst.
 		if cancelledByPoll != nil {
 			select {
 			case <-cancelledByPoll:
-				taskLog.Info("local_directory: wait aborted by server-side cancel")
+				taskLog.Info("local_directory: wait aborted by server-side terminal state")
 				return nil, true
 			default:
 			}

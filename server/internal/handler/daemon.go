@@ -1929,7 +1929,8 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetTaskStatus returns the current status of a task.
-// Used by the daemon to check whether a task was cancelled mid-execution.
+// Used by the daemon to detect terminal/interruption signals (cancelled,
+// failed, completed) while a task is executing mid-flight.
 func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 

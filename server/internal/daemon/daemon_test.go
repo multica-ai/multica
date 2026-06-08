@@ -703,8 +703,12 @@ func TestShouldInterruptAgent(t *testing.T) {
 		want   bool
 	}{
 		{name: "status cancelled", status: "cancelled", err: nil, want: true},
+		{name: "status failed (offline sweeper)", status: "failed", err: nil, want: true},
+		{name: "status completed (finished elsewhere)", status: "completed", err: nil, want: true},
 		{name: "task deleted (404)", status: "", err: notFound, want: true},
 		{name: "running normally", status: "running", err: nil, want: false},
+		{name: "waiting_local_directory keeps running", status: "waiting_local_directory", err: nil, want: false},
+		{name: "dispatched keeps running", status: "dispatched", err: nil, want: false},
 		{name: "transient 5xx is not a cancel signal", status: "", err: transient, want: false},
 		{name: "no information yet", status: "", err: nil, want: false},
 	}
