@@ -22,6 +22,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	// CEREBRO-PATCH(runtime-tool-scan-connections): merge workspace Connections into daemon scan config.
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 )
 
 // RuntimeToolsScanService is the daemon-side seam the cerebro runtimetools
@@ -74,22 +77,29 @@ func (h *Handler) GetRuntimeMcpConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(rt.ToolsConfig) == 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"mcpServers": map[string]any{}})
-		return
+	toolsConfig := json.RawMessage(rt.ToolsConfig)
+	if len(toolsConfig) == 0 {
+		toolsConfig = json.RawMessage(`{"mcpServers":{}}`)
 	}
-	// rt.ToolsConfig is already a JSON document — proxy it as-is so the
+	// CEREBRO-PATCH(runtime-tool-scan-connections): include enabled workspace Connections during scan.
+	if h.ConnectionsInjector != nil {
+		connMCP := h.ConnectionsInjector.BuildMCPConfig(r.Context(), rt.WorkspaceID)
+		if len(connMCP) > 0 {
+			toolsConfig = daemonmcp.Merge(toolsConfig, connMCP)
+		}
+	}
+	// toolsConfig is already a JSON document — proxy it as-is so the
 	// daemon decodes the exact shape an admin entered (extra top-level
 	// keys preserved). Validate it parses so a corrupt row 502s here
 	// instead of crashing the daemon decoder.
 	var parsed any
-	if err := json.Unmarshal(rt.ToolsConfig, &parsed); err != nil {
+	if err := json.Unmarshal(toolsConfig, &parsed); err != nil {
 		writeError(w, http.StatusBadGateway, "stored tools_config is not valid JSON")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(rt.ToolsConfig)
+	_, _ = w.Write(toolsConfig)
 }
 
 // IngestRuntimeToolScan handles POST /api/daemon/runtimes/{runtimeId}/tool-scan.

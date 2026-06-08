@@ -158,7 +158,18 @@ func callToolResultText(result mcp.CallToolResult) string {
 	for _, block := range result.Content {
 		if block.Type == "text" && block.Text != "" {
 			parts = append(parts, block.Text)
+			continue
 		}
+		if raw, err := json.Marshal(block); err == nil && string(raw) != "{}" {
+			parts = append(parts, string(raw))
+		}
+	}
+	if len(parts) == 0 && len(result.StructuredContent) > 0 {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, result.StructuredContent, "", "  "); err == nil {
+			return pretty.String()
+		}
+		return string(result.StructuredContent)
 	}
 	if len(parts) == 0 && result.IsError {
 		return "customer service MCP returned an error without text"

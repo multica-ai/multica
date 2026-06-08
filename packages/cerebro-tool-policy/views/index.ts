@@ -1,6 +1,8 @@
 export {
   ToolPolicyTable,
+  ToolPolicyTabs,
   type ToolPolicyTableProps,
+  type ToolPolicyTabsProps,
   type ToolPolicyTabFilter,
   type ToolPolicyView,
 } from "./tool-policy-table";
@@ -13,10 +15,6 @@ export {
   useCerebroToolPolicySettingsTabs,
   type ExtraSettingsTab,
 } from "./workspace-settings-tab";
-export {
-  ToolPolicySurface,
-  type ToolPolicySurfaceProps,
-} from "./tool-policy-surface";
 export {
   RepoDefaultPolicySelect,
   RepoPolicyBadge,

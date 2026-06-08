@@ -10,7 +10,7 @@
 import { Wrench } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { ToolPolicySurface } from "./tool-policy-surface";
+import { ToolPolicyTabs } from "./tool-policy-table";
 
 // Mirrors @multica/views ExtraSettingsTab structurally. Defined locally so this
 // entrypoint stays free of a views dependency (and the topo-sort coupling it
@@ -42,7 +42,7 @@ export function WorkspacePermissionsTab() {
           and member below can only tighten what is set here — never loosen it.
         </p>
       </div>
-      <ToolPolicySurface wsId={wsId} view="workspace" subjectId={wsId} />
+      <ToolPolicyTabs wsId={wsId} view="workspace" subjectId={wsId} />
     </div>
   );
 }

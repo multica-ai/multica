@@ -91,6 +91,37 @@ func TestCustomerServiceMCPToolsAreRegisteredAndInMetadata(t *testing.T) {
 	}
 }
 
+func TestCustomerServiceMCPToolReturnsStructuredContentWhenNoText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[],"structuredContent":{"orderNumber":"123456","status":"shipped"}}}`))
+	}))
+	defer srv.Close()
+
+	tool := &CustomerServiceMCPTool{
+		name:        "lookup_order",
+		description: "test",
+		inputSchema: objectSchema([]string{"orderNumber"}, map[string]any{"orderNumber": stringProp("order")}),
+		cfg: customerServiceMCPConfig{
+			URL:         srv.URL,
+			BearerToken: "secret",
+		},
+		client: srv.Client(),
+	}
+
+	out, err := tool.Call(context.Background(), map[string]any{"orderNumber": "123456"})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("output was not JSON: %v\n%s", err, out)
+	}
+	if got["orderNumber"] != "123456" || got["status"] != "shipped" {
+		t.Fatalf("structured output = %#v", got)
+	}
+}
+
 func TestCustomerServiceMCPToolRequiresBearerToken(t *testing.T) {
 	tool := &CustomerServiceMCPTool{name: "draft_reply", cfg: customerServiceMCPConfig{URL: "http://example.test/mcp"}}
 	if _, err := tool.Call(context.Background(), map[string]any{"message": "hej"}); err == nil {
