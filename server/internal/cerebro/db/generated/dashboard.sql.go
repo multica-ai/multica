@@ -175,7 +175,12 @@ SELECT cm.id::uuid AS id,
 FROM chat_message cm
 JOIN chat_session cs ON cs.id = cm.chat_session_id
 JOIN agent a ON a.id = cs.agent_id
-LEFT JOIN issue i ON i.id = cs.issue_id
+LEFT JOIN LATERAL (
+  SELECT atq.issue_id FROM agent_task_queue atq
+  WHERE atq.chat_session_id = cs.id
+  ORDER BY atq.created_at DESC LIMIT 1
+) atq ON true
+LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cs.creator_id = $2
@@ -255,7 +260,12 @@ FROM chat_message cm
 JOIN chat_session cs ON cs.id = cm.chat_session_id
 JOIN "user" u ON u.id = cs.creator_id
 JOIN agent a ON a.id = cs.agent_id
-LEFT JOIN issue i ON i.id = cs.issue_id
+LEFT JOIN LATERAL (
+  SELECT atq.issue_id FROM agent_task_queue atq
+  WHERE atq.chat_session_id = cs.id
+  ORDER BY atq.created_at DESC LIMIT 1
+) atq ON true
+LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
