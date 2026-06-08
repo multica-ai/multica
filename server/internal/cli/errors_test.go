@@ -317,6 +317,8 @@ func TestFormatErrorActionableHints(t *testing.T) {
 		{403, []string{"permission", "workspace"}, []string{"无权", "workspace"}},
 		{404, []string{"not found", "list"}, []string{"未找到", "list"}},
 		{409, []string{"conflict", "again"}, []string{"冲突", "重新获取"}},
+		{400, []string{"--help", "expected format"}, []string{"--help", "格式", "参数"}},
+		{422, []string{"--help", "expected format"}, []string{"--help", "格式", "参数"}},
 		{429, []string{"Too many requests"}, []string{"过于频繁"}},
 		{500, []string{"temporarily unavailable", "--debug"}, []string{"暂时不可用", "--debug"}},
 	}
