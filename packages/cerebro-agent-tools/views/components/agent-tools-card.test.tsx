@@ -208,18 +208,18 @@ describe("AgentToolsCard", () => {
     // The override badges are <span>s. The same words appear inside <option>
     // elements of the row override-picker, so scope to span to pick the badge.
     expect(
-      screen.getByText("Tving fra", { selector: "span" }),
+      screen.getByText("Force off", { selector: "span" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Tving på", { selector: "span" }),
+      screen.getByText("Force on", { selector: "span" }),
     ).toBeInTheDocument();
 
-    // Effective: firtal_bq_query (on, inherit) = Aktiv;
-    // github_create_issue (force_off) = Inaktiv;
+    // Effective: firtal_bq_query (on, inherit) = Active;
+    // github_create_issue (force_off) = Inactive;
     // slack_post_message (force_on) = Aktiv.
-    const aktive = screen.getAllByText("Aktiv");
+    const aktive = screen.getAllByText("Active");
     expect(aktive.length).toBe(2);
-    const inaktive = screen.getAllByText("Inaktiv");
+    const inaktive = screen.getAllByText("Inactive");
     expect(inaktive.length).toBe(1);
   });
 
@@ -231,7 +231,7 @@ describe("AgentToolsCard", () => {
 
     expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Kun override (2)"));
+    fireEvent.click(screen.getByText("Override only (2)"));
 
     // Inherit row is hidden.
     expect(screen.queryByText("firtal_bq_query")).not.toBeInTheDocument();
@@ -248,7 +248,7 @@ describe("AgentToolsCard", () => {
 
     expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Effektivt aktive (2)"));
+    fireEvent.click(screen.getByText("Effectively active (2)"));
 
     // The two effectively-on rows survive.
     expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
@@ -274,8 +274,8 @@ describe("AgentToolsCard", () => {
     const slackRow = screen
       .getByText("slack_post_message")
       .closest("tr") as HTMLTableRowElement;
-    expect(slackRow).toHaveTextContent("Tving på");
-    expect(slackRow).toHaveTextContent("Inaktiv");
+    expect(slackRow).toHaveTextContent("Force on");
+    expect(slackRow).toHaveTextContent("Inactive");
     expect(slackRow).toHaveTextContent("Denied by workspace");
   });
 
@@ -293,7 +293,7 @@ describe("AgentToolsCard", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("calls setAgentToolOverride when the admin picks Tving på", async () => {
+  it("calls setAgentToolOverride when the admin picks Force on", async () => {
     const user = userEvent.setup();
     mockCerebroRequest.mockResolvedValue([]);
 
@@ -307,7 +307,7 @@ describe("AgentToolsCard", () => {
     const selects = screen.getAllByRole("combobox", { name: /Skift override/i });
     expect(selects.length).toBe(3);
 
-    // Pick "Tving fra" on the first row (firtal_bq_query, runtime-on).
+    // Pick "Force off" on the first row (firtal_bq_query, runtime-on).
     await user.selectOptions(selects[0]!, "force_off");
 
     expect(mockCerebroRequest).toHaveBeenCalledWith(
@@ -350,7 +350,7 @@ describe("AgentToolsCard", () => {
     );
 
     expect(
-      screen.getByText(/daemon scanner ved næste heartbeat/i),
+      screen.getByText(/daemon will scan on next heartbeat/i),
     ).toBeInTheDocument();
   });
 
@@ -363,7 +363,7 @@ describe("AgentToolsCard", () => {
     );
 
     expect(
-      screen.getByText(/Agenten har ikke en runtime tilknyttet endnu/i),
+      screen.getByText(/The agent has no runtime assigned yet/i),
     ).toBeInTheDocument();
   });
 });

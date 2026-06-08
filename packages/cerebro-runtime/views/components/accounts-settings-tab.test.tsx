@@ -135,12 +135,12 @@ describe("AccountsSettingsTab", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.click(
-      screen.getByRole("button", { name: /Slet konto user-a@example\.com/ }),
+      screen.getByRole("button", { name: /Delete account user-a@example\.com/ }),
     );
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(mockDeleteMutate).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Slet" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
       expect(mockDeleteMutate).toHaveBeenCalledWith("acc-1", expect.any(Object));
@@ -160,9 +160,9 @@ describe("AccountsSettingsTab", () => {
 
     render(<AccountsSettingsTab />);
     await user.click(
-      screen.getByRole("button", { name: /Slet konto user-a@example\.com/ }),
+      screen.getByRole("button", { name: /Delete account user-a@example\.com/ }),
     );
-    await user.click(screen.getByRole("button", { name: "Slet" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith("permission denied");

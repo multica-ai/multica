@@ -86,15 +86,15 @@ describe("CerebroToolsTab", () => {
   it("renders the AgentToolsCard for local agents", async () => {
     renderToolsTab({ ...baseAgent, runtime_mode: "local" });
 
-    expect(await screen.findByText(/Tools på agenten/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Agent tools/i)).toBeInTheDocument();
   });
 
   it("renders the AgentToolsCard for cloud agents", async () => {
     renderToolsTab();
 
-    expect(await screen.findByText(/Tools på agenten/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Agent tools/i)).toBeInTheDocument();
     expect(
-      await screen.findByText(/daemon scanner ved næste heartbeat/i),
+      await screen.findByText(/daemon will scan on next heartbeat/i),
     ).toBeInTheDocument();
   });
 
@@ -124,7 +124,7 @@ describe("CerebroToolsTab", () => {
 
     // The FIR-2230 table replaces the legacy override card on the agent page.
     expect(await screen.findByTestId("tool-policy-table")).toBeInTheDocument();
-    expect(screen.queryByText(/Tools på agenten/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Agent tools/i)).not.toBeInTheDocument();
   });
 
   it("renders the simple table when only the simple flag is on", async () => {
@@ -136,7 +136,7 @@ describe("CerebroToolsTab", () => {
     expect(
       await screen.findByTestId("simple-tool-policy-table"),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/Tools på agenten/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Agent tools/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("tool-policy-table")).not.toBeInTheDocument();
   });
 
