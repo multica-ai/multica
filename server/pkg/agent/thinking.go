@@ -15,11 +15,11 @@ import (
 // UI without hard-coding (and getting wrong) what's installed locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
-// xhigh|max`, Codex's `none|minimal|low|medium|high|xhigh`, and Pi's
-// `off|minimal|low|medium|high|xhigh` onto a shared enum — what users
-// pick must round-trip exactly through each CLI's own value vocabulary.
-// claude, codex, opencode, and pi backends so the daemon can advertise them to the
-// UI without hard-coding (and getting wrong) what's installed locally.
+// xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh` onto a
+// shared enum. OpenCode exposes provider-specific model variants through
+// `opencode run --variant`, and those names can be extended by local
+// opencode.json config. What users pick must round-trip exactly through
+// each CLI's own value vocabulary.
 
 // ── Cache ────────────────────────────────────────────────────────────
 //
