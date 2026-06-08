@@ -28,7 +28,8 @@ import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
-import { toHtml } from "hast-util-to-html";
+import { toJsxRuntime } from "hast-util-to-jsx-runtime";
+import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { Copy, Check } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
@@ -190,7 +191,7 @@ function extractTextFromAst(node: any): string {
     .replace(/\n$/, "");
 }
 
-function buildComponents({ plainCodeBlocks = false }: { plainCodeBlocks?: boolean } = {}): Partial<Components> {
+function buildComponents(): Partial<Components> {
   return {
     // Links — route mention:// to mention components, others show preview card
     a: ReadonlyLink,
@@ -265,26 +266,19 @@ function buildComponents({ plainCodeBlocks = false }: { plainCodeBlocks?: boolea
 
       const code = codeText || String(children).replace(/\n$/, "");
 
-      if (plainCodeBlocks) {
-        return (
-          <code className={cn("hljs", className)} {...props}>
-            {code}
-          </code>
-        );
-      }
-
-      // Block code — highlight with lowlight, output hljs classes
+      // Block code — highlight with lowlight, render as React elements
+      // (not dangerouslySetInnerHTML) so DOM stays stable across re-renders
+      // and browser text selection is never destroyed.
       try {
         const tree = lang
           ? lowlight.highlight(lang, code)
           : lowlight.highlightAuto(code);
-        const html = toHtml(tree);
-        if (html) {
+        if (tree.children.length > 0) {
+          const highlighted = toJsxRuntime(tree, { jsx, jsxs, Fragment });
           return (
-            <code
-              className={cn("hljs", lang && `language-${lang}`)}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
+            <code className={cn("hljs", lang && `language-${lang}`)}>
+              {highlighted}
+            </code>
           );
         }
       } catch {
@@ -340,8 +334,6 @@ function buildComponents({ plainCodeBlocks = false }: { plainCodeBlocks?: boolea
 interface ReadonlyContentProps {
   content: string;
   className?: string;
-  /** Render fenced code as a single text node for native drag selection stability. */
-  plainCodeBlocks?: boolean;
   /**
    * Attachments associated with the surrounding entity (comment / issue
    * body). When the markdown contains an inline `<img>` or file card whose
@@ -363,19 +355,13 @@ interface ReadonlyContentProps {
 export const ReadonlyContent = memo(function ReadonlyContent({
   content,
   className,
-  plainCodeBlocks = false,
   attachments,
 }: ReadonlyContentProps) {
   const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 
-  // Components map is now static — all attachment-aware logic lives in
-  // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
-  const components = useMemo(
-    () => buildComponents({ plainCodeBlocks }),
-    [plainCodeBlocks],
-  );
+  const components = useMemo(() => buildComponents(), []);
 
   return (
     <AttachmentDownloadProvider attachments={attachments}>

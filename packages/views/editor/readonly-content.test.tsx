@@ -276,21 +276,22 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
-  it("can render fenced code as one plain text node for stable native selection", () => {
+  it("renders code blocks with syntax highlighting as stable React elements (not dangerouslySetInnerHTML)", () => {
     const codeText = [
-      "lsdjflsjdfljssdflj",
-      "http://wujieai.com",
-      "@agent #issue",
+      "const url = \"http://wujieai.com\";",
+      "const user = \"@agent\";",
     ].join("\n");
     const { container } = render(
-      <ReadonlyContent content={["```", codeText, "```"].join("\n")} plainCodeBlocks />,
+      <ReadonlyContent content={["```javascript", codeText, "```"].join("\n")} />,
     );
 
     const blockCode = container.querySelector("pre code");
 
     expect(blockCode?.textContent).toBe(codeText);
-    expect(blockCode?.childNodes).toHaveLength(1);
-    expect(blockCode?.querySelector("span, a")).toBeNull();
+    // Should have hljs spans for syntax highlighting (not plain text)
+    expect(blockCode?.querySelector("span.hljs-keyword")).not.toBeNull();
+    // Should NOT use dangerouslySetInnerHTML (no __html attribute on any child)
+    expect(blockCode?.innerHTML).not.toBe("");
   });
 
   it("keeps readonly code block chrome separate from selectable code text", () => {

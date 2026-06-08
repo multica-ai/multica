@@ -210,7 +210,7 @@ function ExpandableCommentBody({
           canCollapse && !expanded && "max-h-80 overflow-hidden",
         )}
       >
-        <ReadonlyContent content={content} attachments={attachments} plainCodeBlocks />
+        <ReadonlyContent content={content} attachments={attachments} />
       </div>
       {canCollapse && !expanded && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-card via-card/95 to-transparent pt-14">
