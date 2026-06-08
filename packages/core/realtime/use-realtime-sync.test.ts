@@ -468,4 +468,74 @@ describe("handleInboxNew", () => {
       expect.objectContaining({ slug: "" }),
     );
   });
+
+  // --- Web path: no desktopAPI → the browser Notification API ---
+  // Same focus/mute gating as desktop, but the desktop bridge is absent and a
+  // granted browser Notification stub is installed on `window`.
+  let webBanners: { title: string; options?: NotificationOptions }[] = [];
+  class FakeNotification {
+    static permission: NotificationPermission = "granted";
+    onclick: (() => void) | null = null;
+    close = vi.fn();
+    constructor(
+      public title: string,
+      public options?: NotificationOptions,
+    ) {
+      webBanners.push({ title, options });
+    }
+  }
+  function installBrowserNotification(
+    permission: NotificationPermission = "granted",
+  ) {
+    webBanners = [];
+    FakeNotification.permission = permission;
+    (globalThis as Record<string, unknown>).window = {
+      Notification: FakeNotification,
+      focus: vi.fn(),
+    };
+  }
+
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+  });
+
+  it("shows a browser banner on web (no desktopAPI) when granted and not muted", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
+    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+      preferences: { system_notifications: "all" },
+    });
+    installBrowserNotification("granted");
+
+    await handleInboxNew(qc, inboxItem());
+
+    expect(webBanners).toHaveLength(1);
+    expect(webBanners[0]?.title).toBe("Mentioned you");
+  });
+
+  it("shows no browser banner when the SOURCE workspace is muted", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
+    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+      preferences: { system_notifications: "muted" },
+    });
+    installBrowserNotification("granted");
+
+    await handleInboxNew(qc, inboxItem());
+
+    expect(webBanners).toHaveLength(0);
+  });
+
+  it("shows no browser banner when permission is not granted", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
+    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+      preferences: { system_notifications: "all" },
+    });
+    installBrowserNotification("default");
+
+    await handleInboxNew(qc, inboxItem());
+
+    expect(webBanners).toHaveLength(0);
+  });
 });

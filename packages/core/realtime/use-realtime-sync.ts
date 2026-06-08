@@ -37,6 +37,10 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import {
+  showWebNotification,
+  type SystemNotificationPayload,
+} from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
@@ -254,33 +258,35 @@ export async function handleInboxNew(
       // Fall through with default behavior.
     }
   }
-  const desktopAPI = (
-    globalThis as unknown as {
-      desktopAPI?: {
-        showNotification?: (payload: {
-          slug: string;
-          itemId: string;
-          issueKey: string;
-          title: string;
-          body: string;
-        }) => void;
-      };
-    }
-  ).desktopAPI;
   // `issueKey` matches the inbox page's URL selector (issue id when the
   // item is attached to an issue, otherwise the inbox item id). `itemId`
   // is the inbox row's own id, needed to fire markInboxRead on click.
   // A null slug (workspace list unavailable / item from a workspace this
   // client can't see) still shows the banner — the user should learn about
   // the inbox item — but with an empty slug so the click is a no-op
-  // (DesktopInboxBridge ignores empty slugs) instead of routing wrong.
-  desktopAPI?.showNotification?.({
+  // (the inbox bridge ignores empty slugs) instead of routing wrong.
+  const payload: SystemNotificationPayload = {
     slug: slug ?? "",
     itemId: item.id,
     issueKey: item.issue_id ?? item.id,
     title: item.title,
     body: item.body ?? "",
-  });
+  };
+  const desktopAPI = (
+    globalThis as unknown as {
+      desktopAPI?: {
+        showNotification?: (payload: SystemNotificationPayload) => void;
+      };
+    }
+  ).desktopAPI;
+  if (desktopAPI?.showNotification) {
+    // Desktop: native OS banner rendered by the Electron main process.
+    desktopAPI.showNotification(payload);
+    return;
+  }
+  // Web: the browser Notification API. No-op without granted permission or on
+  // SSR — the in-app inbox + unread badge still reflect the new item.
+  showWebNotification(payload);
 }
 
 /**
