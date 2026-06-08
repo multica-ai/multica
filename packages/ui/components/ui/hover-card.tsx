@@ -3,6 +3,7 @@
 import { PreviewCard as PreviewCardPrimitive } from "@base-ui/react/preview-card"
 
 import { cn } from "@multica/ui/lib/utils"
+import { usePortalContainer } from "@multica/ui/lib/portal-container"
 
 function HoverCard({ ...props }: PreviewCardPrimitive.Root.Props) {
   return <PreviewCardPrimitive.Root data-slot="hover-card" {...props} />
@@ -49,7 +50,7 @@ function HoverCardContent({
       forwarded?.(e)
     }
   return (
-    <PreviewCardPrimitive.Portal data-slot="hover-card-portal">
+    <PreviewCardPrimitive.Portal data-slot="hover-card-portal" container={usePortalContainer()}>
       <PreviewCardPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}

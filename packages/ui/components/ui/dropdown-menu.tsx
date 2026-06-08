@@ -4,6 +4,7 @@ import * as React from "react"
 import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 
 import { cn } from "@multica/ui/lib/utils"
+import { usePortalContainer } from "@multica/ui/lib/portal-container"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
@@ -37,7 +38,7 @@ function DropdownMenuContent({
   // menu item inside a row that's wrapped in <a> (agent / runtime list
   // rows) would ALSO fire the row's onClick → unintended navigation.
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={usePortalContainer()}>
       <MenuPrimitive.Positioner
         className="isolate z-50 outline-none"
         align={align}

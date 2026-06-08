@@ -4,6 +4,7 @@ import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@multica/ui/lib/utils"
+import { usePortalContainer } from "@multica/ui/lib/portal-container"
 import { Button } from "@multica/ui/components/ui/button"
 import { XIcon } from "lucide-react"
 
@@ -48,7 +49,7 @@ function DialogContent({
   showCloseButton?: boolean
 }) {
   return (
-    <DialogPortal>
+    <DialogPortal container={usePortalContainer()}>
       <DialogOverlay />
       <DialogPrimitive.Popup
         data-slot="dialog-content"

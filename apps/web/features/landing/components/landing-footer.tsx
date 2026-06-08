@@ -8,10 +8,48 @@ import { captureDownloadIntent } from "@multica/core/analytics";
 import { XMark, GitHubMark, githubUrl, twitterUrl } from "./shared";
 import { useLocale, locales, localeLabels } from "../i18n";
 
+export type LandingFooterGroup = {
+  label: string;
+  links: Array<{
+    label: string;
+    href: string;
+  }>;
+};
+
 export function LandingFooter() {
   const { t, locale, setLocale } = useLocale();
   const user = useAuthStore((s) => s.user);
-  const groups = Object.values(t.footer.groups);
+
+  return (
+    <LandingFooterContent
+      ctaHref={user ? "/" : "/login"}
+      ctaLabel={user ? t.header.dashboard : t.footer.cta}
+      locale={locale}
+      setLocale={setLocale}
+    />
+  );
+}
+
+export function LandingFooterContent({
+  brandHref = "#product",
+  ctaHref,
+  ctaLabel,
+  groups,
+  locale,
+  setLocale,
+}: {
+  brandHref?: string;
+  ctaHref: string;
+  ctaLabel?: string;
+  groups?: LandingFooterGroup[];
+  locale?: ReturnType<typeof useLocale>["locale"];
+  setLocale?: ReturnType<typeof useLocale>["setLocale"];
+}) {
+  const localeContext = useLocale();
+  const activeLocale = locale ?? localeContext.locale;
+  const setActiveLocale = setLocale ?? localeContext.setLocale;
+  const footerGroups = groups ?? Object.values(localeContext.t.footer.groups);
+  const footerCtaLabel = ctaLabel ?? localeContext.t.footer.cta;
 
   return (
     <footer className="bg-[#0a0d12] text-white">
@@ -20,14 +58,14 @@ export function LandingFooter() {
         <div className="flex flex-col gap-12 border-b border-white/10 py-16 sm:py-20 lg:flex-row lg:gap-20">
           {/* Left — newsletter / CTA */}
           <div className="lg:w-[340px] lg:shrink-0">
-            <Link href="#product" className="flex items-center gap-3">
+            <Link href={brandHref} className="flex items-center gap-3">
               <MulticaIcon className="size-5 text-white" noSpin />
               <span className="text-[18px] font-semibold tracking-[0.04em] lowercase">
                 multica
               </span>
             </Link>
             <p className="mt-4 max-w-[300px] text-[14px] leading-[1.7] text-white/50 sm:text-[15px]">
-              {t.footer.tagline}
+              {localeContext.t.footer.tagline}
             </p>
             <div className="mt-4 flex items-center gap-3">
               <Link
@@ -49,17 +87,17 @@ export function LandingFooter() {
             </div>
             <div className="mt-6">
               <Link
-                href={user ? "/" : "/login"}
+                href={ctaHref}
                 className="inline-flex items-center justify-center rounded-[11px] bg-white px-5 py-2.5 text-[13px] font-semibold text-[#0a0d12] transition-colors hover:bg-white/88"
               >
-                {user ? t.header.dashboard : t.footer.cta}
+                {footerCtaLabel}
               </Link>
             </div>
           </div>
 
           {/* Right — link columns */}
           <div className="grid flex-1 grid-cols-2 gap-8 sm:grid-cols-4">
-            {groups.map((group) => (
+            {footerGroups.map((group) => (
               <div key={group.label}>
                 <h4 className="text-[12px] font-semibold uppercase tracking-[0.1em] text-white/40">
                   {group.label}
@@ -92,7 +130,7 @@ export function LandingFooter() {
         {/* Bottom: copyright + language switcher */}
         <div className="flex items-center justify-between py-6">
           <p className="text-[13px] text-white/36">
-            {t.footer.copyright.replace(
+            {localeContext.t.footer.copyright.replace(
               "{year}",
               String(new Date().getFullYear()),
             )}
@@ -102,10 +140,10 @@ export function LandingFooter() {
               <button
                 type="button"
                 key={l}
-                onClick={() => setLocale(l)}
+                onClick={() => setActiveLocale(l)}
                 className={cn(
                   "px-1.5 py-1 text-[12px] font-medium transition-colors",
-                  l === locale
+                  l === activeLocale
                     ? "text-white/70"
                     : "text-white/30 hover:text-white/50",
                   i > 0 && "border-l border-white/16",

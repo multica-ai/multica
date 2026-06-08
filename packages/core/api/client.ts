@@ -210,6 +210,11 @@ export interface ApiClientOptions {
   identity?: ApiClientIdentity;
 }
 
+type ApiRequestInit = RequestInit & {
+  extraHeaders?: Record<string, string>;
+  quietStatuses?: number[];
+};
+
 export interface LoginResponse {
   token: string;
   user: User;
@@ -332,25 +337,23 @@ export class ApiClient {
   // structured ApiError, status-aware log level). Returns the raw Response so
   // callers can decide how to decode the body — JSON for the typed `fetch<T>`
   // path, plain text for the attachment-preview proxy, etc.
-  private async fetchRaw(
-    path: string,
-    init?: RequestInit & { extraHeaders?: Record<string, string> },
-  ): Promise<Response> {
+  private async fetchRaw(path: string, init?: ApiRequestInit): Promise<Response> {
     const rid = createRequestId();
     const start = Date.now();
-    const method = init?.method ?? "GET";
+    const { extraHeaders, quietStatuses, headers: initHeaders, ...requestInit } = init ?? {};
+    const method = requestInit.method ?? "GET";
 
     const headers: Record<string, string> = {
       "X-Request-ID": rid,
       ...this.authHeaders(),
-      ...(init?.extraHeaders ?? {}),
-      ...((init?.headers as Record<string, string>) ?? {}),
+      ...(extraHeaders ?? {}),
+      ...((initHeaders as Record<string, string>) ?? {}),
     };
 
     this.logger.info(`→ ${method} ${path}`, { rid });
 
     const res = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
+      ...requestInit,
       headers,
       credentials: "include",
     });
@@ -358,7 +361,11 @@ export class ApiClient {
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
       const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
-      const logLevel = res.status === 404 ? "warn" : "error";
+      const logLevel = quietStatuses?.includes(res.status)
+        ? "info"
+        : res.status === 404
+          ? "warn"
+          : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new ApiError(message, res.status, res.statusText, body);
     }
@@ -367,10 +374,13 @@ export class ApiClient {
     return res;
   }
 
-  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
+  private async fetch<T>(path: string, init?: ApiRequestInit): Promise<T> {
     const res = await this.fetchRaw(path, {
       ...init,
-      extraHeaders: { "Content-Type": "application/json" },
+      extraHeaders: {
+        "Content-Type": "application/json",
+        ...(init?.extraHeaders ?? {}),
+      },
     });
     // Handle 204 No Content
     if (res.status === 204) {
@@ -409,8 +419,8 @@ export class ApiClient {
     return this.fetch("/api/cli-token", { method: "POST" });
   }
 
-  async getMe(): Promise<User> {
-    const raw = await this.fetch<unknown>("/api/me");
+  async getMe(options?: { quietStatuses?: number[] }): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me", options);
     return parseWithFallback(raw, UserSchema, EMPTY_USER, {
       endpoint: "GET /api/me",
     });
@@ -1383,8 +1393,8 @@ export class ApiClient {
   }
 
   // Workspaces
-  async listWorkspaces(): Promise<Workspace[]> {
-    return this.fetch("/api/workspaces");
+  async listWorkspaces(options?: { quietStatuses?: number[] }): Promise<Workspace[]> {
+    return this.fetch("/api/workspaces", options);
   }
 
   async getWorkspace(id: string): Promise<Workspace> {
