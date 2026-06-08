@@ -68,3 +68,11 @@ server/server
 data/
 .kilo
 .idea
+
+# local scratch — temp builds, design notes, throwaway binaries
+scratch/
+
+# Terraform local state and provider cache
+**/.terraform/
+*.tfstate
+*.tfstate.backup
