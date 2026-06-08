@@ -24,6 +24,12 @@ func RegisterListeners(bus *events.Bus, svc *Service) {
 		if !issueID.Valid || status == "" {
 			return
 		}
+		if status == "done" {
+			if err := svc.CancelByIssueID(context.Background(), issueID); err != nil {
+				slog.Error("cerebro wakeup cancel-on-done failed", "error", err)
+			}
+			return
+		}
 		rows, err := svc.ClaimIssueStatus(context.Background(), issueID, status, 50)
 		if err != nil {
 			slog.Error("cerebro wakeup issue-status claim failed", "error", err)

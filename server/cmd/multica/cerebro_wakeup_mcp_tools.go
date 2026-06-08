@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"strconv"
@@ -65,7 +67,14 @@ func registerWakeupTools(srv *mcp.Server, client *cli.APIClient) {
 		if err := client.PostJSON(ctx, "/api/cerebro/wakeups", body, &result); err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
-		return jsonText(result)
+		// CEREBRO-PATCH(wakeup-comment-reminder): instruct agent to post a comment confirming the scheduled wakeup time.
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fireTime := optString(args, "fire_at")
+		instruction := "\n\nIMPORTANT: You MUST now post a comment on the issue confirming the wakeup was scheduled."
+		if fireTime != "" {
+			instruction = fmt.Sprintf("\n\nIMPORTANT: You MUST now post a comment on the issue stating that a wakeup has been scheduled for %s.", fireTime)
+		}
+		return mcp.TextResult(string(data) + instruction), nil
 	})
 
 	srv.RegisterTool(mcp.Tool{

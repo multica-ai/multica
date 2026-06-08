@@ -111,3 +111,11 @@ SET state = 'failed',
     failure = $2,
     updated_at = now()
 WHERE id = $1;
+
+-- name: CancelPendingWakeupsByIssueID :exec
+UPDATE cerebro_agent_wakeup
+SET state = 'cancelled',
+    cancelled_at = now(),
+    updated_at = now()
+WHERE issue_id = $1
+  AND state = 'pending';

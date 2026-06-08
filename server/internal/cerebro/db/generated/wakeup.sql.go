@@ -54,6 +54,20 @@ func (q *Queries) CancelCerebroAgentWakeup(ctx context.Context, arg CancelCerebr
 	return i, err
 }
 
+const cancelPendingWakeupsByIssueID = `-- name: CancelPendingWakeupsByIssueID :exec
+UPDATE cerebro_agent_wakeup
+SET state = 'cancelled',
+    cancelled_at = now(),
+    updated_at = now()
+WHERE issue_id = $1
+  AND state = 'pending'
+`
+
+func (q *Queries) CancelPendingWakeupsByIssueID(ctx context.Context, issueID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, cancelPendingWakeupsByIssueID, issueID)
+	return err
+}
+
 const claimDueTimeWakeups = `-- name: ClaimDueTimeWakeups :many
 UPDATE cerebro_agent_wakeup
 SET state = 'claimed',
