@@ -409,6 +409,9 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
 	case "failed", "cancelled":
+		if child := s.maybeRetryRunOnlyTask(ctx, autopilot, run, task); child != nil {
+			return
+		}
 		reason := "task " + task.Status
 		if task.Error.Valid {
 			reason = task.Error.String
@@ -424,6 +427,67 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
 	}
+}
+
+func (s *AutopilotService) maybeRetryRunOnlyTask(ctx context.Context, autopilot db.Autopilot, run db.AutopilotRun, task db.AgentTaskQueue) *db.AgentTaskQueue {
+	if !shouldRetryAutopilotTask(task) {
+		return nil
+	}
+	if s.TaskSvc == nil {
+		slog.Warn("autopilot retry skipped: task service unavailable",
+			"run_id", util.UUIDToString(run.ID),
+			"task_id", util.UUIDToString(task.ID),
+		)
+		return nil
+	}
+
+	child, err := s.Queries.CreateRetryTask(ctx, task.ID)
+	if err != nil {
+		slog.Warn("autopilot retry failed",
+			"autopilot_id", util.UUIDToString(autopilot.ID),
+			"run_id", util.UUIDToString(run.ID),
+			"task_id", util.UUIDToString(task.ID),
+			"reason", taskFailureReason(task),
+			"error", err,
+		)
+		return nil
+	}
+	if _, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+		ID:     run.ID,
+		TaskID: child.ID,
+	}); err != nil {
+		slog.Warn("autopilot retry: failed to link retry task",
+			"autopilot_id", util.UUIDToString(autopilot.ID),
+			"run_id", util.UUIDToString(run.ID),
+			"retry_task_id", util.UUIDToString(child.ID),
+			"error", err,
+		)
+	}
+
+	slog.Info("autopilot retry enqueued",
+		"autopilot_id", util.UUIDToString(autopilot.ID),
+		"run_id", util.UUIDToString(run.ID),
+		"parent_task_id", util.UUIDToString(task.ID),
+		"retry_task_id", util.UUIDToString(child.ID),
+		"reason", taskFailureReason(task),
+		"attempt", child.Attempt,
+		"max_attempts", child.MaxAttempts,
+	)
+	s.TaskSvc.NotifyTaskEnqueued(ctx, child)
+	return &child
+}
+
+func shouldRetryAutopilotTask(task db.AgentTaskQueue) bool {
+	if task.Status != "failed" {
+		return false
+	}
+	if !task.AutopilotRunID.Valid {
+		return false
+	}
+	if !retryableReasons[taskFailureReason(task)] {
+		return false
+	}
+	return task.Attempt < task.MaxAttempts
 }
 
 // handleDispatchSkip recognises an errDispatchSkipped returned from a
