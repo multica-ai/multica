@@ -94,7 +94,12 @@ export type CerebroFlagKey =
   // TECH-3077: skill metadata — category/domain/tag filtering, data-domain links, impact analysis.
   | "cerebro_skill_metadata"
   // TECH-3077: skill self-learning — observation recording, pattern extraction, auto change-requests.
-  | "cerebro_skill_learning";
+  | "cerebro_skill_learning"
+  // TECH-3099: sub-issue comment guard — three checks extending cerebro_comment_target_guard.
+  // All default OFF; each is independently toggled so workspaces can adopt them one by one.
+  | "cerebro_sub_issue_no_owner_mention"
+  | "cerebro_sub_issue_require_agent_tag"
+  | "cerebro_sub_issue_no_split_session";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -229,6 +234,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
   // infrastructure is in place.
   cerebro_skill_learning: false,
+  // TECH-3099: sub-issue comment guard checks — all OFF by default.
+  cerebro_sub_issue_no_owner_mention: false,
+  cerebro_sub_issue_require_agent_tag: false,
+  cerebro_sub_issue_no_split_session: false,
 };
 
 /**
@@ -663,6 +672,27 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Enable the per-runtime presentation_mode toggle and the in-app xterm.js terminal panel. Runtimes flipped to 'interactive' stream a live shell to the Multica UI so the user can watch and take over an agent session.",
+  },
+  {
+    key: "cerebro_sub_issue_no_owner_mention",
+    label: "Block owner @mention on sub-issues",
+    group: "issues",
+    description:
+      "Reject an agent comment on a sub-issue that @mentions the workspace owner directly. Agents must post status on the parent issue instead of mentioning the owner from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+  },
+  {
+    key: "cerebro_sub_issue_require_agent_tag",
+    label: "Require parent-agent tag on sub-issues",
+    group: "issues",
+    description:
+      "Reject an agent comment on a sub-issue that mentions no agent at all. Forces the agent to tag the parent agent (mention://agent/…) so it stays in the loop. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+  },
+  {
+    key: "cerebro_sub_issue_no_split_session",
+    label: "Block split-session across parent and sub-issue",
+    group: "issues",
+    description:
+      "Reject an agent comment on a sub-issue when the same task session (X-Task-ID) has already posted on the parent issue, preventing a single conversation from being split across both. Requires cerebro_comment_target_guard to be on. TECH-3099.",
   },
   {
     key: "cerebro_display_currency",

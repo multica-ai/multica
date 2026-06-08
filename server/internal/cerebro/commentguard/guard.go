@@ -14,6 +14,9 @@
 // workspace at request time, so the guard can be turned on/off from the Multica
 // feature-flags screen with no env var and no server restart. Default OFF: with
 // no override row prod behaviour is unchanged until an admin turns it on.
+//
+// TECH-3099 extends the guard with three additional sub-issue checks, each
+// behind its own feature flag (all default OFF).
 package commentguard
 
 import (
@@ -32,13 +35,30 @@ import (
 // through) when a comment is rejected, so the agent can re-post with a target.
 const MissingTargetMessage = "comment must mention a target — a person, an agent, or an issue (e.g. MUL-123). Comments with no target are not allowed (FIR-2674)."
 
+// OwnerMentionOnSubIssueMessage is returned when an agent on a sub-issue tries
+// to @mention the workspace owner directly (TECH-3099).
+const OwnerMentionOnSubIssueMessage = "Comments on sub-issues must not mention the workspace owner directly — post on the parent issue instead."
+
+// MissingAgentTagOnSubIssueMessage is returned when an agent posts on a
+// sub-issue without tagging any agent (TECH-3099).
+const MissingAgentTagOnSubIssueMessage = "Comments on sub-issues must mention the parent agent to keep them in the loop."
+
+// SplitSessionMessage is returned when the same task session has already
+// posted on the parent issue and now tries to post on the sub-issue (TECH-3099).
+const SplitSessionMessage = "This task session already posted on the parent issue — do not split a single conversation across both parent and sub-issue."
+
 // FlagCommentTargetGuard is the cerebro feature flag (registry.ts) that gates
 // this guard. Default OFF: with no override row the guard stays inactive, so
 // prod behaviour is unchanged until an admin turns the flag on (FIR-2674).
 const FlagCommentTargetGuard = "cerebro_comment_target_guard"
 
+// TECH-3099: three additional sub-issue guard flags (all default OFF).
+const FlagSubIssueNoOwnerMention  = "cerebro_sub_issue_no_owner_mention"
+const FlagSubIssueRequireAgentTag = "cerebro_sub_issue_require_agent_tag"
+const FlagSubIssueNoSplitSession  = "cerebro_sub_issue_no_split_session"
+
 // flagReader is the subset of the cerebro Queries the guard needs to resolve
-// its feature flag. Satisfied by *cerebrodb.Queries; the interface keeps the
+// its feature flags. Satisfied by *cerebrodb.Queries; the interface keeps the
 // guard unit-testable without a database.
 type flagReader interface {
 	ListCerebroWorkspaceFeatureFlags(ctx context.Context, workspaceID pgtype.UUID) ([]cerebrodb.ListCerebroWorkspaceFeatureFlagsRow, error)
@@ -49,7 +69,7 @@ type flagReader interface {
 // block by accident.
 type Service struct{ flags flagReader }
 
-// New returns a guard that resolves its feature flag through the cerebro
+// New returns a guard that resolves its feature flags through the cerebro
 // Queries. Passing nil yields an always-disabled guard.
 func New(flags flagReader) *Service { return &Service{flags: flags} }
 
@@ -61,40 +81,100 @@ func New(flags flagReader) *Service { return &Service{flags: flags} }
 // cerebro_comment_target_guard flag is ON for the workspace. content must
 // already have had bare issue identifiers (e.g. "MUL-123") expanded into
 // mention links, so plain issue references count as a target.
-func (s *Service) RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, content string) (string, bool) {
+//
+// Additional sub-issue checks (TECH-3099) are enabled via their own flags:
+//   - isSubIssue: whether the target issue has a parent (parent_issue_id != nil)
+//   - ownerUserIDs: workspace owner user IDs (mention://member/<user_id>)
+//   - taskPostedOnParent: true when the same task session already posted on
+//     the parent issue (pre-computed by the handler via cerebro_comment_task)
+func (s *Service) RejectComment(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	authorType, content string,
+	isSubIssue bool,
+	ownerUserIDs []string,
+	taskPostedOnParent bool,
+) (string, bool) {
 	// Members may comment freely; the guard only applies to agents.
 	if s == nil || authorType != "agent" {
 		return "", true
 	}
+
+	flags := s.loadFlags(ctx, workspaceID)
+
 	// Off unless the workspace has the feature flag turned on.
-	if !s.enabled(ctx, workspaceID) {
+	if !flags[FlagCommentTargetGuard] {
 		return "", true
 	}
+
+	// Base check: comment must mention at least one target.
 	if len(util.ParseMentions(content)) == 0 {
 		return MissingTargetMessage, false
 	}
+
+	// TECH-3099 checks — only run on sub-issues.
+	if isSubIssue {
+		// Check 1: must not mention the workspace owner.
+		if flags[FlagSubIssueNoOwnerMention] && mentionsOwner(content, ownerUserIDs) {
+			return OwnerMentionOnSubIssueMessage, false
+		}
+		// Check 2: must mention at least one agent.
+		if flags[FlagSubIssueRequireAgentTag] && !mentionsAgent(content) {
+			return MissingAgentTagOnSubIssueMessage, false
+		}
+		// Check 3: same task must not have posted on the parent issue already.
+		if flags[FlagSubIssueNoSplitSession] && taskPostedOnParent {
+			return SplitSessionMessage, false
+		}
+	}
+
 	return "", true
 }
 
-// enabled resolves the workspace-level cerebro_comment_target_guard flag. No
-// override row means default OFF; a DB error fails closed (guard inactive) and
-// is logged. This is the server mirror of the workspace resolution in
-// packages/cerebro-feature-flags/store.ts.
-func (s *Service) enabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+// mentionsOwner reports whether content contains a member mention whose ID
+// matches any entry in ownerUserIDs.
+func mentionsOwner(content string, ownerUserIDs []string) bool {
+	for _, m := range util.ParseMentions(content) {
+		if m.Type != "member" {
+			continue
+		}
+		for _, id := range ownerUserIDs {
+			if m.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mentionsAgent reports whether content contains at least one agent mention.
+func mentionsAgent(content string) bool {
+	for _, m := range util.ParseMentions(content) {
+		if m.Type == "agent" {
+			return true
+		}
+	}
+	return false
+}
+
+// loadFlags fetches all workspace-level cerebro feature flag overrides in one
+// query and returns them as a key → enabled map. An absent key means no
+// override row, which the guard treats as the TypeScript default (false for
+// every guard flag). A DB error fails open (flags all false) and is logged.
+func (s *Service) loadFlags(ctx context.Context, workspaceID pgtype.UUID) map[string]bool {
+	result := make(map[string]bool)
 	if s.flags == nil || !workspaceID.Valid {
-		return false
+		return result
 	}
 	rows, err := s.flags.ListCerebroWorkspaceFeatureFlags(ctx, workspaceID)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			slog.Error("commentguard: workspace flag lookup failed", "error", err)
 		}
-		return false
+		return result
 	}
 	for _, r := range rows {
-		if r.FlagKey == FlagCommentTargetGuard {
-			return r.Enabled
-		}
+		result[r.FlagKey] = r.Enabled
 	}
-	return false
+	return result
 }

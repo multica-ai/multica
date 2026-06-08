@@ -271,9 +271,11 @@ type MentionTriggerGateInvoker interface {
 // (message, ok=false) when an agent-authored comment references no target and
 // must be rejected; ok=true means it passes. A nil invoker disables the guard.
 //
-// CEREBRO-PATCH(handler-comment-target-guard-iface): seam for FIR-2674.
+// CEREBRO-PATCH(handler-comment-target-guard-iface): seam for FIR-2674 + TECH-3099.
 type CommentTargetGuardInvoker interface {
-	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, content string) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 feature-flag-gated, workspace-scoped.
+	// CEREBRO-PATCH(handler-comment-target-guard-iface): TECH-3099 adds isSubIssue,
+	// ownerUserIDs, taskPostedOnParent for the three new sub-issue checks.
+	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, content string, isSubIssue bool, ownerUserIDs []string, taskPostedOnParent bool) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 + TECH-3099.
 }
 
 // ChannelCreateGuardInvoker is the upstream-side seam for Cerebro's
