@@ -123,11 +123,11 @@ const toolPolicyRowSchema = z.object({
   managed_externally: z.boolean().default(false),
   layers: z
     .object({
-      workspace: layerSettingSchema,
-      runtime: layerSettingSchema,
-      agent: layerSettingSchema,
-      group: layerSettingSchema,
-      user: layerSettingSchema,
+      workspace: layerSettingSchema.default(null),
+      runtime: layerSettingSchema.default(null),
+      agent: layerSettingSchema.default(null),
+      group: layerSettingSchema.default(null),
+      user: layerSettingSchema.default(null),
     })
     .default({ workspace: null, runtime: null, agent: null, group: null, user: null }),
   effective: z

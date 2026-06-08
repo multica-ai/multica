@@ -208,7 +208,8 @@ export function ToolPolicyTable({
   // the underlying fetch, so multiple ToolPolicyTable instances on the same page
   // (e.g. tabbed workspace permissions) share a single network request.
   const capRows = useMemo(() => {
-    if (!tabFilter || tabFilter === "repos") return [];
+    if (tabFilter === "repos") return [];
+    if (!tabFilter) return allCapRows;
     if (tabFilter === "connections") return allCapRows.filter((r) => r.source === "connection");
     if (tabFilter === "runtime") return allCapRows.filter((r) => r.category === "Runtimes");
     // "multica" = everything that isn't a connection or runtime tool
