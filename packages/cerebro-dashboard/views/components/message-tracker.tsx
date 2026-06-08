@@ -3,16 +3,21 @@
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Bot, MessageSquare, Send } from "lucide-react";
+import { useNavigation } from "@multica/views/navigation";
+import { useDashboardStore } from "../../core/store";
 import type { DashboardOverview, TopActor } from "../../core/api";
 
 interface MessageTrackerProps {
   data: DashboardOverview | undefined;
   isLoading: boolean;
+  workspaceSlug: string;
 }
 
-export function MessageTracker({ data, isLoading }: MessageTrackerProps) {
+export function MessageTracker({ data, isLoading, workspaceSlug }: MessageTrackerProps) {
   const senders = data?.top_message_senders ?? [];
   const recipients = data?.top_message_recipients ?? [];
+  const setActor = useDashboardStore((s) => s.setActor);
+  const { push } = useNavigation();
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
@@ -22,6 +27,7 @@ export function MessageTracker({ data, isLoading }: MessageTrackerProps) {
         list={senders}
         isLoading={isLoading}
         emptyText="Ingen beskeder sendt i perioden."
+        onRowClick={(actor) => setActor(actor.id, actor.name || "Unknown")}
       />
       <ActorList
         title="Mest beskedte agenter"
@@ -29,6 +35,7 @@ export function MessageTracker({ data, isLoading }: MessageTrackerProps) {
         list={recipients}
         isLoading={isLoading}
         emptyText="Ingen chat-beskeder modtaget i perioden."
+        onRowClick={(actor) => push(`/${workspaceSlug}/agents/${actor.id}`)}
       />
     </div>
   );
@@ -40,12 +47,14 @@ function ActorList({
   list,
   isLoading,
   emptyText,
+  onRowClick,
 }: {
   title: string;
   icon: React.ReactNode;
   list: TopActor[];
   isLoading: boolean;
   emptyText: string;
+  onRowClick: (actor: TopActor) => void;
 }) {
   const max = list.reduce((m, a) => Math.max(m, a.count), 0);
 
@@ -67,7 +76,7 @@ function ActorList({
           <p className="py-4 text-center text-xs text-muted-foreground">{emptyText}</p>
         ) : (
           list.map((actor) => (
-            <Row key={actor.id} actor={actor} maxCount={max} />
+            <Row key={actor.id} actor={actor} maxCount={max} onClick={() => onRowClick(actor)} />
           ))
         )}
       </CardContent>
@@ -75,11 +84,23 @@ function ActorList({
   );
 }
 
-function Row({ actor, maxCount }: { actor: TopActor; maxCount: number }) {
+function Row({
+  actor,
+  maxCount,
+  onClick,
+}: {
+  actor: TopActor;
+  maxCount: number;
+  onClick: () => void;
+}) {
   const pct = maxCount === 0 ? 0 : Math.round((actor.count / maxCount) * 100);
 
   return (
-    <div className="flex items-center gap-2 rounded-md p-1">
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-md p-1 text-left transition-colors hover:bg-accent/50"
+    >
       <ActorAvatar
         name={actor.name || "?"}
         initials={(actor.name || "?").charAt(0).toUpperCase()}
@@ -102,6 +123,6 @@ function Row({ actor, maxCount }: { actor: TopActor; maxCount: number }) {
           />
         </div>
       </div>
-    </div>
+    </button>
   );
 }

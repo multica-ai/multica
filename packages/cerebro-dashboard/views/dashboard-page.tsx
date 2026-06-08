@@ -138,15 +138,24 @@ export function DashboardPage() {
                   isLoading={overview.isLoading}
                   workspaceSlug={workspace.slug}
                   wsId={workspace.id}
+                  filter="messages"
                 />
               </section>
 
               <section aria-label="Top senders and recipients">
-                <MessageTracker data={data} isLoading={overview.isLoading} />
+                <MessageTracker
+                  data={data}
+                  isLoading={overview.isLoading}
+                  workspaceSlug={workspace.slug}
+                />
               </section>
 
               <section aria-label="Message flow">
-                <MessageFlow data={data} isLoading={overview.isLoading} />
+                <MessageFlow
+                  data={data}
+                  isLoading={overview.isLoading}
+                  workspaceSlug={workspace.slug}
+                />
               </section>
             </>
           )}

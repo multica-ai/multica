@@ -6,7 +6,7 @@ import { useDashboardStore, type DashboardTab } from "../../core/store";
 
 const TABS: { id: DashboardTab; label: string; icon: React.ReactNode }[] = [
   { id: "issues", label: "Issues", icon: <BarChart3 className="size-3.5" /> },
-  { id: "messages", label: "Beskeder", icon: <MessageSquare className="size-3.5" /> },
+  { id: "messages", label: "Messages", icon: <MessageSquare className="size-3.5" /> },
 ];
 
 export function DashboardTabBar() {

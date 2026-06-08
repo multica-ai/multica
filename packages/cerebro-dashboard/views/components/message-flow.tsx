@@ -2,16 +2,19 @@
 
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { ArrowRight } from "lucide-react";
-import type { DashboardOverview } from "../../core/api";
+import { useNavigation } from "@multica/views/navigation";
+import type { DashboardOverview, MessageFlowEntry } from "../../core/api";
 
 interface MessageFlowProps {
   data: DashboardOverview | undefined;
   isLoading: boolean;
+  workspaceSlug: string;
 }
 
-export function MessageFlow({ data, isLoading }: MessageFlowProps) {
+export function MessageFlow({ data, isLoading, workspaceSlug }: MessageFlowProps) {
   const flow = data?.message_flow ?? [];
   const max = flow.reduce((m, e) => Math.max(m, e.count), 0);
+  const { push } = useNavigation();
 
   return (
     <Card>
@@ -35,7 +38,12 @@ export function MessageFlow({ data, isLoading }: MessageFlowProps) {
         ) : (
           <div className="space-y-1.5">
             {flow.map((entry, i) => (
-              <FlowRow key={i} entry={entry} maxCount={max} />
+              <FlowRow
+                key={i}
+                entry={entry}
+                maxCount={max}
+                onClick={() => push(`/${workspaceSlug}/agents/${entry.recipient_id}`)}
+              />
             ))}
           </div>
         )}
@@ -47,13 +55,19 @@ export function MessageFlow({ data, isLoading }: MessageFlowProps) {
 function FlowRow({
   entry,
   maxCount,
+  onClick,
 }: {
-  entry: { sender_name: string; recipient_name: string; count: number };
+  entry: MessageFlowEntry;
   maxCount: number;
+  onClick: () => void;
 }) {
   const pct = maxCount === 0 ? 0 : Math.round((entry.count / maxCount) * 100);
   return (
-    <div className="flex items-center gap-2 rounded-md px-1 py-0.5">
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-accent/50"
+    >
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="shrink-0 max-w-[110px] truncate text-xs font-medium">
           {entry.sender_name}
@@ -75,6 +89,6 @@ function FlowRow({
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
         {entry.count.toLocaleString("da-DK")}
       </span>
-    </div>
+    </button>
   );
 }
