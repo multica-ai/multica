@@ -1172,6 +1172,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			resp.ThreadName = issue.Title
 
 			// Squad-leader briefing injection: when the issue is assigned
 			// to a squad and the claiming agent is that squad's current
@@ -1338,6 +1339,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
+			resp.ThreadName = cs.Title
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
@@ -1402,6 +1404,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				resp.ChatMessage = strings.Join(parts, "\n\n")
+				if strings.TrimSpace(resp.ThreadName) == "" {
+					resp.ThreadName = resp.ChatMessage
+				}
 			}
 		}
 	}
@@ -1418,6 +1423,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
 				resp.AutopilotTitle = ap.Title
+				resp.ThreadName = ap.Title
 				if ap.Description.Valid {
 					resp.AutopilotDescription = ap.Description.String
 				}
@@ -1445,6 +1451,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
 			resp.QuickCreatePrompt = qc.Prompt
+			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
 
 			// When the user picked a project in the modal, surface its title

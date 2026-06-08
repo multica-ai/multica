@@ -28,6 +28,7 @@ type ExecOptions struct {
 	// developer/system instructions. Hermes ACP intentionally ignores it and
 	// relies on cwd-scoped context files such as AGENTS.md instead.
 	SystemPrompt              string
+	ThreadName                string
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration

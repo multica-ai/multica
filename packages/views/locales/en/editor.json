@@ -64,7 +64,10 @@
   },
   "slash_command": {
     "no_skills_configured": "No skills configured",
-    "no_results": "No matching skills"
+    "no_results": "No matching skills",
+    "commands": {
+      "note": "Add a note — won't trigger any agents"
+    }
   },
   "code_block": {
     "copy_code": "Copy code",

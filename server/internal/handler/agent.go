@@ -168,6 +168,7 @@ type AgentTaskResponse struct {
 	// regardless of issue / chat / autopilot / quick-create — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
 	WorkspaceContext string                `json:"workspace_context,omitempty"`
+	ThreadName       string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Status           string                `json:"status"`
 	Priority         int32                 `json:"priority"`
 	DispatchedAt     *string               `json:"dispatched_at"`

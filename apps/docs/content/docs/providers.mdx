@@ -13,7 +13,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 
 | Tool | Vendor | Session resumption | MCP | Skill injection path | Model selection |
 |---|---|---|---|---|---|
-| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Managed inside the Antigravity CLI itself |
+| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Dynamic discovery (`agy models`) |
 | **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | Static + flag |
 | **Codex** | OpenAI | ⚠️ Code exists but unreachable | ✅ | `$CODEX_HOME/skills/` | Static |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
@@ -30,7 +30,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 
 ### Antigravity
 
-From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service and ships with a Gemini-backed default model. **Session resumption works** via `--conversation <id>`; the daemon captures the conversation UUID from the CLI's log file because stdout is plain text rather than a structured event stream. There is no `--model` flag — model selection lives inside the Antigravity CLI settings, so Multica disables the per-agent model picker for this provider. Skills land in `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity migration docs](https://antigravity.google/docs/gcli-migration)).
+From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service and ships with a Gemini-backed default model. **Session resumption works** via `--conversation <id>`; the daemon captures the conversation UUID from the CLI's log file because stdout is plain text rather than a structured event stream. **Model selection works** via the `--model` flag (added in agy 1.0.6): the daemon enumerates the catalog with `agy models` and ships the chosen value verbatim. Note these are human display strings such as `Claude Opus 4.6 (Thinking)`, not `provider/model` slugs — and agy silently no-ops on a value it doesn't recognise, so prefer picking from the discovered list over typing a custom one. Skills land in `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity migration docs](https://antigravity.google/docs/gcli-migration)).
 
 ### Claude Code
 

@@ -300,6 +300,7 @@
     "queued_elapsed_prefix": "已排队 {{elapsed}}",
     "fallback_name": "智能体",
     "tool_count_other": "{{count}} 次工具调用",
+    "event_count_other": "{{count}} 个事件",
     "transcript_button": "查看记录",
     "stop_button": "停止",
     "stop_tooltip": "停止智能体",

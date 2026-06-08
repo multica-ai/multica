@@ -307,6 +307,8 @@
     "fallback_name": "Agent",
     "tool_count_one": "{{count}} tool",
     "tool_count_other": "{{count}} tools",
+    "event_count_one": "{{count}} event",
+    "event_count_other": "{{count}} events",
     "transcript_button": "View transcript",
     "stop_button": "Stop",
     "stop_tooltip": "Stop agent",

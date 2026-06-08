@@ -64,7 +64,10 @@
   },
   "slash_command": {
     "no_skills_configured": "暂无配置的技能",
-    "no_results": "没有匹配的技能"
+    "no_results": "没有匹配的技能",
+    "commands": {
+      "note": "添加备注 — 不触发任何 Agent"
+    }
   },
   "code_block": {
     "copy_code": "复制代码",

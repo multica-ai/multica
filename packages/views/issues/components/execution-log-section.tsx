@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -14,7 +14,10 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { TranscriptButton } from "../../common/task-transcript";
+import { formatDuration } from "../../agents/components/agent-activity-hover-content";
+import { TranscriptButton, buildTimeline } from "../../common/task-transcript";
+import { taskMessagesOptions } from "@multica/core/chat/queries";
+import { RunningStat } from "./running-stat";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
@@ -24,8 +27,9 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 // statuses) collapse behind a "Show past runs (N)" toggle.
 //
 // Replaces:
-//   - the click-to-expand timeline that used to live inside AgentLiveCard
-//     (sticky card stays as a header-only banner)
+//   - the click-to-expand timeline that used to live inside the in-body live
+//     card (the live "agent is working" signal now lives in the header via
+//     IssueAgentHeaderChip)
 //   - the standalone <TaskRunHistory> below the main content
 //
 // Row layout — simple left/right flex:
@@ -135,7 +139,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
       {open && (
         <div className="space-y-0.5 pl-2">
           {activeTasks.map((task) => (
-            <ActiveRow key={task.id} task={task} issueId={issueId} />
+            <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
           ))}
 
           {pastTasks.length > 0 && (
@@ -241,13 +245,53 @@ function useStatusLabel(status: AgentTask["status"]): string {
   }
 }
 
-function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+// One active (running / queued / dispatched / parked) task row. Exported so
+// the issue-detail header live-chip popover renders the exact same row as
+// this panel — same trigger text, same status treatment, same hover-reveal
+// Logs/Stop. The popover hosting it must use `keepMounted` so this row (and
+// its internal confirm dialog) survives the popover closing on Stop click.
+// Running rows read the shared per-task message cache (taskMessagesOptions,
+// kept live by useRealtimeSync's global task:message handler) so every surface
+// — this panel, the header-chip popover, and the transcript dialog — shows the
+// same live "N events (elapsed)" and the same streaming Logs from one source.
+export function ActiveTaskRow({
+  task,
+  issueId,
+}: {
+  task: AgentTask;
+  issueId: string;
+}) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
+
+  // Live message stream for this task — only fetched while running. The shared
+  // cache means the panel row, the popover row, and the chip all dedupe to one
+  // fetch + one WS-maintained entry.
+  const { data: msgs } = useQuery({
+    ...taskMessagesOptions(task.id),
+    enabled: task.status === "running",
+  });
+  const items = useMemo(() => (msgs ? buildTimeline(msgs) : undefined), [msgs]);
+
+  // Running rows show a live-ticking elapsed timer (the ticking digits carry
+  // "alive", the duration carries "how long"). Only running rows tick.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (task.status !== "running") return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [task.status]);
+  const elapsed =
+    task.status === "running"
+      ? formatDuration(
+          task.started_at ?? task.dispatched_at ?? task.created_at,
+          now,
+        )
+      : "";
 
   // Transcript only meaningful once messages exist — pure-queued and
   // waiting_local_directory tasks haven't streamed any agent output yet.
@@ -276,7 +320,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       <RowStatus title={label}>
         {task.status === "running" ? (
           <>
-            <Loader2 className="h-3 w-3 animate-spin text-info" />
+            <RunningStat eventCount={msgs?.length ?? 0} elapsed={elapsed} />
             <span className="sr-only">{label}</span>
           </>
         ) : (
@@ -289,6 +333,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
             task={task}
             agentName=""
             isLive
+            items={items}
             title={t(($) => $.execution_log.transcript_tooltip)}
           />
         )}

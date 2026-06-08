@@ -106,6 +106,8 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           debounceMs={100}
           currentIssueId={issueId}
           attachments={pendingAttachments}
+          enableSlashCommands
+          slashCommandMode="command"
         />
       </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-1">

@@ -19,10 +19,11 @@ import { useT } from "../../../i18n";
  * it fits a single PropRow. Drops the "select a runtime first" state because
  * the inspector only renders this picker after a runtime is bound.
  *
- * Unsupported providers (e.g. antigravity, whose `agy` CLI has no
- * `--model` flag and reads model selection from its own settings) render
- * an inert italic "Managed by runtime" label instead of a clickable
- * picker — the back-end ignores agent.model for those runtimes anyway.
+ * Providers whose runtime ignores per-agent model selection report
+ * `supported=false` and render an inert italic "Managed by runtime" label
+ * instead of a clickable picker. No built-in provider sets this today
+ * (Antigravity gained `--model` in agy 1.0.6), but the branch stays for any
+ * future model-less runtime.
  */
 export function ModelPicker({
   runtimeId,

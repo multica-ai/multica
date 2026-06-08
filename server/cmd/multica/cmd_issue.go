@@ -383,7 +383,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	if client.WorkspaceID == "" {
@@ -510,7 +510,7 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -572,7 +572,7 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -636,10 +636,10 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Use a longer timeout when attachments are present (file uploads can be slow).
-	timeout := 15 * time.Second
+	timeout := cli.APITimeout()
 	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	if len(attachments) > 0 {
-		timeout = 60 * time.Second
+		timeout = cli.AtLeastAPITimeout(60 * time.Second)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -794,7 +794,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -908,7 +908,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -971,7 +971,7 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, id)
@@ -1004,7 +1004,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1164,10 +1164,10 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Use a longer timeout when attachments are present (file uploads can be slow).
-	timeout := 15 * time.Second
+	timeout := cli.APITimeout()
 	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	if len(attachments) > 0 {
-		timeout = 60 * time.Second
+		timeout = cli.AtLeastAPITimeout(60 * time.Second)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -1229,7 +1229,7 @@ func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	if err := client.DeleteJSON(ctx, "/api/comments/"+args[0]); err != nil {
@@ -1250,7 +1250,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1305,7 +1305,7 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueID := ""
@@ -1372,7 +1372,7 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1405,7 +1405,7 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueScope := ""
@@ -1445,7 +1445,7 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	params := url.Values{}
@@ -1507,7 +1507,7 @@ func runIssueSubscriberList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1559,7 +1559,7 @@ func runIssueSubscriberMutation(cmd *cobra.Command, issueID, action string) erro
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, issueID)

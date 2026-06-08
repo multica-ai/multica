@@ -8,8 +8,10 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -70,13 +72,92 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s returned %d: %s", e.Method, e.Path, e.StatusCode, strings.TrimSpace(e.Body))
 }
 
+// newHTTPError builds a *HTTPError from an error response (status >= 400),
+// reading a capped slice of the body. Every Multica API helper funnels its
+// >= 400 responses through this so the top-level FormatError / ExitCodeFor can
+// classify the failure via errors.As(err, **HTTPError) regardless of which
+// HTTP verb the command used.
+func newHTTPError(method, path string, resp *http.Response) *HTTPError {
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return &HTTPError{
+		Method:     method,
+		Path:       path,
+		StatusCode: resp.StatusCode,
+		Body:       strings.TrimSpace(string(data)),
+	}
+}
+
+// defaultHTTPTimeout is the per-request timeout for the CLI's HTTP client.
+// It can be overridden with the MULTICA_HTTP_TIMEOUT environment variable
+// (see httpTimeout). 30s is chosen over the historical 15s because complex
+// networks (notably in mainland China) routinely need more than 15s to
+// complete the TLS handshake plus request round-trip, which surfaced as an
+// opaque "context deadline exceeded" to users.
+const defaultHTTPTimeout = 30 * time.Second
+
+// httpTimeout returns the HTTP client timeout, honoring MULTICA_HTTP_TIMEOUT.
+// The value may be a Go duration string ("45s", "2m") or a plain integer
+// number of seconds ("45"). Invalid or non-positive values fall back to the
+// default.
+func httpTimeout() time.Duration {
+	v := strings.TrimSpace(os.Getenv("MULTICA_HTTP_TIMEOUT"))
+	if v == "" {
+		return defaultHTTPTimeout
+	}
+	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		return d
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return defaultHTTPTimeout
+}
+
+// apiContextGrace is added on top of the HTTP transport timeout when deriving
+// a command-level context deadline, so the transport timeout (which produces a
+// clean, classifiable "request timed out" error) is the one that fires rather
+// than the outer context being canceled first.
+const apiContextGrace = 5 * time.Second
+
+// APITimeout returns the deadline budget for a single CLI API command. It is
+// always at least the configured HTTP transport timeout (see httpTimeout,
+// which honors MULTICA_HTTP_TIMEOUT) plus a small grace margin, so a
+// command-level context never truncates an in-flight request below the timeout
+// the user configured. This is the fix for command contexts that previously
+// hardcoded a 15s deadline shorter than the 30s/env transport timeout.
+func APITimeout() time.Duration {
+	return AtLeastAPITimeout(0)
+}
+
+// AtLeastAPITimeout returns max(min, APITimeout()). Use it for commands that
+// need a larger floor than usual (for example file uploads, which historically
+// used a 60s budget).
+func AtLeastAPITimeout(min time.Duration) time.Duration {
+	budget := httpTimeout() + apiContextGrace
+	if min > budget {
+		return min
+	}
+	return budget
+}
+
+// APIContext derives a command-scoped context whose deadline is APITimeout().
+// The returned cancel func must be called (typically via defer) to release
+// resources. Commands should use this instead of context.WithTimeout with a
+// hardcoded duration so the deadline always respects MULTICA_HTTP_TIMEOUT.
+func APIContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, APITimeout())
+}
+
 // NewAPIClient creates a new API client for ctrl commands.
 func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 	return &APIClient{
 		BaseURL:     strings.TrimRight(baseURL, "/"),
 		WorkspaceID: workspaceID,
 		Token:       token,
-		HTTPClient:  &http.Client{Timeout: 15 * time.Second},
+		HTTPClient:  &http.Client{Timeout: httpTimeout()},
 	}
 }
 
@@ -132,19 +213,14 @@ func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &HTTPError{
-			Method:     http.MethodGet,
-			Path:       path,
-			StatusCode: resp.StatusCode,
-			Body:       strings.TrimSpace(string(data)),
-		}
+		return newHTTPError(http.MethodGet, path, resp)
 	}
 	if out == nil {
 		return nil
@@ -163,14 +239,14 @@ func (c *APIClient) GetJSONWithHeaders(ctx context.Context, path string, out any
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("GET %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
+		return nil, newHTTPError(http.MethodGet, path, resp)
 	}
 	if out != nil {
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
@@ -189,14 +265,14 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("DELETE %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
+		return newHTTPError(http.MethodDelete, path, resp)
 	}
 	return nil
 }
@@ -215,14 +291,14 @@ func (c *APIClient) DeleteJSONWithBody(ctx context.Context, path string, body an
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("DELETE %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respData)))
+		return newHTTPError(http.MethodDelete, path, resp)
 	}
 	return nil
 }
@@ -242,19 +318,14 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &HTTPError{
-			Method:     http.MethodPost,
-			Path:       path,
-			StatusCode: resp.StatusCode,
-			Body:       strings.TrimSpace(string(respData)),
-		}
+		return newHTTPError(http.MethodPost, path, resp)
 	}
 	if out == nil {
 		return nil
@@ -277,14 +348,14 @@ func (c *APIClient) PutJSON(ctx context.Context, path string, body any, out any)
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("PUT %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respData)))
+		return newHTTPError(http.MethodPut, path, resp)
 	}
 	if out == nil {
 		return nil
@@ -307,14 +378,14 @@ func (c *APIClient) PatchJSON(ctx context.Context, path string, body any, out an
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("PATCH %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respData)))
+		return newHTTPError(http.MethodPatch, path, resp)
 	}
 	if out == nil {
 		return nil
@@ -365,14 +436,14 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("upload file returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
+		return "", newHTTPError(http.MethodPost, "/api/upload-file", resp)
 	}
 
 	var result map[string]any
@@ -414,8 +485,8 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	c.setHeaders(req)
 
 	// Use a client that respects the context deadline for slow uploads
-	// (e.g. avatar uploads with 5MB files). The default 15s HTTP client
-	// timeout shadows any longer context deadline.
+	// (e.g. avatar uploads with 5MB files). The default HTTP client timeout
+	// shadows any longer context deadline.
 	httpClient := c.HTTPClient
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
@@ -427,14 +498,14 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	}
 
 	resp, err := httpClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return "", "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", "", fmt.Errorf("upload file returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
+		return "", "", newHTTPError(http.MethodPost, "/api/upload-file", resp)
 	}
 
 	var result AttachmentResponse
@@ -478,14 +549,14 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	}
 
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("download returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, newHTTPError(http.MethodGet, downloadURL, resp)
 	}
 
 	const maxDownloadSize = 100 << 20 // 100 MB
@@ -499,6 +570,7 @@ func (c *APIClient) HealthCheck(ctx context.Context) (string, error) {
 		return "", err
 	}
 	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
 	if err != nil {
 		return "", err
 	}
@@ -506,7 +578,12 @@ func (c *APIClient) HealthCheck(ctx context.Context) (string, error) {
 
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("health check returned %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		return "", &HTTPError{
+			Method:     http.MethodGet,
+			Path:       "/health",
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(data)),
+		}
 	}
 	return strings.TrimSpace(string(data)), nil
 }

@@ -399,6 +399,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Share allowed origins with WebSocket origin checker.
 	realtime.SetAllowedOrigins(origins)
 
+	// Share the same trusted-proxy CIDRs (MULTICA_TRUSTED_PROXIES) so the
+	// WebSocket origin check honors X-Forwarded-Host only from trusted proxies,
+	// using one config source instead of a parallel one.
+	realtime.SetTrustedProxies(signupConfig.TrustedProxies)
+
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},

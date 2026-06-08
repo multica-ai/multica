@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
-	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -120,7 +119,7 @@ func fetchWorkspaces(ctx context.Context, cmd *cobra.Command) ([]workspaceSummar
 }
 
 func runWorkspaceList(cmd *cobra.Command, _ []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	workspaces, err := fetchWorkspaces(ctx, cmd)
@@ -242,7 +241,7 @@ func resolveWorkspaceRef(ctx context.Context, cmd *cobra.Command, input string) 
 }
 
 func runWorkspaceSwitch(cmd *cobra.Command, args []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	ws, err := resolveWorkspaceRef(ctx, cmd, args[0])
@@ -277,7 +276,7 @@ func resolveWorkspaceArg(cmd *cobra.Command, args []string) (string, error) {
 		if uuidRegexp.MatchString(trimmed) {
 			return trimmed, nil
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := cli.APIContext(context.Background())
 		defer cancel()
 		ws, err := resolveWorkspaceRef(ctx, cmd, trimmed)
 		if err != nil {
@@ -302,7 +301,7 @@ func runWorkspaceGet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var ws map[string]any
@@ -396,7 +395,7 @@ func runWorkspaceUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var ws map[string]any
@@ -445,7 +444,7 @@ func runWorkspaceMembers(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var members []map[string]any

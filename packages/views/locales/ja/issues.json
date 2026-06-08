@@ -295,6 +295,7 @@
     "queued_elapsed_prefix": "{{elapsed}} 待機中",
     "fallback_name": "エージェント",
     "tool_count_other": "ツール {{count}} 件",
+    "event_count_other": "イベント {{count}} 件",
     "transcript_button": "トランスクリプトを表示",
     "stop_button": "停止",
     "stop_tooltip": "エージェントを停止",

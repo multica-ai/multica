@@ -46,9 +46,9 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
+import { ActorAvatar } from "../common/actor-avatar";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import {
   Dialog,
@@ -102,6 +102,25 @@ function matchesMember(member: MemberWithUser, query: string) {
     member.email.toLowerCase().includes(query) ||
     (query.length >= 3 && member.role.startsWith(query)) ||
     matchesPinyin(member.name, query)
+  );
+}
+
+function IssueAssigneeAvatar({
+  assigneeType,
+  assigneeId,
+}: {
+  assigneeType?: string | null;
+  assigneeId?: string | null;
+}) {
+  if (!assigneeType || !assigneeId) return null;
+  return (
+    <ActorAvatar
+      actorType={assigneeType}
+      actorId={assigneeId}
+      size={20}
+      profileLink={false}
+      className="shrink-0"
+    />
   );
 }
 
@@ -622,14 +641,13 @@ export function SearchCommand() {
                       <span className="text-xs text-muted-foreground shrink-0">
                         {issue.identifier}
                       </span>
-                      <span className="truncate">
+                      <span className="min-w-0 flex-1 truncate">
                         <HighlightText text={issue.title} query={query} />
                       </span>
-                      <span
-                        className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[issue.status].iconColor}`}
-                      >
-                        {STATUS_CONFIG[issue.status].label}
-                      </span>
+                      <IssueAssigneeAvatar
+                        assigneeType={issue.assignee_type}
+                        assigneeId={issue.assignee_id}
+                      />
                     </div>
                     {issue.matched_description_snippet && (
                       <div className="flex items-start gap-2 pl-[26px]">
@@ -678,12 +696,11 @@ export function SearchCommand() {
                     <span className="text-xs text-muted-foreground shrink-0">
                       {item.identifier}
                     </span>
-                    <span className="truncate">{item.title}</span>
-                    <span
-                      className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[item.status]?.iconColor ?? ""}`}
-                    >
-                      {STATUS_CONFIG[item.status]?.label ?? ""}
-                    </span>
+                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                    <IssueAssigneeAvatar
+                      assigneeType={item.assignee_type}
+                      assigneeId={item.assignee_id}
+                    />
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>

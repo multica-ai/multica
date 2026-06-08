@@ -30,7 +30,7 @@ make selfhost
 
 `make selfhost` will:
 
-1. Generate a `.env` from `.env.example` if missing, with a **random JWT_SECRET**
+1. Generate a `.env` from `.env.example` if missing, with a **random JWT_SECRET and Postgres password**
 2. Pull the official Docker images (PostgreSQL, Multica backend, Multica frontend)
 3. Bring up every service using `docker-compose.selfhost.yml`
 4. Wait until the backend's `/health` endpoint is ready
@@ -50,7 +50,7 @@ Once it's up:
 - **Backend**: [http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**Ports listen on `127.0.0.1` only.** `docker-compose.selfhost.yml` binds every published port to loopback — `ss -tlnp` will not show `0.0.0.0:8080`, and the services are unreachable from other machines by design. The default `JWT_SECRET` and Postgres credentials must never sit on the open internet. For cross-machine access, front the stack with a reverse proxy that terminates TLS — see [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
+**Ports listen on `127.0.0.1` only.** `docker-compose.selfhost.yml` binds every published port to loopback — `ss -tlnp` will not show `0.0.0.0:8080`, and the services are unreachable from other machines by design. Secrets and Postgres credentials must never sit on the open internet. For cross-machine access, front the stack with a reverse proxy that terminates TLS — see [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
 </Callout>
 
 ## 2. Important: keep production safety on
@@ -155,7 +155,7 @@ That points the CLI at `http://localhost:8080` (backend) and `http://localhost:3
 
 ### 5b. Cross-machine: front with a reverse proxy
 
-Because the compose stack only listens on `127.0.0.1`, a daemon on a different machine cannot reach `http://<server-ip>:8080` directly — and you do not want it to, since the default `JWT_SECRET` would otherwise be reachable from the open internet. Put a reverse proxy on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the public HTTPS URL:
+Because the compose stack only listens on `127.0.0.1`, a daemon on a different machine cannot reach `http://<server-ip>:8080` directly — and you do not want it to, since server secrets would otherwise be reachable from the open internet. Put a reverse proxy on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the public HTTPS URL:
 
 ```bash
 multica setup self-host \

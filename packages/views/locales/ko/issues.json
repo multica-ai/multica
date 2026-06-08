@@ -307,6 +307,8 @@
     "fallback_name": "에이전트",
     "tool_count_one": "도구 {{count}}개",
     "tool_count_other": "도구 {{count}}개",
+    "event_count_one": "이벤트 {{count}}개",
+    "event_count_other": "이벤트 {{count}}개",
     "transcript_button": "트랜스크립트 보기",
     "stop_button": "중지",
     "stop_tooltip": "에이전트 중지",

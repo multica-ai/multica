@@ -80,7 +80,7 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 	}
 
 	client := cli.NewAPIClient(serverURL, "", token)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var workspaces []struct {
@@ -162,10 +162,17 @@ func waitForWorkspaceCreation(cmd *cobra.Command, client *cli.APIClient) ([]stru
 	const pollTimeout = 5 * time.Minute
 	deadline := time.Now().Add(pollTimeout)
 
+	// Per-poll request budget. We keep a short 10s floor so the loop stays
+	// responsive (a hung request shouldn't block a single iteration for long),
+	// but it still honors MULTICA_HTTP_TIMEOUT via AtLeastAPITimeout so a user
+	// who raised the timeout for a slow network isn't capped below it. The
+	// overall wait is bounded by pollTimeout regardless.
+	pollRequestTimeout := cli.AtLeastAPITimeout(10 * time.Second)
+
 	for time.Now().Before(deadline) {
 		time.Sleep(pollInterval)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), pollRequestTimeout)
 		var workspaces []struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`

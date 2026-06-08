@@ -40,7 +40,7 @@ import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
 import { SlashCommandExtension } from "./slash-command-extension";
-import { createSlashCommandSuggestion } from "./slash-command-suggestion";
+import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
@@ -136,8 +136,14 @@ export interface EditorExtensionsOptions {
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
-  /** When true, attach the `/` skill picker. Default false. */
+  /** When true, attach the `/` picker. Default false. */
   enableSlashCommands?: boolean;
+  /**
+   * Which `/` menu to attach when enableSlashCommands is true:
+   * - "skill" (default) — the chat picker listing the active agent's skills.
+   * - "command" — the fixed built-in command menu (issue comments), e.g. /note.
+   */
+  slashCommandMode?: "skill" | "command";
 }
 
 export function createEditorExtensions(
@@ -197,10 +203,13 @@ export function createEditorExtensions(
     }),
     SlashCommandExtension.configure({
       HTMLAttributes: { class: "slash-command" },
-      suggestion:
-        options.enableSlashCommands && options.queryClient
-          ? createSlashCommandSuggestion(options.queryClient)
-          : { char: "/", allow: () => false },
+      suggestion: !options.enableSlashCommands
+        ? { char: "/", allow: () => false }
+        : options.slashCommandMode === "command"
+          ? createBuiltinCommandSuggestion()
+          : options.queryClient
+            ? createSlashCommandSuggestion(options.queryClient)
+            : { char: "/", allow: () => false },
     }),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),

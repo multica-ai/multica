@@ -44,6 +44,7 @@ type Task struct {
 	// regardless of task kind so the daemon can inject `## Workspace Context`
 	// into the brief. Empty when the owner hasn't set one.
 	WorkspaceContext        string                `json:"workspace_context,omitempty"`
+	ThreadName              string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                   *AgentData            `json:"agent,omitempty"`
 	Repos                   []RepoData            `json:"repos,omitempty"`
 	ProjectID               string                `json:"project_id,omitempty"`                // issue's project, when present

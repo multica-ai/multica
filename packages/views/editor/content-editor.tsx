@@ -105,8 +105,14 @@ interface ContentEditorProps {
   /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
   mentionMode?: "default" | "context";
   mentionContextItems?: MentionItem[];
-  /** Enable the chat-only `/` skill picker. Defaults false. */
+  /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
+  /**
+   * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
+   * lists the active agent's skills (chat); "command" shows the fixed built-in
+   * command menu (issue comments), e.g. /note.
+   */
+  slashCommandMode?: "skill" | "command";
   /**
    * Attachments referenced by this content. The download buttons on file
    * cards and images inside the editor look up an attachment by `url` and
@@ -153,6 +159,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionMode = "default",
       mentionContextItems,
       enableSlashCommands = false,
+      slashCommandMode = "skill",
       attachments,
     },
     ref,
@@ -228,6 +235,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,
+        slashCommandMode,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;

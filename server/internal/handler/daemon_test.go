@@ -1962,6 +1962,7 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	var resp struct {
 		Task *struct {
 			WorkspaceID string `json:"workspace_id"`
+			ThreadName  string `json:"thread_name"`
 		} `json:"task"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -1975,6 +1976,9 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	}
 	if resp.Task.WorkspaceID != testWorkspaceID {
 		t.Fatalf("expected workspace_id %q, got %q", testWorkspaceID, resp.Task.WorkspaceID)
+	}
+	if resp.Task.ThreadName != "claim workspace fixture" {
+		t.Fatalf("autopilot task thread_name = %q, want autopilot title", resp.Task.ThreadName)
 	}
 }
 
@@ -2387,6 +2391,7 @@ type claimRuntimeGuardTask struct {
 	PriorSessionID string `json:"prior_session_id"`
 	PriorWorkDir   string `json:"prior_work_dir"`
 	ChatMessage    string `json:"chat_message"`
+	ThreadName     string `json:"thread_name"`
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
@@ -2633,6 +2638,9 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 	if task.PriorWorkDir != "/tmp/old-runtime-workdir" {
 		t.Fatalf("runtime mismatch: expected PriorWorkDir='/tmp/old-runtime-workdir', got %q", task.PriorWorkDir)
+	}
+	if task.ThreadName != "runtime-session-skip fixture" {
+		t.Fatalf("issue task thread_name = %q, want issue title", task.ThreadName)
 	}
 	if _, err := testPool.Exec(ctx, `
 		UPDATE agent_task_queue
@@ -2906,6 +2914,9 @@ func TestClaimTask_ChatDeliversAllUnansweredUserMessages(t *testing.T) {
 	if task.ChatMessage != "看上海天气\n\n还有青岛" {
 		t.Fatalf("chat prompt must include every unanswered user message in order; got %q", task.ChatMessage)
 	}
+	if task.ThreadName != "debounce delivery chat" {
+		t.Fatalf("chat task thread_name = %q, want chat session title", task.ThreadName)
+	}
 
 	// Complete the run and record the agent's assistant reply, then send a
 	// fresh user message — only the new one should be delivered next.
@@ -2937,6 +2948,35 @@ func TestClaimTask_ChatDeliversAllUnansweredUserMessages(t *testing.T) {
 	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.ChatMessage != "深圳呢" {
 		t.Fatalf("after a reply, only the new user message must be delivered; got %q", task.ChatMessage)
+	}
+}
+
+func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	quickPrompt := "create a follow-up issue for Codex session titles"
+	quickContext, _ := json.Marshal(map[string]any{
+		"type":         "quick_create",
+		"prompt":       quickPrompt,
+		"requester_id": testUserID,
+		"workspace_id": testWorkspaceID,
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
+		VALUES ($1, $2, 'queued', 2, $3)
+	`, agentID, runtimeID, quickContext); err != nil {
+		t.Fatalf("setup: create quick-create task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.ThreadName != quickPrompt {
+		t.Fatalf("quick-create task thread_name = %q, want prompt", task.ThreadName)
 	}
 }
 

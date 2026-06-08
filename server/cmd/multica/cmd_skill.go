@@ -221,7 +221,7 @@ func runSkillList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var skills []map[string]any
@@ -254,7 +254,7 @@ func runSkillGet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var skill map[string]any
@@ -311,7 +311,7 @@ func runSkillCreate(cmd *cobra.Command, _ []string) error {
 		body["config"] = config
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
@@ -363,7 +363,7 @@ func runSkillUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no fields to update; use --name, --description, --content, or --config")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
@@ -398,7 +398,7 @@ func runSkillDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	if err := client.DeleteJSON(ctx, "/api/skills/"+args[0]); err != nil {
@@ -424,7 +424,7 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 		"url": importURL,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
 	defer cancel()
 
 	var result map[string]any
@@ -480,7 +480,7 @@ func runSkillSearch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("query is required")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
 	defer cancel()
 
 	var results []map[string]any
@@ -519,7 +519,7 @@ func runSkillFilesList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var files []map[string]any
@@ -569,7 +569,7 @@ func runSkillFilesUpsert(cmd *cobra.Command, args []string) error {
 		"content": content,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
@@ -592,7 +592,7 @@ func runSkillFilesDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	if err := client.DeleteJSON(ctx, "/api/skills/"+args[0]+"/files/"+args[1]); err != nil {
