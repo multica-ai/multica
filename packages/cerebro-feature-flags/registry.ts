@@ -88,7 +88,9 @@ export type CerebroFlagKey =
   // TECH-2947: personal focus list pinned to the top of the inbox.
   | "cerebro_focus_list"
   // Interactive terminal (cerebro-terminal): per-runtime presentation mode + xterm.js panel.
-  | "cerebro_interactive_terminal";
+  | "cerebro_interactive_terminal"
+  // TECH-3108: workspace connection registry (API + MCP connections managed from settings).
+  | "cerebro_connections";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -216,6 +218,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // the panel and the backend endpoints reject requests.
   cerebro_focus_list: true,
   cerebro_interactive_terminal: false,
+  // TECH-3108: OFF by default until QA on staging; shows Connections tab in workspace settings.
+  cerebro_connections: false,
 };
 
 /**
@@ -657,6 +661,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Let a workspace show cost in a chosen display currency (USD, DKK, EUR). Cost is always stored in USD and converted at display time with a cached daily rate; a Currency settings tab picks the workspace currency. Off shows raw USD everywhere as before. FIR-40.",
+  },
+  // TECH-3108: workspace connection registry feature flag.
+  {
+    key: "cerebro_connections",
+    label: "Workspace connections",
+    group: "agents",
+    description:
+      "Enable the Connections settings tab where admins can register API and MCP endpoints (external or internal Sliplane paths) available to all runtimes, with per-layer tool-policy permissions. TECH-3108.",
   },
 ];
 

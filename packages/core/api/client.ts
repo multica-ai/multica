@@ -3790,6 +3790,32 @@ export class ApiClient {
     return this.fetch("/api/agents/generate-avatar", { method: "POST", body });
   }
 
+  // CEREBRO-PATCH(cerebro-connections-client): TECH-3108 workspace connection registry methods.
+  // Bodies are unknown so cerebro-connections package owns the schema via parseWithFallback.
+  async listCerebroConnections<T = unknown>(wsId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections`);
+  }
+  async getCerebroConnection<T = unknown>(wsId: string, connId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections/${connId}`);
+  }
+  async createCerebroConnection<T = unknown>(wsId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+  async updateCerebroConnection<T = unknown>(wsId: string, connId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections/${connId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+  async deleteCerebroConnection(wsId: string, connId: string): Promise<void> {
+    await this.fetch<void>(`/api/workspaces/${wsId}/connections/${connId}`, {
+      method: "DELETE",
+    });
+  }
+
   // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (up to 5 square icon variants).
   async generateWorkspaceLogos(
     workspaceId: string,

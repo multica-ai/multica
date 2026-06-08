@@ -93,6 +93,8 @@ import (
 	cerebrofocuslist "github.com/multica-ai/multica/server/internal/cerebro/focus_list"
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler import
 	cerebroagentavatar "github.com/multica-ai/multica/server/internal/cerebro/agent_avatar"
+	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler import
+	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -320,6 +322,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
 	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)
 	h.IdentityProvisioner = cerebroIdentityService
+	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
+	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
+	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from).
 	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool))
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler.
@@ -767,6 +772,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/accounts/{id}/controls", cerebroAccountHandler.UpdateControls)
 					// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry routes (CRUD + reveal + rotate + bindings + audit).
 					cerebroCredentialsHandler.Mount(r)
+					// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection reads (any member).
+					r.Get("/connections", cerebroConnectionsHandler.List)
+					r.Get("/connections/{connId}", cerebroConnectionsHandler.Get)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -807,6 +815,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy writes (admin/owner only).
 					r.Put("/tool-policy", cerebroToolPolicyHandler.Set)
 					r.Delete("/tool-policy", cerebroToolPolicyHandler.Clear)
+					// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection writes (admin/owner only).
+					r.Post("/connections", cerebroConnectionsHandler.Create)
+					r.Put("/connections/{connId}", cerebroConnectionsHandler.Update)
+					r.Delete("/connections/{connId}", cerebroConnectionsHandler.Delete)
 					// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 saving-mode writes (admin/owner only).
 					r.Put("/cost-optimization/{key}", costOptimizationHandler.Upsert)
 					r.Delete("/cost-optimization/{key}", costOptimizationHandler.Delete)
