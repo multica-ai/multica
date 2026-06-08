@@ -191,7 +191,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Test — POST /api/workspaces/{id}/connections/test
 func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.workspaceID(w, r) // auth check only; no DB access
+	wsID, ok := h.workspaceID(w, r)
 	if !ok {
 		return
 	}
@@ -203,6 +203,25 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 	if req.URL == "" {
 		writeError(w, http.StatusBadRequest, "url required")
 		return
+	}
+	// When connection_id is provided, merge stored (real) credentials over masked form fields.
+	if req.ConnectionID != "" {
+		if connID, err := util.ParseUUID(req.ConnectionID); err == nil {
+			if stored, err := h.Store.Get(r.Context(), connID, wsID); err == nil {
+				if req.AuthConfig.BearerToken == "" {
+					req.AuthConfig.BearerToken = stored.AuthConfig.BearerToken
+				}
+				if req.AuthConfig.APIKey == "" {
+					req.AuthConfig.APIKey = stored.AuthConfig.APIKey
+				}
+				if req.AuthConfig.CFAccessID == "" {
+					req.AuthConfig.CFAccessID = stored.AuthConfig.CFAccessID
+				}
+				if req.AuthConfig.CFAccessSecret == "" {
+					req.AuthConfig.CFAccessSecret = stored.AuthConfig.CFAccessSecret
+				}
+			}
+		}
 	}
 	result := doTestConnection(r.Context(), req)
 	writeJSON(w, http.StatusOK, result)

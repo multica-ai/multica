@@ -176,7 +176,7 @@ export function useDeleteConnection(wsId: string) {
 
 export function useTestConnection(wsId: string) {
   return useMutation({
-    mutationFn: async (input: { url: string; type: string; auth_config: Connection["auth_config"] }): Promise<TestResult> => {
+    mutationFn: async (input: { url: string; type: string; auth_config: Connection["auth_config"]; connection_id?: string }): Promise<TestResult> => {
       const raw = await api.testCerebroConnection(wsId, input);
       return parseWithFallback(
         raw,

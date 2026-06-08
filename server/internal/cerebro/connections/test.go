@@ -13,9 +13,10 @@ import (
 const testTimeout = 10 * time.Second
 
 type testConnectionRequest struct {
-	URL        string     `json:"url"`
-	Type       string     `json:"type"`
-	AuthConfig AuthConfig `json:"auth_config"`
+	URL          string     `json:"url"`
+	Type         string     `json:"type"`
+	AuthConfig   AuthConfig `json:"auth_config"`
+	ConnectionID string     `json:"connection_id,omitempty"` // when set, stored credentials are merged over empty form fields
 }
 
 type testConnectionResult struct {

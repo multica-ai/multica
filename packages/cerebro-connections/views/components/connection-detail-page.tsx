@@ -119,6 +119,8 @@ function ConnectionFormBody({
       url: form.url,
       type: form.type,
       auth_config,
+      // Pass the connection ID when editing so the backend can fill in masked credentials.
+      ...(existingConn?.id ? { connection_id: existingConn.id } : {}),
     });
     setTestResult(result);
   }

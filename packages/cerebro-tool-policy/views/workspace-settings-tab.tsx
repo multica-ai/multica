@@ -48,7 +48,7 @@ export function WorkspacePermissionsTab() {
           and member below can only tighten what is set here — never loosen it.
         </p>
       </div>
-      <Tabs defaultValue="multica">
+      <Tabs defaultValue="multica" className="flex-col">
         <TabsList>
           <TabsTrigger value="multica">Multica</TabsTrigger>
           <TabsTrigger value="runtime">Runtime</TabsTrigger>
