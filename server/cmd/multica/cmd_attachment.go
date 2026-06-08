@@ -26,8 +26,8 @@ var attachmentDownloadCmd = &cobra.Command{
 
   # Download to a specific directory
   $ multica attachment download abc123 -o /tmp/images`,
-	Args:  exactArgs(1),
-	RunE:  runAttachmentDownload,
+	Args: exactArgs(1),
+	RunE: runAttachmentDownload,
 }
 
 func init() {
