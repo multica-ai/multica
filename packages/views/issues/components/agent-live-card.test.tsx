@@ -49,6 +49,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
     getActorInitials: (_: string, id: string) =>
       id ? id.slice(0, 2).toUpperCase() : "AG",
     getActorAvatarUrl: () => null,
+    getAgentModel: () => null,
   }),
 }));
 

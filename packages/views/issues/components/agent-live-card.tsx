@@ -53,7 +53,7 @@ interface AgentLiveCardProps {
 
 export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   const { t } = useT("issues");
-  const { getActorName } = useActorName();
+  const { getActorName, getAgentModel } = useActorName();
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   // Cancel confirmation is hoisted here (not per-card) so a single dialog
   // serves both the inline single banner and the multi-agent popover. A
@@ -325,6 +325,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
                     task={task}
                     items={buildTimeline(messages)}
                     agentName={resolveName(task.agent_id)}
+                    agentModel={task.agent_id ? getAgentModel(task.agent_id) : null}
                     onRequestCancel={() => setCancelTarget(task)}
                     cancelling={cancellingIds.has(task.id)}
                   />
@@ -337,6 +338,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
             task={firstEntry.task}
             items={buildTimeline(firstEntry.messages)}
             agentName={resolveName(firstEntry.task.agent_id)}
+            agentModel={firstEntry.task.agent_id ? getAgentModel(firstEntry.task.agent_id) : null}
             onRequestCancel={() => setCancelTarget(firstEntry.task)}
             cancelling={cancellingIds.has(firstEntry.task.id)}
           />
@@ -367,6 +369,7 @@ interface AgentLiveRowProps {
   task: AgentTask;
   items: TimelineItem[];
   agentName: string;
+  agentModel: string | null;
   // Cancel is owned by the parent AgentLiveCard (a single confirm dialog
   // serves both the lone row and the multi-agent list). The row only
   // requests it and reflects the in-flight state.
@@ -374,7 +377,7 @@ interface AgentLiveRowProps {
   cancelling: boolean;
 }
 
-function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: AgentLiveRowProps) {
+function AgentLiveRow({ task, items, agentName, agentModel, onRequestCancel, cancelling }: AgentLiveRowProps) {
   const { t } = useT("issues");
   const [elapsed, setElapsed] = useState("");
 
@@ -424,6 +427,11 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
               ? t(($) => $.agent_live.is_queued, { name: agentName })
               : t(($) => $.agent_live.is_working, { name: agentName })}
         </span>
+        {agentModel && (
+          <span className="max-w-40 shrink min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground" title={agentModel}>
+            {agentModel}
+          </span>
+        )}
         <span className="text-muted-foreground tabular-nums shrink-0">
           {isParked
             ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })

@@ -57,6 +57,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
     : null;
   const runtime = runtimes.find((r) => r.id === agent.runtime_id) ?? null;
   const isArchived = !!agent.archived_at;
+  const explicitModel = agent.model.trim();
   const initials = agent.name
     .split(" ")
     .map((w) => w[0])
@@ -118,6 +119,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           omitted — power-user detail lives on the detail page. */}
       <div className="flex flex-col gap-1.5 text-xs">
         <RuntimeRow agent={agent} runtime={runtime} />
+        {explicitModel && <MetaRow label={t(($) => $.inspector.prop_model)} value={explicitModel} mono />}
         {agent.skills.length > 0 && (
           <SkillsRow skills={agent.skills.map((s) => s.name)} />
         )}
