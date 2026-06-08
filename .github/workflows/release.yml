@@ -362,3 +362,190 @@ jobs:
             --repo ${{ github.repository }} \
             "$chart_file" \
             --clobber
+
+  sync-to-gitee:
+    name: Sync Release To Gitee
+    needs:
+      - release
+      - helm-release
+    runs-on: ubuntu-latest
+    environment: release-notify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release binaries from GitHub
+        run: |
+          mkdir -p dist
+          gh release download "${GITHUB_REF_NAME}" -D dist \
+            -p "multica_*" -p "multica-cli-*" -p "checksums.txt" \
+            --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read GitHub release body
+        id: release-meta
+        run: |
+          BODY=$(gh release view "${GITHUB_REF_NAME}" --json body -q '.body // empty')
+          {
+            echo 'body<<EOF'
+            printf '%s\n' "$BODY"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Gitee tag if needed
+        run: |
+          set -euo pipefail
+
+          rcurl() {
+            local max=3 delay=10 i=1
+            while [ $i -le $max ]; do
+              curl "$@" && return 0
+              echo "::warning::curl attempt $i/$max failed, retrying in ${delay}s..."
+              sleep $delay
+              i=$((i + 1))
+            done
+            return 1
+          }
+
+          OWNER="linkai0924"
+          REPO="multica"
+          TAG="${GITHUB_REF_NAME}"
+          TARGET_REF=$(rcurl -fsS \
+            "https://gitee.com/api/v5/repos/${OWNER}/${REPO}?access_token=${GITEE_ACCESS_TOKEN}" \
+            | jq -r '.default_branch // empty')
+
+          if [ -z "$TARGET_REF" ]; then
+            TARGET_REF=master
+          fi
+
+          create_resp=$(rcurl -sS -X POST \
+            "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/tags" \
+            --data-urlencode "access_token=${GITEE_ACCESS_TOKEN}" \
+            --data-urlencode "tag_name=${TAG}" \
+            --data-urlencode "refs=${TARGET_REF}")
+
+          if printf '%s' "$create_resp" | jq -e '.name? // .commit?.sha? // empty' > /dev/null; then
+            exit 0
+          fi
+
+          err=$(printf '%s' "$create_resp" | jq -r '.message // .error // empty')
+          if printf '%s' "$err" | grep -Eqi 'exist|已存在'; then
+            exit 0
+          fi
+
+          printf '%s\n' "$create_resp"
+          exit 1
+        env:
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+
+      - name: Create or get Gitee release
+        id: gitee-release
+        run: |
+          set -euo pipefail
+
+          rcurl() {
+            local max=3 delay=10 i=1
+            while [ $i -le $max ]; do
+              curl "$@" && return 0
+              echo "::warning::curl attempt $i/$max failed, retrying in ${delay}s..."
+              sleep $delay
+              i=$((i + 1))
+            done
+            return 1
+          }
+
+          OWNER="linkai0924"
+          REPO="multica"
+          TAG="${GITHUB_REF_NAME}"
+          TARGET_REF=$(rcurl -fsS \
+            "https://gitee.com/api/v5/repos/${OWNER}/${REPO}?access_token=${GITEE_ACCESS_TOKEN}" \
+            | jq -r '.default_branch // empty')
+
+          if [ -z "$TARGET_REF" ]; then
+            TARGET_REF=master
+          fi
+
+          existing=$(rcurl -fsS \
+            "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/tags/${TAG}?access_token=${GITEE_ACCESS_TOKEN}" \
+            || true)
+
+          if [ -n "$existing" ] && [ "$(printf '%s' "$existing" | jq -r '.id // empty')" != "" ]; then
+            release_id=$(printf '%s' "$existing" | jq -r '.id')
+          else
+            created=$(rcurl -sS -X POST \
+              "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases" \
+              --data-urlencode "access_token=${GITEE_ACCESS_TOKEN}" \
+              --data-urlencode "tag_name=${TAG}" \
+              --data-urlencode "name=${TAG}" \
+              --data-urlencode "body=${BODY}" \
+              --data-urlencode "prerelease=false" \
+              --data-urlencode "target_commitish=${TARGET_REF}")
+            release_id=$(printf '%s' "$created" | jq -r '.id')
+            if [ -z "$release_id" ]; then
+              printf '%s\n' "$created"
+              exit 1
+            fi
+          fi
+
+          echo "release_id=${release_id}" >> "$GITHUB_OUTPUT"
+        env:
+          BODY: ${{ steps.release-meta.outputs.body }}
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+
+      - name: Upload binaries to Gitee release
+        run: |
+          set -euo pipefail
+
+          rcurl() {
+            local max=3 delay=10 i=1
+            while [ $i -le $max ]; do
+              curl "$@" && return 0
+              echo "::warning::curl attempt $i/$max failed, retrying in ${delay}s..."
+              sleep $delay
+              i=$((i + 1))
+            done
+            return 1
+          }
+
+          OWNER="linkai0924"
+          REPO="multica"
+          TAG="${GITHUB_REF_NAME}"
+          RELEASE_ID="${{ steps.gitee-release.outputs.release_id }}"
+
+          attachments=$(rcurl -fsS \
+            "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/attach_files?access_token=${GITEE_ACCESS_TOKEN}" \
+            || printf '[]')
+
+          i=0
+          for f in dist/*; do
+            [ -f "$f" ] || continue
+            i=$((i + 1))
+            (
+              base=$(basename "$f")
+
+              attach_id=$(printf '%s' "$attachments" | jq -r --arg name "$base" '.[] | select(.name == $name) | .id' | head -n 1)
+              if [ -n "$attach_id" ]; then
+                rcurl -fsS -X DELETE \
+                  "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/attach_files/${attach_id}?access_token=${GITEE_ACCESS_TOKEN}" \
+                  > /dev/null
+              fi
+
+              resp=$(rcurl -fsS -X POST \
+                "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/attach_files" \
+                -F "access_token=${GITEE_ACCESS_TOKEN}" \
+                -F "file=@${f}")
+
+              url=$(printf '%s' "$resp" | jq -r '.browser_download_url // .download_url // .url // empty')
+              if [ -z "$url" ]; then
+                url="https://gitee.com/${OWNER}/${REPO}/releases/download/${TAG}/${base}"
+              fi
+
+              echo "Uploaded: ${base} -> ${url}"
+            ) &
+          done
+
+          wait
+        env:
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
