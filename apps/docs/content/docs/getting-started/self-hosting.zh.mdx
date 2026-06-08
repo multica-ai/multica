@@ -51,7 +51,7 @@ cd multica
 make selfhost
 ```
 
-`make selfhost` automatically creates `.env`, generates a random `JWT_SECRET`, and starts all services via Docker Compose.
+`make selfhost` automatically creates `.env`, generates a random `JWT_SECRET` and Postgres password, and starts all services via Docker Compose.
 
 By default it pulls the latest stable release images from GHCR. To build the backend/web from your current checkout instead, run `make selfhost-build`.
 If the selected GHCR tag has not been published yet, `make selfhost` now tells you to fall back to `make selfhost-build`.
@@ -63,7 +63,7 @@ Once ready:
 - **Backend API:** http://localhost:8080
 
 <Callout>
-If you prefer running the Docker Compose steps manually: `cp .env.example .env`, edit `JWT_SECRET`, then `docker compose -f docker-compose.selfhost.yml pull && docker compose -f docker-compose.selfhost.yml up -d`.
+If you prefer running the Docker Compose steps manually: `cp .env.example .env`, edit `JWT_SECRET`, `POSTGRES_PASSWORD`, and the password segment in `DATABASE_URL`, then `docker compose -f docker-compose.selfhost.yml pull && docker compose -f docker-compose.selfhost.yml up -d`.
 </Callout>
 
 ### Step 2 — Log In
@@ -226,7 +226,8 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` |
+| `DATABASE_URL` | PostgreSQL connection string. Keep the password segment in sync with `POSTGRES_PASSWORD`. | `postgres://multica:<postgres-password>@localhost:5432/multica?sslmode=disable` |
+| `POSTGRES_PASSWORD` | **Must change from default.** Password used by the bundled Postgres container. Keep it in sync with `DATABASE_URL`. | `openssl rand -hex 24` |
 | `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
 
