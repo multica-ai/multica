@@ -78,6 +78,47 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("resolveComment", () => {
+    const commentBody = {
+      id: "comment-1",
+      issue_id: "issue-1",
+      author_type: "member",
+      author_id: "user-1",
+      content: "done",
+      type: "comment",
+      parent_id: "root-1",
+      reactions: [],
+      attachments: [],
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+
+    it("defaults missing resolved fields to null for older responses", async () => {
+      stubFetchJson(commentBody);
+      const client = new ApiClient("https://api.example.test");
+      const comment = await client.resolveComment("comment-1");
+      expect(comment.id).toBe("comment-1");
+      expect(comment.parent_id).toBe("root-1");
+      expect(comment.resolved_at).toBeNull();
+      expect(comment.resolved_by_type).toBeNull();
+      expect(comment.resolved_by_id).toBeNull();
+    });
+
+    it("falls back to an empty comment when the response is malformed", async () => {
+      stubFetchJson({ id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      const comment = await client.resolveComment("comment-1");
+      expect(comment).toEqual(
+        expect.objectContaining({
+          id: "",
+          issue_id: "",
+          parent_id: null,
+          resolved_at: null,
+        }),
+      );
+    });
+  });
+
   describe("listIssues", () => {
     it("falls back to an empty list when the response is malformed", async () => {
       // `issues` having the wrong type triggers the fallback. An object

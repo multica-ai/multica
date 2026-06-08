@@ -303,8 +303,7 @@ export function useDeleteComment(issueId: string) {
 }
 
 /**
- * Resolve / unresolve a comment thread (root comments only — server rejects
- * the call on a reply). Toggle is driven by the `resolved` boolean param:
+ * Resolve / unresolve an individual comment. Toggle is driven by the `resolved` boolean param:
  * true → POST /resolve, false → DELETE /resolve. Mirrors web
  * `useResolveComment(commentId, resolved)` semantics.
  *

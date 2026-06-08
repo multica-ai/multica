@@ -268,13 +268,13 @@
     "leave_comment_placeholder": "コメントを残す...",
     "send_tooltip": "送信",
     "resolve": {
-      "resolve_action": "スレッドを解決",
-      "unresolve_action": "スレッドの解決を取り消す",
+      "resolve_action": "コメントを解決",
+      "unresolve_action": "コメントの解決を取り消す",
       "collapse": "折りたたむ",
       "bar_other": "{{authors}} による解決済みコメント {{count}} 件",
       "bar_authors_more_other": "{{names}} 他 {{count}} 名",
-      "resolve_failed": "スレッドを解決できませんでした",
-      "unresolve_failed": "スレッドの解決を取り消せませんでした"
+      "resolve_failed": "コメントを解決できませんでした",
+      "unresolve_failed": "コメントの解決を取り消せませんでした"
     }
   },
   "reply": {

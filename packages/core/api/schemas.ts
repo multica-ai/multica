@@ -10,6 +10,7 @@ import type {
   BillingPriceTier,
   BillingTopupsPage,
   BillingTransactionsPage,
+  Comment,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
@@ -185,7 +186,27 @@ export const CommentSchema = z.object({
   attachments: z.array(AttachmentSchema).default([]),
   created_at: z.string(),
   updated_at: z.string(),
+  resolved_at: z.string().nullable().default(null),
+  resolved_by_type: z.string().nullable().default(null),
+  resolved_by_id: z.string().nullable().default(null),
 }).loose();
+
+export const EMPTY_COMMENT: Comment = {
+  id: "",
+  issue_id: "",
+  author_type: "member",
+  author_id: "",
+  content: "",
+  type: "comment",
+  parent_id: null,
+  reactions: [],
+  attachments: [],
+  created_at: "",
+  updated_at: "",
+  resolved_at: null,
+  resolved_by_type: null,
+  resolved_by_id: null,
+};
 
 export const CommentsListSchema = z.array(CommentSchema);
 

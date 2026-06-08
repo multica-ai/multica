@@ -15,12 +15,9 @@
  * the targeted bubble's border highlights. See `useCommentLongPress` in
  * `./comment-context-menu.tsx`.
  *
- * Resolved threads render in a collapsed `<ResolvedThreadBar>` by default —
- * mirrors the same state language web uses (`packages/views/issues/
- * components/resolved-thread-bar.tsx`), but the visual is a single-line
- * tap-to-expand bar at iOS section-row scale. Tap expands the bar in place;
- * when expanded the resolved indicator stays at the top of the body so the
- * user keeps the "this thread is resolved" signal even while reading.
+ * Resolved comments render in a collapsed `<ResolvedCommentBar>` at their
+ * own position by default. The compact bubble still groups a root and its
+ * replies, but resolve state is per-comment.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
@@ -82,13 +79,20 @@ export function CommentCard({
   issueIdentifier,
   highlightedCommentId,
 }: Props) {
-  // Resolved threads default to a single-line bar; tap expands in place for
+  // Resolved comments default to a single-line bar; tap expands in place for
   // the current session. Unmount (scroll out of viewport) resets — same
-  // behavior as iOS Mail's "tap to expand a thread" pattern. Replies cannot
-  // themselves be resolved (server enforces root-only), so the resolved flag
-  // on the root is the single source of truth for this card.
-  const resolved = !!entry.resolved_at;
-  const [expanded, setExpanded] = useState(false);
+  // behavior as iOS Mail's "tap to expand a thread" pattern.
+  const [expandedResolvedIds, setExpandedResolvedIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const setResolvedExpanded = useCallback((entryId: string, expand: boolean) => {
+    setExpandedResolvedIds((prev) => {
+      const next = new Set(prev);
+      if (expand) next.add(entryId);
+      else next.delete(entryId);
+      return next;
+    });
+  }, []);
   // Highlight ring while a long-press action sheet is on screen — child
   // CommentBody flips this via onPressChange so the outer bubble shell can
   // visually bind the sheet to the targeted entry.
@@ -112,28 +116,22 @@ export function CommentCard({
   const isSelectingHere =
     selectingId === entry.id || replies.some((r) => r.id === selectingId);
 
-  // Inbox deep-link target inside a resolved thread expands automatically —
+  // Inbox deep-link target inside a resolved comment expands automatically —
   // otherwise tapping a notification would just reveal a bar with no content
   // and force the user to tap again.
   useEffect(() => {
-    if (!resolved || !highlightedCommentId) return;
-    if (
-      highlightedCommentId === entry.id ||
-      replies.some((r) => r.id === highlightedCommentId)
-    ) {
-      setExpanded(true);
+    if (!highlightedCommentId) return;
+    const target =
+      highlightedCommentId === entry.id
+        ? entry
+        : replies.find((r) => r.id === highlightedCommentId);
+    if (target?.resolved_at) {
+      setResolvedExpanded(target.id, true);
     }
-  }, [resolved, highlightedCommentId, entry.id, replies]);
+  }, [highlightedCommentId, entry, replies, setResolvedExpanded]);
 
-  if (resolved && !expanded) {
-    return (
-      <ResolvedThreadBar
-        entry={entry}
-        replies={replies}
-        onExpand={() => setExpanded(true)}
-      />
-    );
-  }
+  const rootResolved = !!entry.resolved_at;
+  const rootResolvedExpanded = expandedResolvedIds.has(entry.id);
 
   return (
     <View className="px-4">
@@ -154,36 +152,62 @@ export function CommentCard({
         <View
           className={cn(
             "bg-surface-1 rounded-2xl px-4 py-3 gap-3 border-2 border-transparent transition-colors",
-            resolved && "opacity-70",
+            rootResolved && rootResolvedExpanded && "opacity-70",
             isHighlighted && "border-primary/30",
             isSelectingHere && "bg-primary/5 border-primary/30",
           )}
         >
-          {resolved ? (
+          {rootResolved && rootResolvedExpanded ? (
             <ResolvedIndicator
               entry={entry}
-              onCollapse={() => setExpanded(false)}
+              onCollapse={() => setResolvedExpanded(entry.id, false)}
             />
           ) : null}
-          <CommentBody
-            entry={entry}
-            issueId={issueId}
-            issueIdentifier={issueIdentifier}
-            onPressChange={handlePressChange}
-          />
-          {replies.map((reply) => (
-            <View key={reply.id} className="border-t border-border/60 pt-3">
-              <CommentBody
-                entry={reply}
-                issueId={issueId}
-                issueIdentifier={issueIdentifier}
-                onPressChange={handlePressChange}
-              />
-              <ReplyHighlightOverlay
-                active={highlightedCommentId === reply.id}
-              />
-            </View>
-          ))}
+          {rootResolved && !rootResolvedExpanded ? (
+            <ResolvedCommentBar
+              entry={entry}
+              onExpand={() => setResolvedExpanded(entry.id, true)}
+            />
+          ) : (
+            <CommentBody
+              entry={entry}
+              issueId={issueId}
+              issueIdentifier={issueIdentifier}
+              onPressChange={handlePressChange}
+            />
+          )}
+          {replies.map((reply) => {
+            const replyResolved = !!reply.resolved_at;
+            const replyResolvedExpanded = expandedResolvedIds.has(reply.id);
+            return (
+              <View key={reply.id} className="border-t border-border/60 pt-3">
+                {replyResolved && !replyResolvedExpanded ? (
+                  <ResolvedCommentBar
+                    entry={reply}
+                    onExpand={() => setResolvedExpanded(reply.id, true)}
+                  />
+                ) : (
+                  <>
+                    {replyResolved && replyResolvedExpanded ? (
+                      <ResolvedIndicator
+                        entry={reply}
+                        onCollapse={() => setResolvedExpanded(reply.id, false)}
+                      />
+                    ) : null}
+                    <CommentBody
+                      entry={reply}
+                      issueId={issueId}
+                      issueIdentifier={issueIdentifier}
+                      onPressChange={handlePressChange}
+                    />
+                  </>
+                )}
+                <ReplyHighlightOverlay
+                  active={highlightedCommentId === reply.id}
+                />
+              </View>
+            );
+          })}
         </View>
         <RootHighlightOverlay active={highlightedCommentId === entry.id} />
       </View>
@@ -192,84 +216,46 @@ export function CommentCard({
 }
 
 /**
- * Compact "thread is resolved" bar — substitutes the full card when a
- * resolved root is collapsed (default state). Tap anywhere to expand.
- *
- * Mirrors web's `<ResolvedThreadBar>` (`packages/views/issues/components/
- * resolved-thread-bar.tsx`): checkmark + N participant authors + reply
- * count + chevron. On mobile we drop the dedicated <Card> chrome and use
- * the same `bg-surface-1` bubble so the resolved bar reads as the same
- * "row" rhythm as the full card it stands in for.
+ * Compact "comment is resolved" bar — substitutes a single comment body when
+ * collapsed (default state). Tap anywhere to expand.
  */
-function ResolvedThreadBar({
+function ResolvedCommentBar({
   entry,
-  replies,
   onExpand,
 }: {
   entry: TimelineEntry;
-  replies: TimelineEntry[];
   onExpand: () => void;
 }) {
   const { getName } = useActorLookup();
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
-
-  // Unique participant set across root + replies, preserving chronological
-  // order of first appearance. Up to two authors are named; the rest are
-  // rolled into "+N more" so the bar stays a single line on a narrow phone.
-  const authorsLabel = useMemo(() => {
-    const MAX_NAMED = 2;
-    const seen = new Set<string>();
-    const ordered: { type: string | null; id: string | null }[] = [];
-    for (const e of [entry, ...replies]) {
-      const key = `${e.actor_type}:${e.actor_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      ordered.push({ type: e.actor_type, id: e.actor_id });
-    }
-    const named = ordered
-      .slice(0, MAX_NAMED)
-      .map((a) =>
-        getName(a.type as "member" | "agent" | null | undefined, a.id),
-      )
-      .join(", ");
-    const remaining = ordered.length - MAX_NAMED;
-    return remaining > 0 ? `${named} +${remaining}` : named;
-  }, [entry, replies, getName]);
-
-  const total = 1 + replies.length;
+  const authorName = getName(
+    entry.actor_type as "member" | "agent" | null | undefined,
+    entry.actor_id,
+  );
 
   return (
-    <View className="px-4">
-      <Pressable
-        onPress={onExpand}
-        className="flex-row items-center gap-2.5 px-4 py-3 rounded-2xl bg-surface-1 active:opacity-70"
-        accessibilityRole="button"
-        accessibilityLabel={`Resolved thread by ${authorsLabel}, ${total} ${total === 1 ? "message" : "messages"}. Tap to expand.`}
+    <Pressable
+      onPress={onExpand}
+      className="flex-row items-center gap-2.5 rounded-xl bg-surface-2 px-3 py-2.5 active:opacity-70"
+      accessibilityRole="button"
+      accessibilityLabel={`Resolved comment by ${authorName}. Tap to expand.`}
+    >
+      <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
+      <Text
+        className="flex-1 text-sm text-muted-foreground"
+        numberOfLines={1}
       >
-        <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
-        <Text
-          className="flex-1 text-sm text-muted-foreground"
-          numberOfLines={1}
-        >
-          Resolved · {total} {total === 1 ? "message" : "messages"} by{" "}
-          {authorsLabel}
-        </Text>
-        <Ionicons name="chevron-down" size={14} color={mutedFg} />
-      </Pressable>
-    </View>
+        Resolved comment by {authorName}
+      </Text>
+      <Ionicons name="chevron-down" size={14} color={mutedFg} />
+    </Pressable>
   );
 }
 
 /**
- * Resolved indicator row that sits at the top of an expanded resolved
- * thread. Carries the "who resolved + when" attribution and a collapse
- * affordance — equivalent to web's "Mark as resolved" header bar
- * (`packages/views/issues/components/comment-card.tsx:519-532`).
- *
- * Tap collapses the thread back to the bar without firing the
- * <CommentBody> long-press action sheet (the row is a self-contained
- * Pressable, sits above CommentBody in the bubble's gap-3 layout).
+ * Resolved indicator row that sits above an expanded resolved comment.
+ * Carries the "who resolved + when" attribution and a collapse affordance.
  */
 function ResolvedIndicator({
   entry,
@@ -291,7 +277,7 @@ function ResolvedIndicator({
       onPress={onCollapse}
       className="flex-row items-center gap-2 active:opacity-60"
       accessibilityRole="button"
-      accessibilityLabel="Collapse resolved thread"
+      accessibilityLabel="Collapse resolved comment"
     >
       <Ionicons name="checkmark-circle" size={14} color={mutedFg} />
       <Text className="text-xs text-muted-foreground flex-1" numberOfLines={1}>
@@ -418,7 +404,10 @@ function CommentBody({
 
   // Reactions live on TimelineEntry.reactions (mirrored from Comment).
   // Pass through to the bar; toggle finds existing match by emoji + actor.
-  const reactions: Reaction[] = (entry.reactions ?? []) as Reaction[];
+  const reactions: Reaction[] = useMemo(
+    () => (entry.reactions ?? []) as Reaction[],
+    [entry.reactions],
+  );
 
   const onToggleReaction = useCallback(
     (emoji: string) => {

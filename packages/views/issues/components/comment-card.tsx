@@ -39,6 +39,7 @@ import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
+import { ResolvedCommentBar } from "./resolved-thread-bar";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,14 +69,11 @@ interface CommentCardProps {
   onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
-  /** Toggle the resolved state on the thread root. Only invoked for root entries. */
+  /** Toggle the resolved state for any comment in this thread. */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
-  /**
-   * When non-null, the thread root is currently rendered as a resolved-but-
-   * expanded card. Pass a "Collapse" affordance into the header so the user
-   * can fold the thread back to the bar; the parent owns the session state.
-   */
-  onCollapseResolved?: () => void;
+  /** Per-session set of resolved comments the user expanded back to full text. */
+  expandedResolvedIds?: ReadonlySet<string>;
+  onResolvedExpandChange?: (commentId: string, expand: boolean) => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
 }
@@ -323,6 +321,9 @@ function CommentRow({
   onEdit,
   onDelete,
   onToggleReaction,
+  onResolveToggle,
+  isResolvedExpanded = false,
+  onResolvedExpandChange,
 }: {
   issueId: string;
   entry: TimelineEntry;
@@ -331,6 +332,9 @@ function CommentRow({
   onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  isResolvedExpanded?: boolean;
+  onResolvedExpandChange?: (commentId: string, expand: boolean) => void;
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -346,6 +350,17 @@ function CommentRow({
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+
+  if (entry.resolved_at && !isResolvedExpanded) {
+    return (
+      <div className="py-3">
+        <ResolvedCommentBar
+          entry={entry}
+          onExpand={() => onResolvedExpandChange?.(entry.id, true)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="py-3">
@@ -366,6 +381,17 @@ function CommentRow({
             {new Date(entry.created_at).toLocaleString()}
           </TooltipContent>
         </Tooltip>
+
+        {entry.resolved_at && onResolvedExpandChange && (
+          <button
+            type="button"
+            onClick={() => onResolvedExpandChange(entry.id, false)}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {t(($) => $.comment.resolve.collapse)}
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-0.5">
           <QuickEmojiPicker
@@ -389,6 +415,24 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {onResolveToggle && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onResolveToggle(entry.id, !entry.resolved_at)}>
+                    {entry.resolved_at ? (
+                      <>
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        {t(($) => $.comment.resolve.unresolve_action)}
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        {t(($) => $.comment.resolve.resolve_action)}
+                      </>
+                    )}
+                  </DropdownMenuItem>
+                </>
+              )}
               {(canEditEntry || canDeleteEntry) && (
                 <>
                   <DropdownMenuSeparator />
@@ -502,7 +546,8 @@ function CommentCardImpl({
   onDelete,
   onToggleReaction,
   onResolveToggle,
-  onCollapseResolved,
+  expandedResolvedIds,
+  onResolvedExpandChange,
   highlightedCommentId,
 }: CommentCardProps) {
   const { t } = useT("issues");
@@ -529,13 +574,15 @@ function CommentCardImpl({
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   const isHighlighted = highlightedCommentId === entry.id;
+  const rootResolvedExpanded = !!entry.resolved_at && !!expandedResolvedIds?.has(entry.id);
+  const rootResolvedCollapsed = !!entry.resolved_at && !rootResolvedExpanded;
 
   return (
     <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
-      {onCollapseResolved && (
+      {rootResolvedExpanded && onResolvedExpandChange && (
         <button
           type="button"
-          onClick={onCollapseResolved}
+          onClick={() => onResolvedExpandChange(entry.id, false)}
           className="flex w-full items-center justify-between border-b border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
           aria-label={t(($) => $.comment.resolve.collapse)}
         >
@@ -657,7 +704,14 @@ function CommentCardImpl({
         <CollapsibleContent>
           {/* Parent comment body */}
           <div className="px-4 pb-3">
-            {edit.editing ? (
+            {rootResolvedCollapsed ? (
+              <div className="pl-10">
+                <ResolvedCommentBar
+                  entry={entry}
+                  onExpand={() => onResolvedExpandChange?.(entry.id, true)}
+                />
+              </div>
+            ) : edit.editing ? (
               <div
                 {...edit.dropZoneProps}
                 className="relative pl-10"
@@ -736,6 +790,9 @@ function CommentCardImpl({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}
+                onResolveToggle={onResolveToggle}
+                isResolvedExpanded={!!expandedResolvedIds?.has(reply.id)}
+                onResolvedExpandChange={onResolvedExpandChange}
               />
             </div>
           ))}

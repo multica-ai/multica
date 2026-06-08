@@ -276,15 +276,15 @@
     "leave_comment_placeholder": "댓글 남기기...",
     "send_tooltip": "보내기",
     "resolve": {
-      "resolve_action": "스레드 해결",
-      "unresolve_action": "스레드 해결 취소",
+      "resolve_action": "댓글 해결",
+      "unresolve_action": "댓글 해결 취소",
       "collapse": "접기",
       "bar_one": "{{authors}}님의 해결된 댓글 {{count}}개",
       "bar_other": "{{authors}}님의 해결된 댓글 {{count}}개",
       "bar_authors_more_one": "{{names}} 외 {{count}}명",
       "bar_authors_more_other": "{{names}} 외 {{count}}명",
-      "resolve_failed": "스레드를 해결하지 못했습니다",
-      "unresolve_failed": "스레드 해결을 취소하지 못했습니다"
+      "resolve_failed": "댓글을 해결하지 못했습니다",
+      "unresolve_failed": "댓글 해결을 취소하지 못했습니다"
     }
   },
   "reply": {

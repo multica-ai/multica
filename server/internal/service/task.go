@@ -2024,16 +2024,13 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if err != nil {
 		return
 	}
-	// Resolve the thread root for thread-level side effects without overwriting
-	// parentID. The stored parent_id must remain the exact comment being replied
-	// to; recursive thread reads recover the root when needed.
-	var rootComment *db.Comment
+	// Resolve the direct parent for reply side effects without overwriting
+	// parentID. The stored parent_id must remain the exact comment being
+	// replied to; recursive thread reads recover the root when needed.
+	var parentComment *db.Comment
 	if parentID.Valid {
-		if root, err := s.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
-			CommentID:   parentID,
-			WorkspaceID: issue.WorkspaceID,
-		}); err == nil {
-			rootComment = &root
+		if parent, err := s.Queries.GetComment(ctx, parentID); err == nil && util.UUIDToString(parent.IssueID) == util.UUIDToString(issueID) {
+			parentComment = &parent
 		}
 	}
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
@@ -2070,46 +2067,54 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			"issue_status": issue.Status,
 		},
 	})
-	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
+	s.AutoUnresolveCommentsOnReply(ctx, []*db.Comment{parentComment}, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
 }
 
-// AutoUnresolveThreadOnReply clears resolved_at on the thread root when a
-// reply lands in a resolved thread, and broadcasts comment:unresolved. Shared
-// between the user-facing Handler.CreateComment path and the agent-facing
-// TaskService.createAgentComment path so the resolved-then-replied state can
-// never desync (one of the bugs Emacs flagged on PR #2300). Errors are logged
-// — the reply itself already committed, the desync is recoverable on next read.
-func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db.Comment, workspaceID, actorType, actorID string) {
-	if parent == nil || !parent.ResolvedAt.Valid {
-		return
-	}
-	updated, err := s.Queries.UnresolveComment(ctx, parent.ID)
-	if err != nil {
-		slog.Warn("auto-unresolve on reply failed", "error", err, "comment_id", util.UUIDToString(parent.ID))
-		return
-	}
-	s.Bus.Publish(events.Event{
-		Type:        protocol.EventCommentUnresolved,
-		WorkspaceID: workspaceID,
-		ActorType:   actorType,
-		ActorID:     actorID,
-		Payload: map[string]any{
-			"comment": map[string]any{
-				"id":               util.UUIDToString(updated.ID),
-				"issue_id":         util.UUIDToString(updated.IssueID),
-				"author_type":      updated.AuthorType,
-				"author_id":        util.UUIDToString(updated.AuthorID),
-				"content":          updated.Content,
-				"type":             updated.Type,
-				"parent_id":        util.UUIDToPtr(updated.ParentID),
-				"created_at":       util.TimestampToString(updated.CreatedAt),
-				"updated_at":       util.TimestampToString(updated.UpdatedAt),
-				"resolved_at":      util.TimestampToPtr(updated.ResolvedAt),
-				"resolved_by_type": util.TextToPtr(updated.ResolvedByType),
-				"resolved_by_id":   util.UUIDToPtr(updated.ResolvedByID),
+// AutoUnresolveCommentsOnReply clears resolved_at on resolved comments that a
+// new reply re-opens, and broadcasts comment:unresolved for each changed row.
+// Callers pass the direct parent comment only; unrelated resolved roots or
+// ancestors stay resolved. Errors are logged — the reply itself already
+// committed, the desync is recoverable on next read.
+func (s *TaskService) AutoUnresolveCommentsOnReply(ctx context.Context, comments []*db.Comment, workspaceID, actorType, actorID string) {
+	seen := make(map[string]struct{}, len(comments))
+	for _, comment := range comments {
+		if comment == nil || !comment.ResolvedAt.Valid {
+			continue
+		}
+		commentID := util.UUIDToString(comment.ID)
+		if _, ok := seen[commentID]; ok {
+			continue
+		}
+		seen[commentID] = struct{}{}
+
+		updated, err := s.Queries.UnresolveComment(ctx, comment.ID)
+		if err != nil {
+			slog.Warn("auto-unresolve on reply failed", "error", err, "comment_id", commentID)
+			continue
+		}
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventCommentUnresolved,
+			WorkspaceID: workspaceID,
+			ActorType:   actorType,
+			ActorID:     actorID,
+			Payload: map[string]any{
+				"comment": map[string]any{
+					"id":               util.UUIDToString(updated.ID),
+					"issue_id":         util.UUIDToString(updated.IssueID),
+					"author_type":      updated.AuthorType,
+					"author_id":        util.UUIDToString(updated.AuthorID),
+					"content":          updated.Content,
+					"type":             updated.Type,
+					"parent_id":        util.UUIDToPtr(updated.ParentID),
+					"created_at":       util.TimestampToString(updated.CreatedAt),
+					"updated_at":       util.TimestampToString(updated.UpdatedAt),
+					"resolved_at":      util.TimestampToPtr(updated.ResolvedAt),
+					"resolved_by_type": util.TextToPtr(updated.ResolvedByType),
+					"resolved_by_id":   util.UUIDToPtr(updated.ResolvedByID),
+				},
 			},
-		},
-	})
+		})
+	}
 }
 
 func issueToMap(issue db.Issue, issuePrefix string) map[string]any {

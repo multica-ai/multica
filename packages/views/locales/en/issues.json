@@ -276,15 +276,15 @@
     "leave_comment_placeholder": "Leave a comment...",
     "send_tooltip": "Send",
     "resolve": {
-      "resolve_action": "Resolve thread",
-      "unresolve_action": "Unresolve thread",
+      "resolve_action": "Resolve comment",
+      "unresolve_action": "Unresolve comment",
       "collapse": "Collapse",
       "bar_one": "{{count}} resolved comment from {{authors}}",
       "bar_other": "{{count}} resolved comments from {{authors}}",
       "bar_authors_more_one": "{{names}} and {{count}} other",
       "bar_authors_more_other": "{{names}} and {{count}} others",
-      "resolve_failed": "Failed to resolve thread",
-      "unresolve_failed": "Failed to unresolve thread"
+      "resolve_failed": "Failed to resolve comment",
+      "unresolve_failed": "Failed to unresolve comment"
     }
   },
   "reply": {

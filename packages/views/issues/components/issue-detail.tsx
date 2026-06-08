@@ -53,7 +53,6 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
-import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
@@ -275,7 +274,7 @@ function formatTokenCount(n: number): string {
 }
 
 // Stable reference for threads with no replies. Inline `[]` would create a
-// new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
+// new array on every render and bust React.memo on CommentCard.
 const EMPTY_REPLIES: TimelineEntry[] = [];
 
 // ---------------------------------------------------------------------------
@@ -335,7 +334,6 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
 // the itemContent dispatcher can switch on.
 type TimelineItem =
   | { kind: "comment"; id: string; entry: TimelineEntry }
-  | { kind: "resolved-bar"; id: string; entry: TimelineEntry }
   | { kind: "activity-group"; id: string; entries: TimelineEntry[] };
 
 type RawTimelineGroup = {
@@ -343,21 +341,12 @@ type RawTimelineGroup = {
   entries: TimelineEntry[];
 };
 
-function flattenGroups(
-  groups: ReadonlyArray<RawTimelineGroup>,
-  expandedResolved: ReadonlySet<string>,
-): TimelineItem[] {
+function flattenGroups(groups: ReadonlyArray<RawTimelineGroup>): TimelineItem[] {
   const out: TimelineItem[] = [];
   for (const group of groups) {
     if (group.type === "comment") {
       const entry = group.entries[0]!;
-      const isResolved = !!entry.resolved_at;
-      const isExpanded = expandedResolved.has(entry.id);
-      out.push(
-        isResolved && !isExpanded
-          ? { kind: "resolved-bar", id: entry.id, entry }
-          : { kind: "comment", id: entry.id, entry },
-      );
+      out.push({ kind: "comment", id: entry.id, entry });
     } else {
       out.push({
         kind: "activity-group",
@@ -722,8 +711,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
-  // Per-session: which resolved threads the user has temporarily expanded.
-  // Not persisted (matches Linear) — reload collapses everything back to bars.
+  // Per-session: which resolved comments the user has temporarily expanded.
+  // Not persisted (matches Linear) — reload collapses them back to bars.
   const [expandedResolved, setExpandedResolved] = useState<Set<string>>(() => new Set());
   const toggleResolvedExpand = useCallback((commentId: string, expand: boolean) => {
     setExpandedResolved((prev) => {
@@ -853,9 +842,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   } = useIssueTimeline(id, user?.id);
 
   // Resolve / unresolve must always clear the per-session expand entry so
-  // re-resolving an already-expanded thread folds it back to the bar (the
+  // re-resolving an already-expanded comment folds it back to the bar (the
   // expand Set is keyed only on commentId, not on resolution state). Without
-  // this wrapper, an expand → unresolve → resolve sequence keeps the thread
+  // this wrapper, an expand → unresolve → resolve sequence keeps the comment
   // visually expanded after the second resolve.
   const handleResolveToggle = useCallback(
     (commentId: string, resolved: boolean) => {
@@ -870,7 +859,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // dedicated `threadReplies` slice per root. Slices are stabilized against
   // the previous render via `prevThreadRepliesRef`: if a thread's flat list
   // is shallow-equal to the previous one, we reuse the previous array so
-  // React.memo on CommentCard / ResolvedThreadBar can short-circuit. Without
+  // React.memo on CommentCard can short-circuit. Without
   // this, every WS event (including reactions, edits, AI streaming on an
   // unrelated thread) hands every card a brand-new prop reference and forces
   // every thread subtree to re-render in lockstep.
@@ -954,13 +943,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [timeline]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
-  // changes (timeline events) or expandedResolved flips (user toggles a
-  // resolved thread). Kept in a useMemo so Virtuoso's data identity is stable
-  // across unrelated re-renders.
+  // changes (timeline events). Kept in a useMemo so Virtuoso's data identity
+  // is stable across unrelated re-renders.
   const items = useMemo<TimelineItem[]>(
-    () => flattenGroups(timelineView.groups, expandedResolved),
-    [timelineView.groups, expandedResolved],
+    () => flattenGroups(timelineView.groups),
+    [timelineView.groups],
   );
+
+  const commentsById = useMemo(() => {
+    const map = new Map<string, TimelineEntry>();
+    for (const entry of timeline) {
+      if (entry.type === "comment") {
+        map.set(entry.id, entry);
+      }
+    }
+    return map;
+  }, [timeline]);
 
   // ID of the trailing activity block — the only one expanded by default.
   const lastActivityGroupId = useMemo(() => {
@@ -970,31 +968,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
     return null;
   }, [timelineView.groups]);
-
-  // Map of reply-comment id → root-comment id, so a deep-link to a reply
-  // (which lives inside a CommentCard, not in the flat items array) can fall
-  // back to scrolling the root thread into view. Without this, an inbox
-  // notification on a reply would land at items[-1] and short-circuit.
-  const replyToRoot = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const [rootId, replies] of timelineView.threadReplies) {
-      for (const reply of replies) {
-        map.set(reply.id, rootId);
-      }
-    }
-    return map;
-  }, [timelineView.threadReplies]);
-
-  // Deep-link target index in the flat items array. For root comments this is
-  // a direct findIndex hit; for reply ids we look up the enclosing root.
-  const targetIdx = useMemo(() => {
-    if (!highlightCommentId) return -1;
-    const direct = items.findIndex((it) => it.id === highlightCommentId);
-    if (direct >= 0) return direct;
-    const rootId = replyToRoot.get(highlightCommentId);
-    if (!rootId) return -1;
-    return items.findIndex((it) => it.id === rootId);
-  }, [items, highlightCommentId, replyToRoot]);
 
   const {
     reactions: issueReactions,
@@ -1073,9 +1046,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // virtualization), so every comment id is in the DOM by the time this
   // effect runs after commit.
   //
-  // For a reply inside a folded resolved thread, the reply is not in items
-  // (only the resolved-bar root is). Auto-expand the thread first; the
-  // effect re-runs once items re-flatten.
+  // For a deep link to a folded resolved comment, auto-expand the comment
+  // first so the highlighted target shows the actual comment body instead
+  // of just the folded bar. The effect re-runs after the expand state flips.
   //
   // `scrollContainerEl` is in deps because the component early-returns a
   // loading skeleton while the issue query is pending. The scroll-container
@@ -1085,13 +1058,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (!highlightCommentId || items.length === 0) return;
     if (didHighlightRef.current === highlightCommentId) return;
 
-    const rootId = replyToRoot.get(highlightCommentId);
+    const targetComment = commentsById.get(highlightCommentId);
     if (
-      rootId &&
-      rootId !== highlightCommentId &&
-      items[targetIdx]?.kind === "resolved-bar"
+      targetComment?.resolved_at &&
+      !expandedResolved.has(highlightCommentId)
     ) {
-      toggleResolvedExpand(rootId, true);
+      toggleResolvedExpand(highlightCommentId, true);
       return;
     }
 
@@ -1104,7 +1076,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     setHighlightedId(highlightCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
     return () => clearTimeout(fade);
-  }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
+  }, [highlightCommentId, items, scrollContainerEl, commentsById, expandedResolved, toggleResolvedExpand]);
 
   // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
   // the viewport — off-screen comments are invisible to browser find-in-page.
@@ -1555,19 +1527,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // The wrapper `id="comment-..."` is the deep-link target — equivalent to
   // a native `<a href="#comment-...">` anchor.
   const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
-    if (item.kind === "resolved-bar") {
-      return (
-        <div className="pb-3" id={`comment-${item.id}`}>
-          <ResolvedThreadBar
-            entry={item.entry}
-            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
-            onExpand={() => toggleResolvedExpand(item.id, true)}
-          />
-        </div>
-      );
-    }
     if (item.kind === "comment") {
-      const isResolved = !!item.entry.resolved_at;
       return (
         <div className="pb-3" id={`comment-${item.id}`}>
           <CommentCard
@@ -1581,7 +1541,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
             onResolveToggle={handleResolveToggle}
-            onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
+            expandedResolvedIds={expandedResolved}
+            onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
           />
         </div>

@@ -733,8 +733,7 @@ class ApiClient {
     await this.fetch<void>(`/api/comments/${commentId}`, { method: "DELETE" });
   }
 
-  // POST /api/comments/:id/resolve — marks the thread root resolved; only
-  // meaningful for root comments. Backend mirrors web semantics.
+  // POST /api/comments/:id/resolve — marks an individual comment resolved.
   async resolveComment(commentId: string): Promise<Comment> {
     return this.fetchValidatedWith(
       `/api/comments/${commentId}/resolve`,
@@ -745,7 +744,7 @@ class ApiClient {
     );
   }
 
-  // DELETE /api/comments/:id/resolve — un-resolves the thread.
+  // DELETE /api/comments/:id/resolve — un-resolves an individual comment.
   async unresolveComment(commentId: string): Promise<Comment> {
     return this.fetchValidatedWith(
       `/api/comments/${commentId}/resolve`,

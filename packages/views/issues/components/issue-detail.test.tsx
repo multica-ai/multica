@@ -200,6 +200,8 @@ const mockApiObj = vi.hoisted(() => ({
   createComment: vi.fn(),
   updateComment: vi.fn(),
   deleteComment: vi.fn(),
+  resolveComment: vi.fn(),
+  unresolveComment: vi.fn(),
   deleteIssue: vi.fn(),
   updateIssue: vi.fn(),
   listIssueSubscribers: vi.fn().mockResolvedValue([]),
@@ -502,6 +504,8 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.resolveComment.mockResolvedValue({ ...mockTimeline[0], issue_id: "issue-1" });
+    mockApiObj.unresolveComment.mockResolvedValue({ ...mockTimeline[0], issue_id: "issue-1" });
     mockApiObj.listMembers.mockResolvedValue([
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
@@ -529,6 +533,84 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+  });
+
+  it("folds only a resolved root comment and keeps its unresolved replies visible", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "comment",
+        id: "root-resolved",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Resolved root content",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "comment",
+        resolved_at: "2026-01-19T00:00:00Z",
+      },
+      {
+        type: "comment",
+        id: "reply-open",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Unresolved reply stays visible",
+        parent_id: "root-resolved",
+        created_at: "2026-01-18T01:00:00Z",
+        updated_at: "2026-01-18T01:00:00Z",
+        comment_type: "comment",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("1 resolved comment from Test User")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Resolved root content")).not.toBeInTheDocument();
+    expect(screen.getByText("Unresolved reply stays visible")).toBeInTheDocument();
+  });
+
+  it("folds a resolved reply independently and expands it in place", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "comment",
+        id: "root-open",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Open root content",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "comment",
+      },
+      {
+        type: "comment",
+        id: "reply-resolved",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Resolved reply content",
+        parent_id: "root-open",
+        created_at: "2026-01-18T01:00:00Z",
+        updated_at: "2026-01-18T01:00:00Z",
+        comment_type: "comment",
+        resolved_at: "2026-01-19T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Open root content")).toBeInTheDocument();
+    });
+    const foldedReply = screen.getByText("1 resolved comment from Test User");
+    expect(screen.queryByText("Resolved reply content")).not.toBeInTheDocument();
+
+    fireEvent.click(foldedReply);
+
+    await waitFor(() => {
+      expect(screen.getByText("Resolved reply content")).toBeInTheDocument();
+    });
   });
 
   it("renders the issue title leaf as a link to the issue detail page", async () => {
@@ -1017,13 +1099,8 @@ describe("IssueDetail (shared)", () => {
       });
     });
 
-    it("auto-expands a folded resolved thread when deep-link target is a reply inside it", async () => {
-      // Seed a timeline where comment-3 is resolved (so it renders as a
-      // resolved-bar by default) and has a reply, reply-1, whose id is the
-      // deep-link target. The reply is not in the flat items array — only
-      // the resolved-bar root is. The effect must detect this, expand the
-      // thread, then on re-run scroll to the reply's id="comment-reply-1" node.
-      const timelineWithResolvedThread: TimelineEntry[] = [
+    it("auto-expands a folded resolved comment when it is the deep-link target", async () => {
+      const timelineWithResolvedComment: TimelineEntry[] = [
         ...mockTimeline,
         {
           type: "comment",
@@ -1042,30 +1119,26 @@ describe("IssueDetail (shared)", () => {
           id: "reply-1",
           actor_type: "member",
           actor_id: "user-1",
-          content: "Reply inside resolved thread",
+          content: "Reply inside resolved comment group",
           parent_id: "comment-3",
           created_at: "2026-01-18T01:00:00Z",
           updated_at: "2026-01-18T01:00:00Z",
           comment_type: "comment",
         } as TimelineEntry,
       ];
-      mockApiObj.listTimeline.mockResolvedValue(timelineWithResolvedThread);
+      mockApiObj.listTimeline.mockResolvedValue(timelineWithResolvedComment);
 
       const queryClient = createTestQueryClient();
       render(
         <I18nProvider locale="en" resources={TEST_RESOURCES}>
           <QueryClientProvider client={queryClient}>
-            <IssueDetail issueId="issue-1" highlightCommentId="reply-1" />
+            <IssueDetail issueId="issue-1" highlightCommentId="comment-3" />
           </QueryClientProvider>
         </I18nProvider>,
       );
 
-      // After expansion, the reply must appear in the DOM (inside the now
-      // -unfolded CommentCard) and the deep-link effect must scroll to it.
       await waitFor(() => {
-        expect(
-          document.getElementById("comment-reply-1"),
-        ).not.toBeNull();
+        expect(screen.getByText("Resolved root")).toBeInTheDocument();
       });
       await waitFor(() => {
         expect(scrollIntoViewSpy).toHaveBeenCalledWith(
