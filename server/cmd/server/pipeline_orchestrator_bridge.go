@@ -70,6 +70,10 @@ type pipelineOrchestratorBridge struct {
 	now   func() time.Time
 	async bool
 
+	loadIssueContext        func(context.Context, string) (pipelineIssueContext, bool)
+	getAutopilotRun         func(context.Context, pgtype.UUID) (db.AutopilotRun, error)
+	listPullRequestsByIssue func(context.Context, pgtype.UUID) ([]db.ListPullRequestsByIssueRow, error)
+
 	mu   sync.Mutex
 	seen map[string]struct{}
 }
@@ -95,12 +99,18 @@ type pipelineIssueContext struct {
 	ParentMetadata map[string]any
 }
 
+type pipelineRunTriggerContext struct {
+	ProjectID     string
+	IssueID       string
+	ParentIssueID string
+}
+
 func newPipelineOrchestratorBridge(queries *db.Queries, cfg pipelineBridgeConfig) *pipelineOrchestratorBridge {
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	return &pipelineOrchestratorBridge{
+	b := &pipelineOrchestratorBridge{
 		queries: queries,
 		cfg:     cfg,
 		client:  &http.Client{Timeout: timeout},
@@ -108,6 +118,12 @@ func newPipelineOrchestratorBridge(queries *db.Queries, cfg pipelineBridgeConfig
 		async:   true,
 		seen:    make(map[string]struct{}),
 	}
+	b.loadIssueContext = b.queryPipelineIssueContext
+	if queries != nil {
+		b.getAutopilotRun = queries.GetAutopilotRun
+		b.listPullRequestsByIssue = queries.ListPullRequestsByIssue
+	}
+	return b
 }
 
 func (b *pipelineOrchestratorBridge) onIssueUpdated(e events.Event) {
@@ -126,7 +142,7 @@ func (b *pipelineOrchestratorBridge) onIssueUpdated(e events.Event) {
 	if prevStatus == issue.Status {
 		return
 	}
-	ctx, ok := b.loadPipelineIssueContext(context.Background(), issue.ID)
+	ctx, ok := b.loadIssueContext(context.Background(), issue.ID)
 	if !ok || !ctx.isDeliveryIssue(b.cfg.AllowedProjectIDs) {
 		return
 	}
@@ -167,7 +183,7 @@ func (b *pipelineOrchestratorBridge) onCommentCreated(e events.Event) {
 	if !ok {
 		return
 	}
-	ctx, ok := b.loadPipelineIssueContext(context.Background(), comment.IssueID)
+	ctx, ok := b.loadIssueContext(context.Background(), comment.IssueID)
 	if !ok || !ctx.isDeliveryIssue(b.cfg.AllowedProjectIDs) {
 		return
 	}
@@ -221,7 +237,7 @@ func (b *pipelineOrchestratorBridge) dispatchPullRequestForIssue(e events.Event,
 	default:
 		return
 	}
-	ctx, ok := b.loadPipelineIssueContext(context.Background(), issueID)
+	ctx, ok := b.loadIssueContext(context.Background(), issueID)
 	if !ok || !ctx.isDeliveryIssue(b.cfg.AllowedProjectIDs) || ctx.waitingOnHuman() {
 		return
 	}
@@ -240,14 +256,14 @@ func (b *pipelineOrchestratorBridge) dispatchPullRequestForIssue(e events.Event,
 }
 
 func (b *pipelineOrchestratorBridge) dispatchCheckSuitesForIssue(e events.Event, issueID string) {
-	if b.queries == nil {
+	if b.listPullRequestsByIssue == nil {
 		return
 	}
-	ctx, ok := b.loadPipelineIssueContext(context.Background(), issueID)
+	ctx, ok := b.loadIssueContext(context.Background(), issueID)
 	if !ok || !ctx.isDeliveryIssue(b.cfg.AllowedProjectIDs) || ctx.waitingOnHuman() {
 		return
 	}
-	rows, err := b.queries.ListPullRequestsByIssue(context.Background(), ctx.Issue.ID)
+	rows, err := b.listPullRequestsByIssue(context.Background(), ctx.Issue.ID)
 	if err != nil {
 		return
 	}
@@ -289,28 +305,44 @@ func (b *pipelineOrchestratorBridge) onAutopilotRunDone(e events.Event) {
 	if runID == "" {
 		return
 	}
-	if b.queries == nil {
+	if b.getAutopilotRun == nil {
 		return
 	}
 	runUUID, err := util.ParseUUID(runID)
 	if err != nil {
 		return
 	}
-	run, err := b.queries.GetAutopilotRun(context.Background(), runUUID)
-	if err != nil || !run.IssueID.Valid {
+	run, err := b.getAutopilotRun(context.Background(), runUUID)
+	if err != nil {
 		return
 	}
-	ctx, ok := b.loadPipelineIssueContext(context.Background(), util.UUIDToString(run.IssueID))
+
+	runCtx := pipelineContextFromRunTrigger(run)
+	if run.IssueID.Valid {
+		runCtx.IssueID = util.UUIDToString(run.IssueID)
+	}
+	if runCtx.IssueID == "" {
+		return
+	}
+	ctx, ok := b.loadIssueContext(context.Background(), runCtx.IssueID)
 	if !ok || !ctx.isDeliveryIssue(b.cfg.AllowedProjectIDs) || ctx.waitingOnHuman() {
 		return
+	}
+	projectID := runCtx.ProjectID
+	if projectID == "" {
+		projectID = uuidPtrString(ctx.effectiveProjectID())
+	}
+	parentIssueID := runCtx.ParentIssueID
+	if parentIssueID == "" {
+		parentIssueID = uuidPtrString(ctx.effectiveParentID())
 	}
 	b.dispatch(pipelineWebhookPayload{
 		EventID:       stableEventID("run-failed", runID),
 		EventType:     pipelineEventRunFailed,
 		WorkspaceID:   e.WorkspaceID,
-		ProjectID:     uuidPtrString(ctx.effectiveProjectID()),
-		IssueID:       util.UUIDToString(run.IssueID),
-		ParentIssueID: uuidPtrString(ctx.effectiveParentID()),
+		ProjectID:     projectID,
+		IssueID:       runCtx.IssueID,
+		ParentIssueID: parentIssueID,
 		ActorType:     coalesceActorType(e.ActorType),
 		ActorID:       e.ActorID,
 		OccurredAt:    b.now().UTC().Format(time.RFC3339),
@@ -372,7 +404,7 @@ func (b *pipelineOrchestratorBridge) markSeen(eventID string) bool {
 	return true
 }
 
-func (b *pipelineOrchestratorBridge) loadPipelineIssueContext(ctx context.Context, issueID string) (pipelineIssueContext, bool) {
+func (b *pipelineOrchestratorBridge) queryPipelineIssueContext(ctx context.Context, issueID string) (pipelineIssueContext, bool) {
 	if b.queries == nil || issueID == "" {
 		return pipelineIssueContext{}, false
 	}
@@ -476,6 +508,43 @@ func pipelineCommentKeyword(content string) (string, bool) {
 
 func isOwnerAcceptanceKeyword(keyword string) bool {
 	return keyword == "验收通过" || keyword == "验收不通过"
+}
+
+func pipelineContextFromRunTrigger(run db.AutopilotRun) pipelineRunTriggerContext {
+	if len(run.TriggerPayload) == 0 {
+		return pipelineRunTriggerContext{}
+	}
+	if ctx, ok := pipelineContextFromPayload(run.TriggerPayload); ok {
+		return ctx
+	}
+
+	var envelope struct {
+		EventPayload json.RawMessage `json:"eventPayload"`
+	}
+	if err := json.Unmarshal(run.TriggerPayload, &envelope); err != nil || len(envelope.EventPayload) == 0 {
+		return pipelineRunTriggerContext{}
+	}
+	ctx, _ := pipelineContextFromPayload(envelope.EventPayload)
+	return ctx
+}
+
+func pipelineContextFromPayload(raw []byte) (pipelineRunTriggerContext, bool) {
+	var payload struct {
+		ProjectID     string `json:"project_id"`
+		IssueID       string `json:"issue_id"`
+		ParentIssueID string `json:"parent_issue_id"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return pipelineRunTriggerContext{}, false
+	}
+	if payload.ProjectID == "" && payload.IssueID == "" && payload.ParentIssueID == "" {
+		return pipelineRunTriggerContext{}, false
+	}
+	return pipelineRunTriggerContext{
+		ProjectID:     payload.ProjectID,
+		IssueID:       payload.IssueID,
+		ParentIssueID: payload.ParentIssueID,
+	}, true
 }
 
 func issueMetadataMap(raw []byte) map[string]any {
