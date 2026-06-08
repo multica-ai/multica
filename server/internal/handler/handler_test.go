@@ -3994,6 +3994,83 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	}
 }
 
+func TestUpdateCommentAddingMentionLeavesTaskQueued(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "Edit Mention Agent", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Edit mention trigger test",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "plain comment before edit",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var comment CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&comment); err != nil {
+		t.Fatalf("decode comment: %v", err)
+	}
+
+	editedContent := fmt.Sprintf("plain comment before edit\n\n[@Edit Mention Agent](mention://agent/%s) please handle this", agentID)
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/comments/"+comment.ID, map[string]any{
+		"content": editedContent,
+	})
+	req = withURLParam(req, "commentId", comment.ID)
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateComment: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var queued int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND trigger_comment_id = $3 AND status = 'queued'
+	`, issueID, agentID, comment.ID).Scan(&queued); err != nil {
+		t.Fatalf("count queued task: %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("expected 1 queued task after editing in an agent mention, got %d", queued)
+	}
+
+	var cancelled int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND trigger_comment_id = $3 AND status = 'cancelled'
+	`, issueID, agentID, comment.ID).Scan(&cancelled); err != nil {
+		t.Fatalf("count cancelled task: %v", err)
+	}
+	if cancelled != 0 {
+		t.Fatalf("expected no cancelled task for the newly added mention, got %d", cancelled)
+	}
+}
+
 func TestPlanRequestRejectsMultipleEligibleTargetAgents(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
