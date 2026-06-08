@@ -2873,6 +2873,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
 	}
+	// Merge the daemon-managed deterministic tool server into the agent's MCP
+	// config when the tool plane is enabled and the provider consumes MCP via
+	// ExecOptions. Additive and fail-open: returns mcpConfig unchanged otherwise.
+	mcpConfig = d.injectDeterministicTools(mcpConfig, provider, env.WorkDir, taskLog)
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
 	// both are empty we deliberately pass "" through — each

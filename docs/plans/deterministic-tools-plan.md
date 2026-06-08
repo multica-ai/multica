@@ -276,7 +276,7 @@ runtimes. Frontend signal builds on `providerSupportsMcpConfig()` in
 
 | Phase | Scope | Outcome |
 |---|---|---|
-| 1 | Go MCP server subcommand + 2 read-only tools (`repo_facts`, `policy_check`); merge helper; inject for **claude** only | End-to-end tool plane on Claude Code |
+| 1 ✅ | Go MCP server subcommand + 2 read-only tools (`repo_facts`, `policy_check`); merge helper; inject for **claude** only | End-to-end tool plane on Claude Code — **implemented** (`server/pkg/dettools/`, `multica mcp-tools serve`, `daemon/dettools_inject.go`) |
 | 2 | Add codex injection; full tool catalog; audit logs + artifacts; env-var config | Production-capable plane for primary native-MCP providers |
 | 3 | Pi via `pi-mcp-adapter` (per-task config); capability reporting; extend to opencode/hermes/kimi/kiro/openclaw | Broader provider coverage incl. adapter-backed Pi |
 | 4 | Policy controls, per-agent `tool_profile` (new agent field), richer UI visibility | Safe multi-agent rollout with differentiated tool access |

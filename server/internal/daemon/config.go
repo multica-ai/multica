@@ -53,11 +53,17 @@ const (
 	DefaultHealthPort              = 19514
 	DefaultMaxConcurrentTasks      = 20
 	DefaultGCInterval              = 1 * time.Hour
-	DefaultGCTTL                   = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
-	DefaultGCOrphanTTL             = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
-	DefaultGCArtifactTTL           = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
-	DefaultAutoUpdateCheckInterval = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
+	DefaultGCTTL                   = 24 * time.Hour   // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL             = 72 * time.Hour   // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCArtifactTTL           = 12 * time.Hour   // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultAutoUpdateCheckInterval = 6 * time.Hour    // how often the daemon polls GitHub for a newer CLI release
+	DefaultDetToolsTimeout         = 90 * time.Second // per-invocation cap for a deterministic tool
+	DefaultDetToolsArtifactDir     = ".multica/artifacts"
 )
+
+// DefaultDetToolsAllowed is the deterministic tool allowlist applied when
+// MULTICA_DETTOOLS_ALLOWED is unset. Kept to the read-only Phase 1 catalog.
+var DefaultDetToolsAllowed = []string{"repo_facts", "policy_check"}
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
 // regenerable build artifacts. Kept conservative: only directories that are
@@ -98,6 +104,18 @@ type Config struct {
 	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
 	ClaudeArgs                     []string
 	CodexArgs                      []string
+	DetTools                       DetToolsConfig // deterministic tool plane (MCP) settings
+}
+
+// DetToolsConfig configures the daemon-managed deterministic tool plane. When
+// Enabled, the daemon merges an MCP server entry pointing at `multica mcp-tools
+// serve` into the agent's mcp_config for providers that consume it.
+type DetToolsConfig struct {
+	Enabled      bool
+	AllowedTools []string
+	Timeout      time.Duration
+	AllowNetwork bool
+	ArtifactDir  string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -429,6 +447,20 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoUpdateInterval = overrides.AutoUpdateCheckInterval
 	}
 
+	// Deterministic tool plane: opt-in via MULTICA_DETTOOLS_ENABLED. All other
+	// settings have safe defaults so enabling it is a single env var.
+	detToolsTimeout, err := durationFromEnv("MULTICA_DETTOOLS_TIMEOUT", DefaultDetToolsTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	detTools := DetToolsConfig{
+		Enabled:      boolEnvSet("MULTICA_DETTOOLS_ENABLED"),
+		AllowedTools: patternsFromEnv("MULTICA_DETTOOLS_ALLOWED", DefaultDetToolsAllowed),
+		Timeout:      detToolsTimeout,
+		AllowNetwork: boolEnvSet("MULTICA_DETTOOLS_ALLOW_NETWORK"),
+		ArtifactDir:  envOrDefault("MULTICA_DETTOOLS_ARTIFACT_DIR", DefaultDetToolsArtifactDir),
+	}
+
 	return Config{
 		ServerBaseURL:                  serverBaseURL,
 		DaemonID:                       daemonID,
@@ -457,7 +489,19 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentToolWatchdog:              agentToolWatchdog,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
+		DetTools:                       detTools,
 	}, nil
+}
+
+// boolEnvSet reports whether the named env var holds a truthy value
+// (true/1/yes/on, case-insensitive).
+func boolEnvSet(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only
