@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-06-07
+// Snapshot: 2026-06-08
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -68,9 +68,17 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gemini-embedding-001": { input: 0.15, output: 0, cacheRead: 0.15, cacheWrite: 0.15 },
   "gemini-flash-latest": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0.3 },
   "gemini-flash-lite-latest": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0.1 },
+  "glm-4.5": { input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite: 0.6 },
+  "glm-4.5-air": { input: 0.2, output: 1.1, cacheRead: 0.03, cacheWrite: 0.2 },
+  "glm-4.5-airx": { input: 1.1, output: 4.5, cacheRead: 0.22, cacheWrite: 1.1 },
+  "glm-4.5-flash": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "glm-4.5-x": { input: 2.2, output: 8.9, cacheRead: 0.45, cacheWrite: 2.2 },
   "glm-4.6": { input: 0.6, output: 2.2, cacheRead: 0.1, cacheWrite: 0.6 },
   "glm-4.7": { input: 0.6, output: 2.2, cacheRead: 0.1, cacheWrite: 0.6 },
+  "glm-4.7-flash": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "glm-4.7-flashx": { input: 0.07, output: 0.4, cacheRead: 0.01, cacheWrite: 0.07 },
   "glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
+  "glm-5-turbo": { input: 1.2, output: 4, cacheRead: 0.24, cacheWrite: 1.2 },
   "glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "google/gemini-flash-latest": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0.3 },
   "google/gemini-flash-lite-latest": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0.1 },
@@ -129,7 +137,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "minimax-m2.1": { input: 0.3, output: 1.2, cacheRead: 0.1, cacheWrite: 0.3 },
   "minimax-m2.5": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 },
   "minimax-m2.7": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 },
-  "minimax-m3": { input: 0.6, output: 2.4, cacheRead: 0.12, cacheWrite: 0.6 },
+  "minimax-m3": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 },
   "o1": { input: 15, output: 60, cacheRead: 7.5, cacheWrite: 15 },
   "o1-mini": { input: 1.1, output: 4.4, cacheRead: 0.55, cacheWrite: 1.1 },
   "o1-preview": { input: 15, output: 60, cacheRead: 7.5, cacheWrite: 15 },
