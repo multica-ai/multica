@@ -197,6 +197,8 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-connections-injector): TECH-3108 workspace connection registry.
 	// Injects enabled MCP connections into RuntimeToolsConfig at task claim time.
 	ConnectionsInjector WorkspaceConnectionsInjector
+	// CEREBRO-PATCH(handler-connection-tool-deny): TECH-3156 per-tool connection enforcement.
+	ConnectionToolDeny ConnectionToolDenyResolver
 }
 
 // CustomStatusResolver is the upstream-side seam for the cerebro status-model
@@ -409,6 +411,16 @@ func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
 // CEREBRO-PATCH(handler-connections-injector-iface): TECH-3108 seam.
 type WorkspaceConnectionsInjector interface {
 	BuildMCPConfig(ctx context.Context, workspaceID pgtype.UUID) json.RawMessage
+}
+
+// ConnectionToolDenyResolver resolves, for a claim's chain context, the MCP
+// connection tools whose effective verdict is Deny — returned as Claude Code
+// --disallowedTools tokens ("mcp__<connection>__<tool>") the daemon passes at
+// spawn so a denied tool is never callable (TECH-3156).
+//
+// CEREBRO-PATCH(handler-connection-tool-deny-iface): TECH-3156 seam.
+type ConnectionToolDenyResolver interface {
+	DisallowedMCPTools(ctx context.Context, workspaceID, runtimeID, agentID pgtype.UUID) ([]string, error)
 }
 
 // CEREBRO-PATCH(handler-bool-helpers): cerebro per-runtime sandbox toggle uses

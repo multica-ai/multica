@@ -205,9 +205,12 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// When connection_id is provided, merge stored (real) credentials over masked form fields.
+	var storedConnID pgtype.UUID
+	haveStoredConn := false
 	if req.ConnectionID != "" {
 		if connID, err := util.ParseUUID(req.ConnectionID); err == nil {
 			if stored, err := h.Store.Get(r.Context(), connID, wsID); err == nil {
+				storedConnID, haveStoredConn = connID, true
 				if req.AuthConfig.BearerToken == "" {
 					req.AuthConfig.BearerToken = stored.AuthConfig.BearerToken
 				}
@@ -224,6 +227,16 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	result := doTestConnection(r.Context(), req)
+	// Persist the discovered tool list on the saved connection so the
+	// permissions UI can render one row per tool (TECH-3156). Best-effort: a
+	// failed probe (no tools) leaves the previous list untouched.
+	if haveStoredConn && result.Reachable && len(result.Tools) > 0 {
+		tools := make([]Tool, 0, len(result.Tools))
+		for _, t := range result.Tools {
+			tools = append(tools, Tool{Name: t.Name, Description: t.Description})
+		}
+		_ = h.Store.UpdateTools(r.Context(), storedConnID, wsID, tools)
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 

@@ -3095,6 +3095,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	} else {
 		mcpConfig = task.RuntimeToolsConfig
 	}
+	// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 — enforce per-tool connection
+	// denies. On Claude Code we pass them as --disallowedTools (kept alongside the base
+	// AskUserQuestion deny so a last-wins parser cannot re-enable it). On any other
+	// provider --disallowedTools does not exist, so we FAIL CLOSED (Sara's decision):
+	// withhold every connection that has a denied tool rather than expose it.
+	if len(task.DisallowedMCPTools) > 0 {
+		if provider == "claude" {
+			denied := append([]string{"AskUserQuestion"}, task.DisallowedMCPTools...)
+			customArgs = append(customArgs, "--disallowedTools", strings.Join(denied, " "))
+		} else {
+			mcpConfig = daemonmcp.StripServers(mcpConfig, connectionsFromMCPTokens(task.DisallowedMCPTools))
+		}
+	}
 	thinkingLevel := ""
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
@@ -4021,6 +4034,28 @@ func resolveTaskModel(task Task, entry AgentEntry) string {
 		return task.Agent.Model
 	}
 	return entry.Model
+}
+
+// connectionsFromMCPTokens extracts the unique connection (MCP server) names from
+// Claude-style "mcp__<server>__<tool>" deny tokens, splitting on the first "__"
+// after the prefix — the same segmentation Claude Code and the persona hook use.
+// CEREBRO-PATCH(daemon-connections-from-mcp-tokens): TECH-3156 fail-closed helper.
+func connectionsFromMCPTokens(tokens []string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, t := range tokens {
+		rest := strings.TrimPrefix(t, "mcp__")
+		conn, _, ok := strings.Cut(rest, "__")
+		if !ok || conn == "" {
+			continue
+		}
+		if _, dup := seen[conn]; dup {
+			continue
+		}
+		seen[conn] = struct{}{}
+		out = append(out, conn)
+	}
+	return out
 }
 
 func defaultArgsForProvider(cfg Config, provider string) []string {

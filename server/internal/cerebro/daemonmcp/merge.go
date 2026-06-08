@@ -88,3 +88,40 @@ func mergeServers(runtimeVal, agentVal any) map[string]any {
 	}
 	return out
 }
+
+// StripServers removes the named MCP servers from an mcp-config document and
+// returns the result. It is the fail-closed half of TECH-3156: when an agent
+// runs on a provider that cannot deny individual MCP tools (anything other than
+// Claude Code), the daemon withholds the whole connection rather than silently
+// exposing a tool an admin set to Deny. Returns the input unchanged when names
+// is empty or the document has no matching servers; returns nil only if the
+// resulting server set is empty AND there were no other top-level keys.
+func StripServers(raw json.RawMessage, names []string) json.RawMessage {
+	if len(raw) == 0 || len(names) == 0 {
+		return raw
+	}
+	doc := decode(raw)
+	if doc == nil {
+		return raw
+	}
+	servers, ok := doc["mcpServers"].(map[string]any)
+	if !ok || len(servers) == 0 {
+		return raw
+	}
+	removed := false
+	for _, n := range names {
+		if _, present := servers[n]; present {
+			delete(servers, n)
+			removed = true
+		}
+	}
+	if !removed {
+		return raw
+	}
+	doc["mcpServers"] = servers
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		return raw
+	}
+	return encoded
+}

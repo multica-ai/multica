@@ -260,6 +260,7 @@ type AgentTaskResponse struct {
 	RuntimeSandboxPolicy             json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
 	RuntimePersonaSandbox            string               `json:"runtime_persona_sandbox,omitempty"`
 	RuntimeToolsConfig               json.RawMessage      `json:"runtime_tools_config,omitempty"`
+	DisallowedMCPTools               []string             `json:"disallowed_mcp_tools,omitempty"` // CEREBRO-PATCH(agent-task-disallowed-mcp-tools): TECH-3156 per-tool connection denies passed to the agent at spawn.
 	PersonaSpawnUserID               string               `json:"persona_spawn_user_id,omitempty"`
 	PersonaSpawnGroupIDs             []string             `json:"persona_spawn_group_ids,omitempty"`
 	ChatHistory                      []ChatHistoryMessage `json:"chat_history,omitempty"`

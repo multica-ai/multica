@@ -30,3 +30,8 @@ export {
   FirtalRegistryRowConfigure,
   FIRTAL_REGISTRY_TOOL_KEY,
 } from "./firtal-registry-row-configure";
+export {
+  ConnectionConfigSheet,
+  type ConnectionConfigSheetProps,
+} from "./connection-config-sheet";
+export { ConnectionRowConfigure } from "./connection-row-configure";

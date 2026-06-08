@@ -1487,12 +1487,25 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if len(rt.ToolsConfig) > 0 {
 			resp.RuntimeToolsConfig = json.RawMessage(rt.ToolsConfig)
 		}
-		// CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge enabled workspace MCP
-		// connections into RuntimeToolsConfig so the daemon injects them via --mcp-config.
+		// CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108/TECH-3156 — resolve
+		// per-tool connection denies FIRST and FAIL CLOSED: if the policy can't be
+		// evaluated, withhold all workspace connections this claim rather than inject
+		// them unenforced. On success, inject and pass the denies as --disallowedTools.
 		if h.ConnectionsInjector != nil {
-			connMCP := h.ConnectionsInjector.BuildMCPConfig(r.Context(), rt.WorkspaceID)
-			if len(connMCP) > 0 {
-				resp.RuntimeToolsConfig = daemonmcp.Merge(resp.RuntimeToolsConfig, connMCP)
+			var denies []string
+			var denyErr error
+			if h.ConnectionToolDeny != nil {
+				denies, denyErr = h.ConnectionToolDeny.DisallowedMCPTools(r.Context(), rt.WorkspaceID, task.RuntimeID, task.AgentID)
+			}
+			if denyErr != nil {
+				slog.Warn("connection tool deny resolution failed; withholding connections (fail-closed)",
+					"runtime_id", runtimeID, "error", denyErr)
+			} else {
+				connMCP := h.ConnectionsInjector.BuildMCPConfig(r.Context(), rt.WorkspaceID)
+				if len(connMCP) > 0 {
+					resp.RuntimeToolsConfig = daemonmcp.Merge(resp.RuntimeToolsConfig, connMCP)
+				}
+				resp.DisallowedMCPTools = denies
 			}
 		}
 		resp.PresentationMode = rt.PresentationMode // CEREBRO-PATCH(daemon-claim-presentation-mode): forward presentation_mode to daemon
