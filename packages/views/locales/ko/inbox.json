@@ -42,6 +42,7 @@
     "task_failed": "작업 실패함",
     "agent_blocked": "에이전트 막힘",
     "agent_completed": "에이전트 완료됨",
+    "agent_done_blocked": "에이전트가 완료로 변경할 수 없음",
     "reaction_added": "반응 추가됨",
     "quick_create_done": "에이전트로 생성됨",
     "quick_create_failed": "에이전트 생성 실패"

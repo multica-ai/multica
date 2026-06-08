@@ -42,6 +42,7 @@
     "task_failed": "Task failed",
     "agent_blocked": "Agent blocked",
     "agent_completed": "Agent completed",
+    "agent_done_blocked": "Agent blocked from done",
     "reaction_added": "Reacted",
     "quick_create_done": "Created with agent",
     "quick_create_failed": "Create with agent failed"

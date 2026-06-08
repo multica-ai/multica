@@ -42,6 +42,7 @@
     "task_failed": "task 失败",
     "agent_blocked": "智能体被阻塞",
     "agent_completed": "智能体已完成",
+    "agent_done_blocked": "智能体不可标记为完成",
     "reaction_added": "添加了表情反应",
     "quick_create_done": "通过智能体创建",
     "quick_create_failed": "通过智能体创建失败"

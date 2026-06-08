@@ -2002,6 +2002,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		priority = "none"
 	}
 
+	// Human-only-done policy: a machine actor may not create an issue that is
+	// already `done` when MULTICA_REQUIRE_HUMAN_DONE is on. prevStatus is ""
+	// (no prior state), so a `done` target counts as a transition.
+	if h.enforceHumanDone(w, r, wsUUID, pgtype.UUID{}, req.Title, "", status) {
+		return
+	}
+
 	var assigneeType pgtype.Text
 	var assigneeID pgtype.UUID
 	if req.AssigneeType != nil {
@@ -2317,6 +2324,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
+
+	// Human-only-done policy: block a machine actor from transitioning this
+	// issue into `done` when MULTICA_REQUIRE_HUMAN_DONE is on. Checked before
+	// any DB write so the status never lands.
+	if req.Status != nil && h.enforceHumanDone(w, r, prevIssue.WorkspaceID, prevIssue.ID, prevIssue.Title, prevIssue.Status, *req.Status) {
+		return
+	}
 
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
@@ -2840,6 +2854,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// Human-only-done policy: reject the whole batch up front when a machine
+	// actor tries to bulk-set `done` and MULTICA_REQUIRE_HUMAN_DONE is on. The
+	// gate is independent of any single issue's prior status, so it is checked
+	// once here rather than mid-loop (which would leave a partial batch).
+	if req.Updates.Status != nil && h.enforceHumanDone(w, r, wsUUID, pgtype.UUID{}, "Bulk status update", "", *req.Updates.Status) {
+		return
+	}
+
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)

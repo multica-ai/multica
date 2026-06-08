@@ -95,14 +95,30 @@ import (
 // human-equivalent or machine-equivalent.
 func RequireHumanActor(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// X-Actor-Source is server-set only. The auth middleware
-		// strips any client-supplied value before stamping its own,
-		// so a non-empty value here is authoritative.
-		switch r.Header.Get("X-Actor-Source") {
-		case "task_token", "cloud_pat":
+		if isMachineActor(r) {
 			writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isMachineActor reports whether the request authenticated via a machine
+// credential — a mat_ task token or mcn_ cloud-node PAT (i.e. an agent process
+// or a cloud-runtime node acting on its owner's behalf) — rather than a human
+// (JWT cookie / mul_ PAT, which leave X-Actor-Source empty).
+//
+// It keys off the server-set X-Actor-Source header. The auth middleware
+// deletes any client-supplied value before stamping its own (see auth.go's
+// `r.Header.Del("X-Actor-Source")`), so a non-empty value here is
+// authoritative — checking it is the single-source-of-truth, no-DB way to
+// classify the credential kind. RequireHumanActor and the human-only-done
+// policy (enforceHumanDone) both gate on this helper; keep the denylist in
+// lockstep with the machine-credential branches in auth.go / daemon_auth.go.
+func isMachineActor(r *http.Request) bool {
+	switch r.Header.Get("X-Actor-Source") {
+	case "task_token", "cloud_pat":
+		return true
+	}
+	return false
 }

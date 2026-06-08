@@ -80,6 +80,17 @@ type Config struct {
 	// return 503 instead of attempting to dial a hard-coded private service.
 	CloudRuntimeFleetURL     string
 	CloudRuntimeFleetTimeout time.Duration
+	// RequireHumanDone, when true, forbids machine actors (mat_ task tokens
+	// and mcn_ cloud-node PATs — i.e. agents and cloud runtimes) from moving
+	// an issue into `done`. The transition into `done` becomes a human-only
+	// action; an agent that finishes its work leaves the issue for a human to
+	// close. A blocked attempt returns 403 and drops an inbox notification for
+	// the owning human. Off by default (opt-in via MULTICA_REQUIRE_HUMAN_DONE)
+	// so existing instances keep the "agent and human are interchangeable"
+	// contract unless an operator opts in. Enforcement lives in
+	// enforceHumanDone (see issue_done_guard.go); it is server-side only, so
+	// it cannot be bypassed by calling the API directly instead of the CLI.
+	RequireHumanDone bool
 }
 
 type cloudRuntimeProxy interface {
