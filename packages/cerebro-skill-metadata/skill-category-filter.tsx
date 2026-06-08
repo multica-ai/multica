@@ -16,6 +16,20 @@ interface SkillCategoryFilterProps {
   onCategoryChange: (category: string | null) => void;
 }
 
+export const UNCATEGORIZED_SKILL_CATEGORY = "__uncategorized__";
+export const UNCATEGORIZED_SKILL_CATEGORY_LABEL = "Ukategoriseret";
+
+export function skillCategoryKey(skill: SkillSummary): string {
+  const category = skill.metadata?.category?.trim();
+  return category || UNCATEGORIZED_SKILL_CATEGORY;
+}
+
+function skillCategoryLabel(category: string): string {
+  return category === UNCATEGORIZED_SKILL_CATEGORY
+    ? UNCATEGORIZED_SKILL_CATEGORY_LABEL
+    : category;
+}
+
 export function SkillCategoryFilter({
   skills,
   category,
@@ -24,10 +38,11 @@ export function SkillCategoryFilter({
   const categories = useMemo(() => {
     const seen = new Set<string>();
     for (const s of skills) {
-      const cat = s.metadata?.category;
-      if (cat) seen.add(cat);
+      seen.add(skillCategoryKey(s));
     }
-    return Array.from(seen).sort();
+    return Array.from(seen).sort((a, b) =>
+      skillCategoryLabel(a).localeCompare(skillCategoryLabel(b)),
+    );
   }, [skills]);
 
   if (categories.length === 0) return null;
@@ -54,7 +69,8 @@ export function SkillCategoryFilter({
         <TooltipContent side="bottom">Vis skills fra alle kategorier</TooltipContent>
       </Tooltip>
       {categories.map((cat) => {
-        const count = skills.filter((s) => s.metadata?.category === cat).length;
+        const label = skillCategoryLabel(cat);
+        const count = skills.filter((s) => skillCategoryKey(s) === cat).length;
         return (
           <Tooltip key={cat}>
             <TooltipTrigger
@@ -69,12 +85,12 @@ export function SkillCategoryFilter({
                   }
                   onClick={() => onCategoryChange(category === cat ? null : cat)}
                 >
-                  {cat}
+                  {label}
                   <span className="ml-1 font-mono text-xs opacity-60">{count}</span>
                 </Button>
               }
             />
-            <TooltipContent side="bottom">Vis {count} skills i kategorien {cat}</TooltipContent>
+            <TooltipContent side="bottom">Vis {count} skills i kategorien {label}</TooltipContent>
           </Tooltip>
         );
       })}

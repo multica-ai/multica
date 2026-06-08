@@ -43,7 +43,11 @@ import { CreateSkillDialog } from "./create-skill-dialog";
 import { type SkillRow, useSkillColumns } from "./skill-columns";
 import { useT } from "../../i18n";
 // CEREBRO-PATCH(skill-category-filter): TECH-3077 — category filter from cerebro-skill-metadata.
-import { SkillCategoryFilter } from "@multica/cerebro-skill-metadata";
+// CEREBRO-PATCH(skill-category-uncategorized): TECH-3148 — reuse category fallback for live uncategorized skills.
+import {
+  SkillCategoryFilter,
+  skillCategoryKey,
+} from "@multica/cerebro-skill-metadata";
 
 type FilterKey = "all" | "used" | "unused" | "mine";
 
@@ -241,7 +245,7 @@ export default function SkillsPage() {
       if (filter === "unused" && byAssignment(s)) return false;
       if (filter === "mine" && s.created_by !== currentUserId) return false;
       // CEREBRO-PATCH(skill-category-filter): TECH-3077 — filter by category.
-      if (categoryFilter && s.metadata?.category !== categoryFilter) return false;
+      if (categoryFilter && skillCategoryKey(s) !== categoryFilter) return false;
       return true;
     });
   }, [skills, assignments, search, filter, currentUserId, categoryFilter]);

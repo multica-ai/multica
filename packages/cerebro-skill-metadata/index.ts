@@ -1,1 +1,4 @@
-export { SkillCategoryFilter } from "./skill-category-filter";
+export {
+  SkillCategoryFilter,
+  skillCategoryKey,
+} from "./skill-category-filter";
