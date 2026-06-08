@@ -170,6 +170,8 @@ type Handler struct {
 	cerebroToolStatus map[string]string // CEREBRO-PATCH(handler-tool-status): reject stale grants for excluded tools.
 	// CEREBRO-PATCH(handler-runtime-tools-admin): JEH-1710 unified runtime
 	runtimeToolsAdmin RuntimeToolsAdminService
+	// CEREBRO-PATCH(handler-runtime-tool-access): TECH-3071 read-only effective runtime tool access preview.
+	runtimeToolAccess RuntimeToolAccessService
 	// CEREBRO-PATCH(handler-runtime-tools-scan): JEH-1710 daemon-side ingest
 	runtimeToolsScan RuntimeToolsScanService
 	// CEREBRO-PATCH(handler-capability-register): FIR-2129 normalized capability register.

@@ -30,6 +30,7 @@ import type { Agent } from "@multica/core/types";
 import type {
   AgentToolOverride,
   RuntimeTool,
+  RuntimeToolEffectiveAccess,
 } from "@multica/cerebro-types";
 import { FirtalRegistryRowConfigure } from "@multica/cerebro-tool-policy/views";
 import {
@@ -55,8 +56,10 @@ type OverrideMode = "inherit" | "force_on" | "force_off";
 
 interface ToolRowData {
   tool: RuntimeTool;
+  access?: RuntimeToolEffectiveAccess;
   overrideMode: OverrideMode;
   effective: boolean;
+  effectiveReason: string;
 }
 
 const runtimeToolsKey = (runtimeId: string) =>
@@ -64,6 +67,9 @@ const runtimeToolsKey = (runtimeId: string) =>
 
 const agentOverridesKey = (agentId: string) =>
   ["cerebro", "agent-tool-overrides", agentId] as const;
+
+const effectiveAccessKey = (runtimeId: string, agentId: string) =>
+  ["cerebro", "runtime-tool-effective-access", runtimeId, "agent", agentId] as const;
 
 export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardProps) {
   const qc = useQueryClient();
@@ -78,6 +84,13 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
     enabled: !!runtimeId,
   });
 
+  const effectiveAccessQuery = useQuery({
+    queryKey: effectiveAccessKey(runtimeId ?? "", agent.id),
+    queryFn: () =>
+      api.listRuntimeToolEffectiveAccess(runtimeId!, { agent_id: agent.id }),
+    enabled: !!runtimeId,
+  });
+
   const overridesQuery = useQuery({
     queryKey: agentOverridesKey(agent.id),
     queryFn: () => listAgentToolOverrides(agent.id),
@@ -88,6 +101,9 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
       setAgentToolOverride(agent.id, toolName, enabled),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentOverridesKey(agent.id) });
+      if (runtimeId) {
+        qc.invalidateQueries({ queryKey: effectiveAccessKey(runtimeId, agent.id) });
+      }
     },
     onError: (err) => {
       toast.error(
@@ -101,6 +117,9 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
       clearAgentToolOverride(agent.id, toolName),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentOverridesKey(agent.id) });
+      if (runtimeId) {
+        qc.invalidateQueries({ queryKey: effectiveAccessKey(runtimeId, agent.id) });
+      }
     },
     onError: (err) => {
       toast.error(
@@ -114,17 +133,32 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
     const overrides = overridesQuery.data ?? [];
     const overrideByName = new Map<string, AgentToolOverride>();
     for (const o of overrides) overrideByName.set(o.tool_name, o);
+    const accessByName = new Map<string, RuntimeToolEffectiveAccess>();
+    for (const row of effectiveAccessQuery.data ?? []) {
+      accessByName.set(row.inventory.tool_name || row.descriptor.tool_key, row);
+    }
     return tools.map((tool) => {
       const override = overrideByName.get(tool.name);
+      const access = accessByName.get(tool.name);
       let overrideMode: OverrideMode = "inherit";
       let effective = tool.enabled;
+      let effectiveReason = tool.enabled
+        ? "Runtime-default er aktiv"
+        : "Runtime-default er slået fra";
       if (override) {
         overrideMode = override.enabled ? "force_on" : "force_off";
         effective = override.enabled;
+        effectiveReason = override.enabled
+          ? "Agent override forsøger at åbne tool'et"
+          : "Agent override lukker tool'et";
       }
-      return { tool, overrideMode, effective };
+      if (access) {
+        effective = access.exposure_effective.effective;
+        effectiveReason = access.exposure_effective.reason;
+      }
+      return { tool, access, overrideMode, effective, effectiveReason };
     });
-  }, [runtimeToolsQuery.data, overridesQuery.data]);
+  }, [runtimeToolsQuery.data, overridesQuery.data, effectiveAccessQuery.data]);
 
   const filteredRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -391,7 +425,7 @@ function AgentToolRow({
   onSetOverride: (toolName: string, enabled: boolean) => void;
   onClearOverride: (toolName: string) => void;
 }) {
-  const { tool, overrideMode, effective } = row;
+  const { tool, overrideMode, effective, effectiveReason } = row;
   const isForceOn = overrideMode === "force_on";
   const isForceOff = overrideMode === "force_off";
   const isOverride = isForceOn || isForceOff;
@@ -421,7 +455,7 @@ function AgentToolRow({
         <OverrideTag mode={overrideMode} />
       </td>
       <td className="px-4 py-3 align-top">
-        <EffectiveState effective={effective} />
+        <EffectiveState effective={effective} reason={effectiveReason} />
       </td>
       <td className="px-2 py-3 align-top">
         <div className="flex flex-col items-end gap-1">
@@ -506,15 +540,30 @@ function OverrideTag({ mode }: { mode: OverrideMode }) {
   );
 }
 
-function EffectiveState({ effective }: { effective: boolean }) {
-  return effective ? (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Aktiv
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
-      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" /> Inaktiv
-    </span>
+function EffectiveState({
+  effective,
+  reason,
+}: {
+  effective: boolean;
+  reason: string;
+}) {
+  return (
+    <div className="max-w-[260px] space-y-1">
+      {effective ? (
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Aktiv
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" /> Inaktiv
+        </span>
+      )}
+      {reason && (
+        <div className="text-[11px] leading-snug text-muted-foreground">
+          {reason}
+        </div>
+      )}
+    </div>
   );
 }
 

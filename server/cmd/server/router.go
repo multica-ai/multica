@@ -47,6 +47,8 @@ import (
 	cerebrogrants "github.com/multica-ai/multica/server/internal/cerebro/grants"
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy handler import
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective runtime tool access preview.
+	cerebrotoolaccess "github.com/multica-ai/multica/server/internal/cerebro/toolaccess"
 	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API.
 	cerebrowakeup "github.com/multica-ai/multica/server/internal/cerebro/wakeup"
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler import
@@ -399,6 +401,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// grants + per-agent overrides) and the daemon-side scan ingest seam.
 	runtimeToolsSvc := runtimetools.New(pool)
 	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(runtimeToolsSvc))
+	h.SetRuntimeToolAccess(newRuntimeToolAccessAdapter(cerebrotoolaccess.New(runtimeToolsSvc, cerebrotoolpolicy.NewStore(pool))))
 	h.SetRuntimeToolsScan(newRuntimeToolsScanAdapter(runtimeToolsSvc))
 	// CEREBRO-PATCH(router-capability-register): FIR-2129 wire capability register API.
 	capabilityRegisterSvc := cerebrocapabilityregistry.New(pool)
@@ -1291,6 +1294,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 unified
 					// runtime tool inventory + per-tool group/user access grants.
 					r.Get("/tools", h.ListRuntimeTools)
+					// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective access preview.
+					r.Get("/tools/effective", h.ListRuntimeToolEffectiveAccess)
 					r.Patch("/tools/{toolName}", h.SetRuntimeToolEnabled)
 					// CEREBRO-PATCH(router-runtime-tools-scan-now): FIR-2230 admin-triggered live scan.
 					r.Post("/tools/scan-now", h.RequestRuntimeToolScan)

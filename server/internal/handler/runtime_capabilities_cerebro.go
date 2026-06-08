@@ -27,7 +27,21 @@ func normalizedRuntimeCapabilities(provider string, rawCapabilities, rawToolsCon
 	ensureCapabilityStringSlice(out, "providers", provider)
 	ensureCapabilityStringSlice(out, "tools", "")
 	ensureCapabilityStringSlice(out, "mcp_servers", "")
+	ensureCapabilityStringSlice(out, "tool_protocols", "")
+	ensureCapabilityBool(out, "supports_ask", false)
 	return out
+}
+
+// CEREBRO-PATCH(runtime-agnostic-tool-access): serialize normalized protocols for effective access resolution.
+func marshalRuntimeCapabilities(caps map[string]any) []byte {
+	if len(caps) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(caps)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func shouldKeepReportedCapabilityValue(base map[string]any, key string, value any) bool {
@@ -55,6 +69,14 @@ func ensureCapabilityStringSlice(caps map[string]any, key, fallback string) {
 		return
 	}
 	caps[key] = []string{}
+}
+
+// CEREBRO-PATCH(runtime-agnostic-tool-access): supports_ask is explicit so Ask can close safely when unsupported.
+func ensureCapabilityBool(caps map[string]any, key string, fallback bool) {
+	if _, ok := caps[key].(bool); ok {
+		return
+	}
+	caps[key] = fallback
 }
 
 func mcpServerNamesFromToolsConfig(raw []byte) []string {

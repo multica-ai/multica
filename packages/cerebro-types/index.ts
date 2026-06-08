@@ -18,6 +18,7 @@ export type { AgentTool } from "./augment";
 // JEH-1710 — runtime-level unified tool inventory + grant types
 export type {
   RuntimeTool,
+  RuntimeToolEffectiveAccess,
   RuntimeToolGroupGrant,
   RuntimeToolUserGrant,
   RuntimeToolGrants,

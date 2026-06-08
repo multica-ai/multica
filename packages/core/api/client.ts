@@ -176,6 +176,7 @@ import { parseWithFallback } from "./schema";
 import {
   AgentToolsListSchema,
   RuntimeToolsListSchema,
+  RuntimeToolEffectiveAccessListSchema,
   RuntimeToolGrantsSchema,
   CapabilityListResponseSchema,
   AgentAvatarBackfillStatusSchema,
@@ -2101,6 +2102,22 @@ export class ApiClient {
     return parseWithFallback(raw, RuntimeToolsListSchema, [], {
       endpoint: path,
     }) as import("@multica/cerebro-types").RuntimeTool[];
+  }
+
+  // CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective runtime tool access preview.
+  async listRuntimeToolEffectiveAccess(
+    runtimeId: string,
+    params: { agent_id?: string; user_id?: string } = {},
+  ): Promise<import("@multica/cerebro-types").RuntimeToolEffectiveAccess[]> {
+    const search = new URLSearchParams();
+    if (params.agent_id) search.set("agent_id", params.agent_id);
+    if (params.user_id) search.set("user_id", params.user_id);
+    const query = search.toString();
+    const path = `/api/runtimes/${runtimeId}/tools/effective${query ? `?${query}` : ""}`;
+    const raw = await this.fetch(path);
+    return parseWithFallback(raw, RuntimeToolEffectiveAccessListSchema, [], {
+      endpoint: path,
+    }) as import("@multica/cerebro-types").RuntimeToolEffectiveAccess[];
   }
 
   async setRuntimeToolEnabled(
