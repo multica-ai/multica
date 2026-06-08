@@ -276,6 +276,23 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
+  it("can render fenced code as one plain text node for stable native selection", () => {
+    const codeText = [
+      "lsdjflsjdfljssdflj",
+      "http://wujieai.com",
+      "@agent #issue",
+    ].join("\n");
+    const { container } = render(
+      <ReadonlyContent content={["```", codeText, "```"].join("\n")} plainCodeBlocks />,
+    );
+
+    const blockCode = container.querySelector("pre code");
+
+    expect(blockCode?.textContent).toBe(codeText);
+    expect(blockCode?.childNodes).toHaveLength(1);
+    expect(blockCode?.querySelector("span, a")).toBeNull();
+  });
+
   it("keeps readonly code block chrome separate from selectable code text", () => {
     const { container } = render(
       <ReadonlyContent content={["```bash", "pnpm test", "```"].join("\n")} />,
@@ -301,6 +318,8 @@ describe("ReadonlyContent code styling", () => {
     expect(codeCss).toContain(".rich-text-editor code");
     expect(codeCss).toContain(".rich-text-editor pre");
     expect(codeCss).toContain(".rich-text-editor pre code");
+    expect(codeCss).toContain("display: block;");
+    expect(codeCss).toContain("min-width: max-content;");
     expect(codeCss).toContain("font-variant-ligatures: none;");
     expect(codeCss).toContain('font-feature-settings: "liga" 0;');
     expect(codeCss).toContain("user-select: text;");

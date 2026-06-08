@@ -190,7 +190,7 @@ function extractTextFromAst(node: any): string {
     .replace(/\n$/, "");
 }
 
-function buildComponents(): Partial<Components> {
+function buildComponents({ plainCodeBlocks = false }: { plainCodeBlocks?: boolean } = {}): Partial<Components> {
   return {
     // Links — route mention:// to mention components, others show preview card
     a: ReadonlyLink,
@@ -263,8 +263,17 @@ function buildComponents(): Partial<Components> {
         return <code {...props}>{codeText || children}</code>;
       }
 
-      // Block code — highlight with lowlight, output hljs classes
       const code = codeText || String(children).replace(/\n$/, "");
+
+      if (plainCodeBlocks) {
+        return (
+          <code className={cn("hljs", className)} {...props}>
+            {code}
+          </code>
+        );
+      }
+
+      // Block code — highlight with lowlight, output hljs classes
       try {
         const tree = lang
           ? lowlight.highlight(lang, code)
@@ -331,6 +340,8 @@ function buildComponents(): Partial<Components> {
 interface ReadonlyContentProps {
   content: string;
   className?: string;
+  /** Render fenced code as a single text node for native drag selection stability. */
+  plainCodeBlocks?: boolean;
   /**
    * Attachments associated with the surrounding entity (comment / issue
    * body). When the markdown contains an inline `<img>` or file card whose
@@ -352,6 +363,7 @@ interface ReadonlyContentProps {
 export const ReadonlyContent = memo(function ReadonlyContent({
   content,
   className,
+  plainCodeBlocks = false,
   attachments,
 }: ReadonlyContentProps) {
   const processed = useMemo(() => preprocessMarkdown(content), [content]);
@@ -360,7 +372,10 @@ export const ReadonlyContent = memo(function ReadonlyContent({
 
   // Components map is now static — all attachment-aware logic lives in
   // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
-  const components = useMemo(() => buildComponents(), []);
+  const components = useMemo(
+    () => buildComponents({ plainCodeBlocks }),
+    [plainCodeBlocks],
+  );
 
   return (
     <AttachmentDownloadProvider attachments={attachments}>
