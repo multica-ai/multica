@@ -694,7 +694,7 @@ func runAgentAvatar(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("file too large: %d bytes (max 5MB)", len(fileData))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
 	defer cancel()
 
 	// Agent existence pre-check.

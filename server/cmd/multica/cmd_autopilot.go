@@ -434,7 +434,7 @@ func runAutopilotTrigger(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(30*time.Second))
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])

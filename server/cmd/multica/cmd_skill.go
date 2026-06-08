@@ -424,7 +424,7 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 		"url": importURL,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
 	defer cancel()
 
 	var result map[string]any
@@ -480,7 +480,7 @@ func runSkillSearch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("query is required")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
 	defer cancel()
 
 	var results []map[string]any

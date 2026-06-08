@@ -42,7 +42,7 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
 	defer cancel()
 
 	// Fetch attachment metadata (includes signed download_url).
