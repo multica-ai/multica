@@ -278,8 +278,8 @@ runtimes. Frontend signal builds on `providerSupportsMcpConfig()` in
 |---|---|---|
 | 1 ✅ | Go MCP server subcommand + 2 read-only tools (`repo_facts`, `policy_check`); merge helper; inject for **claude** only | End-to-end tool plane on Claude Code — **implemented** (`server/pkg/dettools/`, `multica mcp-tools serve`, `daemon/dettools_inject.go`) |
 | 2 ✅ | Add codex injection; full tool catalog (`build_probe`, `test_gate`, `diff_summarize`, `artifact_emit`); artifact writing + audit logging | **Implemented** — codex added to `dettoolsExecOptionsProviders` (same Claude-style shape renders into its `config.toml`); six-tool catalog; `artifact_emit` writes path-scoped artifacts; per-invocation audit log records tool, outcome, duration, input size, and artifact paths |
-| 3 | Pi via `pi-mcp-adapter` (per-task config); capability reporting; extend to opencode/hermes/kimi/kiro/openclaw | Broader provider coverage incl. adapter-backed Pi |
-| 4 | Policy controls, per-agent `tool_profile` (new agent field), richer UI visibility | Safe multi-agent rollout with differentiated tool access |
+| 3 🟡 | Extend to opencode/hermes/kimi/kiro (ExecOptions) + openclaw (execenv); capability-reporting groundwork; Pi via `pi-mcp-adapter` | **Mostly implemented** — all six native-MCP providers now receive the tool server; `mcpSupportKind`/`toolPlaneSupported` added (native/adapter/none). **Pi adapter is BLOCKED** pending the real `pi-mcp-adapter` interface (not in repo) — see §6.1. |
+| 4 ✅ | Policy controls + per-agent tool profiles + capability reporting | **Implemented** — per-agent `deterministic_tools.{allowed_tools,denied_tools}` read from `runtime_config` (plumbed daemon-side, no migration); daemon-wide `MULTICA_DETTOOLS_DENIED` denylist; agents can only narrow the daemon allowlist. Richer invocation-log UI deferred (needs an invocation data model — daemon currently audit-logs only). |
 
 ## 10. Failure handling
 

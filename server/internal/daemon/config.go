@@ -122,6 +122,7 @@ type Config struct {
 type DetToolsConfig struct {
 	Enabled      bool
 	AllowedTools []string
+	DeniedTools  []string // workspace/daemon-wide denylist applied after the allowlist
 	Timeout      time.Duration
 	AllowNetwork bool
 	ArtifactDir  string
@@ -465,6 +466,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	detTools := DetToolsConfig{
 		Enabled:      boolEnvSet("MULTICA_DETTOOLS_ENABLED"),
 		AllowedTools: patternsFromEnv("MULTICA_DETTOOLS_ALLOWED", DefaultDetToolsAllowed),
+		DeniedTools:  patternsFromEnv("MULTICA_DETTOOLS_DENIED", nil),
 		Timeout:      detToolsTimeout,
 		AllowNetwork: boolEnvSet("MULTICA_DETTOOLS_ALLOW_NETWORK"),
 		ArtifactDir:  envOrDefault("MULTICA_DETTOOLS_ARTIFACT_DIR", DefaultDetToolsArtifactDir),

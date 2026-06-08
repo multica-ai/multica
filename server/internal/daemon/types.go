@@ -126,6 +126,9 @@ type AgentData struct {
 	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
 	Model         string            `json:"model,omitempty"`
 	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	// RuntimeConfig is the agent's provider-specific config JSON. The daemon
+	// reads its "deterministic_tools" key for per-agent tool-plane policy.
+	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

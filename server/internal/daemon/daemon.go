@@ -2680,9 +2680,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// loses the envRoot association the GC loop needs, and re-running
 	// Prepare against a stable user path is cheap (no clone, no copy).
 	var agentMcpConfig json.RawMessage
+	var agentRuntimeConfig json.RawMessage
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
+		agentRuntimeConfig = task.Agent.RuntimeConfig
 	}
+	// OpenClaw materializes mcp.servers from this config during execenv.Prepare,
+	// so the deterministic tool server must be merged in before Prepare/Reuse.
+	// No-op for every other provider.
+	agentMcpConfig = d.injectExecenvTools(agentMcpConfig, provider, agentRuntimeConfig, d.logger)
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:      task.PriorWorkDir,
@@ -2876,7 +2882,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Merge the daemon-managed deterministic tool server into the agent's MCP
 	// config when the tool plane is enabled and the provider consumes MCP via
 	// ExecOptions. Additive and fail-open: returns mcpConfig unchanged otherwise.
-	mcpConfig = d.injectDeterministicTools(mcpConfig, provider, env.WorkDir, taskLog)
+	var execAgentRuntimeConfig json.RawMessage
+	if task.Agent != nil {
+		execAgentRuntimeConfig = task.Agent.RuntimeConfig
+	}
+	mcpConfig = d.injectExecOptionsTools(mcpConfig, provider, env.WorkDir, execAgentRuntimeConfig, taskLog)
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
 	// both are empty we deliberately pass "" through — each
