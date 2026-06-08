@@ -1,18 +1,21 @@
-// CEREBRO-PATCH(cerebro-hatchet-worker): FIR-43 — net-new cerebro Hatchet
-// worker. Hosts cron workflows that previously lived as one-off CLI jobs;
+// CEREBRO-PATCH(cerebro-hatchet-worker): FIR-43 — net-new cerebro Hatchet worker
+// that hosts cron workflows previously run as one-off CLI jobs. It POSTs fetched
+// rates to the backend (no DB credential — see CEREBRO_FX_INGEST_URL below);
 // first workflow is the daily USD→{DKK,EUR} reference-rate refresh that
 // powers the display-currency feature (FIR-40). Designed to be one Sliplane
 // container hosting many workflows — never one container per job. New cron
 // jobs land here as additional NewStandaloneTask registrations.
 //
 // Deployment: see docs/cerebro-hatchet-worker.md. Required env:
-//   HATCHET_CLIENT_TOKEN — Hatchet JWT (creds in Infisical /runs)
-//   DATABASE_URL         — Multica Postgres (internal Sliplane URL)
+//   HATCHET_CLIENT_TOKEN          — Hatchet JWT (creds in Infisical /runs)
+//   CEREBRO_FX_INGEST_URL         — internal URL of multica-backend's
+//                                   POST /api/cerebro/exchange-rates endpoint
+//   CEREBRO_EXCHANGE_INGEST_KEY   — service key presented as a Bearer token
 //
-// The display layer only ever reads the cached row from
-// cerebro_exchange_rates; this worker is the only writer of those rows
-// (the static seed in migration 9066 is a cold-start bootstrap that gets
-// overwritten on the worker's first successful tick).
+// The worker holds NO database credential: it fetches rates from Frankfurter
+// and POSTs them to the backend, which is the only writer of
+// cerebro_exchange_rates (the static seed in migration 9066 is a cold-start
+// bootstrap that gets overwritten on the worker's first successful tick).
 package main
 
 import (
@@ -27,9 +30,7 @@ import (
 	"time"
 
 	hatchet "github.com/hatchet-dev/hatchet/sdks/go"
-	"github.com/jackc/pgx/v5/pgxpool"
 
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/exchangerates"
 	"github.com/multica-ai/multica/server/internal/logger"
 )
@@ -58,9 +59,13 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
-	if dbURL == "" {
-		return errors.New("DATABASE_URL is required")
+	ingestURL := strings.TrimSpace(os.Getenv("CEREBRO_FX_INGEST_URL"))
+	if ingestURL == "" {
+		return errors.New("CEREBRO_FX_INGEST_URL is required")
+	}
+	ingestKey := strings.TrimSpace(os.Getenv("CEREBRO_EXCHANGE_INGEST_KEY"))
+	if ingestKey == "" {
+		return errors.New("CEREBRO_EXCHANGE_INGEST_KEY is required")
 	}
 	base := envOr("CEREBRO_FX_BASE", "USD")
 	symbols := splitCSV(envOr("CEREBRO_FX_SYMBOLS", "DKK,EUR"))
@@ -71,15 +76,6 @@ func run() error {
 	// while still landing the rate before EU business hours start.
 	cronExpr := envOr("CEREBRO_FX_CRON", "30 4 * * *")
 
-	pool, err := pgxpool.New(ctx, dbURL)
-	if err != nil {
-		return err
-	}
-	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		return err
-	}
-	queries := cerebrodb.New(pool)
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 
 	client, err := hatchet.NewClient()
@@ -90,11 +86,11 @@ func run() error {
 	fxTask := client.NewStandaloneTask(
 		"cerebro-fetch-exchange-rates",
 		func(taskCtx hatchet.Context, _ fxInput) (fxOutput, error) {
-			out, err := refreshRates(taskCtx, httpClient, queries, endpoint, base, symbols)
+			out, err := refreshRates(taskCtx, httpClient, endpoint, base, symbols, ingestURL, ingestKey)
 			if err != nil {
-				// Best-effort: a fetch failure leaves the previously-cached
-				// rows in place (the display layer's fallback). The task
-				// surfaces the error to Hatchet so retries / alerting work.
+				// Best-effort: a fetch/ingest failure leaves the previously-cached
+				// rows in place (the display layer's fallback). The task surfaces
+				// the error to Hatchet so retries / alerting work.
 				slog.Error("fx refresh failed", "error", err)
 				return out, err
 			}
@@ -115,7 +111,7 @@ func run() error {
 	// logged but does not block worker start, because the static seed in
 	// migration 9066 keeps the display usable until the next attempt.
 	go func() {
-		out, err := refreshRates(ctx, httpClient, queries, endpoint, base, symbols)
+		out, err := refreshRates(ctx, httpClient, endpoint, base, symbols, ingestURL, ingestKey)
 		if err != nil {
 			slog.Warn("bootstrap fx refresh failed (cron will retry)", "error", err)
 			return
@@ -132,20 +128,21 @@ func run() error {
 	return worker.StartBlocking(ctx)
 }
 
-// refreshRates is the shared fetch+store path used both by the cron task body
-// and the bootstrap-on-startup goroutine.
+// refreshRates is the shared fetch+submit path used both by the cron task body
+// and the bootstrap-on-startup goroutine. It fetches from Frankfurter and POSTs
+// the snapshot to the backend ingestion endpoint — no direct DB access.
 func refreshRates(
 	ctx context.Context,
 	httpClient *http.Client,
-	queries *cerebrodb.Queries,
 	endpoint, base string,
 	symbols []string,
+	ingestURL, ingestKey string,
 ) (fxOutput, error) {
 	snap, err := exchangerates.Fetch(ctx, httpClient, endpoint, base, symbols)
 	if err != nil {
 		return fxOutput{Base: base}, err
 	}
-	written, err := exchangerates.Store(ctx, queries, base, snap)
+	written, err := exchangerates.Submit(ctx, httpClient, ingestURL, ingestKey, base, snap)
 	if err != nil {
 		return fxOutput{Base: base, Date: snap.Date, Written: written}, err
 	}

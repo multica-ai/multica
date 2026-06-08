@@ -36,6 +36,8 @@ import (
 	cerebrodisplaycurrency "github.com/multica-ai/multica/server/internal/cerebro/displaycurrency"
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 service-to-service pricing pull for the registry's agent-trace costing.
 	cerebropricing "github.com/multica-ai/multica/server/internal/cerebro/pricing"
+	// CEREBRO-PATCH(cerebro-exchange-rates-ingest-route): FIR-43 service-to-service exchange-rate ingestion from the hatchet worker.
+	cerebroexchangerates "github.com/multica-ai/multica/server/internal/cerebro/exchangerates"
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 streaming dictation proxy handler import.
 	cerebrodictation "github.com/multica-ai/multica/server/internal/cerebro/dictation"
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
@@ -301,6 +303,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 pricing endpoint handler instance (service key from CEREBRO_PRICING_KEY).
 	cerebroPricingHandler := cerebropricing.New(os.Getenv("CEREBRO_PRICING_KEY"))
+	// CEREBRO-PATCH(cerebro-exchange-rates-ingest-route): FIR-43 exchange-rate ingest handler instance (service key from CEREBRO_EXCHANGE_INGEST_KEY).
+	cerebroExchangeRatesIngestHandler := cerebroexchangerates.NewIngestHandler(cerebroQueries, os.Getenv("CEREBRO_EXCHANGE_INGEST_KEY"))
 	// CEREBRO-PATCH(cerebro-github-pr-link-route): FIR-2568 poll-based PR↔issue linking endpoint instance (service key from CEREBRO_GITHUB_LINK_KEY; default workspace slug from CEREBRO_GITHUB_LINK_WORKSPACE_SLUG). Logic in handler/github_pr_link_cerebro.go.
 	cerebroGitHubPRLinkHandler := handler.NewCerebroGitHubPRLinkHandler(h, os.Getenv("CEREBRO_GITHUB_LINK_KEY"), os.Getenv("CEREBRO_GITHUB_LINK_WORKSPACE_SLUG"))
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 workspace-scoped WebSocket proxy; inference deploy stays out of this slice.
@@ -504,6 +508,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/api/config", h.GetConfig)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 service-to-service price-table read for the registry's hourly pricing pull. Outside the user-auth group on purpose — the caller is a backend service that presents CEREBRO_PRICING_KEY as a Bearer token (loopback-only when the key is unset).
 	r.Get("/api/cerebro/pricing", cerebroPricingHandler.Get)
+	// CEREBRO-PATCH(cerebro-exchange-rates-ingest-route): FIR-43 service-to-service exchange-rate ingestion from the multica-hatchet-worker. Outside the user-auth group on purpose — the worker presents CEREBRO_EXCHANGE_INGEST_KEY as a Bearer token (loopback-only when the key is unset). Backend is the sole writer of cerebro_exchange_rates.
+	r.Post("/api/cerebro/exchange-rates", cerebroExchangeRatesIngestHandler.Post)
 	// CEREBRO-PATCH(cerebro-github-pr-link-route): FIR-2568 service-to-service PR-link write for the registry's poll-based scanner. Outside the user-auth group on purpose — the caller is a backend service presenting CEREBRO_GITHUB_LINK_KEY as a Bearer token (loopback-only when the key is unset).
 	r.Post("/api/cerebro/github/pull-requests", cerebroGitHubPRLinkHandler.Post)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
