@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, ChevronRight, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
@@ -36,8 +36,9 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
+import { partitionThreadReplies } from "./thread-utils";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
-import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore, useCommentDraftStore, useCommentFoldStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
@@ -488,6 +489,74 @@ function CommentRow({
 }
 
 // ---------------------------------------------------------------------------
+// Hidden replies bar (GitHub-style middle fold)
+// ---------------------------------------------------------------------------
+
+function HiddenRepliesBar({
+  onExpand,
+  label,
+}: {
+  onExpand: () => void;
+  label: string;
+}) {
+  return (
+    <div className="border-t border-border/50 px-4 py-2">
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-label={label}
+        className="flex w-full items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <span className="h-px flex-1 bg-border/60" aria-hidden />
+        <span className="shrink-0 font-medium">{label}</span>
+        <span className="h-px flex-1 bg-border/60" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function ReplyRows({
+  issueId,
+  replies,
+  currentUserId,
+  canModerate,
+  onEdit,
+  onDelete,
+  onToggleReaction,
+  highlightedCommentId,
+}: {
+  issueId: string;
+  replies: TimelineEntry[];
+  currentUserId?: string;
+  canModerate?: boolean;
+  onEdit: CommentCardProps["onEdit"];
+  onDelete: CommentCardProps["onDelete"];
+  onToggleReaction: CommentCardProps["onToggleReaction"];
+  highlightedCommentId?: string | null;
+}) {
+  return replies.map((reply) => (
+    <div
+      key={reply.id}
+      id={`comment-${reply.id}`}
+      className={cn(
+        "border-t border-border/50 px-4 transition-colors duration-700",
+        highlightedCommentId === reply.id && "bg-brand/5",
+      )}
+    >
+      <CommentRow
+        issueId={issueId}
+        entry={reply}
+        currentUserId={currentUserId}
+        canModerate={canModerate}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onToggleReaction={onToggleReaction}
+      />
+    </div>
+  ));
+}
+
+// ---------------------------------------------------------------------------
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
 
@@ -521,6 +590,60 @@ function CommentCardImpl({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const allNestedReplies = replies;
+
+  const foldEnabled = useCommentFoldStore((s) => s.settings.enabled);
+  const foldThreshold = useCommentFoldStore((s) => s.settings.threshold);
+  const foldHeadCount = useCommentFoldStore((s) => s.settings.headCount);
+  const foldTailCount = useCommentFoldStore((s) => s.settings.tailCount);
+
+  const [repliesExpanded, setRepliesExpanded] = useState(false);
+  const replyDisplay = useMemo(
+    () =>
+      partitionThreadReplies(allNestedReplies, repliesExpanded, {
+        enabled: foldEnabled,
+        threshold: foldThreshold,
+        headCount: foldHeadCount,
+        tailCount: foldTailCount,
+      }),
+    [
+      allNestedReplies,
+      repliesExpanded,
+      foldEnabled,
+      foldThreshold,
+      foldHeadCount,
+      foldTailCount,
+    ],
+  );
+
+  // Deep-link / inbox highlight on a folded reply: expand the middle block
+  // so the target row mounts and issue-detail can scrollIntoView it.
+  useEffect(() => {
+    if (!highlightedCommentId || highlightedCommentId === entry.id) return;
+    if (!allNestedReplies.some((r) => r.id === highlightedCommentId)) return;
+    if (repliesExpanded || !foldEnabled) return;
+
+    const folded = partitionThreadReplies(allNestedReplies, false, {
+      enabled: foldEnabled,
+      threshold: foldThreshold,
+      headCount: foldHeadCount,
+      tailCount: foldTailCount,
+    });
+    if (
+      folded.kind === "collapsed" &&
+      folded.hidden.some((r) => r.id === highlightedCommentId)
+    ) {
+      setRepliesExpanded(true);
+    }
+  }, [
+    highlightedCommentId,
+    entry.id,
+    allNestedReplies,
+    repliesExpanded,
+    foldEnabled,
+    foldThreshold,
+    foldHeadCount,
+    foldTailCount,
+  ]);
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
@@ -725,20 +848,48 @@ function CommentCardImpl({
             )}
           </div>
 
-          {/* Replies */}
-          {allNestedReplies.map((reply) => (
-            <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
-              <CommentRow
+          {/* Replies — long threads fold the middle (GitHub-style). */}
+          {replyDisplay.kind === "all" ? (
+            <ReplyRows
+              issueId={issueId}
+              replies={replyDisplay.replies}
+              currentUserId={currentUserId}
+              canModerate={canModerate}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onToggleReaction={onToggleReaction}
+              highlightedCommentId={highlightedCommentId}
+            />
+          ) : (
+            <>
+              <ReplyRows
                 issueId={issueId}
-                entry={reply}
+                replies={replyDisplay.head}
                 currentUserId={currentUserId}
                 canModerate={canModerate}
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}
+                highlightedCommentId={highlightedCommentId}
               />
-            </div>
-          ))}
+              <HiddenRepliesBar
+                onExpand={() => setRepliesExpanded(true)}
+                label={t(($) => $.comment.show_hidden_replies, {
+                  count: replyDisplay.hiddenCount,
+                })}
+              />
+              <ReplyRows
+                issueId={issueId}
+                replies={replyDisplay.tail}
+                currentUserId={currentUserId}
+                canModerate={canModerate}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onToggleReaction={onToggleReaction}
+                highlightedCommentId={highlightedCommentId}
+              />
+            </>
+          )}
 
           {/* Reply input */}
           <div className="border-t border-border/50 px-4 py-2.5">

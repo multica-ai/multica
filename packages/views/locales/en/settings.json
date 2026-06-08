@@ -19,6 +19,17 @@
       "browser_suffix": " (browser)",
       "hint": "Used for dashboards, charts, and any 'today' label shown to you. It's a personal preference that applies across all your workspaces.",
       "sync_failed": "Failed to save your timezone preference."
+    },
+    "comment_fold": {
+      "title": "Issue comment threads",
+      "description": "When a discussion thread gets long, hide the middle replies behind a \"Show hidden replies\" control — like GitHub. Applies on web and desktop.",
+      "enabled_label": "Collapse long threads",
+      "enabled_hint": "Keep the first and last few replies visible; fold everything in between.",
+      "threshold_label": "Start folding after",
+      "threshold_suffix": "replies",
+      "head_label": "Replies at top",
+      "tail_label": "Replies at bottom",
+      "reset_action": "Reset to defaults"
     }
   },
   "page": {

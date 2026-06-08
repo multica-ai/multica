@@ -297,6 +297,33 @@ vi.mock("@multica/core/issues/stores", () => ({
       }),
     },
   ),
+  useCommentFoldStore: Object.assign(
+    (selector?: any) => {
+      const state = {
+        settings: {
+          enabled: true,
+          threshold: 7,
+          headCount: 2,
+          tailCount: 2,
+        },
+        patchSettings: vi.fn(),
+        resetSettings: vi.fn(),
+      };
+      return selector ? selector(state) : state;
+    },
+    {
+      getState: () => ({
+        settings: {
+          enabled: true,
+          threshold: 7,
+          headCount: 2,
+          tailCount: 2,
+        },
+        patchSettings: vi.fn(),
+        resetSettings: vi.fn(),
+      }),
+    },
+  ),
 }));
 
 // Mock react-virtuoso: jsdom has no real layout, so the real Virtuoso would

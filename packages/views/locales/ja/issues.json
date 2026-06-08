@@ -265,6 +265,7 @@
     "send_reply_failed": "返信を送信できませんでした",
     "delete_failed": "コメントを削除できませんでした",
     "reply_count_other": "返信 {{count}} 件",
+    "show_hidden_replies_other": "非表示の返信 {{count}} 件を表示",
     "leave_comment_placeholder": "コメントを残す...",
     "send_tooltip": "送信",
     "resolve": {

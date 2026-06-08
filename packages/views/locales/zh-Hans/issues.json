@@ -270,6 +270,7 @@
     "send_reply_failed": "发送回复失败",
     "delete_failed": "删除评论失败",
     "reply_count_other": "{{count}} 条回复",
+    "show_hidden_replies_other": "显示 {{count}} 条隐藏回复",
     "leave_comment_placeholder": "留下评论...",
     "send_tooltip": "发送",
     "resolve": {

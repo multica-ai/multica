@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
   Select,
@@ -9,6 +9,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Input } from "@multica/ui/components/ui/input";
+import { Switch } from "@multica/ui/components/ui/switch";
+import { Button } from "@multica/ui/components/ui/button";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -19,6 +23,7 @@ import {
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
+import { useCommentFoldStore } from "@multica/core/issues/stores";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
 
@@ -242,7 +247,153 @@ export function PreferencesTab() {
       </section>
 
       <TimezoneSection />
+
+      <CommentFoldSection />
     </div>
+  );
+}
+
+function CommentFoldNumberField({
+  id,
+  label,
+  suffix,
+  value,
+  min,
+  max,
+  onCommit,
+}: {
+  id: string;
+  label: string;
+  suffix?: string;
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const parsed = Number.parseInt(draft, 10);
+    if (!Number.isFinite(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+    onCommit(parsed);
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-xs font-medium text-muted-foreground">
+        {label}
+      </label>
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          type="number"
+          inputMode="numeric"
+          min={min}
+          max={max}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            }
+          }}
+          className="h-8 w-20 tabular-nums"
+        />
+        {suffix ? (
+          <span className="text-xs text-muted-foreground">{suffix}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CommentFoldSection() {
+  const { t } = useT("settings");
+  const settings = useCommentFoldStore((s) => s.settings);
+  const patchSettings = useCommentFoldStore((s) => s.patchSettings);
+  const resetSettings = useCommentFoldStore((s) => s.resetSettings);
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold">
+          {t(($) => $.preferences.comment_fold.title)}
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t(($) => $.preferences.comment_fold.description)}
+        </p>
+      </div>
+
+      <Card>
+        <CardContent className="divide-y">
+          <div className="flex items-center justify-between gap-4 py-3 first:pt-0">
+            <div className="space-y-0.5 pr-4">
+              <p className="text-sm font-medium">
+                {t(($) => $.preferences.comment_fold.enabled_label)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.preferences.comment_fold.enabled_hint)}
+              </p>
+            </div>
+            <Switch
+              aria-label={t(($) => $.preferences.comment_fold.enabled_label)}
+              checked={settings.enabled}
+              onCheckedChange={(checked) => patchSettings({ enabled: checked })}
+            />
+          </div>
+
+          {settings.enabled ? (
+            <div className="space-y-4 py-3 last:pb-0">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <CommentFoldNumberField
+                  id="comment-fold-threshold"
+                  label={t(($) => $.preferences.comment_fold.threshold_label)}
+                  suffix={t(($) => $.preferences.comment_fold.threshold_suffix)}
+                  value={settings.threshold}
+                  min={3}
+                  max={50}
+                  onCommit={(threshold) => patchSettings({ threshold })}
+                />
+                <CommentFoldNumberField
+                  id="comment-fold-head"
+                  label={t(($) => $.preferences.comment_fold.head_label)}
+                  value={settings.headCount}
+                  min={1}
+                  max={20}
+                  onCommit={(headCount) => patchSettings({ headCount })}
+                />
+                <CommentFoldNumberField
+                  id="comment-fold-tail"
+                  label={t(($) => $.preferences.comment_fold.tail_label)}
+                  value={settings.tailCount}
+                  min={1}
+                  max={20}
+                  onCommit={(tailCount) => patchSettings({ tailCount })}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-muted-foreground"
+                onClick={resetSettings}
+              >
+                {t(($) => $.preferences.comment_fold.reset_action)}
+              </Button>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+    </section>
   );
 }
 

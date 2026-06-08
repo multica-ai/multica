@@ -273,6 +273,8 @@
     "delete_failed": "댓글을 삭제하지 못했습니다",
     "reply_count_one": "답글 {{count}}개",
     "reply_count_other": "답글 {{count}}개",
+    "show_hidden_replies_one": "숨겨진 답글 {{count}}개 표시",
+    "show_hidden_replies_other": "숨겨진 답글 {{count}}개 표시",
     "leave_comment_placeholder": "댓글 남기기...",
     "send_tooltip": "보내기",
     "resolve": {

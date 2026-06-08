@@ -273,6 +273,8 @@
     "delete_failed": "Failed to delete comment",
     "reply_count_one": "{{count}} reply",
     "reply_count_other": "{{count}} replies",
+    "show_hidden_replies_one": "Show {{count}} hidden reply",
+    "show_hidden_replies_other": "Show {{count}} hidden replies",
     "leave_comment_placeholder": "Leave a comment...",
     "send_tooltip": "Send",
     "resolve": {
