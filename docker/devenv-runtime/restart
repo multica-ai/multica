@@ -1,3 +1,0 @@
-#!/bin/sh
-echo "Restarting opencode — it will be back in a few seconds."
-pkill -9 -f '.opencode serve' 2>/dev/null || true

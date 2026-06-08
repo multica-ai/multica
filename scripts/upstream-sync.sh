@@ -112,7 +112,7 @@ git commit -m "chore: sync upstream multica-ai/multica ${FORK_SHORT}..${UPSTREAM
 # 12. Push and open the PR with a drift summary baked into the body.
 git push -u "${FORK_REMOTE}" "${BRANCH}"
 
-DRIFT_PATHS=(.github/ gitops/ server/migrations/ docker/devenv-runtime/)
+DRIFT_PATHS=(.github/ gitops/ server/migrations/)
 DRIFT=$(git diff --stat "${UPSTREAM_REMOTE}/main..HEAD" -- "${DRIFT_PATHS[@]}" || true)
 DELETED_LIST=$(printf -- '- %s\n' "${UPSTREAM_DELETIONS[@]}")
 

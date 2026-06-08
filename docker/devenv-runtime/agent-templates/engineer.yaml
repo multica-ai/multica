@@ -1,8 +1,0 @@
-# Default coding agent for new workspaces.
-# Takes an issue end-to-end: read → implement → open PR → set in_review → stop.
-name: "Engineer"
-description: "Default coding agent. Takes an issue end-to-end: read, implement, open PR, hand back."
-model: "claude-sonnet-4-6"
-max_concurrent_tasks: 6
-visibility: "workspace"
-instructions_file: "engineer.instructions.md"
