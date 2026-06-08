@@ -1720,6 +1720,21 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if status == "" {
 		status = "todo"
 	}
+
+	// Validate status against workspace's configured issue statuses.
+	valid, err := h.Queries.ValidateIssueStatus(r.Context(), db.ValidateIssueStatusParams{
+		WorkspaceID: wsUUID,
+		Name:        status,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to validate status")
+		return
+	}
+	if !valid {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid status %q for this workspace", status))
+		return
+	}
+
 	priority := req.Priority
 	if priority == "" {
 		priority = "none"
@@ -2053,6 +2068,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		params.Description = pgtype.Text{String: *req.Description, Valid: true}
 	}
 	if req.Status != nil {
+		// Validate status against workspace's configured issue statuses.
+		valid, err := h.Queries.ValidateIssueStatus(r.Context(), db.ValidateIssueStatusParams{
+			WorkspaceID: prevIssue.WorkspaceID,
+			Name:        *req.Status,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate status")
+			return
+		}
+		if !valid {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid status %q for this workspace", *req.Status))
+			return
+		}
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
 	if req.Priority != nil {
@@ -2494,6 +2522,23 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// Validate status before iterating over issues.
+	if req.Updates.Status != nil {
+		valid, err := h.Queries.ValidateIssueStatus(r.Context(), db.ValidateIssueStatusParams{
+			WorkspaceID: wsUUID,
+			Name:        *req.Updates.Status,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate status")
+			return
+		}
+		if !valid {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid status %q for this workspace", *req.Updates.Status))
+			return
+		}
+	}
+
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)

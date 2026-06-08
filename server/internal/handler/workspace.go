@@ -201,6 +201,12 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Seed the 7 built-in issue statuses for the new workspace.
+	if err := qtx.EnsureDefaultStatuses(r.Context(), ws.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to seed default issue statuses")
+		return
+	}
+
 	// NOTE: CreateWorkspace deliberately does NOT mark the user as
 	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
 	// (Step 3 of the flow) and by AcceptInvitation (invitee joining an

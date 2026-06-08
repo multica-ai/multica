@@ -17,7 +17,7 @@ import {
   Trash2,
   UserMinus,
 } from "lucide-react";
-import type { AgentTask, Issue } from "@multica/core/types";
+import type { AgentTask, DefaultIssueStatus, Issue } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import {
   ALL_STATUSES,
@@ -156,7 +156,7 @@ export function IssueActionsMenuItems({
           {ALL_STATUSES.map((s) => (
             <P.Item key={s} onClick={() => updateField({ status: s })}>
               <StatusIcon status={s} className="h-3.5 w-3.5" />
-              {t(($) => $.status[s])}
+              {t(($) => $.status[s as DefaultIssueStatus])}
               {issue.status === s && (
                 <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
               )}

@@ -1,6 +1,10 @@
 import type { Label } from "./label";
 
-export type IssueStatus =
+// Custom statuses can be any string registered in the workspace.
+export type IssueStatus = string;
+
+// Built-in default statuses — always available.
+export type DefaultIssueStatus =
   | "backlog"
   | "todo"
   | "in_progress"

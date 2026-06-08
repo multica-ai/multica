@@ -17,7 +17,7 @@ import {
 import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
 import { Eye, MoreHorizontal } from "lucide-react";
-import type { Issue, IssueAssigneeGroup, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
+import type { DefaultIssueStatus, Issue, IssueAssigneeGroup, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { AssigneeGroupedIssuesFilter, MyIssuesFilter } from "@multica/core/issues/queries";
@@ -651,7 +651,7 @@ function HiddenColumnRow({
     <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
       <div className="flex items-center gap-2">
         <StatusIcon status={status} className="h-3.5 w-3.5" />
-        <span className="text-sm">{t(($) => $.status[status])}</span>
+        <span className="text-sm">{t(($) => $.status[status as DefaultIssueStatus])}</span>
       </div>
       <div className="flex items-center gap-1.5">
         <span className="text-xs text-muted-foreground">{total}</span>

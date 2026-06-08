@@ -355,6 +355,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
 
+				// Issue statuses
+				r.Route("/issue-statuses", func(r chi.Router) {
+					// List is member-visible
+					r.With(middleware.RequireWorkspaceMemberFromURL(queries, "id")).Get("/", h.ListWorkspaceIssueStatuses)
+					// Create/update/delete require admin or owner
+					r.Group(func(r chi.Router) {
+						r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+						r.Post("/", h.CreateWorkspaceIssueStatus)
+						r.Put("/{statusId}", h.UpdateWorkspaceIssueStatus)
+						r.Delete("/{statusId}", h.DeleteWorkspaceIssueStatus)
+					})
+				})
+
 				// GitHub integration — connect / disconnect remain admin-only;
 				// the read-only list endpoint lives in the member-level group
 				// above so non-admins can see the workspace's connection state.

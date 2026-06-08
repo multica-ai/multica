@@ -60,4 +60,4 @@ WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND 
 -- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
-  AND i.issue_id IN (SELECT id FROM issue WHERE status IN ('done', 'cancelled'));
+  AND i.issue_id IN (SELECT id FROM issue WHERE status IN (SELECT name FROM workspace_issue_status WHERE workspace_id = $1 AND category IN ('completed', 'cancelled')));

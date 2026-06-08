@@ -65,7 +65,7 @@ import {
   type IssuesScope,
 } from "@multica/core/issues/stores/issues-scope-store";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type { Issue } from "@multica/core/types";
+import type { DefaultIssueStatus, Issue } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useIssueViewStore } from "@multica/core/issues/stores/view-store";
@@ -686,7 +686,7 @@ export function IssueDisplayControls({
                     >
                       <HoverCheck checked={checked} />
                       <StatusIcon status={s} className="h-3.5 w-3.5" />
-                      {t(($) => $.status[s])}
+                      {t(($) => $.status[s as DefaultIssueStatus])}
                       {count > 0 && (
                         <span className="ml-auto text-xs text-muted-foreground">
                           {t(($) => $.filters.issue_count, { count })}

@@ -124,6 +124,7 @@ var issueAssignCmd = &cobra.Command{
 var issueStatusCmd = &cobra.Command{
 	Use:   "status <id> <status>",
 	Short: "Change issue status",
+	Long:  "Change an issue's status. Built-in statuses: backlog, todo, in_progress, in_review, done, blocked, cancelled. Workspace admins can add custom statuses via the API.",
 	Args:  exactArgs(2),
 	RunE:  runIssueStatus,
 }
@@ -224,8 +225,31 @@ var issueSearchCmd = &cobra.Command{
 	RunE:  runIssueSearch,
 }
 
-var validIssueStatuses = []string{
+// defaultIssueStatuses is the fallback list when the API is unreachable.
+var defaultIssueStatuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
+}
+
+// fetchWorkspaceStatuses fetches the valid issue statuses for the current
+// workspace from the API. Falls back to the built-in defaults on error.
+func fetchWorkspaceStatuses(ctx context.Context, client *cli.APIClient) []string {
+	if client.WorkspaceID == "" {
+		return defaultIssueStatuses
+	}
+	var resp []struct {
+		Name string `json:"name"`
+	}
+	if err := client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/issue-statuses", &resp); err != nil {
+		return defaultIssueStatuses
+	}
+	if len(resp) == 0 {
+		return defaultIssueStatuses
+	}
+	names := make([]string, len(resp))
+	for i, s := range resp {
+		names[i] = s.Name
+	}
+	return names
 }
 
 func init() {
@@ -877,17 +901,6 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
 
-	valid := false
-	for _, s := range validIssueStatuses {
-		if s == status {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validIssueStatuses, ", "))
-	}
-
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -895,6 +908,19 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	// Fetch valid statuses from workspace (falls back to built-in defaults).
+	validStatuses := fetchWorkspaceStatuses(ctx, client)
+	valid := false
+	for _, s := range validStatuses {
+		if s == status {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validStatuses, ", "))
+	}
 
 	issueRef, err := resolveIssueRef(ctx, client, id)
 	if err != nil {

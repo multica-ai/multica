@@ -1780,7 +1780,7 @@ func TestRunIssueCommentList_RecentStillLabelsCursorAsThread(t *testing.T) {
 	}
 }
 
-func TestValidIssueStatuses(t *testing.T) {
+func TestDefaultIssueStatuses(t *testing.T) {
 	expected := map[string]bool{
 		"backlog":     true,
 		"todo":        true,
@@ -1790,12 +1790,12 @@ func TestValidIssueStatuses(t *testing.T) {
 		"blocked":     true,
 		"cancelled":   true,
 	}
-	for _, s := range validIssueStatuses {
+	for _, s := range defaultIssueStatuses {
 		if !expected[s] {
-			t.Errorf("unexpected status in validIssueStatuses: %q", s)
+			t.Errorf("unexpected status in defaultIssueStatuses: %q", s)
 		}
 	}
-	if len(validIssueStatuses) != len(expected) {
-		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
+	if len(defaultIssueStatuses) != len(expected) {
+		t.Errorf("defaultIssueStatuses has %d entries, expected %d", len(defaultIssueStatuses), len(expected))
 	}
 }

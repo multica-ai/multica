@@ -1,4 +1,4 @@
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus, DefaultIssueStatus } from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 
 // ---------------------------------------------------------------------------
@@ -140,10 +140,10 @@ function CancelledIcon() {
 }
 
 // ---------------------------------------------------------------------------
-// Renderer map
+// Renderer map — built-in statuses only
 // ---------------------------------------------------------------------------
 
-const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
+const STATUS_RENDERERS: Record<DefaultIssueStatus, () => React.ReactNode> = {
   backlog: BacklogIcon,
   todo: TodoIcon,
   in_progress: InProgressIcon,
@@ -154,6 +154,28 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
 };
 
 // ---------------------------------------------------------------------------
+// Fallback renderer for custom/unknown statuses — a simple colored circle.
+// ---------------------------------------------------------------------------
+
+function CustomStatusIcon({ color }: { color?: string }) {
+  const fill = color ?? "currentColor";
+  return (
+    <>
+      <circle
+        cx={CX}
+        cy={CY}
+        r={OUTER_R}
+        fill="none"
+        stroke={fill}
+        strokeWidth={1.5}
+        opacity={0.5}
+      />
+      <circle cx={CX} cy={CY} r={FILL_R} fill={fill} />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Public component
 // ---------------------------------------------------------------------------
 
@@ -161,21 +183,39 @@ export function StatusIcon({
   status,
   className = "h-4 w-4",
   inheritColor = false,
+  color,
 }: {
   status: IssueStatus;
   className?: string;
   inheritColor?: boolean;
+  /** Explicit color for custom statuses. Used when the caller has the
+   *  StatusDefinition's `color` value from the workspace API. */
+  color?: string;
 }) {
   const cfg = STATUS_CONFIG[status];
-  const Renderer = STATUS_RENDERERS[status];
+  const Renderer = STATUS_RENDERERS[status as DefaultIssueStatus];
 
+  // Built-in status — use the dedicated renderer + semantic color class.
+  if (Renderer && cfg) {
+    return (
+      <svg
+        viewBox="0 0 14 14"
+        fill="none"
+        className={`${className} ${inheritColor ? "" : cfg.iconColor} shrink-0`}
+      >
+        <Renderer />
+      </svg>
+    );
+  }
+
+  // Custom / unknown status — render a colored dot.
   return (
     <svg
       viewBox="0 0 14 14"
       fill="none"
-      className={`${className} ${inheritColor ? "" : cfg.iconColor} shrink-0`}
+      className={`${className} shrink-0`}
     >
-      <Renderer />
+      <CustomStatusIcon color={color ?? cfg?.iconColor} />
     </svg>
   );
 }

@@ -175,6 +175,18 @@ export interface LoginResponse {
   user: User;
 }
 
+/** Shape returned by GET /api/workspaces/{id}/issue-statuses */
+export interface WorkspaceIssueStatusResponse {
+  id: string;
+  workspace_id: string;
+  name: string;
+  label: string;
+  color: string;
+  category: 'not_started' | 'started' | 'completed' | 'cancelled';
+  position: number;
+  is_default: boolean;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -1169,6 +1181,12 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+  }
+
+  /** Fetch the workspace's custom issue statuses. Falls back to an empty
+   *  array on error — callers are expected to merge with DEFAULT_ALL_STATUSES. */
+  async listWorkspaceIssueStatuses(workspaceId: string): Promise<WorkspaceIssueStatusResponse[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/issue-statuses`);
   }
 
   // Members

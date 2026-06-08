@@ -8,7 +8,7 @@ import { captureDownloadIntent } from "@multica/core/analytics";
 import { cn } from "@multica/ui/lib/utils";
 import { DragStrip } from "@multica/views/platform";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
-import type { IssueStatus } from "@multica/core/types";
+import type { DefaultIssueStatus, IssueStatus } from "@multica/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { useT } from "../../i18n";
@@ -300,7 +300,7 @@ function MockActivityCard({
   actor: ActivityActor;
   issueId: string;
   content: React.ReactNode;
-  status?: Extract<IssueStatus, "in_progress" | "done" | "in_review">;
+  status?: DefaultIssueStatus;
   timestamp?: string;
   className?: string;
 }) {
@@ -369,7 +369,7 @@ function StatusFooter({
   return (
     <div className="mt-3 flex items-center gap-2 text-xs">
       <span
-        className={cn("flex items-center gap-1.5 font-medium", cfg.iconColor)}
+        className={cn("flex items-center gap-1.5 font-medium", cfg?.iconColor)}
       >
         <StatusIcon
           status={status}
@@ -378,7 +378,7 @@ function StatusFooter({
             status === "in_progress" && "animate-pulse",
           )}
         />
-        {cfg.label}
+        {cfg?.label}
       </span>
       {timestamp && (
         <>

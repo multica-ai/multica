@@ -233,7 +233,7 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
                     >
                       <HoverCheck checked={checked} />
                       <StatusIcon status={s} className="h-3.5 w-3.5" />
-                      {STATUS_CONFIG[s].label}
+                      {STATUS_CONFIG[s]?.label}
                       {count > 0 && (
                         <span className="ml-auto text-xs text-muted-foreground">
                           {t(($) => $.header.issue_count, { count })}
