@@ -214,3 +214,58 @@ func TestReadAntigravityConversationIDMissingFile(t *testing.T) {
 		t.Errorf("expected empty string for empty path, got %q", got)
 	}
 }
+
+// TestAntigravityModelError is the regression guard for the silent-no-op fix:
+// agy exits 0 with empty output on an unrecognised --model, so Execute must
+// reject a non-empty model that isn't in the `agy models` catalog instead of
+// letting it run to a fake "completed + empty" success. This covers the same
+// validation regardless of whether opts.Model originated from agent.model, a
+// persisted/API value, or the daemon-wide MULTICA_ANTIGRAVITY_MODEL default —
+// they all collapse to opts.Model before Execute runs this check.
+func TestAntigravityModelError(t *testing.T) {
+	t.Parallel()
+
+	catalog := []Model{
+		{ID: "Gemini 3.5 Flash (Medium)", Label: "Gemini 3.5 Flash (Medium)", Provider: "antigravity"},
+		{ID: "Claude Opus 4.6 (Thinking)", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+	}
+
+	// Exact catalog hit → accepted.
+	if err := antigravityModelError("Claude Opus 4.6 (Thinking)", catalog); err != nil {
+		t.Errorf("valid model rejected: %v", err)
+	}
+
+	// Empty model → accepted (flag omitted, agy resolves its own default).
+	if err := antigravityModelError("", catalog); err != nil {
+		t.Errorf("empty model should not error: %v", err)
+	}
+
+	// Empty / nil catalog → fail open (discovery couldn't produce a list, so we
+	// can't prove the value is bad — let agy decide rather than block the run).
+	if err := antigravityModelError("anything at all", nil); err != nil {
+		t.Errorf("empty catalog should fail open, got: %v", err)
+	}
+
+	// Unknown model with a known catalog → actionable error that names the
+	// rejected value and points at `agy models`. THIS is the case that stops
+	// the silent empty-success.
+	err := antigravityModelError("Totally Made Up Model", catalog)
+	if err == nil {
+		t.Fatal("unknown model should be rejected, not silently accepted")
+	}
+	if !strings.Contains(err.Error(), "Totally Made Up Model") {
+		t.Errorf("error should name the rejected model: %v", err)
+	}
+	if !strings.Contains(err.Error(), "agy models") {
+		t.Errorf("error should point the user at `agy models`: %v", err)
+	}
+
+	// Near-miss (trailing space / dropped suffix) → still rejected, because agy
+	// needs the exact display string and would no-op on anything else.
+	if err := antigravityModelError("Claude Opus 4.6 (Thinking) ", catalog); err == nil {
+		t.Error("near-miss model (trailing space) should be rejected")
+	}
+	if err := antigravityModelError("Claude Opus 4.6", catalog); err == nil {
+		t.Error("near-miss model (dropped suffix) should be rejected")
+	}
+}
