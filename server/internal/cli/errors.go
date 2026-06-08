@@ -63,6 +63,42 @@ func (k ErrorKind) IsNetwork() bool {
 	}
 }
 
+// String returns a stable, snake_case identifier for the kind. It is used in
+// --debug output and is safe to log or branch on; it is not user-facing copy
+// (see kindMessages / messageFor for that).
+func (k ErrorKind) String() string {
+	switch k {
+	case KindNetworkTimeout:
+		return "network_timeout"
+	case KindNetworkDNS:
+		return "network_dns"
+	case KindNetworkRefused:
+		return "network_refused"
+	case KindNetworkTLS:
+		return "network_tls"
+	case KindNetworkOffline:
+		return "network_offline"
+	case KindAuthRequired:
+		return "auth_required"
+	case KindForbidden:
+		return "forbidden"
+	case KindNotFound:
+		return "not_found"
+	case KindConflict:
+		return "conflict"
+	case KindValidation:
+		return "validation"
+	case KindRateLimited:
+		return "rate_limited"
+	case KindServerError:
+		return "server_error"
+	case KindUnknown:
+		return "unknown"
+	default:
+		return fmt.Sprintf("ErrorKind(%d)", int(k))
+	}
+}
+
 // NetworkError wraps a transport-layer error (the error returned by
 // http.Client.Do, before any HTTP status is available). It strips the raw
 // URL out of the user-facing message while preserving the original error for
@@ -235,32 +271,32 @@ var kindMessages = map[ErrorKind][2]string{
 		"无法访问 Multica 服务器。请检查网络连接。",
 	},
 	KindAuthRequired: {
-		"Your session has expired or you are not signed in. Run `multica login` to sign in again.",
-		"登录已过期或尚未登录。请运行 `multica login` 重新登录。",
+		"Your session has expired or you are not signed in. Run `multica login` to sign in again. On a self-hosted or non-OAuth setup, ask your administrator for valid credentials.",
+		"登录已过期或尚未登录。请运行 `multica login` 重新登录。自托管或非 OAuth 场景请联系管理员获取有效凭证。",
 	},
 	KindForbidden: {
-		"You do not have permission to access this resource.",
-		"无权访问该资源。",
+		"You do not have permission to access this resource. Check that you are in the right workspace, or ask an administrator to grant access.",
+		"无权访问该资源。请确认当前 workspace 是否正确，或联系管理员授予权限。",
 	},
 	KindNotFound: {
-		"The requested resource was not found. The ID may not exist or may belong to a different workspace.",
-		"未找到请求的资源。该 ID 可能不存在，或不属于当前 workspace。",
+		"The requested resource was not found. Check the ID, or run the matching `list` command to see what exists in this workspace.",
+		"未找到请求的资源。请核对 ID，或运行对应的 list 命令查看当前 workspace 中已有的内容。",
 	},
 	KindConflict: {
-		"The request conflicts with the current state of the resource.",
-		"请求与资源的当前状态冲突。",
+		"The request conflicts with the current state of the resource (it may already exist or have changed since you last fetched it). Re-fetch the latest state and try again.",
+		"请求与资源的当前状态冲突（可能已存在，或自上次获取后已被修改）。请重新获取最新状态后再试。",
 	},
 	KindValidation: {
-		"The request was invalid.",
-		"请求无效。",
+		"The request was invalid. Check the values you provided; run the command with --help to see the expected format.",
+		"请求无效。请检查所填写的参数；可用 --help 查看期望的格式。",
 	},
 	KindRateLimited: {
-		"Too many requests. Please wait a moment and try again.",
-		"请求过于频繁。请稍后重试。",
+		"Too many requests. Please wait a moment and try again; if this keeps happening, reduce how frequently you call the API.",
+		"请求过于频繁。请稍候重试；若持续出现，请降低 API 调用频率。",
 	},
 	KindServerError: {
-		"The Multica service is temporarily unavailable. Please try again later; contact support if the problem persists.",
-		"Multica 服务暂时不可用。请稍后重试，如持续出现请联系支持。",
+		"The Multica service is temporarily unavailable (server error). Please try again later; if it persists, contact support. Re-run with --debug to see the raw server response.",
+		"Multica 服务暂时不可用（服务器错误）。请稍后重试；若持续出现请联系支持。可加 --debug 查看服务器原始响应。",
 	},
 	KindUnknown: {
 		"An unexpected error occurred.",
@@ -363,7 +399,7 @@ func debugDetail(err error) string {
 
 	var netErr *NetworkError
 	if errors.As(err, &netErr) {
-		fmt.Fprintf(&sb, "\n[debug] network: op=%q kind=%d cause=%v", netErr.Op, netErr.Kind, netErr.Err)
+		fmt.Fprintf(&sb, "\n[debug] network: op=%q kind=%s cause=%v", netErr.Op, netErr.Kind, netErr.Err)
 	}
 	var httpErr *HTTPError
 	if errors.As(err, &httpErr) {

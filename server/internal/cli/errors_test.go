@@ -271,3 +271,72 @@ func withLang(t *testing.T, lang string) {
 	t.Setenv("LC_MESSAGES", "")
 	t.Setenv("LANG", lang)
 }
+
+func TestErrorKindString(t *testing.T) {
+	cases := map[ErrorKind]string{
+		KindNetworkTimeout: "network_timeout",
+		KindNetworkDNS:     "network_dns",
+		KindNetworkRefused: "network_refused",
+		KindNetworkTLS:     "network_tls",
+		KindNetworkOffline: "network_offline",
+		KindAuthRequired:   "auth_required",
+		KindForbidden:      "forbidden",
+		KindNotFound:       "not_found",
+		KindConflict:       "conflict",
+		KindValidation:     "validation",
+		KindRateLimited:    "rate_limited",
+		KindServerError:    "server_error",
+		KindUnknown:        "unknown",
+	}
+	seen := map[string]ErrorKind{}
+	for k, want := range cases {
+		if got := k.String(); got != want {
+			t.Errorf("ErrorKind(%d).String() = %q, want %q", int(k), got, want)
+		}
+		if prev, dup := seen[k.String()]; dup {
+			t.Errorf("duplicate String() %q for kinds %d and %d", k.String(), int(prev), int(k))
+		}
+		seen[k.String()] = k
+	}
+	// Out-of-range value gets a stable fallback rather than an empty string.
+	if got := ErrorKind(999).String(); got != "ErrorKind(999)" {
+		t.Errorf("unexpected fallback String(): %q", got)
+	}
+}
+
+// TestFormatErrorActionableHints locks in the per-status actionable hints
+// refined in PR2, in both languages, so a future copy edit can't silently drop
+// the actionable guidance.
+func TestFormatErrorActionableHints(t *testing.T) {
+	cases := []struct {
+		status int
+		enWant []string
+		zhWant []string
+	}{
+		{401, []string{"multica login", "self-hosted", "administrator"}, []string{"multica login", "自托管", "管理员"}},
+		{403, []string{"permission", "workspace"}, []string{"无权", "workspace"}},
+		{404, []string{"not found", "list"}, []string{"未找到", "list"}},
+		{409, []string{"conflict", "again"}, []string{"冲突", "重新获取"}},
+		{429, []string{"Too many requests"}, []string{"过于频繁"}},
+		{500, []string{"temporarily unavailable", "--debug"}, []string{"暂时不可用", "--debug"}},
+	}
+	for _, tc := range cases {
+		httpErr := &HTTPError{Method: "GET", Path: "/api/x", StatusCode: tc.status}
+
+		withLang(t, "en_US.UTF-8")
+		en := FormatError(httpErr, false)
+		for _, sub := range tc.enWant {
+			if !strings.Contains(en, sub) {
+				t.Errorf("EN %d: %q missing %q", tc.status, en, sub)
+			}
+		}
+
+		withLang(t, "zh_CN.UTF-8")
+		zh := FormatError(httpErr, false)
+		for _, sub := range tc.zhWant {
+			if !strings.Contains(zh, sub) {
+				t.Errorf("ZH %d: %q missing %q", tc.status, zh, sub)
+			}
+		}
+	}
+}
