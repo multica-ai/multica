@@ -669,6 +669,15 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
 
+-- name: GetRecentTaskTriggerBeforeComment :one
+SELECT * FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND trigger_comment_id IS NOT NULL
+  AND created_at <= $3
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: DeleteTasksByIssue :execrows
 DELETE FROM agent_task_queue WHERE issue_id = $1;
 

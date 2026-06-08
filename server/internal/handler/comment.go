@@ -20,33 +20,33 @@ import (
 )
 
 type CommentResponse struct {
-ID                string               `json:"id"`
-IssueID           string               `json:"issue_id"`
-AuthorType        string               `json:"author_type"`
-AuthorID          string               `json:"author_id"`
-AuthorDisplayName *string              `json:"author_display_name,omitempty"`
-Content           string               `json:"content"`
-Type              string               `json:"type"`
-ParentID          *string              `json:"parent_id"`
-CreatedAt         string               `json:"created_at"`
-UpdatedAt         string               `json:"updated_at"`
-ResolvedAt        *string              `json:"resolved_at"`
-ResolvedByType    *string              `json:"resolved_by_type"`
-ResolvedByID      *string              `json:"resolved_by_id"`
-Reactions         []ReactionResponse   `json:"reactions"`
-Attachments       []AttachmentResponse `json:"attachments"`
-// Orientation stats — populated only on the roots_only path and omitted in
-// every other mode, so the default response shape stays byte-identical for
-// existing callers. ReplyCount is the number of descendants in the thread;
-// LastActivityAt is the MAX(created_at) across the whole subtree. Together
-// they let an agent triage which thread to drill into without fetching any
-// replies.
-ReplyCount     *int    `json:"reply_count,omitempty"`
-LastActivityAt *string `json:"last_activity_at,omitempty"`
-// ContentTruncated is set only under summary=true: true when Content was
-// clipped to the summary budget, false when it fit. nil (omitted) means the
-// caller did not request a summary projection, so Content is verbatim.
-ContentTruncated *bool `json:"content_truncated,omitempty"`
+	ID                string               `json:"id"`
+	IssueID           string               `json:"issue_id"`
+	AuthorType        string               `json:"author_type"`
+	AuthorID          string               `json:"author_id"`
+	AuthorDisplayName *string              `json:"author_display_name,omitempty"`
+	Content           string               `json:"content"`
+	Type              string               `json:"type"`
+	ParentID          *string              `json:"parent_id"`
+	CreatedAt         string               `json:"created_at"`
+	UpdatedAt         string               `json:"updated_at"`
+	ResolvedAt        *string              `json:"resolved_at"`
+	ResolvedByType    *string              `json:"resolved_by_type"`
+	ResolvedByID      *string              `json:"resolved_by_id"`
+	Reactions         []ReactionResponse   `json:"reactions"`
+	Attachments       []AttachmentResponse `json:"attachments"`
+	// Orientation stats — populated only on the roots_only path and omitted in
+	// every other mode, so the default response shape stays byte-identical for
+	// existing callers. ReplyCount is the number of descendants in the thread;
+	// LastActivityAt is the MAX(created_at) across the whole subtree. Together
+	// they let an agent triage which thread to drill into without fetching any
+	// replies.
+	ReplyCount     *int    `json:"reply_count,omitempty"`
+	LastActivityAt *string `json:"last_activity_at,omitempty"`
+	// ContentTruncated is set only under summary=true: true when Content was
+	// clipped to the summary budget, false when it fit. nil (omitted) means the
+	// caller did not request a summary projection, so Content is verbatim.
+	ContentTruncated *bool `json:"content_truncated,omitempty"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
@@ -380,23 +380,23 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	resp := make([]CommentResponse, len(result.Comments))
 	for i, c := range result.Comments {
 		cid := uuidToString(c.ID)
-resp[i] = commentToResponseWithDisplay(c, grouped[cid], groupedAtt[cid], displayNames[cid])
-// Attach roots_only orientation stats when present (nil map elsewhere).
-if st, ok := result.RootStats[cid]; ok {
-rc := st.ReplyCount
-resp[i].ReplyCount = &rc
-if st.LastActivityAt.Valid {
-la := timestampToString(st.LastActivityAt)
-resp[i].LastActivityAt = &la
-}
-}
-// Apply the summary projection last so it clips whatever content the
-// chosen read mode produced, uniformly across every mode.
-if summary {
-clipped, truncated := summarizeContent(resp[i].Content)
-resp[i].Content = clipped
-resp[i].ContentTruncated = &truncated
-}
+		resp[i] = commentToResponseWithDisplay(c, grouped[cid], groupedAtt[cid], displayNames[cid])
+		// Attach roots_only orientation stats when present (nil map elsewhere).
+		if st, ok := result.RootStats[cid]; ok {
+			rc := st.ReplyCount
+			resp[i].ReplyCount = &rc
+			if st.LastActivityAt.Valid {
+				la := timestampToString(st.LastActivityAt)
+				resp[i].LastActivityAt = &la
+			}
+		}
+		// Apply the summary projection last so it clips whatever content the
+		// chosen read mode produced, uniformly across every mode.
+		if summary {
+			clipped, truncated := summarizeContent(resp[i].Content)
+			resp[i].Content = clipped
+			resp[i].ContentTruncated = &truncated
+		}
 	}
 
 	// Emit the next cursor as response headers when the page is likely not
@@ -983,24 +983,24 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
 	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
-// Collapse parent_id to the thread root before storing so the comment tree
-// never exceeds depth 1 (the 2-level model the product and UI assume — see
-// GetThreadRoot). The agent-drift guard above already compared the *raw*
-// parent_id to the task's trigger comment, so normalization happens only
-// here, after that check. We also repoint parentComment at the root so the
-// downstream thread-aware steps (AutoUnresolveThreadOnReply,
-// isReplyToMemberThread) act on the thread root, not an interior reply.
-if parentID.Valid {
-if root, err := h.Queries.GetThreadRoot(r.Context(), db.GetThreadRootParams{
-CommentID:   parentID,
-WorkspaceID: issue.WorkspaceID,
-}); err == nil {
-parentID = root.ID
-parentComment = &root
-}
-}
+	// Collapse parent_id to the thread root before storing so the comment tree
+	// never exceeds depth 1 (the 2-level model the product and UI assume — see
+	// GetThreadRoot). The agent-drift guard above already compared the *raw*
+	// parent_id to the task's trigger comment, so normalization happens only
+	// here, after that check. We also repoint parentComment at the root so the
+	// downstream thread-aware steps (AutoUnresolveThreadOnReply,
+	// isReplyToMemberThread) act on the thread root, not an interior reply.
+	if parentID.Valid {
+		if root, err := h.Queries.GetThreadRoot(r.Context(), db.GetThreadRootParams{
+			CommentID:   parentID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			parentID = root.ID
+			parentComment = &root
+		}
+	}
 
-comment, updatedIssue, prevIssueStatus, err := h.createCommentWithIssueProgress(r.Context(), issue, db.CreateCommentParams{
+	comment, updatedIssue, prevIssueStatus, err := h.createCommentWithIssueProgress(r.Context(), issue, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  authorType,
@@ -1712,29 +1712,23 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// findTriggerFromRecentTask looks up the most recent task for the given agent
-// on the issue and returns its trigger_comment_id (and the corresponding
-// comment, if it exists). This recovers the original trigger context for system
-// comments that have no parent_id chain — e.g. failure notifications.
-func (h *Handler) findTriggerFromRecentTask(ctx context.Context, issueID, agentID pgtype.UUID) (pgtype.UUID, *db.Comment) {
-	tasks, err := h.Queries.ListTasksByIssue(ctx, issueID)
+// findTriggerFromRecentTask looks up the latest trigger-bearing task for the
+// same agent before the retried comment. That task is the best available
+// source of truth after comment.parent_id has been flattened to the thread root.
+func (h *Handler) findTriggerFromRecentTask(ctx context.Context, comment db.Comment) (pgtype.UUID, *db.Comment) {
+	task, err := h.Queries.GetRecentTaskTriggerBeforeComment(ctx, db.GetRecentTaskTriggerBeforeCommentParams{
+		IssueID:   comment.IssueID,
+		AgentID:   comment.AuthorID,
+		CreatedAt: comment.CreatedAt,
+	})
 	if err != nil {
 		return pgtype.UUID{}, nil
 	}
-	for _, t := range tasks {
-		if uuidToString(t.AgentID) != uuidToString(agentID) {
-			continue
-		}
-		if !t.TriggerCommentID.Valid {
-			continue
-		}
-		tc, err := h.Queries.GetComment(ctx, t.TriggerCommentID)
-		if err != nil {
-			return t.TriggerCommentID, nil
-		}
-		return t.TriggerCommentID, &tc
+	tc, err := h.Queries.GetComment(ctx, task.TriggerCommentID)
+	if err != nil {
+		return task.TriggerCommentID, nil
 	}
-	return pgtype.UUID{}, nil
+	return task.TriggerCommentID, &tc
 }
 
 // findAncestorMemberComment walks parent_id chain from start until it finds a member-authored comment.
@@ -1762,8 +1756,9 @@ func (h *Handler) findAncestorMemberComment(ctx context.Context, start db.Commen
 	return nil, nil
 }
 
-// RetryAgentComment enqueues a new agent task to regenerate a reply, using the nearest
-// member comment in the thread as trigger context (when present).
+// RetryAgentComment enqueues a new agent task to regenerate a reply, using the
+// original task trigger when it can be recovered and the parent chain only as a
+// legacy fallback.
 func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
 	commentID := chi.URLParam(r, "commentId")
 	userID, ok := requireUserID(w, r)
@@ -1813,26 +1808,25 @@ func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	triggerMember, err := h.findAncestorMemberComment(r.Context(), comment)
-	if err != nil {
-		slog.Warn("retry agent comment: ancestor walk failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to resolve thread")
-		return
-	}
 	triggerID := pgtype.UUID{}
-	if triggerMember != nil {
-		triggerID = triggerMember.ID
-	}
+	triggerMember := (*db.Comment)(nil)
 
-	// Fallback: system comments from failed tasks have no parent_id chain.
-	// Recover the original trigger_comment_id from the most recent task for
-	// this agent on the issue.
+	if tid, tc := h.findTriggerFromRecentTask(r.Context(), comment); tid.Valid {
+		triggerID = tid
+		if tc != nil {
+			triggerMember = tc
+		}
+	}
 	if !triggerID.Valid {
-		if tid, tc := h.findTriggerFromRecentTask(r.Context(), comment.IssueID, comment.AuthorID); tid.Valid {
-			triggerID = tid
-			if triggerMember == nil && tc != nil {
-				triggerMember = tc
-			}
+		var err error
+		triggerMember, err = h.findAncestorMemberComment(r.Context(), comment)
+		if err != nil {
+			slog.Warn("retry agent comment: ancestor walk failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve thread")
+			return
+		}
+		if triggerMember != nil {
+			triggerID = triggerMember.ID
 		}
 	}
 
