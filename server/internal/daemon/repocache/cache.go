@@ -149,9 +149,21 @@ func (c *Cache) Lookup(workspaceID, url string) string {
 	return ""
 }
 
+// WithRepoLock serializes caller-supplied mutations on a bare repo against all
+// other same-repo operations that use the cache's lock (Sync, Fetch,
+// CreateWorktree, and daemon GC maintenance).
+func (c *Cache) WithRepoLock(barePath string, fn func() error) error {
+	repoLock := c.lockForRepo(barePath)
+	repoLock.Lock()
+	defer repoLock.Unlock()
+	return fn()
+}
+
 // Fetch runs `git fetch origin` on a cached bare clone to get latest refs.
 func (c *Cache) Fetch(barePath string) error {
-	return gitFetch(barePath)
+	return c.WithRepoLock(barePath, func() error {
+		return gitFetch(barePath)
+	})
 }
 
 // bareDirName returns a filesystem-safe, collision-free directory name for

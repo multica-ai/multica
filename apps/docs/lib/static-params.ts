@@ -1,4 +1,4 @@
-import { docsContentLang, i18n, type Lang } from "@/lib/i18n";
+import { i18n, type Lang } from "@/lib/i18n";
 
 export type DocsStaticParam = {
   lang: Lang;
@@ -36,16 +36,6 @@ export function docsSlugStaticParams(
   };
 
   for (const param of slugParams) addParam(param);
-
-  for (const lang of i18n.languages) {
-    const contentLang = docsContentLang(lang);
-    if (contentLang === lang) continue;
-
-    for (const param of slugParams) {
-      if (param.lang !== contentLang) continue;
-      addParam({ lang, slug: param.slug });
-    }
-  }
 
   return output;
 }

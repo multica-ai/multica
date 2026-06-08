@@ -185,12 +185,7 @@ func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filenam
 	// chose. Uploads from before the sidecar landed have no .meta.json on
 	// disk and fall through to the existing behavior.
 	if meta, ok := readLocalMeta(filePath); ok && meta.Filename != "" {
-		safe := sanitizeFilename(meta.Filename)
-		disposition := "attachment"
-		if isInlineContentType(meta.ContentType) {
-			disposition = "inline"
-		}
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, safe))
+		w.Header().Set("Content-Disposition", ContentDisposition(meta.ContentType, meta.Filename))
 	}
 
 	// Use http.ServeFile which has built-in path traversal protection

@@ -28,6 +28,7 @@ type ExecOptions struct {
 	// developer/system instructions. Hermes ACP intentionally ignores it and
 	// relies on cwd-scoped context files such as AGENTS.md instead.
 	SystemPrompt              string
+	ThreadName                string
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
@@ -37,13 +38,27 @@ type ExecOptions struct {
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
-	// medium|high|xhigh"). Empty means "use the runtime/model default" —
+	// medium|high|xhigh", OpenCode's model variant names). Empty means
+	// "use the runtime/model default" —
 	// every backend that consumes this skips its --effort / reasoning_effort
 	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude and codex backends only; other backends ignore the
+	// by the claude, codex, and opencode backends; other backends ignore the
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+}
+
+// runContext derives the execution context for an agent subprocess from the
+// configured per-run timeout. A positive timeout imposes a hard wall-clock
+// deadline; a zero (or negative) timeout imposes NO deadline, leaving liveness
+// entirely to the daemon's inactivity watchdog so a session that keeps emitting
+// events is never killed merely for running long (MUL-3064). The caller owns
+// the returned CancelFunc and must call it to release resources.
+func runContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+	return context.WithCancel(ctx)
 }
 
 // Session represents a running agent execution.

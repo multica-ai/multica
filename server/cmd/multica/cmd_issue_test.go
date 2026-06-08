@@ -318,6 +318,97 @@ func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	}
 }
 
+func newIssuePullRequestsTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "pull-requests"}
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
+func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI PR lookup",
+			})
+		case "/api/issues/issue-uuid/pull-requests":
+			json.NewEncoder(w).Encode(map[string]any{
+				"pull_requests": []map[string]any{
+					{
+						"url":    "https://github.com/multica-ai/multica/pull/42",
+						"number": float64(42),
+						"state":  "open",
+						"title":  "MUL-2818 add issue PR CLI",
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssuePullRequestsTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssuePullRequests(cmd, []string{"MUL-2818"})
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssuePullRequests: %v", err)
+	}
+
+	if want := []string{"/api/issues/MUL-2818", "/api/issues/issue-uuid/pull-requests"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	prs, _ := payload["pull_requests"].([]any)
+	if len(prs) != 1 {
+		t.Fatalf("pull_requests length = %d, want 1", len(prs))
+	}
+	pr, _ := prs[0].(map[string]any)
+	if pr["url"] != "https://github.com/multica-ai/multica/pull/42" || pr["number"] != float64(42) || pr["state"] != "open" || pr["title"] != "MUL-2818 add issue PR CLI" {
+		t.Fatalf("unexpected PR payload: %#v", pr)
+	}
+}
+
+func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
+	prs := []map[string]any{{
+		"url":    "https://github.com/multica-ai/multica/pull/42",
+		"number": float64(42),
+		"state":  "open",
+		"title":  "MUL-2818 add issue PR CLI",
+	}}
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	printIssuePullRequestsTable(prs)
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	text := string(out)
+	for _, want := range []string{"NUMBER", "STATE", "TITLE", "URL", "42", "open", "MUL-2818 add issue PR CLI", "https://github.com/multica-ai/multica/pull/42"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("table output missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestTruncateID(t *testing.T) {
 	tests := []struct {
 		name string

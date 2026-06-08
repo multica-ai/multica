@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -194,15 +195,12 @@ export function DaemonPanel({
 
   const handleCopy = useCallback(async () => {
     const text = filtered.map((l) => l.raw).join("\n");
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyText(text)) {
       toast.success(
         `Copied ${filtered.length} line${filtered.length === 1 ? "" : "s"}`,
       );
-    } catch (err) {
-      toast.error("Failed to copy", {
-        description: err instanceof Error ? err.message : String(err),
-      });
+    } else {
+      toast.error("Failed to copy");
     }
   }, [filtered]);
 

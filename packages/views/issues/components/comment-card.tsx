@@ -28,9 +28,10 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
+import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -381,8 +382,9 @@ function CommentRow({
             />
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => {
-                copyMarkdown(entry.content ?? "");
-                toast.success(t(($) => $.comment.copied_toast));
+                void copyText(entry.content ?? "").then((ok) => {
+                  if (ok) toast.success(t(($) => $.comment.copied_toast));
+                });
               }}>
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
@@ -595,8 +597,9 @@ function CommentCardImpl({
                 />
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => {
-                    copyMarkdown(entry.content ?? "");
-                    toast.success(t(($) => $.comment.copied_toast));
+                    void copyText(entry.content ?? "").then((ok) => {
+                      if (ok) toast.success(t(($) => $.comment.copied_toast));
+                    });
                   }}>
                     <Copy className="h-3.5 w-3.5" />
                     {t(($) => $.comment.copy_action)}

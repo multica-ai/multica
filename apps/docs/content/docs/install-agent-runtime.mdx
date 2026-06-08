@@ -37,7 +37,7 @@ Listed roughly from most to least common. Pick whichever ones you already have c
 
 ### Claude Code (Anthropic)
 
-The most complete integration. Session resumption works, MCP works, and it's the **only one of the 11 that actually consumes the `mcp_config` field** on agents (see the [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
+The most complete integration. Session resumption works, MCP works, and it consumes the `mcp_config` field on agents (see the [matrix](/providers#mcp-configuration-provider-specific-support)).
 
 | | |
 |---|---|
@@ -48,7 +48,7 @@ The most complete integration. Session resumption works, MCP works, and it's the
 
 ### Codex (OpenAI)
 
-JSON-RPC 2.0 transport with finer-grained approval gates. **Session resumption code exists but is currently unreachable** — pick Claude Code or one of the ACP family if you need resume.
+JSON-RPC 2.0 transport with finer-grained approval gates. MCP config is written into the per-task `$CODEX_HOME/config.toml`. **Session resumption code exists but is currently unreachable** — pick Claude Code or one of the ACP family if you need resume.
 
 | | |
 |---|---|
@@ -89,7 +89,7 @@ Supports the Gemini 2.5 and 3 series. No session resumption, no MCP — suitable
 
 ### OpenCode (SST)
 
-Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog.
+Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog. Consumes the agent's `mcp_config` field through `OPENCODE_CONFIG_CONTENT`.
 
 | | |
 |---|---|
@@ -99,7 +99,7 @@ Open-source CLI agent. Dynamically discovers available models from its own confi
 
 ### Kiro CLI (Amazon)
 
-ACP-over-stdio transport. Session resumption works through ACP `session/load`; skills are copied into `.kiro/skills/`.
+ACP-over-stdio transport. Session resumption works through ACP `session/load`; MCP config is passed through ACP `mcpServers`; skills are copied into `.kiro/skills/`.
 
 | | |
 |---|---|
@@ -109,7 +109,7 @@ ACP-over-stdio transport. Session resumption works through ACP `session/load`; s
 
 ### Kimi (Moonshot)
 
-ACP-protocol agent, primarily aimed at the Chinese market. Skills live under `.kimi/skills/` (native discovery).
+ACP-protocol agent, primarily aimed at the Chinese market. MCP config is passed through ACP `mcpServers`; skills live under `.kimi/skills/` (native discovery).
 
 | | |
 |---|---|
@@ -119,7 +119,7 @@ ACP-protocol agent, primarily aimed at the Chinese market. Skills live under `.k
 
 ### Hermes (Nous Research)
 
-ACP-protocol agent (shares the transport with Kimi). Session resumption works. The skill injection path falls back to the generic `.agent_context/skills/` — verify your skills are loading before relying on them.
+ACP-protocol agent (shares the transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. The skill injection path falls back to the generic `.agent_context/skills/` — verify your skills are loading before relying on them.
 
 | | |
 |---|---|
@@ -129,7 +129,7 @@ ACP-protocol agent (shares the transport with Kimi). Session resumption works. T
 
 ### OpenClaw
 
-Open-source CLI agent orchestrator. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task, and you can't pass `--model` or `--system-prompt` from Multica.
+Open-source CLI agent orchestrator. MCP config is materialized through Multica's per-task config wrapper. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task, and you can't pass `--model` or `--system-prompt` from Multica.
 
 | | |
 |---|---|

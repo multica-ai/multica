@@ -17,8 +17,8 @@ export const STARTER_CARD_IDS = ["intro", "tour", "welcome_page"] as const;
 export type StarterCardId = (typeof STARTER_CARD_IDS)[number];
 
 interface StarterPrompt {
-  title: { en: string; zh: string; ko: string };
-  prompt: { en: string; zh: string; ko: string };
+  title: { en: string; zh: string; ko: string; ja: string };
+  prompt: { en: string; zh: string; ko: string; ja: string };
 }
 
 export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
@@ -27,11 +27,13 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
       en: "Introduce Multica to me",
       zh: "简单介绍一下 Multica",
       ko: "Multica를 간단히 소개해 주세요",
+      ja: "Multica を簡単に紹介してください",
     },
     prompt: {
       en: "Introduce Multica to me in 1–2 paragraphs. Cover what it is, the core concepts (workspace / issue / agent / runtime), and how it differs from tools like Linear or Jira.",
       zh: "用 1-2 段话简单介绍 Multica 给我。讲清楚它是什么、核心概念有哪些(workspace / issue / agent / runtime)、和 Linear / Jira 之类的工具核心区别在哪。",
       ko: "Multica를 1-2문단으로 간단히 소개해 주세요. 무엇인지, 핵심 개념(workspace / issue / agent / runtime)이 무엇인지, Linear나 Jira 같은 도구와 핵심적으로 어떻게 다른지 설명해 주세요.",
+      ja: "Multica を1〜2段落で簡単に紹介してください。何であるか、中心となる概念(workspace / issue / agent / runtime)、そして Linear や Jira のようなツールと根本的にどう違うのかを説明してください。",
     },
   },
   tour: {
@@ -39,11 +41,13 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
       en: "Walk me through the core features",
       zh: "带我熟悉每个功能",
       ko: "핵심 기능을 안내해 주세요",
+      ja: "主要な機能を案内してください",
     },
     prompt: {
       en: "Walk me through Multica's core features — issue, agent, squad, autopilot, chat. Pick one realistic scenario I might run into and explain how all these pieces fit together.",
       zh: "陪我熟悉 Multica 的每个核心功能 —— issue、agent、squad、autopilot、chat。挑一个我可能用得上的真实场景,讲讲这几个东西是怎么配合的。",
       ko: "Multica의 핵심 기능인 issue, agent, squad, autopilot, chat을 안내해 주세요. 제가 실제로 겪을 만한 상황 하나를 골라 이 요소들이 어떻게 함께 작동하는지 설명해 주세요.",
+      ja: "Multica の主要な機能 — issue、agent、squad、autopilot、chat を案内してください。私が実際に遭遇しそうな現実的なシナリオを1つ選び、これらの要素がどう連携するのかを説明してください。",
     },
   },
   welcome_page: {
@@ -51,6 +55,7 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
       en: "Show me what Multica can do for me — as slides",
       zh: "用 slides 介绍 Multica 能为我做什么",
       ko: "Multica가 저에게 무엇을 해줄 수 있는지 슬라이드로 보여 주세요",
+      ja: "Multica が私に何をしてくれるのかをスライドで見せてください",
     },
     prompt: {
       en: `Build me a single-file HTML slide deck that shows what Multica can do for me. Tailor it to my role and use case (see "About me" below). Paste the FULL HTML in a fenced \`\`\`html block in a comment on this issue so I can copy it straight out, save as \`multica-intro.html\`, and double-click to open it in a browser.
@@ -131,6 +136,32 @@ When done, also reply with a one-sentence summary of which scenarios you picked 
 - ArrowLeft / ArrowRight와 Space로 이동. 모서리에 작은 page indicator를 두세요.
 
 완료 후, 어떤 시나리오를 골랐고 왜 골랐는지 한 문장으로 요약해 주세요.`,
+      ja: `Multica が私に何をしてくれるのかを示す、単一ファイルの HTML スライドデッキを作ってください。私の役割とユースケースに合わせてください(下の「私について」を参照)。完全な HTML を、この issue のコメントに fenced \`\`\`html コードブロックで貼り付けてください。そのままコピーして \`multica-intro.html\` として保存し、ブラウザでダブルクリックして開けるようにしてください。
+
+**出力フォーマット**
+- 1つの self-contained な .html。CSS / JS はすべて inline。依存関係なし、ビルドツールなし、外部画像なし(視覚要素は CSS で生成 — グラデーション、幾何学的な図形、inline SVG を使用)。
+- 全体で5〜8枚のスライド:
+  1. タイトル — 「[私の役割] に Multica ができること」
+  2. 4つの中心概念 — workspace / issue / agent / runtime を1枚で
+  3〜6. 私のユースケースに合わせた具体的なシナリオを3〜4個。それぞれ「X をしたいとき → Multica はこう処理します」の形で
+  7. 締め — 具体的な次の一歩のアクション
+
+**ビューポートのルール(必ず守ること)**
+- すべての \`.slide\`: \`height: 100vh; height: 100dvh; overflow: hidden;\`
+- すべての font-size と spacing は \`clamp(min, preferred, max)\` を使用。固定の px / rem は使わない。
+- 1枚あたりの密度: 見出し1つ + bullet 4つ以下、または見出し1つ + 短い段落2つ。あふれたら次のスライドに分ける。
+- \`prefers-reduced-motion: reduce\` を尊重する(アニメーションを無効化)。
+
+**美しさ(ありがちな AI っぽい見た目を避ける)**
+- Fontshare か Google Fonts から個性のある typeface を選ぶ。Inter、Roboto、Arial、システムフォントは使わない。
+- CSS variable で一貫した palette を決める: 主となる色1つ + 鋭いアクセント1つ。ありがちな「紫のグラデーション + 白背景」は避ける。
+- 背景: 雰囲気を出すために重ねたグラデーションや幾何学パターンを使い、のっぺりした白は使わない。
+- アニメーション: スライドごとに、よく練られた load-in を1回だけ(\`animation-delay\` でずらす)。CSS のみ。散らばった micro-interaction は禁止。
+
+**ナビゲーション**
+- ArrowLeft / ArrowRight と Space で進む。隅に小さな page indicator を置く。
+
+完成したら、私のためにどのシナリオを選び、なぜ選んだのかを一文で要約してください。`,
     },
   },
 };

@@ -4,57 +4,74 @@ import "fmt"
 
 // BuildNewCommentsHint returns the comment-reading pointer for the WARM path —
 // the agent ran on this issue before, so there is a since-anchor. The server
-// count is scoped to the triggering thread and excludes the triggering comment
-// itself because that body is already injected into the prompt. It ships only
-// the COUNT and the cursor — never the comment bodies — so the server stays
-// cheap and the agent pulls details on demand.
+// count is ISSUE-WIDE (every thread, not just the triggering one) and excludes
+// the triggering comment itself because that body is already injected into the
+// prompt. It ships only the COUNT and the cursor — never the comment bodies —
+// so the server stays cheap and the agent pulls details on demand.
+//
+// The agent is told the full issue-wide volume but steered to read the
+// triggering (parent) thread FIRST instead of blindly catching up on every
+// thread. The issue-wide `--since` catch-up is kept as an explicit
+// "only if you need it" fallback.
 //
 // Both the per-turn prompt (daemon.buildCommentPrompt) and the CLAUDE.md
 // workflow (InjectRuntimeConfig) call this so the two surfaces cannot drift
 // (hard requirement from PR #2816).
 //
 // Renders nothing on cold start (no prior run → newCommentsSince empty) or when
-// there are no additional thread comments (newCommentCount <= 0) or required
-// IDs are empty. In those cases the caller falls back to BuildResumedCommentsHint
-// (when a prior session is active) or BuildColdCommentsHint.
-func BuildNewCommentsHint(issueID, triggerCommentID, newCommentsSince string, newCommentCount int) string {
-	if newCommentCount <= 0 || newCommentsSince == "" || issueID == "" || triggerCommentID == "" {
+// there are no new comments (newCommentCount <= 0) or issueID is empty. In those
+// cases the caller falls back to BuildResumedCommentsHint (when a prior session
+// is active) or BuildColdCommentsHint.
+func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newCommentsSince string, newCommentCount int) string {
+	if newCommentCount <= 0 || newCommentsSince == "" || issueID == "" {
 		return ""
 	}
-	hint := fmt.Sprintf(
-		"%d other new comment(s) in this thread since your last run. "+
-			"The triggering comment is already included above. "+
-			"To inspect the raw thread delta (which may include the injected trigger and agent-authored rows), run: "+
-			"`multica issue comment list %s --thread %s --since %s --output json`.\n\n",
-		newCommentCount, issueID, triggerCommentID, newCommentsSince,
+	threadID := activeThreadID(triggerThreadID, triggerCommentID)
+	// When we know the triggering thread, steer the agent to read THAT thread
+	// first rather than blindly pulling every new comment issue-wide. The
+	// issue-wide --since catch-up is demoted to an only-if-needed fallback.
+	if threadID != "" {
+		return fmt.Sprintf(
+			"%d new comment(s) on this issue since your last run — don't read them all blindly. "+
+				"Start with the thread your triggering comment is in: "+
+				"`multica issue comment list %s --thread %s --since %s --output json` "+
+				"(swap `--since` for `--tail 30` if you need the full thread, not just the delta). "+
+				"Only if you need context from the other threads, catch up issue-wide: "+
+				"`multica issue comment list %s --since %s --output json`.\n\n",
+			newCommentCount, issueID, threadID, newCommentsSince, issueID, newCommentsSince,
+		)
+	}
+	// Defensive: comment triggers always carry a trigger id, but if one is
+	// missing there is no thread to anchor on, so fall back to the plain
+	// issue-wide catch-up.
+	return fmt.Sprintf(
+		"%d new comment(s) on this issue since your last run. Catch up: "+
+			"`multica issue comment list %s --since %s --output json`.\n\n",
+		newCommentCount, issueID, newCommentsSince,
 	)
-	// --thread + --since is still only a delta: it covers new rows in the
-	// triggering thread, not older pre-anchor context. Keep a bounded fallback
-	// when the older conversation context is missing.
-	hint += fmt.Sprintf(
-		"If older thread context before %s is missing, pull the triggering conversation: "+
-			"`multica issue comment list %s --thread %s --tail 30 --output json`.\n\n",
-		newCommentsSince, issueID, triggerCommentID,
-	)
-	return hint
 }
 
 // BuildResumedCommentsHint returns the comment-reading pointer for the WARM
 // no-delta path: the daemon is resuming a prior provider session and the
 // triggering comment body has already been injected into the per-turn prompt.
-// In that shape, reading the triggering thread's last 30 replies is duplicate
-// context by default. Keep the bounded thread read as an explicit fallback for
-// missing context instead of making it the first action.
-func BuildResumedCommentsHint(issueID, triggerCommentID string) string {
-	if issueID == "" || triggerCommentID == "" {
+// newCommentCount == 0 here means no new comments arrived issue-wide since the
+// last run (beyond the injected trigger and the agent's own replies). Keep the
+// read bounded and conditional, but make it explicit that context-dependent
+// replies should refresh the triggering conversation rather than trusting
+// resumed memory alone.
+func BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID string) string {
+	threadID := activeThreadID(triggerThreadID, triggerCommentID)
+	if issueID == "" || threadID == "" {
 		return ""
 	}
 	return fmt.Sprintf(
 		"You're resuming the prior session, and the triggering comment is already included above. "+
-			"Do not re-read comment history by default. "+
-			"Only if the resumed session is missing thread context, pull the triggering conversation: "+
+			"No other new comments on this issue since your last run. "+
+			"Use the active thread anchor `%s` and triggering comment ID `%s`. "+
+			"If your reply depends on thread context, do not rely only on resumed session memory — "+
+			"first pull the triggering conversation with: "+
 			"`multica issue comment list %s --thread %s --tail 30 --output json`.\n\n",
-		issueID, triggerCommentID,
+		threadID, triggerCommentID, issueID, threadID,
 	)
 }
 
@@ -71,8 +88,9 @@ func BuildResumedCommentsHint(issueID, triggerCommentID string) string {
 // single-source rule as BuildNewCommentsHint, PR #2816). Returns "" when there
 // is no triggering comment to thread from, so the caller can keep a final plain
 // fallback.
-func BuildColdCommentsHint(issueID, triggerCommentID string) string {
-	if issueID == "" || triggerCommentID == "" {
+func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) string {
+	threadID := activeThreadID(triggerThreadID, triggerCommentID)
+	if issueID == "" || threadID == "" {
 		return ""
 	}
 	return fmt.Sprintf(
@@ -80,8 +98,15 @@ func BuildColdCommentsHint(issueID, triggerCommentID string) string {
 			"`multica issue comment list %s --thread %s --tail 30 --output json` "+
 			"(that thread's root + its 30 newest replies). "+
 			"Need cross-thread background? `multica issue comment list %s --recent 20 --output json`.\n\n",
-		issueID, triggerCommentID, issueID,
+		issueID, threadID, issueID,
 	)
+}
+
+func activeThreadID(triggerThreadID, triggerCommentID string) string {
+	if triggerThreadID != "" {
+		return triggerThreadID
+	}
+	return triggerCommentID
 }
 
 // BuildCommentReplyInstructions returns the canonical block telling an agent
@@ -94,7 +119,9 @@ func BuildColdCommentsHint(issueID, triggerCommentID string) string {
 // because resumed Claude sessions keep prior turns' tool calls in context
 // and will otherwise copy the old --parent UUID forward.
 //
-// The template is provider- and platform-aware:
+// The template is platform-aware but provider-agnostic — the failure it
+// guards against lives at the shell layer, so it cannot be scoped to one
+// provider (MUL-2904):
 //
 //   - Windows + any provider → write a UTF-8 file, post with `--content-file`.
 //     This is the only path that survives Windows shells (PowerShell 5.1
@@ -102,15 +129,18 @@ func BuildColdCommentsHint(issueID, triggerCommentID string) string {
 //     non-ASCII as `?`; cmd.exe is at the mercy of `chcp`). The original
 //     reports — #2198 (Chinese), #2236 (Chinese), #2376 (Cyrillic, observed
 //     on a non-Codex agent) — all match this signature.
-//   - Linux/macOS + Codex → stdin/HEREDOC. Codex tends to emit literal `\n`
-//     escapes inside `--content "..."` and produce broken multi-line stored
-//     comments (MUL-1467); stdin sidesteps that.
-//   - Linux/macOS + non-Codex → lightweight inline `--content "..."`.
-//     The CLI's `util.UnescapeBackslashEscapes` decodes `\n` server-side,
-//     so escaped multi-line works correctly. This is the pre-#1795 default,
-//     restored after we found #1795 / #1851 had expanded a Codex-specific
-//     fix into a global mandate that broke Windows non-ASCII for every
-//     provider.
+//   - Linux/macOS + any provider → `--content-stdin` with a QUOTED HEREDOC
+//     (`<<'COMMENT'`). The quoted delimiter stops the shell from expanding
+//     backticks, `$()`, or `$VAR` inside the body. Inlining `--content "..."`
+//     instead lets the shell rewrite the body BEFORE the CLI receives it: a
+//     backtick-wrapped token becomes a failed command substitution that is
+//     silently deleted, the stored comment no longer matches what the model
+//     intended, and a model that notices the mismatch can retry forever
+//     (MUL-2904 / OKK-497). It also sidesteps Codex's habit of emitting
+//     literal `\n` escapes inside `--content` (MUL-1467).
+//
+// provider is retained for caller symmetry and future per-provider tweaks; the
+// guardrail itself is intentionally identical across providers.
 func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) string {
 	if triggerCommentID == "" {
 		return ""
@@ -130,37 +160,24 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 			issueID, triggerCommentID,
 		)
 	}
-	if provider == "codex" {
-		return fmt.Sprintf(
-			"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
-				"do NOT reuse --parent values from previous turns in this session.\n\n"+
-				"Always use `--content-stdin` with a HEREDOC for agent-authored issue comments, even when the reply is a single line. "+
-				"Do NOT use inline `--content`; it is easy to lose formatting or accidentally compress a structured reply into one line.\n\n"+
-				"Use this form, preserving the same issue ID and --parent value:\n\n"+
-				"    cat <<'COMMENT' | multica issue comment add %s --parent %s --content-stdin\n"+
-				"    First paragraph.\n"+
-				"\n"+
-				"    Second paragraph.\n"+
-				"    COMMENT\n\n"+
-				"Do NOT write literal `\\n` escapes to simulate line breaks; the HEREDOC preserves real newlines.\n",
-			issueID, triggerCommentID,
-		)
-	}
-	// Non-Codex providers on Linux/macOS: lightweight inline template, no
-	// platform branch. Pre-#1795 default, restored after we found that
-	// #1795 / #1851 had expanded a Codex-specific fix into a global mandate
-	// that broke Windows non-ASCII for every provider. The CLI decodes
-	// `\n` etc. server-side, so escaped multi-line is fine; for richer
-	// formatting the agent can still reach for `--content-stdin` (works
-	// on Linux/macOS) or `--content-file <path>` (works on every platform),
-	// both listed in Available Commands above.
+	// Linux/macOS, any provider: `--content-stdin` with a quoted HEREDOC. The
+	// quoted delimiter (`<<'COMMENT'`) is what makes this safe — it stops the
+	// shell from running backtick / `$()` substitution or `$VAR` expansion on
+	// the body. Inlining `--content "..."` is what triggered the MUL-2904
+	// duplicate-comment loop, so it is banned for every provider here, not just
+	// Codex.
 	return fmt.Sprintf(
 		"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
 			"do NOT reuse --parent values from previous turns in this session.\n\n"+
+			"Always use `--content-stdin` with a HEREDOC for agent-authored issue comments, even when the reply is a single line. "+
+			"Do NOT use inline `--content`; the shell rewrites unescaped backticks, `$()`, `$VAR`, or quotes in the body before the CLI receives them, and it is easy to lose formatting or compress a structured reply into one line.\n\n"+
 			"Use this form, preserving the same issue ID and --parent value:\n\n"+
-			"    multica issue comment add %s --parent %s --content \"...\"\n\n"+
-			"For multi-line bodies, code blocks, or content with quotes/backticks, prefer `--content-stdin` "+
-			"(pipe a HEREDOC) or `--content-file <path>` (read a UTF-8 file). See Available Commands above for the full menu.\n",
+			"    cat <<'COMMENT' | multica issue comment add %s --parent %s --content-stdin\n"+
+			"    First paragraph.\n"+
+			"\n"+
+			"    Second paragraph.\n"+
+			"    COMMENT\n\n"+
+			"Do NOT write literal `\\n` escapes to simulate line breaks; the HEREDOC preserves real newlines.\n",
 		issueID, triggerCommentID,
 	)
 }

@@ -275,8 +275,6 @@
     "reply_count_other": "답글 {{count}}개",
     "leave_comment_placeholder": "댓글 남기기...",
     "send_tooltip": "보내기",
-    "expand_tooltip": "펼치기",
-    "collapse_tooltip": "접기",
     "resolve": {
       "resolve_action": "스레드 해결",
       "unresolve_action": "스레드 해결 취소",
@@ -290,9 +288,7 @@
     }
   },
   "reply": {
-    "placeholder": "답글 남기기...",
-    "expand_tooltip": "펼치기",
-    "collapse_tooltip": "접기"
+    "placeholder": "답글 남기기..."
   },
   "agent_activity": {
     "hover_header_one": "작업 중인 에이전트 {{count}}개",

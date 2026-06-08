@@ -10,6 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -268,6 +270,12 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publish(protocol.EventSquadCreated, workspaceID, "member", uuidToString(member.UserID), map[string]any{"squad": resp})
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.SquadCreated(
+		uuidToString(member.UserID),
+		workspaceID,
+		uuidToString(squad.ID),
+		1,
+	))
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -463,7 +471,7 @@ type SquadMemberStatusListResponse struct {
 	Members []SquadMemberStatusResponse `json:"members"`
 }
 
-// deriveSquadMemberStatus collapses runtime + task signals into the four
+// deriveSquadMemberStatus collapses runtime + task signals into the five
 // status buckets used by the squad UI. Mirrors the workload+availability
 // split in packages/core/agents/derive-presence.ts: working wins over
 // runtime health (an agent that is in the middle of dispatched/running
@@ -474,9 +482,11 @@ type SquadMemberStatusListResponse struct {
 // last_seen_at is within the last 5 minutes is reported as "unstable" so
 // the squad UI surfaces transient drops the same way the agent dot does.
 //
-// Archived agents always report `offline` regardless of any leftover
+// Archived agents always report `archived` regardless of any leftover
 // runtime row or task — they should appear in the list but never look
-// like they're still working. Per the RFC decision (see MUL-2319), we
+// like they're still working or merely offline (a leftover online
+// runtime row would otherwise read as "offline" and hide the fact that
+// the agent has been archived). Per the RFC decision (see MUL-2319), we
 // surface archived agents in this endpoint rather than filtering them
 // out in the SQL.
 func deriveSquadMemberStatus(
@@ -487,7 +497,7 @@ func deriveSquadMemberStatus(
 	now time.Time,
 ) string {
 	if archived {
-		return "offline"
+		return "archived"
 	}
 	if hasActiveTask {
 		return "working"
@@ -1028,6 +1038,11 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
+		return
+	}
+
+	// Private-leader gate: deny if the actor cannot access the leader.
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, uuidToString(issue.WorkspaceID)) {
 		return
 	}
 

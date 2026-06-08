@@ -113,10 +113,9 @@ ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: ListThreadCommentsForIssue :many
 -- Returns the root of the thread containing @anchor_id plus every descendant
--- (recursive — defends against any future deeper nesting; today's data is two
--- layers because the CreateComment path collapses replies to root, but the
--- schema does not enforce that). @anchor_id may itself be a root or a reply.
--- Output is chronological so it can be fed straight to the agent.
+-- (recursive — supports real reply-to-reply nesting). @anchor_id may itself be
+-- a root or any reply in the thread. Output is chronological so it can be fed
+-- straight to the agent.
 WITH RECURSIVE root_of AS (
     -- Walk up from the anchor until parent_id IS NULL.
     SELECT c.id, c.parent_id
@@ -298,39 +297,18 @@ SELECT count(*) FROM comment
 WHERE issue_id = $1 AND workspace_id = $2;
 
 -- name: CountNewCommentsSince :one
--- Counts non-injected comments in the thread containing @anchor_id created
--- strictly after @since, excluding any authored by the given agent
--- (@author_id). The triggering comment body is already injected into the
--- prompt, so @anchor_id itself is excluded from the count. Feeds the daemon
--- claim response without shipping comment bodies.
-WITH RECURSIVE root_of AS (
-    -- Scope is enforced on both the anchor seed and recursive walk-up; keep
-    -- these predicates together so future parent/thread changes cannot cross
-    -- issue or workspace boundaries.
-    SELECT c.id, c.parent_id
-    FROM comment c
-    WHERE c.id = @anchor_id AND c.issue_id = @issue_id AND c.workspace_id = @workspace_id
-    UNION ALL
-    SELECT p.id, p.parent_id
-    FROM comment p
-    JOIN root_of r ON p.id = r.parent_id
-    WHERE p.issue_id = @issue_id AND p.workspace_id = @workspace_id
-),
-thread_root AS (
-    SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
-),
-descendants AS (
-    SELECT c.id, c.created_at, c.author_type, c.author_id
-    FROM comment c
-    JOIN thread_root tr ON c.id = tr.id
-    UNION
-    SELECT c.id, c.created_at, c.author_type, c.author_id
-    FROM comment c
-    JOIN descendants d ON c.parent_id = d.id
-    WHERE c.issue_id = @issue_id AND c.workspace_id = @workspace_id
-)
-SELECT count(*) FROM descendants
-WHERE created_at > @since
+-- Counts comments on an issue created strictly after @since, ACROSS THE WHOLE
+-- ISSUE (every thread, not just the triggering one). Excludes the triggering
+-- comment itself (@anchor_id — its body is already injected into the prompt)
+-- and any authored by the given agent (@author_id), so a chatty agent does not
+-- inflate its own new-comment count. The agent is steered to read the
+-- triggering thread first (see BuildNewCommentsHint), but the count is
+-- issue-wide so it knows the full catch-up volume. Feeds the daemon claim
+-- response without shipping comment bodies.
+SELECT count(*) FROM comment
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND created_at > @since
   AND id <> @anchor_id
   AND NOT (author_type = 'agent' AND author_id = @author_id);
 
@@ -345,12 +323,9 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: GetThreadRoot :one
 -- Returns the thread-root comment for @comment_id by walking parent_id up to
 -- the row whose parent_id IS NULL. For a root comment it returns that comment
--- itself. Used at the write boundary to flatten replies: every new reply stores
--- the thread root as its parent_id, so the comment tree never exceeds depth 1.
--- This enforces the 2-level threading model the product and UI already assume
--- (a root + a flat list of replies, like Linear/Slack) at insert time, so every
--- reader can treat a reply's parent_id AS its thread root without re-walking the
--- tree. Cycle-safe under the PK constraint (a comment cannot be its own ancestor).
+-- itself. Used when callers need thread-level behavior while parent_id remains
+-- the exact direct parent of a reply. Cycle-safe under the PK constraint (a
+-- comment cannot be its own ancestor).
 WITH RECURSIVE root_of AS (
     SELECT c.id, c.parent_id
     FROM comment c

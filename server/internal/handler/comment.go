@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -871,20 +873,17 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
 	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
-	// Collapse parent_id to the thread root before storing so the comment tree
-	// never exceeds depth 1 (the 2-level model the product and UI assume — see
-	// GetThreadRoot). The agent-drift guard above already compared the *raw*
-	// parent_id to the task's trigger comment, so normalization happens only
-	// here, after that check. We also repoint parentComment at the root so the
-	// downstream thread-aware steps (AutoUnresolveThreadOnReply,
-	// isReplyToMemberThread) act on the thread root, not an interior reply.
+	// parent_id stores the exact comment being replied to. Thread-level behavior
+	// (for example auto-unresolving a resolved thread) resolves the root
+	// separately so storing a reply-to-reply does not destroy the direct-parent
+	// signal used by trigger decisions.
+	var rootComment *db.Comment
 	if parentID.Valid {
 		if root, err := h.Queries.GetThreadRoot(r.Context(), db.GetThreadRootParams{
 			CommentID:   parentID,
 			WorkspaceID: issue.WorkspaceID,
 		}); err == nil {
-			parentID = root.ID
-			parentComment = &root
+			rootComment = &root
 		}
 	}
 
@@ -924,14 +923,42 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// so the reply is visible regardless of the unresolve outcome. Shared with
 	// the agent task path (TaskService.createAgentComment) — both reply paths
 	// must keep the resolved root in sync.
-	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
+	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
 	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// noteCommentPrefix marks a comment as a human-only note. A comment whose first
+// whitespace-delimited token is this prefix (case-insensitive) is stored like
+// any other comment but never triggers an agent — see triggerTasksForComment.
+const noteCommentPrefix = "/note"
+
+// isNoteComment reports whether content opts out of agent triggering via the
+// reserved /note prefix. The prefix must be the comment's first token, so
+// "/note check expiry", "  /NOTE", and "/note" all match, while "/notes",
+// "/ note", and "see foo/note" do not.
+func isNoteComment(content string) bool {
+	trimmed := strings.TrimLeft(content, " \t\r\n")
+	firstToken := trimmed
+	if i := strings.IndexFunc(trimmed, unicode.IsSpace); i >= 0 {
+		firstToken = trimmed[:i]
+	}
+	return strings.EqualFold(firstToken, noteCommentPrefix)
+}
+
 func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID string) {
+	// A comment opening with the reserved /note prefix is a human-only note: it
+	// is recorded like any other comment but must not wake ANY agent. This guard
+	// lives at the single chokepoint so it covers all three trigger paths below
+	// (assignee, squad leader, and @mentioned agents). Gating only
+	// shouldEnqueueOnComment would still let "/note @agent ..." reach an agent
+	// through the mention path.
+	if isNoteComment(comment.Content) {
+		return
+	}
+
 	if actorType == "member" && h.shouldEnqueueOnComment(ctx, issue, actorType, actorID) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
 		!h.isReplyToMemberThread(ctx, parentComment, comment.Content, issue) {

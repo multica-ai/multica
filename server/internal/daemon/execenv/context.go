@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	skillpkg "github.com/multica-ai/multica/server/internal/skill"
+	"gopkg.in/yaml.v3"
 )
 
 // writeContextFiles renders and writes .agent_context/issue_context.md and
@@ -150,21 +153,33 @@ func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *side
 }
 
 // resolveSkillsDir returns the directory where skills should be written
-// based on the agent provider. manifest, when non-nil, is populated with
-// every intermediate directory we had to MkdirAll so CleanupSidecars can
-// rmdir them on local_directory teardown.
+// based on the agent provider, creating it. manifest, when non-nil, is
+// populated with every intermediate directory we had to MkdirAll so
+// CleanupSidecars can rmdir them on local_directory teardown.
 func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (string, error) {
-	var skillsDir string
+	skillsDir := skillsDirPath(workDir, provider)
+	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
+		return "", err
+	}
+	return skillsDir, nil
+}
+
+// skillsDirPath returns the provider-native skills parent directory under
+// workDir WITHOUT creating it or recording anything. resolveSkillsDir wraps
+// this with the MkdirAll/manifest bookkeeping; the reuse-path skill rollback
+// (removeReusedManagedSkillDirs) needs the bare path with no side effects so
+// it can match the managed skill roots the prior manifest recorded.
+func skillsDirPath(workDir, provider string) string {
 	switch provider {
 	case "claude":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.
-		skillsDir = filepath.Join(workDir, ".claude", "skills")
+		return filepath.Join(workDir, ".claude", "skills")
 	case "copilot":
 		// GitHub Copilot CLI natively discovers project-level skills from
 		// .github/skills/<name>/SKILL.md (takes precedence over user-level
 		// skills in ~/.copilot/skills/).
 		// See: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
-		skillsDir = filepath.Join(workDir, ".github", "skills")
+		return filepath.Join(workDir, ".github", "skills")
 	case "opencode":
 		// OpenCode natively discovers project skills from .opencode/skills/ in
 		// the workdir. ConfigPaths.directories() walks up from the discovery
@@ -174,7 +189,7 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 		// `opencode run --dir <workDir>` + PWD override in opencodeBackend —
 		// without those, OpenCode walks from the daemon's inherited PWD and
 		// misses .opencode/skills + AGENTS.md entirely (MUL-2416).
-		skillsDir = filepath.Join(workDir, ".opencode", "skills")
+		return filepath.Join(workDir, ".opencode", "skills")
 	case "openclaw":
 		// OpenClaw's native skill scanner reads <workspaceDir>/skills/. The
 		// daemon pairs this with a per-task synthesized openclaw-config.json
@@ -182,35 +197,31 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 		// workDir, so writing here is what the CLI actually scans. Before
 		// MUL-2219 this used to fall back to .agent_context/skills/, which
 		// no openclaw scan path ever inspected.
-		skillsDir = filepath.Join(workDir, "skills")
+		return filepath.Join(workDir, "skills")
 	case "pi":
 		// Pi natively discovers skills from .pi/skills/ in the workdir.
-		skillsDir = filepath.Join(workDir, ".pi", "skills")
+		return filepath.Join(workDir, ".pi", "skills")
 	case "cursor":
 		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
-		skillsDir = filepath.Join(workDir, ".cursor", "skills")
+		return filepath.Join(workDir, ".cursor", "skills")
 	case "kimi":
 		// Kimi Code CLI auto-discovers project-level skills from .kimi/skills/
 		// in the workdir. See https://moonshotai.github.io/kimi-cli/en/customization/skills.html
-		skillsDir = filepath.Join(workDir, ".kimi", "skills")
+		return filepath.Join(workDir, ".kimi", "skills")
 	case "kiro":
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
-		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+		return filepath.Join(workDir, ".kiro", "skills")
 	case "antigravity":
 		// Antigravity (`agy`) auto-discovers workspace-level skills from
 		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's
 		// workspace skill layout; see https://antigravity.google/docs/gcli-migration
 		// under "Workspace skills".
-		skillsDir = filepath.Join(workDir, ".agents", "skills")
+		return filepath.Join(workDir, ".agents", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
-		skillsDir = filepath.Join(workDir, ".agent_context", "skills")
+		return filepath.Join(workDir, ".agent_context", "skills")
 	}
-	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
-		return "", err
-	}
-	return skillsDir, nil
 }
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
@@ -223,9 +234,12 @@ var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 //
 //   - No frontmatter at all → synthesize one with `name: <slug>` (and the DB
 //     description when available).
-//   - Frontmatter present and already has a non-empty `name` → leave it
-//     untouched. The upstream import may have shaped that block deliberately
-//     to match a specific runtime, and we don't want to clobber it.
+//   - Frontmatter present, has a non-empty `name`, AND parses as valid YAML →
+//     leave it untouched. The upstream import may have shaped that block
+//     deliberately to match a specific runtime, and we don't want to clobber it.
+//   - Frontmatter present and has a non-empty `name` but YAML is invalid (e.g.
+//     unquoted colon in description) → strip and re-synthesize so runtimes like
+//     Codex don't discard the skill on parse errors.
 //   - Frontmatter present but missing `name` (e.g. an upstream skill whose
 //     YAML only set `description`, with the directory slug filling in for
 //     `name` at import time) → prepend `name: <slug>` as the first key of
@@ -233,24 +247,95 @@ var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 func ensureSkillFrontmatter(content, slug, description string) string {
 	fmStart, ok := frontmatterBodyStart(content)
 	if !ok {
-		var b strings.Builder
-		b.WriteString("---\n")
-		fmt.Fprintf(&b, "name: %s\n", slug)
-		if d := strings.TrimSpace(description); d != "" {
-			fmt.Fprintf(&b, "description: %s\n", yamlEscapeInline(d))
-		}
-		b.WriteString("---\n\n")
-		b.WriteString(content)
-		return b.String()
+		return synthesizeFrontmatter(content, slug, description)
 	}
+	// Frontmatter exists and has a parseable name. If it's valid YAML, leave
+	// it untouched so upstream-imported frontmatter survives round-trips.
 	if hasFrontmatterName(content[fmStart:]) {
-		return content
+		if isFrontmatterValidYAML(content) {
+			return content
+		}
+		// Frontmatter has a name but the YAML is invalid (e.g. unquoted
+		// colon in the description). Strip and re-synthesize so runtimes
+		// like Codex don't hard-reject the whole skill at load time.
+		// frontmatterParts returns the full content as the body when it
+		// can't find a closing delimiter, so the malformed block is kept
+		// rather than silently dropped.
+		_, body, _ := frontmatterParts(content)
+		return synthesizeFrontmatter(body, slug, description)
 	}
 	// Frontmatter exists but lacks a parseable `name`. Inject one as the
 	// first key of the existing block and keep the rest verbatim (including
 	// `description`, body, and any runtime-specific keys the import path
 	// preserved).
 	return content[:fmStart] + "name: " + slug + "\n" + content[fmStart:]
+}
+
+// synthesizeFrontmatter produces a SKILL.md body with a YAML frontmatter block
+// carrying at least `name` and (when non-empty) `description`. The description
+// is always escaped as a double-quoted YAML string so values containing colons,
+// brackets, or other YAML-significant characters parse safely.
+func synthesizeFrontmatter(body, slug, description string) string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "name: %s\n", slug)
+	if d := strings.TrimSpace(description); d != "" {
+		fmt.Fprintf(&b, "description: %s\n", yamlEscapeInline(d))
+	}
+	b.WriteString("---\n\n")
+	b.WriteString(body)
+	return b.String()
+}
+
+// isFrontmatterValidYAML reports whether the opening YAML frontmatter block of
+// content parses as a YAML mapping. Returns false when there is no frontmatter,
+// the block has no closing delimiter, is empty, or unmarshalling fails.
+func isFrontmatterValidYAML(content string) bool {
+	fmBody, _, ok := frontmatterParts(content)
+	if !ok || strings.TrimSpace(fmBody) == "" {
+		return false
+	}
+	var m map[string]any
+	return yaml.Unmarshal([]byte(fmBody), &m) == nil
+}
+
+// frontmatterParts splits content into the raw YAML frontmatter body (the text
+// between the opening `---` line and the closing `---` line) and the document
+// body that follows the closing delimiter. ok is false when content has no
+// opening delimiter or no closing delimiter line; in that case body is the full
+// content so callers can keep a malformed block instead of dropping it.
+//
+// A closing delimiter is a line whose only content is `---`, terminated by
+// `\n`, `\r\n`, or end-of-file. Centralizing the rule here keeps the validity
+// check and the re-synthesis path from disagreeing on where a block ends (e.g.
+// for EOF- or CRLF-terminated frontmatter), which previously left a stale block
+// behind when the two definitions diverged.
+func frontmatterParts(content string) (fmBody, body string, ok bool) {
+	start, ok := frontmatterBodyStart(content)
+	if !ok {
+		return "", content, false
+	}
+	rest := content[start:]
+	for searchFrom := 0; ; {
+		nl := strings.Index(rest[searchFrom:], "\n---")
+		if nl < 0 {
+			return "", content, false
+		}
+		closeAt := searchFrom + nl
+		after := rest[closeAt+len("\n---"):]
+		switch {
+		case after == "" || after == "\r":
+			return rest[:closeAt], "", true
+		case strings.HasPrefix(after, "\n"):
+			return rest[:closeAt], after[len("\n"):], true
+		case strings.HasPrefix(after, "\r\n"):
+			return rest[:closeAt], after[len("\r\n"):], true
+		default:
+			// Not a standalone delimiter line (e.g. "----" or "--- text");
+			// keep scanning for the real close.
+			searchFrom = closeAt + len("\n---")
+		}
+	}
 }
 
 // frontmatterBodyStart returns the byte offset where the YAML body begins
@@ -365,7 +450,18 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 		// it would mean the skill's bundled files list two entries
 		// at the same path — that's an upstream data bug, not a
 		// user-content collision, and we surface it.
+		//
+		// One common data bug is storing SKILL.md as both the primary
+		// content (skill.Content) and as a supporting file. Skip the
+		// duplicate so the agent still gets every unique file. The check
+		// is canonical (see skillpkg.IsReservedContentPath) so a
+		// non-canonical spelling like "./SKILL.md" — which filepath.Join
+		// resolves onto the same dir/SKILL.md we just wrote — is caught
+		// too, instead of colliding and failing prep with errPathPreExists.
 		for _, f := range skill.Files {
+			if skillpkg.IsReservedContentPath(f.Path) {
+				continue
+			}
 			fpath := filepath.Join(dir, f.Path)
 			if err := recordMkdirAll(filepath.Dir(fpath), 0o755, manifest); err != nil {
 				return err

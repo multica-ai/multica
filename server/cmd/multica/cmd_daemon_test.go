@@ -6,6 +6,35 @@ import (
 	"testing"
 )
 
+// TestDaemonAlive locks in the liveness predicate the lifecycle commands rely
+// on: both a ready ("running") and a still-booting ("starting") daemon count as
+// alive, so `daemon start` won't double-spawn over a starting daemon and
+// `restart`/`stop` will act on one; only "stopped"/unknown is "no daemon".
+func TestDaemonAlive(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		status any
+		want   bool
+	}{
+		{"running", true},
+		{"starting", true},
+		{"stopped", false},
+		{"", false},
+		{nil, false},
+		{"bogus", false},
+	}
+	for _, c := range cases {
+		if got := daemonAlive(map[string]any{"status": c.status}); got != c.want {
+			t.Errorf("daemonAlive(status=%v) = %v, want %v", c.status, got, c.want)
+		}
+	}
+	// A response with no status key at all (e.g. malformed) is not alive.
+	if daemonAlive(map[string]any{}) {
+		t.Errorf("daemonAlive(no status) = true, want false")
+	}
+}
+
 func TestPrintDaemonStatusIncludesCLIVersion(t *testing.T) {
 	t.Parallel()
 

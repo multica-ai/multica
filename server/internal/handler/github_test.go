@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,8 +20,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestExtractIdentifiers(t *testing.T) {
@@ -2041,5 +2048,344 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 		if strings.Contains(content, banned) {
 			t.Errorf("system comment must not include %q mention (parent unassigned), got: %s", banned, content)
 		}
+	}
+}
+
+
+// generateTestRSAKeyPEM mints an RSA-2048 key, returns its PKCS#1 PEM
+// encoding (the format GitHub hands operators when they create the App)
+// and the parsed *rsa.PrivateKey for verification.
+func generateTestRSAKeyPEM(t *testing.T) (pemBytes []byte, key *rsa.PrivateKey) {
+	t.Helper()
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	der := x509.MarshalPKCS1PrivateKey(k)
+	return pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: der}), k
+}
+
+// TestSignGitHubAppJWT_NotConfigured pins the contract that missing env
+// vars produce ("", nil) — a soft "App auth not available" signal that
+// fetchInstallationAccount uses to fall through to its unauthenticated
+// path. Returning an error here would force every install on a vanilla
+// self-host to log a noisy warning even though the deployment is
+// intentionally not running App-authenticated calls.
+func TestSignGitHubAppJWT_NotConfigured(t *testing.T) {
+	t.Setenv("GITHUB_APP_ID", "")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "")
+	tok, err := signGitHubAppJWT(time.Now())
+	if err != nil {
+		t.Fatalf("expected nil error when env not set, got %v", err)
+	}
+	if tok != "" {
+		t.Errorf("expected empty token when env not set, got %q", tok)
+	}
+
+	// Half-configured (one var set, the other empty) is treated the same
+	// as fully unset — we never want a partial config to claim the App
+	// is wired up.
+	t.Setenv("GITHUB_APP_ID", "12345")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "")
+	tok, err = signGitHubAppJWT(time.Now())
+	if err != nil || tok != "" {
+		t.Errorf("partial config should return empty token, got tok=%q err=%v", tok, err)
+	}
+}
+
+// TestSignGitHubAppJWT_InvalidPEM proves that a malformed private key is
+// surfaced as an error, not silently swallowed. The setup-callback path
+// catches and logs this so the operator gets a breadcrumb instead of an
+// install that quietly never enriches the row.
+func TestSignGitHubAppJWT_InvalidPEM(t *testing.T) {
+	t.Setenv("GITHUB_APP_ID", "12345")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "not a real PEM block")
+	if _, err := signGitHubAppJWT(time.Now()); err == nil {
+		t.Error("expected error for malformed private key, got nil")
+	}
+}
+
+// TestSignGitHubAppJWT_ClaimsAndSignature signs a token with a known key
+// and verifies (a) the claims GitHub requires (`iss`, `iat`, `exp`) carry
+// the values we set, (b) iat is back-dated for clock skew, (c) exp stays
+// inside GitHub's 10-minute cap, and (d) the signature verifies against
+// the matching public key.
+func TestSignGitHubAppJWT_ClaimsAndSignature(t *testing.T) {
+	pemBytes, key := generateTestRSAKeyPEM(t)
+	t.Setenv("GITHUB_APP_ID", "424242")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", string(pemBytes))
+
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	tok, err := signGitHubAppJWT(now)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if tok == "" {
+		t.Fatal("expected non-empty token when fully configured")
+	}
+
+	// Inject the same `now` into the parser's clock so default exp/nbf
+	// validation is anchored to the test-time, not real wall clock —
+	// otherwise the test becomes a time bomb that fails for real once
+	// the real time crosses the token's exp (now + 9m).
+	parsed, err := jwt.Parse(
+		tok,
+		func(token *jwt.Token) (any, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return &key.PublicKey, nil
+		},
+		jwt.WithTimeFunc(func() time.Time { return now }),
+	)
+	if err != nil || !parsed.Valid {
+		t.Fatalf("verify token: err=%v valid=%v", err, parsed != nil && parsed.Valid)
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		t.Fatalf("claims type: %T", parsed.Claims)
+	}
+	if got, _ := claims["iss"].(string); got != "424242" {
+		t.Errorf("iss = %q, want 424242", got)
+	}
+	iat := int64(claims["iat"].(float64))
+	exp := int64(claims["exp"].(float64))
+	if iat != now.Add(-60*time.Second).Unix() {
+		t.Errorf("iat = %d, want %d (now - 60s for clock skew)", iat, now.Add(-60*time.Second).Unix())
+	}
+	if exp != now.Add(9*time.Minute).Unix() {
+		t.Errorf("exp = %d, want %d (now + 9m, inside GitHub's 10m cap)", exp, now.Add(9*time.Minute).Unix())
+	}
+	if exp-iat > int64(10*time.Minute/time.Second) {
+		t.Errorf("exp-iat = %d s, exceeds GitHub's 10m max", exp-iat)
+	}
+}
+
+// TestFetchInstallationAccount_AuthenticatedPopulatesRow simulates the
+// GitHub `/app/installations/{id}` endpoint with a JWT-gated mock and
+// verifies that fetchInstallationAccount, when fully configured,
+// (a) sends a Bearer JWT, (b) parses the JSON response, and (c) returns
+// the real account login instead of the "unknown" placeholder. This is
+// the assertion that nails down the bug fix for MUL-3078.
+func TestFetchInstallationAccount_AuthenticatedPopulatesRow(t *testing.T) {
+	pemBytes, key := generateTestRSAKeyPEM(t)
+	t.Setenv("GITHUB_APP_ID", "11111")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", string(pemBytes))
+
+	const wantInstallationID int64 = 7777777
+	var sawAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		expectedPath := fmt.Sprintf("/app/installations/%d", wantInstallationID)
+		if r.URL.Path != expectedPath {
+			t.Errorf("unexpected path: got %q want %q", r.URL.Path, expectedPath)
+		}
+		// Verify JWT signature using the matching public key — this is
+		// what GitHub does on the real endpoint.
+		bearer := strings.TrimPrefix(sawAuth, "Bearer ")
+		if bearer == sawAuth {
+			http.Error(w, "missing Bearer prefix", http.StatusUnauthorized)
+			return
+		}
+		if _, err := jwt.Parse(bearer, func(token *jwt.Token) (any, error) {
+			return &key.PublicKey, nil
+		}); err != nil {
+			http.Error(w, "bad jwt: "+err.Error(), http.StatusUnauthorized)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"account": map[string]any{
+				"login":      "octocat",
+				"type":       "Organization",
+				"avatar_url": "https://example.com/o.png",
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	oldBase := githubAPIBase
+	githubAPIBase = srv.URL
+	t.Cleanup(func() { githubAPIBase = oldBase })
+
+	login, accountType, avatar := fetchInstallationAccount(context.Background(), wantInstallationID)
+	if login != "octocat" {
+		t.Errorf("login = %q, want %q (the bug repro: stayed as 'unknown' before the fix)", login, "octocat")
+	}
+	if accountType != "Organization" {
+		t.Errorf("accountType = %q, want Organization", accountType)
+	}
+	if avatar == nil || *avatar != "https://example.com/o.png" {
+		t.Errorf("avatar = %v, want pointer to https://example.com/o.png", avatar)
+	}
+	if !strings.HasPrefix(sawAuth, "Bearer ") {
+		t.Errorf("expected Bearer auth header, got %q", sawAuth)
+	}
+}
+
+// TestFetchInstallationAccount_UnauthenticatedFallsBack documents the
+// degraded path: when the operator hasn't set GITHUB_APP_ID/PRIVATE_KEY,
+// the call is made unauthenticated, GitHub returns 401, and the function
+// returns the "unknown" placeholder. This is the input the webhook then
+// upserts over once GitHub delivers `installation.created`.
+func TestFetchInstallationAccount_UnauthenticatedFallsBack(t *testing.T) {
+	t.Setenv("GITHUB_APP_ID", "")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			http.Error(w, "auth required", http.StatusUnauthorized)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"account": map[string]any{"login": "should-not-see"}})
+	}))
+	t.Cleanup(srv.Close)
+	oldBase := githubAPIBase
+	githubAPIBase = srv.URL
+	t.Cleanup(func() { githubAPIBase = oldBase })
+
+	login, _, _ := fetchInstallationAccount(context.Background(), 999)
+	if login != "unknown" {
+		t.Errorf("login = %q, want unknown placeholder when auth not configured", login)
+	}
+}
+
+// TestFetchInstallationAccount_EmptyAccountKeepsPlaceholder pins that a 200
+// response with a missing `account.login` (e.g. GitHub returned a partial
+// payload) still yields the safe "unknown" placeholder rather than writing
+// an empty string — the frontend renders the literal value, so an empty
+// string would surface as "已连接到 " (the bug we're fixing, in a different
+// shape).
+func TestFetchInstallationAccount_EmptyAccountKeepsPlaceholder(t *testing.T) {
+	pemBytes, _ := generateTestRSAKeyPEM(t)
+	t.Setenv("GITHUB_APP_ID", "1")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", string(pemBytes))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"account": map[string]any{}})
+	}))
+	t.Cleanup(srv.Close)
+	oldBase := githubAPIBase
+	githubAPIBase = srv.URL
+	t.Cleanup(func() { githubAPIBase = oldBase })
+
+	login, accountType, avatar := fetchInstallationAccount(context.Background(), 12)
+	if login != "unknown" {
+		t.Errorf("expected 'unknown' placeholder for empty account.login, got %q", login)
+	}
+	if accountType != "User" {
+		t.Errorf("expected default 'User' accountType, got %q", accountType)
+	}
+	if avatar != nil {
+		t.Errorf("expected nil avatar, got %v", *avatar)
+	}
+}
+
+// TestWebhook_InstallationCreatedRefreshesUnknownLogin guards the fix for
+// MUL-3078: when the setup callback persists a row with the "unknown"
+// placeholder (because the operator hasn't configured App JWT auth, or
+// the API call failed), the subsequent `installation.created` webhook
+// must (a) overwrite account_login with the real value from the payload
+// and (b) broadcast a `github_installation:created` event so any open
+// Settings → GitHub tab re-queries without needing a manual refresh.
+func TestWebhook_InstallationCreatedRefreshesUnknownLogin(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "installation-refresh-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	const installationID int64 = 71717171
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+	})
+
+	// Seed the row the way the setup callback does today when App JWT
+	// auth isn't available: account_login = "unknown".
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "unknown",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("seed installation row: %v", err)
+	}
+
+	// Subscribe to the bus BEFORE firing the webhook so we can assert the
+	// broadcast actually fired. Bus.Subscribe is per-event-type, which
+	// matches the realtime hub's downstream filter.
+	gotEvent := make(chan events.Event, 1)
+	testHandler.Bus.Subscribe(protocol.EventGitHubInstallationCreated, func(e events.Event) {
+		select {
+		case gotEvent <- e:
+		default:
+		}
+	})
+
+	body, _ := json.Marshal(map[string]any{
+		"action": "created",
+		"installation": map[string]any{
+			"id": installationID,
+			"account": map[string]any{
+				"login":      "real-octocat",
+				"type":       "Organization",
+				"avatar_url": "https://example.com/avatar.png",
+			},
+		},
+	})
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
+	req.Header.Set("X-GitHub-Event", "installation")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	testHandler.HandleGitHubWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	// (a) The row's account_login must be the real login, not "unknown".
+	got, err := testHandler.Queries.GetGitHubInstallationByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("get installation: %v", err)
+	}
+	if got.AccountLogin != "real-octocat" {
+		t.Errorf("account_login = %q, want %q (refresh did not overwrite the unknown placeholder)",
+			got.AccountLogin, "real-octocat")
+	}
+	if got.AccountType != "Organization" {
+		t.Errorf("account_type = %q, want Organization", got.AccountType)
+	}
+
+	// (b) A broadcast must have been emitted on the installation:created
+	// channel so the frontend re-queries the list. The realtime listener
+	// drops events with empty workspace_id, so we verify both the type
+	// AND the workspace scope.
+	select {
+	case ev := <-gotEvent:
+		if ev.WorkspaceID != testWorkspaceID {
+			t.Errorf("broadcast WorkspaceID = %q, want %q", ev.WorkspaceID, testWorkspaceID)
+		}
+		// The payload must carry the redacted installation shape so
+		// non-admin clients on the workspace channel can't extract the
+		// numeric installation_id from the broadcast itself.
+		payload, ok := ev.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("broadcast payload type: %T", ev.Payload)
+		}
+		inst, ok := payload["installation"].(GitHubInstallationResponse)
+		if !ok {
+			t.Fatalf("installation payload type: %T", payload["installation"])
+		}
+		if inst.AccountLogin != "real-octocat" {
+			t.Errorf("broadcast account_login = %q, want real-octocat", inst.AccountLogin)
+		}
+		if inst.InstallationID != nil {
+			t.Errorf("broadcast must redact installation_id, got %v", *inst.InstallationID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Errorf("expected github_installation:created broadcast after webhook refresh, got none in 2s")
 	}
 }

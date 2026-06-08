@@ -29,54 +29,36 @@ func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (i
 }
 
 const countNewCommentsSince = `-- name: CountNewCommentsSince :one
-WITH RECURSIVE root_of AS (
-    SELECT c.id, c.parent_id
-    FROM comment c
-    WHERE c.id = $1 AND c.issue_id = $2 AND c.workspace_id = $3
-    UNION ALL
-    SELECT p.id, p.parent_id
-    FROM comment p
-    JOIN root_of r ON p.id = r.parent_id
-    WHERE p.issue_id = $2 AND p.workspace_id = $3
-),
-thread_root AS (
-    SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
-),
-descendants AS (
-    SELECT c.id, c.created_at, c.author_type, c.author_id
-    FROM comment c
-    JOIN thread_root tr ON c.id = tr.id
-    UNION
-    SELECT c.id, c.created_at, c.author_type, c.author_id
-    FROM comment c
-    JOIN descendants d ON c.parent_id = d.id
-    WHERE c.issue_id = $2 AND c.workspace_id = $3
-)
-SELECT count(*) FROM descendants
-WHERE created_at > $4
-  AND id <> $1
+SELECT count(*) FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND created_at > $3
+  AND id <> $4
   AND NOT (author_type = 'agent' AND author_id = $5)
 `
 
 type CountNewCommentsSinceParams struct {
-	AnchorID    pgtype.UUID        `json:"anchor_id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
+	AnchorID    pgtype.UUID        `json:"anchor_id"`
 	AuthorID    pgtype.UUID        `json:"author_id"`
 }
 
-// Counts non-injected comments in the thread containing @anchor_id created
-// strictly after @since, excluding any authored by the given agent
-// (@author_id). The triggering comment body is already injected into the
-// prompt, so @anchor_id itself is excluded from the count. Feeds the daemon
-// claim response without shipping comment bodies.
+// Counts comments on an issue created strictly after @since, ACROSS THE WHOLE
+// ISSUE (every thread, not just the triggering one). Excludes the triggering
+// comment itself (@anchor_id — its body is already injected into the prompt)
+// and any authored by the given agent (@author_id), so a chatty agent does not
+// inflate its own new-comment count. The agent is steered to read the
+// triggering thread first (see BuildNewCommentsHint), but the count is
+// issue-wide so it knows the full catch-up volume. Feeds the daemon claim
+// response without shipping comment bodies.
 func (q *Queries) CountNewCommentsSince(ctx context.Context, arg CountNewCommentsSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countNewCommentsSince,
-		arg.AnchorID,
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.Since,
+		arg.AnchorID,
 		arg.AuthorID,
 	)
 	var count int64
@@ -222,12 +204,9 @@ type GetThreadRootParams struct {
 
 // Returns the thread-root comment for @comment_id by walking parent_id up to
 // the row whose parent_id IS NULL. For a root comment it returns that comment
-// itself. Used at the write boundary to flatten replies: every new reply stores
-// the thread root as its parent_id, so the comment tree never exceeds depth 1.
-// This enforces the 2-level threading model the product and UI already assume
-// (a root + a flat list of replies, like Linear/Slack) at insert time, so every
-// reader can treat a reply's parent_id AS its thread root without re-walking the
-// tree. Cycle-safe under the PK constraint (a comment cannot be its own ancestor).
+// itself. Used when callers need thread-level behavior while parent_id remains
+// the exact direct parent of a reply. Cycle-safe under the PK constraint (a
+// comment cannot be its own ancestor).
 func (q *Queries) GetThreadRoot(ctx context.Context, arg GetThreadRootParams) (Comment, error) {
 	row := q.db.QueryRow(ctx, getThreadRoot, arg.CommentID, arg.WorkspaceID)
 	var i Comment
@@ -824,10 +803,9 @@ type ListThreadCommentsForIssueRow struct {
 }
 
 // Returns the root of the thread containing @anchor_id plus every descendant
-// (recursive — defends against any future deeper nesting; today's data is two
-// layers because the CreateComment path collapses replies to root, but the
-// schema does not enforce that). @anchor_id may itself be a root or a reply.
-// Output is chronological so it can be fed straight to the agent.
+// (recursive — supports real reply-to-reply nesting). @anchor_id may itself be
+// a root or any reply in the thread. Output is chronological so it can be fed
+// straight to the agent.
 func (q *Queries) ListThreadCommentsForIssue(ctx context.Context, arg ListThreadCommentsForIssueParams) ([]ListThreadCommentsForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listThreadCommentsForIssue,
 		arg.RowLimit,

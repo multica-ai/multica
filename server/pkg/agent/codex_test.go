@@ -881,6 +881,81 @@ func TestCodexStartOrResumeThreadStartsFresh(t *testing.T) {
 	}
 }
 
+func TestCodexStartOrResumeThreadSetsNameOnFreshThread(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_named"}}`),
+		},
+		{
+			method: "thread/name/set",
+			result: json.RawMessage(`{}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["threadId"] != "thr_named" {
+					t.Errorf("threadId = %v, want thr_named", params["threadId"])
+				}
+				if params["name"] != "Review GitHub issue #3843" {
+					t.Errorf("name = %v, want semantic title", params["name"])
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{ThreadName: "Review GitHub issue #3843"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_named" {
+		t.Errorf("threadID = %q, want thr_named", threadID)
+	}
+	if resumed {
+		t.Error("resumed should be false when no prior session is provided")
+	}
+}
+
+func TestCodexStartOrResumeThreadNameFailureDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_named"}}`),
+		},
+		{
+			method:  "thread/name/set",
+			errMsg:  "unsupported method",
+			errCode: -32601,
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{ThreadName: "Semantic task title"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread should continue after name failure: %v", err)
+	}
+	if threadID != "thr_named" {
+		t.Errorf("threadID = %q, want thr_named", threadID)
+	}
+	if resumed {
+		t.Error("resumed should be false when no prior session is provided")
+	}
+}
+
 func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 	t.Parallel()
 

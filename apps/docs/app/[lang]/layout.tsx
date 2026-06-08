@@ -7,25 +7,17 @@ import type { Metadata } from "next";
 import { cn } from "@multica/ui/lib/utils";
 import { baseOptions } from "@/app/layout.config";
 import { source } from "@/lib/source";
-import { docsContentLang, i18n, type Lang } from "@/lib/i18n";
+import { i18n, type Lang } from "@/lib/i18n";
 import { uiTranslations, localeLabels } from "@/lib/translations";
 import { DocsSettings } from "@/components/docs-settings";
 
+// Inter (Latin UI face) is exposed under `--font-inter`. The full `--font-sans`
+// stack — Inter + the per-locale CJK fallback chain, including the Japanese-first
+// override scoped to `<html lang="ja">` — is composed in static CSS in
+// ./global.css (CSP-safe, no inline <style>). Mirrors apps/web/app/layout.tsx.
 const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-sans",
-  fallback: [
-    "-apple-system",
-    "BlinkMacSystemFont",
-    "Segoe UI",
-    "PingFang SC",
-    "Microsoft YaHei",
-    "Noto Sans CJK SC",
-    "Apple SD Gothic Neo",
-    "Malgun Gothic",
-    "Noto Sans CJK KR",
-    "sans-serif",
-  ],
+  variable: "--font-inter",
 });
 
 const geistMono = Geist_Mono({
@@ -76,7 +68,6 @@ export default async function Layout({
   const lang = (i18n.languages as readonly string[]).includes(rawLang)
     ? (rawLang as Lang)
     : (i18n.defaultLanguage as Lang);
-  const contentLang = docsContentLang(lang);
   const locales = i18n.languages.map((l) => ({
     locale: l,
     name: localeLabels[l],
@@ -84,7 +75,7 @@ export default async function Layout({
 
   return (
     <html
-      lang={contentLang}
+      lang={lang}
       suppressHydrationWarning
       className={cn(
         "antialiased",
@@ -103,7 +94,7 @@ export default async function Layout({
           search={{ options: { api: "/docs/api/search" } }}
         >
           <DocsLayout
-            tree={source.getPageTree(contentLang)}
+            tree={source.getPageTree(lang)}
             // Suppress Fumadocs's default sidebar-footer icons (theme +
             // language + search). Our custom <DocsSettings> is mounted as
             // the sidebar footer instead — two labelled buttons, not three

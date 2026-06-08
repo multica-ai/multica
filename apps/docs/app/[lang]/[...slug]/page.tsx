@@ -9,7 +9,7 @@ import { notFound } from "next/navigation";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { Metadata } from "next";
 import { docsAlternates } from "@/lib/site";
-import { docsContentLang, i18n, type Lang } from "@/lib/i18n";
+import { i18n, type Lang } from "@/lib/i18n";
 import { DocsLocaleProvider, LocaleLink } from "@/components/locale-link";
 import { docsSlugStaticParams } from "@/lib/static-params";
 
@@ -24,7 +24,7 @@ export default async function Page(props: {
 }) {
   const params = await props.params;
   const lang = asLang(params.lang);
-  const page = source.getPage(params.slug, docsContentLang(lang));
+  const page = source.getPage(params.slug, lang);
   if (!page) notFound();
 
   const MDX = page.data.body;
@@ -51,7 +51,7 @@ export async function generateMetadata(props: {
 }): Promise<Metadata> {
   const params = await props.params;
   const lang = asLang(params.lang);
-  const page = source.getPage(params.slug, docsContentLang(lang));
+  const page = source.getPage(params.slug, lang);
   if (!page) notFound();
 
   return {
