@@ -267,8 +267,6 @@
     "reply_count_other": "返信 {{count}} 件",
     "leave_comment_placeholder": "コメントを残す...",
     "send_tooltip": "送信",
-    "expand_tooltip": "展開",
-    "collapse_tooltip": "折りたたむ",
     "resolve": {
       "resolve_action": "スレッドを解決",
       "unresolve_action": "スレッドの解決を取り消す",
@@ -280,9 +278,7 @@
     }
   },
   "reply": {
-    "placeholder": "返信を残す...",
-    "expand_tooltip": "展開",
-    "collapse_tooltip": "折りたたむ"
+    "placeholder": "返信を残す..."
   },
   "agent_activity": {
     "hover_header_other": "作業中のエージェント {{count}} 件",

@@ -1,6 +1,6 @@
 ---
 name: multica-skill-importing
-description: Use when a user provides a skill URL, slug, or clear intent to import/install a specific skill into the current Multica workspace. Teaches the workspace import API/CLI path (POST /api/skills/import), the supported URL source families, the SkillWithFilesResponse shape returned on success, duplicate 409 handling with the existing_skill body, additive agent binding vs replace-all, and the reserved SKILL.md supporting-file rule. Do not use it to decide which skill the user needs, and never treat an external local installer like npx skills add as the final Multica install.
+description: "Use when a user provides a skill URL, slug, or clear intent to import/install a specific skill into the current Multica workspace. Teaches the workspace import API/CLI path (POST /api/skills/import), the supported URL source families, the SkillWithFilesResponse shape returned on success, duplicate 409 handling with the existing_skill body, additive agent binding vs replace-all, and the reserved SKILL.md supporting-file rule. Do not use it to decide which skill the user needs, and never treat an external local installer like npx skills add as the final Multica install."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---

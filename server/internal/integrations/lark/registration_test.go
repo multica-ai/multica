@@ -81,7 +81,7 @@ func TestRegistrationClient_Begin_HappyPath(t *testing.T) {
 	})
 
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	res, err := c.Begin(context.Background(), "Ada - Multica")
+	res, err := c.Begin(context.Background(), "Ada - Multica", "")
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestRegistrationClient_Begin_OmitsNameWhenPresetEmpty(t *testing.T) {
 	})
 
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	res, err := c.Begin(context.Background(), "")
+	res, err := c.Begin(context.Background(), "", "")
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -143,6 +143,83 @@ func TestRegistrationClient_Begin_OmitsNameWhenPresetEmpty(t *testing.T) {
 	}
 	if _, ok := u.Query()["name"]; ok {
 		t.Errorf("qr URL should omit name when preset empty, got %q", res.QRCodeURL)
+	}
+}
+
+// TestRegistrationClient_Begin_RegionLarkBeginsOnLarksuite pins the
+// new explicit-region routing: passing region=lark to Begin must POST
+// the begin form against the configured LarkDomain (international) host
+// rather than the Feishu default. This is the routing optimization the
+// split "Bind to Feishu / Bind to Lark" UI relies on — without it, a
+// Lark user would still hit accounts.feishu.cn first and only flip to
+// larksuite mid-poll via the tenant-brand auto-switch.
+func TestRegistrationClient_Begin_RegionLarkBeginsOnLarksuite(t *testing.T) {
+	feishuFake := newRegistrationFake(t)
+	feishuFake.mux.HandleFunc(registrationEndpoint, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("region=lark should NOT POST begin to the Feishu host (%s)", feishuFake.URL())
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	larkFake := newRegistrationFake(t)
+	larkFake.stubBegin(map[string]any{
+		"device_code":               "dc_lark",
+		"verification_uri_complete": "https://accounts.larksuite.com/oauth/v1/qrcode?code=abc",
+	})
+
+	c := NewRegistrationClient(RegistrationConfig{
+		Domain:     feishuFake.URL(),
+		LarkDomain: larkFake.URL(),
+	})
+	res, err := c.Begin(context.Background(), "", RegionLark)
+	if err != nil {
+		t.Fatalf("Begin(region=lark): %v", err)
+	}
+	if res.Domain != larkFake.URL() {
+		t.Errorf("BeginResult.Domain: got %q want %q (LarkDomain) — subsequent polls must hit the larksuite host directly",
+			res.Domain, larkFake.URL())
+	}
+	if got := larkFake.beginN.Load(); got != 1 {
+		t.Errorf("Lark begin POSTs: got %d want 1", got)
+	}
+	if got := feishuFake.beginN.Load(); got != 0 {
+		t.Errorf("Feishu begin POSTs: got %d want 0 (region=lark must not touch Feishu host)", got)
+	}
+}
+
+// TestRegistrationClient_Begin_RegionFeishuBeginsOnFeishu pins the
+// explicit-feishu side of the same split: passing region=feishu (or
+// the empty-string back-compat default) keeps the original mainland
+// host. Documenting both directions catches a future regression where
+// the region selector accidentally inverts.
+func TestRegistrationClient_Begin_RegionFeishuBeginsOnFeishu(t *testing.T) {
+	feishuFake := newRegistrationFake(t)
+	feishuFake.stubBegin(map[string]any{
+		"device_code":               "dc_feishu",
+		"verification_uri_complete": "https://accounts.feishu.cn/oauth/v1/qrcode?code=abc",
+	})
+
+	larkFake := newRegistrationFake(t)
+	larkFake.mux.HandleFunc(registrationEndpoint, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("region=feishu should NOT POST begin to the Lark host (%s)", larkFake.URL())
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	c := NewRegistrationClient(RegistrationConfig{
+		Domain:     feishuFake.URL(),
+		LarkDomain: larkFake.URL(),
+	})
+	res, err := c.Begin(context.Background(), "", RegionFeishu)
+	if err != nil {
+		t.Fatalf("Begin(region=feishu): %v", err)
+	}
+	if res.Domain != feishuFake.URL() {
+		t.Errorf("BeginResult.Domain: got %q want %q (Feishu)", res.Domain, feishuFake.URL())
+	}
+	if got := feishuFake.beginN.Load(); got != 1 {
+		t.Errorf("Feishu begin POSTs: got %d want 1", got)
+	}
+	if got := larkFake.beginN.Load(); got != 0 {
+		t.Errorf("Lark begin POSTs: got %d want 0", got)
 	}
 }
 
@@ -159,7 +236,7 @@ func TestRegistrationClient_Begin_DefaultsWhenServerOmitsTimers(t *testing.T) {
 	})
 
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	res, err := c.Begin(context.Background(), "")
+	res, err := c.Begin(context.Background(), "", "")
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -178,7 +255,7 @@ func TestRegistrationClient_Begin_LarkError(t *testing.T) {
 		"error_description": "missing archetype",
 	})
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	_, err := c.Begin(context.Background(), "")
+	_, err := c.Begin(context.Background(), "", "")
 	if err == nil {
 		t.Fatal("expected error from Lark error response")
 	}
@@ -198,7 +275,7 @@ func TestRegistrationClient_Begin_HTTPNon2xx(t *testing.T) {
 		_, _ = w.Write([]byte("server boom"))
 	})
 	c := NewRegistrationClient(RegistrationConfig{Domain: fake.URL()})
-	_, err := c.Begin(context.Background(), "")
+	_, err := c.Begin(context.Background(), "", "")
 	if err == nil {
 		t.Fatal("want error on 500")
 	}
@@ -356,6 +433,110 @@ func TestRegistrationClient_Poll_DomainSwitchOnLarkTenant(t *testing.T) {
 	}
 	if res.SwitchedDomain != "https://lark-international.test" {
 		t.Errorf("SwitchedDomain: got %q", res.SwitchedDomain)
+	}
+	if res.SwitchedRegion != RegionLark {
+		t.Errorf("SwitchedRegion: got %q want %q", res.SwitchedRegion, RegionLark)
+	}
+}
+
+// TestRegistrationClient_Poll_DomainSwitchOnFeishuTenant pins the
+// reverse direction of the tenant-brand swap: a session begun against
+// the Lark international host whose authorizing account turns out to
+// be on mainland Feishu must surface a switch back to Feishu, with
+// the region flipping accordingly. Without this, a user who picks the
+// "Bind to Lark" CTA but actually scans with a Feishu account would
+// carry RegionLark all the way through finishSuccess and either fail
+// at GetBotInfo or commit a wrong-region installation row. Documenting
+// this side keeps the symmetry promised in the public PollResult docs
+// and the split-CTA UI's "wrong entry" recovery contract.
+func TestRegistrationClient_Poll_DomainSwitchOnFeishuTenant(t *testing.T) {
+	larkFake := newRegistrationFake(t)
+	larkFake.mux.HandleFunc(registrationEndpoint, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"user_info": map[string]any{"tenant_brand": "feishu"},
+		})
+	})
+	// Domain (Feishu) points at a *distinct* host so we can assert the
+	// switch landed there; LarkDomain is the host we are CURRENTLY on
+	// (the larkFake) so the swap predicate (`!HasPrefix(domain, LarkDomain)`)
+	// resolves correctly.
+	c := NewRegistrationClient(RegistrationConfig{
+		Domain:     "https://feishu-mainland.test",
+		LarkDomain: larkFake.URL(),
+	})
+	res, err := c.Poll(context.Background(), larkFake.URL(), "dc_x")
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if res.SwitchedDomain != "https://feishu-mainland.test" {
+		t.Errorf("SwitchedDomain: got %q want feishu host", res.SwitchedDomain)
+	}
+	if res.SwitchedRegion != RegionFeishu {
+		t.Errorf("SwitchedRegion: got %q want %q", res.SwitchedRegion, RegionFeishu)
+	}
+}
+
+// TestRegistrationClient_Poll_NoSwitchWhenAlreadyOnMatchingHost pins
+// that the swap is gated on the current domain — a `tenant_brand=lark`
+// hint emitted while polling AGAINST the Lark host must NOT fire a
+// redundant switch (which would loop the polling state machine), and
+// likewise `tenant_brand=feishu` against the Feishu host. Both arms
+// of the symmetry are covered to catch a future regression where the
+// gate flips on only one side.
+func TestRegistrationClient_Poll_NoSwitchWhenAlreadyOnMatchingHost(t *testing.T) {
+	cases := []struct {
+		name        string
+		brand       string
+		begunOn     string
+		feishuHost  string
+		larkHost    string
+	}{
+		{
+			name:       "lark brand on lark host is a no-op",
+			brand:      "lark",
+			begunOn:    "https://lark-international.test",
+			feishuHost: "https://feishu-mainland.test",
+			larkHost:   "https://lark-international.test",
+		},
+		{
+			name:       "feishu brand on feishu host is a no-op",
+			brand:      "feishu",
+			begunOn:    "https://feishu-mainland.test",
+			feishuHost: "https://feishu-mainland.test",
+			larkHost:   "https://lark-international.test",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newRegistrationFake(t)
+			fake.mux.HandleFunc(registrationEndpoint, func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, map[string]any{
+					"user_info": map[string]any{"tenant_brand": tc.brand},
+				})
+			})
+			// Use the fake's URL for whichever side we claim to be on,
+			// and a placeholder URL for the other — the test only
+			// exercises a single Poll call, the cross-host re-poll is
+			// the service's job.
+			cfg := RegistrationConfig{Domain: tc.feishuHost, LarkDomain: tc.larkHost}
+			if tc.begunOn == tc.feishuHost {
+				cfg.Domain = fake.URL()
+			} else {
+				cfg.LarkDomain = fake.URL()
+			}
+			c := NewRegistrationClient(cfg)
+			res, err := c.Poll(context.Background(), fake.URL(), "dc_x")
+			if err != nil {
+				t.Fatalf("Poll: %v", err)
+			}
+			if res.SwitchedDomain != "" {
+				t.Errorf("SwitchedDomain: got %q, want empty (already on matching host)",
+					res.SwitchedDomain)
+			}
+			if res.SwitchedRegion != "" {
+				t.Errorf("SwitchedRegion: got %q, want empty", res.SwitchedRegion)
+			}
+		})
 	}
 }
 

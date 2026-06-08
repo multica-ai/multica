@@ -179,6 +179,9 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳频率 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 任务轮询频率 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
+| `MULTICA_AGENT_TIMEOUT` | `0` | 单次任务的绝对墙钟上限；`0` = 不设上限，任务只受看门狗约束（活跃任务不会因为跑得久被杀）。想要硬性成本/资源天花板时再设一个正值 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 工具在途时的静默上限：某个工具调用发出后长时间无任何输出（疑似卡死的子进程）这么久就 force-stop。`0` = 关闭该兜底（在途工具永不被停）|
 | `MULTICA_<PROVIDER>_PATH` | 对应 CLI 名 | 各 AI 编程工具的可执行文件路径（如 `MULTICA_CLAUDE_PATH`）|
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI 编程工具的默认模型 |
 
@@ -200,17 +203,23 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 
 ## GitHub 集成
 
-[GitHub PR ↔ issue 集成](/github-integration) 依赖两个环境变量。两个都配上才会启用 Settings 里的 Connect GitHub 并接受 webhook。
+[GitHub PR ↔ issue 集成](/github-integration) 依赖两个必填环境变量。两个都配上才会启用 Settings 里的 Connect GitHub 并接受 webhook。另外两个可选变量用于在安装时直接拿到关联账号名。
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `GITHUB_APP_SLUG` | 空 | 你的 GitHub App slug（`https://github.com/apps/<slug>` 的尾部）。Settings → GitHub 里安装按钮的跳转 URL 用它拼 |
 | `GITHUB_WEBHOOK_SECRET` | 空 | 你在 GitHub App 上设置的 Webhook secret。每条 `pull_request` / `installation` delivery 都用它做 HMAC-SHA256 校验；同一个值也用作 setup 回调里 state token 的签名密钥 |
+| `GITHUB_APP_ID` | 空 | 可选。App 设置页上的数字 App ID。配合 `GITHUB_APP_PRIVATE_KEY` 使用，让 setup 回调在安装那一刻直接从 GitHub 取到关联账号名 |
+| `GITHUB_APP_PRIVATE_KEY` | 空 | 可选。App RSA 私钥的完整 PEM 块（包含 `-----BEGIN/END-----` 两行，保留换行）。用于签发 GitHub App 鉴权 REST 调用所需的短效 JWT |
 
-**任一变量未设时：**
+**任一必填变量未设时：**
 
 - Settings → GitHub 里 `Connect GitHub` 按钮 **disable**，对 admin 显示「not configured」提示
 - `/api/webhooks/github` 直接返回 **`503 github webhooks not configured`**——secret 没配置时 Multica 拒绝处理任何 webhook 事件，而不是把所有签名当 valid
+
+**可选 `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` 未设时：**
+
+- 安装完成后，连接卡片会先短暂显示 `已连接到 unknown`。等 GitHub 的 `installation.created` webhook 到达（通常几秒内），Multica 会把 row 刷成真实的组织/用户名，并通过 realtime 推送让正在打开的 Settings → GitHub 页面无需手动刷新即可更新。
 
 **注意：** `GITHUB_WEBHOOK_SECRET` 同时被复用为 install 流程里 state token 的签名密钥，所以运维只需要维护一个 secret。它**不是** GitHub App 的 *Client* secret——Client secret 是 OAuth 用的，和本集成无关。完整配置流程见 [GitHub 集成 → Self-Host 配置](/github-integration#self-host-配置)。
 

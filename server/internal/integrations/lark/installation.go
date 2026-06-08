@@ -25,6 +25,7 @@ type InstallationParams struct {
 	TenantKey       string // optional, "" treated as NULL
 	BotOpenID       string
 	InstallerUserID pgtype.UUID
+	Region          Region // which cloud (feishu/lark); empty defaults to feishu
 }
 
 // InstallationService creates, refreshes and revokes per-agent Lark
@@ -71,6 +72,7 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 		TenantKey:          textOrNull(p.TenantKey),
 		BotOpenID:          p.BotOpenID,
 		InstallerUserID:    p.InstallerUserID,
+		Region:             string(RegionOrDefault(string(p.Region))),
 	})
 }
 

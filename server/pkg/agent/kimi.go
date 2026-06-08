@@ -49,10 +49,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	// `kimi acp` ignores --yolo / --auto-approve (they're flags on the
 	// root `kimi` command, not on the `acp` subcommand). Instead, the

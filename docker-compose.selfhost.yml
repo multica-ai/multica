@@ -98,11 +98,14 @@ services:
       # "127.0.0.1/32" when running behind a same-host reverse proxy.
       MULTICA_TRUSTED_PROXIES: ${MULTICA_TRUSTED_PROXIES:-}
       # Lark / Feishu bot integration. MULTICA_LARK_SECRET_KEY is the
-      # opt-in: unset = integration disabled. The two base-URL knobs
-      # default to the mainland host (open.feishu.cn); international Lark
-      # tenants must point BOTH at https://open.larksuite.com — one drives
-      # outbound Open Platform API calls, the other the inbound long-conn
-      # callback bootstrap. See docs/lark-bot-integration.
+      # opt-in: unset = integration disabled. Mainland 飞书 and international
+      # Lark are auto-detected per installation and served side by side, so
+      # the two base-URL knobs should normally stay EMPTY. They are optional
+      # deployment-wide overrides that force every installation onto one host
+      # (proxy / mock / single-cloud staging). Upgrading from a setup that
+      # used https://open.larksuite.com here? The server relabels existing
+      # installs to region=lark on first boot, then you can clear them.
+      # See docs/lark-bot-integration.
       MULTICA_LARK_SECRET_KEY: ${MULTICA_LARK_SECRET_KEY:-}
       MULTICA_LARK_HTTP_BASE_URL: ${MULTICA_LARK_HTTP_BASE_URL:-}
       MULTICA_LARK_CALLBACK_BASE_URL: ${MULTICA_LARK_CALLBACK_BASE_URL:-}

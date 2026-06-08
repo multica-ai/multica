@@ -250,8 +250,6 @@
     "col_cli": "CLI",
     "cost_delta_flat": "変化なし",
     "cli_managed_badge": "デスクトップ",
-    "cli_update_available_aria": "更新あり",
-    "cli_update_available_tooltip": "更新あり: {{version}}",
     "row_actions_aria": "行の操作",
     "delete_action": "削除",
     "delete_permission_hint": "ランタイムの所有者とワークスペース管理者のみが、このランタイムを削除できます",

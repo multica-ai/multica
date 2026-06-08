@@ -16,6 +16,18 @@ type enricherFakeClient struct {
 	byID       map[string][]LarkMessage
 	errByID    map[string]error
 	calls      []string
+
+	// ListChatMessages canned results + recorder, keyed by chat id.
+	byChat     map[ChatID][]LarkMessage
+	errByChat  map[ChatID]error
+	listCalls  []ChatID
+	listParams []ListMessagesParams
+
+	// BatchGetUsers canned open_id -> name map + recorder. Empty by
+	// default, so speakers fall back to positional "User N".
+	userNames map[string]string
+	usersErr  error
+	userCalls [][]string
 }
 
 func newEnricherFake() *enricherFakeClient {
@@ -23,6 +35,8 @@ func newEnricherFake() *enricherFakeClient {
 		configured: true,
 		byID:       map[string][]LarkMessage{},
 		errByID:    map[string]error{},
+		byChat:     map[ChatID][]LarkMessage{},
+		errByChat:  map[ChatID]error{},
 	}
 }
 
@@ -33,6 +47,27 @@ func (f *enricherFakeClient) GetMessage(ctx context.Context, creds InstallationC
 		return nil, e
 	}
 	return f.byID[id], nil
+}
+func (f *enricherFakeClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
+	f.listCalls = append(f.listCalls, p.ChatID)
+	f.listParams = append(f.listParams, p)
+	if e, ok := f.errByChat[p.ChatID]; ok {
+		return nil, e
+	}
+	return f.byChat[p.ChatID], nil
+}
+func (f *enricherFakeClient) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {
+	f.userCalls = append(f.userCalls, openIDs)
+	if f.usersErr != nil {
+		return nil, f.usersErr
+	}
+	out := map[string]string{}
+	for _, id := range openIDs {
+		if name := f.userNames[id]; name != "" {
+			out[id] = name
+		}
+	}
+	return out, nil
 }
 
 // Unused-by-enricher methods — present only to satisfy APIClient.

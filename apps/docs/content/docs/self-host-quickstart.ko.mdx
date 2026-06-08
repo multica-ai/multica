@@ -192,44 +192,26 @@ multica.example.com {
 
 Cloud와 동일한 흐름입니다 — [Cloud 빠른 시작 → 5-6단계](/cloud-quickstart#5-create-an-agent)를 참고하세요.
 
-## 7. 사용량 롤업 스케줄링(사용량 대시보드에 필수)
+<span id="7-usage-rollup-no-operator-action-required" />
 
-<Callout type="warning">
-사용량 / 런타임 대시보드는 `rollup_task_usage_hourly()`가 채우는 파생 테이블 `task_usage_hourly`에서 데이터를 읽습니다. 번들된 `pgvector/pgvector:pg17` Postgres 이미지에는 **`pg_cron`이 포함되어 있지 않으며**, 백엔드도 롤업을 인프로세스로 실행하지 않습니다. `rollup_task_usage_hourly()`를 스케줄링하는 것이 없으면, 원시 `task_usage` 행은 계속 들어오는데 대시보드는 영원히 0에 머무릅니다.
+## 7. 사용량 롤업(운영자 작업 불필요)
+
+<Callout type="info">
+사용량 / 런타임 대시보드는 `rollup_task_usage_hourly()`가 채우는 파생 테이블 `task_usage_hourly`에서 데이터를 읽습니다. MUL-2957부터 백엔드는 DB 기반 스케줄러를 통해 인프로세스로 이 롤업을 실행하므로 더 이상 `pg_cron`이 필요하지 않으며, 외부 cron / systemd 타이머도 권장 설정이 아닙니다. 번들된 `pgvector/pgvector:pg17` 이미지가 변경 없이 동작합니다.
 </Callout>
 
-지원되는 옵션 중 하나를 고르세요 — 하나만 있으면 됩니다.
+인프로세스 스케줄러는 30초마다 틱하면서 `sys_cron_executions` 테이블을 통해 5분 단위 UTC 플랜을 클레임합니다. 백엔드 레플리카가 여러 개여도 안전합니다 — 고유 키 `(job_name, scope_kind, scope_id, plan_time)` 덕분에 각 플랜에서 단 하나만이 승자가 됩니다. 신규 배포에는 어떤 설정도 필요 없습니다.
 
-**옵션 A — 외부 cron / systemd-timer(가장 간단함).** 임의의 외부 스케줄러에서 5분마다 롤업을 실행합니다. 멱등하고 워터마크 기반이므로, 놓친 틱은 따라잡습니다.
-
-```bash
-# /etc/cron.d/multica-rollup — every 5 minutes
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
-  -c "SELECT rollup_task_usage_hourly();" >/dev/null
-```
-
-**옵션 B — Postgres를 `pg_cron`이 포함된 이미지로 교체.** `docker-compose.selfhost.yml`의 `pgvector/pgvector:pg17`을 `pgvector`와 `pg_cron`을 모두 갖춘 이미지(`supabase/postgres` 또는 커스텀 빌드)로 교체하고, `shared_preload_libraries=pg_cron`을 설정한 뒤 재시작하고, 작업을 한 번 등록합니다.
+**호환성 — 기존 `pg_cron` 등록.** 이전에 rollup을 `pg_cron` 잡으로 등록했었다면(`SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', …)`) 굳이 제거할 필요는 없습니다 — SQL 함수가 내부적으로 advisory lock 4246을 잡기 때문에 앱 스케줄러와 `pg_cron`이 이중 쓰기를 할 수 없습니다. 중복 항목을 제거하려면:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-SELECT cron.schedule(
-  'rollup_task_usage_hourly',
-  '*/5 * * * *',
-  $$SELECT rollup_task_usage_hourly()$$
-);
+SELECT cron.unschedule('rollup_task_usage_hourly')
+  FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
 ```
 
-**옵션 C — 먼저 히스토리 백필(업그레이드 경로).** `v0.3.4 → v0.3.5+`로 업그레이드하는 중이고 기존 `task_usage` 행이 있다면, migration `103`이 hourly 테이블이 시드될 때까지 `refusing to drop legacy daily rollups: ...`와 함께 `migrate up`을 중단합니다. 번들된 백필을 한 번 실행한 다음, 옵션 A 또는 B를 설정하세요.
+**`v0.3.4 → v0.3.5+` 업그레이드.** 이전 릴리스에서는 migration 103을 적용하기 전에 운영자가 직접 `cmd/backfill_task_usage_hourly`를 실행해야 했고, 그러지 않으면 fail-closed 가드가 `migrate up`을 중단했습니다. MUL-2957부터 이 작업은 자동입니다 — migrate 명령이 migration 103을 적용하기 직전에(advisory lock 4246 보호 아래에서) 멱등한 월별 슬라이스 백필을 실행한 뒤 계속 진행합니다. 바쁜 DB에서는 여전히 `--sleep-between-slices=2s`로 읽기 부하를 조절하기 위해 스탠드얼론 backfill을 실행할 수 있지만 더 이상 필수는 아닙니다.
 
-```bash
-docker compose -f docker-compose.selfhost.yml exec backend \
-  ./backfill_task_usage_hourly --sleep-between-slices=2s
-```
-
-`--sleep-between-slices=2s`는 바쁜 DB에서 읽기 부하를 조절합니다. 완료된 후 백엔드 컨테이너를 재시작하면(시작 시 migration이 실행됨) 업그레이드가 완료됩니다.
-
-전체 레퍼런스 — Kubernetes `CronJob` 템플릿과 업그레이드 순서 포함 — 는 저장소의 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)에 있습니다.
+전체 레퍼런스(운영 노트와 Kubernetes 배포 형태 포함)는 저장소의 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)에 있습니다.
 
 ## Kubernetes 배포(대체 방안)
 
@@ -283,8 +265,8 @@ multica setup self-host \
 - **백엔드가 시작되지 않음**: `docker compose -f docker-compose.selfhost.yml logs backend`로 컨테이너 로그를 확인하세요. 보통 `.env`의 잘못된 `DATABASE_URL` 또는 `JWT_SECRET`이 원인입니다
 - **인증 코드를 받지 못함**: 이메일 백엔드가 구성되지 않은 경우(Resend도 SMTP도 없음) → `docker compose logs backend`에서 `[DEV] Verification code`를 찾으세요
 - **WebSocket이 연결되지 않음**: 공개 배포에서는 반드시 `FRONTEND_ORIGIN`을 실제 프런트엔드 도메인으로 설정해야 합니다. [문제 해결 → WebSocket이 연결되지 않음](/troubleshooting#websocket-wont-connect)을 참고하세요
-- **사용량 / 런타임 대시보드가 0에 머무름**: `rollup_task_usage_hourly()`가 스케줄링되지 않고 있습니다 — 위의 [7단계](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)와 [문제 해결 → 사용량 대시보드가 0으로 표시됨](/troubleshooting#usage-dashboard-stays-at-zero)을 참고하세요
-- **`migrate up`이 `refusing to drop legacy daily rollups`로 실패함**: `v0.3.4 → v0.3.5+` 업그레이드 경로 가드입니다. 먼저 `backfill_task_usage_hourly`를 실행하세요 — [7단계 → 옵션 C](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)를 참고하세요
+- **사용량 / 런타임 대시보드가 0에 머무름**: `rollup_task_usage_hourly()`가 스케줄링되지 않고 있습니다 — 위의 [7단계](#7-usage-rollup-no-operator-action-required)와 [문제 해결 → 사용량 대시보드가 0으로 표시됨](/troubleshooting#usage-dashboard-stays-at-zero)을 참고하세요
+- **`migrate up`이 `refusing to drop legacy daily rollups`로 실패함**: `v0.3.4 → v0.3.5+` 업그레이드 경로 가드입니다. MUL-2957부터 migrate 명령이 migration 103을 적용하기 전에 백필을 자동으로 실행합니다 — [7단계](#7-usage-rollup-no-operator-action-required)를 참고하세요
 
 ## 다음 단계
 

@@ -36,9 +36,9 @@ RETURNING *;
 -- lifecycle.
 INSERT INTO lark_installation (
     workspace_id, agent_id, app_id, app_secret_encrypted,
-    tenant_key, bot_open_id, bot_union_id, installer_user_id
+    tenant_key, bot_open_id, bot_union_id, installer_user_id, region
 ) VALUES (
-    $1, $2, $3, $4, sqlc.narg('tenant_key'), $5, sqlc.narg('bot_union_id'), $6
+    $1, $2, $3, $4, sqlc.narg('tenant_key'), $5, sqlc.narg('bot_union_id'), $6, sqlc.arg('region')
 )
 ON CONFLICT (workspace_id, agent_id) DO UPDATE SET
     app_id               = EXCLUDED.app_id,
@@ -47,10 +47,25 @@ ON CONFLICT (workspace_id, agent_id) DO UPDATE SET
     bot_open_id          = EXCLUDED.bot_open_id,
     bot_union_id         = EXCLUDED.bot_union_id,
     installer_user_id    = EXCLUDED.installer_user_id,
+    region               = EXCLUDED.region,
     status               = 'active',
     installed_at         = now(),
     updated_at           = now()
 RETURNING *;
+
+-- name: BackfillLarkInstallationRegionToLark :execrows
+-- Upgrade repair: flip every installation still carrying the migration-116
+-- default ('feishu') to 'lark'. Called ONLY by
+-- BackfillRegionFromLegacyOverride, and ONLY when the deployment's global
+-- base-URL override pointed at Lark international — on such a deployment the
+-- whole integration talked to open.larksuite.com, so every existing install
+-- is really Lark and the migration's mainland default mislabels it.
+-- Idempotent: once flipped there is nothing left at 'feishu' to update, and
+-- new installs already carry the device-flow-detected region.
+UPDATE lark_installation
+SET region     = 'lark',
+    updated_at = now()
+WHERE region = 'feishu';
 
 -- name: SetLarkInstallationBotUnionID :exec
 -- Operator-only backfill for installations created before the

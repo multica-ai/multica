@@ -192,44 +192,26 @@ multica.example.com {
 
 Cloud と同じ流れです — [Cloud クイックスタート → ステップ5-6](/cloud-quickstart#5-create-an-agent)を参照してください。
 
-## 7. 使用量ロールアップのスケジューリング（使用量ダッシュボードに必須）
+<span id="7-usage-rollup-no-operator-action-required" />
 
-<Callout type="warning">
-使用量 / ランタイムのダッシュボードは、`rollup_task_usage_hourly()` が埋める派生テーブル `task_usage_hourly` からデータを読み取ります。バンドルされた `pgvector/pgvector:pg17` の Postgres イメージには **`pg_cron` が含まれておらず**、バックエンドもロールアップをインプロセスで実行しません。`rollup_task_usage_hourly()` をスケジューリングするものが何もないと、生の `task_usage` 行は届き続けるのに、ダッシュボードは永遠にゼロのままになります。
+## 7. 使用量ロールアップ（オペレーターの操作は不要）
+
+<Callout type="info">
+使用量 / ランタイムのダッシュボードは、`rollup_task_usage_hourly()` が埋める派生テーブル `task_usage_hourly` からデータを読み取ります。MUL-2957 以降、バックエンドは DB バックドのスケジューラー経由でこのロールアップをインプロセスで実行するようになり、`pg_cron` は不要になりました。外部 cron / systemd タイマーも推奨セットアップではなくなっています。バンドルされた `pgvector/pgvector:pg17` イメージは変更なしで動作します。
 </Callout>
 
-サポートされているオプションのいずれか1つを選んでください — 1つあれば十分です。
+インプロセススケジューラーは 30 秒おきにティックし、`sys_cron_executions` テーブルを介して 5 分ごとの UTC プランをクレームします。複数のバックエンドレプリカでも安全です — 一意キー `(job_name, scope_kind, scope_id, plan_time)` により、各プランで勝者は 1 つだけです。新規デプロイでは何の設定も不要です。
 
-**オプション A — 外部 cron / systemd-timer（最もシンプル）。** 任意の帯域外スケジューラから5分ごとにロールアップを実行します。冪等でウォーターマーク駆動なので、取りこぼしたティックは追いつきます。
-
-```bash
-# /etc/cron.d/multica-rollup — every 5 minutes
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
-  -c "SELECT rollup_task_usage_hourly();" >/dev/null
-```
-
-**オプション B — Postgres を `pg_cron` を同梱したイメージに置き換える。** `docker-compose.selfhost.yml` の `pgvector/pgvector:pg17` を、`pgvector` と `pg_cron` の両方を備えたイメージ（`supabase/postgres`、またはカスタムビルド）に置き換え、`shared_preload_libraries=pg_cron` を設定して再起動してから、ジョブを一度登録します。
+**互換性 — 既存の `pg_cron` 登録。** 以前 rollup を `pg_cron` ジョブとして登録していた（`SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', …)`）場合でも、削除する必要はありません — SQL 関数が内部で advisory lock 4246 を保持するため、アプリのスケジューラーと `pg_cron` が二重書き込みすることはありません。冗長なエントリを削除するには:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-SELECT cron.schedule(
-  'rollup_task_usage_hourly',
-  '*/5 * * * *',
-  $$SELECT rollup_task_usage_hourly()$$
-);
+SELECT cron.unschedule('rollup_task_usage_hourly')
+  FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
 ```
 
-**オプション C — まず履歴をバックフィルする（アップグレード経路）。** `v0.3.4 → v0.3.5+` へアップグレード中で、既存の `task_usage` 行がある場合、migration `103` は hourly テーブルがシードされるまで `refusing to drop legacy daily rollups: ...` とともに `migrate up` を中断します。バンドルされたバックフィルを一度実行してから、オプション A または B を設定してください。
+**`v0.3.4 → v0.3.5+` からのアップグレード。** 以前のリリースでは、migration 103 を適用する前にオペレーターが手動で `cmd/backfill_task_usage_hourly` を実行する必要があり、そうしないと migration の fail-closed ガードが `migrate up` を中断していました。MUL-2957 以降、これは自動化されました — migrate コマンドが migration 103 を適用する直前に冪等な月単位スライスのバックフィル（advisory lock 4246 の下）を実行してから処理を続行します。忙しい DB では `--sleep-between-slices=2s` で読み取り負荷を絞るためにスタンドアロンの backfill を実行することもできますが、もはや必須ではありません。
 
-```bash
-docker compose -f docker-compose.selfhost.yml exec backend \
-  ./backfill_task_usage_hourly --sleep-between-slices=2s
-```
-
-`--sleep-between-slices=2s` は、忙しい DB での読み取り負荷を調整します。完了後、バックエンドのコンテナを再起動すると（起動時に migration が実行されます）アップグレードが完了します。
-
-完全なリファレンス — Kubernetes の `CronJob` テンプレートとアップグレード順序を含む — は、リポジトリの [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup) にあります。
+完全なリファレンス（運用ノートと Kubernetes デプロイ形態を含む）は、リポジトリの [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup) にあります。
 
 ## Kubernetes デプロイ（代替手段）
 
@@ -283,8 +265,8 @@ multica setup self-host \
 - **バックエンドが起動しない**: `docker compose -f docker-compose.selfhost.yml logs backend` でコンテナのログを確認してください。たいていは `.env` の不正な `DATABASE_URL` または `JWT_SECRET` が原因です
 - **認証コードが届かない**: メールバックエンドが構成されていない場合（Resend も SMTP もない）→ `docker compose logs backend` で `[DEV] Verification code` を探してください
 - **WebSocket が接続できない**: 公開デプロイでは、`FRONTEND_ORIGIN` を実際のフロントエンドのドメインに必ず設定する必要があります。[トラブルシューティング → WebSocket が接続できない](/troubleshooting#websocket-wont-connect)を参照してください
-- **使用量 / ランタイムのダッシュボードがゼロのまま**: `rollup_task_usage_hourly()` がスケジューリングされていません — 上記の [ステップ7](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)と[トラブルシューティング → 使用量ダッシュボードがゼロと表示される](/troubleshooting#usage-dashboard-stays-at-zero)を参照してください
-- **`migrate up` が `refusing to drop legacy daily rollups` で失敗する**: `v0.3.4 → v0.3.5+` のアップグレード経路ガードです。まず `backfill_task_usage_hourly` を実行してください — [ステップ7 → オプション C](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)を参照してください
+- **使用量 / ランタイムのダッシュボードがゼロのまま**: `rollup_task_usage_hourly()` がスケジューリングされていません — 上記の [ステップ7](#7-usage-rollup-no-operator-action-required)と[トラブルシューティング → 使用量ダッシュボードがゼロと表示される](/troubleshooting#usage-dashboard-stays-at-zero)を参照してください
+- **`migrate up` が `refusing to drop legacy daily rollups` で失敗する**: `v0.3.4 → v0.3.5+` のアップグレード経路ガードです。MUL-2957 以降、migrate コマンドは migration 103 を適用する前に自動でバックフィルを実行します — [ステップ7](#7-usage-rollup-no-operator-action-required)を参照してください
 
 ## 次のステップ
 

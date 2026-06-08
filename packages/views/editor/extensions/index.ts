@@ -72,6 +72,30 @@ export const ImageExtension = Image.extend({
           attrs.uploading ? { "data-uploading": "" } : {},
         parseHTML: (el: HTMLElement) => el.hasAttribute("data-uploading"),
       },
+      // Intrinsic pixel dimensions, captured on upload (file-upload.ts). The
+      // browser uses width/height on <img> to compute aspect-ratio and reserve
+      // the box before the image decodes, so inserting an image causes no
+      // layout shift (and the post-insert scrollIntoView stays correct). Not
+      // serialized to markdown — `renderMarkdown` only emits src/alt/title — so
+      // round-trips stay clean.
+      width: {
+        default: null,
+        renderHTML: (attrs: Record<string, unknown>) =>
+          attrs.width ? { width: attrs.width as number } : {},
+        parseHTML: (el: HTMLElement) => {
+          const w = parseInt(el.getAttribute("width") || "", 10);
+          return Number.isFinite(w) ? w : null;
+        },
+      },
+      height: {
+        default: null,
+        renderHTML: (attrs: Record<string, unknown>) =>
+          attrs.height ? { height: attrs.height as number } : {},
+        parseHTML: (el: HTMLElement) => {
+          const h = parseInt(el.getAttribute("height") || "", 10);
+          return Number.isFinite(h) ? h : null;
+        },
+      },
     };
   },
   addNodeView() {

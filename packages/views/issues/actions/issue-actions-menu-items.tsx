@@ -42,6 +42,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSeparator,
 } from "@multica/ui/components/ui/context-menu";
+import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
 import { useT } from "../../i18n";
 
@@ -132,10 +133,10 @@ export function IssueActionsMenuItems({
       toast.error(t(($) => $.detail.workdir_path_unavailable));
       return;
     }
-    navigator.clipboard.writeText(latestWorkDir).then(
-      () => toast.success(t(($) => $.detail.workdir_path_copied)),
-      () => toast.error(t(($) => $.detail.workdir_path_copy_failed)),
-    );
+    void copyText(latestWorkDir).then((ok) => {
+      if (ok) toast.success(t(($) => $.detail.workdir_path_copied));
+      else toast.error(t(($) => $.detail.workdir_path_copy_failed));
+    });
   }, [tasks, t]);
 
   return (

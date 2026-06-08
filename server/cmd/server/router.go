@@ -209,10 +209,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// real Lark traffic can point MULTICA_LARK_HTTP_BASE_URL
 				// at a mock server.
 				//
-				// MULTICA_LARK_HTTP_BASE_URL overrides the default
-				// open.feishu.cn host (set to https://open.larksuite.com
-				// for the Lark international tenant, or to a mock for
-				// integration tests).
+				// MULTICA_LARK_HTTP_BASE_URL is an OPTIONAL deployment-wide
+				// override. Normal operation leaves it empty: each call then
+				// resolves its open-platform host from the installation's
+				// region (open.feishu.cn vs open.larksuite.com), so one
+				// deployment serves both clouds. Set it only to force every
+				// installation onto one host — a proxy, a mock for tests, or
+				// a single-cloud staging setup.
 				larkClient := lark.NewHTTPAPIClient(lark.HTTPClientConfig{
 					BaseURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_HTTP_BASE_URL")),
 					Logger:  slog.Default(),
@@ -294,6 +297,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// is bridge code — it will simply find no rows to update
 				// on a fresh deployment and exit. MUL-2671.
 				go lark.BackfillBotUnionIDs(context.Background(), queries, larkClient, installSvc, slog.Default())
+
+				// Upgrade repair for deployments that ran the whole
+				// integration against Lark international via the deployment-
+				// wide base-URL override before per-installation region
+				// existed: migration 116 backfilled their rows to 'feishu',
+				// so relabel them to 'lark' (their true cloud) before the
+				// operator clears the override. No-op on mainland / fresh
+				// deployments. Off the hot startup path like the union_id
+				// backfill. MUL-3083.
+				go lark.BackfillRegionFromLegacyOverride(context.Background(), queries,
+					strings.TrimSpace(os.Getenv("MULTICA_LARK_HTTP_BASE_URL")),
+					strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),
+					slog.Default())
 
 				// Device-flow registration service: end-to-end install
 				// pipeline that talks to accounts.feishu.cn (RFC 8628)
@@ -980,17 +996,22 @@ func buildLarkConnectorFactory(installSvc *lark.InstallationService, apiClient l
 		creds := lark.InstallationCredentials{
 			AppID:     inst.AppID,
 			AppSecret: secret,
+			Region:    lark.RegionOrDefault(inst.Region),
 		}
 		if inst.TenantKey.Valid {
 			creds.TenantKey = inst.TenantKey.String
 		}
 		return creds, nil
 	})
-	// Inbound enricher: expands quoted replies / forwarded bundles into
-	// the agent's body via the IM API before dispatch. It shares the
+	// Inbound enricher: expands quoted replies / forwarded bundles AND
+	// prefetches a window of surrounding group history (MUL-3084) into the
+	// agent's body via the IM API before dispatch. It shares the
 	// connector's resolved credentials and runs under the connector's
 	// EnrichTimeout so it cannot overrun the Lark long-conn ACK budget.
-	enricher := lark.NewInboundEnricher(apiClient, lark.InboundEnricherConfig{Logger: slog.Default()})
+	enricher := lark.NewInboundEnricher(apiClient, lark.InboundEnricherConfig{
+		RecentContextSize: lark.DefaultRecentContextSize,
+		Logger:            slog.Default(),
+	})
 	conn, err := lark.NewWSLongConnConnector(lark.WSConnectorConfig{
 		Dialer:              dialer,
 		EndpointFetcher:     endpointFetcher,

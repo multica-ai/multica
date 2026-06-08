@@ -531,11 +531,20 @@ sent from a pre-workspace surface.
 
 ### Frontend-only events
 
-- `$pageview` — fired by `apps/web/components/pageview-tracker.tsx` on
-  every Next.js App Router path or query-string change. The tracker
-  mounts once under `WebProviders` and drives the acquisition funnel's
+- `$pageview` — fired by the web tracker
+  (`apps/web/components/pageview-tracker.tsx`) on Next.js App Router
+  **pathname** changes, and by the desktop tracker
+  (`apps/desktop/.../pageview-tracker.tsx`) on visible-surface changes.
+  Both mount once at the root and drive the acquisition funnel's
   `/ → signup` step. posthog-js's automatic pageview capture is
   disabled in `initAnalytics` so we own the event shape.
+  `capturePageview` (`packages/core/analytics`) **section-normalizes** the
+  path before emitting: query string / hash are stripped and resource-id
+  segments are collapsed, so `/acme/issues/8d5c…` and `/acme/issues/MUL-12`
+  both report as `/acme/issues`, and consecutive views of the same section
+  are deduplicated. This keeps PostHog at section granularity rather than
+  billing a `$pageview` per resource or per filter/sort/search change. The
+  tracker is deliberately NOT keyed on the query string.
 - `onboarding_runtime_path_selected` — fired from
   `packages/views/onboarding/steps/step-platform-fork.tsx` when the web
   user clicks one of the three Step 3 fork cards (before any server

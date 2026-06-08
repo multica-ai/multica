@@ -40,6 +40,13 @@ type InboundMessage struct {
 	// the dispatcher itself stays msg_type-agnostic and only reads Body.
 	MessageType string
 
+	// CreateTime is the trigger message's creation time (epoch
+	// milliseconds, as Lark sends it). The enricher uses it to anchor the
+	// group recent-context window to the moment of the @-mention — it
+	// fetches the conversation up to this time rather than whatever is
+	// newest when the (slightly later) prefetch HTTP call runs.
+	CreateTime string
+
 	// ParentID is the message_id of the message this one quote-replies
 	// to, taken verbatim from the receive event's `parent_id`. Empty
 	// when the message is not a reply. The enricher fetches it and

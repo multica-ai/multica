@@ -15,23 +15,39 @@ import (
 )
 
 const (
-	DefaultServerURL                      = "ws://localhost:8080/ws"
-	DefaultPollInterval                   = 30 * time.Second
-	DefaultHeartbeatInterval              = 15 * time.Second
-	DefaultAgentTimeout                   = 2 * time.Hour
+	DefaultServerURL         = "ws://localhost:8080/ws"
+	DefaultPollInterval      = 30 * time.Second
+	DefaultHeartbeatInterval = 15 * time.Second
+	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
+	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdogs
+	// (DefaultAgentIdleWatchdog / DefaultAgentToolWatchdog), so a session that keeps emitting events is
+	// never killed merely for running long (MUL-3064). Operators who want a
+	// hard ceiling for cost/resource control can set MULTICA_AGENT_TIMEOUT.
+	DefaultAgentTimeout                   = 0
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
 	// on a stuck child process (e.g. `docker ps` against a frozen dockerd),
-	// in which case `cmd.Wait()` never returns and the task sits at "running"
-	// for its full DefaultAgentTimeout (2 h). The previous 5 min default
+	// in which case `cmd.Wait()` never returns. With no wall-clock cap
+	// (DefaultAgentTimeout = 0) such a run would otherwise sit at "running"
+	// forever, so this watchdog is its sole liveness net. The previous 5 min default
 	// killed legitimate long assistant outputs (e.g. RFC-length writeups)
 	// where the model streams a single message for many minutes without any
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
-	DefaultAgentIdleWatchdog       = 30 * time.Minute
+	DefaultAgentIdleWatchdog = 30 * time.Minute
+	// DefaultAgentToolWatchdog bounds how long a single tool call may stay in
+	// flight (tool_use emitted, no tool_result and no other message) before the
+	// idle watchdog force-stops the run. The idle watchdog ignores its normal
+	// window while a tool is in flight, because a real build/install/test
+	// legitimately runs silently for many minutes — but with no wall-clock cap
+	// (DefaultAgentTimeout = 0) a backend that emits tool_use and never the
+	// matching tool_result would otherwise run forever. This is the backstop for
+	// that stuck-tool case (MUL-3064). Set MULTICA_AGENT_TOOL_WATCHDOG=0 to
+	// disable, in which case an in-flight tool never force-stops the run.
+	DefaultAgentToolWatchdog       = 2 * time.Hour
 	DefaultRuntimeName             = "Local Agent"
 	DefaultWorkspaceSyncInterval   = 30 * time.Second
 	DefaultHealthPort              = 19514
@@ -79,6 +95,7 @@ type Config struct {
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
 	ClaudeArgs                     []string
 	CodexArgs                      []string
 }
@@ -86,11 +103,13 @@ type Config struct {
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
-	ServerURL                      string
-	WorkspacesRoot                 string
-	PollInterval                   time.Duration
-	HeartbeatInterval              time.Duration
-	AgentTimeout                   time.Duration
+	ServerURL         string
+	WorkspacesRoot    string
+	PollInterval      time.Duration
+	HeartbeatInterval time.Duration
+	// AgentTimeout is a pointer so an explicit `--agent-timeout 0` (no cap) is
+	// distinguishable from "flag not passed". nil = use env/default.
+	AgentTimeout                   *time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	MaxConcurrentTasks             int
 	DaemonID                       string
@@ -260,8 +279,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	if overrides.AgentTimeout > 0 {
-		agentTimeout = overrides.AgentTimeout
+	if overrides.AgentTimeout != nil {
+		agentTimeout = *overrides.AgentTimeout
 	}
 
 	codexSemanticInactivityTimeout, err := durationFromEnv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", DefaultCodexSemanticInactivityTimeout)
@@ -276,6 +295,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// route 0 through durationFromEnv so the operator can opt out without
 	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
 	agentIdleWatchdog, err := durationFromEnv("MULTICA_AGENT_IDLE_WATCHDOG", DefaultAgentIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// MULTICA_AGENT_TOOL_WATCHDOG=0 disables the in-flight-tool backstop; any
+	// positive duration overrides DefaultAgentToolWatchdog.
+	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", DefaultAgentToolWatchdog)
 	if err != nil {
 		return Config{}, err
 	}
@@ -428,6 +454,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
+		AgentToolWatchdog:              agentToolWatchdog,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
 	}, nil

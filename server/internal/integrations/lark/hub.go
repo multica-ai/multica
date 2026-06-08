@@ -493,7 +493,11 @@ func leaseToken(nodeID string, gen uint64) string {
 // secret is never extracted; the encrypted ciphertext is fine to hash.
 func installationFingerprint(inst db.LarkInstallation) string {
 	sum := sha256.Sum256(inst.AppSecretEncrypted)
-	return inst.AppID + "|" + inst.BotOpenID + "|" + hex.EncodeToString(sum[:])
+	// region is part of the fingerprint: if a re-install corrects the
+	// cloud (e.g. a row mis-detected as feishu is re-scanned as lark),
+	// the WS bootstrap host changes, so the running supervisor must be
+	// torn down and restarted against the new host.
+	return inst.AppID + "|" + inst.BotOpenID + "|" + inst.Region + "|" + hex.EncodeToString(sum[:])
 }
 
 // supervise owns one installation's connection lifecycle. It loops:

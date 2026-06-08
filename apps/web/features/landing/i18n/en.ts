@@ -293,6 +293,36 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.17",
+        date: "2026-06-05",
+        title: "Feishu Bot Group Chat, Usage Scheduling, and CLI Updates",
+        changes: [],
+        features: [
+          "Feishu Bot group mentions now include nearby conversation context, so the responding agent can understand what the team was discussing before it was mentioned",
+          "Admins can disconnect a Feishu Bot directly from the agent integrations area without detouring through Settings",
+          "Self-hosted workspaces now keep usage rollups running without requiring a separate cron setup",
+          "The CLI can create and update agents from external MCP configuration files",
+        ],
+        improvements: [
+          "Large Issue descriptions and long markdown drafts open much faster in the editor",
+          "Cloud setup guidance for adding a computer is more reliable and avoids saving unreachable server settings",
+          "Pageview analytics are cleaner and focus on meaningful site sections instead of noisy URL variations",
+          "Self-hosting docs now lead with the built-in usage scheduler and keep older cron-based paths as compatibility notes",
+          "Assignment workflows now preserve the assigned agent identity more consistently",
+          "Issue comment and reply composers are cleaner, auto-growing as you type without extra expand controls",
+        ],
+        fixes: [
+          "Image uploads keep the cursor in the right place and no longer grow when markdown is edited repeatedly",
+          "Copy buttons now work on self-hosted HTTP deployments, including code blocks, links, commands, and payload previews",
+          "Agent runs now time out only after inactivity instead of ending because of a fixed wall-clock limit",
+          "Agent configuration values for Claude Code now reach the child process while internal session markers stay private",
+          "Inbox notification mute checks and desktop notification routing now respect the source workspace",
+          "GitHub installations now show the connected account name right after installation",
+          "Model discovery waits consistently and does not hide available choices after an empty result",
+          "Self-hosted Feishu environment variables are accepted correctly",
+        ],
+      },
+      {
         version: "0.3.16",
         date: "2026-06-04",
         title: "Lark Bot Integration",

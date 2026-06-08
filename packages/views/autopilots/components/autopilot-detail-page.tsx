@@ -29,6 +29,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -291,12 +292,11 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
 
   const handleCopy = async () => {
     if (!webhookUrl) return;
-    try {
-      await navigator.clipboard.writeText(webhookUrl);
+    if (await copyText(webhookUrl)) {
       setCopied(true);
       toast.success(t(($) => $.trigger_row.url_copied));
       setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       toast.error(t(($) => $.trigger_row.url_copy_failed));
     }
   };

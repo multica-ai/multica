@@ -703,8 +703,12 @@ func TestShouldInterruptAgent(t *testing.T) {
 		want   bool
 	}{
 		{name: "status cancelled", status: "cancelled", err: nil, want: true},
+		{name: "status failed (offline sweeper)", status: "failed", err: nil, want: true},
+		{name: "status completed (finished elsewhere)", status: "completed", err: nil, want: true},
 		{name: "task deleted (404)", status: "", err: notFound, want: true},
 		{name: "running normally", status: "running", err: nil, want: false},
+		{name: "waiting_local_directory keeps running", status: "waiting_local_directory", err: nil, want: false},
+		{name: "dispatched keeps running", status: "dispatched", err: nil, want: false},
 		{name: "transient 5xx is not a cancel signal", status: "", err: transient, want: false},
 		{name: "no information yet", status: "", err: nil, want: false},
 	}
@@ -1096,8 +1100,9 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 
 // idleWatchdogBackend simulates the MUL-2225 hang: emit one message to mark
 // activity, then go silent forever. With a short AgentIdleWatchdog, the
-// watchdog should fire and short-circuit executeAndDrain instead of waiting
-// for the full drainTimeout (which is ~21 minutes by default).
+// watchdog should fire and short-circuit executeAndDrain. With no wall-clock
+// cap (opts.Timeout = 0) the drain loop imposes no deadline of its own, so the
+// idle watchdog is the only thing that ends this otherwise-forever-silent run.
 type idleWatchdogBackend struct {
 	emitOne bool // when true, emit one message before going silent; when false, never emit anything
 }
@@ -1282,6 +1287,45 @@ func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testi
 	}
 	if result.Status != "completed" {
 		t.Fatalf("expected status=completed, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+// stuckInFlightToolBackend models a hung tool: it emits a tool_use and then
+// goes silent forever — the matching tool_result never arrives, so inFlightTools
+// stays at 1 (e.g. a child process that never returns). With no wall-clock cap
+// (the MUL-3064 default), AgentToolWatchdog is the only thing that ends it.
+type stuckInFlightToolBackend struct{}
+
+func (stuckInFlightToolBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 2)
+	resCh := make(chan agent.Result)
+	msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "Bash", CallID: "c1"}
+	// Deliberately leave msgCh open, never emit tool_result, never write resCh.
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	// The normal idle window would be skipped while a tool is in flight; the
+	// AgentToolWatchdog budget is what must fire here.
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+	d.cfg.AgentToolWatchdog = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog for a hung in-flight tool, got %q (err=%q)", result.Status, result.Error)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("tool watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentToolWatchdog)
 	}
 }
 

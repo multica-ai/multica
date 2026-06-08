@@ -374,6 +374,7 @@ func (p *Patcher) installationCredentials(inst db.LarkInstallation) (Installatio
 	creds := InstallationCredentials{
 		AppID:     inst.AppID,
 		AppSecret: secret,
+		Region:    RegionOrDefault(inst.Region),
 	}
 	if inst.TenantKey.Valid {
 		creds.TenantKey = inst.TenantKey.String

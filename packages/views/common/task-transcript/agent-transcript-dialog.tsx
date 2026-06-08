@@ -22,6 +22,7 @@ import {
   ArrowUpNarrowWide,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import {
@@ -280,7 +281,8 @@ export function AgentTranscriptDialog({
   // sequence they see on screen — matters when sort is set to newest-first.
   const handleCopyWorkdir = useCallback(() => {
     if (!task.relative_work_dir) return;
-    navigator.clipboard.writeText(task.relative_work_dir).then(() => {
+    void copyText(task.relative_work_dir).then((ok) => {
+      if (!ok) return;
       setCopiedWorkdir(true);
       setTimeout(() => setCopiedWorkdir(false), 2000);
     });
@@ -294,7 +296,8 @@ export function AgentTranscriptDialog({
         return `[${label}] ${summary}`;
       })
       .join("\n");
-    navigator.clipboard.writeText(text).then(() => {
+    void copyText(text).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

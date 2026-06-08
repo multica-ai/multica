@@ -21,7 +21,7 @@ import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } fr
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
-import { copyMarkdown } from "../../editor";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { AttachmentList } from "../../issues/components/comment-card";
 import type { AgentAvailability } from "@multica/core/agents";
 import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/core/types";
@@ -305,10 +305,9 @@ function MessageCopyButton({
 }) {
   const { t } = useT("chat");
   const handleCopy = async () => {
-    try {
-      await copyMarkdown(extractCopyText(message, timeline));
+    if (await copyText(extractCopyText(message, timeline))) {
       toast.success(t(($) => $.message_list.copied_toast));
-    } catch {
+    } else {
       toast.error(t(($) => $.message_list.copy_failed_toast));
     }
   };

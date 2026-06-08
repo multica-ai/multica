@@ -303,6 +303,7 @@ func (r *LarkOutcomeReplier) installationCredentials(inst db.LarkInstallation) (
 	creds := InstallationCredentials{
 		AppID:     inst.AppID,
 		AppSecret: secret,
+		Region:    RegionOrDefault(inst.Region),
 	}
 	if inst.TenantKey.Valid {
 		creds.TenantKey = inst.TenantKey.String

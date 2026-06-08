@@ -81,6 +81,7 @@ func BackfillBotUnionIDs(
 			AppID:     row.AppID,
 			AppSecret: secret,
 			TenantKey: row.TenantKey.String,
+			Region:    RegionOrDefault(row.Region),
 		})
 		cancel()
 		if err != nil {

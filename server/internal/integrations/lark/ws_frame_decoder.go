@@ -75,6 +75,7 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst db.LarkInstallation) 
 		MessageID:    evt.Message.MessageID,
 		SenderOpenID: OpenID(evt.Sender.SenderID.OpenID),
 		MessageType:  evt.Message.MessageType,
+		CreateTime:   evt.Message.CreateTime,
 		// parent_id / root_id are populated by Lark only in reply
 		// scenarios. The enricher keys quoted-reply expansion off
 		// ParentID (the directly quoted message); RootID is carried for

@@ -75,6 +75,12 @@ func (s *stubAPIClientWithRecorder) GetBotInfo(ctx context.Context, creds Instal
 func (s *stubAPIClientWithRecorder) GetMessage(ctx context.Context, creds InstallationCredentials, messageID string) ([]LarkMessage, error) {
 	return nil, nil
 }
+func (s *stubAPIClientWithRecorder) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
+	return nil, nil
+}
+func (s *stubAPIClientWithRecorder) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {
+	return nil, nil
+}
 
 // stubCredentialsResolver returns a fixed plaintext secret.
 type stubCredentialsResolver struct{ secret string }

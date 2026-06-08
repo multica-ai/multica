@@ -5,6 +5,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
@@ -164,6 +165,24 @@ function ProjectIssuesContent({
     [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
+  const activeFilters = useMemo(() => ({
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters: [],
+    includeNoProject: false,
+    labelFilters,
+    agentRunningFilter,
+  }), [
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    labelFilters,
+    agentRunningFilter,
+  ]);
+
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
@@ -270,6 +289,7 @@ function ProjectIssuesContent({
         <SwimLaneView
           issues={issues}
           unfilteredIssues={swimlaneIssues}
+          activeFilters={activeFilters}
           visibleStatuses={visibleStatuses}
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}
@@ -754,8 +774,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 />
                 <DropdownMenuContent align="end" className="w-auto">
                   <DropdownMenuItem onClick={() => {
-                    navigator.clipboard.writeText(window.location.href);
-                    toast.success(t(($) => $.detail.toast_link_copied));
+                    void copyText(window.location.href).then((ok) => {
+                      if (ok) toast.success(t(($) => $.detail.toast_link_copied));
+                    });
                   }}>
                     <Link2 className="h-3.5 w-3.5" />
                     {t(($) => $.detail.copy_link)}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BookOpenText,
@@ -36,7 +36,7 @@ import { IntegrationsTab } from "./tabs/integrations-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
-type DetailTab =
+export type DetailTab =
   | "activity"
   | "tasks"
   | "instructions"
@@ -75,6 +75,14 @@ interface AgentOverviewPaneProps {
   agent: Agent;
   runtimes: AgentRuntime[];
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  /**
+   * One-shot request from a sibling (the inspector's compact Lark status
+   * row) to focus a specific tab. Routed through the same `requestTabChange`
+   * the tab buttons use, so the unsaved-changes guard still fires. The pane
+   * calls `onNavIntentHandled` to clear it after consuming.
+   */
+  navIntent?: DetailTab | null;
+  onNavIntentHandled?: () => void;
 }
 
 /**
@@ -104,6 +112,8 @@ export function AgentOverviewPane({
   agent,
   runtimes,
   onUpdate,
+  navIntent,
+  onNavIntentHandled,
 }: AgentOverviewPaneProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
@@ -172,6 +182,17 @@ export function AgentOverviewPane({
       setPendingTab(null);
     }
   };
+
+  // Consume a one-shot tab-focus request from a sibling. Routing through
+  // `requestTabChange` (rather than `setActiveTab`) keeps the unsaved-changes
+  // guard honored even when the request originates outside the tab strip. The
+  // effect body is a no-op while `navIntent` is null, so the unstable
+  // `requestTabChange`/`onNavIntentHandled` identities can't loop it.
+  useEffect(() => {
+    if (navIntent == null) return;
+    requestTabChange(navIntent);
+    onNavIntentHandled?.();
+  }, [navIntent, requestTabChange, onNavIntentHandled]);
 
   return (
     // On mobile the parent stacks the inspector and overview and scrolls the

@@ -15,13 +15,14 @@ import (
 	"time"
 )
 
-// defaultLarkCallbackBaseURL is the bootstrap host for the long-conn
-// `/callback/ws/endpoint` request. Note this is `open.feishu.cn`
-// (mainland) regardless of where the WS itself ends up — Lark returns
-// the wss URL in the response body. Operators on the international
-// tenant override via MULTICA_LARK_CALLBACK_BASE_URL to
-// `https://open.larksuite.com`.
-const defaultLarkCallbackBaseURL = "https://open.feishu.cn"
+// The bootstrap host for the long-conn `/callback/ws/endpoint` request
+// is the installation's open-platform host — open.feishu.cn for Feishu
+// (mainland), open.larksuite.com for Lark (international) — resolved per
+// call from InstallationCredentials.Region via Region.OpenPlatformBaseURL
+// (Lark returns the actual wss URL in the response body, so only the
+// bootstrap POST host has to be region-aware). A deployment-wide
+// MULTICA_LARK_CALLBACK_BASE_URL still overrides every installation when
+// set (staging / mock).
 
 // HTTPConnectionTokenFetcher is the production EndpointFetcher. It
 // exchanges per-installation app credentials for a short-lived
@@ -51,9 +52,11 @@ type HTTPConnectionTokenFetcher struct {
 	cfg HTTPConnectionTokenConfig
 }
 
-// HTTPConnectionTokenConfig wires the fetcher's dependencies. BaseURL
-// defaults to defaultLarkCallbackBaseURL; tests substitute an
-// httptest.Server URL.
+// HTTPConnectionTokenConfig wires the fetcher's dependencies. BaseURL is
+// an optional deployment-wide override; when empty (the production
+// default) Endpoint() resolves the bootstrap host per installation from
+// the region. Tests substitute an httptest.Server URL to force all
+// regions to the fake server.
 type HTTPConnectionTokenConfig struct {
 	BaseURL    string
 	HTTPClient *http.Client
@@ -62,9 +65,12 @@ type HTTPConnectionTokenConfig struct {
 }
 
 func (c HTTPConnectionTokenConfig) withDefaults() HTTPConnectionTokenConfig {
-	if c.BaseURL == "" {
-		c.BaseURL = defaultLarkCallbackBaseURL
-	}
+	// BaseURL is intentionally NOT defaulted here. Empty means "no
+	// deployment-wide override" — Endpoint() then resolves the bootstrap
+	// host per installation from InstallationCredentials.Region, so one
+	// fetcher serves both Feishu and Lark. A non-empty BaseURL
+	// (MULTICA_LARK_CALLBACK_BASE_URL, or an httptest URL in tests)
+	// forces every installation to that host.
 	c.BaseURL = strings.TrimRight(c.BaseURL, "/")
 	if c.HTTPClient == nil {
 		c.HTTPClient = &http.Client{Timeout: defaultRequestTimeout}
@@ -119,7 +125,14 @@ func (f *HTTPConnectionTokenFetcher) Endpoint(ctx context.Context, creds Install
 	if err != nil {
 		return WSEndpoint{}, fmt.Errorf("marshal body: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.cfg.BaseURL+"/callback/ws/endpoint", bytes.NewReader(raw))
+	// Resolve the bootstrap host per call: an explicit cfg.BaseURL
+	// override wins (env / httptest), otherwise the installation's region
+	// picks Feishu vs Lark so one fetcher serves both clouds.
+	base := f.cfg.BaseURL
+	if base == "" {
+		base = creds.Region.OpenPlatformBaseURL()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/callback/ws/endpoint", bytes.NewReader(raw))
 	if err != nil {
 		return WSEndpoint{}, fmt.Errorf("new request: %w", err)
 	}

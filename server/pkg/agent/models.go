@@ -182,6 +182,15 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 		return nil, err
 	}
 
+	// Don't cache an empty result. Zero models is almost always a transient
+	// failure (discovery CLI timeout, not-logged-in, network blip) rather than
+	// a runtime that genuinely has no models; caching it would keep the picker
+	// blank for the full TTL even after the cause clears. Skipping the cache
+	// lets the next request retry immediately. See #3729.
+	if len(models) == 0 {
+		return models, nil
+	}
+
 	modelCacheMu.Lock()
 	modelCache[key] = modelCacheEntry{models: models, expiresAt: time.Now().Add(modelCacheTTL)}
 	modelCacheMu.Unlock()
@@ -563,7 +572,13 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Newer pi fetches its catalog from each configured provider over the
+	// network, so discovery time scales with provider count — a multi-provider
+	// setup measured ~4.6-4.8s, right at the old 5s cap. When jitter pushed it
+	// over, the daemon killed the command before it printed anything and the
+	// model picker came back empty while the runtime stayed online. 15s matches
+	// the opencode discovery cap (see #3729, same class as #3627).
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
 	hideAgentWindow(cmd)
@@ -979,7 +994,10 @@ func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, 
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return cursorStaticModels(), nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// 15s to match the other network-backed discovery paths (pi/opencode/ACP);
+	// cursor-agent fetches its frequently-changing catalog, so a tight cap can
+	// time out and fall back to the minimal static list. See #3729.
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
 	hideAgentWindow(cmd)

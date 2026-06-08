@@ -13,6 +13,12 @@ export interface LarkInstallation {
   bot_open_id: string;
   installer_user_id: string;
   status: "active" | "revoked" | string;
+  /** Which Lark cloud the bot lives on: "feishu" (mainland) or "lark"
+   * (international). Auto-detected at install time. Optional so an older
+   * desktop build parsing a newer server — or a newer build hitting a
+   * server that predates the field — defaults to Feishu in the UI
+   * (see CLAUDE.md → API Response Compatibility). */
+  region?: "feishu" | "lark" | string;
   installed_at: string;
   created_at: string;
   updated_at: string;

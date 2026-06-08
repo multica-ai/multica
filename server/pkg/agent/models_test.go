@@ -407,6 +407,57 @@ exit 1
 	}
 }
 
+// TestCachedDiscoveryDoesNotCacheEmpty verifies that an empty discovery result
+// is not cached, so a transient failure (e.g. a `pi --list-models` timeout)
+// doesn't keep the model picker blank for the full TTL. A non-empty result is
+// still cached. See #3729.
+func TestCachedDiscoveryDoesNotCacheEmpty(t *testing.T) {
+	const emptyKey, nonEmptyKey = "test-cache-empty", "test-cache-nonempty"
+	// modelCache is a package-level global; clear our keys up front and on
+	// cleanup so the test stays hermetic under `go test -count=N` (a leftover
+	// non-empty entry from a prior run would otherwise skip the callback).
+	resetCache := func() {
+		modelCacheMu.Lock()
+		delete(modelCache, emptyKey)
+		delete(modelCache, nonEmptyKey)
+		modelCacheMu.Unlock()
+	}
+	resetCache()
+	t.Cleanup(resetCache)
+
+	emptyCalls := 0
+	empty := func() ([]Model, error) {
+		emptyCalls++
+		return []Model{}, nil
+	}
+	for i := 0; i < 2; i++ {
+		got, err := cachedDiscovery(emptyKey, empty)
+		if err != nil {
+			t.Fatalf("cachedDiscovery: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("expected empty result, got %+v", got)
+		}
+	}
+	if emptyCalls != 2 {
+		t.Fatalf("empty result must not be cached: expected fn called 2x, got %d", emptyCalls)
+	}
+
+	nonEmptyCalls := 0
+	nonEmpty := func() ([]Model, error) {
+		nonEmptyCalls++
+		return []Model{{ID: "provider/model"}}, nil
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := cachedDiscovery(nonEmptyKey, nonEmpty); err != nil {
+			t.Fatalf("cachedDiscovery: %v", err)
+		}
+	}
+	if nonEmptyCalls != 1 {
+		t.Fatalf("non-empty result must be cached: expected fn called 1x, got %d", nonEmptyCalls)
+	}
+}
+
 func TestParsePiModels(t *testing.T) {
 	input := `openai:gpt-4o
 anthropic:claude-opus-4-7

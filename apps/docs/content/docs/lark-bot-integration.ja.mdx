@@ -80,11 +80,11 @@ Multica Cloud では連携はすでに利用可能です——このセクショ
 2. API を再起動します。キーを設定するまで、**設定 → 連携** には「Lark integration not enabled」という通知が表示され、**Lark に紐づける** のエントリポイントは非表示のままになります。
 
 <Callout type="info">
-**国際版テナント。** 連携はデフォルトで中国大陸のホスト（`open.feishu.cn`）を使います。組織が Lark の国際版テナントにある場合は、トランスポートをそちらに向けてください。
+**Feishu と Lark 国際版の両対応。** 各 Bot がどのクラウド（中国大陸の Feishu = `open.feishu.cn`、国際版 Lark = `open.larksuite.com`）に属するかは、QR コードをスキャンした時点で自動的に判定され、そのインストールに保存されて、その Bot へのすべての呼び出しに使われます。1 つのデプロイで両方を同時に提供できるため、どちらのテナントのチームも追加設定なしでバインドできます。
 
-```dotenv
-MULTICA_LARK_HTTP_BASE_URL=https://open.larksuite.com
-```
+`MULTICA_LARK_HTTP_BASE_URL` / `MULTICA_LARK_CALLBACK_BASE_URL` は、デプロイ全体を上書きする任意のオプション（プロキシやモック用）としてのみ残っています。通常運用では未設定のままにして、各インストールがそれぞれのクラウドに到達するようにしてください。
+
+**単一クラウド構成からのアップグレード？** これらを `https://open.larksuite.com` に設定して国際版 Lark を運用していた場合、アップグレード後の初回起動時にサーバーが既存のインストールを Lark リージョンへ付け替えるので、その後はこの上書きを外せます。中国大陸の Feishu デプロイでは操作は不要です。
 </Callout>
 
 ## 次に

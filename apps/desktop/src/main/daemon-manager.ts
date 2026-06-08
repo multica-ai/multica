@@ -17,6 +17,7 @@ import {
 import { join } from "path";
 import { homedir, hostname } from "os";
 import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
+import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import {
@@ -35,6 +36,13 @@ const LOG_TAIL_MAX_RETRIES = 5;
 // take a while (it renews the PAT and lists workspaces before serving /health), so we
 // wait past the common case to avoid probing healthy-but-slow starts.
 const AUTH_PROBE_GRACE_MS = 10_000;
+// `multica daemon start` blocks until the daemon reports ready, polling /health
+// for up to its own startup timeout (45s in server/cmd/multica/cmd_daemon.go) to
+// cover cold-start agent-version detection. This execFile timeout MUST stay
+// above that — otherwise Electron kills the CLI supervisor mid-startup and a
+// healthy-but-slow start is misreported as a failure (the detached daemon child
+// keeps running, so the UI flashes "stopped" then "running").
+const DAEMON_START_EXEC_TIMEOUT_MS = 60_000;
 
 const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false };
 
@@ -320,6 +328,13 @@ async function fetchHealth(): Promise<DaemonStatus> {
     // a successful /health clears the flag.
     if (authExpired) {
       return { state: "auth_expired", profile: active.name };
+    }
+    // The daemon binds /health before preflight finishes and self-reports
+    // "starting" until it's ready. Trust that over our own currentState, so a
+    // daemon booting on its own — or started via the CLI — surfaces as
+    // "starting" instead of "stopped".
+    if (data?.status === "starting") {
+      return { state: "starting", profile: active.name };
     }
     return {
       state: currentState === "starting" ? "starting" : "stopped",
@@ -663,7 +678,10 @@ async function syncToken(
   if (userChanged) {
     try {
       const existing = await fetchHealthAtPort(active.port);
-      if (existing?.status === "running") {
+      if (daemonStatusAlive(existing?.status)) {
+        // Restart whether it's "running" or still "starting" — a booting daemon
+        // already loaded the old token at startup, so it must be restarted to
+        // pick up the rotated credentials.
         console.log(
           "[daemon] user switched — restarting daemon with new credentials",
         );
@@ -780,7 +798,10 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
 
   const active = await ensureActiveProfile();
   const existing = await fetchHealthAtPort(active.port);
-  if (existing?.status === "running") {
+  if (daemonStatusAlive(existing?.status)) {
+    // A daemon is already up ("running") or booting ("starting") on this port —
+    // don't spawn a second one (the CLI rejects that as "already running").
+    // Let polling track it through to "running".
     pollOnce();
     return { success: true };
   }
@@ -798,7 +819,7 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
     execFile(
       bin,
       args,
-      { timeout: 20_000, env: desktopSpawnEnv() },
+      { timeout: DAEMON_START_EXEC_TIMEOUT_MS, env: desktopSpawnEnv() },
       (err) => {
         if (err) {
           currentState = "stopped";

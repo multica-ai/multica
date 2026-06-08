@@ -80,11 +80,11 @@ Multica Cloud에서는 연동이 이미 사용 가능합니다 — 이 섹션은
 2. API를 재시작하세요. 키가 설정되기 전까지 **설정 → Integrations**에는 "Lark integration not enabled" 안내가 표시되고, **Bind to Lark** 진입점은 숨겨진 채로 유지됩니다.
 
 <Callout type="info">
-**국제판 테넌트.** 연동은 기본적으로 중국 본토 호스트(`open.feishu.cn`)를 사용합니다. 당신의 조직이 Lark 국제판 테넌트에 있다면, 전송 계층을 그쪽으로 가리키게 하세요.
+**Feishu와 Lark 국제판을 동시에 지원.** 각 Bot이 어느 클라우드(중국 본토 Feishu = `open.feishu.cn`, 국제판 Lark = `open.larksuite.com`)에 속하는지는 QR 코드를 스캔할 때 자동으로 감지되어 해당 설치에 저장되고, 그 Bot에 대한 모든 호출에 사용됩니다. 하나의 배포로 둘을 동시에 제공하므로, 어느 테넌트의 팀이든 추가 설정 없이 바인딩할 수 있습니다.
 
-```dotenv
-MULTICA_LARK_HTTP_BASE_URL=https://open.larksuite.com
-```
+`MULTICA_LARK_HTTP_BASE_URL` / `MULTICA_LARK_CALLBACK_BASE_URL`는 배포 전체를 덮어쓰는 선택적 오버라이드(프록시나 mock용)로만 남아 있습니다. 일반 운영에서는 설정하지 않은 채로 두어 각 설치가 자기 클라우드에 도달하도록 하세요.
+
+**단일 클라우드 구성에서 업그레이드하나요?** 이 변수들을 `https://open.larksuite.com`으로 설정해 국제판 Lark를 운영했다면, 업그레이드 후 첫 부팅 시 서버가 기존 설치를 Lark 리전으로 다시 표시하므로 이후에는 오버라이드를 지울 수 있습니다. 중국 본토 Feishu 배포에서는 별도 작업이 필요 없습니다.
 </Callout>
 
 ## 다음

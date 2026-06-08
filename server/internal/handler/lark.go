@@ -28,9 +28,13 @@ type LarkInstallationResponse struct {
 	BotOpenID       string  `json:"bot_open_id"`
 	InstallerUserID string  `json:"installer_user_id"`
 	Status          string  `json:"status"`
-	InstalledAt     string  `json:"installed_at"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	// Region is the Lark cloud this installation lives on: "feishu"
+	// (mainland) or "lark" (international). The UI uses it to render a
+	// badge and to build the correct "Manage in Lark" dev-console host.
+	Region      string `json:"region"`
+	InstalledAt string `json:"installed_at"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 func larkInstallationToResponse(row db.LarkInstallation) LarkInstallationResponse {
@@ -42,6 +46,7 @@ func larkInstallationToResponse(row db.LarkInstallation) LarkInstallationRespons
 		BotOpenID:       row.BotOpenID,
 		InstallerUserID: uuidToString(row.InstallerUserID),
 		Status:          row.Status,
+		Region:          row.Region,
 		InstalledAt:     row.InstalledAt.Time.UTC().Format(time.RFC3339),
 		CreatedAt:       row.CreatedAt.Time.UTC().Format(time.RFC3339),
 		UpdatedAt:       row.UpdatedAt.Time.UTC().Format(time.RFC3339),
@@ -260,6 +265,26 @@ func (h *Handler) BeginLarkInstall(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// region is the cloud the user explicitly chose to bind against —
+	// "feishu" (mainland, accounts.feishu.cn) or "lark" (international,
+	// accounts.larksuite.com). The frontend now exposes two CTAs ("Bind
+	// to Feishu" / "Bind to Lark") so the QR is rendered against the
+	// right cloud up front rather than relying on the mid-poll
+	// tenant-brand auto-switch from a Feishu-first begin. We accept
+	// "feishu", "lark", and the empty string (for back-compat with
+	// callers that pre-date the split CTA, which RegionOrDefault inside
+	// the service maps to Feishu); any other value is a 400 — the
+	// service would normalize an unknown value to Feishu silently and
+	// that would mask a frontend regression where a typo'd region
+	// landed users on the wrong cloud without telling them.
+	regionParam := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("region")))
+	switch regionParam {
+	case "", "feishu", "lark":
+		// ok — empty defaults to feishu downstream.
+	default:
+		writeError(w, http.StatusBadRequest, "region must be 'feishu' or 'lark'")
+		return
+	}
 	// Ownership pre-check at the HTTP boundary so a malformed
 	// agent_id surfaces 404 here (not an opaque service error from
 	// inside the service's own re-check).
@@ -279,6 +304,7 @@ func (h *Handler) BeginLarkInstall(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 		AgentID:     agentUUID,
 		InitiatorID: initiatorUUID,
+		Region:      lark.Region(regionParam),
 	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to start install: "+err.Error())

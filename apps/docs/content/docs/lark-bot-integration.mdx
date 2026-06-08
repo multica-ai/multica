@@ -80,11 +80,11 @@ For self-host, Lark is **off until you set an at-rest encryption key**. The key 
 2. Restart the API. Until the key is set, **Settings → Integrations** shows a "Lark integration not enabled" notice and the **Bind to Lark** entry points stay hidden.
 
 <Callout type="info">
-**International tenants.** The integration defaults to the mainland host (`open.feishu.cn`). If your organization is on Lark's international tenant, point the transport at it:
+**Feishu and Lark international, side by side.** The cloud each Bot belongs to — mainland Feishu (`open.feishu.cn`) or Lark international (`open.larksuite.com`) — is detected automatically when you scan the QR, stored on the installation, and used for every call to that Bot. A single deployment serves both at once, so teams on either tenant can bind without any extra configuration.
 
-```dotenv
-MULTICA_LARK_HTTP_BASE_URL=https://open.larksuite.com
-```
+The `MULTICA_LARK_HTTP_BASE_URL` / `MULTICA_LARK_CALLBACK_BASE_URL` env vars remain only as an optional deployment-wide override (a proxy or a mock); leave them unset for normal operation so each installation keeps reaching its own cloud.
+
+**Upgrading from a single-cloud setup?** If you ran an international-Lark deployment by setting those vars to `https://open.larksuite.com`, the server relabels your existing installations to the Lark region on first boot after upgrade — you can then clear the override. Mainland deployments need no action.
 </Callout>
 
 ## Next

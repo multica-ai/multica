@@ -275,8 +275,6 @@
     "reply_count_other": "{{count}} replies",
     "leave_comment_placeholder": "Leave a comment...",
     "send_tooltip": "Send",
-    "expand_tooltip": "Expand",
-    "collapse_tooltip": "Collapse",
     "resolve": {
       "resolve_action": "Resolve thread",
       "unresolve_action": "Unresolve thread",
@@ -290,9 +288,7 @@
     }
   },
   "reply": {
-    "placeholder": "Leave a reply...",
-    "expand_tooltip": "Expand",
-    "collapse_tooltip": "Collapse"
+    "placeholder": "Leave a reply..."
   },
   "agent_activity": {
     "hover_header_one": "{{count}} agent working",

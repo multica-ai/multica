@@ -193,44 +193,24 @@ After bringing the proxy up, set `FRONTEND_ORIGIN=https://multica.example.com` i
 
 Same flow as Cloud — see [Cloud quickstart → Steps 5-6](/cloud-quickstart#5-create-an-agent).
 
-## 7. Schedule the usage rollup (required for the Usage dashboard)
+## 7. Usage rollup (no operator action required)
 
-<Callout type="warning">
-The Usage / Runtime dashboards read from a derived `task_usage_hourly` table populated by `rollup_task_usage_hourly()`. The bundled `pgvector/pgvector:pg17` Postgres image **does not include `pg_cron`**, and the backend does not run the rollup in-process either. If nothing schedules `rollup_task_usage_hourly()`, raw `task_usage` rows keep arriving while the dashboard stays at zero forever.
+<Callout type="info">
+The Usage / Runtime dashboards read from a derived `task_usage_hourly` table populated by `rollup_task_usage_hourly()`. As of MUL-2957 the backend runs this rollup in-process via the DB-backed scheduler — `pg_cron` is no longer required, and external cron / systemd timers are no longer the recommended setup. The bundled `pgvector/pgvector:pg17` image works without changes.
 </Callout>
 
-Pick one of the supported options — only one is needed.
+The in-process scheduler ticks every 30 seconds and claims a 5-minute UTC plan via the `sys_cron_executions` table. Multiple backend replicas are safe — the unique key `(job_name, scope_kind, scope_id, plan_time)` means only one wins each plan. No setup is needed for new deployments.
 
-**Option A — External cron / systemd-timer (simplest).** Run the rollup every 5 minutes from any out-of-band scheduler. It's idempotent and watermark-driven, so missed ticks catch up:
-
-```bash
-# /etc/cron.d/multica-rollup — every 5 minutes
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
-  -c "SELECT rollup_task_usage_hourly();" >/dev/null
-```
-
-**Option B — Swap Postgres for an image that ships `pg_cron`.** Replace `pgvector/pgvector:pg17` in `docker-compose.selfhost.yml` with an image that has both `pgvector` and `pg_cron` (`supabase/postgres`, or a custom build), set `shared_preload_libraries=pg_cron`, restart, then register the job once:
+**Compatibility — existing `pg_cron` registrations.** If you previously registered the rollup as a `pg_cron` job (`SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', …)`), you do not need to remove it — the SQL function holds advisory lock 4246 internally, so the app scheduler and `pg_cron` cannot double-write. To drop the redundant entry:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-SELECT cron.schedule(
-  'rollup_task_usage_hourly',
-  '*/5 * * * *',
-  $$SELECT rollup_task_usage_hourly()$$
-);
+SELECT cron.unschedule('rollup_task_usage_hourly')
+  FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
 ```
 
-**Option C — Backfill history first (upgrade path).** If you're upgrading from `v0.3.4 → v0.3.5+` and have existing `task_usage` rows, migration `103` will abort `migrate up` with `refusing to drop legacy daily rollups: ...` until the hourly table is seeded. Run the bundled backfill once, then set up Option A or B:
+**Upgrade from `v0.3.4 → v0.3.5+`.** The previous release asked operators to run `cmd/backfill_task_usage_hourly` manually before applying migration 103, otherwise the migration's fail-closed guard would abort `migrate up`. As of MUL-2957 this is automatic: the migrate command runs an idempotent monthly-slice backfill (under advisory lock 4246) immediately before applying migration 103, then continues. You may still run the standalone backfill on a busy DB to throttle read pressure with `--sleep-between-slices=2s`, but it is no longer required.
 
-```bash
-docker compose -f docker-compose.selfhost.yml exec backend \
-  ./backfill_task_usage_hourly --sleep-between-slices=2s
-```
-
-`--sleep-between-slices=2s` throttles read pressure on a busy DB. After it finishes, restart the backend container (migrations run on startup) and the upgrade completes.
-
-Full reference — including the Kubernetes `CronJob` template and the upgrade order — lives in the repo's [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+Full reference — including operations notes and the Kubernetes deployment shape — lives in the repo's [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
 
 ## Kubernetes deployment (alternative)
 
@@ -284,8 +264,8 @@ The full reference — three login modes, the `backend` ExternalName workaround 
 - **Backend won't start**: check container logs with `docker compose -f docker-compose.selfhost.yml logs backend`; usually it's a bad `DATABASE_URL` or `JWT_SECRET` in `.env`
 - **Verification code not received**: no email backend is configured (neither Resend nor SMTP) → look for `[DEV] Verification code` in `docker compose logs backend`
 - **WebSocket won't connect**: for public deployments you must set `FRONTEND_ORIGIN` to your real frontend domain; see [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
-- **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)
-- **`migrate up` fails with `refusing to drop legacy daily rollups`**: upgrade-path guard from `v0.3.4 → v0.3.5+`. Run `backfill_task_usage_hourly` first — see [Step 7 → Option C](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)
+- **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-usage-rollup-no-operator-action-required) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)
+- **`migrate up` fails with `refusing to drop legacy daily rollups`**: upgrade-path guard from `v0.3.4 → v0.3.5+`. As of MUL-2957 the migrate command runs the backfill automatically before applying migration 103 — see [Step 7](#7-usage-rollup-no-operator-action-required)
 
 ## Next steps
 

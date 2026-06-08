@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 // Named import, NOT default: react-qr-code is CJS, and electron-vite's
 // dep-optimizer default-import interop handed back the module namespace
 // object instead of the component, throwing "Element type is invalid …
@@ -12,6 +12,7 @@ import { ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 // was fine. The named export maps straight to `exports.QRCode` and
 // resolves correctly under both bundlers.
 import { QRCode } from "react-qr-code";
+import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import {
@@ -41,6 +42,15 @@ import { api, ApiError } from "@multica/core/api";
 import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+
+// MUL-3083: the Lark (international, open.larksuite.com) "connect a Bot"
+// entry is temporarily hidden while its install → inbound pipeline is
+// stabilized — some Lark installs complete on Lark's side but never land a
+// `lark_installation` row, so the Bot silently can't receive messages.
+// Mainland Feishu is unaffected and keeps its bind entry. Existing
+// installations (either cloud) stay fully manageable. Flip this back to
+// `true` to restore the "Bind to Lark" CTA; nothing else needs to change.
+const LARK_INTL_CONNECT_ENABLED: boolean = false;
 
 // LarkTab is the workspace settings panel for Lark Bot installations.
 // Listing is member-visible; the disconnect action is admin-only (the
@@ -232,6 +242,11 @@ function InstallationRow({
         <div className="space-y-1">
           <p className="text-sm font-medium">
             {agentName}
+            <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              {installation.region === "lark"
+                ? t(($) => $.lark.region_lark)
+                : t(($) => $.lark.region_feishu)}
+            </span>
             {!isActive && (
               <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                 {t(($) => $.lark.revoked_badge)}
@@ -281,15 +296,33 @@ export function LarkAgentBindButton({
   agentId,
   agentName,
   className,
+  onShowConnectedDetails,
 }: {
   agentId: string;
   agentName?: string;
   className?: string;
+  /**
+   * When set, the connected state renders as a compact read-only status
+   * row that invokes this callback on click instead of the full badge with
+   * inline Manage / Disconnect actions. The agent inspector passes a
+   * "jump to the Integrations tab" handler so the left column stays a
+   * glanceable summary and the management actions live in one place (the
+   * tab). The tab itself omits this prop and gets the full badge.
+   */
+  onShowConnectedDetails?: () => void;
 }) {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
   const user = useAuthStore((s) => s.user);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  // dialogRegion carries two pieces of state in one variable: which
+  // cloud the dialog should target (drives the device-flow `begin`
+  // host and the dialog copy), AND whether the dialog is open at all
+  // (null = closed). A separate boolean would have to be kept in sync
+  // with the region — collapsing them prevents an "open but with no
+  // region picked" intermediate state from existing.
+  const [dialogRegion, setDialogRegion] = useState<"feishu" | "lark" | null>(
+    null,
+  );
 
   const { data: listing } = useQuery({
     ...larkInstallationsOptions(wsId),
@@ -318,7 +351,13 @@ export function LarkAgentBindButton({
     (inst) => inst.agent_id === agentId && inst.status === "active",
   );
   if (existing) {
-    return (
+    return onShowConnectedDetails ? (
+      <LarkAgentBotStatusRow
+        installation={existing}
+        onClick={onShowConnectedDetails}
+        className={className}
+      />
+    ) : (
       <LarkAgentBotConnectedBadge installation={existing} className={className} />
     );
   }
@@ -327,44 +366,136 @@ export function LarkAgentBindButton({
   // a fresh scan would fail at the post-poll bot-info step, so hide the CTA.
   if (!installSupported) return null;
 
+  // Two CTAs, one per cloud — Feishu (mainland) on the left, Lark
+  // (international) on the right. We deliberately render two explicit
+  // entry points instead of one auto-detect QR because Lark only emits
+  // tenant_brand="lark" mid-poll AFTER the user has authorized; until
+  // then a Lark user has to scan a QR served from accounts.feishu.cn,
+  // which has surfaced as confusing for international users (MUL-3083
+  // follow-up). Each button passes its region to the install dialog,
+  // which threads it to the backend so the device-flow `begin` POSTs
+  // directly against the matching accounts host. The mid-poll
+  // tenant-brand auto-switch in RegistrationService is preserved as a
+  // safety net for users who pick the wrong entry.
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
-        className={className}
-        title={agentName ? t(($) => $.lark.bind_button_title, { agent: agentName }) : undefined}
+      <div
+        className={cn("flex flex-wrap items-center gap-2", className)}
+        data-testid="lark-agent-bind-buttons"
       >
-        <ExternalLink className="h-3 w-3" />
-        {t(($) => $.lark.bind_button)}
-      </Button>
-      {dialogOpen && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogRegion("feishu")}
+          disabled={!agentId}
+          title={
+            agentName
+              ? t(($) => $.lark.bind_button_feishu_title, { agent: agentName })
+              : undefined
+          }
+          data-testid="lark-agent-bind-feishu"
+        >
+          <ExternalLink className="h-3 w-3" />
+          {t(($) => $.lark.bind_button_feishu)}
+        </Button>
+        {/* MUL-3083: Lark (international) bind entry is temporarily hidden —
+            see LARK_INTL_CONNECT_ENABLED. Mainland Feishu (above) is
+            unaffected. */}
+        {LARK_INTL_CONNECT_ENABLED && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDialogRegion("lark")}
+            disabled={!agentId}
+            title={
+              agentName
+                ? t(($) => $.lark.bind_button_lark_title, { agent: agentName })
+                : undefined
+            }
+            data-testid="lark-agent-bind-lark"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t(($) => $.lark.bind_button_lark)}
+          </Button>
+        )}
+      </div>
+      {dialogRegion && (
         <LarkInstallDialog
           wsId={wsId}
           agentId={agentId}
           agentName={agentName}
-          onClose={() => setDialogOpen(false)}
+          region={dialogRegion}
+          onClose={() => setDialogRegion(null)}
         />
       )}
     </>
   );
 }
 
-// LarkAgentBotConnectedBadge is the "already connected" affordance the
-// agent inspector renders in place of the Bind button when this agent
-// has an active Lark installation. The badge is non-interactive (just
-// a status pill), the Manage link opens the Bot's dev console page in
-// a new tab so the user can manage scopes / display name / additional
-// permissions without re-scanning the QR.
+// LarkAgentBotStatusRow is the compact, read-only connected affordance the
+// agent inspector (left column) renders instead of the full badge. It shows
+// only the status — green dot, Feishu/Lark region chip, "Connected to Lark"
+// — and is a single full-width button that deep-links into the Integrations
+// tab, where Manage / Disconnect live. Keeping the destructive action out of
+// the always-visible sidebar means it exists in exactly one place.
+function LarkAgentBotStatusRow({
+  installation,
+  onClick,
+  className,
+}: {
+  installation: LarkInstallation;
+  onClick: () => void;
+  className?: string;
+}) {
+  const { t } = useT("settings");
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        className,
+      )}
+      data-testid="lark-agent-bot-status"
+    >
+      <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+        {installation.region === "lark"
+          ? t(($) => $.lark.region_lark)
+          : t(($) => $.lark.region_feishu)}
+      </span>
+      <span className="truncate">{t(($) => $.lark.agent_bot_connected_label)}</span>
+      <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0" />
+    </button>
+  );
+}
+
+// LarkAgentBotConnectedBadge is the full "already connected" affordance the
+// Integrations tab renders in place of the Bind button when this agent has
+// an active Lark installation. (The inspector's left column uses the compact
+// LarkAgentBotStatusRow instead, which deep-links here.) It lays out as two
+// rows: row 1 pairs a green-dot status (with the Feishu/Lark region chip) on
+// the left with a soft-destructive Disconnect button on the right; row 2
+// carries the secondary "Manage in Lark" link to the Bot's dev console page
+// (new tab). Disconnect removes the installation after a confirm dialog.
 //
-// The dev console URL host follows the same default as the backend's
-// LARK_BASE_URL (open.feishu.cn for mainland Lark). Operators on the
-// Lark international tenant currently see the wrong host; future-
-// proofing requires the backend to surface a per-installation
-// `dev_console_url` on the listings response. Tracked separately.
-const LARK_DEV_CONSOLE_HOST = "https://open.feishu.cn";
+// Visibility rules carry over from the parent `LarkAgentBindButton`:
+// only owners and admins ever reach this component, so the unbind
+// affordance is unconditionally shown — the backend gates DELETE on
+// the same role and would 403 anyone else, which makes a redundant
+// `canManage` check here dead code.
+//
+// The dev-console host depends on which Lark cloud the bot lives on:
+// Feishu (mainland) bots are managed at open.feishu.cn, Lark
+// (international) bots at open.larksuite.com. The region is auto-detected
+// at install time and surfaced per installation on the listings
+// response; an older server that omits `region` defaults to Feishu
+// (API-compat — see CLAUDE.md).
+function larkDevConsoleHost(region?: string): string {
+  return region === "lark"
+    ? "https://open.larksuite.com"
+    : "https://open.feishu.cn";
+}
 
 function LarkAgentBotConnectedBadge({
   installation,
@@ -374,29 +505,131 @@ function LarkAgentBotConnectedBadge({
   className?: string;
 }) {
   const { t } = useT("settings");
-  const manageHref = `${LARK_DEV_CONSOLE_HOST}/app/${encodeURIComponent(installation.app_id)}`;
+  const wsId = useWorkspaceId();
+  const qc = useQueryClient();
+  const manageHref = `${larkDevConsoleHost(installation.region)}/app/${encodeURIComponent(installation.app_id)}`;
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  async function handleDisconnect() {
+    if (disconnecting) return;
+    setDisconnecting(true);
+    try {
+      await api.deleteLarkInstallation(wsId, installation.id);
+      // Invalidate before closing the dialog: the badge unmounts when
+      // the listings query updates (the parent swaps to the Bind CTA),
+      // so leaving the open state behind is fine — but doing the
+      // network call before the close prevents a flash of "stale
+      // connected" state.
+      await qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
+      toast.success(t(($) => $.lark.toast_disconnected));
+      setConfirmOpen(false);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.lark.toast_disconnect_failed),
+      );
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
   return (
-    <div className={className} data-testid="lark-agent-bot-connected">
-      <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-        {t(($) => $.lark.agent_bot_connected_label)}
-      </span>
+    <div
+      className={cn("space-y-2", className)}
+      data-testid="lark-agent-bot-connected"
+    >
+      {/* Row 1: connection status (left) and the destructive unbind
+          action (right). The Disconnect uses the soft-tinted
+          `destructive` button variant — it reads dangerous without the
+          loud solid-red, and stays visible because it is the user-facing
+          recovery path for the install_supported=false / re-scan
+          zombie-bot trap (server/internal/handler/lark.go). Confirmation
+          is mandatory: the backend disconnect tears down the WebSocket
+          and stops message delivery. */}
+      <div className="flex items-center justify-between gap-3">
+        <span className="inline-flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            {installation.region === "lark"
+              ? t(($) => $.lark.region_lark)
+              : t(($) => $.lark.region_feishu)}
+          </span>
+          <span className="truncate">{t(($) => $.lark.agent_bot_connected_label)}</span>
+        </span>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => setConfirmOpen(true)}
+          disabled={disconnecting}
+          title={t(($) => $.lark.agent_bot_disconnect_tooltip)}
+          aria-label={t(($) => $.lark.disconnect)}
+          data-testid="lark-agent-bot-disconnect"
+        >
+          <Trash2 className="h-3 w-3" />
+          {disconnecting
+            ? t(($) => $.lark.disconnecting)
+            : t(($) => $.lark.disconnect)}
+        </Button>
+      </div>
+
+      {/* Row 2: secondary "Manage in Lark" link to the Bot's dev-console
+          app page. Demoted below the status row so it no longer competes
+          with the primary connect/disconnect intents. Region-aware tooltip
+          keeps the Feishu vs Lark distinction this branch introduced. */}
       <a
         href={manageHref}
         target="_blank"
         rel="noopener noreferrer"
-        className="ml-3 inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
-        title={t(($) => $.lark.agent_bot_manage_tooltip)}
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+        title={
+          installation.region === "lark"
+            ? t(($) => $.lark.agent_bot_manage_tooltip_lark)
+            : t(($) => $.lark.agent_bot_manage_tooltip_feishu)
+        }
       >
         <ExternalLink className="h-3 w-3" />
-        {t(($) => $.lark.agent_bot_manage_link)}
+        {installation.region === "lark"
+          ? t(($) => $.lark.agent_bot_manage_link_lark)
+          : t(($) => $.lark.agent_bot_manage_link_feishu)}
       </a>
+
+      <AlertDialog
+        open={confirmOpen}
+        onOpenChange={(v) => {
+          if (!v && !disconnecting) setConfirmOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.lark.disconnect_confirm_title)}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.lark.disconnect_confirm_description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={disconnecting}>
+              {t(($) => $.lark.disconnect_confirm_cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+            >
+              {disconnecting
+                ? t(($) => $.lark.disconnecting)
+                : t(($) => $.lark.disconnect)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
 // LarkInstallDialog walks the user through the device-flow install:
-// 1) POST /lark/install/begin → render QR
+// 1) POST /lark/install/begin?region=<feishu|lark> → render QR
 // 2) poll /lark/install/{sessionId}/status until success | error | expiry
 // 3) on success: toast, close, invalidate installations cache
 //
@@ -404,15 +637,23 @@ function LarkAgentBotConnectedBadge({
 // rather than reusing a stale device_code — Lark's device_code is
 // single-use and a re-render of the same QR after an error would just
 // fail again at the next poll.
+//
+// region is a required prop so the begin POST hits the right cloud
+// (accounts.feishu.cn vs accounts.larksuite.com) and the dialog copy
+// (title, scan hint, link fallback) reflects the cloud the user
+// picked. Defaulting it would silently route Lark users to a Feishu QR
+// — exactly the confusion this split-CTA refactor is meant to remove.
 function LarkInstallDialog({
   wsId,
   agentId,
   agentName,
+  region,
   onClose,
 }: {
   wsId: string;
   agentId: string;
   agentName?: string;
+  region: "feishu" | "lark";
   onClose: () => void;
 }) {
   const { t } = useT("settings");
@@ -446,7 +687,7 @@ function LarkInstallDialog({
     setErrorMessage(null);
     setSession(null);
     try {
-      const res = await api.beginLarkInstall(wsId, agentId);
+      const res = await api.beginLarkInstall(wsId, agentId, region);
       if (closedRef.current) return;
       setSession({
         sessionId: res.session_id,
@@ -503,7 +744,11 @@ function LarkInstallDialog({
         setStatus(res.status);
         if (res.status === "success") {
           await qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
-          toast.success(t(($) => $.lark.install_success_toast));
+          toast.success(
+            region === "lark"
+              ? t(($) => $.lark.install_success_toast_lark)
+              : t(($) => $.lark.install_success_toast_feishu),
+          );
           // Close after a tiny beat so the user sees the success state
           // briefly before the dialog disappears.
           setTimeout(() => {
@@ -574,11 +819,19 @@ function LarkInstallDialog({
     >
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>{t(($) => $.lark.install_dialog_title)}</DialogTitle>
+          <DialogTitle>
+            {region === "lark"
+              ? t(($) => $.lark.install_dialog_title_lark)
+              : t(($) => $.lark.install_dialog_title_feishu)}
+          </DialogTitle>
           <DialogDescription>
-            {agentName
-              ? t(($) => $.lark.install_dialog_description_for_agent, { agent: agentName })
-              : t(($) => $.lark.install_dialog_description)}
+            {region === "lark"
+              ? agentName
+                ? t(($) => $.lark.install_dialog_description_for_agent_lark, { agent: agentName })
+                : t(($) => $.lark.install_dialog_description_lark)
+              : agentName
+                ? t(($) => $.lark.install_dialog_description_for_agent_feishu, { agent: agentName })
+                : t(($) => $.lark.install_dialog_description_feishu)}
           </DialogDescription>
         </DialogHeader>
 
@@ -595,7 +848,9 @@ function LarkInstallDialog({
                 <QRCode value={session.qrCodeURL} size={192} />
               </div>
               <p className="text-center text-xs text-muted-foreground">
-                {t(($) => $.lark.install_scan_hint)}
+                {region === "lark"
+                  ? t(($) => $.lark.install_scan_hint_lark)
+                  : t(($) => $.lark.install_scan_hint_feishu)}
               </p>
               <a
                 href={session.qrCodeURL}
@@ -603,7 +858,9 @@ function LarkInstallDialog({
                 rel="noopener noreferrer"
                 className="text-xs underline text-muted-foreground"
               >
-                {t(($) => $.lark.install_open_link_fallback)}
+                {region === "lark"
+                  ? t(($) => $.lark.install_open_link_fallback_lark)
+                  : t(($) => $.lark.install_open_link_fallback_feishu)}
               </a>
             </>
           )}
