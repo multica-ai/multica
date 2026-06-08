@@ -1,0 +1,126 @@
+name: Sync upstream
+
+# Daily check for new commits on the upstream repository this fork tracks.
+# When upstream is ahead, a `chore/upstream-sync` branch is force-updated to
+# upstream's tip and a PR is opened (or updated) to merge those changes into the
+# fork's default branch. The merge itself is performed by GitHub when the PR is
+# merged, so merge conflicts surface in the PR UI rather than failing this job;
+# a trial-merge probe additionally lists any conflicting files in the PR body.
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # daily at 07:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  # Override either by setting repository variables (Settings -> Secrets and
+  # variables -> Actions -> Variables) named UPSTREAM_REPO / UPSTREAM_BRANCH.
+  UPSTREAM_REPO: ${{ vars.UPSTREAM_REPO || 'multica-ai/multica' }}
+  UPSTREAM_BRANCH: ${{ vars.UPSTREAM_BRANCH || 'main' }}
+  SYNC_BRANCH: chore/upstream-sync
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # Prefer a PAT (secret UPSTREAM_SYNC_TOKEN) when present so the resulting PR
+    # triggers CI; fall back to the built-in GITHUB_TOKEN otherwise.
+    env:
+      GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          set -euo pipefail
+          echo "Upstream: https://github.com/${UPSTREAM_REPO} (branch ${UPSTREAM_BRANCH})"
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "${UPSTREAM_BRANCH}"
+
+      - name: Check for new commits
+        id: check
+        run: |
+          set -euo pipefail
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          echo "default_branch=${DEFAULT_BRANCH}" >> "$GITHUB_OUTPUT"
+
+          AHEAD=$(git rev-list --count "origin/${DEFAULT_BRANCH}..upstream/${UPSTREAM_BRANCH}")
+          echo "Upstream is ${AHEAD} commit(s) ahead of origin/${DEFAULT_BRANCH}."
+          echo "ahead=${AHEAD}" >> "$GITHUB_OUTPUT"
+          if [ "${AHEAD}" = "0" ]; then
+            echo "Already up to date; nothing to do."
+            exit 0
+          fi
+
+          # Trial merge to detect conflicts up front. Done on a detached HEAD and
+          # immediately aborted — it never touches any branch or remote.
+          CONFLICTS=""
+          git checkout -q --detach "origin/${DEFAULT_BRANCH}"
+          if ! git merge --no-commit --no-ff "upstream/${UPSTREAM_BRANCH}" >/dev/null 2>&1; then
+            CONFLICTS=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+          fi
+          git merge --abort 2>/dev/null || true
+          git checkout -q "${DEFAULT_BRANCH}"
+          echo "conflicts=${CONFLICTS}" >> "$GITHUB_OUTPUT"
+
+      - name: Update sync branch
+        if: steps.check.outputs.ahead != '0'
+        run: |
+          set -euo pipefail
+          # The sync branch tracks upstream's tip exactly. Opening a PR from it
+          # into the default branch lets GitHub compute the real merge commit
+          # (bringing upstream changes in while preserving fork commits) and
+          # report conflicts, without this job having to resolve them.
+          git push --force origin \
+            "refs/remotes/upstream/${UPSTREAM_BRANCH}:refs/heads/${SYNC_BRANCH}"
+
+      - name: Create or update pull request
+        if: steps.check.outputs.ahead != '0'
+        run: |
+          set -euo pipefail
+          DEFAULT_BRANCH="${{ steps.check.outputs.default_branch }}"
+          AHEAD="${{ steps.check.outputs.ahead }}"
+          CONFLICTS="${{ steps.check.outputs.conflicts }}"
+
+          TITLE="chore: sync ${AHEAD} commit(s) from upstream ${UPSTREAM_REPO}"
+
+          # Plain text only (no backticks) to keep the shell from interpreting
+          # the body as command substitution.
+          nl=$'\n'
+          BODY="Automated daily sync from upstream ${UPSTREAM_REPO}@${UPSTREAM_BRANCH}.${nl}${nl}"
+          BODY="${BODY}- ${AHEAD} new upstream commit(s) since ${DEFAULT_BRANCH}.${nl}"
+          BODY="${BODY}- Merging this PR brings upstream changes into ${DEFAULT_BRANCH} while preserving fork-specific commits.${nl}"
+          BODY="${BODY}- The sync branch (${SYNC_BRANCH}) is force-updated to upstream's tip on each run, so this PR refreshes automatically.${nl}"
+          if [ -n "${CONFLICTS}" ]; then
+            BODY="${BODY}${nl}WARNING: a trial merge found conflicts in: ${CONFLICTS}${nl}"
+            BODY="${BODY}Resolve them on the ${SYNC_BRANCH} branch before merging.${nl}"
+          fi
+          BODY="${BODY}${nl}Generated by .github/workflows/sync-upstream.yml${nl}"
+
+          EXISTING=$(gh pr list --head "${SYNC_BRANCH}" --base "${DEFAULT_BRANCH}" \
+            --state open --json number --jq '.[0].number // empty')
+
+          if [ -n "${EXISTING}" ]; then
+            echo "Updating existing PR #${EXISTING}"
+            gh pr edit "${EXISTING}" --title "${TITLE}" --body "${BODY}"
+          else
+            echo "Creating new sync PR"
+            gh pr create --base "${DEFAULT_BRANCH}" --head "${SYNC_BRANCH}" \
+              --title "${TITLE}" --body "${BODY}"
+          fi
