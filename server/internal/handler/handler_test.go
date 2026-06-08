@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated" // CEREBRO-PATCH(handler-test-cerebro-queries): wire fork query set in handler tests.
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -59,6 +60,7 @@ func TestMain(m *testing.M) {
 	bus := events.New()
 	emailSvc := service.NewEmailService()
 	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
+	testHandler.CerebroQueries = cerebrodb.New(pool) // CEREBRO-PATCH(handler-test-cerebro-queries): metadata-backed handlers need fork queries in shared test handler.
 	testHandler.BudgetService = service.NewBudgetService(queries)
 	// httptest.NewRequest defaults RemoteAddr to 192.0.2.1, so every webhook
 	// test in the suite shares one IP bucket. With the production default

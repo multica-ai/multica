@@ -197,9 +197,10 @@ func TestListAgents_PrivateVisibleButLockedForPlainMember(t *testing.T) {
 	}
 
 	// Flag overridden off → legacy hide. Wire CerebroQueries so the override is
-	// read, restoring nil afterwards so the rest of the suite is unaffected.
+	// read, restoring the previous shared test handler state afterwards.
+	origCerebroQueries := testHandler.CerebroQueries
 	testHandler.CerebroQueries = cerebrodb.New(testPool)
-	t.Cleanup(func() { testHandler.CerebroQueries = nil })
+	t.Cleanup(func() { testHandler.CerebroQueries = origCerebroQueries }) // CEREBRO-PATCH(handler-test-cerebro-queries): do not clear shared fork query wiring for later tests.
 	if _, err := testPool.Exec(context.Background(), `
 		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled)
 		VALUES ($1, $2, 'cerebro_private_agent_requests', false)
@@ -596,11 +597,11 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 	}
 
 	cases := []struct {
-		name       string
-		actorType  string
-		actorID    string
-		want       bool
-		reason     string
+		name      string
+		actorType string
+		actorID   string
+		want      bool
+		reason    string
 	}{
 		{
 			name:      "plain member — denied",
