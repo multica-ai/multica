@@ -178,7 +178,7 @@ describe("SimpleToolPolicyTable", () => {
     );
     // read_files has no override → falls back to Effective allow.
     const readRow = screen.getByTestId("tool-row-read_files");
-    expect(within(readRow).getByRole("button", { name: "Tillad" })).toHaveAttribute(
+    expect(within(readRow).getByRole("button", { name: "Allow" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

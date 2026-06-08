@@ -204,7 +204,7 @@ describe("AgentToolsCard", () => {
     expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
     // Inherit row: shows "Arver" tag.
-    expect(screen.getAllByText("— Arver").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("— Inherits").length).toBeGreaterThan(0);
     // The override badges are <span>s. The same words appear inside <option>
     // elements of the row override-picker, so scope to span to pick the badge.
     expect(

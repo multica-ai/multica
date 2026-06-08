@@ -120,7 +120,7 @@ describe("AccountsSettingsTab", () => {
     render(<AccountsSettingsTab />);
 
     expect(
-      screen.getByText(/Ingen konti registreret endnu/),
+      screen.getByText(/No accounts registered yet/),
     ).toBeInTheDocument();
   });
 
