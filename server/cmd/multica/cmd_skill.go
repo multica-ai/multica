@@ -148,8 +148,13 @@ func runSkillList(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// CEREBRO-PATCH(skill-metadata-filter-cli): TECH-3077 — use filtered endpoint when flags set.
+	path := "/api/skills"
+	if skillListHasMetadataFilter() {
+		path += buildSkillListMetadataQuery()
+	}
 	var skills []map[string]any
-	if err := client.GetJSON(ctx, "/api/skills", &skills); err != nil {
+	if err := client.GetJSON(ctx, path, &skills); err != nil {
 		return fmt.Errorf("list skills: %w", err)
 	}
 

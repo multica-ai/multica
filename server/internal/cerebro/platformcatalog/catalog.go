@@ -70,8 +70,9 @@ const (
 	CategoryWorkspace   = "Workspace"
 	CategorySkills      = "Skills"
 	CategorySquads      = "Squads"
-	CategoryCredentials = "Credentials"
-	CategoryWorkflows   = "Workflows"
+	CategoryCredentials  = "Credentials"
+	CategoryConnections  = "Connections"
+	CategoryWorkflows    = "Workflows"
 	CategoryChannels    = "Channels"
 	CategoryReadAccess  = "Read access"
 )
@@ -718,6 +719,19 @@ var catalog = []Capability{
 		},
 	},
 
+	// --- Connections (CEREBRO-PATCH cerebro-connections-catalog: TECH-3108) ---
+	{
+		Key:         "manage_connections",
+		Title:       "Manage workspace connections",
+		Category:    CategoryConnections,
+		Description: "Create, edit, or delete workspace API/MCP connections (external URLs and internal Sliplane paths).",
+		Ops: []string{
+			"POST /api/workspaces/{id}/connections",
+			"PUT /api/workspaces/{id}/connections/{connId}",
+			"DELETE /api/workspaces/{id}/connections/{connId}",
+		},
+	},
+
 	// --- Credentials ----------------------------------------------------------
 	{
 		Key:         "manage_credentials",
@@ -803,6 +817,7 @@ var excluded = map[string]string{
 	// actor to gate on, so the tool-policy engine has nothing to decide.
 	"POST /api/workspaces/":                        "self_only — create-workspace is pre-workspace; any authenticated user, no workspace context to gate within",
 	"POST /api/workspaces/{id}/leave":              "self_only — leaving is the caller's own membership",
+	"POST /api/inbox/add-issue":                    "self_only — caller pinning any issue into their own inbox",
 	"DELETE /api/me/profile":                       "self_only — caller's own profile",
 	"PATCH /api/me":                                "self_only — caller's own profile",
 	"PUT /api/me/profile":                          "self_only — caller's own profile",

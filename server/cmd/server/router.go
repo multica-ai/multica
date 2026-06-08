@@ -1208,6 +1208,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListSkills)
 				r.Post("/", h.CreateSkill)
 				r.Post("/import", h.ImportSkill)
+				// CEREBRO-PATCH(skill-metadata-audit): TECH-3077 — skills with missing metadata.
+				r.Get("/audit", h.ListSkillsAudit)
 				r.Get("/change-requests", h.ListPendingChangeRequests)
 				r.Post("/change-requests/{crId}/review", h.ReviewSkillChangeRequest)
 				r.Route("/{id}", func(r chi.Router) {
@@ -1221,12 +1223,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/versions", h.ListSkillVersions)
 					r.Get("/change-requests", h.ListSkillChangeRequests)
 					r.Post("/change-requests", h.CreateSkillChangeRequest)
+					// CEREBRO-PATCH(skill-impact-route): TECH-3077 — automation impact analysis.
+					r.Get("/impact", h.GetSkillImpact)
+					// CEREBRO-PATCH(skill-observations-route): TECH-3077 — learning observations.
+					r.Get("/observations", h.GetSkillObservations)
 					r.Get("/forks", h.ListSkillForks)
 					r.Post("/forks", h.CreateSkillFork)
 					// CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage for the web UI.
 					r.Get("/fork-parent", h.GetSkillForkParent)
 				})
 			})
+
+			// CEREBRO-PATCH(skill-observation-post-route): TECH-3077 — record skill observation (runtime → server).
+			r.Post("/api/skill-observations", h.RecordSkillObservation)
 
 			// Usage
 			r.Route("/api/usage", func(r chi.Router) {
@@ -1431,6 +1440,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard overview endpoint
 			r.Get("/api/cerebro/dashboard", cerebroDashboardHandler.Overview)
+			// CEREBRO-PATCH(cerebro-dashboard-actor-messages-route): TECH-3093 actor message history
+			r.Get("/api/cerebro/dashboard/actor-messages", cerebroDashboardHandler.ActorMessages)
+			// CEREBRO-PATCH(cerebro-dashboard-all-messages-route): TECH-3093 all messages table
+			r.Get("/api/cerebro/dashboard/all-messages", cerebroDashboardHandler.AllMessages)
 			// CEREBRO-PATCH(cerebro-duplicate-check-route): FIR-2504 "find similar at create" endpoint + adoption-event sink.
 			r.Post("/api/cerebro/issues/check-similar", h.CheckSimilarIssues)
 			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)

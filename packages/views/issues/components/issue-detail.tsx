@@ -32,6 +32,7 @@ import {
   UserMinus,
   Users,
   X, // CEREBRO-PATCH(remove-parent-issue): issue sidebar clear-parent affordance.
+  Inbox, // CEREBRO-PATCH(cerebro-inbox-add-issue): "Add to inbox" in the detail toolbar menu.
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../../layout/page-header";
@@ -47,7 +48,8 @@ import { useHighlightCommentScroll } from "@multica/cerebro-ui/hooks/use-highlig
 // CEREBRO-PATCH(issue-detail-context-trigger-import): TECH-2969 — click title in topbar to open context top-sheet.
 import { IssueContextTrigger } from "@multica/cerebro-ui/components/issue-context-trigger";
 // CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — unarchive button rendered in detail toolbar when host embeds IssueDetail in archived inbox view.
-import { CerebroUnarchiveToolbarButton } from "@multica/cerebro-inbox";
+// CEREBRO-PATCH(cerebro-inbox-add-issue): "Add to inbox" action in the detail toolbar 3-dot menu.
+import { CerebroUnarchiveToolbarButton, useAddIssueToInbox } from "@multica/cerebro-inbox";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -1176,6 +1178,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     else panel.collapse();
   }, [isMobile, sidebarRef]);
 
+  const addToInbox = useAddIssueToInbox(); // CEREBRO-PATCH(cerebro-inbox-add-issue): "Add to inbox" in the detail 3-dot menu.
   // CEREBRO-PATCH(issue-detail-delete-handler): preserve cerebro's inline delete dialog flow
   const deleteIssueMutation = useDeleteIssue();
   const handleDelete = async () => {
@@ -1971,6 +1974,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   <Link2 className="h-3.5 w-3.5" />
                   Copy link
                 </DropdownMenuItem>
+                {/* CEREBRO-PATCH(cerebro-inbox-add-issue): add this issue to the member's inbox. */}
+                {issue && <DropdownMenuItem onClick={() => addToInbox.mutate(issue.id, { onSuccess: () => toast.success("Added to inbox") })}>
+                  <Inbox className="h-3.5 w-3.5" />
+                  Add to inbox
+                </DropdownMenuItem>}
 
                 <DropdownMenuSeparator />
 

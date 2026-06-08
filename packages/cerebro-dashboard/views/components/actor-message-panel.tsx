@@ -1,0 +1,103 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { X, MessageSquare, Bot } from "lucide-react";
+import { useDashboardStore } from "../../core/store";
+import { actorMessagesOptions } from "../../core/queries";
+import type { ActorMessage } from "../../core/api";
+
+function timeAgo(iso: string): string {
+  try {
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return "lige nu";
+    if (diff < 3600) return `${Math.floor(diff / 60)} min siden`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} t siden`;
+    return new Date(iso).toLocaleDateString("da-DK", { day: "numeric", month: "short" });
+  } catch {
+    return "";
+  }
+}
+
+export function ActorMessagePanel({ wsId }: { wsId: string }) {
+  const range = useDashboardStore((s) => s.range);
+  const actorId = useDashboardStore((s) => s.messagePanelActorId);
+  const actorName = useDashboardStore((s) => s.messagePanelActorName);
+  const close = useDashboardStore((s) => s.closeMessagePanel);
+
+  const { data, isLoading } = useQuery(actorMessagesOptions(wsId, actorId, range));
+
+  if (!actorId) return null;
+
+  const messages = data?.messages ?? [];
+
+  return (
+    <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col border-l bg-background shadow-xl">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="size-4 text-muted-foreground" />
+          <div>
+            <p className="text-sm font-semibold">{actorName ?? "Beskeder"}</p>
+            <p className="text-xs text-muted-foreground">
+              {isLoading ? "Henter…" : `${messages.length} beskeder i perioden`}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={close}
+          className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-3">
+        {isLoading ? (
+          <div className="space-y-3">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="space-y-1">
+                <div className="h-3 w-24 animate-pulse rounded bg-muted" />
+                <div className="h-10 animate-pulse rounded bg-muted" />
+              </div>
+            ))}
+          </div>
+        ) : messages.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            Ingen beskeder i den valgte periode.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {messages.map((msg) => (
+              <MessageRow key={msg.id} message={msg} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MessageRow({ message }: { message: ActorMessage }) {
+  return (
+    <div className="rounded-lg border bg-card p-3">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Bot className="size-3" />
+          <span className="font-medium text-foreground">{message.agent_name}</span>
+          {message.issue_title && (
+            <>
+              <span>·</span>
+              <span className="truncate max-w-[120px]">{message.issue_title}</span>
+            </>
+          )}
+        </div>
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {timeAgo(message.created_at)}
+        </span>
+      </div>
+      <p className="line-clamp-3 text-xs text-foreground/90">{message.content}</p>
+    </div>
+  );
+}

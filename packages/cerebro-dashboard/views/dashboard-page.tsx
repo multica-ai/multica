@@ -15,6 +15,8 @@ import { ActivityFeed } from "./components/activity-feed";
 import { RecentTasksList } from "./components/recent-tasks-list";
 import { MessageTracker } from "./components/message-tracker";
 import { MessageFlow } from "./components/message-flow";
+import { ActorMessagePanel } from "./components/actor-message-panel";
+import { AllMessagesTable } from "./components/all-messages-table";
 import { DashboardTabBar } from "./components/dashboard-tab-bar";
 import { useDashboardStore } from "../core/store";
 import { dashboardOverviewOptions } from "../core/queries";
@@ -77,6 +79,8 @@ export function DashboardPage() {
           <TimeRangePicker />
         </div>
       </PageHeader>
+
+      {tab === "messages" && <ActorMessagePanel wsId={workspace.id} />}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-col gap-6 p-6">
@@ -156,6 +160,10 @@ export function DashboardPage() {
                   isLoading={overview.isLoading}
                   workspaceSlug={workspace.slug}
                 />
+              </section>
+
+              <section aria-label="All messages">
+                <AllMessagesTable wsId={workspace.id} />
               </section>
             </>
           )}

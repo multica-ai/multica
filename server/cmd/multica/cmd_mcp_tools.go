@@ -107,6 +107,12 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	registerCredentialTools(srv, client, workspaceID)
 	// CEREBRO-PATCH(mcp-skill-governance-tools): FIR-2655 skill ownership/change-request/version/fork MCP tools.
 	registerSkillGovernanceTools(srv, client)
+	// CEREBRO-PATCH(mcp-skill-metadata-tools): TECH-3077 skill metadata filtering and audit tools.
+	registerSkillMetadataTools(srv, client)
+	// CEREBRO-PATCH(mcp-skill-automation-tools): TECH-3077 skill automation impact analysis tool.
+	registerSkillAutomationTools(srv, client)
+	// CEREBRO-PATCH(mcp-skill-learning-tools): TECH-3077 skill self-learning observation tools.
+	registerSkillLearningTools(srv, client)
 	// CEREBRO-PATCH(cerebro-wakeup-mcp-tools): FIR-3013 agent wakeup scheduling tools.
 	registerWakeupTools(srv, client)
 

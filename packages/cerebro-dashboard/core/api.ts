@@ -26,6 +26,7 @@ export interface TopActor {
   id: string;
   name: string;
   count: number;
+  spend_cents?: number;
 }
 
 export interface ActivityEntry {
@@ -66,6 +67,31 @@ export interface RecentTask {
   created_at: string;
 }
 
+export interface ActorMessage {
+  id: string;
+  content: string;
+  created_at: string;
+  sender_id?: string;
+  sender_name?: string;
+  agent_id: string;
+  agent_name: string;
+  session_id: string;
+  issue_id?: string;
+  issue_number?: number;
+  issue_title?: string;
+}
+
+export interface ActorMessagesResponse {
+  actor_id: string;
+  range: TimeRange;
+  messages: ActorMessage[];
+}
+
+export interface AllMessagesResponse {
+  range: TimeRange;
+  messages: ActorMessage[];
+}
+
 export interface DashboardOverview {
   range: TimeRange;
   period_start: string;
@@ -98,10 +124,22 @@ export async function fetchDashboardOverview(
   scope: ActorScope,
   actorId: string | null,
 ): Promise<DashboardOverview> {
+  const actorType = scopeToActorType(scope);
   return api.getCerebroDashboardOverview<DashboardOverview>(range, {
-    actor_type: scopeToActorType(scope),
-    actor_id: actorId,
+    actor_type: actorType,
+    actor_id: actorType ? actorId : null,
   });
+}
+
+export async function fetchActorMessages(
+  actorId: string,
+  range: TimeRange,
+): Promise<ActorMessagesResponse> {
+  return api.getCerebroDashboardActorMessages<ActorMessagesResponse>(actorId, range);
+}
+
+export async function fetchAllMessages(range: TimeRange): Promise<AllMessagesResponse> {
+  return api.getCerebroDashboardAllMessages<AllMessagesResponse>(range);
 }
 
 function scopeToActorType(scope: ActorScope): ActorType | undefined {

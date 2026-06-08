@@ -162,6 +162,160 @@ func (q *Queries) DashboardActivityFeed(ctx context.Context, arg DashboardActivi
 	return items, nil
 }
 
+const dashboardActorChatMessages = `-- name: DashboardActorChatMessages :many
+SELECT cm.id::uuid AS id,
+       cm.content,
+       cm.created_at,
+       a.id::uuid AS agent_id,
+       a.name AS agent_name,
+       cs.id::uuid AS session_id,
+       i.id::uuid AS issue_id,
+       i.number AS issue_number,
+       i.title AS issue_title
+FROM chat_message cm
+JOIN chat_session cs ON cs.id = cm.chat_session_id
+JOIN agent a ON a.id = cs.agent_id
+LEFT JOIN issue i ON i.id = cs.issue_id
+WHERE cs.workspace_id = $1
+  AND cm.role = 'user'
+  AND cs.creator_id = $2
+  AND cm.created_at >= $3 AND cm.created_at < $4
+ORDER BY cm.created_at DESC
+LIMIT 50
+`
+
+type DashboardActorChatMessagesParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+}
+
+type DashboardActorChatMessagesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	Content     string             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	AgentName   string             `json:"agent_name"`
+	SessionID   pgtype.UUID        `json:"session_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	IssueNumber pgtype.Int4        `json:"issue_number"`
+	IssueTitle  pgtype.Text        `json:"issue_title"`
+}
+
+// Individual chat messages sent by a specific member in the period. TECH-3093.
+func (q *Queries) DashboardActorChatMessages(ctx context.Context, arg DashboardActorChatMessagesParams) ([]DashboardActorChatMessagesRow, error) {
+	rows, err := q.db.Query(ctx, dashboardActorChatMessages,
+		arg.WorkspaceID,
+		arg.CreatorID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardActorChatMessagesRow{}
+	for rows.Next() {
+		var i DashboardActorChatMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Content,
+			&i.CreatedAt,
+			&i.AgentID,
+			&i.AgentName,
+			&i.SessionID,
+			&i.IssueID,
+			&i.IssueNumber,
+			&i.IssueTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const dashboardAllChatMessages = `-- name: DashboardAllChatMessages :many
+SELECT cm.id::uuid AS id,
+       cm.content,
+       cm.created_at,
+       u.id::uuid AS sender_id,
+       COALESCE(u.name, u.email, 'Unknown') AS sender_name,
+       a.id::uuid AS agent_id,
+       a.name AS agent_name,
+       cs.id::uuid AS session_id,
+       i.id::uuid AS issue_id,
+       i.number AS issue_number,
+       i.title AS issue_title
+FROM chat_message cm
+JOIN chat_session cs ON cs.id = cm.chat_session_id
+JOIN "user" u ON u.id = cs.creator_id
+JOIN agent a ON a.id = cs.agent_id
+LEFT JOIN issue i ON i.id = cs.issue_id
+WHERE cs.workspace_id = $1
+  AND cm.role = 'user'
+  AND cm.created_at >= $2 AND cm.created_at < $3
+ORDER BY cm.created_at DESC
+LIMIT 200
+`
+
+type DashboardAllChatMessagesParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+}
+
+type DashboardAllChatMessagesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	Content     string             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	SenderID    pgtype.UUID        `json:"sender_id"`
+	SenderName  string             `json:"sender_name"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	AgentName   string             `json:"agent_name"`
+	SessionID   pgtype.UUID        `json:"session_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	IssueNumber pgtype.Int4        `json:"issue_number"`
+	IssueTitle  pgtype.Text        `json:"issue_title"`
+}
+
+// All member chat messages in the workspace for the period, newest first. TECH-3093.
+func (q *Queries) DashboardAllChatMessages(ctx context.Context, arg DashboardAllChatMessagesParams) ([]DashboardAllChatMessagesRow, error) {
+	rows, err := q.db.Query(ctx, dashboardAllChatMessages, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardAllChatMessagesRow{}
+	for rows.Next() {
+		var i DashboardAllChatMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Content,
+			&i.CreatedAt,
+			&i.SenderID,
+			&i.SenderName,
+			&i.AgentID,
+			&i.AgentName,
+			&i.SessionID,
+			&i.IssueID,
+			&i.IssueNumber,
+			&i.IssueTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dashboardCountActiveChannelsInPeriod = `-- name: DashboardCountActiveChannelsInPeriod :one
 SELECT COUNT(DISTINCT i.id)::int
 FROM issue i
@@ -1002,7 +1156,8 @@ func (q *Queries) DashboardTopMessageRecipientsInPeriod(ctx context.Context, arg
 const dashboardTopMessageSendersInPeriod = `-- name: DashboardTopMessageSendersInPeriod :many
 SELECT u.id::uuid AS actor_id,
        COALESCE(u.name, u.email, 'Unknown') AS name,
-       COUNT(*)::int AS count
+       COUNT(*)::int AS count,
+       COALESCE(spend.spend_cents, 0)::bigint AS spend_cents
 FROM (
   SELECT cs.creator_id AS user_id
   FROM chat_message cm
@@ -1022,7 +1177,17 @@ FROM (
     AND c.created_at >= $2 AND c.created_at < $3
 ) sub
 JOIN "user" u ON u.id = sub.user_id
-GROUP BY u.id, u.name, u.email
+LEFT JOIN (
+  SELECT atq.original_user_id, SUM(tu.cost_cents)::bigint AS spend_cents
+  FROM task_usage tu
+  JOIN agent_task_queue atq ON atq.id = tu.task_id
+  JOIN agent a ON a.id = atq.agent_id
+  WHERE a.workspace_id = $1
+    AND tu.created_at >= $2 AND tu.created_at < $3
+    AND atq.original_user_id IS NOT NULL
+  GROUP BY atq.original_user_id
+) spend ON spend.original_user_id = u.id
+GROUP BY u.id, u.name, u.email, spend.spend_cents
 ORDER BY COUNT(*) DESC
 LIMIT 10
 `
@@ -1034,13 +1199,15 @@ type DashboardTopMessageSendersInPeriodParams struct {
 }
 
 type DashboardTopMessageSendersInPeriodRow struct {
-	ActorID pgtype.UUID `json:"actor_id"`
-	Name    string      `json:"name"`
-	Count   int32       `json:"count"`
+	ActorID    pgtype.UUID `json:"actor_id"`
+	Name       string      `json:"name"`
+	Count      int32       `json:"count"`
+	SpendCents int64       `json:"spend_cents"`
 }
 
 // Top members by messages sent in the period: combines chat messages (user role)
-// with member comments on channel/DM issues. TECH-3093.
+// with member comments on channel/DM issues. Includes spend attributed to each
+// member via agent_task_queue.original_user_id → task_usage.cost_cents. TECH-3093.
 func (q *Queries) DashboardTopMessageSendersInPeriod(ctx context.Context, arg DashboardTopMessageSendersInPeriodParams) ([]DashboardTopMessageSendersInPeriodRow, error) {
 	rows, err := q.db.Query(ctx, dashboardTopMessageSendersInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
 	if err != nil {
@@ -1050,7 +1217,12 @@ func (q *Queries) DashboardTopMessageSendersInPeriod(ctx context.Context, arg Da
 	items := []DashboardTopMessageSendersInPeriodRow{}
 	for rows.Next() {
 		var i DashboardTopMessageSendersInPeriodRow
-		if err := rows.Scan(&i.ActorID, &i.Name, &i.Count); err != nil {
+		if err := rows.Scan(
+			&i.ActorID,
+			&i.Name,
+			&i.Count,
+			&i.SpendCents,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

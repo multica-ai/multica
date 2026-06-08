@@ -1289,6 +1289,18 @@ type Skill struct {
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	ApproverIds    []pgtype.UUID      `json:"approver_ids"`
 	CurrentVersion string             `json:"current_version"`
+	Metadata       []byte             `json:"metadata"`
+}
+
+type SkillAutomationLink struct {
+	ID             pgtype.UUID        `json:"id"`
+	SkillID        pgtype.UUID        `json:"skill_id"`
+	AutomationType string             `json:"automation_type"`
+	AutomationID   pgtype.UUID        `json:"automation_id"`
+	AutomationName string             `json:"automation_name"`
+	Schedule       pgtype.Text        `json:"schedule"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type SkillChangeRequest struct {
@@ -1325,6 +1337,31 @@ type SkillFork struct {
 	ForkedSkillID pgtype.UUID        `json:"forked_skill_id"`
 	ForkedBy      pgtype.UUID        `json:"forked_by"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type SkillObservation struct {
+	ID           pgtype.UUID        `json:"id"`
+	SkillID      pgtype.UUID        `json:"skill_id"`
+	SkillVersion string             `json:"skill_version"`
+	RunID        pgtype.UUID        `json:"run_id"`
+	AutopilotID  pgtype.UUID        `json:"autopilot_id"`
+	DeltaType    string             `json:"delta_type"`
+	DeltaValue   string             `json:"delta_value"`
+	Confidence   float64            `json:"confidence"`
+	Outcome      string             `json:"outcome"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type SkillObservationAggregate struct {
+	SkillID        pgtype.UUID        `json:"skill_id"`
+	DeltaType      string             `json:"delta_type"`
+	DeltaValue     string             `json:"delta_value"`
+	RunCount       int32              `json:"run_count"`
+	SuccessCount   int32              `json:"success_count"`
+	ConsistencyPct float64            `json:"consistency_pct"`
+	LastSeen       pgtype.Timestamptz `json:"last_seen"`
+	FirstSeen      pgtype.Timestamptz `json:"first_seen"`
+	AutoProposedAt pgtype.Timestamptz `json:"auto_proposed_at"`
 }
 
 type SkillVersion struct {

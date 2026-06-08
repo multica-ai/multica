@@ -1,2328 +1,2340 @@
 {
-  "http": [
-    {
-      "id": "DELETE /api/agents/{id}/tool-overrides/{toolName}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/artifact-folders/{id}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/artifacts/{id}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/attachments/{id}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/autopilots/{id}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/autopilots/{id}/triggers/{triggerId}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/cerebro/agent-passes/{passId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/cerebro/issues/{issueId}/custom-status/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
-      "gate": "via:DELETE /api/cerebro/projects/{projectID}/sprint-settings/"
-    },
-    {
-      "id": "DELETE /api/cerebro/projects/{projectId}/status-model/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/cerebro/references/{refId}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/cerebro/share-tokens/{tokenId}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/cerebro/focus-list/{id}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
-      "gate": "via:DELETE /api/cerebro/sprint-recurring-tasks/{id}/"
-    },
-    {
-      "id": "DELETE /api/cerebro/sprints/{sprintID}/",
-      "gate": "via:DELETE /api/cerebro/sprints/{sprintID}/"
-    },
-    {
-      "id": "DELETE /api/cerebro/status-models/{id}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/cerebro/status-models/{id}/set-default",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/cerebro/status-models/default",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/cerebro/terminal/sessions/{sessionId}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/wakeups/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/wakeups/{id}/cancel",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/cerebro/workflows/{id}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/channels/{id}/archive",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/chat/sessions/{sessionId}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/cloud-runtime/nodes",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/comments/{commentId}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/comments/{commentId}/reactions",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/comments/{commentId}/resolve",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/groups/{id}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/groups/{id}/agents/{agentId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/groups/{id}/capabilities/{capability}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/groups/{id}/members/{userId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/groups/{id}/runtimes/{runtimeId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/inbox/{id}/mute",
-      "gate": "self_only"
-    },
-    {
-      "id": "DELETE /api/issues/{id}/",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "DELETE /api/issues/{id}/blocked-by/{otherId}",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "DELETE /api/issues/{id}/blocks/{otherId}",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "DELETE /api/issues/{id}/labels/{labelId}",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "DELETE /api/issues/{id}/metadata/{key}",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "DELETE /api/issues/{id}/reactions",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "DELETE /api/issues/{id}/related/{otherId}",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "DELETE /api/labels/{id}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/me/profile",
-      "gate": "self_only"
-    },
-    {
-      "id": "DELETE /api/pins/{itemType}/{itemId}",
-      "gate": "self_only"
-    },
-    {
-      "id": "DELETE /api/projects/{id}/",
-      "gate": "project_access"
-    },
-    {
-      "id": "DELETE /api/projects/{id}/group-access/{groupId}",
-      "gate": "project_access"
-    },
-    {
-      "id": "DELETE /api/projects/{id}/members/{userId}",
-      "gate": "project_access"
-    },
-    {
-      "id": "DELETE /api/projects/{id}/resources/{resourceId}",
-      "gate": "project_access"
-    },
-    {
-      "id": "DELETE /api/roles/{id}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/roles/{id}/assignments/{subjectType}/{subjectId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/runtimes/{runtimeId}/",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/skills/{id}/",
-      "gate": "skill_ownership"
-    },
-    {
-      "id": "DELETE /api/skills/{id}/files/{fileId}",
-      "gate": "skill_ownership"
-    },
-    {
-      "id": "DELETE /api/squads/{id}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/squads/{id}/members",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/tokens/{id}",
-      "gate": "self_only"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/",
-      "gate": "workspace_owner"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/accounts/{id}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/cost-optimization/holdout/{key}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/cost-optimization/{key}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/credentials/{credId}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/credentials/{credId}/bindings/{bindingId}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/feature-flags/{key}/workspace",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/github/installations/{installationId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/grants/{grantId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/invitations/{invitationId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/members/{memberId}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/workspaces/{id}/tool-policy",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/autopilots/{id}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/autopilots/{id}/triggers/{triggerId}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/cerebro/focus-list/{id}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PATCH /api/cerebro/references/{refId}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PATCH /api/chat/sessions/{sessionId}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PATCH /api/groups/{id}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/me",
-      "gate": "self_only"
-    },
-    {
-      "id": "PATCH /api/me/onboarding",
-      "gate": "self_only"
-    },
-    {
-      "id": "PATCH /api/me/preferences",
-      "gate": "self_only"
-    },
-    {
-      "id": "PATCH /api/projects/{id}/access",
-      "gate": "project_access"
-    },
-    {
-      "id": "PATCH /api/roles/{id}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/runtimes/{runtimeId}/",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "PATCH /api/runtimes/{runtimeId}/persona-sandbox",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "PATCH /api/runtimes/{runtimeId}/sandbox",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "PATCH /api/runtimes/{runtimeId}/sandbox-policy",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "PATCH /api/runtimes/{runtimeId}/tools-config",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/squads/{id}/members/role",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PATCH /api/workspaces/{id}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/workspaces/{id}/accounts/{id}/controls",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PATCH /api/workspaces/{id}/credentials/{credId}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PATCH /api/workspaces/{id}/grants/{grantId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/workspaces/{id}/members/{memberId}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PATCH /api/workspaces/{id}/members/{memberId}/budget-enforcement",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/agents/",
-      "gate": "cerebro_capability:create_agent"
-    },
-    {
-      "id": "POST /api/agents/backfill-avatars",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/agents/from-template",
-      "gate": "cerebro_capability:create_agent"
-    },
-    {
-      "id": "POST /api/agents/generate-avatar",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/agents/{id}/archive",
-      "gate": "cerebro_agent_access"
-    },
-    {
-      "id": "POST /api/agents/{id}/cancel-tasks",
-      "gate": "cerebro_agent_access"
-    },
-    {
-      "id": "POST /api/agents/{id}/restore",
-      "gate": "cerebro_agent_access"
-    },
-    {
-      "id": "POST /api/artifact-folders/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/artifact-uploads",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/artifacts/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/autopilots/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/autopilots/{id}/deliveries/{deliveryId}/replay",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/autopilots/{id}/trigger",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/autopilots/{id}/triggers",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/autopilots/{id}/triggers/{triggerId}/rotate-webhook-token",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/capabilities/report",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/agent-passes/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/cerebro/exchange-rates",
-      "exempt": "pre-auth service-to-service — CEREBRO_EXCHANGE_INGEST_KEY bearer token authorises the multica-hatchet-worker's daily FX snapshot push before any user JWT exists (FIR-43)"
-    },
-    {
-      "id": "POST /api/cerebro/focus-list/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/focus-list/{id}/done",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/focus-list/{id}/snooze",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/focus-list/reorder",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/github/pull-requests",
-      "exempt": "pre-auth service-to-service \u2014 CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push before any user JWT exists (FIR-2568)"
-    },
-    {
-      "id": "POST /api/cerebro/issues/check-similar",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/issues/check-similar/event",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/issues/{id}/share-tokens",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
-      "gate": "via:POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/"
-    },
-    {
-      "id": "POST /api/cerebro/projects/{projectID}/sprint-sweep",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/cerebro/projects/{projectID}/sprints/",
-      "gate": "via:POST /api/cerebro/projects/{projectID}/sprints/"
-    },
-    {
-      "id": "POST /api/cerebro/status-models/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/cerebro/terminal/sessions",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/workflows/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/workflows/_test/cron-sweep",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/workflows/{id}/regenerate-outbound-secret",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/workflows/{id}/regenerate-signing-secret",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/workflows/{id}/regenerate-token",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/workflows/{id}/toggle",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/channels/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/channels/{id}/archive",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/channels/{id}/read",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/chat/sessions/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/chat/sessions/{sessionId}/convert-to-issue",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/chat/sessions/{sessionId}/messages",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/chat/sessions/{sessionId}/read",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cli-token",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/cloud-billing/checkout-sessions",
-      "gate": "human_actor"
-    },
-    {
-      "id": "POST /api/cloud-billing/portal-sessions",
-      "gate": "human_actor"
-    },
-    {
-      "id": "POST /api/cloud-runtime/nodes",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/cloud-runtime/nodes/exec",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/cloud-runtime/nodes/reboot",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/cloud-runtime/nodes/start",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/cloud-runtime/nodes/status",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/cloud-runtime/nodes/stop",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/comments/move-to-thread",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/comments/{commentId}/move-to-subissue",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/comments/{commentId}/reactions",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/comments/{commentId}/resolve",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/contact-sales",
-      "exempt": "pre-auth \u2014 public marketing inquiry form, rate-limited by IP + business-email validation at handler layer"
-    },
-    {
-      "id": "POST /api/daemon/accounts/{id}/usage",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/deregister",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/heartbeat",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/register",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/local-skills/import/{requestId}/result",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/local-skills/{requestId}/result",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/models/{requestId}/result",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/recover-orphans",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/refresh-capabilities",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/tasks/claim",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/tool-scan",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/runtimes/{runtimeId}/update/{updateId}/result",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/tasks/{taskId}/complete",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/tasks/{taskId}/fail",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/tasks/{taskId}/messages",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/tasks/{taskId}/progress",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/tasks/{taskId}/session",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/tasks/{taskId}/start",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/tasks/{taskId}/usage",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/tasks/{taskId}/wait-local-directory",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/daemon/workspaces/{workspaceId}/repo/check",
-      "gate": "daemon_auth"
-    },
-    {
-      "id": "POST /api/feedback",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/groups/{id}/agents",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/groups/{id}/capabilities",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/groups/{id}/members",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/groups/{id}/runtimes",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/inbox/archive-all",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/archive-all-read",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/archive-completed",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/mark-all-read",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/notifications/archive-all",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/notifications/mark-all-read",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/add-issue",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/reminders",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/archive",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/mute",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/read",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/run-private-agent",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/unarchive",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/inbox/{id}/unread",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/invitations/{id}/accept",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/invitations/{id}/decline",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/issues/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/issues/batch-delete",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/issues/batch-update",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/issues/quick-create",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/issues/{id}/blocked-by",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/blocks",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/comments",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/labels",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/reactions",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/references",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/related",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/rerun",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/squad-evaluated",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/subscribe",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/tasks/{taskId}/cancel",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/issues/{id}/unsubscribe",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/labels/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/me/onboarding/cloud-waitlist",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/me/onboarding/complete",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/me/onboarding/no-runtime-bootstrap",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/me/onboarding/runtime-bootstrap",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/persona/approvals/{id}/approve",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/persona/approvals/{id}/deny",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/pins/",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/projects/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/projects/{id}/group-access",
-      "gate": "project_access"
-    },
-    {
-      "id": "POST /api/projects/{id}/members",
-      "gate": "project_access"
-    },
-    {
-      "id": "POST /api/projects/{id}/resources",
-      "gate": "project_access"
-    },
-    {
-      "id": "POST /api/push/subscribe",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/push/unsubscribe",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/roles/{id}/assignments",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/runtime-setup/exchange",
-      "exempt": "bootstrap \u2014 exchanges setup token before daemon user session exists"
-    },
-    {
-      "id": "POST /api/runtime-setup/tokens",
-      "gate": "via:POST /api/runtime-setup/tokens"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/archive-agents-and-delete",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/local-skills",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/local-skills/import",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/models",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/pause",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/tools/scan-now",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/unpause",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/update",
-      "gate": "cerebro_runtime_access"
-    },
-    {
-      "id": "POST /api/skills/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/skills/change-requests/{crId}/review",
-      "gate": "skill_ownership"
-    },
-    {
-      "id": "POST /api/skills/import",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/skills/{id}/change-requests",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/skills/{id}/forks",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/squads/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/squads/{id}/members",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/tasks/{taskId}/cancel",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/tokens/",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/tokens/current/renew",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/upload-file",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "POST /api/webhooks/autopilots/{token}",
-      "gate": "pre_auth_token"
-    },
-    {
-      "id": "POST /api/webhooks/github",
-      "exempt": "pre-auth signed webhook \u2014 GitHub HMAC signature authorises delivery before any user JWT exists"
-    },
-    {
-      "id": "POST /api/webhooks/stripe",
-      "exempt": "pre-auth signed webhook \u2014 Stripe HMAC signature (Stripe-Signature header) authorises delivery; multica-cloud upstream verifies the raw body before processing"
-    },
-    {
-      "id": "POST /api/work-sessions/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/work-sessions/{id}/fork",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/work-sessions/{id}/messages",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/work-sessions/{id}/resume",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/workspaces/",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/accounts",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/approvals/intake",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/approvals/{approvalId}/approve",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/approvals/{approvalId}/delegate",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/approvals/{approvalId}/reject",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/credentials",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/credentials/{credId}/bindings",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/credentials/{credId}/reveal",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/credentials/{credId}/rotate",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/generate-logo",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/grants",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/grants/evaluate",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/groups",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/leave",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/members",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/pause-tasks",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/roles",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/runtime-setup-token",
-      "gate": "via:POST /api/workspaces/{id}/runtime-setup-token"
-    },
-    {
-      "id": "POST /auth/google",
-      "exempt": "pre-auth \u2014 establishes identity"
-    },
-    {
-      "id": "POST /auth/logout",
-      "exempt": "pre-auth \u2014 clears identity, must succeed even with stale credentials"
-    },
-    {
-      "id": "POST /auth/send-code",
-      "exempt": "pre-auth \u2014 establishes identity"
-    },
-    {
-      "id": "POST /auth/verify-code",
-      "exempt": "pre-auth \u2014 establishes identity"
-    },
-    {
-      "id": "PUT /api/agents/{id}/",
-      "gate": "cerebro_agent_access"
-    },
-    {
-      "id": "PUT /api/agents/{id}/env",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/agents/{id}/infisical-folders",
-      "gate": "cerebro_agent_access"
-    },
-    {
-      "id": "PUT /api/agents/{id}/skills",
-      "gate": "cerebro_agent_access"
-    },
-    {
-      "id": "PUT /api/agents/{id}/tool-overrides/{toolName}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/agents/{id}/tools/{name}/",
-      "gate": "cerebro_agent_access"
-    },
-    {
-      "id": "PUT /api/artifact-folders/{id}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/artifacts/{id}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/artifacts/{id}/folder",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/artifacts/{id}/scope",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/autopilots/{id}/triggers/{triggerId}/signing-secret",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/cerebro/issues/{issueID}/sprint/",
-      "gate": "via:PUT /api/cerebro/issues/{issueID}/sprint/"
-    },
-    {
-      "id": "PUT /api/cerebro/issues/{issueId}/custom-status/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/cerebro/projects/{projectID}/sprint-settings/",
-      "gate": "via:PUT /api/cerebro/projects/{projectID}/sprint-settings/"
-    },
-    {
-      "id": "PUT /api/cerebro/projects/{projectId}/status-model/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/cerebro/sprint-recurring-tasks/{id}/",
-      "gate": "via:PUT /api/cerebro/sprint-recurring-tasks/{id}/"
-    },
-    {
-      "id": "PUT /api/cerebro/sprints/{sprintID}/",
-      "gate": "via:PUT /api/cerebro/sprints/{sprintID}/"
-    },
-    {
-      "id": "PUT /api/cerebro/status-models/{id}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/cerebro/workflows/{id}",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/cerebro/workspaces/{id}/auth-settings/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/channels/{id}/agents/{agentId}/listen-mode",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/comments/{commentId}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/issues/{id}",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "PUT /api/issues/{id}/metadata/{key}",
-      "gate": "issue_scope"
-    },
-    {
-      "id": "PUT /api/labels/{id}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/me/profile",
-      "gate": "self_only"
-    },
-    {
-      "id": "PUT /api/notification-preferences/",
-      "gate": "self_only"
-    },
-    {
-      "id": "PUT /api/pins/reorder",
-      "gate": "self_only"
-    },
-    {
-      "id": "PUT /api/projects/{id}/",
-      "gate": "project_access"
-    },
-    {
-      "id": "PUT /api/projects/{id}/parent",
-      "gate": "project_access"
-    },
-    {
-      "id": "PUT /api/projects/{id}/resources/{resourceId}",
-      "gate": "project_access"
-    },
-    {
-      "id": "PUT /api/projects/{id}/show-descendants",
-      "gate": "project_access"
-    },
-    {
-      "id": "PUT /api/skills/{id}/",
-      "gate": "skill_ownership"
-    },
-    {
-      "id": "PUT /api/skills/{id}/files",
-      "gate": "skill_ownership"
-    },
-    {
-      "id": "PUT /api/skills/{id}/ownership",
-      "gate": "skill_ownership"
-    },
-    {
-      "id": "PUT /api/squads/{id}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/work-sessions/{id}/complete",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/work-sessions/{id}/name",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/workspaces/{id}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/workspaces/{id}/cost-optimization/holdout/{key}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/workspaces/{id}/display-currency",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/workspaces/{id}/cost-optimization/{key}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/workspaces/{id}/feature-flags/{key}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/workspaces/{id}/feature-flags/{key}/workspace",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/workspaces/{id}/members/{memberId}/infisical-folders",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/workspaces/{id}/tool-policy",
-      "gate": "workspace_admin"
-    }
-  ],
-  "mcp": [
-    {
-      "id": "add_attachment",
-      "gate": "via:POST /api/upload-file"
-    },
-    {
-      "id": "add_comment",
-      "gate": "via:POST /api/issues/{id}/comments"
-    },
-    {
-      "id": "add_group_agent",
-      "gate": "via:POST /api/groups/{id}/agents"
-    },
-    {
-      "id": "add_group_member",
-      "gate": "via:POST /api/groups/{id}/members"
-    },
-    {
-      "id": "add_group_runtime",
-      "gate": "via:POST /api/groups/{id}/runtimes"
-    },
-    {
-      "id": "add_project_group",
-      "gate": "via:POST /api/projects/{id}/group-access"
-    },
-    {
-      "id": "attach_session",
-      "gate": "via:POST /api/work-sessions/"
-    },
-    {
-      "id": "bind_repo",
-      "exempt": "local-only \u2014 writes to MCP repo binding on disk, no remote call"
-    },
-    {
-      "id": "cancel_wakeup",
-      "gate": "via:POST /api/cerebro/wakeups/{id}/cancel"
-    },
-    {
-      "id": "complete_work",
-      "gate": "via:PUT /api/work-sessions/{id}/complete"
-    },
-    {
-      "id": "create_artifact",
-      "gate": "via:POST /api/artifacts/"
-    },
-    {
-      "id": "create_artifact_folder",
-      "gate": "via:POST /api/artifact-folders/"
-    },
-    {
-      "id": "create_grant",
-      "gate": "via:POST /api/workspaces/{id}/grants"
-    },
-    {
-      "id": "create_group",
-      "gate": "via:POST /api/workspaces/{id}/groups"
-    },
-    {
-      "id": "create_issue",
-      "gate": "via:POST /api/issues/"
-    },
-    {
-      "id": "create_project",
-      "gate": "via:POST /api/projects/"
-    },
-    {
-      "id": "credential_audit_log",
-      "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
-    },
-    {
-      "id": "credential_list",
-      "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
-    },
-    {
-      "id": "credential_policy_get",
-      "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
-    },
-    {
-      "id": "credential_policy_set",
-      "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
-    },
-    {
-      "id": "delete_artifact",
-      "gate": "via:DELETE /api/artifacts/{id}"
-    },
-    {
-      "id": "delete_artifact_folder",
-      "gate": "via:DELETE /api/artifact-folders/{id}"
-    },
-    {
-      "id": "delete_grant",
-      "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "delete_group",
-      "gate": "via:DELETE /api/groups/{id}"
-    },
-    {
-      "id": "evaluate_policy",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants policy check"
-    },
-    {
-      "id": "fork_session",
-      "gate": "via:POST /api/work-sessions/{id}/fork"
-    },
-    {
-      "id": "get_artifact",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "get_grant",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
-    },
-    {
-      "id": "get_group",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "get_issue",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "get_me",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_artifact_folders",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_artifacts",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_comments",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_grant_audit",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
-    },
-    {
-      "id": "list_grants",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
-    },
-    {
-      "id": "list_group_agents",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_group_capabilities",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_group_members",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_group_runtimes",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_groups",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_issues",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_project_groups",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_projects",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_runtimes",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_wakeups",
-      "exempt": "read-only \u2014 wraps GET /api/cerebro/wakeups"
-    },
-    {
-      "id": "move_artifact",
-      "gate": "via:PUT /api/artifacts/{id}/folder"
-    },
-    {
-      "id": "remove_group_agent",
-      "gate": "via:DELETE /api/groups/{id}/agents/{agentId}"
-    },
-    {
-      "id": "remove_group_capability",
-      "gate": "via:DELETE /api/groups/{id}/capabilities/{capability}"
-    },
-    {
-      "id": "remove_group_member",
-      "gate": "via:DELETE /api/groups/{id}/members/{userId}"
-    },
-    {
-      "id": "remove_group_runtime",
-      "gate": "via:DELETE /api/groups/{id}/runtimes/{runtimeId}"
-    },
-    {
-      "id": "remove_project_group",
-      "gate": "via:DELETE /api/projects/{id}/group-access/{groupId}"
-    },
-    {
-      "id": "report_activity",
-      "gate": "via:POST /api/work-sessions/{id}/messages"
-    },
-    {
-      "id": "resume_session",
-      "gate": "via:POST /api/work-sessions/{id}/resume"
-    },
-    {
-      "id": "search_artifacts",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "search_issues",
-      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "schedule_wakeup",
-      "gate": "via:POST /api/cerebro/wakeups"
-    },
-    {
-      "id": "set_artifact_folder",
-      "gate": "via:PUT /api/artifacts/{id}/folder"
-    },
-    {
-      "id": "set_group_capability",
-      "gate": "via:POST /api/groups/{id}/capabilities"
-    },
-    {
-      "id": "skill_fork",
-      "gate": "via:POST /api/skills/{id}/forks"
-    },
-    {
-      "id": "skill_get",
-      "exempt": "read-only \u2014 GET /api/skills/{id} (+ /files) carry their own auth, no mutation"
-    },
-    {
-      "id": "skill_list",
-      "exempt": "read-only \u2014 GET /api/skills, no mutation"
-    },
-    {
-      "id": "skill_list_change_requests",
-      "exempt": "read-only \u2014 GET /api/skills/change-requests (+ per-skill), no mutation"
-    },
-    {
-      "id": "skill_list_forks",
-      "exempt": "read-only \u2014 GET /api/skills/{id}/forks, no mutation"
-    },
-    {
-      "id": "skill_list_versions",
-      "exempt": "read-only \u2014 GET /api/skills/{id}/versions, no mutation"
-    },
-    {
-      "id": "skill_propose_change",
-      "gate": "via:POST /api/skills/{id}/change-requests"
-    },
-    {
-      "id": "skill_review_change_request",
-      "gate": "via:POST /api/skills/change-requests/{crId}/review"
-    },
-    {
-      "id": "update_artifact",
-      "gate": "via:PUT /api/artifacts/{id}"
-    },
-    {
-      "id": "update_artifact_folder",
-      "gate": "via:PUT /api/artifact-folders/{id}"
-    },
-    {
-      "id": "update_grant",
-      "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "update_group",
-      "gate": "via:PATCH /api/groups/{id}"
-    },
-    {
-      "id": "update_issue",
-      "gate": "via:PUT /api/issues/{id}"
-    },
-    {
-      "id": "update_project",
-      "gate": "via:PUT /api/projects/{id}/"
-    }
-  ],
-  "cli": [
-    {
-      "id": "agent archive",
-      "gate": "via:POST /api/agents/{id}/archive"
-    },
-    {
-      "id": "agent avatar",
-      "gate": "via:POST /api/agents/{id}/avatar"
-    },
-    {
-      "id": "agent create",
-      "gate": "via:POST /api/agents/"
-    },
-    {
-      "id": "agent e2e-spawn",
-      "exempt": "developer-tool \u2014 local spawn against own daemon, no server mutation"
-    },
-    {
-      "id": "agent env get",
-      "exempt": "read-only \u2014 wraps GET /api/agents/{id}/env"
-    },
-    {
-      "id": "agent env set",
-      "gate": "via:PUT /api/agents/{id}/env"
-    },
-    {
-      "id": "agent get",
-      "exempt": "read-only \u2014 wraps GET /api/agents/{id}"
-    },
-    {
-      "id": "agent list",
-      "exempt": "read-only \u2014 wraps GET /api/agents/"
-    },
-    {
-      "id": "agent restore",
-      "gate": "via:POST /api/agents/{id}/restore"
-    },
-    {
-      "id": "agent skills list",
-      "exempt": "read-only \u2014 wraps GET /api/agents/{id}/skills"
-    },
-    {
-      "id": "agent skills set",
-      "gate": "via:PUT /api/agents/{id}/skills"
-    },
-    {
-      "id": "agent tasks",
-      "exempt": "read-only \u2014 wraps GET /api/agents/{id}/tasks"
-    },
-    {
-      "id": "agent update",
-      "gate": "via:PUT /api/agents/{id}/"
-    },
-    {
-      "id": "artifact create",
-      "gate": "via:POST /api/artifacts/"
-    },
-    {
-      "id": "artifact delete",
-      "gate": "via:DELETE /api/artifacts/{id}"
-    },
-    {
-      "id": "artifact folder create",
-      "gate": "via:POST /api/artifact-folders/"
-    },
-    {
-      "id": "artifact folder delete",
-      "gate": "via:DELETE /api/artifact-folders/{id}"
-    },
-    {
-      "id": "artifact folder list",
-      "exempt": "read-only \u2014 wraps GET /api/artifact-folders/"
-    },
-    {
-      "id": "artifact folder update",
-      "gate": "via:PUT /api/artifact-folders/{id}"
-    },
-    {
-      "id": "artifact get",
-      "exempt": "read-only \u2014 wraps GET /api/artifacts/{id}"
-    },
-    {
-      "id": "artifact list",
-      "exempt": "read-only \u2014 wraps GET /api/artifacts/"
-    },
-    {
-      "id": "artifact set-folder",
-      "gate": "via:PUT /api/artifacts/{id}/folder"
-    },
-    {
-      "id": "artifact update",
-      "gate": "via:PUT /api/artifacts/{id}"
-    },
-    {
-      "id": "attachment download",
-      "exempt": "read-only \u2014 wraps GET /uploads/*"
-    },
-    {
-      "id": "attachment text",
-      "exempt": "read-only \u2014 wraps GET /api/attachments/{id}/content"
-    },
-    {
-      "id": "attachment upload",
-      "gate": "via:POST /api/upload-file"
-    },
-    {
-      "id": "auth logout",
-      "exempt": "pre-auth \u2014 clears local credentials"
-    },
-    {
-      "id": "auth status",
-      "exempt": "local-only \u2014 reads local CLI config"
-    },
-    {
-      "id": "autopilot create",
-      "gate": "via:POST /api/autopilots/"
-    },
-    {
-      "id": "autopilot delete",
-      "gate": "via:DELETE /api/autopilots/{id}/"
-    },
-    {
-      "id": "autopilot get",
-      "exempt": "read-only \u2014 wraps GET /api/autopilots/{id}"
-    },
-    {
-      "id": "autopilot list",
-      "exempt": "read-only \u2014 wraps GET /api/autopilots/"
-    },
-    {
-      "id": "autopilot runs",
-      "exempt": "read-only \u2014 wraps GET /api/autopilots/{id}/runs"
-    },
-    {
-      "id": "autopilot trigger",
-      "gate": "via:POST /api/autopilots/{id}/trigger"
-    },
-    {
-      "id": "autopilot trigger-add",
-      "gate": "via:POST /api/autopilots/{id}/triggers"
-    },
-    {
-      "id": "autopilot trigger-delete",
-      "gate": "via:DELETE /api/autopilots/{id}/triggers/{triggerId}/"
-    },
-    {
-      "id": "autopilot trigger-rotate-url",
-      "gate": "via:http"
-    },
-    {
-      "id": "autopilot trigger-update",
-      "gate": "via:PATCH /api/autopilots/{id}/triggers/{triggerId}/"
-    },
-    {
-      "id": "autopilot update",
-      "gate": "via:PATCH /api/autopilots/{id}/"
-    },
-    {
-      "id": "config set",
-      "exempt": "local-only \u2014 writes to CLI config file on disk"
-    },
-    {
-      "id": "config show",
-      "exempt": "local-only \u2014 reads CLI config file on disk"
-    },
-    {
-      "id": "daemon disk-usage",
-      "exempt": "local-only \u2014 inspects daemon workdir on disk"
-    },
-    {
-      "id": "daemon logs",
-      "exempt": "local-only \u2014 reads daemon log file on disk"
-    },
-    {
-      "id": "daemon restart",
-      "exempt": "local-only \u2014 controls local daemon process"
-    },
-    {
-      "id": "daemon start",
-      "exempt": "local-only \u2014 controls local daemon process"
-    },
-    {
-      "id": "daemon status",
-      "exempt": "local-only \u2014 queries local daemon process"
-    },
-    {
-      "id": "daemon stop",
-      "exempt": "local-only \u2014 controls local daemon process"
-    },
-    {
-      "id": "document create",
-      "gate": "via:POST /api/artifacts"
-    },
-    {
-      "id": "document delete",
-      "gate": "via:DELETE /api/artifacts/{id}"
-    },
-    {
-      "id": "document get",
-      "exempt": "read-only \u2014 wraps GET /api/artifacts/{id}"
-    },
-    {
-      "id": "document list",
-      "exempt": "read-only \u2014 wraps GET /api/artifacts/search"
-    },
-    {
-      "id": "document update",
-      "gate": "via:PUT /api/artifacts/{id}"
-    },
-    {
-      "id": "grant create",
-      "gate": "via:POST /api/workspaces/{id}/grants"
-    },
-    {
-      "id": "grant delete",
-      "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "grant get",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "grant list",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants"
-    },
-    {
-      "id": "grant update",
-      "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "group agent add",
-      "gate": "via:POST /api/groups/{id}/agents"
-    },
-    {
-      "id": "group agent list",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}/agents"
-    },
-    {
-      "id": "group agent remove",
-      "gate": "via:DELETE /api/groups/{id}/agents/{agentId}"
-    },
-    {
-      "id": "group capability list",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}/capabilities"
-    },
-    {
-      "id": "group capability remove",
-      "gate": "via:DELETE /api/groups/{id}/capabilities/{capability}"
-    },
-    {
-      "id": "group capability set",
-      "gate": "via:POST /api/groups/{id}/capabilities"
-    },
-    {
-      "id": "group create",
-      "gate": "via:POST /api/workspaces/{id}/groups"
-    },
-    {
-      "id": "group delete",
-      "gate": "via:DELETE /api/groups/{id}"
-    },
-    {
-      "id": "group get",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}"
-    },
-    {
-      "id": "group list",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/groups"
-    },
-    {
-      "id": "group member add",
-      "gate": "via:POST /api/groups/{id}/members"
-    },
-    {
-      "id": "group member list",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}/members"
-    },
-    {
-      "id": "group member remove",
-      "gate": "via:DELETE /api/groups/{id}/members/{userId}"
-    },
-    {
-      "id": "group project add",
-      "gate": "via:POST /api/projects/{id}/group-access"
-    },
-    {
-      "id": "group project list",
-      "exempt": "read-only \u2014 wraps GET /api/projects/{id}/group-access"
-    },
-    {
-      "id": "group project remove",
-      "gate": "via:DELETE /api/projects/{id}/group-access/{groupId}"
-    },
-    {
-      "id": "group runtime add",
-      "gate": "via:POST /api/groups/{id}/runtimes"
-    },
-    {
-      "id": "group runtime list",
-      "exempt": "read-only \u2014 wraps GET /api/groups/{id}/runtimes"
-    },
-    {
-      "id": "group runtime remove",
-      "gate": "via:DELETE /api/groups/{id}/runtimes/{runtimeId}"
-    },
-    {
-      "id": "group update",
-      "gate": "via:PATCH /api/groups/{id}"
-    },
-    {
-      "id": "issue ask",
-      "gate": "via:POST /api/issues/{id}/comments"
-    },
-    {
-      "id": "issue assign",
-      "gate": "via:PUT /api/issues/{id}"
-    },
-    {
-      "id": "issue cancel-task",
-      "gate": "via:POST /api/tasks/{taskId}/cancel"
-    },
-    {
-      "id": "issue block",
-      "gate": "via:POST /api/issues/{id}/blocked-by"
-    },
-    {
-      "id": "issue blocks",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/dependencies"
-    },
-    {
-      "id": "issue comment add",
-      "gate": "via:POST /api/issues/{id}/comments"
-    },
-    {
-      "id": "issue comment delete",
-      "gate": "via:DELETE /api/comments/{commentId}/"
-    },
-    {
-      "id": "issue comment list",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/comments"
-    },
-    {
-      "id": "issue comment move",
-      "gate": "via:POST /api/comments/move-to-thread"
-    },
-    {
-      "id": "issue create",
-      "gate": "via:POST /api/issues/"
-    },
-    {
-      "id": "issue context",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/context (CEREBRO-PATCH issue-context-bundle, FIR-2384)"
-    },
-    {
-      "id": "issue get",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}"
-    },
-    {
-      "id": "issue label add",
-      "gate": "via:POST /api/issues/{id}/labels"
-    },
-    {
-      "id": "issue label list",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/labels"
-    },
-    {
-      "id": "issue label remove",
-      "gate": "via:DELETE /api/issues/{id}/labels/{labelId}"
-    },
-    {
-      "id": "issue related",
-      "gate": "via:POST /api/issues/{id}/related"
-    },
-    {
-      "id": "issue unblock",
-      "gate": "via:DELETE /api/issues/{id}/blocked-by/{otherId}"
-    },
-    {
-      "id": "issue list",
-      "exempt": "read-only \u2014 wraps GET /api/issues/"
-    },
-    {
-      "id": "issue metadata delete",
-      "gate": "via:http"
-    },
-    {
-      "id": "issue metadata get",
-      "gate": "via:http"
-    },
-    {
-      "id": "issue metadata list",
-      "gate": "via:http"
-    },
-    {
-      "id": "issue metadata set",
-      "gate": "via:http"
-    },
-    {
-      "id": "issue rerun",
-      "gate": "via:POST /api/issues/{id}/rerun"
-    },
-    {
-      "id": "issue run-messages",
-      "exempt": "read-only \u2014 wraps GET /api/daemon/tasks/{taskId}/messages"
-    },
-    {
-      "id": "issue runs",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/runs"
-    },
-    {
-      "id": "issue search",
-      "exempt": "read-only \u2014 wraps GET /api/issues/search"
-    },
-    {
-      "id": "issue status",
-      "gate": "via:PUT /api/issues/{id}"
-    },
-    {
-      "id": "issue subscriber add",
-      "gate": "via:POST /api/issues/{id}/subscribe"
-    },
-    {
-      "id": "issue subscriber list",
-      "exempt": "read-only \u2014 wraps GET /api/issues/{id}/subscribers"
-    },
-    {
-      "id": "issue subscriber remove",
-      "gate": "via:POST /api/issues/{id}/unsubscribe"
-    },
-    {
-      "id": "issue update",
-      "gate": "via:PUT /api/issues/{id}"
-    },
-    {
-      "id": "label create",
-      "gate": "via:POST /api/labels/"
-    },
-    {
-      "id": "label delete",
-      "gate": "via:DELETE /api/labels/{id}/"
-    },
-    {
-      "id": "label get",
-      "exempt": "read-only \u2014 wraps GET /api/labels/{id}"
-    },
-    {
-      "id": "label list",
-      "exempt": "read-only \u2014 wraps GET /api/labels/"
-    },
-    {
-      "id": "label update",
-      "gate": "via:PUT /api/labels/{id}/"
-    },
-    {
-      "id": "login",
-      "exempt": "pre-auth \u2014 establishes identity, then writes token to CLI config"
-    },
-    {
-      "id": "mcp install",
-      "exempt": "local-only \u2014 wires the MCP entry into the developer's Claude config"
-    },
-    {
-      "id": "mcp serve",
-      "exempt": "local-only \u2014 runs the MCP stdio server in this process"
-    },
-    {
-      "id": "orchestrate run",
-      "exempt": "local-only \u2014 simulates a plan locally; live agent dispatch is server-side and gated"
-    },
-    {
-      "id": "orchestrate validate",
-      "exempt": "local-only \u2014 reads a plan file and reports validation issues"
-    },
-    {
-      "id": "orchestrate waves",
-      "exempt": "local-only \u2014 reads a plan file and prints the computed execution waves"
-    },
-    {
-      "id": "project create",
-      "gate": "via:POST /api/projects/"
-    },
-    {
-      "id": "project delete",
-      "gate": "via:DELETE /api/projects/{id}/"
-    },
-    {
-      "id": "project get",
-      "exempt": "read-only \u2014 wraps GET /api/projects/{id}"
-    },
-    {
-      "id": "project list",
-      "exempt": "read-only \u2014 wraps GET /api/projects/"
-    },
-    {
-      "id": "project resource add",
-      "gate": "via:POST /api/projects/{id}/resources"
-    },
-    {
-      "id": "project resource list",
-      "exempt": "read-only \u2014 wraps GET /api/projects/{id}/resources"
-    },
-    {
-      "id": "project resource remove",
-      "gate": "via:DELETE /api/projects/{id}/resources/{resourceId}"
-    },
-    {
-      "id": "project resource update",
-      "gate": "via:PUT /api/projects/{id}/resources/{resourceId}"
-    },
-    {
-      "id": "project status",
-      "gate": "via:PUT /api/projects/{id}/"
-    },
-    {
-      "id": "project update",
-      "gate": "via:PUT /api/projects/{id}/"
-    },
-    {
-      "id": "sprint assign",
-      "gate": "via:PUT /api/issues/{id}"
-    },
-    {
-      "id": "sprint create",
-      "gate": "via:POST /api/projects/ + PUT /api/projects/{id}/parent"
-    },
-    {
-      "id": "sprint delete",
-      "gate": "via:DELETE /api/projects/{id}/"
-    },
-    {
-      "id": "sprint get",
-      "exempt": "read-only - wraps GET /api/projects/{id}"
-    },
-    {
-      "id": "sprint list",
-      "exempt": "read-only - wraps GET /api/projects/tree"
-    },
-    {
-      "id": "sprint update",
-      "gate": "via:PUT /api/projects/{id}/"
-    },
-    {
-      "id": "repo check",
-      "exempt": "read-only \u2014 pre-flight capability query, wraps daemon_auth-gated POST /api/daemon/workspaces/{workspaceId}/repo/check"
-    },
-    {
-      "id": "repo checkout",
-      "exempt": "local-only \u2014 git clone via daemon into local workdir"
-    },
-    {
-      "id": "runtime activity",
-      "exempt": "read-only \u2014 wraps GET /api/runtimes/{runtimeId}/activity"
-    },
-    {
-      "id": "runtime delete",
-      "gate": "via:DELETE /api/runtimes/{runtimeId}"
-    },
-    {
-      "id": "runtime list",
-      "exempt": "read-only \u2014 wraps GET /api/runtimes/"
-    },
-    {
-      "id": "runtime update",
-      "gate": "via:POST /api/runtimes/{runtimeId}/update"
-    },
-    {
-      "id": "runtime usage",
-      "exempt": "read-only \u2014 wraps GET /api/runtimes/{runtimeId}/usage"
-    },
-    {
-      "id": "setup cloud",
-      "exempt": "bootstrap \u2014 uses runtime-setup token before any user session exists"
-    },
-    {
-      "id": "setup self-host",
-      "exempt": "bootstrap \u2014 uses runtime-setup token before any user session exists"
-    },
-    {
-      "id": "skill change-requests",
-      "exempt": "read-only \u2014 wraps GET /api/skills/[{id}/]change-requests"
-    },
-    {
-      "id": "skill create",
-      "gate": "via:POST /api/skills/"
-    },
-    {
-      "id": "skill delete",
-      "gate": "via:DELETE /api/skills/{id}/"
-    },
-    {
-      "id": "skill diff",
-      "exempt": "read-only \u2014 wraps GET /api/skills/{id}/versions"
-    },
-    {
-      "id": "skill files delete",
-      "gate": "via:DELETE /api/skills/{id}/files/{fileId}"
-    },
-    {
-      "id": "skill files list",
-      "exempt": "read-only \u2014 wraps GET /api/skills/{id}/files"
-    },
-    {
-      "id": "skill files upsert",
-      "gate": "via:PUT /api/skills/{id}/files"
-    },
-    {
-      "id": "skill fork",
-      "gate": "via:POST /api/skills/{id}/forks"
-    },
-    {
-      "id": "skill get",
-      "exempt": "read-only \u2014 wraps GET /api/skills/{id}"
-    },
-    {
-      "id": "skill import",
-      "gate": "via:POST /api/skills/import"
-    },
-    {
-      "id": "skill list",
-      "exempt": "read-only \u2014 wraps GET /api/skills/"
-    },
-    {
-      "id": "skill ownership",
-      "gate": "via:PUT /api/skills/{id}/ownership"
-    },
-    {
-      "id": "skill propose",
-      "gate": "via:POST /api/skills/{id}/change-requests"
-    },
-    {
-      "id": "skill review",
-      "gate": "via:POST /api/skills/change-requests/{crId}/review"
-    },
-    {
-      "id": "skill update",
-      "gate": "via:PUT /api/skills/{id}/"
-    },
-    {
-      "id": "skill versions",
-      "exempt": "read-only \u2014 wraps GET /api/skills/{id}/versions"
-    },
-    {
-      "id": "squad activity",
-      "gate": "via:POST /api/issues/{id}/squad-evaluated"
-    },
-    {
-      "id": "squad create",
-      "gate": "via:POST /api/squads/"
-    },
-    {
-      "id": "squad delete",
-      "gate": "via:DELETE /api/squads/{id}/"
-    },
-    {
-      "id": "squad get",
-      "exempt": "read-only \u2014 wraps GET /api/squads/{id}"
-    },
-    {
-      "id": "squad list",
-      "exempt": "read-only \u2014 wraps GET /api/squads"
-    },
-    {
-      "id": "squad member add",
-      "gate": "via:POST /api/squads/{id}/members"
-    },
-    {
-      "id": "squad member list",
-      "exempt": "read-only \u2014 wraps GET /api/squads/{id}/members"
-    },
-    {
-      "id": "squad member remove",
-      "gate": "via:DELETE /api/squads/{id}/members"
-    },
-    {
-      "id": "squad update",
-      "gate": "via:PUT /api/squads/{id}/"
-    },
-    {
-      "id": "update",
-      "exempt": "local-only \u2014 replaces the multica binary on disk"
-    },
-    {
-      "id": "user profile get",
-      "exempt": "read-only \u2014 wraps GET /api/me/profile"
-    },
-    {
-      "id": "user profile update",
-      "gate": "via:PUT /api/me/profile"
-    },
-    {
-      "id": "version",
-      "exempt": "local-only \u2014 prints build metadata"
-    },
-    {
-      "id": "wakeup cancel",
-      "gate": "via:POST /api/cerebro/wakeups/{id}/cancel"
-    },
-    {
-      "id": "wakeup create",
-      "gate": "via:POST /api/cerebro/wakeups"
-    },
-    {
-      "id": "wakeup get",
-      "exempt": "read-only \u2014 wraps GET /api/cerebro/wakeups/{id}"
-    },
-    {
-      "id": "wakeup list",
-      "exempt": "read-only \u2014 wraps GET /api/cerebro/wakeups"
-    },
-    {
-      "id": "workspace get",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/"
-    },
-    {
-      "id": "workspace list",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/"
-    },
-    {
-      "id": "workspace member list",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/members"
-    },
-    {
-      "id": "workspace switch",
-      "exempt": "local-only \u2014 changes the active workspace in CLI config"
-    },
-    {
-      "id": "workspace update",
-      "gate": "via:PUT /api/workspaces/{id}/"
-    }
-  ]
+    "http": [
+        {
+            "id": "DELETE /api/agents/{id}/tool-overrides/{toolName}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/artifact-folders/{id}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/artifacts/{id}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/attachments/{id}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/autopilots/{id}/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/autopilots/{id}/triggers/{triggerId}/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/cerebro/agent-passes/{passId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/cerebro/focus-list/{id}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/cerebro/issues/{issueId}/custom-status/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
+            "gate": "via:DELETE /api/cerebro/projects/{projectID}/sprint-settings/"
+        },
+        {
+            "id": "DELETE /api/cerebro/projects/{projectId}/status-model/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/cerebro/references/{refId}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/cerebro/share-tokens/{tokenId}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
+            "gate": "via:DELETE /api/cerebro/sprint-recurring-tasks/{id}/"
+        },
+        {
+            "id": "DELETE /api/cerebro/sprints/{sprintID}/",
+            "gate": "via:DELETE /api/cerebro/sprints/{sprintID}/"
+        },
+        {
+            "id": "DELETE /api/cerebro/status-models/default",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/cerebro/status-models/{id}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/cerebro/terminal/sessions/{sessionId}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/cerebro/workflows/{id}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/channels/{id}/archive",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/chat/sessions/{sessionId}/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/cloud-runtime/nodes",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/comments/{commentId}/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/comments/{commentId}/reactions",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/comments/{commentId}/resolve",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/groups/{id}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/groups/{id}/agents/{agentId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/groups/{id}/capabilities/{capability}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/groups/{id}/members/{userId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/groups/{id}/runtimes/{runtimeId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/inbox/{id}/mute",
+            "gate": "self_only"
+        },
+        {
+            "id": "DELETE /api/issues/{id}/",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "DELETE /api/issues/{id}/blocked-by/{otherId}",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "DELETE /api/issues/{id}/blocks/{otherId}",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "DELETE /api/issues/{id}/labels/{labelId}",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "DELETE /api/issues/{id}/metadata/{key}",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "DELETE /api/issues/{id}/reactions",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "DELETE /api/issues/{id}/related/{otherId}",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "DELETE /api/labels/{id}/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/me/profile",
+            "gate": "self_only"
+        },
+        {
+            "id": "DELETE /api/pins/{itemType}/{itemId}",
+            "gate": "self_only"
+        },
+        {
+            "id": "DELETE /api/projects/{id}/",
+            "gate": "project_access"
+        },
+        {
+            "id": "DELETE /api/projects/{id}/group-access/{groupId}",
+            "gate": "project_access"
+        },
+        {
+            "id": "DELETE /api/projects/{id}/members/{userId}",
+            "gate": "project_access"
+        },
+        {
+            "id": "DELETE /api/projects/{id}/resources/{resourceId}",
+            "gate": "project_access"
+        },
+        {
+            "id": "DELETE /api/roles/{id}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/roles/{id}/assignments/{subjectType}/{subjectId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/runtimes/{runtimeId}/",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/skills/{id}/",
+            "gate": "skill_ownership"
+        },
+        {
+            "id": "DELETE /api/skills/{id}/files/{fileId}",
+            "gate": "skill_ownership"
+        },
+        {
+            "id": "DELETE /api/squads/{id}/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/squads/{id}/members",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/tokens/{id}",
+            "gate": "self_only"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/",
+            "gate": "workspace_owner"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/accounts/{id}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/connections/{connId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/cost-optimization/holdout/{key}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/cost-optimization/{key}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/credentials/{credId}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/credentials/{credId}/bindings/{bindingId}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/feature-flags/{key}/workspace",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/github/installations/{installationId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/grants/{grantId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/invitations/{invitationId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/members/{memberId}/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "DELETE /api/workspaces/{id}/tool-policy",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/autopilots/{id}/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/autopilots/{id}/triggers/{triggerId}/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/cerebro/focus-list/{id}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PATCH /api/cerebro/references/{refId}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PATCH /api/cerebro/status-models/{id}/set-default",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/chat/sessions/{sessionId}/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PATCH /api/groups/{id}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/me",
+            "gate": "self_only"
+        },
+        {
+            "id": "PATCH /api/me/onboarding",
+            "gate": "self_only"
+        },
+        {
+            "id": "PATCH /api/me/preferences",
+            "gate": "self_only"
+        },
+        {
+            "id": "PATCH /api/projects/{id}/access",
+            "gate": "project_access"
+        },
+        {
+            "id": "PATCH /api/roles/{id}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/runtimes/{runtimeId}/",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "PATCH /api/runtimes/{runtimeId}/persona-sandbox",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "PATCH /api/runtimes/{runtimeId}/sandbox",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "PATCH /api/runtimes/{runtimeId}/sandbox-policy",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "PATCH /api/runtimes/{runtimeId}/tools-config",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/squads/{id}/members/role",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PATCH /api/workspaces/{id}/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/workspaces/{id}/accounts/{id}/controls",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PATCH /api/workspaces/{id}/credentials/{credId}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PATCH /api/workspaces/{id}/grants/{grantId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/workspaces/{id}/members/{memberId}/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PATCH /api/workspaces/{id}/members/{memberId}/budget-enforcement",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/agents/",
+            "gate": "cerebro_capability:create_agent"
+        },
+        {
+            "id": "POST /api/agents/backfill-avatars",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/agents/from-template",
+            "gate": "cerebro_capability:create_agent"
+        },
+        {
+            "id": "POST /api/agents/generate-avatar",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/agents/{id}/archive",
+            "gate": "cerebro_agent_access"
+        },
+        {
+            "id": "POST /api/agents/{id}/cancel-tasks",
+            "gate": "cerebro_agent_access"
+        },
+        {
+            "id": "POST /api/agents/{id}/restore",
+            "gate": "cerebro_agent_access"
+        },
+        {
+            "id": "POST /api/artifact-folders/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/artifact-uploads",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/artifacts/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/autopilots/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/autopilots/{id}/deliveries/{deliveryId}/replay",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/autopilots/{id}/trigger",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/autopilots/{id}/triggers",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/autopilots/{id}/triggers/{triggerId}/rotate-webhook-token",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/capabilities/report",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/agent-passes/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/cerebro/exchange-rates",
+            "exempt": "pre-auth service-to-service \u2014 CEREBRO_EXCHANGE_INGEST_KEY bearer token authorises the multica-hatchet-worker's daily FX snapshot push before any user JWT exists (FIR-43)"
+        },
+        {
+            "id": "POST /api/cerebro/focus-list/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/focus-list/reorder",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/focus-list/{id}/done",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/focus-list/{id}/snooze",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/github/pull-requests",
+            "exempt": "pre-auth service-to-service \u2014 CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push before any user JWT exists (FIR-2568)"
+        },
+        {
+            "id": "POST /api/cerebro/issues/check-similar",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/issues/check-similar/event",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/issues/{id}/share-tokens",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
+            "gate": "via:POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/"
+        },
+        {
+            "id": "POST /api/cerebro/projects/{projectID}/sprint-sweep",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/cerebro/projects/{projectID}/sprints/",
+            "gate": "via:POST /api/cerebro/projects/{projectID}/sprints/"
+        },
+        {
+            "id": "POST /api/cerebro/status-models/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/cerebro/terminal/sessions",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/wakeups/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/wakeups/{id}/cancel",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/workflows/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/workflows/_test/cron-sweep",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/workflows/{id}/regenerate-outbound-secret",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/workflows/{id}/regenerate-signing-secret",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/workflows/{id}/regenerate-token",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cerebro/workflows/{id}/toggle",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/channels/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/channels/{id}/archive",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/channels/{id}/read",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/chat/sessions/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/chat/sessions/{sessionId}/convert-to-issue",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/chat/sessions/{sessionId}/messages",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/chat/sessions/{sessionId}/read",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/cli-token",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/cloud-billing/checkout-sessions",
+            "gate": "human_actor"
+        },
+        {
+            "id": "POST /api/cloud-billing/portal-sessions",
+            "gate": "human_actor"
+        },
+        {
+            "id": "POST /api/cloud-runtime/nodes",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/cloud-runtime/nodes/exec",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/cloud-runtime/nodes/reboot",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/cloud-runtime/nodes/start",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/cloud-runtime/nodes/status",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/cloud-runtime/nodes/stop",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/comments/move-to-thread",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/comments/{commentId}/move-to-subissue",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/comments/{commentId}/reactions",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/comments/{commentId}/resolve",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/contact-sales",
+            "exempt": "pre-auth \u2014 public marketing inquiry form, rate-limited by IP + business-email validation at handler layer"
+        },
+        {
+            "id": "POST /api/daemon/accounts/{id}/usage",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/deregister",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/heartbeat",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/register",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/runtimes/{runtimeId}/local-skills/import/{requestId}/result",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/runtimes/{runtimeId}/local-skills/{requestId}/result",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/runtimes/{runtimeId}/models/{requestId}/result",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/runtimes/{runtimeId}/recover-orphans",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/runtimes/{runtimeId}/refresh-capabilities",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/runtimes/{runtimeId}/tasks/claim",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/runtimes/{runtimeId}/tool-scan",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/runtimes/{runtimeId}/update/{updateId}/result",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/tasks/{taskId}/complete",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/tasks/{taskId}/fail",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/tasks/{taskId}/messages",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/tasks/{taskId}/progress",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/tasks/{taskId}/session",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/tasks/{taskId}/start",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/tasks/{taskId}/usage",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/tasks/{taskId}/wait-local-directory",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/daemon/workspaces/{workspaceId}/repo/check",
+            "gate": "daemon_auth"
+        },
+        {
+            "id": "POST /api/feedback",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/groups/{id}/agents",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/groups/{id}/capabilities",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/groups/{id}/members",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/groups/{id}/runtimes",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/inbox/add-issue",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/archive-all",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/archive-all-read",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/archive-completed",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/mark-all-read",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/notifications/archive-all",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/notifications/mark-all-read",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/reminders",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/{id}/archive",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/{id}/mute",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/{id}/read",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/{id}/run-private-agent",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/{id}/unarchive",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/inbox/{id}/unread",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/invitations/{id}/accept",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/invitations/{id}/decline",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/issues/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/issues/batch-delete",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/issues/batch-update",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/issues/quick-create",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/issues/{id}/blocked-by",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/blocks",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/comments",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/labels",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/reactions",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/references",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/related",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/rerun",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/squad-evaluated",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/subscribe",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/tasks/{taskId}/cancel",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/issues/{id}/unsubscribe",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/labels/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/me/onboarding/cloud-waitlist",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/me/onboarding/complete",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/me/onboarding/no-runtime-bootstrap",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/me/onboarding/runtime-bootstrap",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/persona/approvals/{id}/approve",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/persona/approvals/{id}/deny",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/pins/",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/projects/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/projects/{id}/group-access",
+            "gate": "project_access"
+        },
+        {
+            "id": "POST /api/projects/{id}/members",
+            "gate": "project_access"
+        },
+        {
+            "id": "POST /api/projects/{id}/resources",
+            "gate": "project_access"
+        },
+        {
+            "id": "POST /api/push/subscribe",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/push/unsubscribe",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/roles/{id}/assignments",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/runtime-setup/exchange",
+            "exempt": "bootstrap \u2014 exchanges setup token before daemon user session exists"
+        },
+        {
+            "id": "POST /api/runtime-setup/tokens",
+            "gate": "via:POST /api/runtime-setup/tokens"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/archive-agents-and-delete",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/local-skills",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/local-skills/import",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/models",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/pause",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/tools/scan-now",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/unpause",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "POST /api/runtimes/{runtimeId}/update",
+            "gate": "cerebro_runtime_access"
+        },
+        {
+            "id": "POST /api/skills/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/skills/change-requests/{crId}/review",
+            "gate": "skill_ownership"
+        },
+        {
+            "id": "POST /api/skills/import",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/skills/{id}/change-requests",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/skills/{id}/forks",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/squads/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/squads/{id}/members",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/tasks/{taskId}/cancel",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/tokens/",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/tokens/current/renew",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/upload-file",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "POST /api/webhooks/autopilots/{token}",
+            "gate": "pre_auth_token"
+        },
+        {
+            "id": "POST /api/webhooks/github",
+            "exempt": "pre-auth signed webhook \u2014 GitHub HMAC signature authorises delivery before any user JWT exists"
+        },
+        {
+            "id": "POST /api/webhooks/stripe",
+            "exempt": "pre-auth signed webhook \u2014 Stripe HMAC signature (Stripe-Signature header) authorises delivery; multica-cloud upstream verifies the raw body before processing"
+        },
+        {
+            "id": "POST /api/work-sessions/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/work-sessions/{id}/fork",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/work-sessions/{id}/messages",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/work-sessions/{id}/resume",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/workspaces/",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/accounts",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/approvals/intake",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/approvals/{approvalId}/approve",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/approvals/{approvalId}/delegate",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/approvals/{approvalId}/reject",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/connections",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/credentials",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/credentials/{credId}/bindings",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/credentials/{credId}/reveal",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/credentials/{credId}/rotate",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/generate-logo",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/grants",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/grants/evaluate",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/groups",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/leave",
+            "gate": "self_only"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/members",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/pause-tasks",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/roles",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "POST /api/workspaces/{id}/runtime-setup-token",
+            "gate": "via:POST /api/workspaces/{id}/runtime-setup-token"
+        },
+        {
+            "id": "POST /auth/google",
+            "exempt": "pre-auth \u2014 establishes identity"
+        },
+        {
+            "id": "POST /auth/logout",
+            "exempt": "pre-auth \u2014 clears identity, must succeed even with stale credentials"
+        },
+        {
+            "id": "POST /auth/send-code",
+            "exempt": "pre-auth \u2014 establishes identity"
+        },
+        {
+            "id": "POST /auth/verify-code",
+            "exempt": "pre-auth \u2014 establishes identity"
+        },
+        {
+            "id": "PUT /api/agents/{id}/",
+            "gate": "cerebro_agent_access"
+        },
+        {
+            "id": "PUT /api/agents/{id}/env",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/agents/{id}/infisical-folders",
+            "gate": "cerebro_agent_access"
+        },
+        {
+            "id": "PUT /api/agents/{id}/skills",
+            "gate": "cerebro_agent_access"
+        },
+        {
+            "id": "PUT /api/agents/{id}/tool-overrides/{toolName}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/agents/{id}/tools/{name}/",
+            "gate": "cerebro_agent_access"
+        },
+        {
+            "id": "PUT /api/artifact-folders/{id}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/artifacts/{id}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/artifacts/{id}/folder",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/artifacts/{id}/scope",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/autopilots/{id}/triggers/{triggerId}/signing-secret",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/cerebro/issues/{issueID}/sprint/",
+            "gate": "via:PUT /api/cerebro/issues/{issueID}/sprint/"
+        },
+        {
+            "id": "PUT /api/cerebro/issues/{issueId}/custom-status/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/cerebro/projects/{projectID}/sprint-settings/",
+            "gate": "via:PUT /api/cerebro/projects/{projectID}/sprint-settings/"
+        },
+        {
+            "id": "PUT /api/cerebro/projects/{projectId}/status-model/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/cerebro/sprint-recurring-tasks/{id}/",
+            "gate": "via:PUT /api/cerebro/sprint-recurring-tasks/{id}/"
+        },
+        {
+            "id": "PUT /api/cerebro/sprints/{sprintID}/",
+            "gate": "via:PUT /api/cerebro/sprints/{sprintID}/"
+        },
+        {
+            "id": "PUT /api/cerebro/status-models/{id}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/cerebro/workflows/{id}",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/cerebro/workspaces/{id}/auth-settings/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/channels/{id}/agents/{agentId}/listen-mode",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/comments/{commentId}/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/issues/{id}",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "PUT /api/issues/{id}/metadata/{key}",
+            "gate": "issue_scope"
+        },
+        {
+            "id": "PUT /api/labels/{id}/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/me/profile",
+            "gate": "self_only"
+        },
+        {
+            "id": "PUT /api/notification-preferences/",
+            "gate": "self_only"
+        },
+        {
+            "id": "PUT /api/pins/reorder",
+            "gate": "self_only"
+        },
+        {
+            "id": "PUT /api/projects/{id}/",
+            "gate": "project_access"
+        },
+        {
+            "id": "PUT /api/projects/{id}/parent",
+            "gate": "project_access"
+        },
+        {
+            "id": "PUT /api/projects/{id}/resources/{resourceId}",
+            "gate": "project_access"
+        },
+        {
+            "id": "PUT /api/projects/{id}/show-descendants",
+            "gate": "project_access"
+        },
+        {
+            "id": "PUT /api/skills/{id}/",
+            "gate": "skill_ownership"
+        },
+        {
+            "id": "PUT /api/skills/{id}/files",
+            "gate": "skill_ownership"
+        },
+        {
+            "id": "PUT /api/skills/{id}/ownership",
+            "gate": "skill_ownership"
+        },
+        {
+            "id": "PUT /api/squads/{id}/",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/work-sessions/{id}/complete",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/work-sessions/{id}/name",
+            "gate": "workspace_member"
+        },
+        {
+            "id": "PUT /api/workspaces/{id}/",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/workspaces/{id}/connections/{connId}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/workspaces/{id}/cost-optimization/holdout/{key}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/workspaces/{id}/cost-optimization/{key}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/workspaces/{id}/display-currency",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/workspaces/{id}/feature-flags/{key}",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/workspaces/{id}/feature-flags/{key}/workspace",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/workspaces/{id}/members/{memberId}/infisical-folders",
+            "gate": "workspace_admin"
+        },
+        {
+            "id": "PUT /api/workspaces/{id}/tool-policy",
+            "gate": "workspace_admin"
+        }
+    ],
+    "mcp": [
+        {
+            "id": "add_attachment",
+            "gate": "via:POST /api/upload-file"
+        },
+        {
+            "id": "add_comment",
+            "gate": "via:POST /api/issues/{id}/comments"
+        },
+        {
+            "id": "add_group_agent",
+            "gate": "via:POST /api/groups/{id}/agents"
+        },
+        {
+            "id": "add_group_member",
+            "gate": "via:POST /api/groups/{id}/members"
+        },
+        {
+            "id": "add_group_runtime",
+            "gate": "via:POST /api/groups/{id}/runtimes"
+        },
+        {
+            "id": "add_project_group",
+            "gate": "via:POST /api/projects/{id}/group-access"
+        },
+        {
+            "id": "attach_session",
+            "gate": "via:POST /api/work-sessions/"
+        },
+        {
+            "id": "bind_repo",
+            "exempt": "local-only \u2014 writes to MCP repo binding on disk, no remote call"
+        },
+        {
+            "id": "cancel_wakeup",
+            "gate": "via:POST /api/cerebro/wakeups/{id}/cancel"
+        },
+        {
+            "id": "complete_work",
+            "gate": "via:PUT /api/work-sessions/{id}/complete"
+        },
+        {
+            "id": "create_artifact",
+            "gate": "via:POST /api/artifacts/"
+        },
+        {
+            "id": "create_artifact_folder",
+            "gate": "via:POST /api/artifact-folders/"
+        },
+        {
+            "id": "create_grant",
+            "gate": "via:POST /api/workspaces/{id}/grants"
+        },
+        {
+            "id": "create_group",
+            "gate": "via:POST /api/workspaces/{id}/groups"
+        },
+        {
+            "id": "create_issue",
+            "gate": "via:POST /api/issues/"
+        },
+        {
+            "id": "create_project",
+            "gate": "via:POST /api/projects/"
+        },
+        {
+            "id": "credential_audit_log",
+            "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
+        },
+        {
+            "id": "credential_list",
+            "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
+        },
+        {
+            "id": "credential_policy_get",
+            "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
+        },
+        {
+            "id": "credential_policy_set",
+            "exempt": "local-only stub \u2014 in-memory mock, no HTTP until JEH-1196"
+        },
+        {
+            "id": "delete_artifact",
+            "gate": "via:DELETE /api/artifacts/{id}"
+        },
+        {
+            "id": "delete_artifact_folder",
+            "gate": "via:DELETE /api/artifact-folders/{id}"
+        },
+        {
+            "id": "delete_grant",
+            "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
+        },
+        {
+            "id": "delete_group",
+            "gate": "via:DELETE /api/groups/{id}"
+        },
+        {
+            "id": "evaluate_policy",
+            "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants policy check"
+        },
+        {
+            "id": "fork_session",
+            "gate": "via:POST /api/work-sessions/{id}/fork"
+        },
+        {
+            "id": "get_artifact",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "get_grant",
+            "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+        },
+        {
+            "id": "get_group",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "get_issue",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "get_me",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_artifact_folders",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_artifacts",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_comments",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_grant_audit",
+            "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+        },
+        {
+            "id": "list_grants",
+            "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+        },
+        {
+            "id": "list_group_agents",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_group_capabilities",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_group_members",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_group_runtimes",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_groups",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_issues",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_project_groups",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_projects",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_runtimes",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "list_wakeups",
+            "exempt": "read-only \u2014 wraps GET /api/cerebro/wakeups"
+        },
+        {
+            "id": "move_artifact",
+            "gate": "via:PUT /api/artifacts/{id}/folder"
+        },
+        {
+            "id": "remove_group_agent",
+            "gate": "via:DELETE /api/groups/{id}/agents/{agentId}"
+        },
+        {
+            "id": "remove_group_capability",
+            "gate": "via:DELETE /api/groups/{id}/capabilities/{capability}"
+        },
+        {
+            "id": "remove_group_member",
+            "gate": "via:DELETE /api/groups/{id}/members/{userId}"
+        },
+        {
+            "id": "remove_group_runtime",
+            "gate": "via:DELETE /api/groups/{id}/runtimes/{runtimeId}"
+        },
+        {
+            "id": "remove_project_group",
+            "gate": "via:DELETE /api/projects/{id}/group-access/{groupId}"
+        },
+        {
+            "id": "report_activity",
+            "gate": "via:POST /api/work-sessions/{id}/messages"
+        },
+        {
+            "id": "resume_session",
+            "gate": "via:POST /api/work-sessions/{id}/resume"
+        },
+        {
+            "id": "search_artifacts",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "search_issues",
+            "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+        },
+        {
+            "id": "schedule_wakeup",
+            "gate": "via:POST /api/cerebro/wakeups"
+        },
+        {
+            "id": "set_artifact_folder",
+            "gate": "via:PUT /api/artifacts/{id}/folder"
+        },
+        {
+            "id": "set_group_capability",
+            "gate": "via:POST /api/groups/{id}/capabilities"
+        },
+        {
+            "id": "skill_fork",
+            "gate": "via:POST /api/skills/{id}/forks"
+        },
+        {
+            "id": "skill_get",
+            "exempt": "read-only \u2014 GET /api/skills/{id} (+ /files) carry their own auth, no mutation"
+        },
+        {
+            "id": "skill_list",
+            "exempt": "read-only \u2014 GET /api/skills, no mutation"
+        },
+        {
+            "id": "skill_list_change_requests",
+            "exempt": "read-only \u2014 GET /api/skills/change-requests (+ per-skill), no mutation"
+        },
+        {
+            "id": "skill_list_forks",
+            "exempt": "read-only \u2014 GET /api/skills/{id}/forks, no mutation"
+        },
+        {
+            "id": "skill_list_versions",
+            "exempt": "read-only \u2014 GET /api/skills/{id}/versions, no mutation"
+        },
+        {
+            "id": "skill_propose_change",
+            "gate": "via:POST /api/skills/{id}/change-requests"
+        },
+        {
+            "id": "skill_review_change_request",
+            "gate": "via:POST /api/skills/change-requests/{crId}/review"
+        },
+        {
+            "id": "update_artifact",
+            "gate": "via:PUT /api/artifacts/{id}"
+        },
+        {
+            "id": "update_artifact_folder",
+            "gate": "via:PUT /api/artifact-folders/{id}"
+        },
+        {
+            "id": "update_grant",
+            "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
+        },
+        {
+            "id": "update_group",
+            "gate": "via:PATCH /api/groups/{id}"
+        },
+        {
+            "id": "update_issue",
+            "gate": "via:PUT /api/issues/{id}"
+        },
+        {
+            "id": "update_project",
+            "gate": "via:PUT /api/projects/{id}/"
+        }
+    ],
+    "cli": [
+        {
+            "id": "agent archive",
+            "gate": "via:POST /api/agents/{id}/archive"
+        },
+        {
+            "id": "agent avatar",
+            "gate": "via:POST /api/agents/{id}/avatar"
+        },
+        {
+            "id": "agent create",
+            "gate": "via:POST /api/agents/"
+        },
+        {
+            "id": "agent e2e-spawn",
+            "exempt": "developer-tool \u2014 local spawn against own daemon, no server mutation"
+        },
+        {
+            "id": "agent env get",
+            "exempt": "read-only \u2014 wraps GET /api/agents/{id}/env"
+        },
+        {
+            "id": "agent env set",
+            "gate": "via:PUT /api/agents/{id}/env"
+        },
+        {
+            "id": "agent get",
+            "exempt": "read-only \u2014 wraps GET /api/agents/{id}"
+        },
+        {
+            "id": "agent list",
+            "exempt": "read-only \u2014 wraps GET /api/agents/"
+        },
+        {
+            "id": "agent restore",
+            "gate": "via:POST /api/agents/{id}/restore"
+        },
+        {
+            "id": "agent skills list",
+            "exempt": "read-only \u2014 wraps GET /api/agents/{id}/skills"
+        },
+        {
+            "id": "agent skills set",
+            "gate": "via:PUT /api/agents/{id}/skills"
+        },
+        {
+            "id": "agent tasks",
+            "exempt": "read-only \u2014 wraps GET /api/agents/{id}/tasks"
+        },
+        {
+            "id": "agent update",
+            "gate": "via:PUT /api/agents/{id}/"
+        },
+        {
+            "id": "artifact create",
+            "gate": "via:POST /api/artifacts/"
+        },
+        {
+            "id": "artifact delete",
+            "gate": "via:DELETE /api/artifacts/{id}"
+        },
+        {
+            "id": "artifact folder create",
+            "gate": "via:POST /api/artifact-folders/"
+        },
+        {
+            "id": "artifact folder delete",
+            "gate": "via:DELETE /api/artifact-folders/{id}"
+        },
+        {
+            "id": "artifact folder list",
+            "exempt": "read-only \u2014 wraps GET /api/artifact-folders/"
+        },
+        {
+            "id": "artifact folder update",
+            "gate": "via:PUT /api/artifact-folders/{id}"
+        },
+        {
+            "id": "artifact get",
+            "exempt": "read-only \u2014 wraps GET /api/artifacts/{id}"
+        },
+        {
+            "id": "artifact list",
+            "exempt": "read-only \u2014 wraps GET /api/artifacts/"
+        },
+        {
+            "id": "artifact set-folder",
+            "gate": "via:PUT /api/artifacts/{id}/folder"
+        },
+        {
+            "id": "artifact update",
+            "gate": "via:PUT /api/artifacts/{id}"
+        },
+        {
+            "id": "attachment download",
+            "exempt": "read-only \u2014 wraps GET /uploads/*"
+        },
+        {
+            "id": "attachment text",
+            "exempt": "read-only \u2014 wraps GET /api/attachments/{id}/content"
+        },
+        {
+            "id": "attachment upload",
+            "gate": "via:POST /api/upload-file"
+        },
+        {
+            "id": "auth logout",
+            "exempt": "pre-auth \u2014 clears local credentials"
+        },
+        {
+            "id": "auth status",
+            "exempt": "local-only \u2014 reads local CLI config"
+        },
+        {
+            "id": "autopilot create",
+            "gate": "via:POST /api/autopilots/"
+        },
+        {
+            "id": "autopilot delete",
+            "gate": "via:DELETE /api/autopilots/{id}/"
+        },
+        {
+            "id": "autopilot get",
+            "exempt": "read-only \u2014 wraps GET /api/autopilots/{id}"
+        },
+        {
+            "id": "autopilot list",
+            "exempt": "read-only \u2014 wraps GET /api/autopilots/"
+        },
+        {
+            "id": "autopilot runs",
+            "exempt": "read-only \u2014 wraps GET /api/autopilots/{id}/runs"
+        },
+        {
+            "id": "autopilot trigger",
+            "gate": "via:POST /api/autopilots/{id}/trigger"
+        },
+        {
+            "id": "autopilot trigger-add",
+            "gate": "via:POST /api/autopilots/{id}/triggers"
+        },
+        {
+            "id": "autopilot trigger-delete",
+            "gate": "via:DELETE /api/autopilots/{id}/triggers/{triggerId}/"
+        },
+        {
+            "id": "autopilot trigger-rotate-url",
+            "gate": "via:http"
+        },
+        {
+            "id": "autopilot trigger-update",
+            "gate": "via:PATCH /api/autopilots/{id}/triggers/{triggerId}/"
+        },
+        {
+            "id": "autopilot update",
+            "gate": "via:PATCH /api/autopilots/{id}/"
+        },
+        {
+            "id": "config set",
+            "exempt": "local-only \u2014 writes to CLI config file on disk"
+        },
+        {
+            "id": "config show",
+            "exempt": "local-only \u2014 reads CLI config file on disk"
+        },
+        {
+            "id": "daemon disk-usage",
+            "exempt": "local-only \u2014 inspects daemon workdir on disk"
+        },
+        {
+            "id": "daemon logs",
+            "exempt": "local-only \u2014 reads daemon log file on disk"
+        },
+        {
+            "id": "daemon restart",
+            "exempt": "local-only \u2014 controls local daemon process"
+        },
+        {
+            "id": "daemon start",
+            "exempt": "local-only \u2014 controls local daemon process"
+        },
+        {
+            "id": "daemon status",
+            "exempt": "local-only \u2014 queries local daemon process"
+        },
+        {
+            "id": "daemon stop",
+            "exempt": "local-only \u2014 controls local daemon process"
+        },
+        {
+            "id": "document create",
+            "gate": "via:POST /api/artifacts"
+        },
+        {
+            "id": "document delete",
+            "gate": "via:DELETE /api/artifacts/{id}"
+        },
+        {
+            "id": "document get",
+            "exempt": "read-only \u2014 wraps GET /api/artifacts/{id}"
+        },
+        {
+            "id": "document list",
+            "exempt": "read-only \u2014 wraps GET /api/artifacts/search"
+        },
+        {
+            "id": "document update",
+            "gate": "via:PUT /api/artifacts/{id}"
+        },
+        {
+            "id": "grant create",
+            "gate": "via:POST /api/workspaces/{id}/grants"
+        },
+        {
+            "id": "grant delete",
+            "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
+        },
+        {
+            "id": "grant get",
+            "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants/{grantId}"
+        },
+        {
+            "id": "grant list",
+            "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants"
+        },
+        {
+            "id": "grant update",
+            "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
+        },
+        {
+            "id": "group agent add",
+            "gate": "via:POST /api/groups/{id}/agents"
+        },
+        {
+            "id": "group agent list",
+            "exempt": "read-only \u2014 wraps GET /api/groups/{id}/agents"
+        },
+        {
+            "id": "group agent remove",
+            "gate": "via:DELETE /api/groups/{id}/agents/{agentId}"
+        },
+        {
+            "id": "group capability list",
+            "exempt": "read-only \u2014 wraps GET /api/groups/{id}/capabilities"
+        },
+        {
+            "id": "group capability remove",
+            "gate": "via:DELETE /api/groups/{id}/capabilities/{capability}"
+        },
+        {
+            "id": "group capability set",
+            "gate": "via:POST /api/groups/{id}/capabilities"
+        },
+        {
+            "id": "group create",
+            "gate": "via:POST /api/workspaces/{id}/groups"
+        },
+        {
+            "id": "group delete",
+            "gate": "via:DELETE /api/groups/{id}"
+        },
+        {
+            "id": "group get",
+            "exempt": "read-only \u2014 wraps GET /api/groups/{id}"
+        },
+        {
+            "id": "group list",
+            "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/groups"
+        },
+        {
+            "id": "group member add",
+            "gate": "via:POST /api/groups/{id}/members"
+        },
+        {
+            "id": "group member list",
+            "exempt": "read-only \u2014 wraps GET /api/groups/{id}/members"
+        },
+        {
+            "id": "group member remove",
+            "gate": "via:DELETE /api/groups/{id}/members/{userId}"
+        },
+        {
+            "id": "group project add",
+            "gate": "via:POST /api/projects/{id}/group-access"
+        },
+        {
+            "id": "group project list",
+            "exempt": "read-only \u2014 wraps GET /api/projects/{id}/group-access"
+        },
+        {
+            "id": "group project remove",
+            "gate": "via:DELETE /api/projects/{id}/group-access/{groupId}"
+        },
+        {
+            "id": "group runtime add",
+            "gate": "via:POST /api/groups/{id}/runtimes"
+        },
+        {
+            "id": "group runtime list",
+            "exempt": "read-only \u2014 wraps GET /api/groups/{id}/runtimes"
+        },
+        {
+            "id": "group runtime remove",
+            "gate": "via:DELETE /api/groups/{id}/runtimes/{runtimeId}"
+        },
+        {
+            "id": "group update",
+            "gate": "via:PATCH /api/groups/{id}"
+        },
+        {
+            "id": "issue ask",
+            "gate": "via:POST /api/issues/{id}/comments"
+        },
+        {
+            "id": "issue assign",
+            "gate": "via:PUT /api/issues/{id}"
+        },
+        {
+            "id": "issue cancel-task",
+            "gate": "via:POST /api/tasks/{taskId}/cancel"
+        },
+        {
+            "id": "issue block",
+            "gate": "via:POST /api/issues/{id}/blocked-by"
+        },
+        {
+            "id": "issue blocks",
+            "exempt": "read-only \u2014 wraps GET /api/issues/{id}/dependencies"
+        },
+        {
+            "id": "issue comment add",
+            "gate": "via:POST /api/issues/{id}/comments"
+        },
+        {
+            "id": "issue comment delete",
+            "gate": "via:DELETE /api/comments/{commentId}/"
+        },
+        {
+            "id": "issue comment list",
+            "exempt": "read-only \u2014 wraps GET /api/issues/{id}/comments"
+        },
+        {
+            "id": "issue comment move",
+            "gate": "via:POST /api/comments/move-to-thread"
+        },
+        {
+            "id": "issue create",
+            "gate": "via:POST /api/issues/"
+        },
+        {
+            "id": "issue context",
+            "exempt": "read-only \u2014 wraps GET /api/issues/{id}/context (CEREBRO-PATCH issue-context-bundle, FIR-2384)"
+        },
+        {
+            "id": "issue get",
+            "exempt": "read-only \u2014 wraps GET /api/issues/{id}"
+        },
+        {
+            "id": "issue label add",
+            "gate": "via:POST /api/issues/{id}/labels"
+        },
+        {
+            "id": "issue label list",
+            "exempt": "read-only \u2014 wraps GET /api/issues/{id}/labels"
+        },
+        {
+            "id": "issue label remove",
+            "gate": "via:DELETE /api/issues/{id}/labels/{labelId}"
+        },
+        {
+            "id": "issue related",
+            "gate": "via:POST /api/issues/{id}/related"
+        },
+        {
+            "id": "issue unblock",
+            "gate": "via:DELETE /api/issues/{id}/blocked-by/{otherId}"
+        },
+        {
+            "id": "issue list",
+            "exempt": "read-only \u2014 wraps GET /api/issues/"
+        },
+        {
+            "id": "issue metadata delete",
+            "gate": "via:http"
+        },
+        {
+            "id": "issue metadata get",
+            "gate": "via:http"
+        },
+        {
+            "id": "issue metadata list",
+            "gate": "via:http"
+        },
+        {
+            "id": "issue metadata set",
+            "gate": "via:http"
+        },
+        {
+            "id": "issue rerun",
+            "gate": "via:POST /api/issues/{id}/rerun"
+        },
+        {
+            "id": "issue run-messages",
+            "exempt": "read-only \u2014 wraps GET /api/daemon/tasks/{taskId}/messages"
+        },
+        {
+            "id": "issue runs",
+            "exempt": "read-only \u2014 wraps GET /api/issues/{id}/runs"
+        },
+        {
+            "id": "issue search",
+            "exempt": "read-only \u2014 wraps GET /api/issues/search"
+        },
+        {
+            "id": "issue status",
+            "gate": "via:PUT /api/issues/{id}"
+        },
+        {
+            "id": "issue subscriber add",
+            "gate": "via:POST /api/issues/{id}/subscribe"
+        },
+        {
+            "id": "issue subscriber list",
+            "exempt": "read-only \u2014 wraps GET /api/issues/{id}/subscribers"
+        },
+        {
+            "id": "issue subscriber remove",
+            "gate": "via:POST /api/issues/{id}/unsubscribe"
+        },
+        {
+            "id": "issue update",
+            "gate": "via:PUT /api/issues/{id}"
+        },
+        {
+            "id": "label create",
+            "gate": "via:POST /api/labels/"
+        },
+        {
+            "id": "label delete",
+            "gate": "via:DELETE /api/labels/{id}/"
+        },
+        {
+            "id": "label get",
+            "exempt": "read-only \u2014 wraps GET /api/labels/{id}"
+        },
+        {
+            "id": "label list",
+            "exempt": "read-only \u2014 wraps GET /api/labels/"
+        },
+        {
+            "id": "label update",
+            "gate": "via:PUT /api/labels/{id}/"
+        },
+        {
+            "id": "login",
+            "exempt": "pre-auth \u2014 establishes identity, then writes token to CLI config"
+        },
+        {
+            "id": "mcp install",
+            "exempt": "local-only \u2014 wires the MCP entry into the developer's Claude config"
+        },
+        {
+            "id": "mcp serve",
+            "exempt": "local-only \u2014 runs the MCP stdio server in this process"
+        },
+        {
+            "id": "orchestrate run",
+            "exempt": "local-only \u2014 simulates a plan locally; live agent dispatch is server-side and gated"
+        },
+        {
+            "id": "orchestrate validate",
+            "exempt": "local-only \u2014 reads a plan file and reports validation issues"
+        },
+        {
+            "id": "orchestrate waves",
+            "exempt": "local-only \u2014 reads a plan file and prints the computed execution waves"
+        },
+        {
+            "id": "project create",
+            "gate": "via:POST /api/projects/"
+        },
+        {
+            "id": "project delete",
+            "gate": "via:DELETE /api/projects/{id}/"
+        },
+        {
+            "id": "project get",
+            "exempt": "read-only \u2014 wraps GET /api/projects/{id}"
+        },
+        {
+            "id": "project list",
+            "exempt": "read-only \u2014 wraps GET /api/projects/"
+        },
+        {
+            "id": "project resource add",
+            "gate": "via:POST /api/projects/{id}/resources"
+        },
+        {
+            "id": "project resource list",
+            "exempt": "read-only \u2014 wraps GET /api/projects/{id}/resources"
+        },
+        {
+            "id": "project resource remove",
+            "gate": "via:DELETE /api/projects/{id}/resources/{resourceId}"
+        },
+        {
+            "id": "project resource update",
+            "gate": "via:PUT /api/projects/{id}/resources/{resourceId}"
+        },
+        {
+            "id": "project status",
+            "gate": "via:PUT /api/projects/{id}/"
+        },
+        {
+            "id": "project update",
+            "gate": "via:PUT /api/projects/{id}/"
+        },
+        {
+            "id": "sprint assign",
+            "gate": "via:PUT /api/issues/{id}"
+        },
+        {
+            "id": "sprint create",
+            "gate": "via:POST /api/projects/ + PUT /api/projects/{id}/parent"
+        },
+        {
+            "id": "sprint delete",
+            "gate": "via:DELETE /api/projects/{id}/"
+        },
+        {
+            "id": "sprint get",
+            "exempt": "read-only - wraps GET /api/projects/{id}"
+        },
+        {
+            "id": "sprint list",
+            "exempt": "read-only - wraps GET /api/projects/tree"
+        },
+        {
+            "id": "sprint update",
+            "gate": "via:PUT /api/projects/{id}/"
+        },
+        {
+            "id": "repo check",
+            "exempt": "read-only \u2014 pre-flight capability query, wraps daemon_auth-gated POST /api/daemon/workspaces/{workspaceId}/repo/check"
+        },
+        {
+            "id": "repo checkout",
+            "exempt": "local-only \u2014 git clone via daemon into local workdir"
+        },
+        {
+            "id": "runtime activity",
+            "exempt": "read-only \u2014 wraps GET /api/runtimes/{runtimeId}/activity"
+        },
+        {
+            "id": "runtime delete",
+            "gate": "via:DELETE /api/runtimes/{runtimeId}"
+        },
+        {
+            "id": "runtime list",
+            "exempt": "read-only \u2014 wraps GET /api/runtimes/"
+        },
+        {
+            "id": "runtime update",
+            "gate": "via:POST /api/runtimes/{runtimeId}/update"
+        },
+        {
+            "id": "runtime usage",
+            "exempt": "read-only \u2014 wraps GET /api/runtimes/{runtimeId}/usage"
+        },
+        {
+            "id": "setup cloud",
+            "exempt": "bootstrap \u2014 uses runtime-setup token before any user session exists"
+        },
+        {
+            "id": "setup self-host",
+            "exempt": "bootstrap \u2014 uses runtime-setup token before any user session exists"
+        },
+        {
+            "id": "skill change-requests",
+            "exempt": "read-only \u2014 wraps GET /api/skills/[{id}/]change-requests"
+        },
+        {
+            "id": "skill create",
+            "gate": "via:POST /api/skills/"
+        },
+        {
+            "id": "skill delete",
+            "gate": "via:DELETE /api/skills/{id}/"
+        },
+        {
+            "id": "skill diff",
+            "exempt": "read-only \u2014 wraps GET /api/skills/{id}/versions"
+        },
+        {
+            "id": "skill files delete",
+            "gate": "via:DELETE /api/skills/{id}/files/{fileId}"
+        },
+        {
+            "id": "skill files list",
+            "exempt": "read-only \u2014 wraps GET /api/skills/{id}/files"
+        },
+        {
+            "id": "skill files upsert",
+            "gate": "via:PUT /api/skills/{id}/files"
+        },
+        {
+            "id": "skill fork",
+            "gate": "via:POST /api/skills/{id}/forks"
+        },
+        {
+            "id": "skill get",
+            "exempt": "read-only \u2014 wraps GET /api/skills/{id}"
+        },
+        {
+            "id": "skill import",
+            "gate": "via:POST /api/skills/import"
+        },
+        {
+            "id": "skill list",
+            "exempt": "read-only \u2014 wraps GET /api/skills/"
+        },
+        {
+            "id": "skill ownership",
+            "gate": "via:PUT /api/skills/{id}/ownership"
+        },
+        {
+            "id": "skill propose",
+            "gate": "via:POST /api/skills/{id}/change-requests"
+        },
+        {
+            "id": "skill review",
+            "gate": "via:POST /api/skills/change-requests/{crId}/review"
+        },
+        {
+            "id": "skill update",
+            "gate": "via:PUT /api/skills/{id}/"
+        },
+        {
+            "id": "skill versions",
+            "exempt": "read-only \u2014 wraps GET /api/skills/{id}/versions"
+        },
+        {
+            "id": "squad activity",
+            "gate": "via:POST /api/issues/{id}/squad-evaluated"
+        },
+        {
+            "id": "squad create",
+            "gate": "via:POST /api/squads/"
+        },
+        {
+            "id": "squad delete",
+            "gate": "via:DELETE /api/squads/{id}/"
+        },
+        {
+            "id": "squad get",
+            "exempt": "read-only \u2014 wraps GET /api/squads/{id}"
+        },
+        {
+            "id": "squad list",
+            "exempt": "read-only \u2014 wraps GET /api/squads"
+        },
+        {
+            "id": "squad member add",
+            "gate": "via:POST /api/squads/{id}/members"
+        },
+        {
+            "id": "squad member list",
+            "exempt": "read-only \u2014 wraps GET /api/squads/{id}/members"
+        },
+        {
+            "id": "squad member remove",
+            "gate": "via:DELETE /api/squads/{id}/members"
+        },
+        {
+            "id": "squad update",
+            "gate": "via:PUT /api/squads/{id}/"
+        },
+        {
+            "id": "update",
+            "exempt": "local-only \u2014 replaces the multica binary on disk"
+        },
+        {
+            "id": "user profile get",
+            "exempt": "read-only \u2014 wraps GET /api/me/profile"
+        },
+        {
+            "id": "user profile update",
+            "gate": "via:PUT /api/me/profile"
+        },
+        {
+            "id": "version",
+            "exempt": "local-only \u2014 prints build metadata"
+        },
+        {
+            "id": "wakeup cancel",
+            "gate": "via:POST /api/cerebro/wakeups/{id}/cancel"
+        },
+        {
+            "id": "wakeup create",
+            "gate": "via:POST /api/cerebro/wakeups"
+        },
+        {
+            "id": "wakeup get",
+            "exempt": "read-only \u2014 wraps GET /api/cerebro/wakeups/{id}"
+        },
+        {
+            "id": "wakeup list",
+            "exempt": "read-only \u2014 wraps GET /api/cerebro/wakeups"
+        },
+        {
+            "id": "workspace get",
+            "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/"
+        },
+        {
+            "id": "workspace list",
+            "exempt": "read-only \u2014 wraps GET /api/workspaces/"
+        },
+        {
+            "id": "workspace member list",
+            "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/members"
+        },
+        {
+            "id": "workspace switch",
+            "exempt": "local-only \u2014 changes the active workspace in CLI config"
+        },
+        {
+            "id": "workspace update",
+            "gate": "via:PUT /api/workspaces/{id}/"
+        }
+    ]
 }
