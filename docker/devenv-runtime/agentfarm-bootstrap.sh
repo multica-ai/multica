@@ -10,13 +10,16 @@
 # Optional from secret bag:      GIT_USER_EMAIL, JIRA_PAT
 #                                (both together trigger acli auth; either missing skips)
 # Defaulted constant:            ATLASSIAN_SITE (https://g2crowd.atlassian.net)
-# Hardcoded constants:           MULTICA_SERVER_URL, LITELLM_BASE_URL (workspace-invariant)
+# Env-overridable (default set): MULTICA_SERVER_URL (dev pipeline points it at the dev server)
+# Hardcoded constants:           LITELLM_BASE_URL (workspace-invariant)
 # Reads from image:              /etc/multica/agent-templates/
 
 set -euo pipefail
 
-# ── Hardcoded workspace-invariant URLs ────────────────────────────────────────
-readonly MULTICA_SERVER_URL="https://agentfarm.g2.com"
+# ── Server / LLM URLs ─────────────────────────────────────────────────────────
+# MULTICA_SERVER_URL defaults to the tools/prod server; override via env to point
+# at the development agentfarm server.
+readonly MULTICA_SERVER_URL="${MULTICA_SERVER_URL:-https://agentfarm.g2.com}"
 readonly LITELLM_BASE_URL="https://llmproxy.g2.com"
 
 # ── 0. Sanity-check required env. Fail loud over silent partial provisioning. ─

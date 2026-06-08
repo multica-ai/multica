@@ -35,7 +35,9 @@ chmod 600 "${SSH_KEY}" 2>/dev/null || true
 chmod 644 "${SSH_KEY}.pub" 2>/dev/null || true
 
 # ── Write multica config ───────────────────────────────────────────────────────
-readonly MULTICA_SERVER_URL="https://agentfarm.g2.com"
+# Defaults to the tools/prod server; override via env (e.g. the dev runner
+# pipeline points this at the development agentfarm server).
+readonly MULTICA_SERVER_URL="${MULTICA_SERVER_URL:-https://agentfarm.g2.com}"
 config_dir="${HOME}/.multica"
 mkdir -p "${config_dir}"
 umask 077
