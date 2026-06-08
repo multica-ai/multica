@@ -260,3 +260,65 @@ WHERE i.workspace_id = $1 AND i.kind = 'issue' AND i.origin_type = 'agent_task'
 GROUP BY u.id, u.name
 ORDER BY COUNT(*) DESC
 LIMIT 20;
+
+-- name: DashboardTopMessageSendersInPeriod :many
+-- Top members by messages sent in the period: combines chat messages (user role)
+-- with member comments on channel/DM issues. TECH-3093.
+SELECT u.id::uuid AS actor_id,
+       COALESCE(u.name, u.email, 'Unknown') AS name,
+       COUNT(*)::int AS count
+FROM (
+  SELECT cs.creator_id AS user_id
+  FROM chat_message cm
+  JOIN chat_session cs ON cs.id = cm.chat_session_id
+  WHERE cs.workspace_id = $1
+    AND cm.role = 'user'
+    AND cm.created_at >= $2 AND cm.created_at < $3
+
+  UNION ALL
+
+  SELECT c.author_id AS user_id
+  FROM comment c
+  JOIN issue i ON i.id = c.issue_id
+  WHERE i.workspace_id = $1
+    AND i.kind IN ('channel', 'dm')
+    AND c.author_type = 'member'
+    AND c.created_at >= $2 AND c.created_at < $3
+) sub
+JOIN "user" u ON u.id = sub.user_id
+GROUP BY u.id, u.name, u.email
+ORDER BY COUNT(*) DESC
+LIMIT 10;
+
+-- name: DashboardTopMessageRecipientsInPeriod :many
+-- Top agents by chat messages received from members in the period. TECH-3093.
+SELECT a.id::uuid AS actor_id,
+       a.name,
+       COUNT(*)::int AS count
+FROM chat_message cm
+JOIN chat_session cs ON cs.id = cm.chat_session_id
+JOIN agent a ON a.id = cs.agent_id
+WHERE cs.workspace_id = $1
+  AND cm.role = 'user'
+  AND cm.created_at >= $2 AND cm.created_at < $3
+GROUP BY a.id, a.name
+ORDER BY COUNT(*) DESC
+LIMIT 10;
+
+-- name: DashboardMessageFlowInPeriod :many
+-- Sender→recipient pairs with message counts for the period. TECH-3093.
+SELECT u.id::uuid AS sender_id,
+       COALESCE(u.name, u.email, 'Unknown') AS sender_name,
+       a.id::uuid AS recipient_id,
+       a.name AS recipient_name,
+       COUNT(*)::int AS count
+FROM chat_message cm
+JOIN chat_session cs ON cs.id = cm.chat_session_id
+JOIN "user" u ON u.id = cs.creator_id
+JOIN agent a ON a.id = cs.agent_id
+WHERE cs.workspace_id = $1
+  AND cm.role = 'user'
+  AND cm.created_at >= $2 AND cm.created_at < $3
+GROUP BY u.id, u.name, u.email, a.id, a.name
+ORDER BY COUNT(*) DESC
+LIMIT 30;

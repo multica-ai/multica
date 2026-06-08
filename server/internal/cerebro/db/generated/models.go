@@ -505,13 +505,6 @@ type CerebroExchangeRate struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
-type CerebroWorkspaceSetting struct {
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	DisplayCurrency string             `json:"display_currency"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	UpdatedBy       pgtype.UUID        `json:"updated_by"`
-}
-
 type CerebroFeatureFlag struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -918,6 +911,13 @@ type CerebroWorkspaceGrantAudit struct {
 	Surface     string             `json:"surface"`
 	Diff        []byte             `json:"diff"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroWorkspaceSetting struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	DisplayCurrency string             `json:"display_currency"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy       pgtype.UUID        `json:"updated_by"`
 }
 
 type ChatMessage struct {

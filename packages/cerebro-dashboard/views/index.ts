@@ -8,3 +8,6 @@ export { IssuesDonut } from "./components/issues-donut";
 export { TopActors } from "./components/top-actors";
 export { ActivityFeed } from "./components/activity-feed";
 export { RecentTasksList } from "./components/recent-tasks-list";
+export { MessageTracker } from "./components/message-tracker";
+export { MessageFlow } from "./components/message-flow";
+export { DashboardTabBar } from "./components/dashboard-tab-bar";
