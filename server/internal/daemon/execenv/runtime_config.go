@@ -523,6 +523,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	if hasIssueContext { // CEREBRO-PATCH(runtime-config-no-busywait): FIR-2610 — standing rule: never busy-wait on CI/deploy
 		b.WriteString(cerebroNoBusyWaitRule())
+		b.WriteString(cerebroWakeupMandatoryRule()) // CEREBRO-PATCH(runtime-config-wakeup-mandatory): TECH-3121 — set a wakeup and state the time whenever you comment about waiting or returning
 	}
 
 	b.WriteString("### Workflow\n\n")
