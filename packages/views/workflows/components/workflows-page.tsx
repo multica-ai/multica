@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Workflow as WorkflowIcon, Play, Pause, FileText, Archive, Zap, History, Eye } from "lucide-react";
+import { Plus, Workflow as WorkflowIcon, Play, Pause, FileText, Archive, Zap, History, Eye, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { workflowListOptions, workflowNodesOptions, workflowEdgesOptions, useCreateWorkflow } from "@multica/core/workflows/queries";
+import { toast } from "sonner";
+import { workflowListOptions, workflowNodesOptions, workflowEdgesOptions, useCreateWorkflow, useDeleteWorkflow, workflowTemplateListOptions, useCreateWorkflowFromTemplate } from "@multica/core/workflows/queries";
+import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, useNavigation } from "../../navigation";
@@ -151,6 +153,7 @@ function WorkflowRow({ workflow }: { workflow: Workflow }) {
   const wsPaths = useWorkspacePaths();
   const status = (workflow.status as WorkflowStatus) || "draft";
   const Icon = STATUS_ICON[status] ?? FileText;
+  const deleteWorkflow = useDeleteWorkflow(wsId);
 
   const { data: nodes = [] } = useQuery({
     ...workflowNodesOptions(wsId, workflow.id),
@@ -171,6 +174,16 @@ function WorkflowRow({ workflow }: { workflow: Workflow }) {
   const vh = maxY - minY + 20;
   const thumbH = 44;
   const thumbW = Math.min(vw * (thumbH / vh), 180);
+
+  const handleDelete = async () => {
+    if (!confirm(t(($) => $.page.delete_confirm))) return;
+    try {
+      await deleteWorkflow.mutateAsync(workflow.id);
+      toast.success(t(($) => $.detail.toast_deleted));
+    } catch {
+      toast.error(t(($) => $.detail.toast_delete_failed));
+    }
+  };
 
   return (
     <div className="group/row flex items-center gap-2 border-b px-5 py-2 text-sm transition-colors hover:bg-accent/40 h-16">
@@ -242,6 +255,14 @@ function WorkflowRow({ workflow }: { workflow: Workflow }) {
         >
           <History className="h-3.5 w-3.5" />
         </AppLink>
+        <button
+          type="button"
+          className="shrink-0 w-20 flex justify-center p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+          title="Delete"
+          onClick={handleDelete}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   );
@@ -254,6 +275,9 @@ export function WorkflowsPage() {
   const { push } = useNavigation();
   const { data, isLoading } = useQuery(workflowListOptions(wsId));
   const createWorkflow = useCreateWorkflow(wsId);
+  const createFromTemplate = useCreateWorkflowFromTemplate(wsId);
+  const { data: templateData } = useQuery(workflowTemplateListOptions(wsId));
+  const backendTemplates = templateData?.workflows ?? [];
   const workflows = data?.workflows ?? [];
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | "all">("all");
   const [previewTemplate, setPreviewTemplate] = useState<WorkflowTemplate | null>(null);
@@ -348,6 +372,7 @@ export function WorkflowsPage() {
               <span className="w-20 text-center shrink-0">{t(($) => $.page.table.status)}</span>
               <span className="w-16 text-center shrink-0">{t(($) => $.page.table.nodes)}</span>
               <span className="w-16 shrink-0 text-center">{t(($) => $.page.table.runs)}</span>
+              <span className="w-20 shrink-0 text-center">{t(($) => $.page.table.actions)}</span>
             </div>
             <div className="flex gap-1 px-5 py-2 border-b">
               {(["all", "active", "draft", "paused", "archived"] as const).map((s) => (
@@ -406,17 +431,55 @@ export function WorkflowsPage() {
                 <Button
                   size="sm"
                   onClick={async () => {
+                    // Prefer the backend template clone so the new workflow
+                    // gets every field (instructions, format_schema, etc.)
+                    // exactly as the server-side template defines it.
+                    const backendTpl = backendTemplates.find(
+                      (t) => t.title === previewTemplate.name
+                    );
+                    if (backendTpl) {
+                      const workflow = await createFromTemplate.mutateAsync({
+                        templateId: backendTpl.id,
+                        title: previewTemplate.name,
+                      });
+                      setPreviewTemplate(null);
+                      push(wsPaths.workflowDetail(workflow.id));
+                      return;
+                    }
+                    // Fallback: manual creation from the hard-coded preview data.
                     const workflow = await createWorkflow.mutateAsync({
                       title: previewTemplate.name,
-                      template: previewTemplate.templateKey,
                     });
+                    const oldToNew = new Map<string, string>();
+                    for (const node of previewTemplate.nodes) {
+                      const created = await api.createWorkflowNode(workflow.id, {
+                        title: node.title,
+                        description: node.description,
+                        position_x: node.position_x,
+                        position_y: node.position_y,
+                        worker_type: "agent",
+                        critic_type: "human",
+                        format_schema: { shape: "rectangle" },
+                      });
+                      oldToNew.set(node.id, created.id);
+                    }
+                    for (const edge of previewTemplate.edges) {
+                      const sourceId = oldToNew.get(edge.source_node_id);
+                      const targetId = oldToNew.get(edge.target_node_id);
+                      if (sourceId && targetId) {
+                        await api.createWorkflowEdge(workflow.id, {
+                          source_node_id: sourceId,
+                          target_node_id: targetId,
+                        });
+                      }
+                    }
                     setPreviewTemplate(null);
                     push(wsPaths.workflowDetail(workflow.id));
                   }}
-                  disabled={createWorkflow.isPending}
+                  disabled={createWorkflow.isPending || createFromTemplate.isPending}
                 >
                   <Zap className="h-3.5 w-3.5 mr-1" />
-                  {createWorkflow.isPending ? "Creating..." : "Use this template"}
+                  {createWorkflow.isPending || createFromTemplate.isPending ? "Creating..." : "Use this template"}
                 </Button>
               </div>
             </>

@@ -7,8 +7,10 @@
       "status": "Status",
       "nodes": "Nodes",
       "last_run": "Last run",
-      "runs": "Runs"
+      "runs": "Runs",
+      "actions": "Actions"
     },
+    "delete_confirm": "Delete this workflow? All nodes, edges and runs will be permanently deleted.",
     "last_run_empty": "--",
     "empty": {
       "title": "No workflows yet",

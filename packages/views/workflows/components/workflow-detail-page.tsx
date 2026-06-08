@@ -28,7 +28,6 @@ import { useT } from "../../i18n";
 import { ReactFlowProvider } from "@xyflow/react";
 import { DAGCanvas } from "./dag-canvas";
 import { NodeConfigPanel } from "./node-config-panel";
-import { NodePalette } from "./node-palette";
 import { computeAutoLayout } from "./layout";
 import type { WorkflowStatus } from "@multica/core/types";
 
@@ -154,13 +153,12 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
     deleteEdgeMutation.mutate(edgeId);
   }, [deleteEdgeMutation.mutate, edges]);
 
-  const handleAddNode = async (type: string, x: number, y: number, color?: string) => {
+  const handleAddNode = async (type: string, x: number, y: number) => {
     try {
       const isAnnotation = type === "annotation";
       const formatSchema: Record<string, unknown> = isAnnotation
         ? { type: "annotation" }
         : { shape: type };
-      if (color) formatSchema.color = color;
       const result = await createNodeMutation.mutateAsync({
         title: isAnnotation ? "Note" : "New Node",
         worker_type: "human",
@@ -435,9 +433,17 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               />
             </ReactFlowProvider>
           )}
-          {/* Node palette (floating, top-left) */}
+          {/* Add node button (floating, top-left) */}
           {nodes.length > 0 && mode === "edit" && (
-            <NodePalette className="absolute top-3 left-3" />
+            <Button
+              size="icon"
+              variant="outline"
+              className="absolute top-3 left-3 h-9 w-9"
+              onClick={() => handleAddNode("rectangle", 200, 200)}
+              title={t(($) => $.detail.add_node)}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
           )}
         </div>
 
