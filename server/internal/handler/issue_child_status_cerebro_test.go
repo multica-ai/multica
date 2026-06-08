@@ -61,6 +61,32 @@ func TestChildInReviewNotifiesParent(t *testing.T) {
 	}
 }
 
+func TestChildStatusNotificationSkippedWhenWorkspaceFlagOff(t *testing.T) {
+	wireChildNotifyFlagQueries(t)
+	clearChildNotifyFlag(t, testUserID, "cerebro_child_status_notify_parent")
+	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_status_notify_parent", false, false)
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+		t.Fatalf("workspace flag off should suppress in_review parent notification, got %d comments", got)
+	}
+}
+
+func TestChildStatusNotificationPersonalOverrideBeatsUnlockedWorkspaceOff(t *testing.T) {
+	wireChildNotifyFlagQueries(t)
+	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_status_notify_parent", false, false)
+	setChildNotifyFlag(t, testUserID, "cerebro_child_status_notify_parent", true, false)
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "blocked")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("personal override on should allow blocked parent notification, got %d comments", got)
+	}
+}
+
 // TestChildBlockedNotifiesParent — a child moving into `blocked` posts exactly
 // one system comment on the parent whose body signals the blocked state so the
 // parent driver knows to unblock or re-route.

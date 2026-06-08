@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
 
 // childDoneFixture creates a parent + child pair so the parent-notification
@@ -89,6 +91,41 @@ func countSystemCommentsOn(t *testing.T, issueID string) int {
 	return n
 }
 
+func setChildNotifyFlag(t *testing.T, userID, key string, enabled, locked bool) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled, locked)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (workspace_id, user_id, flag_key) DO UPDATE
+		 SET enabled = EXCLUDED.enabled, locked = EXCLUDED.locked, updated_at = NOW()`,
+		testWorkspaceID, userID, key, enabled, locked,
+	); err != nil {
+		t.Fatalf("set child notify flag %s for %s: %v", key, userID, err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM cerebro_feature_flags WHERE workspace_id = $1 AND user_id = $2 AND flag_key = $3`,
+			testWorkspaceID, userID, key)
+	})
+}
+
+func clearChildNotifyFlag(t *testing.T, userID, key string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM cerebro_feature_flags WHERE workspace_id = $1 AND user_id = $2 AND flag_key = $3`,
+		testWorkspaceID, userID, key,
+	); err != nil {
+		t.Fatalf("clear child notify flag %s for %s: %v", key, userID, err)
+	}
+}
+
+func wireChildNotifyFlagQueries(t *testing.T) {
+	t.Helper()
+	orig := testHandler.CerebroQueries
+	testHandler.CerebroQueries = cerebrodb.New(testPool)
+	t.Cleanup(func() { testHandler.CerebroQueries = orig })
+}
+
 func systemCommentOn(t *testing.T, issueID string) (content, authorIDStr string, parentNull bool, typeStr string) {
 	t.Helper()
 	row := testPool.QueryRow(context.Background(),
@@ -151,6 +188,32 @@ func TestChildDoneNotifiesParent(t *testing.T) {
 		if strings.Contains(content, banned) {
 			t.Errorf("parent has no assignee but comment included %q mention, got: %s", banned, content)
 		}
+	}
+}
+
+func TestChildDoneNotificationSkippedWhenWorkspaceFlagOff(t *testing.T) {
+	wireChildNotifyFlagQueries(t)
+	clearChildNotifyFlag(t, testUserID, "cerebro_child_done_notify_parent")
+	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_done_notify_parent", false, false)
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+		t.Fatalf("workspace flag off should suppress done parent notification, got %d comments", got)
+	}
+}
+
+func TestChildDoneNotificationPersonalOverrideBeatsUnlockedWorkspaceOff(t *testing.T) {
+	wireChildNotifyFlagQueries(t)
+	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_done_notify_parent", false, false)
+	setChildNotifyFlag(t, testUserID, "cerebro_child_done_notify_parent", true, false)
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("personal override on should allow done parent notification, got %d comments", got)
 	}
 }
 
