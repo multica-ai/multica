@@ -1355,6 +1355,9 @@ importers:
 
   packages/cerebro-channels:
     dependencies:
+      '@multica/cerebro-display-currency':
+        specifier: workspace:*
+        version: link:../cerebro-display-currency
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
