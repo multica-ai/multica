@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync"
 	"testing"
@@ -360,17 +361,21 @@ func TestCheckOrigin(t *testing.T) {
 	})
 	t.Cleanup(func() { SetAllowedOrigins(prev) })
 
-	prevProxies := trustedProxies.Load().([]string)
-	SetTrustedProxies([]string{"127.0.0.1", "10.0.0.1"})
+	prevProxies := trustedProxies.Load().([]netip.Prefix)
+	SetTrustedProxies([]netip.Prefix{
+		netip.MustParsePrefix("127.0.0.1/32"),
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("::1/128"),
+	})
 	t.Cleanup(func() { SetTrustedProxies(prevProxies) })
 
 	cases := []struct {
-		name        string
-		host        string
-		origin      string
-		fwdHost     string
-		remoteAddr  string
-		want        bool
+		name       string
+		host       string
+		origin     string
+		fwdHost    string
+		remoteAddr string
+		want       bool
 	}{
 		{"empty origin allowed", "api.multica.ai", "", "", "1.2.3.4:5678", true},
 		{"same-origin allowed (native client default)", "localhost:8080", "http://localhost:8080", "", "1.2.3.4:5678", true},
@@ -386,6 +391,10 @@ func TestCheckOrigin(t *testing.T) {
 		{"X-Forwarded-Host from trusted proxy but evil origin rejected", "internal.proxy", "https://evil.com", "multica.ai", "127.0.0.1:5678", false},
 		{"X-Forwarded-Host present but origin matches direct Host", "multica.ai", "https://multica.ai", "other.host", "1.2.3.4:5678", true},
 		{"X-Forwarded-Host spoofed by attacker rejected", "internal.proxy", "https://evil.com", "evil.com", "1.2.3.4:5678", false},
+		{"X-Forwarded-Host from trusted CIDR range matches origin", "internal.proxy", "https://multica.ai", "multica.ai", "10.5.6.7:5678", true},
+		{"X-Forwarded-Host from trusted IPv6 proxy matches origin", "internal.proxy", "https://multica.ai", "multica.ai", "[::1]:5678", true},
+		{"X-Forwarded-Host comma list uses first (client-facing) value", "internal.proxy", "https://multica.ai", "multica.ai, proxy.internal", "127.0.0.1:5678", true},
+		{"X-Forwarded-Host comma list ignores trailing values", "internal.proxy", "https://app.multica.ai", "proxy.internal, app.multica.ai", "127.0.0.1:5678", false},
 	}
 
 	for _, tc := range cases {
