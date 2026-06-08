@@ -42,6 +42,8 @@ import { readOrigin } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";
 import { type SkillRow, useSkillColumns } from "./skill-columns";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(skill-category-filter): TECH-3077 — category filter from cerebro-skill-metadata.
+import { SkillCategoryFilter } from "@multica/cerebro-skill-metadata";
 
 type FilterKey = "all" | "used" | "unused" | "mine";
 
@@ -199,6 +201,8 @@ export default function SkillsPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [createOpen, setCreateOpen] = useState(false);
+  // CEREBRO-PATCH(skill-category-filter): TECH-3077 — category filter state.
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
 
   const assignments = useMemo(
     () => selectSkillAssignments(agents),
@@ -236,9 +240,11 @@ export default function SkillsPage() {
       if (filter === "used" && !byAssignment(s)) return false;
       if (filter === "unused" && byAssignment(s)) return false;
       if (filter === "mine" && s.created_by !== currentUserId) return false;
+      // CEREBRO-PATCH(skill-category-filter): TECH-3077 — filter by category.
+      if (categoryFilter && s.metadata?.category !== categoryFilter) return false;
       return true;
     });
-  }, [skills, assignments, search, filter, currentUserId]);
+  }, [skills, assignments, search, filter, currentUserId, categoryFilter]);
 
   const handleCreated = (skill: Skill) => {
     navigation.push(paths.skillDetail(skill.id));
@@ -386,6 +392,14 @@ export default function SkillsPage() {
               filter={filter}
               setFilter={setFilter}
             />
+            {/* CEREBRO-PATCH(skill-category-filter): TECH-3077 — category filter row. */}
+            <div className="shrink-0 border-b px-3 py-2 sm:px-4">
+              <SkillCategoryFilter
+                skills={skills}
+                category={categoryFilter}
+                onCategoryChange={setCategoryFilter}
+              />
+            </div>
             {filtered.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
                 <Search className="h-8 w-8 text-muted-foreground/40" />
