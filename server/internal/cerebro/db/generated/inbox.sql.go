@@ -132,6 +132,54 @@ func (q *Queries) ClearInboxMuteByIssue(ctx context.Context, arg ClearInboxMuteB
 	return result.RowsAffected(), nil
 }
 
+const createManualInboxItem = `-- name: CreateManualInboxItem :one
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title,
+    actor_type, actor_id, route
+) VALUES ($1, 'member', $2, 'manually_added', 'info', $3, $4, 'member', $2, 'inbox')
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+`
+
+type CreateManualInboxItemParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Title       string      `json:"title"`
+}
+
+// Manually add an issue to the member's inbox. actor = the member themselves
+// (self-created), severity = info since no action is required.
+func (q *Queries) CreateManualInboxItem(ctx context.Context, arg CreateManualInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, createManualInboxItem,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.Title,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
 const createPrivateAgentRunRequest = `-- name: CreatePrivateAgentRunRequest :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
@@ -276,6 +324,53 @@ func (q *Queries) CreateRuntimePauseInboxCard(ctx context.Context, arg CreateRun
 		arg.Body,
 		arg.Details,
 	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
+const findManualInboxItem = `-- name: FindManualInboxItem :one
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND issue_id = $3
+  AND type = 'manually_added'
+  AND archived = false
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindManualInboxItemParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// Dedup guard for manually_added items. Returns the active (non-archived) item
+// for (recipient, issue) so AddIssueToInbox can resurface it instead of
+// inserting a duplicate row.
+func (q *Queries) FindManualInboxItem(ctx context.Context, arg FindManualInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, findManualInboxItem, arg.WorkspaceID, arg.RecipientID, arg.IssueID)
 	var i InboxItem
 	err := row.Scan(
 		&i.ID,

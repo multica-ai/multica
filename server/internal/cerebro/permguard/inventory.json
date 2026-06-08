@@ -737,6 +737,10 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/inbox/add-issue",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/inbox/reminders",
       "gate": "self_only"
     },

@@ -59,7 +59,9 @@
     "_comment_cerebro_patch_agent_comment_split": "CEREBRO-PATCH(inbox-types-locale-ko): TECH-2961 agent-comment-by-tag split labels",
     "agent_comment_no_tag": "에이전트 댓글",
     "agent_comment_member_tag": "에이전트가 멘션함",
-    "agent_comment_agent_tag": "에이전트 인계"
+    "agent_comment_agent_tag": "에이전트 인계",
+    "_comment_cerebro_patch_manually_added": "CEREBRO-PATCH(cerebro-inbox-add-issue): issue #3076 — manually added inbox item type label.",
+    "manually_added": "받은 편지함에 추가됨"
   },
   "labels": {
     "set_status_to": "상태 변경:",

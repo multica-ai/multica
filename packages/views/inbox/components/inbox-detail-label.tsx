@@ -44,6 +44,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     agent_comment_no_tag: t(($) => $.types.agent_comment_no_tag),
     agent_comment_member_tag: t(($) => $.types.agent_comment_member_tag),
     agent_comment_agent_tag: t(($) => $.types.agent_comment_agent_tag),
+    manually_added: t(($) => $.types.manually_added), // CEREBRO-PATCH(cerebro-inbox-add-issue): label for manually added inbox items.
   };
 }
 

@@ -44,6 +44,9 @@ const (
 	eventInboxUnmuted    = "inbox:unmuted"
 	eventInboxUnread     = "inbox:unread"
 	eventInboxUnarchived = "inbox:unarchived"
+	// eventInboxNew fires when a new item is manually inserted via the handler.
+	// listeners.go routes the WS message to the recipient's open sessions.
+	eventInboxNew = "inbox:new"
 )
 
 // Handler exposes the cerebro-only inbox HTTP endpoints. Carries both the
@@ -612,6 +615,109 @@ func (h *Handler) ArchiveAllNotifications(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+// AddIssueToInbox manually places an issue into the member's inbox.
+// Body: {"issue_id": "<uuid>"}
+//
+// Idempotent: if the member already has an active (non-archived) manually_added
+// item for this issue, the existing item is marked unread so it resurfaces
+// without creating a duplicate row.
+func (h *Handler) AddIssueToInbox(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := workspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	recipientID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	var body struct {
+		IssueID string `json:"issue_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.IssueID) == "" {
+		writeError(w, http.StatusBadRequest, "issue_id is required")
+		return
+	}
+	issueUUID, err := util.ParseUUID(strings.TrimSpace(body.IssueID))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid issue_id")
+		return
+	}
+
+	// Validate the issue belongs to the workspace and retrieve its title.
+	issue, err := h.Upstream.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          issueUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+
+	// Dedup: if an active manually_added item already exists, mark it unread so
+	// it resurfaces in the feed without duplicating the row.
+	existing, err := h.Cerebro.FindManualInboxItem(r.Context(), cerebrodb.FindManualInboxItemParams{
+		WorkspaceID: wsUUID,
+		RecipientID: recipientID,
+		IssueID:     issueUUID,
+	})
+	if err == nil {
+		updated, err := h.Cerebro.SetInboxUnread(r.Context(), existing.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update inbox item")
+			return
+		}
+		h.publishInboxEvent(eventInboxUnread, updated)
+		writeJSON(w, http.StatusOK, toResponse(updated))
+		return
+	}
+
+	// No active item — create one.
+	item, err := h.Cerebro.CreateManualInboxItem(r.Context(), cerebrodb.CreateManualInboxItemParams{
+		WorkspaceID: wsUUID,
+		RecipientID: recipientID,
+		IssueID:     issueUUID,
+		Title:       issue.Title,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create inbox item")
+		return
+	}
+	h.publishNewItem(item)
+	writeJSON(w, http.StatusCreated, toResponse(item))
+}
+
+// publishNewItem broadcasts inbox:new for a freshly inserted item so real-time
+// listeners in listeners.go push it to the recipient's open sessions.
+// The payload shape matches what listeners.go expects: payload["item"]["recipient_id"]
+// routes the WS message to the correct connected client.
+func (h *Handler) publishNewItem(item cerebrodb.InboxItem) {
+	if h.Bus == nil {
+		return
+	}
+	recipientID := util.UUIDToString(item.RecipientID)
+	h.Bus.Publish(events.Event{
+		Type:        eventInboxNew,
+		WorkspaceID: util.UUIDToString(item.WorkspaceID),
+		ActorType:   "member",
+		ActorID:     recipientID,
+		Payload: map[string]any{
+			"item": map[string]any{
+				"id":           util.UUIDToString(item.ID),
+				"recipient_id": recipientID,
+				"type":         item.Type,
+				"title":        item.Title,
+				"route":        item.Route,
+			},
+		},
+	})
 }
 
 func workspaceUUID(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {

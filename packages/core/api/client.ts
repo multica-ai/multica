@@ -2637,6 +2637,14 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/run-private-agent`, { method: "POST" });
   }
 
+  // CEREBRO-PATCH(cerebro-inbox-add-issue): manually place an issue in the member's inbox.
+  async addIssueToInbox(issueId: string): Promise<InboxItem> {
+    return this.fetch("/api/inbox/add-issue", {
+      method: "POST",
+      body: JSON.stringify({ issue_id: issueId }),
+    });
+  }
+
   // CEREBRO-PATCH(cerebro-focus-list-client): TECH-2947 — personal focus list API.
   async listFocusListItems(): Promise<FocusListItem[]> {
     return this.fetch("/api/cerebro/focus-list");
