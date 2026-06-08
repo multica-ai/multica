@@ -139,8 +139,11 @@ async function loadModelsDev() {
   ];
 
   const sortedKeys = [...rows.keys()].sort();
-  for (const key of sortedKeys) {
-    const c = rows.get(key);
+
+  // Pre-compute clamped effective pricing for all rows so we can do the
+  // redundancy check and the final emit in one pass.
+  const effective = new Map();
+  for (const [key, c] of rows) {
     // Clamp cacheRead to input so estimateCacheSavings never goes negative.
     // models.dev has a few upstream-quirky rows (e.g. gpt-3.5-turbo) where
     // cache_read > input, which would make "money saved by the cache" a
@@ -152,7 +155,53 @@ async function loadModelsDev() {
     // cache_write: 0.3 vs input: 3) is almost certainly a data error and
     // would systematically under-bill cache-creation tokens.
     const cacheWrite = Math.max(c.cache_write ?? c.input, c.input);
-    lines.push(`  ${JSON.stringify(key)}: { input: ${c.input}, output: ${c.output}, cacheRead: ${cacheRead}, cacheWrite: ${cacheWrite} },`);
+    effective.set(key, { input: c.input, output: c.output, cacheRead, cacheWrite });
+  }
+
+  const pricingId = (p) =>
+    `${p.input}|${p.output}|${p.cacheRead}|${p.cacheWrite}`;
+
+  // Fully-canonical form: mirrors the resolver's canonicalCandidates
+  // transformations (utils.ts:280-317) that eliminate resolver-equivalent
+  // aliases — strip provider prefix, apply claude dot→dash, strip context
+  // tag, strip trailing date. Two keys with the same FC and identical
+  // effective pricing resolve to the same entry; keep only the FC
+  // representative and drop the redundant alias.
+  //
+  // Critically, canonAnthropic only applies to claude-* IDs — OpenAI
+  // dot/dash (gpt-5.4 ≠ gpt-5-4) are NOT normalized and must both stay.
+  //
+  // github-copilot/* entries with real pricing land here too: their dashed
+  // provider counterpart does not exist in models.dev, but stripProvider
+  // reaches the identical bare-model entry (e.g. github-copilot/claude-opus-4.7
+  // → claude-opus-4-7 — same $5/$25 rate). Safe to drop: the resolver's
+  // stripProvider step finds the bare key without the vendor row.
+  const fullyCanonical = (key) => {
+    const i = key.indexOf("/");
+    let s =
+      i > 0 && /^[a-z][a-z0-9_-]*$/i.test(key.slice(0, i))
+        ? key.slice(i + 1)
+        : key;
+    if (s.startsWith("claude-")) s = s.replace(/\./g, "-");
+    s = s.replace(/\[[^\]]+\]$/, "");
+    s = s.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
+    return s;
+  };
+
+  let skippedRedundant = 0;
+
+  for (const key of sortedKeys) {
+    const fc = fullyCanonical(key);
+    if (
+      fc !== key &&
+      effective.has(fc) &&
+      pricingId(effective.get(fc)) === pricingId(effective.get(key))
+    ) {
+      skippedRedundant++;
+      continue;
+    }
+    const eff = effective.get(key);
+    lines.push(`  ${JSON.stringify(key)}: { input: ${eff.input}, output: ${eff.output}, cacheRead: ${eff.cacheRead}, cacheWrite: ${eff.cacheWrite} },`);
   }
   lines.push("};");
   lines.push("");
@@ -164,6 +213,7 @@ async function loadModelsDev() {
   console.log(`  Providers included: ${ALLOWED_PROVIDERS.length - skippedProviders.length}`);
   console.log(`  Models with pricing: ${pricedCount}`);
   console.log(`  Models skipped (no cost data): ${skippedNoCost}`);
+  console.log(`  Resolver-equivalent duplicates skipped: ${skippedRedundant}`);
 })().catch((err) => {
   console.error(err);
   process.exit(1);
