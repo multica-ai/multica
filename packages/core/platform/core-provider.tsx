@@ -95,7 +95,6 @@ export function CoreProvider({
       <AuthInitializer
         onLogin={onLogin}
         onLogout={onLogout}
-        storage={storage}
         cookieAuth={cookieAuth}
         casdoorMode={casdoorMode}
         identity={identity}
