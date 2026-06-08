@@ -11,7 +11,7 @@ import (
 )
 
 // thinking.go discovers per-model reasoning/effort catalogs for the
-// claude, codex, and pi backends so the daemon can advertise them to the
+// claude, codex, opencode, and pi backends so the daemon can advertise them to the
 // UI without hard-coding (and getting wrong) what's installed locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
