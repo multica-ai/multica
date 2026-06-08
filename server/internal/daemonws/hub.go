@@ -79,6 +79,13 @@ type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtime
 // CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
 type MessageHandler func(ctx context.Context, identity ClientIdentity, msg protocol.Message) error
 
+// DisconnectHandler is called when a daemon WebSocket connection drops.
+// identity carries the full connection scope so handlers can clean up
+// any per-runtime state (e.g. adopted terminal sessions).
+//
+// CEREBRO-PATCH(daemonws-disconnect-handler): cleanup hook for cerebro-owned per-runtime state on daemon disconnect
+type DisconnectHandler func(identity ClientIdentity)
+
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
 // best-effort wakeup hints; the daemon still uses HTTP claim for correctness.
 type Hub struct {
@@ -93,6 +100,9 @@ type Hub struct {
 
 	msgMu      sync.RWMutex
 	onMessage  MessageHandler // CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
+
+	dcMu         sync.RWMutex
+	onDisconnect DisconnectHandler // CEREBRO-PATCH(daemonws-disconnect-handler): cleanup hook for cerebro-owned per-runtime state on daemon disconnect
 }
 
 func NewHub() *Hub {
@@ -147,6 +157,26 @@ func (h *Hub) messageHandler() MessageHandler {
 	h.msgMu.RLock()
 	defer h.msgMu.RUnlock()
 	return h.onMessage
+}
+
+// SetDisconnectHandler installs the callback invoked when a daemon WS connection
+// drops. The handler is called with the disconnected connection's identity so
+// it can clean up per-runtime state (e.g. adopted terminal sessions).
+//
+// CEREBRO-PATCH(daemonws-disconnect-handler): cleanup hook for cerebro-owned per-runtime state on daemon disconnect
+func (h *Hub) SetDisconnectHandler(fn DisconnectHandler) {
+	if h == nil {
+		return
+	}
+	h.dcMu.Lock()
+	h.onDisconnect = fn
+	h.dcMu.Unlock()
+}
+
+func (h *Hub) disconnectHandler() DisconnectHandler {
+	h.dcMu.RLock()
+	defer h.dcMu.RUnlock()
+	return h.onDisconnect
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity ClientIdentity) {
@@ -342,6 +372,10 @@ func (h *Hub) unregister(c *client) {
 		"runtimes", len(c.runtimes),
 		"total_clients", total,
 	)
+	// CEREBRO-PATCH(daemonws-disconnect-handler): notify cerebro-owned handlers so they can clean up per-runtime state (e.g. adopted terminal sessions).
+	if fn := c.hub.disconnectHandler(); fn != nil {
+		fn(c.identity)
+	}
 }
 
 func (c *client) readPump() {

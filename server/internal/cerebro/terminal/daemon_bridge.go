@@ -18,7 +18,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -328,4 +330,50 @@ func marshalCerebroFrame(frameType string, payload any) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(protocol.Message{Type: frameType, Payload: raw})
+}
+
+// daemonDisconnectGrace is how long we wait before closing adopted sessions
+// after a daemon WS disconnect. This covers transient reconnects so a brief
+// network blip doesn't kill an in-flight terminal session.
+const daemonDisconnectGrace = 15 * time.Second
+
+// OnDaemonDisconnect is called by the daemonws hub when a daemon WS connection
+// drops. After a short grace period it closes any adopted sessions whose
+// runtime is in the disconnected identity — the daemon can no longer send
+// term_exit for those tasks, so without this cleanup the sessions would hang
+// open until the 8-hour reaper fires.
+//
+// CEREBRO-PATCH(daemonws-disconnect-handler): close adopted terminal sessions when daemon disconnects
+func (b *DaemonBridge) OnDaemonDisconnect(identity daemonws.ClientIdentity) {
+	if len(identity.RuntimeIDs) == 0 {
+		return
+	}
+	runtimeSet := make(map[string]bool, len(identity.RuntimeIDs))
+	for _, rid := range identity.RuntimeIDs {
+		if rid != "" {
+			runtimeSet[rid] = true
+		}
+	}
+	go func() {
+		time.Sleep(daemonDisconnectGrace)
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		for key, s := range b.adopted {
+			parts := strings.SplitN(key, "|", 2)
+			if len(parts) != 2 || !runtimeSet[parts[0]] {
+				continue
+			}
+			if s.closed.Load() {
+				delete(b.adopted, key)
+				continue
+			}
+			s.Exit(1, errors.New("daemon disconnected"))
+			delete(b.adopted, key)
+			b.logger.Info("term: session closed on daemon disconnect",
+				"runtime_id", parts[0],
+				"task_id", parts[1],
+				"session_id", s.ID,
+			)
+		}
+	}()
 }

@@ -420,6 +420,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-terminal-bridge): connect daemonws hub to terminal broker so daemons can mirror agent stdout into adopted broker sessions.
 	cerebroTerminalBridge := cerebroterminal.NewDaemonBridge(cerebroTerminalBroker, daemonHub, cerebroQueries)
 	daemonHub.SetMessageHandler(cerebroTerminalBridge.HandleMessage)
+	// CEREBRO-PATCH(daemonws-disconnect-handler): close adopted terminal sessions when the daemon WS connection drops so sessions don't hang until the 8-hour reaper.
+	daemonHub.SetDisconnectHandler(cerebroTerminalBridge.OnDaemonDisconnect)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 v2b — pass upstream queries so per-issue custom status mirrors onto the upstream issue row, and pass the pool so the two writes commit atomically (Mia review).
