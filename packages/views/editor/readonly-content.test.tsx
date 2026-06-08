@@ -230,6 +230,39 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
+  it("copies the raw snippet to the clipboard via the code block copy button", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    const { container } = render(
+      <ReadonlyContent
+        content={["```bash", literalCode, "```"].join("\n")}
+      />,
+    );
+
+    const button = container.querySelector(
+      ".code-block-wrapper button",
+    ) as HTMLButtonElement | null;
+    expect(button).not.toBeNull();
+
+    fireEvent.click(button!);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(literalCode);
+    });
+  });
+
+  it("does not render a copy button for inline code", () => {
+    const { container } = render(
+      <ReadonlyContent content={`Run \`${literalCode}\` now`} />,
+    );
+    // Inline code never reaches the `pre` renderer, so no copy chrome.
+    expect(container.querySelector(".code-block-wrapper")).toBeNull();
+  });
+
   it("keeps editor code literal by disabling font ligatures", () => {
     const codeCss = readFileSync("editor/styles/code.css", "utf8");
 

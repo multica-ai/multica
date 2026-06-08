@@ -16,7 +16,8 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useMemo, useRef } from "react";
+import { isValidElement, memo, useMemo, useRef, useState } from "react";
+import { Copy, Check } from "lucide-react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -30,6 +31,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../i18n";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
 import { useNavigation } from "../navigation";
@@ -58,6 +60,73 @@ const lowlight = createLowlight(common);
 // Anchored to whole class tokens so `language-htmlbars` / `language-mermaidx`
 // don't accidentally match and lose their <pre> wrapper.
 const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
+
+// ---------------------------------------------------------------------------
+// Copyable code block — wraps the rendered <pre> with a hover copy button.
+// Mirrors the editor's CodeBlockView chrome (`.code-block-wrapper` +
+// `.code-block-header`) so a code snippet looks identical whether it appears
+// in the editor or in a readonly comment / description.
+// ---------------------------------------------------------------------------
+
+// Recursively concatenate the raw text of a hast node. The `pre` renderer
+// receives the unrendered `<pre><code>` AST (highlighted output is injected
+// via dangerouslySetInnerHTML downstream, so the rendered children no longer
+// hold the plain text) — walking the node tree is the reliable source.
+function collectNodeText(node: unknown): string {
+  if (!node || typeof node !== "object") return "";
+  const n = node as { type?: string; value?: string; children?: unknown[] };
+  if (n.type === "text") return n.value ?? "";
+  if (Array.isArray(n.children)) return n.children.map(collectNodeText).join("");
+  return "";
+}
+
+function CodeBlockWithCopy({
+  code,
+  children,
+}: {
+  code: string;
+  children: React.ReactNode;
+}) {
+  const { t } = useT("editor");
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopy = async () => {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable (insecure context / denied permission) — no-op.
+    }
+  };
+
+  return (
+    <div className="code-block-wrapper group/code relative">
+      <div
+        contentEditable={false}
+        className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
+      >
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title={t(($) => $.code_block.copy_code)}
+          aria-label={t(($) => $.code_block.copy_code)}
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+      <pre>{children}</pre>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
@@ -275,7 +344,7 @@ function buildComponents(): Partial<Components> {
     // renderer above so the outer `<pre>` does not wrap them — this is the
     // standard two-layer pattern used to escape react-markdown's default
     // `<pre><code>` envelope.
-    pre: ({ children }) => {
+    pre: ({ children, node }) => {
       // react-markdown calls `pre` BEFORE invoking the `code` renderer —
       // `children` is the unrendered `<code>` element from the AST. So we
       // identify "this block was meant to be unwrapped" by inspecting the
@@ -291,7 +360,11 @@ function buildComponents(): Partial<Components> {
           return <>{children}</>;
         }
       }
-      return <pre>{children}</pre>;
+      // Real code block — wrap with a hover copy button. The raw snippet text
+      // comes from the AST node (trailing newline trimmed to match the `code`
+      // renderer), since highlighted output is injected as raw HTML.
+      const code = collectNodeText(node).replace(/\n$/, "");
+      return <CodeBlockWithCopy code={code}>{children}</CodeBlockWithCopy>;
     },
   };
 }
