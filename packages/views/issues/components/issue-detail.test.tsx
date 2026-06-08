@@ -589,6 +589,7 @@ describe("IssueDetail (shared)", () => {
     // breadcrumb title, regardless of linkSelfInBreadcrumb. The context sheet
     // is more useful than navigation in the inline Inbox pane where you're
     // already viewing the issue.
+    // CEREBRO-PATCH(issue-detail-test-english-aria): IssueContextTrigger uses English aria-label
     const triggers = await screen.findAllByRole("button", {
       name: "View full task context",
     });
@@ -605,6 +606,7 @@ describe("IssueDetail (shared)", () => {
     // trigger button — CSS (`md:hidden` / `hidden md:flex`) gates which
     // one is actually visible at runtime, but jsdom keeps both in the
     // tree. We only need one of them to drive the sheet for this test.
+    // CEREBRO-PATCH(issue-detail-test-english-aria): IssueContextTrigger uses English aria-label
     const triggers = await screen.findAllByRole("button", {
       name: "View full task context",
     });
