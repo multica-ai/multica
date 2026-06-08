@@ -7,7 +7,7 @@ import (
 
 type localRunProvider interface {
 	Name() string
-	Run(args []string, cwd string, env localCLIEnv, initialPrompt string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error)
+	Run(args []string, cwd string, env localCLIEnv, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error)
 }
 
 var localRunProviders = []localRunProvider{
@@ -29,8 +29,8 @@ type codexLocalRunProvider struct{}
 
 func (codexLocalRunProvider) Name() string { return "codex" }
 
-func (codexLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, initialPrompt string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
-	return executeCodexRemoteCLI(args, cwd, env, initialPrompt, reporter, usageReporter)
+func (codexLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
+	return executeCodexRemoteCLI(args, cwd, env, reporter, usageReporter)
 }
 
 type claudeLocalRunProvider struct{}
