@@ -82,20 +82,20 @@ function styleLines(profile: Profile): string[] {
 
   if (length === "low") {
     return [
-      "Default 1–3 sætninger. Vis data i tabel/liste hvis >5 punkter.",
-      "Spring hilsner og \"let me know\"-closings over.",
-      "Match navne fra koden eksakt. Ingen opfundne ord.",
+      "Default 1–3 sentences. Show data in table/list if >5 items.",
+      "Skip greetings and \"let me know\" closings.",
+      "Match names from code exactly. No invented words.",
     ];
   }
   if (length === "mid") {
     return [
-      "Default 3–6 sætninger. Brug struktur ved >5 punkter.",
-      "Match navne fra koden eksakt. Ingen opfundne ord.",
+      "Default 3–6 sentences. Use structure for >5 items.",
+      "Match names from code exactly. No invented words.",
     ];
   }
   return [
-    "Forklar ræsonnement og trade-offs. Brug sektioner ved længere svar.",
-    "Match navne fra koden eksakt. Ingen opfundne ord.",
+    "Explain reasoning and trade-offs. Use sections for longer answers.",
+    "Match names from code exactly. No invented words.",
   ];
 }
 
@@ -123,20 +123,20 @@ function autonomyLines(profile: Profile): string[] {
 
   if (autonomy === "high") {
     return [
-      "Reversibelt: bare kør, vis hvad der skete.",
-      "Destruktivt: spørg først.",
-      "Spørg ikke om ting du selv kan finde/gøre.",
+      "Reversible: just run it, show what happened.",
+      "Destructive: ask first.",
+      "Don't ask about things you can find/do yourself.",
     ];
   }
   if (autonomy === "mid") {
     return [
-      "Reversibelt: gør det, opsummér ændringen.",
-      "Destruktivt eller tvetydigt: bekræft først.",
+      "Reversible: do it, summarize the change.",
+      "Destructive or ambiguous: confirm first.",
     ];
   }
   return [
-    "Bekræft plan før ikke-trivielle ændringer.",
-    "Destruktivt: spørg altid først.",
+    "Confirm plan before non-trivial changes.",
+    "Destructive: always ask first.",
   ];
 }
 

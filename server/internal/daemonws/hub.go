@@ -72,6 +72,20 @@ func (c *client) markSeen(eventID string) bool {
 type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
 // CEREBRO-PATCH(ws-heartbeat-handler-payload): JEH-997 takes the full
 
+// MessageHandler is the fall-through callback for daemon-originated frames
+// that the hub's built-in switch doesn't recognise (today: anything not
+// daemon:heartbeat). Returning an error is logged at debug level.
+//
+// CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
+type MessageHandler func(ctx context.Context, identity ClientIdentity, msg protocol.Message) error
+
+// DisconnectHandler is called when a daemon WebSocket connection drops.
+// identity carries the full connection scope so handlers can clean up
+// any per-runtime state (e.g. adopted terminal sessions).
+//
+// CEREBRO-PATCH(daemonws-disconnect-handler): cleanup hook for cerebro-owned per-runtime state on daemon disconnect
+type DisconnectHandler func(identity ClientIdentity)
+
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
 // best-effort wakeup hints; the daemon still uses HTTP claim for correctness.
 type Hub struct {
@@ -83,6 +97,12 @@ type Hub struct {
 
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
+
+	msgMu      sync.RWMutex
+	onMessage  MessageHandler // CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
+
+	dcMu         sync.RWMutex
+	onDisconnect DisconnectHandler // CEREBRO-PATCH(daemonws-disconnect-handler): cleanup hook for cerebro-owned per-runtime state on daemon disconnect
 }
 
 func NewHub() *Hub {
@@ -118,6 +138,45 @@ func (h *Hub) heartbeatHandler() HeartbeatHandler {
 	h.hbMu.RLock()
 	defer h.hbMu.RUnlock()
 	return h.onHeartbeat
+}
+
+// SetMessageHandler installs the fall-through handler for non-heartbeat
+// frames. A nil handler disables fall-through dispatch (the default).
+//
+// CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
+func (h *Hub) SetMessageHandler(fn MessageHandler) {
+	if h == nil {
+		return
+	}
+	h.msgMu.Lock()
+	h.onMessage = fn
+	h.msgMu.Unlock()
+}
+
+func (h *Hub) messageHandler() MessageHandler {
+	h.msgMu.RLock()
+	defer h.msgMu.RUnlock()
+	return h.onMessage
+}
+
+// SetDisconnectHandler installs the callback invoked when a daemon WS connection
+// drops. The handler is called with the disconnected connection's identity so
+// it can clean up per-runtime state (e.g. adopted terminal sessions).
+//
+// CEREBRO-PATCH(daemonws-disconnect-handler): cleanup hook for cerebro-owned per-runtime state on daemon disconnect
+func (h *Hub) SetDisconnectHandler(fn DisconnectHandler) {
+	if h == nil {
+		return
+	}
+	h.dcMu.Lock()
+	h.onDisconnect = fn
+	h.dcMu.Unlock()
+}
+
+func (h *Hub) disconnectHandler() DisconnectHandler {
+	h.dcMu.RLock()
+	defer h.dcMu.RUnlock()
+	return h.onDisconnect
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity ClientIdentity) {
@@ -313,6 +372,10 @@ func (h *Hub) unregister(c *client) {
 		"runtimes", len(c.runtimes),
 		"total_clients", total,
 	)
+	// CEREBRO-PATCH(daemonws-disconnect-handler): notify cerebro-owned handlers so they can clean up per-runtime state (e.g. adopted terminal sessions).
+	if fn := c.hub.disconnectHandler(); fn != nil {
+		fn(c.identity)
+	}
 }
 
 func (c *client) readPump() {
@@ -321,7 +384,7 @@ func (c *client) readPump() {
 		c.conn.Close()
 	}()
 
-	c.conn.SetReadLimit(4096)
+	c.conn.SetReadLimit(128 * 1024) // CEREBRO-PATCH(daemonws-term-read-limit): cerebro:term_stdout frames are base64-encoded and can exceed 4 KB; 128 KB matches the daemon flush ceiling.
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -350,8 +413,12 @@ func (c *client) handleFrame(raw []byte) {
 	case protocol.EventDaemonHeartbeat:
 		c.handleHeartbeatFrame(msg.Payload)
 	default:
-		// Unknown app messages are intentionally ignored for forward
-		// compatibility with future daemon → server message types.
+		// CEREBRO-PATCH(daemonws-message-handler): cerebro-only frame types (cerebro:*) flow through the message handler seam.
+		if handler := c.hub.messageHandler(); handler != nil {
+			if err := handler(context.Background(), c.identity, msg); err != nil {
+				slog.Debug("daemon websocket message handler error", "error", err, "type", msg.Type, "daemon_id", c.identity.DaemonID)
+			}
+		}
 	}
 }
 

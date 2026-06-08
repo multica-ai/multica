@@ -40,6 +40,16 @@ type Set struct {
 	// list is the baseline a workspace-default policy can pin to.
 	MCPServers []string `json:"mcp_servers"`
 
+	// ToolProtocols is the transport vocabulary Cerebro can use when exposing
+	// platform tools to this runtime. It is capability-negotiation data, not a
+	// permission decision.
+	ToolProtocols []string `json:"tool_protocols"`
+
+	// SupportsAsk tells the server whether this runtime can wait for a human
+	// approval flow while a tool call is pending. Local CLI runtimes generally
+	// cannot; the cloud gateway can.
+	SupportsAsk bool `json:"supports_ask"`
+
 	// Skills the runtime can load. Mostly relevant for Claude Code (which
 	// uses ~/.claude/skills); other runtimes report nil and the field is
 	// omitted from the wire payload via the AsMap helper below.
@@ -113,6 +123,8 @@ var providerRegistry = map[string]Set{
 			"Write",
 		},
 		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
 		Skills:          []string{},
 		Subagents:       []string{"Task"},
 		Hooks:           []string{"PreToolUse", "PostToolUse", "Stop", "SubagentStop", "Notification"},
@@ -130,6 +142,8 @@ var providerRegistry = map[string]Set{
 			"view",
 		},
 		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
 		Subagents:       []string{},
 		Hooks:           []string{"OnTaskStart", "OnTaskEnd"},
 		SecretBindings:  []string{"OPENAI_API_KEY"},
@@ -149,6 +163,8 @@ var providerRegistry = map[string]Set{
 			"web_search",
 		},
 		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
 		Subagents:       []string{},
 		Hooks:           []string{},
 		SecretBindings:  []string{"CURSOR_API_KEY"},
@@ -165,6 +181,8 @@ var providerRegistry = map[string]Set{
 			"web_fetch",
 		},
 		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
 		Subagents:       []string{},
 		Hooks:           []string{},
 		SecretBindings:  []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
@@ -175,6 +193,8 @@ var providerRegistry = map[string]Set{
 		Providers:      []string{"firtal-gateway"},
 		Tools:          []string{},
 		MCPServers:     []string{},
+		ToolProtocols:  []string{"native_tool_loop"},
+		SupportsAsk:    true,
 		Hooks:          []string{},
 		SecretBindings: []string{"FIRTAL_GATEWAY_API_KEY"},
 		// Firtal Gateway's surface is entirely MCP- and tool-pass-through;
@@ -195,6 +215,8 @@ func staticFallback(provider string) Set {
 		Providers:       []string{provider},
 		Tools:           []string{},
 		MCPServers:      []string{},
+		ToolProtocols:   []string{},
+		SupportsAsk:     false,
 		DiscoveryMethod: "unmapped",
 	}
 }
@@ -247,9 +269,11 @@ func EnrichWithAgentMCPServers(s Set, names []string) Set {
 // caps["mcp_servers"] without needing to know about cli_binaries etc.
 func AsMap(s Set) map[string]any {
 	out := map[string]any{
-		"providers":   nonNilStrings(s.Providers),
-		"tools":       nonNilStrings(s.Tools),
-		"mcp_servers": nonNilStrings(s.MCPServers),
+		"providers":      nonNilStrings(s.Providers),
+		"tools":          nonNilStrings(s.Tools),
+		"mcp_servers":    nonNilStrings(s.MCPServers),
+		"tool_protocols": nonNilStrings(s.ToolProtocols),
+		"supports_ask":   s.SupportsAsk,
 	}
 	if len(s.Skills) > 0 {
 		out["skills"] = s.Skills
@@ -295,6 +319,8 @@ func cloneSet(s Set) Set {
 		Providers:       cloneStrings(s.Providers),
 		Tools:           cloneStrings(s.Tools),
 		MCPServers:      cloneStrings(s.MCPServers),
+		ToolProtocols:   cloneStrings(s.ToolProtocols),
+		SupportsAsk:     s.SupportsAsk,
 		Skills:          cloneStrings(s.Skills),
 		Subagents:       cloneStrings(s.Subagents),
 		Hooks:           cloneStrings(s.Hooks),

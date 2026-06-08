@@ -81,6 +81,7 @@ type dayBucket struct {
 	IssuesDone     int    `json:"issues_done"`
 	TasksCompleted int    `json:"tasks_completed"`
 	TasksFailed    int    `json:"tasks_failed"`
+	MessagesSent   int    `json:"messages_sent"` // CEREBRO-PATCH(cerebro-dashboard-messages-timeline): TECH-3093
 }
 
 type bucket struct {
@@ -89,9 +90,18 @@ type bucket struct {
 }
 
 type topActor struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Count int    `json:"count"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Count      int    `json:"count"`
+	SpendCents int64  `json:"spend_cents,omitempty"`
+}
+
+type messageFlowEntry struct {
+	SenderID      string `json:"sender_id"`
+	SenderName    string `json:"sender_name"`
+	RecipientID   string `json:"recipient_id"`
+	RecipientName string `json:"recipient_name"`
+	Count         int    `json:"count"`
 }
 
 type activityEntry struct {
@@ -125,27 +135,30 @@ type recentTask struct {
 }
 
 type overviewResponse struct {
-	Range              string          `json:"range"`
-	PeriodStart        string          `json:"period_start"`
-	PeriodEnd          string          `json:"period_end"`
-	IssuesCreated      kpi             `json:"issues_created"`
-	IssuesCompleted    kpi             `json:"issues_completed"`
-	ChatMessages       kpi             `json:"chat_messages"`
-	ChannelMessages    kpi             `json:"channel_messages"`
-	ChannelsActive     kpi             `json:"channels_active"`
-	TasksCompleted     kpi             `json:"tasks_completed"`
-	TasksFailed        kpi             `json:"tasks_failed"`
-	AgentsActive       kpi             `json:"agents_active"`
-	MembersActive      kpi             `json:"members_active"`
-	SpendCents         kpi             `json:"spend_cents"`
-	IssuesByStatus     []bucket        `json:"issues_by_status"`
-	IssuesByPriority   []bucket        `json:"issues_by_priority"`
-	IssuesByOnBehalfOf []topActor      `json:"issues_by_on_behalf_of"`
-	Timeline           []dayBucket     `json:"timeline"`
-	TopAgents          []topActor      `json:"top_agents"`
-	TopMembers         []topActor      `json:"top_members"`
-	ActivityFeed       []activityEntry `json:"activity_feed"`
-	RecentTasks        []recentTask    `json:"recent_tasks"`
+	Range                 string          `json:"range"`
+	PeriodStart           string          `json:"period_start"`
+	PeriodEnd             string          `json:"period_end"`
+	IssuesCreated         kpi             `json:"issues_created"`
+	IssuesCompleted       kpi             `json:"issues_completed"`
+	ChatMessages          kpi             `json:"chat_messages"`
+	ChannelMessages       kpi             `json:"channel_messages"`
+	ChannelsActive        kpi             `json:"channels_active"`
+	TasksCompleted        kpi             `json:"tasks_completed"`
+	TasksFailed           kpi             `json:"tasks_failed"`
+	AgentsActive          kpi             `json:"agents_active"`
+	MembersActive         kpi             `json:"members_active"`
+	SpendCents            kpi             `json:"spend_cents"`
+	IssuesByStatus        []bucket        `json:"issues_by_status"`
+	IssuesByPriority      []bucket        `json:"issues_by_priority"`
+	IssuesByOnBehalfOf    []topActor      `json:"issues_by_on_behalf_of"`
+	Timeline              []dayBucket     `json:"timeline"`
+	TopAgents             []topActor      `json:"top_agents"`
+	TopMembers            []topActor      `json:"top_members"`
+	TopMessageSenders     []topActor         `json:"top_message_senders"`
+	TopMessageRecipients  []topActor         `json:"top_message_recipients"`
+	MessageFlow           []messageFlowEntry `json:"message_flow"`
+	ActivityFeed          []activityEntry    `json:"activity_feed"`
+	RecentTasks           []recentTask       `json:"recent_tasks"`
 }
 
 // Overview returns the full dashboard payload for the current workspace.
@@ -430,6 +443,15 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 				timeline.buckets[i].TasksFailed = int(row.Count)
 			}
 		}
+		// CEREBRO-PATCH(cerebro-dashboard-messages-timeline): TECH-3093 messages per day
+		msgs, _ := h.Cerebro.DashboardCountMessagesByDay(c, cerebrodb.DashboardCountMessagesByDayParams{
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), Column4: actorType.String, Column5: actorID,
+		})
+		for _, row := range msgs {
+			if i, ok := timeline.idx[row.Day]; ok {
+				timeline.buckets[i].MessagesSent = int(row.Count)
+			}
+		}
 		mu.Lock()
 		out.Timeline = timeline.buckets
 		mu.Unlock()
@@ -470,6 +492,64 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		}
 		mu.Lock()
 		out.TopMembers = top
+		mu.Unlock()
+		return nil
+	})
+
+	// --- Message flow: sender→recipient pairs (TECH-3093) ---
+	runOne(func(c context.Context) error {
+		rows, err := h.Cerebro.DashboardMessageFlowInPeriod(c, cerebrodb.DashboardMessageFlowInPeriodParams{
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+		})
+		if err != nil {
+			return err
+		}
+		var flow []messageFlowEntry
+		for _, row := range rows {
+			flow = append(flow, messageFlowEntry{
+				SenderID:      util.UUIDToString(row.SenderID),
+				SenderName:    row.SenderName,
+				RecipientID:   util.UUIDToString(row.RecipientID),
+				RecipientName: row.RecipientName,
+				Count:         int(row.Count),
+			})
+		}
+		mu.Lock()
+		out.MessageFlow = flow
+		mu.Unlock()
+		return nil
+	})
+
+	// --- Top message senders / recipients (TECH-3093) ---
+	runOne(func(c context.Context) error {
+		rows, err := h.Cerebro.DashboardTopMessageSendersInPeriod(c, cerebrodb.DashboardTopMessageSendersInPeriodParams{
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+		})
+		if err != nil {
+			return err
+		}
+		var top []topActor
+		for _, row := range rows {
+			top = append(top, topActor{ID: util.UUIDToString(row.ActorID), Name: row.Name, Count: int(row.Count), SpendCents: row.SpendCents})
+		}
+		mu.Lock()
+		out.TopMessageSenders = top
+		mu.Unlock()
+		return nil
+	})
+	runOne(func(c context.Context) error {
+		rows, err := h.Cerebro.DashboardTopMessageRecipientsInPeriod(c, cerebrodb.DashboardTopMessageRecipientsInPeriodParams{
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+		})
+		if err != nil {
+			return err
+		}
+		var top []topActor
+		for _, row := range rows {
+			top = append(top, topActor{ID: util.UUIDToString(row.ActorID), Name: row.Name, Count: int(row.Count)})
+		}
+		mu.Lock()
+		out.TopMessageRecipients = top
 		mu.Unlock()
 		return nil
 	})
@@ -693,4 +773,160 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+type actorMessage struct {
+	ID          string `json:"id"`
+	Content     string `json:"content"`
+	CreatedAt   string `json:"created_at"`
+	SenderID    string `json:"sender_id,omitempty"`
+	SenderName  string `json:"sender_name,omitempty"`
+	AgentID     string `json:"agent_id"`
+	AgentName   string `json:"agent_name"`
+	SessionID   string `json:"session_id"`
+	IssueID     string `json:"issue_id,omitempty"`
+	IssueNumber int32  `json:"issue_number,omitempty"`
+	IssueTitle  string `json:"issue_title,omitempty"`
+}
+
+type actorMessagesResponse struct {
+	ActorID  string         `json:"actor_id"`
+	Range    string         `json:"range"`
+	Messages []actorMessage `json:"messages"`
+}
+
+type allMessagesResponse struct {
+	Range    string         `json:"range"`
+	Messages []actorMessage `json:"messages"`
+}
+
+// ActorMessages returns the chat messages sent by a specific member in a time period.
+// Used by the Messages tab detail panel in the cerebro dashboard. TECH-3093.
+func (h *Handler) ActorMessages(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+
+	actorIDStr := r.URL.Query().Get("actor_id")
+	if actorIDStr == "" {
+		writeError(w, http.StatusBadRequest, "actor_id required")
+		return
+	}
+	actorUUID, err := util.ParseUUID(actorIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid actor_id")
+		return
+	}
+
+	rangeStr := r.URL.Query().Get("range")
+	spec := parseRange(rangeStr, time.Now())
+
+	rows, err := h.Cerebro.DashboardActorChatMessages(r.Context(), cerebrodb.DashboardActorChatMessagesParams{
+		WorkspaceID: wsUUID,
+		CreatorID:   actorUUID,
+		CreatedAt:   ts(spec.periodStart),
+		CreatedAt_2: ts(spec.periodEnd),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	msgs := make([]actorMessage, 0, len(rows))
+	for _, row := range rows {
+		m := actorMessage{
+			ID:        util.UUIDToString(row.ID),
+			Content:   row.Content,
+			CreatedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339),
+			AgentID:   util.UUIDToString(row.AgentID),
+			AgentName: row.AgentName,
+			SessionID: util.UUIDToString(row.SessionID),
+		}
+		if row.IssueID.Valid {
+			m.IssueID = util.UUIDToString(row.IssueID)
+		}
+		if row.IssueNumber.Valid {
+			m.IssueNumber = row.IssueNumber.Int32
+		}
+		if row.IssueTitle.Valid {
+			m.IssueTitle = row.IssueTitle.String
+		}
+		msgs = append(msgs, m)
+	}
+
+	writeJSON(w, http.StatusOK, actorMessagesResponse{
+		ActorID:  actorIDStr,
+		Range:    rangeOrDefault(rangeStr),
+		Messages: msgs,
+	})
+}
+
+// AllMessages returns all member chat messages in the workspace for a time period.
+// Used by the "all messages" data table on the Messages tab. TECH-3093.
+func (h *Handler) AllMessages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+
+	rangeStr := r.URL.Query().Get("range")
+	spec := parseRange(rangeStr, time.Now())
+	// CEREBRO-PATCH(cerebro-dashboard-all-messages-filter): TECH-3093 actor filter
+	actorType, actorID, ok := parseActorFilter(w, r)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Cerebro.DashboardAllChatMessages(r.Context(), cerebrodb.DashboardAllChatMessagesParams{
+		WorkspaceID: wsUUID,
+		CreatedAt:   ts(spec.periodStart),
+		CreatedAt_2: ts(spec.periodEnd),
+		Column4:     actorType.String,
+		Column5:     actorID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	msgs := make([]actorMessage, 0, len(rows))
+	for _, row := range rows {
+		m := actorMessage{
+			ID:         util.UUIDToString(row.ID),
+			Content:    row.Content,
+			CreatedAt:  row.CreatedAt.Time.UTC().Format(time.RFC3339),
+			SenderID:   util.UUIDToString(row.SenderID),
+			SenderName: row.SenderName,
+			AgentID:    util.UUIDToString(row.AgentID),
+			AgentName:  row.AgentName,
+			SessionID:  util.UUIDToString(row.SessionID),
+		}
+		if row.IssueID.Valid {
+			m.IssueID = util.UUIDToString(row.IssueID)
+		}
+		if row.IssueNumber.Valid {
+			m.IssueNumber = row.IssueNumber.Int32
+		}
+		if row.IssueTitle.Valid {
+			m.IssueTitle = row.IssueTitle.String
+		}
+		msgs = append(msgs, m)
+	}
+
+	writeJSON(w, http.StatusOK, allMessagesResponse{
+		Range:    rangeOrDefault(rangeStr),
+		Messages: msgs,
+	})
 }

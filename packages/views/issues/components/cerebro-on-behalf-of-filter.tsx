@@ -32,7 +32,7 @@ function Indicator({ checked }: { checked: boolean }) {
 }
 
 /**
- * "Startet på vegne af" filter submenu. `selected` holds workspace user UUIDs
+ * "Started on behalf of" filter submenu. `selected` holds workspace user UUIDs
  * (matches the backend `on_behalf_of_ids` param); `onToggle` flips one user.
  */
 export function OnBehalfOfFilterSub({
@@ -52,7 +52,7 @@ export function OnBehalfOfFilterSub({
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
         <UserRound className="size-3.5" />
-        <span className="flex-1">På vegne af</span>
+        <span className="flex-1">On behalf of</span>
         {selected.length > 0 && (
           <span className="text-xs text-primary font-medium">{selected.length}</span>
         )}
@@ -63,7 +63,7 @@ export function OnBehalfOfFilterSub({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Søg medlem…"
+            placeholder="Search member…"
             className="w-full bg-transparent text-base md:text-sm placeholder:text-muted-foreground outline-none"
             autoFocus
           />
@@ -71,7 +71,7 @@ export function OnBehalfOfFilterSub({
         <div className="max-h-64 overflow-y-auto p-1">
           {filtered.length === 0 ? (
             <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-              Ingen medlemmer.
+              No members.
             </div>
           ) : (
             filtered.map((m) => {

@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useNavigation } from "@multica/views/navigation";
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import { TranscriptButton } from "@multica/views/common/task-transcript";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
@@ -33,7 +34,7 @@ export function TasksTable({
   if (isError) {
     return (
       <div className="rounded-md border border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
-        Kunne ikke hente tasks: {errorMessage ?? "ukendt fejl"}
+        Failed to fetch tasks: {errorMessage ?? "unknown error"}
       </div>
     );
   }
@@ -51,9 +52,9 @@ export function TasksTable({
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center gap-1 rounded-md border p-12 text-center">
-        <p className="text-sm font-medium">Ingen tasks matcher dine filtre</p>
+        <p className="text-sm font-medium">No tasks match your filters</p>
         <p className="text-xs text-muted-foreground">
-          Prøv at nulstille filtre eller vælge en bredere tidsperiode.
+          Try resetting filters or selecting a wider time range.
         </p>
       </div>
     );
@@ -262,6 +263,7 @@ function Row({
   visibleColumns: Record<ColumnId, boolean>;
 }) {
   const { push } = useNavigation();
+  const { formatCents } = useCostFormatter();
   const target = rowTarget(task, workspaceSlug);
   const onClick = () => {
     if (target) push(target);
@@ -383,7 +385,7 @@ function Row({
       )}
       {visibleColumns.cost && (
         <td className="px-3 py-2 text-right text-muted-foreground">
-          {formatCost(task.cost_cents)}
+          {task.cost_cents ? formatCents(task.cost_cents) : "—"}
         </td>
       )}
       {visibleColumns.triggered_by && (
@@ -606,9 +608,3 @@ function formatDuration(startISO: string | undefined, endISO: string | undefined
   }
 }
 
-function formatCost(cents: number | undefined): string {
-  if (cents === undefined || cents === 0) return "—";
-  if (cents < 100) return `$0.${String(cents).padStart(2, "0")}`;
-  const dollars = cents / 100;
-  return `$${dollars.toFixed(2)}`;
-}

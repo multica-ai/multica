@@ -2,7 +2,15 @@
 
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Pencil, Trash2, Download, ExternalLink } from "lucide-react";
+import {
+  ArrowLeft,
+  Pencil,
+  Trash2,
+  Download,
+  ExternalLink,
+  RotateCcw,
+  Save,
+} from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -23,15 +31,17 @@ import {
 } from "@multica/cerebro-artifacts/core";
 import { Input } from "@multica/ui/components/ui/input";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useAuthStore } from "@multica/core/auth";
+import { useCurrentMember } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
+import { ContentEditor, type ContentEditorRef } from "@multica/views/editor";
 import { ArtifactContent } from "../components/artifact-content";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
 import { MoveScopeMenu } from "../components/move-scope-menu";
+import type { Artifact } from "@multica/core/types";
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -67,13 +77,26 @@ function downloadBlob(content: string, mime: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function canEditArtifact(
+  artifact: Artifact,
+  userId: string | null,
+  role: string | null,
+): boolean {
+  if (role === "owner" || role === "admin") return true;
+  return artifact.author_type === "member" && artifact.author_id === userId;
+}
+
 /**
  * The "people + things" line under the title — author and the issues / project
  * the document is connected to. Each is clickable: agent goes to the agent
  * profile (placeholder for now via /agents), members are non-link, issues and
  * projects deep-link.
  */
-function ConnectionRow({ artifact }: { artifact: import("@multica/core/types").Artifact }) {
+function ConnectionRow({
+  artifact,
+}: {
+  artifact: import("@multica/core/types").Artifact;
+}) {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const { getActorName, getMemberName } = useActorName();
@@ -160,6 +183,82 @@ function ConnectionRow({ artifact }: { artifact: import("@multica/core/types").A
   );
 }
 
+function MarkdownDocumentEditor({
+  artifact,
+  onSave,
+  isSaving,
+}: {
+  artifact: Artifact;
+  onSave: (body: string) => Promise<void>;
+  isSaving: boolean;
+}) {
+  const editorRef = React.useRef<ContentEditorRef>(null);
+  const [draft, setDraft] = React.useState(artifact.body);
+  const [resetVersion, setResetVersion] = React.useState(0);
+
+  React.useEffect(() => {
+    setDraft(artifact.body);
+    setResetVersion((v) => v + 1);
+  }, [artifact.id, artifact.body]);
+
+  const isDirty = draft !== artifact.body;
+
+  const handleSave = async () => {
+    const nextBody = editorRef.current?.getMarkdown() ?? draft;
+    if (nextBody === artifact.body) {
+      setDraft(nextBody);
+      return;
+    }
+    await onSave(nextBody);
+  };
+
+  const handleRevert = () => {
+    setDraft(artifact.body);
+    setResetVersion((v) => v + 1);
+  };
+
+  return (
+    <section className="overflow-hidden rounded-md border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
+        <div className="text-xs font-medium text-muted-foreground">
+          Markdown document
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8"
+            onClick={handleRevert}
+            disabled={!isDirty || isSaving}
+          >
+            <RotateCcw className="mr-1 size-4" />
+            Revert
+          </Button>
+          <Button
+            size="sm"
+            className="h-8"
+            onClick={handleSave}
+            disabled={!isDirty || isSaving}
+          >
+            <Save className="mr-1 size-4" />
+            {isSaving ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
+      <div className="min-h-[65vh] bg-background px-4 py-4 md:px-6 md:py-5">
+        <ContentEditor
+          key={`${artifact.id}:${resetVersion}`}
+          ref={editorRef}
+          defaultValue={artifact.body}
+          onUpdate={setDraft}
+          placeholder="Write something…"
+          className="min-h-[60vh]"
+        />
+      </div>
+    </section>
+  );
+}
+
 export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -167,7 +266,7 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   const { data: artifact, isLoading, isError } = useQuery(
     artifactDetailOptions(wsId, artifactId),
   );
-  const userId = useAuthStore((s) => s.user?.id);
+  const { userId, role } = useCurrentMember(wsId);
   const remove = useDeleteArtifact();
   const update = useUpdateArtifact();
   const [confirmDelete, setConfirmDelete] = React.useState(false);
@@ -192,8 +291,13 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
         <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
           <div className="mb-3 flex items-center gap-2">
             <MobileSidebarTrigger className="mr-0" />
-            <Button variant="ghost" size="sm" onClick={() => router.push(wsPaths.documents())}>
-              <ArrowLeft className="mr-1 size-4" /><span className="hidden sm:inline">Documents</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push(wsPaths.documents())}
+            >
+              <ArrowLeft className="mr-1 size-4" />
+              <span className="hidden sm:inline">Documents</span>
             </Button>
           </div>
           <p className="mt-4 text-sm text-muted-foreground">
@@ -204,8 +308,7 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
     );
   }
 
-  const canEdit =
-    artifact.author_type === "member" && artifact.author_id === userId;
+  const canEdit = canEditArtifact(artifact, userId, role);
 
   const handleDelete = async () => {
     await remove.mutateAsync(artifact);
@@ -234,7 +337,9 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   const handleDownload = () => {
     const slug = slugifyForFilename(artifact.title);
     if (artifact.format === "pdf") {
-      if (artifact.file_url) window.open(artifact.file_url, "_blank", "noreferrer");
+      if (artifact.file_url) {
+        window.open(artifact.file_url, "_blank", "noreferrer");
+      }
       return;
     }
     if (artifact.format === "html") {
@@ -249,129 +354,178 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
     ((artifact.format === "html" || artifact.format === "md") &&
       Boolean(artifact.body));
 
+  const handleSaveMarkdownBody = async (body: string) => {
+    await update.mutateAsync({ id: artifact.id, data: { body } });
+  };
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-7xl px-4 py-4 md:px-8 md:py-6">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <MobileSidebarTrigger className="mr-0" />
-          <Button variant="ghost" size="sm" onClick={() => router.push(wsPaths.documents())}>
-            <ArrowLeft className="mr-1 size-4" /><span className="hidden sm:inline">Documents</span>
-          </Button>
-        </div>
-        <div className="flex items-center gap-0.5 sm:gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="max-sm:px-2"
-            title="Open in new window"
-            onClick={() => window.open(window.location.href, "_blank", "noreferrer")}
-          >
-            <ExternalLink className="size-4 sm:mr-1" /><span className="hidden sm:inline">Open in new window</span>
-          </Button>
-          {canDownload && (
-            <Button variant="ghost" size="sm" className="max-sm:px-2" title="Download" onClick={handleDownload}>
-              <Download className="size-4 sm:mr-1" /><span className="hidden sm:inline">Download</span>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MobileSidebarTrigger className="mr-0" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push(wsPaths.documents())}
+            >
+              <ArrowLeft className="mr-1 size-4" />
+              <span className="hidden sm:inline">Documents</span>
             </Button>
-          )}
-          {canEdit && (
-            <>
-              <Button variant="ghost" size="sm" className="max-sm:px-2" title="Rename" onClick={startRename}>
-                <Pencil className="size-4 sm:mr-1" /><span className="hidden sm:inline">Rename</span>
-              </Button>
+          </div>
+          <div className="flex items-center gap-0.5 sm:gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="max-sm:px-2"
+              title="Open in new window"
+              onClick={() =>
+                window.open(window.location.href, "_blank", "noreferrer")
+              }
+            >
+              <ExternalLink className="size-4 sm:mr-1" />
+              <span className="hidden sm:inline">Open in new window</span>
+            </Button>
+            {canDownload && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="max-sm:px-2"
-                title="Edit body"
-                onClick={() => router.push(wsPaths.documentEdit(artifact.id))}
+                title="Download"
+                onClick={handleDownload}
               >
-                <Pencil className="size-4 sm:mr-1" /><span className="hidden sm:inline">Edit body</span>
+                <Download className="size-4 sm:mr-1" />
+                <span className="hidden sm:inline">Download</span>
               </Button>
-              <MoveScopeMenu artifact={artifact} />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="max-sm:px-2 text-destructive hover:text-destructive"
-                title="Delete"
-                onClick={() => setConfirmDelete(true)}
-              >
-                <Trash2 className="size-4 sm:mr-1" /><span className="hidden sm:inline">Delete</span>
-              </Button>
-            </>
+            )}
+            {canEdit && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="max-sm:px-2"
+                  title="Rename"
+                  onClick={startRename}
+                >
+                  <Pencil className="size-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Rename</span>
+                </Button>
+                {artifact.format !== "md" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="max-sm:px-2"
+                    title="Edit body"
+                    onClick={() =>
+                      router.push(wsPaths.documentEdit(artifact.id))
+                    }
+                  >
+                    <Pencil className="size-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Edit body</span>
+                  </Button>
+                )}
+                <MoveScopeMenu artifact={artifact} />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="max-sm:px-2 text-destructive hover:text-destructive"
+                  title="Delete"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <Trash2 className="size-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Delete</span>
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="mb-4 flex items-center gap-2">
+          <KindIcon
+            kind={artifact.kind}
+            className="size-4 text-muted-foreground"
+          />
+          <Badge variant="secondary" className="text-xs font-normal">
+            {KIND_LABELS[artifact.kind]}
+          </Badge>
+          <Badge variant="outline" className="text-xs uppercase">
+            {artifact.format}
+          </Badge>
+          {artifact.author_type === "agent" && (
+            <Badge variant="outline" className="text-xs">
+              agent
+            </Badge>
           )}
         </div>
-      </div>
 
-      <div className="mb-4 flex items-center gap-2">
-        <KindIcon kind={artifact.kind} className="size-4 text-muted-foreground" />
-        <Badge variant="secondary" className="text-xs font-normal">
-          {KIND_LABELS[artifact.kind]}
-        </Badge>
-        <Badge variant="outline" className="text-xs uppercase">
-          {artifact.format}
-        </Badge>
-        {artifact.author_type === "agent" && (
-          <Badge variant="outline" className="text-xs">
-            agent
-          </Badge>
-        )}
-      </div>
-
-      {renaming ? (
-        <Input
-          autoFocus
-          value={titleDraft}
-          onChange={(e) => setTitleDraft(e.target.value)}
-          onBlur={commitRename}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commitRename();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              cancelRename();
+        {renaming ? (
+          <Input
+            autoFocus
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitRename();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelRename();
+              }
+            }}
+            className="h-auto py-1 text-2xl font-semibold leading-tight"
+          />
+        ) : (
+          <h1
+            className={
+              "text-2xl font-semibold leading-tight" +
+              (canEdit
+                ? " cursor-text rounded px-1 -mx-1 hover:bg-accent/30"
+                : "")
             }
-          }}
-          className="text-2xl font-semibold leading-tight h-auto py-1"
-        />
-      ) : (
-        <h1
-          className={
-            "text-2xl font-semibold leading-tight" +
-            (canEdit ? " cursor-text hover:bg-accent/30 rounded px-1 -mx-1" : "")
-          }
-          onClick={canEdit ? startRename : undefined}
-          title={canEdit ? "Click to rename" : undefined}
-        >
-          {artifact.title}
-        </h1>
-      )}
-      <ConnectionRow artifact={artifact} />
-      <p className="mt-1 text-xs text-muted-foreground">
-        Updated {formatDateTime(artifact.updated_at)}
-      </p>
+            onClick={canEdit ? startRename : undefined}
+            title={canEdit ? "Click to rename" : undefined}
+          >
+            {artifact.title}
+          </h1>
+        )}
+        <ConnectionRow artifact={artifact} />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Updated {formatDateTime(artifact.updated_at)}
+        </p>
 
-      <div className="mt-6">
-        <ArtifactContent artifact={artifact} />
-      </div>
+        <div className="mt-6">
+          {artifact.format === "md" && canEdit ? (
+            <MarkdownDocumentEditor
+              artifact={artifact}
+              onSave={handleSaveMarkdownBody}
+              isSaving={update.isPending}
+            />
+          ) : (
+            <ArtifactContent artifact={artifact} />
+          )}
+        </div>
 
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete document?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently removes &ldquo;{artifact.title}&rdquo;. Cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} disabled={remove.isPending}>
-              {remove.isPending ? "Deleting…" : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete document?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This permanently removes &ldquo;{artifact.title}&rdquo;. Cannot
+                be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDelete}
+                disabled={remove.isPending}
+              >
+                {remove.isPending ? "Deleting…" : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

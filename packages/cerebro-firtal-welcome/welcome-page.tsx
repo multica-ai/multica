@@ -32,20 +32,20 @@ const DESKTOP_DOWNLOAD_URL = "/download";
 
 /** What a member can do in Firtal Multica. */
 const MEMBER_CAN = [
-  "Oprette og arbejde med issues (opgaver) — beskrive, kommentere, vedhæfte filer og følge dem til de er løst.",
-  "Samarbejde med AI-agenterne — tildele dem opgaver, stille spørgsmål og få dem til at løse ting for dig.",
-  "Bruge inbox, kanaler og chat til at følge med og kommunikere med både kolleger og agenter.",
-  "Se dashboards, dokumenter og de artefakter agenterne producerer undervejs.",
-  "Installere Multica som desktop-app og som app på din telefon (se trinnene længere nede).",
+  "Create and work with issues (tasks) — describe, comment, attach files, and follow them through to resolution.",
+  "Collaborate with AI agents — assign them tasks, ask questions, and have them solve things for you.",
+  "Use inbox, channels, and chat to stay updated and communicate with both colleagues and agents.",
+  "View dashboards, documents, and the artifacts agents produce along the way.",
+  "Install Multica as a desktop app and as an app on your phone (see the steps below).",
 ];
 
 /** What a member cannot do — those actions are reserved for admins. */
 const MEMBER_CANNOT = [
-  "Ændre workspace-indstillinger eller fakturering.",
-  "Oprette, redigere eller slette agenter på workspace-niveau — det styrer en admin.",
-  "Administrere andre medlemmers adgang, roller eller invitationer.",
-  "Ændre tool-policies og sikkerhedsindstillinger for agenterne.",
-  "Slette workspacet eller andres data.",
+  "Change workspace settings or billing.",
+  "Create, edit, or delete agents at the workspace level — that is managed by an admin.",
+  "Manage other members' access, roles, or invitations.",
+  "Change tool policies and security settings for the agents.",
+  "Delete the workspace or other people's data.",
 ];
 
 export interface FirtalWelcomePageProps {
@@ -99,7 +99,7 @@ export function FirtalWelcomePage({
           onClick={onLogout}
         >
           <LogOut />
-          Log ud
+          Log out
         </Button>
       )}
 
@@ -110,12 +110,12 @@ export function FirtalWelcomePage({
             <Sparkles className="h-7 w-7 text-primary" />
           </div>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            Velkommen til Firtal Multica
+            Welcome to Firtal Multica
           </h1>
           <p className="max-w-xl text-muted-foreground">
-            Firtals AI-platform. Her arbejder du med agenter, issues og chats —
-            alt samlet ét sted. Start med at læse hvad du kan som member, og
-            installér så appen hvis du vil.
+            Firtal's AI platform. Here you work with agents, issues, and chats —
+            all in one place. Start by reading what you can do as a member, and
+            then install the app if you want.
           </p>
         </header>
 
@@ -123,15 +123,15 @@ export function FirtalWelcomePage({
         <section className="mt-12">
           <SectionHeader
             icon={<BookOpen className="h-5 w-5" />}
-            title="1. Hvad kan du som member?"
-            description="Læs det her først. Det giver dig overblikket over hvad du kan — og hvad kun en admin kan — i Firtal Multica."
+            title="1. What can you do as a member?"
+            description="Read this first. It gives you an overview of what you can do — and what only an admin can do — in Firtal Multica."
           />
           <Card className="mt-4 p-6">
             <div className="grid gap-6 sm:grid-cols-2">
               <div>
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                   <Check className="h-4 w-4" />
-                  Det kan du
+                  What you can do
                 </h3>
                 <ul className="mt-3 space-y-2">
                   {MEMBER_CAN.map((item) => (
@@ -148,7 +148,7 @@ export function FirtalWelcomePage({
               <div>
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
                   <X className="h-4 w-4" />
-                  Det kan kun en admin
+                  Admin only
                 </h3>
                 <ul className="mt-3 space-y-2">
                   {MEMBER_CANNOT.map((item) => (
@@ -170,15 +170,15 @@ export function FirtalWelcomePage({
         <section className="mt-10">
           <SectionHeader
             icon={<Monitor className="h-5 w-5" />}
-            title="2. Hent desktop-appen (anbefalet)"
-            description="Den giver dig den bedste oplevelse: hurtigere genveje, native notifikationer og flere arbejdsruder side om side. Du kan også bare blive i browseren."
+            title="2. Download the desktop app (recommended)"
+            description="It gives you the best experience: faster shortcuts, native notifications, and multiple work panes side by side. You can also just stay in the browser."
           />
           <Card className="mt-4 p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm text-muted-foreground">
-                Hent appen til Mac eller Windows. På Mac trækker du Multica til
-                Programmer-mappen; på Windows følger du installationsguiden.
-                Første gang logger du ind med samme konto som her.
+                Download the app for Mac or Windows. On Mac, drag Multica to
+                the Applications folder; on Windows, follow the installation guide.
+                The first time you log in, use the same account as here.
               </div>
               <a
                 className={`${buttonVariants()} shrink-0`}
@@ -187,7 +187,7 @@ export function FirtalWelcomePage({
                 rel="noopener noreferrer"
               >
                 <Download className="h-4 w-4" />
-                Download desktop-app
+                Download desktop app
               </a>
             </div>
           </Card>
@@ -197,8 +197,8 @@ export function FirtalWelcomePage({
         <section className="mt-10">
           <SectionHeader
             icon={<Smartphone className="h-5 w-5" />}
-            title="3. Installér Multica som app på din telefon"
-            description="Du kan tilføje Multica som en app (PWA) på både iPhone og Android — så fungerer den ligesom en native app."
+            title="3. Install Multica as an app on your phone"
+            description="You can add Multica as an app (PWA) on both iPhone and Android — it will work just like a native app."
           />
           <Card className="mt-4 p-2 sm:p-4">
             <Accordion className="w-full">
@@ -208,20 +208,20 @@ export function FirtalWelcomePage({
                 </AccordionTrigger>
                 <AccordionContent className="px-4">
                   <ol className="ml-5 list-decimal space-y-2 text-sm text-muted-foreground">
-                    <li>Åbn Multica i Safari på din iPhone (ikke Chrome).</li>
+                    <li>Open Multica in Safari on your iPhone (not Chrome).</li>
                     <li>
-                      Tryk på <strong>Del</strong>-knappen nederst (firkanten med
-                      pilen).
+                      Tap the <strong>Share</strong> button at the bottom (the square with
+                      the arrow).
                     </li>
                     <li>
-                      Vælg <strong>Føj til hjemmeskærm</strong> i menuen.
+                      Select <strong>Add to Home Screen</strong> in the menu.
                     </li>
                     <li>
-                      Giv den et navn (Multica) og tryk <strong>Tilføj</strong>.
+                      Give it a name (Multica) and tap <strong>Add</strong>.
                     </li>
                     <li>
-                      Åbn appen fra hjemmeskærmen — den kører nu i fuld skærm,
-                      uden Safari-rammen.
+                      Open the app from the home screen — it now runs full screen,
+                      without the Safari frame.
                     </li>
                   </ol>
                 </AccordionContent>
@@ -232,18 +232,18 @@ export function FirtalWelcomePage({
                 </AccordionTrigger>
                 <AccordionContent className="px-4">
                   <ol className="ml-5 list-decimal space-y-2 text-sm text-muted-foreground">
-                    <li>Åbn Multica i Chrome på din Android.</li>
+                    <li>Open Multica in Chrome on your Android.</li>
                     <li>
-                      Tryk på menuen (de tre prikker) øverst til højre.
+                      Tap the menu (the three dots) in the top right.
                     </li>
                     <li>
-                      Vælg <strong>Installér app</strong> eller{" "}
-                      <strong>Føj til startskærm</strong>.
+                      Select <strong>Install app</strong> or{" "}
+                      <strong>Add to home screen</strong>.
                     </li>
-                    <li>Bekræft i dialogen.</li>
+                    <li>Confirm in the dialog.</li>
                     <li>
-                      Åbn Multica fra appoversigten — push-notifikationer virker
-                      som i en almindelig app.
+                      Open Multica from the app drawer — push notifications work
+                      just like in a regular app.
                     </li>
                   </ol>
                 </AccordionContent>
@@ -256,14 +256,14 @@ export function FirtalWelcomePage({
         <section className="mt-10">
           <SectionHeader
             icon={<LifeBuoy className="h-5 w-5" />}
-            title="4. Sådan får du hjælp og melder fejl"
-            description="Al support foregår inde i Multica Support — ikke her."
+            title="4. How to get help and report issues"
+            description="All support happens inside Multica Support — not here."
           />
           <Card className="mt-4 p-6">
             <p className="text-sm text-muted-foreground">
-              Hvis du støder på en fejl eller har brug for hjælp, sker det hele
-              inde i Multica Support. Du opretter selv en sag derinde, og Knud —
-              en flink og vidende fyr — tager den derfra og hjælper dig videre.
+              If you encounter an error or need help, everything happens
+              inside Multica Support. You open a case there yourself, and Knud —
+              a friendly and knowledgeable person — takes it from there and helps you further.
             </p>
             <div className="mt-5 rounded-lg border border-border bg-muted/40 p-4">
               <RadioGroup
@@ -282,8 +282,8 @@ export function FirtalWelcomePage({
                     htmlFor="support-ack"
                     className="text-sm font-normal leading-relaxed text-foreground"
                   >
-                    Jeg har læst og forstået, at al support og fejlmelding
-                    foregår inde i Multica Support, hvor Knud hjælper.
+                    I have read and understood that all support and bug reporting
+                    happens inside Multica Support, where Knud helps.
                   </Label>
                 </div>
               </RadioGroup>
@@ -295,7 +295,7 @@ export function FirtalWelcomePage({
         <div className="mt-12 flex flex-col items-center gap-3">
           {!supportAcknowledged && (
             <p className="text-sm text-muted-foreground">
-              Bekræft support-trinnet herover, før du går videre.
+              Confirm the support step above before continuing.
             </p>
           )}
           <Button
@@ -303,7 +303,7 @@ export function FirtalWelcomePage({
             onClick={handleComplete}
             disabled={!supportAcknowledged}
           >
-            Gå til min indbakke
+            Go to my inbox
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>

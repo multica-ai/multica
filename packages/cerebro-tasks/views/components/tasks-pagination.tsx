@@ -27,12 +27,12 @@ export function TasksPagination({ total, loadedCount }: TasksPaginationProps) {
           : `${from.toLocaleString("da-DK")}–${to.toLocaleString("da-DK")} af ${total.toLocaleString("da-DK")}`}
       </span>
       <div className="flex items-center gap-1">
-        <PageButton onClick={prevPage} disabled={!hasPrev} ariaLabel="Forrige side">
+        <PageButton onClick={prevPage} disabled={!hasPrev} ariaLabel="Previous page">
           <ChevronLeft className="size-3.5" />
-          <span>Forrige</span>
+          <span>Previous</span>
         </PageButton>
-        <PageButton onClick={nextPage} disabled={!hasNext} ariaLabel="Næste side">
-          <span>Næste</span>
+        <PageButton onClick={nextPage} disabled={!hasNext} ariaLabel="Next page">
+          <span>Next</span>
           <ChevronRight className="size-3.5" />
         </PageButton>
       </div>

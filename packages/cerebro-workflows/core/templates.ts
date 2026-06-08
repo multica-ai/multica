@@ -30,7 +30,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
   {
     key: "status-change",
     label: "Status changed → Create sub-issue",
-    description: "Når et issue går i in_review, opret et QA sub-issue.",
+    description: "When an issue moves to in_review, create a QA sub-issue.",
     status: "active",
     defaults: {
       name: "Auto QA on in_review",
@@ -41,7 +41,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
       action_type: "create_sub_issue",
       action_config: {
         title: "QA: {{title}}",
-        description: "Auto-genereret fra workflow ved overgang til in_review.",
+        description: "Auto-generated from workflow on transition to in_review.",
       },
     },
   },
@@ -49,7 +49,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     key: "due-date-time",
     label: "Due date / time reached → Send reminder",
     description:
-      "Ping den tildelte agent eller member når et issues due date (eller specifikke klokkeslæt) er nået.",
+      "Ping the assigned agent or member when an issue's due date (or specific time) has been reached.",
     status: "active",
     defaults: {
       name: "Due-date reminder",
@@ -64,7 +64,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
         // error if they try to save without it.
         recipient_id: "",
         recipient_type: "member",
-        message: "Reminder: issuet's due date er nået.",
+        message: "Reminder: the issue's due date has been reached.",
       },
     },
   },
@@ -72,7 +72,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     key: "run-skill",
     label: "Status changed → Run skill",
     description:
-      "Når et issue går i in_review, kør en navngiven skill på den valgte agent med issue-konteksten som input.",
+      "When an issue moves to in_review, run a named skill on the selected agent with the issue context as input.",
     status: "active",
     defaults: {
       name: "Auto skill on in_review",
@@ -98,7 +98,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     key: "comment-on-issue",
     label: "Status changed → Comment on issue",
     description:
-      "Når et issue ændrer status, post en workflow-forfattet kommentar på issuet eller dets parent.",
+      "When an issue changes status, post a workflow-authored comment on the issue or its parent.",
     status: "active",
     defaults: {
       name: "Status announcement",
@@ -109,7 +109,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
       action_type: "comment_on_issue",
       action_config: {
         target: "self",
-        content: "Workflow: {{title}} er nu klar til review.",
+        content: "Workflow: {{title}} is now ready for review.",
       },
     },
   },
@@ -121,7 +121,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     key: "route-by-domain",
     label: "Status changed → Route by domain",
     description:
-      "Når et issue går i todo, klassificér det til kode/business/design/indhold og attach et `domain:<x>` label.",
+      "When an issue moves to todo, classify it as code/business/design/content and attach a `domain:<x>` label.",
     status: "active",
     defaults: {
       name: "Auto-route by domain",
@@ -146,10 +146,10 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     key: "validate-evidence-on-review",
     label: "In review + evidence → Done",
     description:
-      "Når et issue går i in_review og tråden indeholder en PR-URL eller screenshot, flyt automatisk til done. Ellers bliver det i in_review.",
+      "When an issue moves to in_review and the thread contains a PR URL or screenshot, automatically move to done. Otherwise it stays in in_review.",
     status: "active",
     defaults: {
-      name: "Auto-done når evidens er på plads",
+      name: "Auto-done when evidence is in place",
       enabled: true,
       trigger_type: "status_changed",
       trigger_config: { to_status: "in_review" },
@@ -176,7 +176,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     key: "escalate-stalled-to-owner",
     label: "Due date reached → Escalate to owner",
     description:
-      "Når et issues due date passerer, walker workflow'et parent-kæden op og poster på første ancestor med assignee — hvis sub-issuet ikke har set status-skift de seneste 12 timer.",
+      "When an issue's due date passes, the workflow walks up the parent chain and posts on the first ancestor with an assignee — if the sub-issue has not seen a status change in the last 12 hours.",
     status: "active",
     defaults: {
       name: "Escalate stalled sub-issues",
@@ -193,7 +193,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
   {
     key: "all-children-done",
     label: "All children done → Update parent",
-    description: "Når alle children er done, flyt parent til in_review.",
+    description: "When all children are done, move parent to in_review.",
     status: "active",
     defaults: {
       name: "Auto promote parent when all children done",
@@ -212,7 +212,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
   {
     key: "mention-agent",
     label: "Mention agent in comment → Auto-reply",
-    description: "Når en agent @mentiones i en kommentar, re-route issue til den.",
+    description: "When an agent is @mentioned in a comment, re-route the issue to it.",
     status: "active",
     defaults: {
       name: "Mention → auto-reply",
@@ -238,7 +238,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
   {
     key: "cron",
     label: "Run on schedule",
-    description: "Kør en navngivet skill på et fast skema.",
+    description: "Run a named skill on a fixed schedule.",
     status: "active",
     defaults: {
       name: "Run skill on schedule",
@@ -264,10 +264,10 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
   {
     key: "sub-issue-created",
     label: "Sub-issue created → Comment on parent",
-    description: "Notificér parent når der oprettes nye sub-issues.",
+    description: "Notify parent when new sub-issues are created.",
     status: "active",
     defaults: {
-      name: "Nyt sub-issue → kommentar på parent",
+      name: "New sub-issue → comment on parent",
       enabled: true,
       trigger_type: "sub_issue_created",
       trigger_config: {
@@ -279,14 +279,14 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
       action_type: "comment_on_issue",
       action_config: {
         target: "parent",
-        content: "Nyt sub-issue oprettet: {{title}}",
+        content: "New sub-issue created: {{title}}",
       },
     },
   },
   {
     key: "cron-daily-standup",
     label: "Daily stand-up → Run skill",
-    description: "Daglig standup-summary på hverdage kl. 9.",
+    description: "Daily standup summary on weekdays at 9.",
     status: "active",
     defaults: {
       name: "Daily stand-up skill",
@@ -311,7 +311,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
   {
     key: "webhook-github-pr",
     label: "GitHub PR webhook → Create sub-issue",
-    description: "Inbound webhook fra GitHub PR-event → opret sub-issue.",
+    description: "Inbound webhook from GitHub PR event → create sub-issue.",
     status: "active",
     defaults: {
       name: "GitHub PR webhook → sub-issue",
@@ -328,7 +328,7 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
         // body). Missing keys render as empty strings, so a slightly off
         // payload shape degrades gracefully instead of crashing the action.
         title: "GitHub PR: {{payload.pull_request.title}}",
-        description: "Ny webhook fra GitHub PR. Se workflow-loggen for payload.",
+        description: "New webhook from GitHub PR. See the workflow log for payload.",
       },
     },
   },

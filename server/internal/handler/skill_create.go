@@ -105,6 +105,8 @@ func (h *Handler) createSkillWithFiles(ctx context.Context, input skillCreateInp
 	if err := tx.Commit(ctx); err != nil {
 		return SkillWithFilesResponse{}, err
 	}
+	// CEREBRO-PATCH(skill-metadata-sync-create): TECH-3077 — sync metadata after create.
+	h.syncSkillMetadataAsync(parseUUID(result.ID), input.Content)
 
 	return result, nil
 }

@@ -850,11 +850,11 @@ function AgentsSection({
     try {
       await addRuntime.mutateAsync(pendingDual.runtime.id);
       await addAgent.mutateAsync(pendingDual.agent.id);
-      toast.success("Agent og runtime tilføjet");
+      toast.success("Agent and runtime added");
       setPendingDual(null);
     } catch (e) {
       toast.error(
-        e instanceof Error ? e.message : "Kunne ikke tilføje agent + runtime",
+        e instanceof Error ? e.message : "Failed to add agent + runtime",
       );
     }
   };
@@ -923,7 +923,7 @@ function AgentsSection({
                           className="text-[10px]"
                           data-testid="agent-runtime-badge"
                         >
-                          Kører på: {runtime.name || runtime.provider}
+                          Runs on: {runtime.name || runtime.provider}
                         </Badge>
                         {runtimeMissing && isAdmin && (
                           <>
@@ -934,15 +934,15 @@ function AgentsSection({
                                     variant="destructive"
                                     className="text-[10px]"
                                     data-testid="agent-runtime-missing-badge"
-                                    aria-label={`Mangler runtime ${runtime.name || runtime.provider} i gruppen`}
+                                    aria-label={`Missing runtime ${runtime.name || runtime.provider} in group`}
                                   >
                                     <AlertTriangle className="mr-1 size-3" />
-                                    Mangler runtime {runtime.name || runtime.provider} i gruppen
+                                    Missing runtime {runtime.name || runtime.provider} in group
                                   </Badge>
                                 }
                               />
                               <TooltipContent>
-                                Gruppen har ikke runtime "{runtime.name || runtime.provider}" på allowlist'en, så medlemmerne kan ikke trigge denne agent.
+                                The group does not have runtime "{runtime.name || runtime.provider}" on its allowlist, so members cannot trigger this agent.
                               </TooltipContent>
                             </Tooltip>
                             <Button
@@ -955,13 +955,13 @@ function AgentsSection({
                               }
                               disabled={addRuntime.isPending}
                             >
-                              Tilføj runtime
+                              Add runtime
                             </Button>
                           </>
                         )}
                       </>
                     ) : (
-                      <span>Ingen runtime registreret</span>
+                      <span>No runtime registered</span>
                     )}
                   </span>
                 </span>
@@ -1006,8 +1006,8 @@ function AgentsSection({
                     <span className="block truncate">{a.name}</span>
                     <span className="block text-xs text-muted-foreground truncate">
                       {runtime
-                        ? `Kører på: ${runtime.name || runtime.provider}`
-                        : "Ingen runtime"}
+                        ? `Runs on: ${runtime.name || runtime.provider}`
+                        : "No runtime"}
                     </span>
                   </span>
                   <Button
@@ -1034,19 +1034,19 @@ function AgentsSection({
         <AlertDialogContent data-testid="add-runtime-prompt">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Denne agent kræver runtime {pendingDual?.runtime.name || pendingDual?.runtime.provider}
+              This agent requires runtime {pendingDual?.runtime.name || pendingDual?.runtime.provider}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Agenten "{pendingDual?.agent.name}" kører på en runtime der ikke er
-              i gruppens allowlist. Hvis du tilføjer agenten alene, kan
-              gruppens medlemmer stadig ikke trigge den. Tilføj begge?
+              The agent "{pendingDual?.agent.name}" runs on a runtime that is not
+              on the group's allowlist. If you add the agent alone, the
+              group's members will still not be able to trigger it. Add both?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel
               disabled={addRuntime.isPending || addAgent.isPending}
             >
-              Annullér
+              Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
@@ -1056,8 +1056,8 @@ function AgentsSection({
               disabled={addRuntime.isPending || addAgent.isPending}
             >
               {addRuntime.isPending || addAgent.isPending
-                ? "Tilføjer…"
-                : "Tilføj begge"}
+                ? "Adding…"
+                : "Add both"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1107,7 +1107,7 @@ function CapabilitiesSection({
       <div className="space-y-4 p-4">
         <CapabilityRow
           label="Create runtimes"
-          tooltip="Members i denne gruppe kan oprette egne runtimes. De får automatisk adgang til runtimes de selv har oprettet, uanset andre group-permissions."
+          tooltip="Members of this group can create their own runtimes. They automatically get access to runtimes they created themselves, regardless of other group permissions."
           checked={has("create_runtime")}
           disabled={!isAdmin || grant.isPending || revoke.isPending}
           onChange={(next) => onToggle("create_runtime", next)}
@@ -1115,7 +1115,7 @@ function CapabilitiesSection({
         />
         <CapabilityRow
           label="Create agents"
-          tooltip="Members i denne gruppe kan oprette egne agenter. De får automatisk adgang til agenter de selv har oprettet, uanset andre group-permissions."
+          tooltip="Members of this group can create their own agents. They automatically get access to agents they created themselves, regardless of other group permissions."
           checked={has("create_agent")}
           disabled={!isAdmin || grant.isPending || revoke.isPending}
           onChange={(next) => onToggle("create_agent", next)}

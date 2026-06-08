@@ -44,6 +44,8 @@ import {
   FileDropOverlay,
 } from "../../editor";
 import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
+// CEREBRO-PATCH(thread-side-panel-cost-badge-import): FIR-39 per-comment cost badge on channel thread replies.
+import { CommentCostBadge } from "@multica/cerebro-channels";
 import { collectThreadReplies } from "../../issues/components/thread-utils";
 import { ReadonlyContent } from "../../editor";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
@@ -280,6 +282,8 @@ function ThreadEntry({
               day: "numeric",
             })}
           </span>
+          {/* CEREBRO-PATCH(thread-side-panel-cost-badge): FIR-39 per-comment cost badge inline with the timestamp. */}
+          <CommentCostBadge issueId={channelId} commentId={entry.id} authorType={entry.actor_type} />
         </div>
 
         {editing ? (

@@ -24,6 +24,7 @@ interface KpiCardsProps {
   isLoading: boolean;
   wsId: string;
   workspaceSlug: string;
+  filter?: "messages";
 }
 
 function useIsWorkspaceAdmin(wsId: string): boolean {
@@ -33,7 +34,7 @@ function useIsWorkspaceAdmin(wsId: string): boolean {
   return member?.role === "owner" || member?.role === "admin";
 }
 
-export function KpiCards({ data, isLoading, wsId, workspaceSlug }: KpiCardsProps) {
+export function KpiCards({ data, isLoading, wsId, workspaceSlug, filter }: KpiCardsProps) {
   const isAdmin = useIsWorkspaceAdmin(wsId);
 
   const cards: KpiCardSpec[] = [
@@ -99,9 +100,16 @@ export function KpiCards({ data, isLoading, wsId, workspaceSlug }: KpiCardsProps
     });
   }
 
+  const visibleCards =
+    filter === "messages"
+      ? cards.filter((c) =>
+          c.label === "Chat messages" || c.label === "Channel messages" || c.label === "Spend",
+        )
+      : cards;
+
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-      {cards.map((c) => (
+      {visibleCards.map((c) => (
         <KpiCard key={c.label} {...c} isLoading={isLoading} />
       ))}
     </div>

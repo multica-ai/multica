@@ -487,7 +487,11 @@ WHERE (status = 'dispatched' AND dispatched_at < now() - make_interval(secs => @
 RETURNING *;
 
 -- name: ExpireStaleQueuedTasks :many
--- Fails tasks that have been sitting in 'queued' for longer than the TTL.
+-- Fails tasks that have been sitting in 'queued' for longer than the TTL,
+-- except queued tasks on paused runtimes. Runtime pause is a deliberate hold
+-- state: queued work must wait for unpause and then be claimed normally.
+-- CEREBRO-PATCH(paused-runtime-queued-ttl): protect deliberately paused queues
+-- from the generic queued-TTL cleanup while keeping offline backlog draining.
 -- This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
 -- new dispatch-time admission gate that refuses to enqueue when the runtime
 -- is offline, we still need to drain the historical 87k+ doomed rows and
@@ -510,10 +514,15 @@ RETURNING *;
 -- the DB when the backlog is large — the sweeper drains the rest on
 -- subsequent ticks.
 WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
-    ORDER BY created_at ASC
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.status = 'queued'
+      AND atq.created_at < now() - make_interval(secs => @ttl_secs::double precision)
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_runtime rt
+          WHERE rt.id = atq.runtime_id
+            AND rt.paused_at IS NOT NULL
+      )
+    ORDER BY atq.created_at ASC
     LIMIT @max_per_tick::int
     FOR UPDATE SKIP LOCKED
 )
@@ -526,6 +535,11 @@ FROM victims v
 WHERE t.id = v.id
   AND t.status = 'queued'
   AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_runtime rt
+      WHERE rt.id = t.runtime_id
+        AND rt.paused_at IS NOT NULL
+  )
 RETURNING t.*;
 
 -- name: CancelAgentTask :one

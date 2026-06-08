@@ -1,0 +1,4 @@
+-- No-op rollback: the seeded rows are harmless to leave in place, and by the
+-- time this migration is rolled back the dynamic fetch may own these rows —
+-- deleting them blindly could drop live rates. The table itself is dropped by
+-- 9064_cerebro_exchange_rates.down.sql.

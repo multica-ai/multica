@@ -4,6 +4,8 @@
 // CEREBRO-PATCH(channels-flag-gate): cerebro_channels feature flag controls channel/DM chrome
 
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
@@ -30,6 +32,7 @@ import {
   UserMinus,
   Users,
   X, // CEREBRO-PATCH(remove-parent-issue): issue sidebar clear-parent affordance.
+  Inbox, // CEREBRO-PATCH(cerebro-inbox-add-issue): "Add to inbox" in the detail toolbar menu.
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../../layout/page-header";
@@ -45,7 +48,8 @@ import { useHighlightCommentScroll } from "@multica/cerebro-ui/hooks/use-highlig
 // CEREBRO-PATCH(issue-detail-context-trigger-import): TECH-2969 — click title in topbar to open context top-sheet.
 import { IssueContextTrigger } from "@multica/cerebro-ui/components/issue-context-trigger";
 // CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — unarchive button rendered in detail toolbar when host embeds IssueDetail in archived inbox view.
-import { CerebroUnarchiveToolbarButton } from "@multica/cerebro-inbox";
+// CEREBRO-PATCH(cerebro-inbox-add-issue): "Add to inbox" action in the detail toolbar 3-dot menu.
+import { CerebroUnarchiveToolbarButton, useAddIssueToInbox } from "@multica/cerebro-inbox";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -94,6 +98,8 @@ import { PriorityIcon } from "./priority-icon";
 import { StatusIcon } from "./status-icon";
 // CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related sidebar section.
 import { DependenciesSection } from "./dependencies-section";
+// CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3144 — wakeup list + cancel in issue sidebar.
+import { CerebroWakeupSection } from "./cerebro-wakeup-section";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
 // CEREBRO-PATCH(issue-detail-status-model): FIR-1550 provide the issue's project status-model presentation to status surfaces
 import { CerebroStatusModelProvider } from "@multica/cerebro-status-models/views";
@@ -287,15 +293,6 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
-}
-
-// Render server-returned cents as USD with a precision floor so single-digit
-// cent runs don't render as "$0.00".
-function formatCostCents(cents: number): string {
-  const usd = cents / 100;
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
 }
 
 function TimelineSkeleton() {
@@ -652,6 +649,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
   const workspace = useCurrentWorkspace();
+  // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 — cost rendered in the
+  // workspace display currency (standard 2-decimal precision, as before for USD).
+  const { formatCents: formatCostCents } = useCostFormatter();
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
@@ -1180,6 +1180,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     else panel.collapse();
   }, [isMobile, sidebarRef]);
 
+  const addToInbox = useAddIssueToInbox(); // CEREBRO-PATCH(cerebro-inbox-add-issue): "Add to inbox" in the detail 3-dot menu.
   // CEREBRO-PATCH(issue-detail-delete-handler): preserve cerebro's inline delete dialog flow
   const deleteIssueMutation = useDeleteIssue();
   const handleDelete = async () => {
@@ -1375,9 +1376,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
-          {/* CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — show the human an agent created this issue for, so it traces back to a member. */}
+          {/* CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — show the human an agent created this issue for, so it traces back to a member. Label translated to English (TECH-3099). */}
           {issue.on_behalf_of ? (
-            <PropRow label="På vegne af" interactive={false}>
+            <PropRow label="On behalf of" interactive={false}>
               <ActorAvatar actorType="member" actorId={issue.on_behalf_of.user_id} size={16} />
               <span className="truncate">{issue.on_behalf_of.name}</span>
             </PropRow>
@@ -1686,6 +1687,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           </div>}
         </div>
       )}
+
+      {/* CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3144 — pending wakeups with cancel */}
+      {!isChat && <CerebroWakeupSection issueId={id} />}
     </div>
   );
 
@@ -1747,50 +1751,37 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            {linkSelfInBreadcrumb ? (
-              <AppLink
-                href={isChat ? paths.channelDetail(issue.id) : paths.issueDetail(issue.id)}
-                className="flex min-w-0 items-center gap-1.5 hover:text-foreground/80 transition-colors"
-              >
-                {isChat ? (
+            {isChat ? (
+              linkSelfInBreadcrumb ? (
+                <AppLink
+                  href={paths.channelDetail(issue.id)}
+                  className="flex min-w-0 items-center gap-1.5 hover:text-foreground/80 transition-colors"
+                >
                   <span className="truncate font-medium text-foreground">
                     {isChannel ? `# ${displayTitle}` : displayTitle}
                   </span>
-                ) : (
-                  <>
-                    <span className="shrink-0 text-muted-foreground">
-                      {issue.identifier}
-                    </span>
-                    <span className="truncate font-medium text-foreground">
-                      {displayTitle}
-                    </span>
-                  </>
-                )}
-              </AppLink>
+                </AppLink>
+              ) : (
+                <span className="truncate font-medium text-foreground">
+                  {isChannel ? `# ${displayTitle}` : displayTitle}
+                </span>
+              )
             ) : (
-              <>
-                {isChat ? (
-                  <span className="truncate font-medium text-foreground">
-                    {isChannel ? `# ${displayTitle}` : displayTitle}
-                  </span>
-                ) : (
-                  /* CEREBRO-PATCH(issue-detail-context-trigger-desktop): TECH-2969 — click identifier+title in desktop breadcrumb to open context top-sheet. */
-                  <IssueContextTrigger
-                    fullTitle={displayTitle}
-                    description={issue.description}
-                    identifier={issue.identifier}
-                    className="min-w-0"
-                    containerRef={issueColumnRef}
-                  >
-                    <span className="shrink-0 text-muted-foreground">
-                      {issue.identifier}
-                    </span>
-                    <span className="truncate font-medium text-foreground">
-                      {displayTitle}
-                    </span>
-                  </IssueContextTrigger>
-                )}
-              </>
+              /* CEREBRO-PATCH(issue-detail-context-trigger-desktop): TECH-2969 — click identifier+title in desktop breadcrumb to open context top-sheet. Also fires from inbox (linkSelfInBreadcrumb=true) — non-chat issues always use the context trigger. */
+              <IssueContextTrigger
+                fullTitle={displayTitle}
+                description={issue.description}
+                identifier={issue.identifier}
+                className="min-w-0"
+                containerRef={issueColumnRef}
+              >
+                <span className="shrink-0 text-muted-foreground">
+                  {issue.identifier}
+                </span>
+                <span className="truncate font-medium text-foreground">
+                  {displayTitle}
+                </span>
+              </IssueContextTrigger>
             )}
             {/* CEREBRO-PATCH(issue-private-badge-header): inherited-privacy badge in issue header (JEH-1750). */}
             {issue.is_private && <PrivateBadge size="sm" className="ml-1 shrink-0" />}
@@ -1988,6 +1979,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   <Link2 className="h-3.5 w-3.5" />
                   Copy link
                 </DropdownMenuItem>
+                {/* CEREBRO-PATCH(cerebro-inbox-add-issue): add this issue to the member's inbox. */}
+                {issue && <DropdownMenuItem onClick={() => addToInbox.mutate(issue.id, { onSuccess: () => toast.success("Added to inbox") })}>
+                  <Inbox className="h-3.5 w-3.5" />
+                  Add to inbox
+                </DropdownMenuItem>}
 
                 <DropdownMenuSeparator />
 

@@ -54,8 +54,8 @@ describe("compileProfile", () => {
       processPref: 1,
     };
     const compiled = compileProfile(profile);
-    expect(compiled).toContain("1–3 sætninger");
-    expect(compiled).toContain("Reversibelt: bare kør");
+    expect(compiled).toContain("Default 1–3 sentences");
+    expect(compiled).toContain("Reversible: just run it");
     expect(compiled).toContain("SCOPE: git:1, code:1, computer:1, process:1");
   });
 
@@ -70,8 +70,8 @@ describe("compileProfile", () => {
       processPref: 5,
     };
     const compiled = compileProfile(profile);
-    expect(compiled).toContain("Forklar ræsonnement");
-    expect(compiled).toContain("Bekræft plan");
+    expect(compiled).toContain("Explain reasoning");
+    expect(compiled).toContain("Confirm plan");
     expect(compiled).toContain("SCOPE: git:5, code:5, computer:5, process:5");
   });
 
@@ -151,13 +151,13 @@ const defaultProfileOutputs: Record<(typeof PERSONAS)[number], string> = {
   ekspert: `USER: Jens (Eksperten, dansk)
 
 STYLE:
-- Default 3–6 sætninger. Brug struktur ved >5 punkter.
-- Match navne fra koden eksakt. Ingen opfundne ord.
+- Default 3–6 sentences. Use structure for >5 items.
+- Match names from code exactly. No invented words.
 
 AUTONOMY:
-- Reversibelt: bare kør, vis hvad der skete.
-- Destruktivt: spørg først.
-- Spørg ikke om ting du selv kan finde/gøre.
+- Reversible: just run it, show what happened.
+- Destructive: ask first.
+- Don't ask about things you can find/do yourself.
 
 SCOPE: git:5, code:5, computer:5, process:5
 
@@ -167,12 +167,12 @@ AVOID:
   grundig: `USER: Jens (Den grundige, dansk)
 
 STYLE:
-- Forklar ræsonnement og trade-offs. Brug sektioner ved længere svar.
-- Match navne fra koden eksakt. Ingen opfundne ord.
+- Explain reasoning and trade-offs. Use sections for longer answers.
+- Match names from code exactly. No invented words.
 
 AUTONOMY:
-- Bekræft plan før ikke-trivielle ændringer.
-- Destruktivt: spørg altid først.
+- Confirm plan before non-trivial changes.
+- Destructive: always ask first.
 
 SCOPE: git:4, code:4, computer:5, process:5
 
@@ -182,12 +182,12 @@ AVOID:
   larling: `USER: Jens (Lærlingen, dansk)
 
 STYLE:
-- Forklar ræsonnement og trade-offs. Brug sektioner ved længere svar.
-- Match navne fra koden eksakt. Ingen opfundne ord.
+- Explain reasoning and trade-offs. Use sections for longer answers.
+- Match names from code exactly. No invented words.
 
 AUTONOMY:
-- Bekræft plan før ikke-trivielle ændringer.
-- Destruktivt: spørg altid først.
+- Confirm plan before non-trivial changes.
+- Destructive: always ask first.
 
 SCOPE: git:2, code:2, computer:3, process:2
 
@@ -197,14 +197,14 @@ AVOID:
   utalmodig: `USER: Jens (Den utålmodige, dansk)
 
 STYLE:
-- Default 1–3 sætninger. Vis data i tabel/liste hvis >5 punkter.
-- Spring hilsner og "let me know"-closings over.
-- Match navne fra koden eksakt. Ingen opfundne ord.
+- Default 1–3 sentences. Show data in table/list if >5 items.
+- Skip greetings and "let me know" closings.
+- Match names from code exactly. No invented words.
 
 AUTONOMY:
-- Reversibelt: bare kør, vis hvad der skete.
-- Destruktivt: spørg først.
-- Spørg ikke om ting du selv kan finde/gøre.
+- Reversible: just run it, show what happened.
+- Destructive: ask first.
+- Don't ask about things you can find/do yourself.
 
 SCOPE: git:4, code:4, computer:5, process:4
 
@@ -236,26 +236,26 @@ AVOID:
 const emptyAntiPatternsOutput = `USER: Jens (Eksperten, dansk)
 
 STYLE:
-- Default 3–6 sætninger. Brug struktur ved >5 punkter.
-- Match navne fra koden eksakt. Ingen opfundne ord.
+- Default 3–6 sentences. Use structure for >5 items.
+- Match names from code exactly. No invented words.
 
 AUTONOMY:
-- Reversibelt: gør det, opsummér ændringen.
-- Destruktivt eller tvetydigt: bekræft først.
+- Reversible: do it, summarize the change.
+- Destructive or ambiguous: confirm first.
 
 SCOPE: git:3, code:3, computer:3, process:3`;
 
 const maxAntiPatternsOutput = `USER: Jens (Den utålmodige, dansk)
 
 STYLE:
-- Default 1–3 sætninger. Vis data i tabel/liste hvis >5 punkter.
-- Spring hilsner og "let me know"-closings over.
-- Match navne fra koden eksakt. Ingen opfundne ord.
+- Default 1–3 sentences. Show data in table/list if >5 items.
+- Skip greetings and "let me know" closings.
+- Match names from code exactly. No invented words.
 
 AUTONOMY:
-- Reversibelt: bare kør, vis hvad der skete.
-- Destruktivt: spørg først.
-- Spørg ikke om ting du selv kan finde/gøre.
+- Reversible: just run it, show what happened.
+- Destructive: ask first.
+- Don't ask about things you can find/do yourself.
 
 SCOPE: git:4, code:4, computer:5, process:4
 

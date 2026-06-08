@@ -61,7 +61,7 @@ export function IssueContextTrigger({
       <div
         role="dialog"
         aria-modal="false"
-        aria-label="Opgavekontekst"
+        aria-label="Task context"
         className="absolute inset-x-0 top-0 z-50 border-b bg-background shadow-md animate-in slide-in-from-top-2 duration-150"
       >
         <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-2">
@@ -78,7 +78,7 @@ export function IssueContextTrigger({
           <button
             type="button"
             onClick={() => setOpen(false)}
-            aria-label="Luk"
+            aria-label="Close"
             className="mt-0.5 shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="h-4 w-4" />
@@ -94,7 +94,7 @@ export function IssueContextTrigger({
             </div>
           ) : (
             <div className="text-sm italic text-muted-foreground">
-              Ingen beskrivelse endnu.
+              No description yet.
             </div>
           )}
         </div>
@@ -109,7 +109,7 @@ export function IssueContextTrigger({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Vis fuld kontekst for opgaven"
+        aria-label="View full task context"
         aria-expanded={open}
         className={cn(
           "flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",

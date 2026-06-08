@@ -88,12 +88,12 @@ export function FirtalRegistryConfigDialog({
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: agentToolsKey(agentId) });
-      toast.success("Data source-tilladelser gemt");
+      toast.success("Data source permissions saved");
       onOpenChange(false);
     },
     onError: (err) => {
       toast.error(
-        err instanceof Error ? err.message : "Kunne ikke gemme tilladelser",
+        err instanceof Error ? err.message : "Failed to save permissions",
       );
     },
   });
@@ -130,8 +130,8 @@ export function FirtalRegistryConfigDialog({
         <SheetHeader className="border-b">
           <SheetTitle>firtal_registry — data sources</SheetTitle>
           <SheetDescription>
-            Vælg hvilke data sources agenten må se via Firtal Data Registry.
-            Uden tilladelse ser agenten ingen kilder.
+            Choose which data sources the agent may see via Firtal Data Registry.
+            Without permission the agent sees no sources.
           </SheetDescription>
         </SheetHeader>
 
@@ -140,7 +140,7 @@ export function FirtalRegistryConfigDialog({
             <div className="space-y-0.5">
               <Label htmlFor="allow-all-ds">Tillad alle data sources</Label>
               <p className="text-xs text-muted-foreground">
-                Slår allowlisten fra — agenten ser alt i registret.
+                Disables the allowlist — the agent sees everything in the registry.
               </p>
             </div>
             <Switch
@@ -158,7 +158,7 @@ export function FirtalRegistryConfigDialog({
                   type="search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Søg data sources…"
+                  placeholder="Search data sources…"
                   className="h-8 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
@@ -175,7 +175,7 @@ export function FirtalRegistryConfigDialog({
                 </p>
               ) : filteredSources.length === 0 ? (
                 <p className="py-4 text-sm text-muted-foreground">
-                  Ingen data sources matcher søgningen.
+                  No data sources match the search.
                 </p>
               ) : (
                 <ul className="flex-1 space-y-1 overflow-y-auto rounded-md border p-2">

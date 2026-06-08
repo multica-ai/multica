@@ -100,11 +100,11 @@ export function GroupsTab({ onSelectGroup }: GroupsTabProps = {}) {
           >
             <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 font-medium">Navn</th>
+                <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 font-medium text-right">Members</th>
                 <th className="px-3 py-2 font-medium text-right">Agents</th>
                 <th className="px-3 py-2 font-medium text-right">Runtimes</th>
-                <th className="px-3 py-2 font-medium">Oprettet af</th>
+                <th className="px-3 py-2 font-medium">Created by</th>
                 <th className="px-3 py-2 font-medium">Capabilities</th>
               </tr>
             </thead>
@@ -153,15 +153,15 @@ function CreateGroupForm() {
       className="rounded-md border border-border bg-muted/30 p-4 space-y-3"
       data-testid="create-group-form"
     >
-      <div className="text-sm font-medium">Opret gruppe</div>
+      <div className="text-sm font-medium">Create group</div>
       <Input
-        placeholder="Gruppenavn (fx Engineering)"
+        placeholder="Group name (e.g. Engineering)"
         value={name}
         onChange={(e) => setName(e.target.value)}
         aria-label="Group name"
       />
       <Textarea
-        placeholder="Valgfri beskrivelse"
+        placeholder="Optional description"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         aria-label="Group description"
@@ -174,7 +174,7 @@ function CreateGroupForm() {
           disabled={!trimmed || create.isPending}
         >
           <Plus className="size-4 mr-1.5" />
-          {create.isPending ? "Opretter…" : "Opret gruppe"}
+          {create.isPending ? "Creating…" : "Create group"}
         </Button>
       </div>
     </div>

@@ -17,6 +17,14 @@ declare module "@multica/core/types/workspace" {
   interface Workspace {
     avatar_url?: string | null;
   }
+  // TECH-3002: workspace accent color. Stored in workspace.settings so the
+  // existing PATCH /workspaces/:id endpoint handles it — no schema migration.
+  // Two fields let auto-extraction and manual override coexist without
+  // either silently overwriting the other.
+  interface WorkspaceSettings {
+    accent_color_auto?: string;   // hex extracted from logo (set on logo save)
+    accent_color_manual?: string; // user's explicit override from color picker
+  }
 }
 
 // FIR-1550 v2b: per-issue custom_status pin joined onto the upstream Issue
@@ -148,6 +156,52 @@ export interface RuntimeTool {
   description: string;
   enabled: boolean;
   last_scanned_at: string | null;
+}
+
+export interface RuntimeToolEffectiveAccess {
+  descriptor: {
+    tool_key: string;
+    display_name: string;
+    description?: string;
+    source: string;
+    risk_class: string;
+    protocols: string[];
+    recommended_default_policy: string;
+  };
+  inventory: {
+    runtime_id: string;
+    tool_name: string;
+    source: string;
+    mcp_server_name?: string;
+    enabled: boolean;
+  };
+  policy: {
+    effective: string;
+    reason: string;
+    decided_by?: string;
+    capped_by?: string;
+  };
+  runtime_grant: {
+    effective: string;
+    reason: string;
+  };
+  protocol: {
+    effective: string;
+    required_protocols: string[];
+    runtime_protocols: string[];
+    selected_protocol?: string;
+    supports_ask: boolean;
+    unsupported_message?: string;
+  };
+  credential: {
+    effective: string;
+    reason: string;
+  };
+  exposure_effective: {
+    effective: boolean;
+    reason: string;
+  };
+  layers?: Record<string, string>;
 }
 
 export interface RuntimeToolGroupGrant {

@@ -34,7 +34,7 @@ export function TopActors({ data, isLoading, kind }: TopActorsProps) {
           [0, 1, 2].map((i) => <div key={i} className="h-6 animate-pulse rounded bg-muted" />)
         ) : list.length === 0 ? (
           <p className="py-4 text-center text-xs text-muted-foreground">
-            Ingen aktivitet i perioden.
+            No activity in this period.
           </p>
         ) : (
           list.map((a) => <Row key={a.id} actor={a} maxCount={max} kind={kind} />)

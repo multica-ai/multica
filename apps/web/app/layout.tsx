@@ -5,7 +5,6 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
-import { CerebroFirtalPortalBar } from "@/components/cerebro-firtal-portal-bar";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { CEREBRO_AGENT_AVATAR_RESOURCES } from "@multica/cerebro-agent-avatar/locales";
@@ -110,7 +109,6 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full")}
     >
-      {/* CEREBRO-PATCH(web-firtal-bar-reserve): CerebroFirtalPortalBar owns the portal-bar body state client-side. Do not reserve pt-12 server-side; installed PWAs can keep stale body padding across reloads, and a global reservation pushes the app shell down before we know whether bar.js actually loaded. TECH-2903. */}
       <body className="h-full overflow-hidden">
         {/* CEREBRO-PATCH(web-serwist): wrap with SerwistProvider for service worker */}
         <SerwistProvider
@@ -125,7 +123,6 @@ export default async function RootLayout({
             <Toaster />
           </ThemeProvider>
         </SerwistProvider>
-        <CerebroFirtalPortalBar />
       </body>
     </html>
   );

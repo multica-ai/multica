@@ -232,38 +232,57 @@ func emitAutopilotPausedNotifications(
 		}
 		emitted[key] = true
 
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			WorkspaceID:   autopilot.WorkspaceID,
-			RecipientType: r.Type,
-			RecipientID:   r.ID,
-			Type:          "autopilot_paused",
-			Severity:      "attention",
-			IssueID:       pgtype.UUID{},
-			Title:         title,
-			Body:          util.StrToText(body),
-			ActorType:     util.StrToText("system"),
-			ActorID:       pgtype.UUID{},
-			Details:       details,
-			Route:         "inbox",
-		})
-		if err != nil {
-			slog.Warn("autopilot failure monitor: inbox write failed",
-				"autopilot_id", autopilotIDStr,
-				"recipient_type", r.Type,
-				"recipient_id", util.UUIDToString(r.ID),
-				"error", err,
-			)
-			continue
-		}
+		routes := systemNotificationRoutes(ctx, queries, r.Type, util.UUIDToString(r.ID))
+		for _, route := range routes {
+			item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+				WorkspaceID:   autopilot.WorkspaceID,
+				RecipientType: r.Type,
+				RecipientID:   r.ID,
+				Type:          "autopilot_paused",
+				Severity:      "attention",
+				IssueID:       pgtype.UUID{},
+				Title:         title,
+				Body:          util.StrToText(body),
+				ActorType:     util.StrToText("system"),
+				ActorID:       pgtype.UUID{},
+				Details:       details,
+				Route:         route,
+			})
+			if err != nil {
+				slog.Warn("autopilot failure monitor: inbox write failed",
+					"autopilot_id", autopilotIDStr,
+					"recipient_type", r.Type,
+					"recipient_id", util.UUIDToString(r.ID),
+					"route", route,
+					"error", err,
+				)
+				continue
+			}
 
-		bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
-			WorkspaceID: workspaceID,
-			ActorType:   "system",
-			ActorID:     "",
-			Payload:     map[string]any{"item": inboxItemToResponse(item)},
-		})
+			bus.Publish(events.Event{
+				Type:        protocol.EventInboxNew,
+				WorkspaceID: workspaceID,
+				ActorType:   "system",
+				ActorID:     "",
+				Payload:     map[string]any{"item": inboxItemToResponse(item)},
+			})
+		}
 	}
+}
+
+// CEREBRO-PATCH(system-notification-routing): let platform-authored inbox rows obey the per-channel system setting.
+func systemNotificationRoutes(ctx context.Context, queries *db.Queries, recipientType, recipientID string) []string {
+	if recipientType != "member" {
+		return []string{routeInbox}
+	}
+	routes := make([]string, 0, 2)
+	if resolveChannelChoice(ctx, queries, recipientType, recipientID, channelInbox, "system_notification") {
+		routes = append(routes, routeInbox)
+	}
+	if resolveChannelChoice(ctx, queries, recipientType, recipientID, channelNotifications, "system_notification") {
+		routes = append(routes, routeNotifications)
+	}
+	return routes
 }
 
 // pausedRecipient identifies a single inbox_item recipient.

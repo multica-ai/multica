@@ -26,6 +26,7 @@ export {
   useUnmuteInbox,
   useMarkInboxUnread,
   useUnarchiveInbox,
+  useAddIssueToInbox,
   useCreateInboxReminder,
   useRunPrivateAgentRequest,
 } from "./mutations";

@@ -36,12 +36,12 @@ export function AccountsSettingsTab() {
     const target = pendingDelete;
     deleteMut.mutate(target.id, {
       onSuccess: () => {
-        toast.success(`Slettede ${target.login_identity}`);
+        toast.success(`Deleted ${target.login_identity}`);
         setPendingDelete(null);
       },
       onError: (e) => {
         toast.error(
-          e instanceof Error ? e.message : "Kunne ikke slette kontoen",
+          e instanceof Error ? e.message : "Failed to delete account",
         );
       },
     });
@@ -50,17 +50,16 @@ export function AccountsSettingsTab() {
   return (
     <section className="space-y-4">
       <header className="space-y-1">
-        <h2 className="text-base font-semibold">Konti</h2>
+        <h2 className="text-base font-semibold">Accounts</h2>
         <p className="text-sm text-muted-foreground">
-          Login-identiteter som daemon-runtimes i workspacet er authentificeret
-          som. Daemon registrerer konti automatisk når en runtime starter op.
+          Login identities that daemon runtimes in the workspace are authenticated as. The daemon registers accounts automatically when a runtime starts up.
         </p>
       </header>
 
       <div className="rounded-lg border">
         <div className="flex items-center justify-between border-b px-4 py-2.5">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Workspace-konti
+            Workspace accounts
           </span>
           <span className="text-xs text-muted-foreground">
             {accounts ? accounts.length : 0}
@@ -69,17 +68,17 @@ export function AccountsSettingsTab() {
 
         {isLoading ? (
           <div className="px-4 py-8 text-center">
-            <p className="text-xs text-muted-foreground">Indlæser…</p>
+            <p className="text-xs text-muted-foreground">Loading…</p>
           </div>
         ) : !accounts || accounts.length === 0 ? (
           <div className="flex flex-col items-center px-4 py-8 text-center">
             <KeyRound className="h-6 w-6 text-muted-foreground/40" />
             <p className="mt-2 text-sm text-muted-foreground">
-              Ingen konti registreret endnu
+              No accounts registered yet
             </p>
           </div>
         ) : (
-          <ul className="divide-y" aria-label="Workspace-konti">
+          <ul className="divide-y" aria-label="Workspace accounts">
             {accounts.map((acc) => (
               <li
                 key={acc.id}
@@ -99,7 +98,7 @@ export function AccountsSettingsTab() {
                   size="icon-sm"
                   className="text-muted-foreground hover:text-destructive"
                   onClick={() => setPendingDelete(acc)}
-                  aria-label={`Slet konto ${acc.login_identity}`}
+                  aria-label={`Delete account ${acc.login_identity}`}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -117,23 +116,23 @@ export function AccountsSettingsTab() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Slet konto?</AlertDialogTitle>
+            <AlertDialogTitle>Delete account?</AlertDialogTitle>
             <AlertDialogDescription>
-              Vil du slette <strong>{pendingDelete?.login_identity}</strong>?
-              Runtimes der peger på denne konto vil vise &quot;Konto ukendt&quot;
-              indtil daemon rapporterer en ny.
+              Delete <strong>{pendingDelete?.login_identity}</strong>?
+              Runtimes pointing to this account will show &quot;Account unknown&quot;
+              until the daemon reports a new one.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteMut.isPending}>
-              Annullér
+              Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={handleConfirmDelete}
               disabled={deleteMut.isPending}
             >
-              {deleteMut.isPending ? "Sletter…" : "Slet"}
+              {deleteMut.isPending ? "Deleting…" : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

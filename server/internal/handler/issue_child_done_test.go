@@ -119,6 +119,7 @@ func clearChildNotifyFlag(t *testing.T, userID, key string) {
 	}
 }
 
+// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — tests wire cerebro queries only for flag-gated cases.
 func wireChildNotifyFlagQueries(t *testing.T) {
 	t.Helper()
 	orig := testHandler.CerebroQueries
@@ -192,6 +193,7 @@ func TestChildDoneNotifiesParent(t *testing.T) {
 }
 
 func TestChildDoneNotificationSkippedWhenWorkspaceFlagOff(t *testing.T) {
+	// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — workspace override off suppresses done notification.
 	wireChildNotifyFlagQueries(t)
 	clearChildNotifyFlag(t, testUserID, "cerebro_child_done_notify_parent")
 	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_done_notify_parent", false, false)
@@ -205,6 +207,7 @@ func TestChildDoneNotificationSkippedWhenWorkspaceFlagOff(t *testing.T) {
 }
 
 func TestChildDoneNotificationPersonalOverrideBeatsUnlockedWorkspaceOff(t *testing.T) {
+	// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — personal override beats unlocked workspace default.
 	wireChildNotifyFlagQueries(t)
 	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_done_notify_parent", false, false)
 	setChildNotifyFlag(t, testUserID, "cerebro_child_done_notify_parent", true, false)

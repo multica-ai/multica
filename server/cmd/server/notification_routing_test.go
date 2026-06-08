@@ -268,6 +268,13 @@ func TestResolveChannelChoice_DefaultsWhenNoPrefs(t *testing.T) {
 		{channelDesktop, "agent_comment_no_tag", false},
 		{channelDesktop, "agent_comment_member_tag", true},
 		{channelDesktop, "agent_comment_agent_tag", false},
+		// System notifications stay visible in Inbox by default, but do not
+		// fan out to the lighter notification or banner/push channels unless
+		// the user opts in.
+		{channelInbox, "system_notification", true},
+		{channelNotifications, "system_notification", false},
+		{channelMobile, "system_notification", false},
+		{channelDesktop, "system_notification", false},
 	}
 	for _, tc := range cases {
 		got := resolveChannelChoice(context.Background(), queries, "member", testUserID, tc.channel, tc.key)
@@ -298,6 +305,37 @@ func TestResolveChannelChoice_HonoursOverride(t *testing.T) {
 	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelInbox, "mentioned"); !got {
 		t.Errorf("untouched key fall-through: got false, want true (default)")
 	}
+}
+
+// CEREBRO-PATCH(system-notification-routing): regression for platform-authored notification routing.
+func TestSystemNotificationRoutes_HonoursStorageChannelPrefs(t *testing.T) {
+	queries := db.New(testPool)
+	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
+
+	if got := systemNotificationRoutes(context.Background(), queries, "member", testUserID); !sameStrings(got, []string{routeInbox}) {
+		t.Fatalf("default system notification routes = %+v, want inbox only", got)
+	}
+
+	setUserChannelPrefs(t, testUserID, map[string]map[string]string{
+		channelInbox:         {"system_notification": "off"},
+		channelNotifications: {"system_notification": "on"},
+	}, nil)
+
+	if got := systemNotificationRoutes(context.Background(), queries, "member", testUserID); !sameStrings(got, []string{routeNotifications}) {
+		t.Fatalf("overridden system notification routes = %+v, want notifications only", got)
+	}
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestResolveChannelChoice_AgentsOnlyInbox(t *testing.T) {

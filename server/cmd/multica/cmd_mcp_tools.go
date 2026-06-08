@@ -107,12 +107,20 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	registerCredentialTools(srv, client, workspaceID)
 	// CEREBRO-PATCH(mcp-skill-governance-tools): FIR-2655 skill ownership/change-request/version/fork MCP tools.
 	registerSkillGovernanceTools(srv, client)
+	// CEREBRO-PATCH(mcp-skill-metadata-tools): TECH-3077 skill metadata filtering and audit tools.
+	registerSkillMetadataTools(srv, client)
+	// CEREBRO-PATCH(mcp-skill-automation-tools): TECH-3077 skill automation impact analysis tool.
+	registerSkillAutomationTools(srv, client)
+	// CEREBRO-PATCH(mcp-skill-learning-tools): TECH-3077 skill self-learning observation tools.
+	registerSkillLearningTools(srv, client)
+	// CEREBRO-PATCH(cerebro-wakeup-mcp-tools): FIR-3013 agent wakeup scheduling tools.
+	registerWakeupTools(srv, client)
 
 	// -----------------------------------------------------------------------
 	// list_issues
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "list_issues",
+		Name: "list_issues",
 		Description: `List issues in the current workspace. Returns issues with identifier (e.g. JEH-43), title, status, priority, project, and assignee. Use this to find existing work before creating new issues.
 
 HUMAN COMMUNICATION: When referencing an issue to a human (chat, summary, status update), use both identifier AND title — e.g. "JEH-43 Add rate limiting", not just "JEH-43". The identifier alone is opaque to humans.`,
@@ -159,7 +167,7 @@ HUMAN COMMUNICATION: When referencing an issue to a human (chat, summary, status
 	// get_issue
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "get_issue",
+		Name: "get_issue",
 		Description: `Get full issue details: title, description, status, comments, and sub-issues. Use this to understand the full context of an issue before working on it or commenting.
 
 HUMAN COMMUNICATION: When referencing an issue to a human (chat, summary, status update), use both identifier AND title — e.g. "JEH-43 Add rate limiting", not just "JEH-43". The identifier alone is opaque to humans.`,
@@ -199,7 +207,7 @@ HUMAN COMMUNICATION: When referencing an issue to a human (chat, summary, status
 	// search_issues
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "search_issues",
+		Name: "search_issues",
 		Description: `Search issues by text query across titles and descriptions. Use this to find related or duplicate issues before creating new ones.
 
 HUMAN COMMUNICATION: When referencing an issue to a human (chat, summary, status update), use both identifier AND title — e.g. "JEH-43 Add rate limiting", not just "JEH-43". The identifier alone is opaque to humans.`,
@@ -233,7 +241,7 @@ HUMAN COMMUNICATION: When referencing an issue to a human (chat, summary, status
 	// create_issue
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "create_issue",
+		Name: "create_issue",
 		Description: `Create a new issue. If a repo-project binding exists, project_id defaults to the bound project.
 
 WRITING GUIDELINES — issues are read by both humans and AI agents:
@@ -342,7 +350,7 @@ WRITING GUIDELINES — issues are read by both humans and AI agents:
 	// add_comment
 	// -----------------------------------------------------------------------
 	srv.RegisterTool(mcp.Tool{
-		Name:        "add_comment",
+		Name: "add_comment",
 		Description: `Add a comment to an issue. Comments are visible to the entire team.
 
 WRITING GUIDELINES:

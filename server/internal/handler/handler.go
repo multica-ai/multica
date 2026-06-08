@@ -170,6 +170,8 @@ type Handler struct {
 	cerebroToolStatus map[string]string // CEREBRO-PATCH(handler-tool-status): reject stale grants for excluded tools.
 	// CEREBRO-PATCH(handler-runtime-tools-admin): JEH-1710 unified runtime
 	runtimeToolsAdmin RuntimeToolsAdminService
+	// CEREBRO-PATCH(handler-runtime-tool-access): TECH-3071 read-only effective runtime tool access preview.
+	runtimeToolAccess RuntimeToolAccessService
 	// CEREBRO-PATCH(handler-runtime-tools-scan): JEH-1710 daemon-side ingest
 	runtimeToolsScan RuntimeToolsScanService
 	// CEREBRO-PATCH(handler-capability-register): FIR-2129 normalized capability register.
@@ -192,6 +194,9 @@ type Handler struct {
 	ApprovalGate *permgate.Gate
 	// CEREBRO-PATCH(handler-semantic-search): FIR-2604 hybrid (FTS+vector) seam.
 	SemanticSearch SemanticSearchInvoker
+	// CEREBRO-PATCH(handler-connections-injector): TECH-3108 workspace connection registry.
+	// Injects enabled MCP connections into RuntimeToolsConfig at task claim time.
+	ConnectionsInjector WorkspaceConnectionsInjector
 }
 
 // CustomStatusResolver is the upstream-side seam for the cerebro status-model
@@ -268,9 +273,11 @@ type MentionTriggerGateInvoker interface {
 // (message, ok=false) when an agent-authored comment references no target and
 // must be rejected; ok=true means it passes. A nil invoker disables the guard.
 //
-// CEREBRO-PATCH(handler-comment-target-guard-iface): seam for FIR-2674.
+// CEREBRO-PATCH(handler-comment-target-guard-iface): seam for FIR-2674 + TECH-3099.
 type CommentTargetGuardInvoker interface {
-	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, content string) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 feature-flag-gated, workspace-scoped.
+	// CEREBRO-PATCH(handler-comment-target-guard-iface): TECH-3099 adds isSubIssue,
+	// ownerUserIDs, taskPostedOnParent for the three new sub-issue checks.
+	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, content string, isSubIssue bool, ownerUserIDs []string, taskPostedOnParent bool) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 + TECH-3099.
 }
 
 // ChannelCreateGuardInvoker is the upstream-side seam for Cerebro's
@@ -393,6 +400,16 @@ func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToStr
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
 func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
 func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
+
+// WorkspaceConnectionsInjector is the seam for injecting enabled workspace MCP
+// connections into a task's RuntimeToolsConfig at claim time (TECH-3108).
+// Returns a {"mcpServers": {...}} JSON fragment ready for daemonmcp.Merge, or
+// nil when there are no enabled MCP connections for the workspace.
+//
+// CEREBRO-PATCH(handler-connections-injector-iface): TECH-3108 seam.
+type WorkspaceConnectionsInjector interface {
+	BuildMCPConfig(ctx context.Context, workspaceID pgtype.UUID) json.RawMessage
+}
 
 // CEREBRO-PATCH(handler-bool-helpers): cerebro per-runtime sandbox toggle uses
 // nullable bool semantics (nil = inherit env-var default).

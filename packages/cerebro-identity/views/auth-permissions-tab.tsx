@@ -113,7 +113,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
     const next = draftDomain.trim().toLowerCase();
     if (!next) return;
     if (next.includes("@") || /\s/.test(next)) {
-      toast.error("Et domæne må ikke indeholde '@' eller mellemrum.");
+      toast.error("A domain must not contain '@' or spaces.");
       return;
     }
     if (domains.some((d) => d.toLowerCase() === next)) {
@@ -137,10 +137,10 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
         default_group_id: defaultGroupId,
         google_workspace_sync_enabled: syncEnabled,
       });
-      toast.success("Auth-indstillinger gemt.");
+      toast.success("Auth settings saved.");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Ukendt fejl";
-      toast.error(`Kunne ikke gemme: ${message}`);
+      const message = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to save: ${message}`);
     }
   };
 
@@ -152,29 +152,29 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
           Auth & Permissions
         </h3>
         <p className="text-xs text-muted-foreground max-w-prose">
-          Kontroller hvilke email-domæner der automatisk får adgang til dette
-          workspace når de logger ind med Google for første gang, og hvilken
-          rolle de nye medlemmer får tildelt. Eksterne brugere (uden for
-          listen) skal stadig inviteres manuelt fra Members-fanen.
+          Control which email domains automatically get access to this
+          workspace when they log in with Google for the first time, and which
+          role new members are assigned. External users (outside the
+          list) still need to be invited manually from the Members tab.
         </p>
       </div>
 
       <section className="rounded-md border border-border p-4 space-y-3">
-        <h4 className="text-sm font-medium">Auto-signup-domæner</h4>
+        <h4 className="text-sm font-medium">Auto-signup domains</h4>
         <p className="text-xs text-muted-foreground">
-          Når en bruger med en af disse email-domæner logger ind med Google
-          for første gang, oprettes der automatisk et medlemskab i dette
-          workspace. Lad listen være tom for at slukke for auto-signup helt.
+          When a user with one of these email domains logs in with Google
+          for the first time, a membership in this workspace is automatically created.
+          Leave the list empty to disable auto-signup entirely.
         </p>
 
         {isPending ? (
-          <div className="text-xs text-muted-foreground">Henter…</div>
+          <div className="text-xs text-muted-foreground">Loading…</div>
         ) : (
           <>
             <div className="flex flex-wrap gap-2 min-h-[1.75rem]">
               {domains.length === 0 ? (
                 <span className="text-xs text-muted-foreground italic">
-                  Ingen domæner — auto-signup er slukket.
+                  No domains — auto-signup is disabled.
                 </span>
               ) : (
                 domains.map((domain) => (
@@ -187,7 +187,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
                     {canEdit && (
                       <button
                         type="button"
-                        aria-label={`Fjern ${domain}`}
+                        aria-label={`Remove ${domain}`}
                         onClick={() => handleRemoveDomain(domain)}
                         className="hover:bg-muted rounded"
                       >
@@ -211,7 +211,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
                       handleAddDomain();
                     }
                   }}
-                  aria-label="Nyt domæne"
+                  aria-label="New domain"
                   className="h-9 text-sm"
                 />
                 <Button
@@ -222,7 +222,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
                   disabled={!draftDomain.trim()}
                 >
                   <Plus className="h-4 w-4 mr-1" />
-                  Tilføj
+                  Add
                 </Button>
               </div>
             )}
@@ -233,17 +233,17 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
       <section className="rounded-md border border-border p-4 space-y-3">
         <h4 className="text-sm font-medium flex items-center gap-2">
           <Users className="h-4 w-4" />
-          Standard-gruppe for nye brugere
+          Default group for new users
         </h4>
         <p className="text-xs text-muted-foreground">
-          Alle nye medlemmer (auto-signup, invitation og manuel tilføjelse)
-          placeres automatisk i denne gruppe, så de har adgang fra dag ét.
+          All new members (auto-signup, invitation, and manual addition)
+          are automatically placed in this group so they have access from day one.
         </p>
         {groupsPending ? (
-          <div className="text-xs text-muted-foreground">Henter grupper…</div>
+          <div className="text-xs text-muted-foreground">Loading groups…</div>
         ) : groups.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">
-            Opret mindst én gruppe under Groups-fanen først.
+            Create at least one group under the Groups tab first.
           </p>
         ) : (
           <Select
@@ -252,7 +252,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
             disabled={!canEdit || isPending}
           >
             <SelectTrigger className="w-full max-w-md h-9 text-sm">
-              <SelectValue placeholder="Vælg standard-gruppe">
+              <SelectValue placeholder="Select default group">
                 {() =>
                   defaultGroupId
                     ? (groups.find((g) => g.id === defaultGroupId)?.name ?? defaultGroupId)
@@ -272,10 +272,10 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
       </section>
 
       <section className="rounded-md border border-border p-4 space-y-3">
-        <h4 className="text-sm font-medium">Default-rolle</h4>
+        <h4 className="text-sm font-medium">Default role</h4>
         <p className="text-xs text-muted-foreground">
-          Rolle som auto-oprettede medlemmer får. Du kan altid ændre rollen
-          bagefter på Members-fanen.
+          Role that auto-created members receive. You can always change the role
+          afterwards on the Members tab.
         </p>
         <Select
           value={defaultRole}
@@ -298,21 +298,21 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
           <div>
             <h4 className="text-sm font-medium flex items-center gap-2">
               <RefreshCw className="h-4 w-4" />
-              Google Workspace-gruppe-sync
+              Google Workspace group sync
             </h4>
             <p className="text-xs text-muted-foreground mt-1 max-w-prose">
-              Når slået til, holder Multica automatisk de 9 Firtal-hold
-              opdateret ud fra Google Workspace (tjekkes hver 4. time). Folk der
-              tilføjes eller fjernes fra en gruppe i Google følger med. Kun
-              brugere der allerede er medlem af dette workspace bliver tilføjet —
-              resten springes over.
+              When enabled, Multica automatically keeps the 9 Firtal teams
+              up to date from Google Workspace (checked every 4 hours). People who
+              are added or removed from a group in Google are synced accordingly. Only
+              users who are already members of this workspace are added —
+              the rest are skipped.
             </p>
           </div>
           <Switch
             checked={syncEnabled}
             onCheckedChange={(v) => setSyncEnabled(v === true)}
             disabled={!canEdit || isPending}
-            aria-label="Slå Google Workspace-gruppe-sync til eller fra"
+            aria-label="Enable or disable Google Workspace group sync"
           />
         </div>
         <div className="flex flex-wrap gap-2 pt-1">
@@ -335,14 +335,14 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
               (groups.length > 0 && !defaultGroupId)
             }
           >
-            {updateMutation.isPending ? "Gemmer…" : "Gem ændringer"}
+            {updateMutation.isPending ? "Saving…" : "Save changes"}
           </Button>
         </div>
       )}
 
       {!canEdit && (
         <p className="text-xs text-muted-foreground italic">
-          Kun owner og admin kan ændre disse indstillinger.
+          Only owners and admins can change these settings.
         </p>
       )}
     </div>

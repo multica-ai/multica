@@ -5,7 +5,7 @@ import { useDashboardStore } from "../../core/store";
 import type { ActorScope } from "../../core/types";
 
 const TABS: { value: ActorScope; label: string }[] = [
-  { value: "all", label: "Alle" },
+  { value: "all", label: "All" },
   { value: "members", label: "Members" },
   { value: "agents", label: "Agents" },
 ];

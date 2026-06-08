@@ -76,6 +76,7 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   agent_comment_no_tag: "Agent comment",
   agent_comment_member_tag: "Agent tagged you",
   agent_comment_agent_tag: "Agent hand-off",
+  manually_added: "Added to inbox", // CEREBRO-PATCH(cerebro-inbox-add-issue): label for manually added inbox items.
 };
 
 function shortDate(dateStr: string): string {

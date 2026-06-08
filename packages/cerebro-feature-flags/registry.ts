@@ -13,6 +13,11 @@ export type CerebroFlagKey =
   | "cerebro_mcp_guide"
   | "cerebro_channels"
   | "cerebro_chat_message_cost"
+  // FIR-39: per-comment cost badge on issues + channels (mirror of the chat
+  // per-reply badge from FIR-31). One run can post multiple comments; cost is
+  // pinned to the run's last comment so it sums to the issue total chip
+  // already shown in the sidebar without double-counting.
+  | "cerebro_comment_cost"
   | "cerebro_web_push"
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
@@ -71,22 +76,39 @@ export type CerebroFlagKey =
   // preserves today's behavior (any member can create); turn on to require
   // owner/admin role for POST /api/channels (kind='channel'; DMs always open).
   | "cerebro_channel_create_restricted"
-  // TECH-2903: Firtal portal top bar (apps.firtal.com/bar.js). Default ON.
-  // When on, the bar loads on every page and the body reserves 48px so it
-  // never overlays app content. Off removes both.
-  | "cerebro_firtal_portal_bar"
   // TECH-2925: admin UI for firtal_registry data source allowlist on agents.
   | "cerebro_firtal_registry_allowlist_ui"
   // FIR-33 (sub of FIR-18): auto-switch the "Create with agent" modal to manual
   // create when the picked agent's daemon CLI is below the quick-create gate,
   // instead of leaving the user on a warning banner with Create disabled.
   | "cerebro_quick_create_version_autoswitch"
+  // FIR-40: per-workspace display currency (USD/DKK/EUR) for cost — settings
+  // tab + display-time conversion. Off => cost shows in raw USD as before.
+  | "cerebro_display_currency"
   // TECH-2947: personal focus list pinned to the top of the inbox.
   | "cerebro_focus_list"
   // TECH-3006: controls whether parent is notified when a sub-issue reaches done.
   | "cerebro_child_done_notify_parent"
   // TECH-3006: controls whether parent is notified when a sub-issue reaches in_review or blocked.
-  | "cerebro_child_status_notify_parent";
+  | "cerebro_child_status_notify_parent"
+  // Interactive terminal (cerebro-terminal): per-runtime presentation mode + xterm.js panel.
+  | "cerebro_interactive_terminal"
+  // TECH-3108: workspace connection registry (API + MCP connections managed from settings).
+  | "cerebro_connections"
+  // TECH-3077: skill metadata — category/domain/tag filtering, data-domain links, impact analysis.
+  | "cerebro_skill_metadata"
+  // TECH-3077: skill self-learning — observation recording, pattern extraction, auto change-requests.
+  | "cerebro_skill_learning"
+  // TECH-3099: sub-issue comment guard — three checks extending cerebro_comment_target_guard.
+  // All default OFF; each is independently toggled so workspaces can adopt them one by one.
+  | "cerebro_sub_issue_no_owner_mention"
+  | "cerebro_sub_issue_require_agent_tag"
+  | "cerebro_sub_issue_no_split_session"
+  // FIR-2563: per-workspace toggle for the approval enforcement gate. When off,
+  // the server-side gate lets every tool call through for this workspace without
+  // an inbox ask or a deny — even when CEREBRO_APPROVAL_GATE_ENABLED is true on
+  // the server. Defaults ON so existing workspaces keep their current behaviour.
+  | "cerebro_approval_gate";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -103,6 +125,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_mcp_guide: true,
   cerebro_channels: true,
   cerebro_chat_message_cost: true,
+  cerebro_comment_cost: true,
   cerebro_web_push: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
@@ -121,8 +144,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_persona_permissions: true,
   cerebro_skill_mention: true,
   cerebro_grants: false,
-  cerebro_tool_policy: false,
-  cerebro_simple_tool_policy: false,
+  cerebro_tool_policy: true,
+  cerebro_simple_tool_policy: true,
   // FIR-2594: surface the Multica platform actions (create issue, add comment,
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
   // so they are settable Allow/Ask/Deny on every layer. Default OFF — nothing
@@ -199,11 +222,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // is restricted to workspace owners/admins (members get 403). DMs are never
   // gated. Off restores today's behaviour (any member or agent may create).
   cerebro_channel_create_restricted: false,
-  // TECH-2903: ON by default. Loads the Firtal portal top bar
-  // (apps.firtal.com/bar.js) and reserves 48px at the top of the body so the
-  // bar can never overlay app content. Off removes the bar and reclaims the
-  // space.
-  cerebro_firtal_portal_bar: true,
   // TECH-2925: OFF by default until QA on staging; hides Konfigurer on firtal_registry.
   cerebro_firtal_registry_allowlist_ui: false,
   // FIR-33 (sub of FIR-18): ON by default. When the agent picked in the Quick
@@ -212,18 +230,36 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // stranding the user on a warning banner. Off restores the warning-only
   // behaviour.
   cerebro_quick_create_version_autoswitch: true,
+  cerebro_display_currency: true,
   // TECH-2947: ON by default. Personal focus list at the top of the inbox —
   // a lightweight to-do surface for ADHD-friendly task tracking. Off hides
   // the panel and the backend endpoints reject requests.
   cerebro_focus_list: true,
   // TECH-3006: ON by default — preserves current behavior. Post a system
   // comment on the parent and wake its assignee when a sub-issue reaches done.
-  // Off silences the notification for the whole workspace.
+  // Off silences the notification for the effective flag scope.
   cerebro_child_done_notify_parent: true,
   // TECH-3006: ON by default — preserves current behavior. Post a system
   // comment on the parent and wake its assignee when a sub-issue reaches
-  // in_review or blocked. Off silences the notification for the whole workspace.
+  // in_review or blocked. Off silences the notification for the effective flag scope.
   cerebro_child_status_notify_parent: true,
+  cerebro_interactive_terminal: false,
+  // TECH-3108: OFF by default until QA on staging; shows Connections tab in workspace settings.
+  cerebro_connections: false,
+  // TECH-3077: ON — skill metadata schema (category, domain, tags, data-domain links).
+  cerebro_skill_metadata: true,
+  // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
+  // infrastructure is in place.
+  cerebro_skill_learning: false,
+  // TECH-3099: sub-issue comment guard checks — all OFF by default.
+  cerebro_sub_issue_no_owner_mention: false,
+  cerebro_sub_issue_require_agent_tag: false,
+  cerebro_sub_issue_no_split_session: false,
+  // FIR-2563: ON by default. When the server gate is active
+  // (CEREBRO_APPROVAL_GATE_ENABLED=true), this per-workspace flag lets an admin
+  // disable enforcement for their workspace without a server restart. Off = all
+  // tool calls are allowed through for this workspace regardless of policy rows.
+  cerebro_approval_gate: true,
 };
 
 /**
@@ -342,6 +378,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Show the spend ($) of each assistant reply in the chat footer, next to \"Replied in …\". Hover for the token/model breakdown. Off hides the per-reply badge (the session-total chip in the header stays).",
+  },
+  {
+    key: "cerebro_comment_cost",
+    label: "Per-comment issue & channel cost",
+    group: "issues",
+    description:
+      "Show the spend ($) of each agent comment on issues and channels, with a token/model breakdown on hover. A run that posts progress + a result places the badge on the run's last comment, so per-comment numbers sum to the issue total already shown in the sidebar (JEH-736) without double-counting. Off hides the per-comment badge.",
   },
   {
     key: "cerebro_web_push",
@@ -632,13 +675,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "When on, creating a named channel (POST /api/channels with kind='channel') requires workspace owner or admin role; members get 403. DMs are never gated. Off restores today's behaviour where any workspace member or agent can create a channel. FIR-2660.",
   },
   {
-    key: "cerebro_firtal_portal_bar",
-    label: "Firtal portal top bar",
-    group: "workspace",
-    description:
-      "Show the slim Firtal portal top bar (app switcher + signed-in user) on every page, loaded from apps.firtal.com/bar.js. The 48px top space is reserved server-side so the bar can never overlay app content. Off removes the bar and reclaims the space. TECH-2903.",
-  },
-  {
     key: "cerebro_firtal_registry_allowlist_ui",
     label: "firtal_registry allowlist UI",
     group: "agents",
@@ -653,18 +689,69 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "In the \"Create with agent\" modal, when the picked agent's daemon runs a multica CLI below the quick-create minimum, automatically switch to manual create (carrying the typed prompt, project, and parent over) instead of leaving the user on a warning banner with Create disabled. Off restores the warning-only behaviour. FIR-33.",
   },
   {
+    key: "cerebro_interactive_terminal",
+    label: "Interactive terminal",
+    group: "agents",
+    description:
+      "Enable the per-runtime presentation_mode toggle and the in-app xterm.js terminal panel. Runtimes flipped to 'interactive' stream a live shell to the Multica UI so the user can watch and take over an agent session.",
+  },
+  {
     key: "cerebro_child_done_notify_parent",
     label: "Notify parent when sub-issue is done",
     group: "inbox",
     description:
-      "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to done. Off silences the notification for the whole workspace. TECH-3006.",
+      "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to done. Off silences the notification for the effective flag scope. TECH-3006.",
   },
   {
     key: "cerebro_child_status_notify_parent",
     label: "Notify parent when sub-issue is in review or blocked",
     group: "inbox",
     description:
-      "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to in_review or blocked. Off silences the notification for the whole workspace. TECH-3006.",
+      "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to in_review or blocked. Off silences the notification for the effective flag scope. TECH-3006.",
+  },
+  {
+    key: "cerebro_sub_issue_no_owner_mention",
+    label: "Block on-behalf-of user @mention on sub-issues",
+    group: "issues",
+    description:
+      "Reject an agent comment on a sub-issue that @mentions the user the task was started for (on-behalf-of user) directly. Agents must post status on the parent issue instead of mentioning that user from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+  },
+  {
+    key: "cerebro_sub_issue_require_agent_tag",
+    label: "Require parent-agent tag on sub-issues",
+    group: "issues",
+    description:
+      "Reject an agent comment on a sub-issue that mentions no agent at all. Forces the agent to tag the parent agent (mention://agent/…) so it stays in the loop. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+  },
+  {
+    key: "cerebro_sub_issue_no_split_session",
+    label: "Block split-session across parent and sub-issue",
+    group: "issues",
+    description:
+      "Reject an agent comment on a sub-issue when the same task session (X-Task-ID) has already posted on the parent issue, preventing a single conversation from being split across both. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+  },
+  {
+    key: "cerebro_display_currency",
+    label: "Display currency",
+    group: "workspace",
+    description:
+      "Let a workspace show cost in a chosen display currency (USD, DKK, EUR). Cost is always stored in USD and converted at display time with a cached daily rate; a Currency settings tab picks the workspace currency. Off shows raw USD everywhere as before. FIR-40.",
+  },
+  // TECH-3108: workspace connection registry feature flag.
+  {
+    key: "cerebro_connections",
+    label: "Workspace connections",
+    group: "agents",
+    description:
+      "Enable the Connections settings tab where admins can register API and MCP endpoints (external or internal Sliplane paths) available to all runtimes, with per-layer tool-policy permissions. TECH-3108.",
+  },
+  // FIR-2563: per-workspace approval gate toggle.
+  {
+    key: "cerebro_approval_gate",
+    label: "Tool approval enforcement",
+    group: "permissions",
+    description:
+      "When on, the server enforces the per-tool Allow / Ask / Block policy for every agent tool call — tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off lets all tool calls through for this workspace without an inbox ask, even when the server gate is active. Requires the server's CEREBRO_APPROVAL_GATE_ENABLED flag to have any effect. FIR-2563.",
   },
 ];
 

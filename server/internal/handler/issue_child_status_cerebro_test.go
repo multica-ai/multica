@@ -62,6 +62,7 @@ func TestChildInReviewNotifiesParent(t *testing.T) {
 }
 
 func TestChildStatusNotificationSkippedWhenWorkspaceFlagOff(t *testing.T) {
+	// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — workspace override off suppresses status notification.
 	wireChildNotifyFlagQueries(t)
 	clearChildNotifyFlag(t, testUserID, "cerebro_child_status_notify_parent")
 	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_status_notify_parent", false, false)
@@ -75,6 +76,7 @@ func TestChildStatusNotificationSkippedWhenWorkspaceFlagOff(t *testing.T) {
 }
 
 func TestChildStatusNotificationPersonalOverrideBeatsUnlockedWorkspaceOff(t *testing.T) {
+	// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — personal override beats unlocked workspace default.
 	wireChildNotifyFlagQueries(t)
 	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_status_notify_parent", false, false)
 	setChildNotifyFlag(t, testUserID, "cerebro_child_status_notify_parent", true, false)

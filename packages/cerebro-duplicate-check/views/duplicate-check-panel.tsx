@@ -117,13 +117,13 @@ export function DuplicateCheckPanel({
           <Sparkles className="h-3.5 w-3.5" />
         )}
         <span className="flex-1">
-          {showLoading ? "Tjekker for lignende issues…" : "Findes det her allerede?"}
+          {showLoading ? "Checking for similar issues…" : "Does this already exist?"}
         </span>
         {isOverlay && onDismiss && (
           <button
             type="button"
             onClick={onDismiss}
-            aria-label="Skjul lignende issues"
+            aria-label="Hide similar issues"
             className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors cursor-pointer"
           >
             <X className="h-3.5 w-3.5" />
@@ -193,12 +193,12 @@ function MatchRow({
           {isDuplicate ? (
             <>
               <AlertTriangle className="h-3 w-3" />
-              Dubletter
+              Duplicate
             </>
           ) : (
             <>
               <GitBranch className="h-3 w-3" />
-              Relateret
+              Related
             </>
           )}
         </span>
@@ -219,7 +219,7 @@ function MatchRow({
           className="inline-flex items-center gap-1 text-foreground underline-offset-2 hover:underline"
         >
           <ExternalLink className="h-3 w-3" />
-          Åbn eksisterende
+          Open existing
         </button>
         {onAttachAsSubIssue && (
           <>
@@ -232,7 +232,7 @@ function MatchRow({
               className="inline-flex items-center gap-1 text-foreground underline-offset-2 hover:underline"
             >
               <GitBranch className="h-3 w-3" />
-              Opret som under-issue
+              Create as sub-issue
             </button>
           </>
         )}

@@ -26,9 +26,10 @@ import (
 // server/internal/cerebro/runtime/cost_savings_measure.go. "off" is the absence
 // of an override row, so it never appears as a value here.
 const (
-	costSavingSnapshotKey   = "snapshot_prompt"
-	costSavingModeShadow    = "shadow"
-	costSavingModeOn        = "on"
+	costSavingSnapshotKey    = "snapshot_prompt"
+	costSavingCompressionKey = "snapshot_compression" // CEREBRO-PATCH(daemon-snapshot-compression): overflow strategy key (FIR-3074)
+	costSavingModeShadow     = "shadow"
+	costSavingModeOn         = "on"
 	// snapshotInlinedReads is how many platform reads the snapshot replaces per
 	// run: the `multica issue get` + `multica issue comment list` the agent
 	// would otherwise run at the start of every comment-/assignment-triggered
@@ -39,6 +40,12 @@ const (
 	// snapshot inlines. Issue p99 is ~30 comments; bounding it keeps the start
 	// prompt from ballooning on long-running threads.
 	snapshotThreadCommentLimit = 30
+
+	// snapshotMaxChars is the overflow threshold. Snapshots exceeding this
+	// trigger the overflow strategy controlled by costSavingCompressionKey:
+	// "off" → size-guard fallback (agent fetches its own context, no snapshot);
+	// "on"  → Haiku-compressed tiered snapshot.
+	snapshotMaxChars = 40_000 // CEREBRO-PATCH(daemon-snapshot-compression): overflow threshold (FIR-3074)
 )
 
 // applySnapshotSaving wires the snapshot_prompt cost saving into a daemon task
@@ -68,7 +75,31 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 			slog.Warn("snapshot cost-saving: list comments failed", "error", err)
 			return
 		}
-		resp.IssueSnapshot = renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
+		snapshot := renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
+
+		// CEREBRO-PATCH(daemon-snapshot-compression): overflow guard — activate B or C when snapshot is too large (FIR-3074)
+		if int64(len(snapshot)) > snapshotMaxChars {
+			compressionMode := h.compressionSavingMode(ctx, issue.WorkspaceID)
+			if compressionMode == costSavingModeOn {
+				// C: tiered Haiku compression — summarize older comments, keep recent verbatim.
+				compressed := compressIssueSnapshot(ctx, issue, comments, triggerCommentID, resp.AgentID)
+				if compressed != "" {
+					snapshot = compressed
+				} else {
+					// Haiku failed — fall through to size-guard.
+					slog.Warn("snapshot compression: haiku failed, falling back to minimal prompt",
+						"issue_id", uuidToString(issue.ID), "snapshot_chars", len(snapshot))
+					return
+				}
+			} else {
+				// B: size-guard fallback — skip snapshot entirely; agent fetches its own context.
+				slog.Info("snapshot overflow: size guard activated, falling back to minimal prompt",
+					"issue_id", uuidToString(issue.ID), "snapshot_chars", len(snapshot))
+				return
+			}
+		}
+
+		resp.IssueSnapshot = snapshot
 		snapshotChars = int64(len(resp.IssueSnapshot))
 	} else {
 		// Shadow: estimate the context volume we would have inlined.
@@ -90,6 +121,23 @@ func (h *Handler) snapshotSavingMode(ctx context.Context, workspaceID pgtype.UUI
 	}
 	for _, row := range rows {
 		if row.SavingKey == costSavingSnapshotKey {
+			return row.Mode
+		}
+	}
+	return ""
+}
+
+// compressionSavingMode returns the workspace's mode for the snapshot_compression
+// saving ("on"/"shadow"), or "" when off/absent or on lookup error.
+// CEREBRO-PATCH(daemon-snapshot-compression): overflow strategy mode lookup (FIR-3074)
+func (h *Handler) compressionSavingMode(ctx context.Context, workspaceID pgtype.UUID) string {
+	rows, err := h.CerebroQueries.ListCerebroCostOptimization(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("snapshot compression: list modes failed", "error", err)
+		return ""
+	}
+	for _, row := range rows {
+		if row.SavingKey == costSavingCompressionKey {
 			return row.Mode
 		}
 	}

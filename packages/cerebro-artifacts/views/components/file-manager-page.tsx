@@ -1262,13 +1262,15 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                           >
                             <Pencil className="mr-2 size-3.5" /> Rename
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              router.push(wsPaths.documentEdit(a.id))
-                            }
-                          >
-                            <Pencil className="mr-2 size-3.5" /> Edit body
-                          </DropdownMenuItem>
+                          {a.format !== "md" && (
+                            <DropdownMenuItem
+                              onClick={() =>
+                                router.push(wsPaths.documentEdit(a.id))
+                              }
+                            >
+                              <Pencil className="mr-2 size-3.5" /> Edit body
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSub>
                             <DropdownMenuSubTrigger>
                               <ArrowLeftRight className="mr-2 size-3.5" /> Move
@@ -1314,13 +1316,13 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                     >
                       <Pencil className="mr-2 size-3.5" /> Rename
                     </ContextMenuItem>
-                    <ContextMenuItem
-                      onClick={() =>
-                        router.push(wsPaths.documentEdit(a.id))
-                      }
-                    >
-                      <Pencil className="mr-2 size-3.5" /> Edit body
-                    </ContextMenuItem>
+                    {a.format !== "md" && (
+                      <ContextMenuItem
+                        onClick={() => router.push(wsPaths.documentEdit(a.id))}
+                      >
+                        <Pencil className="mr-2 size-3.5" /> Edit body
+                      </ContextMenuItem>
+                    )}
                     <ContextMenuSub>
                       <ContextMenuSubTrigger>
                         <ArrowLeftRight className="mr-2 size-3.5" /> Move to

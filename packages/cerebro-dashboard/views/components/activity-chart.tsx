@@ -44,7 +44,7 @@ export function ActivityChart({ data, isLoading }: ActivityChartProps) {
           <div className="h-56 animate-pulse rounded bg-muted" />
         ) : series.length === 0 ? (
           <div className="flex h-56 items-center justify-center text-xs text-muted-foreground">
-            Ingen data i den valgte periode.
+            No data in the selected period.
           </div>
         ) : (
           <div className="h-56">
@@ -106,7 +106,7 @@ export function ActivityChart({ data, isLoading }: ActivityChartProps) {
 function shortDay(iso: string): string {
   try {
     const d = new Date(iso);
-    return d.toLocaleDateString("da-DK", { day: "2-digit", month: "short" });
+    return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
   } catch {
     return iso;
   }

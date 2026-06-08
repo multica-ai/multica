@@ -7,9 +7,11 @@ import type { Agent } from "@multica/core/types";
 import type {
   AgentToolOverride,
   RuntimeTool,
+  RuntimeToolEffectiveAccess,
 } from "@multica/cerebro-types";
 
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
+const mockListRuntimeToolEffectiveAccess = vi.hoisted(() => vi.fn());
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 const mockUseFeatureFlag = vi.hoisted(() => vi.fn(() => false));
 
@@ -26,6 +28,7 @@ vi.mock("@multica/core/api", async () => {
     api: {
       ...actual.api,
       listRuntimeTools: mockListRuntimeTools,
+      listRuntimeToolEffectiveAccess: mockListRuntimeToolEffectiveAccess,
       cerebroRequest: mockCerebroRequest,
     },
   };
@@ -108,11 +111,55 @@ const overrides: AgentToolOverride[] = [
   },
 ];
 
+function effectiveAccess(
+  tool: RuntimeTool,
+  effective: boolean,
+  reason = effective ? "allowed by policy, runtime grants, protocol, and credential checks" : "blocked by policy",
+): RuntimeToolEffectiveAccess {
+  return {
+    descriptor: {
+      tool_key: tool.name,
+      display_name: tool.name,
+      description: tool.description,
+      source: tool.source === "mcp" ? "mcp" : "platform",
+      risk_class: "read",
+      protocols: tool.source === "mcp" ? ["mcp_stdio"] : ["native_tool_loop"],
+      recommended_default_policy: "allow",
+    },
+    inventory: {
+      runtime_id: tool.runtime_id,
+      tool_name: tool.name,
+      source: tool.source,
+      mcp_server_name: tool.mcp_server_name,
+      enabled: tool.enabled,
+    },
+    policy: { effective: "allow", reason: "Allowed by default" },
+    runtime_grant: { effective: effective ? "allow" : "deny", reason },
+    protocol: {
+      effective: "supported",
+      required_protocols: [],
+      runtime_protocols: ["native_tool_loop", "mcp_stdio"],
+      selected_protocol: tool.source === "mcp" ? "mcp_stdio" : "native_tool_loop",
+      supports_ask: false,
+    },
+    credential: { effective: "not_required", reason: "No credential required" },
+    exposure_effective: { effective, reason },
+    layers: {},
+  };
+}
+
+const effectiveRows = [
+  effectiveAccess(runtimeTools[0]!, true),
+  effectiveAccess(runtimeTools[1]!, false, "Agent override lukker tool'et"),
+  effectiveAccess(runtimeTools[2]!, true, "Agent override åbner tool'et"),
+];
+
 function renderWithClient(
   node: React.ReactNode,
   data: {
     tools?: RuntimeTool[];
     overrides?: AgentToolOverride[];
+    effective?: RuntimeToolEffectiveAccess[];
   } = {},
 ) {
   const qc = new QueryClient({
@@ -129,6 +176,10 @@ function renderWithClient(
       data.overrides,
     );
   }
+  qc.setQueryData(
+    ["cerebro", "runtime-tool-effective-access", "rt-1", "agent", "agent-1"],
+    data.effective ?? effectiveRows,
+  );
   return render(
     <QueryClientProvider client={qc}>{node}</QueryClientProvider>,
   );
@@ -136,6 +187,8 @@ function renderWithClient(
 
 beforeEach(() => {
   mockListRuntimeTools.mockReset();
+  mockListRuntimeToolEffectiveAccess.mockReset();
+  mockListRuntimeToolEffectiveAccess.mockResolvedValue(effectiveRows);
   mockCerebroRequest.mockReset();
   mockCerebroRequest.mockResolvedValue(overrides);
   mockUseFeatureFlag.mockReturnValue(false);
@@ -151,22 +204,22 @@ describe("AgentToolsCard", () => {
     expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
     // Inherit row: shows "Arver" tag.
-    expect(screen.getAllByText("— Arver").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("— Inherits").length).toBeGreaterThan(0);
     // The override badges are <span>s. The same words appear inside <option>
     // elements of the row override-picker, so scope to span to pick the badge.
     expect(
-      screen.getByText("Tving fra", { selector: "span" }),
+      screen.getByText("Force off", { selector: "span" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Tving på", { selector: "span" }),
+      screen.getByText("Force on", { selector: "span" }),
     ).toBeInTheDocument();
 
-    // Effective: firtal_bq_query (on, inherit) = Aktiv;
-    // github_create_issue (force_off) = Inaktiv;
+    // Effective: firtal_bq_query (on, inherit) = Active;
+    // github_create_issue (force_off) = Inactive;
     // slack_post_message (force_on) = Aktiv.
-    const aktive = screen.getAllByText("Aktiv");
+    const aktive = screen.getAllByText("Active");
     expect(aktive.length).toBe(2);
-    const inaktive = screen.getAllByText("Inaktiv");
+    const inaktive = screen.getAllByText("Inactive");
     expect(inaktive.length).toBe(1);
   });
 
@@ -178,7 +231,7 @@ describe("AgentToolsCard", () => {
 
     expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Kun override (2)"));
+    fireEvent.click(screen.getByText("Override only (2)"));
 
     // Inherit row is hidden.
     expect(screen.queryByText("firtal_bq_query")).not.toBeInTheDocument();
@@ -195,13 +248,35 @@ describe("AgentToolsCard", () => {
 
     expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Effektivt aktive (2)"));
+    fireEvent.click(screen.getByText("Effectively active (2)"));
 
     // The two effectively-on rows survive.
     expect(screen.getByText("firtal_bq_query")).toBeInTheDocument();
     expect(screen.getByText("slack_post_message")).toBeInTheDocument();
     // The forced-off row is hidden.
     expect(screen.queryByText("github_create_issue")).not.toBeInTheDocument();
+  });
+
+  it("lets server-computed deny win over a force-on agent override", () => {
+    renderWithClient(
+      <AgentToolsCard agent={agent} canEdit={true} runtimeName="sara-mac-mini" />,
+      {
+        tools: runtimeTools,
+        overrides,
+        effective: [
+          effectiveRows[0]!,
+          effectiveRows[1]!,
+          effectiveAccess(runtimeTools[2]!, false, "Denied by workspace"),
+        ],
+      },
+    );
+
+    const slackRow = screen
+      .getByText("slack_post_message")
+      .closest("tr") as HTMLTableRowElement;
+    expect(slackRow).toHaveTextContent("Force on");
+    expect(slackRow).toHaveTextContent("Inactive");
+    expect(slackRow).toHaveTextContent("Denied by workspace");
   });
 
   it("hides row actions when canEdit is false", () => {
@@ -218,7 +293,7 @@ describe("AgentToolsCard", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("calls setAgentToolOverride when the admin picks Tving på", async () => {
+  it("calls setAgentToolOverride when the admin picks Force on", async () => {
     const user = userEvent.setup();
     mockCerebroRequest.mockResolvedValue([]);
 
@@ -232,7 +307,7 @@ describe("AgentToolsCard", () => {
     const selects = screen.getAllByRole("combobox", { name: /Skift override/i });
     expect(selects.length).toBe(3);
 
-    // Pick "Tving fra" on the first row (firtal_bq_query, runtime-on).
+    // Pick "Force off" on the first row (firtal_bq_query, runtime-on).
     await user.selectOptions(selects[0]!, "force_off");
 
     expect(mockCerebroRequest).toHaveBeenCalledWith(
@@ -275,7 +350,7 @@ describe("AgentToolsCard", () => {
     );
 
     expect(
-      screen.getByText(/daemon scanner ved næste heartbeat/i),
+      screen.getByText(/daemon will scan on next heartbeat/i),
     ).toBeInTheDocument();
   });
 
@@ -288,7 +363,7 @@ describe("AgentToolsCard", () => {
     );
 
     expect(
-      screen.getByText(/Agenten har ikke en runtime tilknyttet endnu/i),
+      screen.getByText(/The agent has no runtime assigned yet/i),
     ).toBeInTheDocument();
   });
 });

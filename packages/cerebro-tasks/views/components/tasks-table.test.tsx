@@ -19,6 +19,15 @@ vi.mock("@multica/ui/components/common/actor-avatar", () => ({
   ),
 }));
 
+vi.mock("@multica/cerebro-display-currency/views", () => ({
+  useCostFormatter: () => ({
+    formatCents: (cents: number) => `$${(cents / 100).toFixed(2)}`,
+    formatUsd: (usd: number) => `$${usd.toFixed(2)}`,
+    formatUsdCompact: (usd: number) =>
+      usd >= 100 ? `$${Math.round(usd)}` : `$${usd.toFixed(2)}`,
+  }),
+}));
+
 vi.mock("@multica/views/common/task-transcript", () => ({
   TranscriptButton: ({ task, title }: { task: AgentTask; title: string }) => (
     <button

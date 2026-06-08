@@ -60,6 +60,7 @@ import type {
   CreateRuntimeSetupTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  IssueCommentCosts, // CEREBRO-PATCH(issue-comment-cost-client): FIR-39
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -175,6 +176,7 @@ import { parseWithFallback } from "./schema";
 import {
   AgentToolsListSchema,
   RuntimeToolsListSchema,
+  RuntimeToolEffectiveAccessListSchema,
   RuntimeToolGrantsSchema,
   CapabilityListResponseSchema,
   AgentAvatarBackfillStatusSchema,
@@ -236,6 +238,9 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
 } from "./schemas";
+// CEREBRO-PATCH(api-client-active-terminal-session): inline zod schema for active terminal session lookup.
+import { z } from "zod";
+const ActiveTerminalSessionSchema = z.object({ session_id: z.string(), attach_path: z.string(), created_at: z.string() }).loose();
 
 /** Identifies the calling client to the server.
  *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
@@ -400,6 +405,13 @@ export class ApiClient {
 
   setToken(token: string | null) {
     this.token = token;
+  }
+
+  // CEREBRO-PATCH(terminal-ws-auth): exposes the stored bearer token so the
+  // terminal WS hook can send it as a first-message auth frame (browsers cannot
+  // set Authorization headers on WebSocket upgrades).
+  getToken(): string | null {
+    return this.token;
   }
 
   private readCsrfToken(): string | null {
@@ -1138,6 +1150,26 @@ export class ApiClient {
     if (filter?.actor_type) params.set("actor_type", filter.actor_type);
     if (filter?.actor_id) params.set("actor_id", filter.actor_id);
     return this.fetch<T>(`/api/cerebro/dashboard?${params.toString()}`);
+  }
+
+  // CEREBRO-PATCH(cerebro-dashboard-actor-messages-client): TECH-3093 per-member message history
+  async getCerebroDashboardActorMessages<T = unknown>(
+    actorId: string,
+    range: "24h" | "7d" | "30d",
+  ): Promise<T> {
+    const params = new URLSearchParams({ actor_id: actorId, range });
+    return this.fetch<T>(`/api/cerebro/dashboard/actor-messages?${params.toString()}`);
+  }
+
+  // CEREBRO-PATCH(cerebro-dashboard-all-messages-client): TECH-3093 all messages table
+  async getCerebroDashboardAllMessages<T = unknown>(
+    range: "24h" | "7d" | "30d",
+    filter?: { actor_type?: string; actor_id?: string | null },
+  ): Promise<T> {
+    const params = new URLSearchParams({ range });
+    if (filter?.actor_type) params.set("actor_type", filter.actor_type);
+    if (filter?.actor_id) params.set("actor_id", filter.actor_id);
+    return this.fetch<T>(`/api/cerebro/dashboard/all-messages?${params.toString()}`);
   }
 
   // CEREBRO-PATCH(cerebro-tasks-client): JEH-900 cross-agent tasks list endpoint
@@ -2078,6 +2110,22 @@ export class ApiClient {
     }) as import("@multica/cerebro-types").RuntimeTool[];
   }
 
+  // CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective runtime tool access preview.
+  async listRuntimeToolEffectiveAccess(
+    runtimeId: string,
+    params: { agent_id?: string; user_id?: string } = {},
+  ): Promise<import("@multica/cerebro-types").RuntimeToolEffectiveAccess[]> {
+    const search = new URLSearchParams();
+    if (params.agent_id) search.set("agent_id", params.agent_id);
+    if (params.user_id) search.set("user_id", params.user_id);
+    const query = search.toString();
+    const path = `/api/runtimes/${runtimeId}/tools/effective${query ? `?${query}` : ""}`;
+    const raw = await this.fetch(path);
+    return parseWithFallback(raw, RuntimeToolEffectiveAccessListSchema, [], {
+      endpoint: path,
+    }) as import("@multica/cerebro-types").RuntimeToolEffectiveAccess[];
+  }
+
   async setRuntimeToolEnabled(
     runtimeId: string,
     toolName: string,
@@ -2176,6 +2224,30 @@ export class ApiClient {
       `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/users/${userId}`,
       { method: "DELETE" },
     );
+  }
+
+  // CEREBRO-PATCH(api-client-terminal): cerebro interactive-terminal endpoints.
+  async getRuntimePresentationMode(runtimeId: string): Promise<{ runtime_id: string; presentation_mode: "headless" | "interactive" }> {
+    return this.fetch(`/api/cerebro/terminal/runtimes/${runtimeId}/presentation-mode`);
+  }
+  async setRuntimePresentationMode(runtimeId: string, mode: "headless" | "interactive"): Promise<{ runtime_id: string; presentation_mode: "headless" | "interactive" }> {
+    return this.fetch(`/api/cerebro/terminal/runtimes/${runtimeId}/presentation-mode`, { method: "PUT", body: JSON.stringify({ presentation_mode: mode }) });
+  }
+  async createTerminalSession(runtimeId: string, command?: string[]): Promise<{ id: string; runtime_id: string; command: string[]; created_at: string; attach_path: string }> {
+    return this.fetch(`/api/cerebro/terminal/sessions`, { method: "POST", body: JSON.stringify({ runtime_id: runtimeId, command }) });
+  }
+  async deleteTerminalSession(sessionId: string): Promise<void> {
+    await this.fetch(`/api/cerebro/terminal/sessions/${sessionId}`, { method: "DELETE" });
+  }
+  terminalAttachUrl(attachPath: string): string {
+    const base = this.baseUrl.replace(/^http/, "ws");
+    return `${base}${attachPath}`;
+  }
+  // CEREBRO-PATCH(api-client-active-terminal-session): runtime-keyed lookup of a daemon-published terminal session.
+  async getActiveTerminalSession(runtimeId: string): Promise<{ session_id: string; attach_path: string; created_at: string } | null> {
+    const raw = await this.fetch<unknown>(`/api/cerebro/terminal/runtimes/${runtimeId}/session`);
+    if (raw === undefined) return null; // 204 No Content path
+    return parseWithFallback(raw, ActiveTerminalSessionSchema, null, { endpoint: "GET /api/cerebro/terminal/runtimes/:id/session" });
   }
 
   async updateRuntimeSandbox(
@@ -2460,6 +2532,11 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }
 
+  // CEREBRO-PATCH(issue-comment-cost-client): FIR-39 per-comment cost badge.
+  async getIssueCommentCosts(issueId: string): Promise<IssueCommentCosts> {
+    return this.fetch(`/api/issues/${issueId}/comment-costs`);
+  }
+
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
@@ -2602,6 +2679,14 @@ export class ApiClient {
   // InboxItem (the row is removed from the active inbox on settle).
   async runPrivateAgentRunRequest(id: string): Promise<{ id: string; status: string }> {
     return this.fetch(`/api/inbox/${id}/run-private-agent`, { method: "POST" });
+  }
+
+  // CEREBRO-PATCH(cerebro-inbox-add-issue): manually place an issue in the member's inbox.
+  async addIssueToInbox(issueId: string): Promise<InboxItem> {
+    return this.fetch("/api/inbox/add-issue", {
+      method: "POST",
+      body: JSON.stringify({ issue_id: issueId }),
+    });
   }
 
   // CEREBRO-PATCH(cerebro-focus-list-client): TECH-2947 — personal focus list API.
@@ -3747,6 +3832,64 @@ export class ApiClient {
   async generateAgentAvatar(agentName: string, customPrompt?: string): Promise<{ url: string }> {
     const body = JSON.stringify({ agent_name: agentName, custom_prompt: customPrompt });
     return this.fetch("/api/agents/generate-avatar", { method: "POST", body });
+  }
+
+  // CEREBRO-PATCH(cerebro-connections-client): TECH-3108 workspace connection registry methods.
+  // Bodies are unknown so cerebro-connections package owns the schema via parseWithFallback.
+  async listCerebroConnections<T = unknown>(wsId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections`);
+  }
+  async getCerebroConnection<T = unknown>(wsId: string, connId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections/${connId}`);
+  }
+  async createCerebroConnection<T = unknown>(wsId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+  async updateCerebroConnection<T = unknown>(wsId: string, connId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections/${connId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+  async deleteCerebroConnection(wsId: string, connId: string): Promise<void> {
+    await this.fetch<void>(`/api/workspaces/${wsId}/connections/${connId}`, {
+      method: "DELETE",
+    });
+  }
+  // CEREBRO-PATCH(cerebro-connections-test-client): TECH-3108 test connection endpoint.
+  async testCerebroConnection<T = unknown>(wsId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections/test`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-wakeup-sidebar): list and cancel agent wakeups per issue for the sidebar.
+  async listIssueWakeups(issueId: string, state = "pending"): Promise<{
+    wakeups: {
+      id: string;
+      agent_id: string;
+      issue_id: string;
+      prompt: string;
+      trigger_type: string;
+      fire_at?: string;
+      watch_status?: string;
+      state: string;
+      created_at: string;
+    }[];
+  }> {
+    const qs = new URLSearchParams({ issue_id: issueId, state, limit: "50" });
+    return this.fetch(`/api/cerebro/wakeups?${qs.toString()}`);
+  }
+
+  async cancelWakeup(id: string): Promise<{ id: string; state: string }> {
+    return this.fetch(`/api/cerebro/wakeups/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   }
 
   // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (up to 5 square icon variants).

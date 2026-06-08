@@ -137,13 +137,13 @@ describe("groupRows", () => {
 });
 
 describe("SimpleToolPolicyTable", () => {
-  it("renders the four Danish section headers and groups rows under them", async () => {
+  it("renders the four section headers and groups rows under them", async () => {
     renderTable();
     expect(await screen.findByText("Læs filer")).toBeInTheDocument();
-    expect(screen.getByText("Læs")).toBeInTheDocument();
-    expect(screen.getByText("Udfør")).toBeInTheDocument();
-    expect(screen.getByText("Hent")).toBeInTheDocument();
-    expect(screen.getByText("Destruktivt")).toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
+    expect(screen.getByText("Execute")).toBeInTheDocument();
+    expect(screen.getByText("Fetch")).toBeInTheDocument();
+    expect(screen.getByText("Destructive")).toBeInTheDocument();
   });
 
   it("writes the chosen verdict to the agent layer when a toggle is clicked", async () => {
@@ -151,7 +151,7 @@ describe("SimpleToolPolicyTable", () => {
     renderTable();
     await screen.findByText("Læs filer");
     const readRow = screen.getByTestId("tool-row-read_files");
-    await user.click(within(readRow).getByRole("button", { name: "Bloker" }));
+    await user.click(within(readRow).getByRole("button", { name: "Block" }));
 
     await waitFor(() => {
       const putCall = mockCerebroRequest.mock.calls.find(
@@ -172,19 +172,19 @@ describe("SimpleToolPolicyTable", () => {
     await screen.findByText("Kør kommandoer");
     // bash has an explicit agent="allow" override.
     const bashRow = screen.getByTestId("tool-row-bash");
-    expect(within(bashRow).getByRole("button", { name: "Tillad" })).toHaveAttribute(
+    expect(within(bashRow).getByRole("button", { name: "Allow" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     // read_files has no override → falls back to Effective allow.
     const readRow = screen.getByTestId("tool-row-read_files");
-    expect(within(readRow).getByRole("button", { name: "Tillad" })).toHaveAttribute(
+    expect(within(readRow).getByRole("button", { name: "Allow" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
   });
 
-  it("fails closed: an unknown Effective verdict with no override highlights Bloker, never Tillad", async () => {
+  it("fails closed: an unknown Effective verdict with no override highlights Block, never Allow", async () => {
     mockCerebroRequest.mockResolvedValue({
       tools: [
         {
@@ -201,10 +201,10 @@ describe("SimpleToolPolicyTable", () => {
     renderTable();
     const mysteryRow = await screen.findByTestId("tool-row-mystery_tool");
     expect(
-      within(mysteryRow).getByRole("button", { name: "Bloker" }),
+      within(mysteryRow).getByRole("button", { name: "Block" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(
-      within(mysteryRow).getByRole("button", { name: "Tillad" }),
+      within(mysteryRow).getByRole("button", { name: "Allow" }),
     ).toHaveAttribute("aria-pressed", "false");
   });
 
@@ -222,7 +222,7 @@ describe("SimpleToolPolicyTable", () => {
     ).toBeInTheDocument();
   });
 
-  it("summarises 'Alle data sources' on the firtal_registry button when allow-all is set", async () => {
+  it("summarises 'All data sources' on the firtal_registry button when allow-all is set", async () => {
     mockCerebroRequest.mockResolvedValue({
       tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
     });
@@ -241,11 +241,11 @@ describe("SimpleToolPolicyTable", () => {
     await waitFor(() => {
       expect(
         within(fdrRow).getByTestId("firtal-registry-configure"),
-      ).toHaveTextContent("Alle data sources");
+      ).toHaveTextContent("All data sources");
     });
   });
 
-  it("summarises 'N af M data sources' when an explicit allowlist is set", async () => {
+  it("summarises 'N of M data sources' when an explicit allowlist is set", async () => {
     mockCerebroRequest.mockResolvedValue({
       tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
     });
@@ -278,7 +278,7 @@ describe("SimpleToolPolicyTable", () => {
     await waitFor(() => {
       expect(
         within(fdrRow).getByTestId("firtal-registry-configure"),
-      ).toHaveTextContent("2 af 3 data sources");
+      ).toHaveTextContent("2 of 3 data sources");
     });
   });
 

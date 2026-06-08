@@ -24,6 +24,8 @@ import (
 	cerebrosemantic "github.com/multica-ai/multica/server/internal/cerebro/semantic"
 	// CEREBRO-PATCH(main-skill-archive-sync): FIR-2656 nightly skill archive sync import.
 	cerebroskillsync "github.com/multica-ai/multica/server/internal/cerebro/skillsync"
+	// CEREBRO-PATCH(main-wakeup): FIR-3013 agent wakeup scheduler.
+	cerebrowakeup "github.com/multica-ai/multica/server/internal/cerebro/wakeup"
 	// CEREBRO-PATCH(main-runtime-tool-backfill): JEH-1710 bid 6 cloud-tool registry backfill import
 	cerebroruntimetools "github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 cerebro workflow engine import
@@ -332,6 +334,9 @@ func main() {
 	}
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
+	// CEREBRO-PATCH(main-wakeup): FIR-3013 issue/time/GitHub-CI wakeup listeners.
+	wakeupSvc := cerebrowakeup.New(cerebrodb.New(pool), queries, taskSvc, bus)
+	cerebrowakeup.RegisterListeners(bus, wakeupSvc)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
@@ -346,6 +351,8 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
+	// CEREBRO-PATCH(main-wakeup): FIR-3013 due-time wakeup sweeper.
+	go cerebrowakeup.RunSweeper(sweepCtx, wakeupSvc, 30*time.Second)
 	// CEREBRO-PATCH(inbox-reminders-due): due reminders re-enter inbox live and can fire reminder-only mobile push.
 	go runReminderDueSweeper(sweepCtx, queries, bus)
 	// CEREBRO-PATCH(issue-date-reminders): fire a notification when an issue's start/due date arrives (the day-of).

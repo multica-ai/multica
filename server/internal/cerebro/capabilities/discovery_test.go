@@ -86,7 +86,7 @@ func TestAsMap_LegacyShape(t *testing.T) {
 	s := For("claude")
 	m := AsMap(s)
 
-	for _, key := range []string{"providers", "tools", "mcp_servers"} {
+	for _, key := range []string{"providers", "tools", "mcp_servers", "tool_protocols"} {
 		v, ok := m[key]
 		if !ok {
 			t.Errorf("AsMap missing required key %q", key)
@@ -119,19 +119,35 @@ func TestAsMap_LegacyShape(t *testing.T) {
 	if back["tools"] == nil {
 		t.Error("tools must serialise as an array, not null")
 	}
+	if back["supports_ask"] != false {
+		t.Errorf("supports_ask: got %v, want false for claude", back["supports_ask"])
+	}
 }
 
 func TestLegacyProviderMap_MatchesLegacyShape(t *testing.T) {
 	got := LegacyProviderMap("claude")
 	want := AsMap(For("claude"))
 
-	for _, key := range []string{"providers", "tools", "mcp_servers", "discovery_method"} {
+	for _, key := range []string{"providers", "tools", "mcp_servers", "tool_protocols", "supports_ask", "discovery_method"} {
 		if got[key] == nil {
 			t.Fatalf("LegacyProviderMap missing %q", key)
 		}
 	}
 	if !equal(got["tools"].([]string), want["tools"].([]string)) {
 		t.Errorf("tools: got %v, want %v", got["tools"], want["tools"])
+	}
+	if !equal(got["tool_protocols"].([]string), []string{"mcp_stdio"}) {
+		t.Errorf("tool_protocols: got %v, want [mcp_stdio]", got["tool_protocols"])
+	}
+}
+
+func TestFirtalGatewayReportsNativeToolLoopAndAsk(t *testing.T) {
+	got := LegacyProviderMap("firtal-gateway")
+	if !equal(got["tool_protocols"].([]string), []string{"native_tool_loop"}) {
+		t.Fatalf("tool_protocols: got %v, want [native_tool_loop]", got["tool_protocols"])
+	}
+	if got["supports_ask"] != true {
+		t.Fatalf("supports_ask: got %v, want true", got["supports_ask"])
 	}
 }
 

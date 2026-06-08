@@ -158,6 +158,8 @@ export function AgentsPage() {
     return members.find((m) => m.user_id === currentUser.id)?.role ?? null;
   }, [members, currentUser]);
   const isWorkspaceAdmin = myRole === "owner" || myRole === "admin";
+  // CEREBRO-PATCH(agent-create-show-to-members): backend cerebroRequireCapability gates actual creation; show button to any member so group-capability holders (non-admin) can create agents.
+  const canCreateAgent = myRole !== null;
   // CEREBRO-PATCH(agent-avatar-backfill): admin progress + regenerate-all dialog state.
   const [isStartingBackfill, setIsStartingBackfill] = useState(false);
   const [showRegenerate, setShowRegenerate] = useState(false);
@@ -463,7 +465,7 @@ export function AgentsPage() {
       <div className="flex flex-1 min-h-0 flex-col">
         <PageHeaderBar
           totalCount={0}
-          canCreate={isWorkspaceAdmin}
+          canCreate={canCreateAgent}
           onCreate={() => setShowCreate(true)}
         />
         <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
@@ -492,7 +494,7 @@ export function AgentsPage() {
   if (listError) {
     return (
       <ListError
-        canCreate={isWorkspaceAdmin}
+        canCreate={canCreateAgent}
         onCreate={() => setShowCreate(true)}
         listError={listError}
         onRetry={refetchList}
@@ -506,7 +508,7 @@ export function AgentsPage() {
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeaderBar
         totalCount={totalActiveCount}
-        canCreate={isWorkspaceAdmin}
+        canCreate={canCreateAgent}
         onCreate={() => setShowCreate(true)}
         canBackfill={isWorkspaceAdmin}
         backfillStatus={avatarBackfillStatus}
@@ -519,7 +521,7 @@ export function AgentsPage() {
         {showEmpty ? (
           <div className="flex flex-1 items-center justify-center">
             <EmptyState
-              canCreate={isWorkspaceAdmin}
+              canCreate={canCreateAgent}
               onCreate={() => setShowCreate(true)}
             />
           </div>

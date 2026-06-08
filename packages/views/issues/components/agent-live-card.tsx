@@ -3,7 +3,9 @@
 // CEREBRO-PATCH(agent-live-card-cerebro): cerebro modification of upstream file
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, ChevronDown, Loader2, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus } from "lucide-react";
+import { Bot, ChevronRight, ChevronDown, Loader2, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus, Terminal as TerminalIcon } from "lucide-react";
+// CEREBRO-PATCH(agent-live-card-terminal-link): use cerebro-terminal hook to render an "Open terminal" affordance for tasks running in interactive presentation mode.
+import { useIssueTerminalLink, openTerminalPopout } from "@multica/cerebro-terminal";
 import { api } from "@multica/core/api";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@multica/core/types/events";
@@ -409,6 +411,8 @@ interface AgentLiveRowProps {
 function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: AgentLiveRowProps) {
   const { t } = useT("issues");
   const [elapsed, setElapsed] = useState("");
+  // CEREBRO-PATCH(agent-live-card-terminal-link): derive popout availability for this task's runtime.
+  const terminalLink = useIssueTerminalLink(task.runtime_id);
 
   const isQueued = task.status === "queued";
   // `waiting_local_directory` is the daemon-parked stage of an otherwise-
@@ -482,6 +486,10 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
+          {/* CEREBRO-PATCH(agent-live-card-terminal-link): open interactive-terminal popout for the agent's runtime. */}
+          {!isQueued && terminalLink.shouldShow && terminalLink.popoutUrl && (
+            <button type="button" onClick={() => openTerminalPopout(terminalLink.popoutUrl!, task.runtime_id)} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors" title="Open terminal in new window"><TerminalIcon className="h-3 w-3" /><span>Terminal</span></button>
+          )}
           {!isParked && (
             <TranscriptButton
               task={task}

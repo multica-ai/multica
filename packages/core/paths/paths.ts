@@ -18,7 +18,7 @@ const encode = (id: string) => encodeURIComponent(id);
 function workspaceScoped(slug: string) {
   const ws = `/${encode(slug)}`;
   return {
-    root: () => `${ws}/issues`,
+    root: () => ws, // CEREBRO-PATCH(start-page-workspace-switch): bare workspace route applies the user's start-page redirect.
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
@@ -55,6 +55,9 @@ function workspaceScoped(slug: string) {
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     settings: () => `${ws}/settings`,
+    // CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 full-page connection create/edit routes.
+    connectionNew: () => `${ws}/settings/connections/new`,
+    connectionEdit: (id: string) => `${ws}/settings/connections/${encode(id)}`,
     // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180 Persona permissions admin page
     permissions: () => `${ws}/permissions`,
     // CEREBRO-PATCH(firtal-welcome-path): FIR-2490 Firtal-branded welcome page

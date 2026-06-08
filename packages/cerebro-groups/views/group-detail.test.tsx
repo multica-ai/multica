@@ -332,10 +332,10 @@ describe("GroupDetailView", () => {
       expect(screen.getByTestId("add-runtime-prompt")).toBeInTheDocument(),
     );
     expect(
-      screen.getByText(/Denne agent kræver runtime/i),
+      screen.getByText(/This agent requires runtime/i),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Tilføj begge/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Add both/i }));
 
     await waitFor(() => {
       expect(mockAddGroupRuntime).toHaveBeenCalledWith("g-1", "rt-1");
@@ -356,10 +356,10 @@ describe("GroupDetailView", () => {
     // The tooltip copy is rendered as the description text under the toggle
     // (visible without hovering), so we can assert directly.
     expect(
-      screen.getByText(/automatisk adgang til runtimes/i),
+      screen.getByText(/automatically get access to runtimes/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/automatisk adgang til agenter/i),
+      screen.getByText(/automatically get access to agents/i),
     ).toBeInTheDocument();
   });
 });

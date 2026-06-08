@@ -108,7 +108,7 @@ function previewNextFires(
   tz: string,
   n: number,
 ): { fires: string[] } | { error: string } {
-  if (!expr.trim()) return { error: "tom — angiv et cron-udtryk" };
+  if (!expr.trim()) return { error: "empty — enter a cron expression" };
   try {
     const opts = tz.trim() ? { tz: tz.trim() } : undefined;
     // cron-parser v4 exposes parseExpression on the default export.
@@ -140,7 +140,7 @@ export function CronTriggerFields({
 }: CronTriggerFieldsProps) {
   return (
     <>
-      <Field label="Cron-udtryk (m h dom mon dow)">
+      <Field label="Cron expression (m h dom mon dow)">
         <Input
           value={schedule}
           onChange={(e) => onChangeSchedule(e.target.value)}
@@ -149,7 +149,7 @@ export function CronTriggerFields({
           data-testid="cron-schedule-expr"
         />
       </Field>
-      <Field label="Tidszone (IANA, fx Europe/Copenhagen)">
+      <Field label="Timezone (IANA, e.g. Europe/Copenhagen)">
         <Input
           value={timezone}
           onChange={(e) => onChangeTimezone(e.target.value)}
@@ -157,7 +157,7 @@ export function CronTriggerFields({
           data-testid="cron-timezone"
         />
       </Field>
-      <Field label="Næste 5 fire-tider">
+      <Field label="Next 5 fire times">
         <CronPreview schedule={schedule} timezone={timezone} />
       </Field>
     </>
@@ -237,13 +237,13 @@ export function WebhookInboundFields({
     <div className="flex flex-col gap-3">
       {!workflowId && (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-300">
-          Gem workflowet først for at få genereret et webhook-token og en URL.
+          Save the workflow first to generate a webhook token and URL.
         </div>
       )}
 
-      <Field label="Webhook-URL (kopiér til kilde-systemet)">
+      <Field label="Webhook URL (copy to source system)">
         <div className="flex items-center gap-2">
-          <Input value={localUrl} readOnly placeholder="Genereres når token er sat" />
+          <Input value={localUrl} readOnly placeholder="Generated when token is set" />
           <Button
             type="button"
             variant="outline"
@@ -252,14 +252,14 @@ export function WebhookInboundFields({
             onClick={copy}
             data-testid="inbound-webhook-copy"
           >
-            Kopiér
+            Copy
           </Button>
         </div>
       </Field>
 
       <Field label="Token">
         <div className="flex items-center gap-2">
-          <Input value={localToken} readOnly placeholder="Generér for at få et token" />
+          <Input value={localToken} readOnly placeholder="Generate to get a token" />
           <Button
             type="button"
             variant="outline"
@@ -273,7 +273,7 @@ export function WebhookInboundFields({
         </div>
       </Field>
 
-      <Field label="HMAC-armer modtagelse (anbefales i prod)">
+      <Field label="HMAC-arm reception (recommended in prod)">
         <Switch
           checked={hmacToggled || signingSecretSet}
           onCheckedChange={(v) => onChangeHmacToggled(v === true)}
@@ -281,20 +281,20 @@ export function WebhookInboundFields({
       </Field>
 
       {(hmacToggled || signingSecretSet) && (
-        <Field label="Signing-secret">
+        <Field label="Signing secret">
           {oneTimeSecret ? (
             <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1 font-mono text-[11px] text-emerald-700 dark:text-emerald-300">
               {oneTimeSecret}
               <div className="mt-1 text-[10px] text-muted-foreground">
-                Gem denne nu — secret vises kun denne ene gang.
+                Save this now — the secret is shown only once.
               </div>
             </div>
           ) : signingSecretSet ? (
             <div className="text-[11px] text-muted-foreground">
-              Secret armeret — rotér for at se en ny.
+              Secret armed — rotate to see a new one.
             </div>
           ) : (
-            <div className="text-[11px] text-muted-foreground">Secret ikke sat.</div>
+            <div className="text-[11px] text-muted-foreground">Secret not set.</div>
           )}
           <Button
             type="button"
@@ -305,7 +305,7 @@ export function WebhookInboundFields({
             onClick={runSecretRegen}
             data-testid="inbound-webhook-rotate-secret"
           >
-            {secretMutation.isPending ? "…" : "Generér signing-secret"}
+            {secretMutation.isPending ? "…" : "Generate signing secret"}
           </Button>
         </Field>
       )}
@@ -334,7 +334,7 @@ export function CommentMentionFields({
       new RegExp(matchTarget);
       return null;
     } catch (err) {
-      return err instanceof Error ? err.message : "ugyldig regex";
+      return err instanceof Error ? err.message : "invalid regex";
     }
   }, [matchMode, matchTarget]);
 
@@ -342,19 +342,19 @@ export function CommentMentionFields({
     matchMode === "agent" || matchMode === "member"
       ? "Agent/member UUID"
       : matchMode === "keyword"
-        ? "Søgeord (case-insensitive substring)"
-        : "Regex-mønster, fx ^/skill\\s+(\\w+)";
+        ? "Keyword (case-insensitive substring)"
+        : "Regex pattern, e.g. ^/skill\\s+(\\w+)";
 
   const label =
     matchMode === "agent" || matchMode === "member"
       ? "UUID"
       : matchMode === "keyword"
-        ? "Søgeord"
-        : "Regex-mønster";
+        ? "Keyword"
+        : "Regex pattern";
 
   return (
     <>
-      <Field label="Match-mode">
+      <Field label="Match mode">
         <NativeSelect
           value={matchMode}
           onChange={(e) => onChangeMatchMode(e.target.value as CerebroCommentMatchMode)}
@@ -376,7 +376,7 @@ export function CommentMentionFields({
           data-testid="comment-mention-target"
         />
         {regexError && (
-          <div className="text-[11px] text-destructive">Regex-fejl: {regexError}</div>
+          <div className="text-[11px] text-destructive">Regex error: {regexError}</div>
         )}
       </Field>
     </>
@@ -388,8 +388,7 @@ export function CommentMentionFields({
 export function AllChildrenDoneFields() {
   return (
     <div className="rounded-md border border-muted bg-muted/30 px-2 py-2 text-[11px] text-muted-foreground">
-      Ingen yderligere config — workflowet fyrer når alle sub-issues af det
-      trigger-issue når status &apos;done&apos;.
+      No additional config — the workflow fires when all sub-issues of the trigger issue reach status &apos;done&apos;.
     </div>
   );
 }
@@ -406,7 +405,7 @@ export function SubIssueCreatedFields({
   onChangeParentIssueId,
 }: SubIssueCreatedFieldsProps) {
   return (
-    <Field label="Parent issue UUID (tom = alle sub-issues i workspace)">
+    <Field label="Parent issue UUID (empty = all sub-issues in workspace)">
       <Input
         value={parentIssueId}
         onChange={(e) => onChangeParentIssueId(e.target.value)}
@@ -459,13 +458,13 @@ export function WebhookOutboundFields({
   };
 
   const urlError = useMemo(() => {
-    if (!url) return "URL er påkrævet";
+    if (!url) return "URL is required";
     try {
       const u = new URL(url);
-      if (u.protocol !== "https:" && u.protocol !== "http:") return "kun http(s) tilladt";
+      if (u.protocol !== "https:" && u.protocol !== "http:") return "only http(s) allowed";
       return null;
     } catch {
-      return "ugyldig URL";
+      return "invalid URL";
     }
   }, [url]);
 
@@ -518,38 +517,38 @@ export function WebhookOutboundFields({
                   className="flex-1"
                 />
                 <Button type="button" variant="outline" size="sm" onClick={() => removeHeader(i)}>
-                  Fjern
+                  Remove
                 </Button>
               </div>
             );
           })}
           <Button type="button" variant="outline" size="sm" className="w-fit" onClick={addHeader}>
-            Tilføj header
+            Add header
           </Button>
         </div>
       </Field>
 
-      <Field label="Inkludér issue-snapshot i body">
+      <Field label="Include issue snapshot in body">
         <Switch
           checked={includeIssueSnapshot}
           onCheckedChange={(v) => onChangeIncludeIssueSnapshot(v === true)}
         />
       </Field>
 
-      <Field label="Outbound signing-secret (HMAC af request body)">
+      <Field label="Outbound signing secret (HMAC of request body)">
         {oneTimeSecret ? (
           <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1 font-mono text-[11px] text-emerald-700 dark:text-emerald-300">
             {oneTimeSecret}
             <div className="mt-1 text-[10px] text-muted-foreground">
-              Gem denne nu — secret vises kun denne ene gang.
+              Save this now — the secret is shown only once.
             </div>
           </div>
         ) : outboundSet ? (
           <div className="text-[11px] text-muted-foreground">
-            Secret armeret — rotér for at se en ny.
+            Secret armed — rotate to see a new one.
           </div>
         ) : (
-          <div className="text-[11px] text-muted-foreground">Secret ikke sat.</div>
+          <div className="text-[11px] text-muted-foreground">Secret not set.</div>
         )}
         <Button
           type="button"
@@ -560,7 +559,7 @@ export function WebhookOutboundFields({
           onClick={runSecretRegen}
           data-testid="webhook-outbound-rotate-secret"
         >
-          {secretMutation.isPending ? "…" : "Generér outbound-secret"}
+          {secretMutation.isPending ? "…" : "Generate outbound secret"}
         </Button>
       </Field>
     </>
@@ -569,13 +568,13 @@ export function WebhookOutboundFields({
 
 function validateHeaderName(name: string): string | null {
   if (!name) return null;
-  if (!HEADER_NAME_RE.test(name)) return "kun A-Z, a-z, 0-9 og '-' tilladt";
+  if (!HEADER_NAME_RE.test(name)) return "only A-Z, a-z, 0-9 and '-' allowed";
   const lower = name.toLowerCase();
   if (FORBIDDEN_OUTBOUND_HEADERS.includes(lower)) {
-    return `'${name}' er reserveret`;
+    return `'${name}' is reserved`;
   }
   for (const prefix of FORBIDDEN_OUTBOUND_HEADER_PREFIXES) {
-    if (lower.startsWith(prefix)) return `'${name}' bruger reserveret prefix`;
+    if (lower.startsWith(prefix)) return `'${name}' uses a reserved prefix`;
   }
   return null;
 }

@@ -82,6 +82,9 @@ export type ToolPolicyView =
   | "group"
   | "member";
 
+/** Restricts the rows shown to a specific category of tools. */
+export type ToolPolicyTabFilter = "repos" | "connections" | "runtime" | "multica";
+
 export interface ToolPolicyTableProps {
   wsId: string;
   /** Which page this table is on — decides the editable layer + write subject. */
@@ -96,6 +99,15 @@ export interface ToolPolicyTableProps {
   /** The viewing user + their groups, so the Effective column reflects the ceiling. */
   userId?: string | null;
   groupIds?: string[];
+  /**
+   * When set, restricts which rows are visible:
+   *   "repos"       — only per-repo rows (read/checkout/push per repository)
+   *   "connections" — only workspace connection tools (source === "connection")
+   *   "runtime"     — only runtime/daemon capability tools
+   *   "multica"     — everything else (issues, agents, comments, etc.)
+   * When omitted, all rows are shown (original behaviour).
+   */
+  tabFilter?: ToolPolicyTabFilter;
 }
 
 // VIEW_EDIT_LAYER maps each surface to the chain layer it authors. The member
@@ -153,6 +165,7 @@ export function ToolPolicyTable({
   runtimeId,
   userId,
   groupIds,
+  tabFilter,
 }: ToolPolicyTableProps) {
   // Each surface assembles only the chain context it authors. The workspace
   // root layer is always loaded server-side from wsId, so the workspace view
@@ -188,8 +201,25 @@ export function ToolPolicyTable({
   const rows = query.data ?? [];
   // Capability-wide rows (the flat catalog) vs. per-repo rows (collapsible
   // groups). A repo row is any row scoped to a resource (non-empty pattern).
-  const capRows = useMemo(() => rows.filter((r) => !r.resource_pattern), [rows]);
-  const repoRows = useMemo(() => rows.filter((r) => r.resource_pattern), [rows]);
+  const allCapRows = useMemo(() => rows.filter((r) => !r.resource_pattern), [rows]);
+  const allRepoRows = useMemo(() => rows.filter((r) => r.resource_pattern), [rows]);
+
+  // tabFilter narrows which rows this instance shows. TanStack Query deduplicates
+  // the underlying fetch, so multiple ToolPolicyTable instances on the same page
+  // (e.g. tabbed workspace permissions) share a single network request.
+  const capRows = useMemo(() => {
+    if (tabFilter === "repos") return [];
+    if (!tabFilter) return allCapRows;
+    if (tabFilter === "connections") return allCapRows.filter((r) => r.source === "connection");
+    if (tabFilter === "runtime") return allCapRows.filter((r) => r.category === "Runtimes");
+    // "multica" = everything that isn't a connection or runtime tool
+    return allCapRows.filter((r) => r.source !== "connection" && r.category !== "Runtimes");
+  }, [tabFilter, allCapRows]);
+
+  const repoRows = useMemo(() => {
+    if (!tabFilter || tabFilter === "repos") return allRepoRows;
+    return [];
+  }, [tabFilter, allRepoRows]);
 
   const facets = useMemo(() => classFacets(capRows), [capRows]);
   const filtered = useMemo(
@@ -229,7 +259,7 @@ export function ToolPolicyTable({
     <div className="flex flex-col gap-4" data-testid="tool-policy-table">
       <CatalogHeader
         shown={filtered.length}
-        total={rows.length}
+        total={capRows.length + repoRows.length}
         busy={busy}
         onBulk={bulkSet}
       />
@@ -253,7 +283,9 @@ export function ToolPolicyTable({
         <p className="text-sm text-muted-foreground">Loading tools…</p>
       ) : repoGroups.length === 0 && filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {rows.length === 0 ? "No tools reported yet." : "No tools match these filters."}
+          {allCapRows.length === 0 && allRepoRows.length === 0
+            ? "No tools reported yet."
+            : "No tools match these filters."}
         </p>
       ) : (
         <>

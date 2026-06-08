@@ -20,12 +20,14 @@ export interface DayBucket {
   issues_done: number;
   tasks_completed: number;
   tasks_failed: number;
+  messages_sent?: number; // CEREBRO-PATCH(cerebro-dashboard-messages-timeline): TECH-3093
 }
 
 export interface TopActor {
   id: string;
   name: string;
   count: number;
+  spend_cents?: number;
 }
 
 export interface ActivityEntry {
@@ -42,6 +44,14 @@ export interface ActivityEntry {
   created_at: string;
 }
 
+export interface MessageFlowEntry {
+  sender_id: string;
+  sender_name: string;
+  recipient_id: string;
+  recipient_name: string;
+  count: number;
+}
+
 export interface RecentTask {
   task_id: string;
   agent_id: string;
@@ -56,6 +66,31 @@ export interface RecentTask {
   completed_at?: string;
   started_at?: string;
   created_at: string;
+}
+
+export interface ActorMessage {
+  id: string;
+  content: string;
+  created_at: string;
+  sender_id?: string;
+  sender_name?: string;
+  agent_id: string;
+  agent_name: string;
+  session_id: string;
+  issue_id?: string;
+  issue_number?: number;
+  issue_title?: string;
+}
+
+export interface ActorMessagesResponse {
+  actor_id: string;
+  range: TimeRange;
+  messages: ActorMessage[];
+}
+
+export interface AllMessagesResponse {
+  range: TimeRange;
+  messages: ActorMessage[];
 }
 
 export interface DashboardOverview {
@@ -78,6 +113,9 @@ export interface DashboardOverview {
   timeline: DayBucket[];
   top_agents: TopActor[];
   top_members: TopActor[];
+  top_message_senders: TopActor[];
+  top_message_recipients: TopActor[];
+  message_flow: MessageFlowEntry[];
   activity_feed: ActivityEntry[];
   recent_tasks: RecentTask[];
 }
@@ -87,9 +125,29 @@ export async function fetchDashboardOverview(
   scope: ActorScope,
   actorId: string | null,
 ): Promise<DashboardOverview> {
+  const actorType = scopeToActorType(scope);
   return api.getCerebroDashboardOverview<DashboardOverview>(range, {
-    actor_type: scopeToActorType(scope),
-    actor_id: actorId,
+    actor_type: actorType,
+    actor_id: actorType ? actorId : null,
+  });
+}
+
+export async function fetchActorMessages(
+  actorId: string,
+  range: TimeRange,
+): Promise<ActorMessagesResponse> {
+  return api.getCerebroDashboardActorMessages<ActorMessagesResponse>(actorId, range);
+}
+
+export async function fetchAllMessages(
+  range: TimeRange,
+  scope?: ActorScope,
+  actorId?: string | null,
+): Promise<AllMessagesResponse> {
+  const actorType = scope ? scopeToActorType(scope) : undefined;
+  return api.getCerebroDashboardAllMessages<AllMessagesResponse>(range, {
+    actor_type: actorType,
+    actor_id: actorType ? actorId : null,
   });
 }
 

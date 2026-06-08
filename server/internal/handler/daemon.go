@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebropersona "github.com/multica-ai/multica/server/internal/cerebro/persona"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy" // CEREBRO-PATCH(daemon-repo-toolpolicy): FIR-2505 repo-capability resolved via tool-policy chain
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp" // CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge workspace connections into RuntimeToolsConfig
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/profile"
@@ -1486,6 +1487,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if len(rt.ToolsConfig) > 0 {
 			resp.RuntimeToolsConfig = json.RawMessage(rt.ToolsConfig)
 		}
+		// CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge enabled workspace MCP
+		// connections into RuntimeToolsConfig so the daemon injects them via --mcp-config.
+		if h.ConnectionsInjector != nil {
+			connMCP := h.ConnectionsInjector.BuildMCPConfig(r.Context(), rt.WorkspaceID)
+			if len(connMCP) > 0 {
+				resp.RuntimeToolsConfig = daemonmcp.Merge(resp.RuntimeToolsConfig, connMCP)
+			}
+		}
+		resp.PresentationMode = rt.PresentationMode // CEREBRO-PATCH(daemon-claim-presentation-mode): forward presentation_mode to daemon
 		auditDetails, _ := json.Marshal(map[string]any{
 			"task_id":                uuidToString(task.ID),
 			"runtime_id":             uuidToString(task.RuntimeID),

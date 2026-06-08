@@ -25,8 +25,8 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const defaultAvatarModel = "openai/gpt-5-image-mini"
-const gatewayChatCompletionsPath = "/api/ai/proxy/v1/chat/completions"
+const defaultAvatarModel = "gpt-image-1"
+const gatewayImagesPath = "/api/ai/proxy/openai/v1/images/generations"
 
 // Avatar visual identity is derived deterministically from the agent name so
 // re-generations stay stable without storing a seed. The background colour is
@@ -502,25 +502,26 @@ func buildPromptWithBackground(agentName, customPrompt, bgOverride string) strin
 	first := firstNameToken(agentName)
 	gender, known := genderForName(agentName)
 
-	subject := "a person"
+	subject := "a young person"
 	var genderClause string
 	switch {
 	case known && first != "":
-		subject = "a " + gender
+		subject = "a young " + gender
 		genderClause = fmt.Sprintf(
-			"The subject is a %s — render a clearly %s face and build matching the "+
+			"The subject is a young %s in their mid-20s to early 30s — render a clearly %s face and build matching the "+
 				"Scandinavian first name %q. ", gender, genderAdjective(gender), first)
 	case known:
-		subject = "a " + gender
-		genderClause = fmt.Sprintf("The subject is a %s — render a clearly %s face. ", gender, genderAdjective(gender))
+		subject = "a young " + gender
+		genderClause = fmt.Sprintf("The subject is a young %s in their mid-20s to early 30s — render a clearly %s face. ", gender, genderAdjective(gender))
 	case first != "":
 		genderClause = fmt.Sprintf(
-			"Depict a real person whose gender and appearance are consistent with the "+
+			"Depict a young person in their mid-20s to early 30s whose gender and appearance are consistent with the "+
 				"Scandinavian first name %q. ", first)
 	}
 
 	return fmt.Sprintf(
 		"Photorealistic professional headshot portrait of %s with Scandinavian features, "+
+			"in their mid-20s to early 30s, "+
 			"%s hair, wearing %s. "+
 			"The entire background is one flat, solid, vivid, fully saturated %s, "+
 			"lit bright and perfectly even from edge to edge so the colour reads boldly at first glance — "+
@@ -674,44 +675,10 @@ func nameIndex(name, salt string, n int) int {
 	return int(h.Sum32() % uint32(n))
 }
 
-type gatewayResponse struct {
-	Choices []struct {
-		Message struct {
-			Images  []imageRef `json:"images"`
-			Content any        `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-}
-
-// imageRef extracts a base64 data URL from a gateway image entry. OpenRouter
-// (which the Data Registry gateway proxies) returns each image as an object
-// shaped like {"type":"image_url","image_url":{"url":"data:image/png;base64,…"}}.
-// Some providers/tests emit a bare string instead, so accept both forms.
-type imageRef struct {
-	URL string
-}
-
-func (r *imageRef) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err == nil {
-		r.URL = s
-		return nil
-	}
-	var obj struct {
-		URL      string `json:"url"`
-		ImageURL struct {
-			URL string `json:"url"`
-		} `json:"image_url"`
-	}
-	if err := json.Unmarshal(b, &obj); err != nil {
-		return err
-	}
-	if obj.ImageURL.URL != "" {
-		r.URL = obj.ImageURL.URL
-	} else {
-		r.URL = obj.URL
-	}
-	return nil
+type imagesAPIResponse struct {
+	Data []struct {
+		B64JSON string `json:"b64_json"`
+	} `json:"data"`
 }
 
 type gatewayConfig struct {
@@ -778,18 +745,18 @@ func callGateway(ctx context.Context, client *http.Client, cfg gatewayConfig, pr
 		client = http.DefaultClient
 	}
 	body := map[string]any{
-		"model":      cfg.model,
-		"modalities": []string{"image"},
-		"messages": []map[string]any{
-			{"role": "user", "content": prompt},
-		},
+		"model":         cfg.model,
+		"prompt":        prompt,
+		"n":             1,
+		"size":          "1024x1024",
+		"output_format": "b64_json",
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.baseURL+gatewayChatCompletionsPath, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.baseURL+gatewayImagesPath, bytes.NewReader(raw))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
@@ -812,16 +779,16 @@ func callGateway(ctx context.Context, client *http.Client, cfg gatewayConfig, pr
 		return nil, fmt.Errorf("data registry AI gateway returned HTTP %d: %.512s", resp.StatusCode, string(respBody))
 	}
 
-	var parsed gatewayResponse
+	var parsed imagesAPIResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-	if len(parsed.Choices) == 0 || len(parsed.Choices[0].Message.Images) == 0 {
+	if len(parsed.Data) == 0 || parsed.Data[0].B64JSON == "" {
 		return nil, fmt.Errorf("no image in data registry AI gateway response")
 	}
 
-	imgData := parsed.Choices[0].Message.Images[0].URL
-	// Strip "data:image/png;base64," prefix when present.
+	imgData := parsed.Data[0].B64JSON
+	// Strip "data:image/png;base64," prefix when present (defensive; b64_json is usually bare).
 	if idx := strings.Index(imgData, ","); idx != -1 {
 		imgData = imgData[idx+1:]
 	}

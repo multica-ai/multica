@@ -46,7 +46,7 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
   if (!workspace) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace context…
       </div>
     );
   }
@@ -63,9 +63,9 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
     <div className="flex h-full flex-col">
       <PageHeader className="justify-between gap-3">
         <div className="flex min-w-0 flex-col">
-          <h1 className="text-sm font-semibold">Workflow-log</h1>
+          <h1 className="text-sm font-semibold">Workflow log</h1>
           <p className="truncate text-[11px] text-muted-foreground">
-            Eksekveringer på tværs af workflows
+            Executions across workflows
           </p>
         </div>
       </PageHeader>
@@ -82,7 +82,7 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
                     setOffset(0);
                   }}
                 >
-                  <option value="">Alle</option>
+                  <option value="">All</option>
                   {(workflows.data?.workflows ?? []).map((w) => (
                     <option key={w.id} value={w.id}>
                       {w.name}
@@ -96,7 +96,7 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as CerebroWorkflowRunStatus | "")}
               >
-                <option value="">Alle</option>
+                <option value="">All</option>
                 <option value="queued">Queued</option>
                 <option value="running">Running</option>
                 <option value="success">Success</option>
@@ -108,17 +108,17 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
 
           {runs.isError && (
             <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-              Kunne ikke hente runs.
+              Failed to load runs.
             </div>
           )}
 
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[22%]">Tidspunkt</TableHead>
+                <TableHead className="w-[22%]">Time</TableHead>
                 <TableHead className="w-[22%]">Workflow</TableHead>
                 <TableHead className="w-[14%]">Status</TableHead>
-                <TableHead className="w-[10%]">Forsøg</TableHead>
+                <TableHead className="w-[10%]">Attempt</TableHead>
                 <TableHead>Note</TableHead>
               </TableRow>
             </TableHeader>
@@ -126,7 +126,7 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
               {rows.length === 0 && !runs.isLoading && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                    Ingen kørsler matcher filtrene.
+                    No runs match the filters.
                   </TableCell>
                 </TableRow>
               )}
@@ -148,7 +148,7 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
                   <TableCell className="text-xs">{r.attempt}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {r.error ?? (r.next_retry_at
-                      ? `Næste forsøg: ${new Date(r.next_retry_at).toLocaleString()}`
+                      ? `Next attempt: ${new Date(r.next_retry_at).toLocaleString()}`
                       : "")}
                   </TableCell>
                 </TableRow>
@@ -165,7 +165,7 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
                 disabled={offset === 0}
                 onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
               >
-                Forrige
+                Previous
               </Button>
               <Button
                 size="sm"
@@ -173,7 +173,7 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
                 disabled={(runs.data?.runs.length ?? 0) < PAGE_SIZE}
                 onClick={() => setOffset(offset + PAGE_SIZE)}
               >
-                Næste
+                Next
               </Button>
             </div>
           </div>

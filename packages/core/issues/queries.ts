@@ -74,6 +74,12 @@ export const issueKeys = {
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  // CEREBRO-PATCH(issue-comment-cost-query-key): FIR-39 — per-comment cost
+  // badge keyed as a child of usage() on purpose: the existing task-lifecycle
+  // invalidation (use-realtime-sync invalidates the `["issues", "usage"]`
+  // prefix on every task event) already refreshes it, so the badge fills in
+  // the moment a task finishes with no extra realtime wiring.
+  commentCosts: (issueId: string) => ["issues", "usage", issueId, "comment-costs"] as const,
   /** Issue-level attachments — used by the description editor so its
    *  inline file-card / image NodeViews can re-sign download URLs at
    *  click time. */
@@ -512,6 +518,22 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+/**
+ * FIR-39 — per-task spend for one issue (or channel; channels are issues),
+ * fetched once and looked up by the per-comment cost badge under each agent
+ * reply. Keyed under usage() so the existing task-lifecycle invalidation
+ * refreshes it; staleTime: Infinity keeps it from refetching on its own
+ * between events.
+ */
+export function issueCommentCostsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.commentCosts(issueId),
+    queryFn: () => api.getIssueCommentCosts(issueId),
+    enabled: !!issueId,
+    staleTime: Infinity,
   });
 }
 

@@ -99,7 +99,6 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	defer d.clearWSHeartbeatAcks()
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
-	signalTaskWakeup(taskWakeups)
 
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
@@ -115,6 +114,15 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	writes := make(chan []byte, writeBufSize)
 	writerDone := make(chan struct{})
 	go d.runWSWriter(conn, writes, writerDone)
+	// CEREBRO-PATCH(daemon-ws-write-accessor): publish the writes channel so cerebro_terminal.go can enqueue term frames; cleared on disconnect.
+	// CEREBRO-PATCH(daemon-ws-write-accessor-signal-order): wsWrites must be stored BEFORE signalTaskWakeup so cerebroAttachTerminal never sees a nil channel.
+	d.wsWrites.Store(&writes)
+	defer d.wsWrites.Store(nil)
+	// CEREBRO-PATCH(daemon-cerebro-term-reattach): re-emit any in-flight attach frame so a task claimed before WS connected still gets a broker session.
+	if af := d.cerebroActiveAttach.Load(); af != nil {
+		d.enqueueCerebroFrame(*af)
+	}
+	signalTaskWakeup(taskWakeups)
 
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	hbDone := make(chan struct{})

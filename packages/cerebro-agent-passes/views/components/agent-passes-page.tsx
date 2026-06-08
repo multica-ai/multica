@@ -51,7 +51,7 @@ export function AgentPassesPage() {
   if (!workspace || isMemberLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace context…
       </div>
     );
   }
@@ -61,9 +61,9 @@ export function AgentPassesPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <ShieldOff className="size-8 text-muted-foreground" />
-        <h2 className="text-base font-medium">Adgang nægtet</h2>
+        <h2 className="text-base font-medium">Access denied</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Kun workspace-owners og -admins kan administrere agent passes.
+          Only workspace owners and admins can manage agent passes.
         </p>
       </div>
     );
@@ -74,7 +74,7 @@ export function AgentPassesPage() {
   const handleRevoke = (pass: AgentPass) => {
     if (pass.status !== "active") return;
     const reason = window.prompt(
-      "Begrundelse for tilbagekaldelse (valgfri):",
+      "Reason for revocation (optional):",
       "",
     );
     if (reason === null) return; // cancelled
@@ -88,28 +88,27 @@ export function AgentPassesPage() {
           <KeyRound className="h-4 w-4 text-muted-foreground" />
           <h1 className="text-sm font-medium">Agent passes</h1>
           <p className="ml-2 hidden truncate text-xs text-muted-foreground md:block">
-            Maskinlæsbare mandater der afgrænser hvad en agent må på et issue
+            Machine-readable mandates that constrain what an agent may do on an issue
           </p>
         </div>
         <Button size="sm" onClick={() => setShowCreate(true)}>
-          Udsted pas
+          Issue pass
         </Button>
       </PageHeader>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
         {list.isError && (
           <div className="rounded border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            Kunne ikke hente agent passes:{" "}
-            {(list.error as Error)?.message ?? "ukendt fejl"}
+            Failed to load agent passes:{" "}
+            {(list.error as Error)?.message ?? "unknown error"}
           </div>
         )}
         {list.isLoading && !list.data && (
-          <div className="text-sm text-muted-foreground">Indlæser…</div>
+          <div className="text-sm text-muted-foreground">Loading…</div>
         )}
         {list.data && passes.length === 0 && (
           <div className="rounded border border-dashed p-6 text-center text-sm text-muted-foreground">
-            Ingen agent passes endnu. Klik på "Udsted pas" for at oprette den
-            første.
+            No agent passes yet. Click "Issue pass" to create the first one.
           </div>
         )}
         {passes.length > 0 && (
@@ -121,7 +120,7 @@ export function AgentPassesPage() {
                 <TableHead>Issue</TableHead>
                 <TableHead>Scope</TableHead>
                 <TableHead>Spend ceiling</TableHead>
-                <TableHead>Udløber</TableHead>
+                <TableHead>Expires</TableHead>
                 <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
@@ -154,7 +153,7 @@ export function AgentPassesPage() {
                         disabled={revokeMutation.isPending}
                         onClick={() => handleRevoke(pass)}
                       >
-                        Tilbagekald
+                        Revoke
                       </Button>
                     ) : null}
                   </TableCell>
@@ -178,13 +177,13 @@ export function AgentPassesPage() {
 function StatusBadge({ status }: { status: AgentPassStatus }) {
   switch (status) {
     case "active":
-      return <Badge variant="default">Aktiv</Badge>;
+      return <Badge variant="default">Active</Badge>;
     case "revoked":
-      return <Badge variant="destructive">Tilbagekaldt</Badge>;
+      return <Badge variant="destructive">Revoked</Badge>;
     case "expired":
-      return <Badge variant="secondary">Udløbet</Badge>;
+      return <Badge variant="secondary">Expired</Badge>;
     case "exhausted":
-      return <Badge variant="secondary">Budget brugt</Badge>;
+      return <Badge variant="secondary">Budget exhausted</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }

@@ -171,6 +171,6 @@ describe("RuntimeAccountsCard", () => {
       />,
     );
 
-    expect(screen.getByText("Indlæser…")).toBeInTheDocument();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 });

@@ -2746,6 +2746,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// loops in PR #2918). The helper guards on transition + parent state and
 	// fails best-effort.
 	if statusChanged {
+		// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — pass requester for personal flag override.
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, userID)
 		// CEREBRO-PATCH(child-status-notify): FIR-2601 — also notify+wake parent on in_review/blocked.
 		h.notifyParentOfChildStatus(r.Context(), prevIssue, issue, userID)
@@ -3259,6 +3260,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Platform-driven parent notification, mirrored from UpdateIssue
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
+			// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — pass requester for personal flag override.
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, userID)
 			// CEREBRO-PATCH(child-status-notify): FIR-2601 — also notify+wake parent on in_review/blocked.
 			h.notifyParentOfChildStatus(r.Context(), prevIssue, issue, userID)

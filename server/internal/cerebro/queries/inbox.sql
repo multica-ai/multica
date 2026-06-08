@@ -154,6 +154,31 @@ INSERT INTO inbox_item (
 ) VALUES ($1, 'member', $2, 'runtime_auto_paused', $3, NULL, $4, $5, 'system', NULL, $6, 'inbox')
 RETURNING *;
 
+-- name: FindManualInboxItem :one
+-- Dedup guard for manually_added items. Returns the active (non-archived) item
+-- for (recipient, issue) so AddIssueToInbox can resurface it instead of
+-- inserting a duplicate row.
+SELECT *
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND issue_id = $3
+  AND type = 'manually_added'
+  AND archived = false
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: CreateManualInboxItem :one
+-- Manually add an issue to the member's inbox. actor = the member themselves
+-- (self-created), severity = info since no action is required.
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title,
+    actor_type, actor_id, route
+) VALUES ($1, 'member', $2, 'manually_added', 'info', $3, $4, 'member', $2, 'inbox')
+RETURNING *;
+
 -- name: BumpRuntimePauseInboxCard :one
 -- FIR-2611: a later auto-pause for the same runtime on the same day. Refresh
 -- the card in place — bump the failed-run counter, update severity/title/body

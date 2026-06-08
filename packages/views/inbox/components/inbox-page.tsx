@@ -1323,6 +1323,22 @@ export function InboxPage() {
   );
 
   const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;
+  // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004 — find the most
+  // recent unread inbox notification for the selected channel that carries a
+  // comment_id, so ChannelDetail can auto-open the relevant thread on mount.
+  const selectedChannelCommentId = useMemo<string | undefined>(() => {
+    if (!selectedChannel) return undefined;
+    const relevant = items
+      .filter(
+        (i) => !i.read && !i.archived && i.issue_id === selectedChannel.id && i.details?.comment_id,
+      )
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return relevant[0]?.details?.comment_id ?? undefined;
+    // items intentionally omitted: snapshot at channel-select time so the
+    // read-mark that fires immediately after doesn't clear initialCommentId
+    // before ChannelDetail's auto-open effect has a chance to run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChannel]);
   // CEREBRO-PATCH(inbox-mobile-detail-title): Mobile detail header shows the selected message/chat/channel title next to Back (JEH-1515).
   const selectedDetailTitle = selectedChannel
     ? selectedChannel.kind === "channel"
@@ -1342,13 +1358,21 @@ export function InboxPage() {
   // new inbox notification for the same issue, and the dedup helper picks the
   // newest one — keying on its id would remount IssueDetail on every event,
   // wiping the comment composer draft and resetting scroll position.
+  // CEREBRO-PATCH(inbox-channel-error-boundary): TECH-3009 — wrap ChannelDetail
+  // in an error boundary (mirrors the IssueDetail boundary below) so a render
+  // crash in the channel pane shows a recoverable fallback instead of
+  // propagating to the whole InboxPage.
   const detailContent = selectedChannel ? (
-    <ChannelDetail
-      key={selectedChannel.id}
-      channelId={selectedChannel.id}
-      initialChannel={selectedChannel}
-      onArchive={() => setSelectedKey(null, "")}
-    />
+    <ErrorBoundary resetKeys={[selectedChannel.id]}>
+      <ChannelDetail
+        key={selectedChannel.id}
+        channelId={selectedChannel.id}
+        initialChannel={selectedChannel}
+        // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004
+        initialCommentId={selectedChannelCommentId}
+        onArchive={() => setSelectedKey(null, "")}
+      />
+    </ErrorBoundary>
   ) : selectedChatSession || selectedKey === "new-chat" ? (
     <InboxChatPanel
       key={selectedChatSession?.id ?? "new"}

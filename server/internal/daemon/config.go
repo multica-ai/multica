@@ -647,8 +647,9 @@ func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
 	}
 
 	return AgentEntry{
-		Path:  "",
-		Model: strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_MODEL")),
+		Path:        "",
+		Model:       strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_MODEL")),
+		DisplayName: strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_RUNTIME_NAME")), // CEREBRO-PATCH(daemon-firtal-gateway-runtime-name): custom runtime display name
 	}, true, nil
 }
 
