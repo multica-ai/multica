@@ -28,6 +28,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: ATLASSIAN_SITE
               value: https://g2crowd.atlassian.net
+            - name: DEFAULT_GIT_REPO
+              value: "https://github.com/g2crowd/ai-enhancement-hub,https://github.com/g2crowd/ue,https://github.com/g2crowd/companies_service"
           envFrom:
             - secretRef:
                 name: agentrunner-secrets
