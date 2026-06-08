@@ -2081,7 +2081,12 @@ func shouldInterruptAgent(status string, err error) bool {
 	if err != nil {
 		return isTaskNotFoundError(err)
 	}
-	return status == "cancelled"
+	switch status {
+	case "cancelled", "failed", "completed":
+		return true
+	default:
+		return false
+	}
 }
 
 // watchTaskCancellation polls the server for the task's status on the given
