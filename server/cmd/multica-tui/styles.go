@@ -24,8 +24,7 @@ var (
 var (
 	AppStyle = lipgloss.NewStyle().
 			Padding(1, 2).
-			Background(clrBg).
-			Width(100)
+			Background(clrBg)
 
 	TitleStyle = lipgloss.NewStyle().
 			Foreground(clrCyan).
@@ -45,9 +44,9 @@ var (
 	StatusPaused  = lipgloss.NewStyle().Foreground(clrDim).SetString("◐ paused")
 	StatusQueued  = lipgloss.NewStyle().Foreground(clrOrange).SetString("◉ queued")
 
-	StatusTodo     = lipgloss.NewStyle().Foreground(clrDim).SetString("○ todo")
-	StatusInProg   = lipgloss.NewStyle().Foreground(clrYellow).SetString("● in_progress")
-	StatusDone     = lipgloss.NewStyle().Foreground(clrGreen).SetString("✓ done")
+	StatusTodo      = lipgloss.NewStyle().Foreground(clrDim).SetString("○ todo")
+	StatusInProg    = lipgloss.NewStyle().Foreground(clrYellow).SetString("● in_progress")
+	StatusDone      = lipgloss.NewStyle().Foreground(clrGreen).SetString("✓ done")
 	StatusCancelled = lipgloss.NewStyle().Foreground(clrRed).SetString("✗ cancelled")
 
 	RowStyle = lipgloss.NewStyle().
@@ -65,15 +64,6 @@ var (
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(clrDim).
 			PaddingTop(1)
-
-	BoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(clrBorder).
-			Padding(0, 1).
-			Width(48)
-
-	AgentBox = BoxStyle.Copy().Width(48)
-	IssueBox = BoxStyle.Copy().Width(56)
 )
 
 // ── Status helpers ───────────────────────────────────────────
@@ -111,4 +101,19 @@ func runtimeStatusStyle(status string) string {
 		return StatusOnline.String()
 	}
 	return StatusOffline.String()
+}
+
+func priorityColor(p string) string {
+	switch p {
+	case "urgent", "critical":
+		return lipgloss.NewStyle().Foreground(clrAccent).Render("⬆ " + p)
+	case "high":
+		return lipgloss.NewStyle().Foreground(clrOrange).Render("↑ " + p)
+	case "medium":
+		return lipgloss.NewStyle().Foreground(clrYellow).Render("→ " + p)
+	case "low":
+		return lipgloss.NewStyle().Foreground(clrDim).Render("↓ " + p)
+	default:
+		return lipgloss.NewStyle().Foreground(clrDim).Render(p)
+	}
 }

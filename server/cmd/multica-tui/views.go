@@ -10,237 +10,315 @@ import (
 	"github.com/pennxiv/multica/server/cmd/multica-tui/api"
 )
 
-// ── Main View ────────────────────────────────────────────────
+const multicaArt = ` __  __      _ _   _         
+|  \/  |_  _| | |_(_)__ __ _ 
+| |\/| | || | |  _| / _/ _` + "`" + ` |
+|_|  |_|\_,_|_|\__|_\__\__,_|`
 
 func (m Model) View() string {
+	width := m.width
+	if width < 2 {
+		width = 100
+	}
 	if m.loading && m.agents == nil {
-		return m.viewLoading()
+		return AppStyle.Render(
+			lipgloss.JoinVertical(lipgloss.Center, "", "",
+				m.spinner.View()+" Loading..."),
+		)
 	}
 
-	var b strings.Builder
+	innerW := width - 4
+	var sec []string
 
-	// Title
-	title := TitleStyle.Render(" 🤖 Multica Dashboard")
-	ts := DimStyle.Render(fmt.Sprintf("  last: %s", m.lastUpdated.Format("15:04:05")))
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Center, title, ts))
-	b.WriteString("\n\n")
+	// ── Header ──
+	{
+		artStyle := lipgloss.NewStyle().Foreground(clrCyan)
+		artLines := strings.Split(multicaArt, "\n")
+		innerW := width - 4
 
-	// Error banner
-	if m.err != nil {
-		b.WriteString(lipgloss.NewStyle().
-			Foreground(clrAccent).
-			Bold(true).
-			Render("⚠ " + m.err.Error() + "\n\n"))
-	}
-
-	// Tabs
-	b.WriteString(m.viewTabs())
-	b.WriteString("\n")
-
-	// Tab content
-	switch m.tab {
-	case TabAgents:
-		b.WriteString(m.viewAgentOverview())
-	case TabIssues:
-		b.WriteString(m.viewIssueQueue())
-	}
-
-	// Help
-	b.WriteString("\n")
-	b.WriteString(HelpStyle.Render(m.help.View(m.keys)))
-
-	return AppStyle.Render(b.String())
-}
-
-func (m Model) viewLoading() string {
-	return AppStyle.Render(
-		lipgloss.JoinVertical(lipgloss.Center,
-			"",
-			"",
-			m.spinner.View()+" Loading...",
-		),
-	)
-}
-
-func (m Model) viewTabs() string {
-	var tabs []string
-	for i := 0; i < int(TabCount); i++ {
-		t := Tab(i)
-		style := lipgloss.NewStyle().
-			Padding(0, 2).
-			Bold(true).
-			Foreground(clrDim).
-			Border(lipgloss.NormalBorder(), false, false, true, false).
-			BorderForeground(clrBorder)
-		if i == int(m.tab) {
-			style = style.Foreground(clrCyan).
-				BorderForeground(clrCyan).
-				Background(clrBgLight)
+		// Stats line beside art (aligned to rightmost art line)
+		online := 0
+		for _, a := range m.agents {
+			if a.Status == "idle" || a.Status == "busy" || a.Status == "working" {
+				online++
+			}
 		}
-		tabs = append(tabs, style.Render(t.String()))
+		stats := fmt.Sprintf(" %d agents · %d issues  %s ", online, len(m.issues), m.lastUpdated.Format("15:04:05"))
+
+		// Build header: art lines with stats on the last line
+		for i, line := range artLines {
+			if i == len(artLines)-1 {
+				pad := innerW - lipgloss.Width(artStyle.Render(line)) - len(stats)
+				if pad < 1 {
+					pad = 1
+				}
+				sec = append(sec, artStyle.Render(line)+strings.Repeat(" ", pad)+DimStyle.Render(stats))
+			} else {
+				sec = append(sec, artStyle.Render(line))
+			}
+		}
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Center, tabs...)
+
+	if m.err != nil {
+		sec = append(sec, lipgloss.NewStyle().Foreground(clrAccent).Bold(true).Render("⚠ "+m.err.Error()))
+	}
+
+	sec = append(sec, m.renderAgents(innerW))
+	sec = append(sec, m.renderIssues(innerW))
+
+	taskS := m.renderTaskDetail(innerW)
+	if taskS != "" {
+		sec = append(sec, taskS)
+	}
+
+	activeS := m.renderActive(innerW)
+	if activeS != "" {
+		sec = append(sec, activeS)
+	}
+
+	sec = append(sec, HelpStyle.Render(m.help.View(m.keys)))
+	return AppStyle.Width(width-2).Render(lipgloss.JoinVertical(lipgloss.Left, sec...))
 }
 
-// ── Agent Overview ───────────────────────────────────────────
+// ── Agents ───────────────────────────────────────────────────
 
-func (m Model) viewAgentOverview() string {
-	if len(m.agents) == 0 {
-		return DimStyle.Render("  No agents found.")
-	}
-
-	// Build runtime lookup
+func (m Model) renderAgents(w int) string {
 	runtimeMap := make(map[string]string)
 	for _, r := range m.runtimes {
 		runtimeMap[r.ID] = r.Status
 	}
 
-	// Build dashboard runtime lookup
-	dashMap := make(map[string]float64)
-	for _, d := range m.dashboard {
-		dashMap[d.AgentID] = d.TotalSeconds
-	}
-
 	var lines []string
-	lines = append(lines, SectionStyle.Render(fmt.Sprintf("🧑‍💻 Agents (%d)", len(m.agents))))
+	lines = append(lines, secTitle(" Agents ", w))
 
-	// Header
-	header := lipgloss.NewStyle().Bold(true).Foreground(clrDim).
-		Render(fmt.Sprintf("%-4s %-18s %-10s %-8s %-22s %s", "", "Name", "Status", "Runtime", "Model", "Tasks"))
-	lines = append(lines, "  "+header)
-	lines = append(lines, "")
-
-	for i, a := range m.agents {
+	for _, a := range m.agents {
 		icon := agentIcon(a.Name)
-		runtimeStatus := runtimeMap[a.RuntimeID]
-		runStr := runtimeStatusStyle(runtimeStatus)
 		statStr := agentStatusStyle(a.Status)
 		modelStr := shortModel(a.Model)
-		taskCount := ""
+		runStr := runtimeStatusStyle(runtimeMap[a.RuntimeID])
+
+		taskInfo := ""
 		if tasks, ok := m.agentTasks[a.ID]; ok && len(tasks) > 0 {
-			// Show latest task status
-			running := 0
+			n := 0
 			for _, t := range tasks {
 				if t.Status == "in_progress" || t.Status == "running" {
-					running++
+					n++
 				}
 			}
-			if running > 0 {
-				taskCount = lipgloss.NewStyle().Foreground(clrYellow).Render(fmt.Sprintf("🏃%d", running))
+			if n > 0 {
+				taskInfo = lipgloss.NewStyle().Foreground(clrYellow).Render(fmt.Sprintf(" 🏃%d", n))
 			} else {
-				taskCount = DimStyle.Render(fmt.Sprintf("%d tasks", len(tasks)))
+				taskInfo = DimStyle.Render(fmt.Sprintf(" %dt", len(tasks)))
 			}
 		}
 
-		line := fmt.Sprintf("%-4s %-18s %-10s %-8s %-22s %s", icon, a.Name, statStr, runStr, modelStr, taskCount)
-
-		if i == m.cursor {
-			lines = append(lines, "  "+SelectedRowStyle.Render(line))
-		} else {
-			lines = append(lines, "  "+RowStyle.Render(line))
-		}
+		lines = append(lines, fmt.Sprintf("  %s  %s%s %s%s",
+				icon,
+				lipgloss.NewStyle().Width(12).Render(a.Name),
+				lipgloss.NewStyle().Width(12).Render(statStr),
+				runStr, taskInfo))
+		lines = append(lines, fmt.Sprintf("     %s", modelStr))
 	}
-
-	// Runtime summary
-	lines = append(lines, "")
-	lines = append(lines, SectionStyle.Render(fmt.Sprintf("⚡ Runtimes (%d)", len(m.runtimes))))
-	for _, r := range m.runtimes {
-		rs := runtimeStatusStyle(r.Status)
-		lines = append(lines, fmt.Sprintf("    %s %s", rs, r.Name))
-	}
-
 	return strings.Join(lines, "\n")
 }
 
-// ── Issue Queue ──────────────────────────────────────────────
+// ── Issues ───────────────────────────────────────────────────
 
-func (m Model) viewIssueQueue() string {
-	// Sort: in_progress first, then todo, then done, rest
+func (m Model) renderIssues(w int) string {
 	sorted := make([]api.Issue, len(m.issues))
 	copy(sorted, m.issues)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		return issuePriority(sorted[i].Status) < issuePriority(sorted[j].Status)
+		return issuePrio(sorted[i].Status) < issuePrio(sorted[j].Status)
 	})
 
+	var lines []string
+	lines = append(lines, secTitle(fmt.Sprintf(" Issues (%d) ", len(sorted)), w))
 	if len(sorted) == 0 {
-		return DimStyle.Render("  No issues.")
+		lines = append(lines, "  "+DimStyle.Render("No issues."))
+		return strings.Join(lines, "\n")
 	}
 
-	var lines []string
-	lines = append(lines, SectionStyle.Render(fmt.Sprintf("📋 Issues (%d)", len(sorted))))
-
-	// Header
-	header := lipgloss.NewStyle().Bold(true).Foreground(clrDim).
-		Render(fmt.Sprintf("%-8s %-50s %-14s %-8s %s", "ID", "Title", "Status", "Pri", "Assignee"))
-	lines = append(lines, "  "+header)
-	lines = append(lines, "")
+	// Fixed column widths (visible chars)
+	const (
+		wCursor   = 2
+		wStatus   = 14
+		wAgent    = 9
+		wID       = 10
+		wPriority = 10
+	)
+	wTitle := w - wCursor - wStatus - wAgent - wID - wPriority - 6
+	if wTitle < 6 {
+		wTitle = 6
+	}
 
 	for i, issue := range sorted {
-		cursor := ""
+		cursor := " "
 		if i == m.cursor {
 			cursor = "▸"
 		}
 
 		statusStr := issueStatusStyle(issue.Status)
-		priStr := priorityColor(issue.Priority)
 		assignee := m.agentName(issue.AssigneeID)
-
 		id := issue.Identifier
 		if id == "" {
 			id = fmt.Sprintf("#%d", issue.Number)
 		}
-		title := issue.Title
-		if len([]rune(title)) > 47 {
-			title = string([]rune(title)[:44]) + "..."
+		priStr := priorityColor(issue.Priority)
+
+		// Title truncate by visible width
+		titleTxt := issue.Title
+		if lipgloss.Width(titleTxt) > wTitle {
+			for lipgloss.Width(titleTxt) > wTitle-3 {
+				titleTxt = string([]rune(titleTxt)[:len([]rune(titleTxt))-1])
+			}
+			titleTxt += "..."
 		}
 
-		line := fmt.Sprintf("%s %-8s %-50s %-14s %-8s %s", cursor, id, title, statusStr, priStr, assignee)
+		// Build row with fixed-width cells using lipgloss
+		parts := []string{
+			cursor,
+			lipgloss.NewStyle().Width(wStatus).Render(statusStr),
+			lipgloss.NewStyle().Width(wAgent).Render(assignee),
+			lipgloss.NewStyle().Width(wID).Render(id),
+			titleTxt,
+			lipgloss.NewStyle().Width(wPriority).Render(priStr),
+		}
+		row := strings.Join(parts, " ")
 
 		if i == m.cursor {
-			lines = append(lines, "  "+SelectedRowStyle.Render(line))
+			lines = append(lines, "  "+SelectedRowStyle.Render(row))
 		} else {
-			lines = append(lines, "  "+RowStyle.Render(line))
+			lines = append(lines, "  "+RowStyle.Render(row))
 		}
+	}
+	return strings.Join(lines, "\n")
+}
 
-		// Show task detail on selected
-		if i == m.cursor {
-			// Check if there are active tasks for this issue
-			for _, tasks := range m.agentTasks {
-				for _, t := range tasks {
-					if t.IssueID == issue.ID && (t.Status == "in_progress" || t.Status == "running" || t.Status == "queued") {
-						detail := fmt.Sprintf("      %s %s [%s] attempt=%d",
-							taskKindIcon(t.Kind), DimStyle.Render(t.ID[:12]),
-							issueStatusStyle(t.Status), t.Attempt)
-						if t.StartedAt != nil {
-							start, _ := time.Parse(time.RFC3339, *t.StartedAt)
-							detail += DimStyle.Render(fmt.Sprintf(" %s ago", time.Since(start).Round(time.Second)))
-						}
-						lines = append(lines, "  "+detail)
-					}
+// ── Task Detail ──────────────────────────────────────────────
+
+func (m Model) renderTaskDetail(w int) string {
+	if len(m.issues) == 0 || m.cursor < 0 {
+		return ""
+	}
+	sorted := make([]api.Issue, len(m.issues))
+	copy(sorted, m.issues)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return issuePrio(sorted[i].Status) < issuePrio(sorted[j].Status)
+	})
+	if m.cursor >= len(sorted) {
+		return ""
+	}
+	sel := sorted[m.cursor]
+
+	var taskLines []string
+	for _, tasks := range m.agentTasks {
+		for _, t := range tasks {
+			if t.IssueID != sel.ID {
+				continue
+			}
+			statusStr := issueStatusStyle(t.Status)
+			startStr := ""
+			if t.StartedAt != nil {
+				start, err := time.Parse(time.RFC3339, *t.StartedAt)
+				if err == nil {
+					startStr = fmt.Sprintf(" %s", time.Since(start).Round(time.Second))
+				}
+			}
+			errorStr := ""
+			if t.Error != nil && *t.Error != "" {
+				errorStr = "  " + lipgloss.NewStyle().Foreground(clrAccent).Render("✗ "+*t.Error)
+			}
+			attemptStr := ""
+			if t.Attempt > 1 {
+				attemptStr = fmt.Sprintf(" attempt=%d", t.Attempt)
+			}
+			taskLines = append(taskLines,
+				fmt.Sprintf("   %s  %s%s%s%s%s",
+					taskKindIcon(t.Kind),
+					statusStr, DimStyle.Render(startStr),
+					DimStyle.Render(attemptStr),
+					errorStr,
+					DimStyle.Render("  "+t.ID[:min(12, len(t.ID))]),
+				))
+		}
+	}
+
+	if len(taskLines) == 0 {
+		taskLines = append(taskLines, "   "+DimStyle.Render("No active tasks for this issue"))
+	}
+
+	lines := []string{secTitle(fmt.Sprintf(" %s: Tasks ", sel.Identifier), w)}
+	lines = append(lines, taskLines...)
+	return strings.Join(lines, "\n")
+}
+
+// ── Active ───────────────────────────────────────────────────
+
+func (m Model) renderActive(w int) string {
+	type at struct {
+		name string
+		task api.Task
+	}
+	var active []at
+	for _, a := range m.agents {
+		if tasks, ok := m.agentTasks[a.ID]; ok {
+			for _, t := range tasks {
+				if t.Status == "in_progress" || t.Status == "running" || t.Status == "queued" {
+					active = append(active, at{name: a.Name, task: t})
 				}
 			}
 		}
 	}
+	if len(active) == 0 {
+		return ""
+	}
 
+	var lines []string
+	lines = append(lines, secTitle(fmt.Sprintf(" Active (%d) ", len(active)), w))
+	for _, a := range active {
+		t := a.task
+		statusStr := issueStatusStyle(t.Status)
+		startStr := ""
+		if t.StartedAt != nil {
+			start, err := time.Parse(time.RFC3339, *t.StartedAt)
+			if err == nil {
+				startStr = fmt.Sprintf(" %s", time.Since(start).Round(time.Second))
+			}
+		}
+		lines = append(lines,
+			fmt.Sprintf("   %s  [%s]  %s%s",
+				taskKindIcon(t.Kind), a.name, statusStr,
+				DimStyle.Render(startStr),
+			))
+	}
 	return strings.Join(lines, "\n")
 }
 
-// ── Helpers ──────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────
 
-func (m Model) agentName(assigneeID string) string {
+func secTitle(text string, w int) string {
+	s := lipgloss.NewStyle().Bold(true).Foreground(clrWhite).Render(text)
+	n := w - lipgloss.Width(s) - 1
+	if n < 1 {
+		n = 1
+	}
+	return s + lipgloss.NewStyle().Foreground(clrBorder).Render(strings.Repeat("─", n)) + "\n"
+}
+
+func (m Model) agentName(id string) string {
 	for _, a := range m.agents {
-		if a.ID == assigneeID {
+		if a.ID == id {
 			return a.Name
 		}
 	}
-	if len(assigneeID) > 8 {
-		return assigneeID[:8]
+	if len(id) > 8 {
+		return id[:8]
 	}
-	return assigneeID
+	return id
 }
 
-func issuePriority(status string) int {
-	switch status {
+func issuePrio(s string) int {
+	switch s {
 	case "in_progress":
 		return 0
 	case "todo", "backlog":
@@ -252,4 +330,43 @@ func issuePriority(status string) int {
 	default:
 		return 2
 	}
+}
+
+func agentIcon(n string) string {
+	switch n {
+	case "Rana":
+		return "🐸"
+	case "Tom":
+		return "🐱"
+	case "crayon":
+		return "✏️"
+	case "Mr. Chicken":
+		return "🐔"
+	default:
+		return "🤖"
+	}
+}
+
+func taskKindIcon(k string) string {
+	switch k {
+	case "code", "implement":
+		return "💻"
+	case "review":
+		return "👀"
+	case "debug", "fix":
+		return "🔧"
+	case "research":
+		return "🔍"
+	case "test":
+		return "🧪"
+	default:
+		return "⚡"
+	}
+}
+
+func shortModel(s string) string {
+	if len(s) > 24 {
+		return s[:22] + ".."
+	}
+	return s
 }
