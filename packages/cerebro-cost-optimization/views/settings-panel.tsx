@@ -12,6 +12,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import {
   clampHoldoutPct,
+  COST_SAVING_DEFAULTS,
   COST_SAVINGS,
   type CostSavingDefinition,
   type CostSavingKey,
@@ -22,7 +23,7 @@ import {
   runtimeScopeNote,
   savingSupportsHoldout,
 } from "../registry";
-import { useSavingMode } from "../store";
+import { useCostOptimizationStore, useSavingMode } from "../store";
 import {
   useCostOptimizationHoldoutQuery,
   useCostOptimizationQuery,
@@ -236,6 +237,10 @@ export function CostOptimizationSettingsPanel() {
   const query = useCostOptimizationQuery();
   const holdoutQuery = useCostOptimizationHoldoutQuery();
   const holdoutOverrides = holdoutQuery.data ?? {};
+  // Reactive overrides map used to evaluate dependsOn visibility conditions.
+  const overrides = useCostOptimizationStore((s) => s.overrides);
+  const resolveMode = (key: CostSavingKey): CostSavingMode =>
+    overrides[key] ?? COST_SAVING_DEFAULTS[key];
 
   return (
     <section className="space-y-4">
@@ -261,14 +266,17 @@ export function CostOptimizationSettingsPanel() {
       )}
 
       <div className="space-y-3">
-        {COST_SAVINGS.map((def) => (
-          <SavingRow
-            key={def.key}
-            def={def}
-            canManage={canManage}
-            holdoutOverride={holdoutOverrides[def.key as CostSavingKey]}
-          />
-        ))}
+        {COST_SAVINGS.map((def) => {
+          if (def.dependsOn && resolveMode(def.dependsOn) !== "on") return null;
+          return (
+            <SavingRow
+              key={def.key}
+              def={def}
+              canManage={canManage}
+              holdoutOverride={holdoutOverrides[def.key as CostSavingKey]}
+            />
+          );
+        })}
       </div>
     </section>
   );
