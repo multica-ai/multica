@@ -1,4 +1,4 @@
-module github.com/pennxiv/multica/server/cmd/multica-tui
+module github.com/multica-ai/multica/server/cmd/multica-tui
 
 go 1.26.3
 

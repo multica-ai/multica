@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/pennxiv/multica/server/cmd/multica-tui/api"
+	"github.com/multica-ai/multica/server/cmd/multica-tui/api"
 )
 
 const multicaArt = ` __  __      _ _   _         

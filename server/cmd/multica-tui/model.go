@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/pennxiv/multica/server/cmd/multica-tui/api"
+	"github.com/multica-ai/multica/server/cmd/multica-tui/api"
 )
 
 // ── Messages ─────────────────────────────────────────────────
@@ -84,10 +84,10 @@ func NewModel() *Model {
 	baseURL := os.Getenv("MULTICA_API_URL")
 	wsID := os.Getenv("MULTICA_WORKSPACE_ID")
 	if baseURL == "" {
-		baseURL = "http://172.20.3.43:8080"
+		baseURL = "http://localhost:8080"
 	}
 	if wsID == "" {
-		wsID = "25c422ca-babf-4b73-bd38-872007769138"
+		wsID = "" // must set via env or config
 	}
 	// Fallback: read from multica config
 	if token == "" {
