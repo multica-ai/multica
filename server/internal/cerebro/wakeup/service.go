@@ -102,13 +102,14 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 	})
 }
 
-func (s *Service) List(ctx context.Context, workspaceID pgtype.UUID, agentID pgtype.UUID, state pgtype.Text, limit int32) ([]cerebrodb.CerebroAgentWakeup, error) {
+func (s *Service) List(ctx context.Context, workspaceID pgtype.UUID, agentID pgtype.UUID, issueID pgtype.UUID, state pgtype.Text, limit int32) ([]cerebrodb.CerebroAgentWakeup, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	return s.Cerebro.ListCerebroAgentWakeups(ctx, cerebrodb.ListCerebroAgentWakeupsParams{
 		WorkspaceID: workspaceID,
 		AgentID:     agentID,
+		IssueID:     issueID,
 		State:       state,
 		Limit:       limit,
 	})

@@ -18,6 +18,7 @@ FROM cerebro_agent_wakeup
 WHERE workspace_id = $1
   AND (sqlc.narg('agent_id')::uuid IS NULL OR agent_id = sqlc.narg('agent_id')::uuid)
   AND (sqlc.narg('state')::text IS NULL OR state = sqlc.narg('state')::text)
+  AND (sqlc.narg('issue_id')::uuid IS NULL OR issue_id = sqlc.narg('issue_id')::uuid)
 ORDER BY created_at DESC
 LIMIT $2;
 

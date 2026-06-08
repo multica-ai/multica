@@ -3867,6 +3867,31 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-wakeup-sidebar): list and cancel agent wakeups per issue for the sidebar.
+  async listIssueWakeups(issueId: string, state = "pending"): Promise<{
+    wakeups: {
+      id: string;
+      agent_id: string;
+      issue_id: string;
+      prompt: string;
+      trigger_type: string;
+      fire_at?: string;
+      watch_status?: string;
+      state: string;
+      created_at: string;
+    }[];
+  }> {
+    const qs = new URLSearchParams({ issue_id: issueId, state, limit: "50" });
+    return this.fetch(`/api/cerebro/wakeups?${qs.toString()}`);
+  }
+
+  async cancelWakeup(id: string): Promise<{ id: string; state: string }> {
+    return this.fetch(`/api/cerebro/wakeups/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
   // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (up to 5 square icon variants).
   async generateWorkspaceLogos(
     workspaceId: string,
