@@ -498,6 +498,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   });
   // CEREBRO-PATCH(channels-flag-gate): filter channel/dm pins when feature is disabled
   const channelsEnabled = useFeatureFlag("cerebro_channels");
+  // CEREBRO-PATCH(projects-flag-gate): TECH-2880 hide Projects sidebar entry when flag is OFF
+  const projectsEnabled = useFeatureFlag("cerebro_projects");
   const pinnedItems = React.useMemo(
     () =>
       channelsEnabled
@@ -609,7 +611,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   render={
                     <SidebarMenuButton>
                       <span className="relative">
-                        <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+                        {/* CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — show workspace logo in the sidebar switcher trigger. */}
+                        <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" avatarUrl={workspace?.avatar_url} />
                         {myInvitations.length > 0 && (
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
@@ -652,10 +655,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <DropdownMenuItem
                         key={ws.id}
                         render={
-                          <AppLink href={paths.workspace(ws.slug).issues()} />
+                          // CEREBRO-PATCH(start-page-workspace-switch): switch via workspace root so the selected start page is applied.
+                          <AppLink href={paths.workspace(ws.slug).root()} />
                         }
                       >
-                        <WorkspaceAvatar name={ws.name} size="sm" />
+                        {/* CEREBRO-PATCH(workspace-avatar-logo): FIR-2580 — show each workspace's logo in the switcher list. */}
+                        <WorkspaceAvatar name={ws.name} size="sm" avatarUrl={ws.avatar_url} />
                         <span className="flex-1 truncate">{ws.name}</span>
                         {ws.id === workspace?.id && (
                           <Check className="h-3.5 w-3.5 text-primary" />
@@ -848,7 +853,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <ApprovalsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 cerebro agent-passes entry in workspace group */}
                 <AgentPassesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
-                {/* Projects — collapsible nav item with sub-items */}
+                {/* CEREBRO-PATCH(projects-flag-gate): TECH-2880 wrap Projects collapsible in cerebro_projects gate */}
+                {projectsEnabled && (
                 <Collapsible defaultOpen>
                   <SidebarMenuItem>
                     <CollapsibleTrigger
@@ -944,6 +950,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </CollapsibleContent>
                   </SidebarMenuItem>
                 </Collapsible>
+                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

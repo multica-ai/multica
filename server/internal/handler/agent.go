@@ -196,6 +196,11 @@ type AgentTaskResponse struct {
 	Repos            []RepoData            `json:"repos,omitempty"`
 	ProjectID        string                `json:"project_id,omitempty"`        // issue's project, when present
 	ProjectTitle     string                `json:"project_title,omitempty"`     // for surfacing in agent context
+	// CEREBRO-PATCH(agent-task-issue-title): FIR-2763 M1 — daemon-resolved issue
+	// titles so the trace-upload sidecar can stamp human-readable names on each
+	// ai_proxy_logs row. Empty when unresolved; registry stores null.
+	IssueTitle       string                `json:"issue_title,omitempty"`
+	ParentIssueTitle string                `json:"parent_issue_title,omitempty"`
 	ProjectResources []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
 	CreatedAt        string                `json:"created_at"`
 	PriorSessionID   string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
@@ -248,6 +253,8 @@ type AgentTaskResponse struct {
 	UserProfilePrompt                string               `json:"user_profile_prompt,omitempty"`
 	Kind                             string               `json:"kind"`                     // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 	Title                            *string              `json:"title,omitempty"`          // CEREBRO-PATCH(task-title-builder): short generated headline.
+	// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — queued-task hint while runtime is paused (runtime_paused|reason|unpause_at).
+	WaitReason                       *string              `json:"wait_reason,omitempty"`
 	ModelOverride                    string               `json:"model_override,omitempty"` // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
 	SandboxEnabled                   *bool                `json:"sandbox_enabled,omitempty"`
 	RuntimeSandboxPolicy             json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
@@ -274,6 +281,7 @@ type AgentTaskResponse struct {
 	// CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
 	// CEREBRO-PATCH(agent): persona integration additions.
 	// CEREBRO-PATCH(runtime-tools-config-claim-resp): runtime-level tools_config surfaced at claim so daemon can merge with agent.mcp_config (9031).
+	PresentationMode string `json:"presentation_mode,omitempty"` // CEREBRO-PATCH(agent-task-presentation-mode): pass interactive terminal mode through to daemon
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
@@ -351,6 +359,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		TriggerSummary:   textToPtr(t.TriggerSummary),
 		// CEREBRO-PATCH(task-title-builder): surface generated title to clients.
 		Title:           textToPtr(t.Title),
+		// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — explain queued waits without issue comments.
+		WaitReason:      textToPtr(t.WaitReason),
 		WorkDir:         workDir,
 		RelativeWorkDir: relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		// Surface task source so the UI can distinguish issue-linked tasks

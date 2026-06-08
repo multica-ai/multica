@@ -12,6 +12,12 @@ export type CerebroFlagKey =
   | "cerebro_sandbox_ui"
   | "cerebro_mcp_guide"
   | "cerebro_channels"
+  | "cerebro_chat_message_cost"
+  // FIR-39: per-comment cost badge on issues + channels (mirror of the chat
+  // per-reply badge from FIR-31). One run can post multiple comments; cost is
+  // pinned to the run's last comment so it sums to the issue total chip
+  // already shown in the sidebar without double-counting.
+  | "cerebro_comment_cost"
   | "cerebro_web_push"
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
@@ -52,6 +58,8 @@ export type CerebroFlagKey =
   | "cerebro_duplicate_check_on_create"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
   | "cerebro_google_identity"
+  // FIR-2580: per-workspace logo (upload + sidebar/breadcrumbs + web favicon + desktop dock icon).
+  | "cerebro_workspace_logo"
   // FIR-2666: project sprint feature (sprint settings, auto-create next sprint, recurring tasks).
   | "cerebro_sprints"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
@@ -61,7 +69,26 @@ export type CerebroFlagKey =
   // FIR-2674: reject agent comments that mention no target (person, agent, or issue).
   | "cerebro_comment_target_guard"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
-  | "cerebro_agent_trigger_permissions";
+  | "cerebro_agent_trigger_permissions"
+  // TECH-2880: collapsible Projects entry in the sidebar (with nested project tree).
+  | "cerebro_projects"
+  // FIR-2660: restrict channel creation to workspace owners/admins. Default off
+  // preserves today's behavior (any member can create); turn on to require
+  // owner/admin role for POST /api/channels (kind='channel'; DMs always open).
+  | "cerebro_channel_create_restricted"
+  // TECH-2925: admin UI for firtal_registry data source allowlist on agents.
+  | "cerebro_firtal_registry_allowlist_ui"
+  // FIR-33 (sub of FIR-18): auto-switch the "Create with agent" modal to manual
+  // create when the picked agent's daemon CLI is below the quick-create gate,
+  // instead of leaving the user on a warning banner with Create disabled.
+  | "cerebro_quick_create_version_autoswitch"
+  // FIR-40: per-workspace display currency (USD/DKK/EUR) for cost — settings
+  // tab + display-time conversion. Off => cost shows in raw USD as before.
+  | "cerebro_display_currency"
+  // TECH-2947: personal focus list pinned to the top of the inbox.
+  | "cerebro_focus_list"
+  // Interactive terminal (cerebro-terminal): per-runtime presentation mode + xterm.js panel.
+  | "cerebro_interactive_terminal";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -77,6 +104,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_sandbox_ui: true,
   cerebro_mcp_guide: true,
   cerebro_channels: true,
+  cerebro_chat_message_cost: true,
+  cerebro_comment_cost: true,
   cerebro_web_push: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
@@ -95,8 +124,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_persona_permissions: true,
   cerebro_skill_mention: true,
   cerebro_grants: false,
-  cerebro_tool_policy: false,
-  cerebro_simple_tool_policy: false,
+  cerebro_tool_policy: true,
+  cerebro_simple_tool_policy: true,
   // FIR-2594: surface the Multica platform actions (create issue, add comment,
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
   // so they are settable Allow/Ask/Deny on every layer. Default OFF — nothing
@@ -141,6 +170,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // signup is the launch feature, and the table starts empty so a fresh
   // workspace with no configured domains is still a no-op.
   cerebro_google_identity: true,
+  // FIR-2580: ships default OFF — opt-in per workspace before the logo
+  // surfaces (upload UI, favicon swap, desktop dock icon).
+  cerebro_workspace_logo: false,
   // FIR-2666: project sprint feature. Defaults OFF — turn on per workspace
   // when ready. Hides the Sprints tab on the project page, the sprint picker
   // in the issue sidebar, and skips the sprint sweeper.
@@ -163,6 +195,27 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_comment_target_guard: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
+  // TECH-2880: OFF by default — workspace opts in to surface the Projects
+  // collapsible (header + sub-items) in the sidebar.
+  cerebro_projects: false,
+  // FIR-2660: OFF by default. When on, POST /api/channels with kind='channel'
+  // is restricted to workspace owners/admins (members get 403). DMs are never
+  // gated. Off restores today's behaviour (any member or agent may create).
+  cerebro_channel_create_restricted: false,
+  // TECH-2925: OFF by default until QA on staging; hides Konfigurer on firtal_registry.
+  cerebro_firtal_registry_allowlist_ui: false,
+  // FIR-33 (sub of FIR-18): ON by default. When the agent picked in the Quick
+  // Create modal runs a daemon CLI below the quick-create gate, the modal flips
+  // to manual create (carrying the typed prompt/project/parent) instead of
+  // stranding the user on a warning banner. Off restores the warning-only
+  // behaviour.
+  cerebro_quick_create_version_autoswitch: true,
+  cerebro_display_currency: true,
+  // TECH-2947: ON by default. Personal focus list at the top of the inbox —
+  // a lightweight to-do surface for ADHD-friendly task tracking. Off hides
+  // the panel and the backend endpoints reject requests.
+  cerebro_focus_list: true,
+  cerebro_interactive_terminal: false,
 };
 
 /**
@@ -274,6 +327,20 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable channel-style conversations (kind=channel issues, /channels/{id} route, channel list in inbox).",
+  },
+  {
+    key: "cerebro_chat_message_cost",
+    label: "Per-reply chat cost",
+    group: "workspace",
+    description:
+      "Show the spend ($) of each assistant reply in the chat footer, next to \"Replied in …\". Hover for the token/model breakdown. Off hides the per-reply badge (the session-total chip in the header stays).",
+  },
+  {
+    key: "cerebro_comment_cost",
+    label: "Per-comment issue & channel cost",
+    group: "issues",
+    description:
+      "Show the spend ($) of each agent comment on issues and channels, with a token/model breakdown on hover. A run that posts progress + a result places the badge on the run's last comment, so per-comment numbers sum to the issue total already shown in the sidebar (JEH-736) without double-counting. Off hides the per-comment badge.",
   },
   {
     key: "cerebro_web_push",
@@ -529,6 +596,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Adds an Auth & Permissions tab to workspace settings: owner/admin can list email domains that auto-provision into this workspace on first Google login, and pick the default role new members get. Off hides the tab and disables the auto-membership hook. FIR-2523.",
   },
   {
+    key: "cerebro_workspace_logo",
+    label: "Workspace logo",
+    group: "workspace",
+    description:
+      "Let owners/admins upload a workspace logo in Settings → General. The logo replaces the letter tile in the sidebar, switcher and breadcrumbs, the browser-tab favicon on web, and the dock/window icon in the desktop app. Off hides the uploader and keeps the default icons. FIR-2580.",
+  },
+  {
     key: "cerebro_sprints",
     label: "Project sprints",
     group: "workspace",
@@ -541,6 +615,48 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Render uploaded PDFs in Documents and the attachment viewer using the browser's native PDF view (scroll, zoom, search) instead of dumping the extracted text. Off restores the extracted-text view. FIR-2661.",
+  },
+  {
+    key: "cerebro_projects",
+    label: "Projects sidebar entry",
+    group: "workspace",
+    description:
+      "Show the collapsible Projects entry in the workspace sidebar (project list, nested tree, and the 'New Project' shortcut). Off hides the entry entirely — projects can still be reached via direct URL and the Projects page. TECH-2880.",
+  },
+  {
+    key: "cerebro_channel_create_restricted",
+    label: "Restrict who can create channels",
+    group: "permissions",
+    description:
+      "When on, creating a named channel (POST /api/channels with kind='channel') requires workspace owner or admin role; members get 403. DMs are never gated. Off restores today's behaviour where any workspace member or agent can create a channel. FIR-2660.",
+  },
+  {
+    key: "cerebro_firtal_registry_allowlist_ui",
+    label: "firtal_registry allowlist UI",
+    group: "agents",
+    description:
+      "Show Konfigurer on the agent Tools tab for firtal_registry so admins can pick which data sources the agent may access. TECH-2925.",
+  },
+  {
+    key: "cerebro_quick_create_version_autoswitch",
+    label: "Auto-switch to manual on stale agent CLI",
+    group: "issues",
+    description:
+      "In the \"Create with agent\" modal, when the picked agent's daemon runs a multica CLI below the quick-create minimum, automatically switch to manual create (carrying the typed prompt, project, and parent over) instead of leaving the user on a warning banner with Create disabled. Off restores the warning-only behaviour. FIR-33.",
+  },
+  {
+    key: "cerebro_interactive_terminal",
+    label: "Interactive terminal",
+    group: "agents",
+    description:
+      "Enable the per-runtime presentation_mode toggle and the in-app xterm.js terminal panel. Runtimes flipped to 'interactive' stream a live shell to the Multica UI so the user can watch and take over an agent session.",
+  },
+  {
+    key: "cerebro_display_currency",
+    label: "Display currency",
+    group: "workspace",
+    description:
+      "Let a workspace show cost in a chosen display currency (USD, DKK, EUR). Cost is always stored in USD and converted at display time with a cached daily rate; a Currency settings tab picks the workspace currency. Off shows raw USD everywhere as before. FIR-40.",
   },
 ];
 

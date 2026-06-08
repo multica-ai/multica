@@ -74,6 +74,7 @@ import { useAgentPresence } from "@/lib/use-agent-presence";
 import { Header } from "@/components/ui/header";
 import { ChatTitleButton } from "@/components/chat/chat-title-button";
 import { ChatSessionActions } from "@/components/chat/chat-session-actions";
+import { ChatSessionCost } from "@/components/chat/chat-session-cost";
 import { ChatMessageList } from "@/components/chat/chat-message-list";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { AgentPickerSheet } from "@/components/chat/agent-picker-sheet";
@@ -380,11 +381,16 @@ export default function ChatTab() {
           />
         }
         right={
-          <ChatSessionActions
-            showMore={!!activeSession}
-            onMorePress={handleDeleteActive}
-            onNewPress={handleNewChat}
-          />
+          // FIR-31 — accumulated session cost ("cost $X.XX") left of the
+          // actions; self-hides until the session has logged spend.
+          <View className="flex-row items-center gap-3">
+            <ChatSessionCost sessionId={activeSession?.id ?? null} />
+            <ChatSessionActions
+              showMore={!!activeSession}
+              onMorePress={handleDeleteActive}
+              onNewPress={handleNewChat}
+            />
+          </View>
         }
       />
       {availability === "none" ? <NoAgentBanner /> : null}

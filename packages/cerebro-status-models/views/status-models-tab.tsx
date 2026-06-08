@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { GitBranch, Pencil, Plus, Trash2 } from "lucide-react";
+import { GitBranch, Pencil, Plus, Star, StarOff, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -19,6 +19,8 @@ import {
   useUpdateStatusModelMutation,
   useDeleteStatusModelMutation,
   useClearProjectStatusModelMutation,
+  useSetWorkspaceDefaultMutation,
+  useClearWorkspaceDefaultMutation,
 } from "@multica/cerebro-status-models/core";
 import type { CerebroStatusModel } from "@multica/cerebro-status-models/core";
 import { Button } from "@multica/ui/components/ui/button";
@@ -46,6 +48,8 @@ export function StatusModelsTab() {
   // assignMutation is invoked inside StatusModelAssignModal — kept imported
   // for the modal child so the v2b mapping flow owns the assignment call.
   const clearMutation = useClearProjectStatusModelMutation(wsId);
+  const setDefaultMutation = useSetWorkspaceDefaultMutation(wsId);
+  const clearDefaultMutation = useClearWorkspaceDefaultMutation(wsId);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<CerebroStatusModel | undefined>();
@@ -75,6 +79,20 @@ export function StatusModelsTab() {
   const openEdit = (model: CerebroStatusModel) => {
     setEditing(model);
     setEditorOpen(true);
+  };
+
+  const handleToggleDefault = (model: CerebroStatusModel) => {
+    if (model.workspace_default) {
+      clearDefaultMutation.mutate(undefined, {
+        onError: () => toast.error("Could not remove the workspace default."),
+      });
+    } else {
+      setDefaultMutation.mutate(model.id, {
+        onError: () => toast.error("Could not set the workspace default."),
+        onSuccess: () =>
+          toast.success(`"${model.name}" is now the workspace standard — new projects will use it automatically.`),
+      });
+    }
   };
 
   const handleDelete = (model: CerebroStatusModel) => {
@@ -150,6 +168,11 @@ export function StatusModelsTab() {
                     <Badge variant="secondary">
                       {model.project_count} project(s)
                     </Badge>
+                    {model.workspace_default && (
+                      <Badge variant="outline" className="text-xs border-amber-400 text-amber-600 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400">
+                        Workspace standard
+                      </Badge>
+                    )}
                   </div>
                   {model.description && (
                     <p className="mt-0.5 text-sm text-muted-foreground">
@@ -158,12 +181,26 @@ export function StatusModelsTab() {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button variant="ghost" size="icon-sm" onClick={() => openEdit(model)}>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title={model.workspace_default ? "Remove as workspace standard" : "Set as workspace standard"}
+                    disabled={setDefaultMutation.isPending || clearDefaultMutation.isPending}
+                    onClick={() => handleToggleDefault(model)}
+                  >
+                    {model.workspace_default ? (
+                      <StarOff className="size-3.5 text-amber-500" />
+                    ) : (
+                      <Star className="size-3.5" />
+                    )}
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" title="Edit model" onClick={() => openEdit(model)}>
                     <Pencil className="size-3.5" />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon-sm"
+                    title="Delete model"
                     disabled={model.project_count > 0 || deleteMutation.isPending}
                     onClick={() => handleDelete(model)}
                   >

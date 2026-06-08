@@ -31,7 +31,15 @@ export type InboxItemType =
   | "private_agent_run_request"
   // CEREBRO-PATCH(inbox-skill-change-request): FIR-2627/FIR-2629 — a skill change request was opened (owner/approvers notified) or reviewed (proposer notified). Clicking deep-links to the skill detail with the proposal focused.
   | "skill_change_request_created"
-  | "skill_change_request_reviewed";
+  | "skill_change_request_reviewed"
+  // CEREBRO-PATCH(core-types-inbox): FIR-2611 — one aggregated card per runtime/day when a runtime auto-pauses on expired login / hit quota.
+  | "runtime_auto_paused"
+  // CEREBRO-PATCH(core-types-inbox): TECH-2961 — agent-authored comments are split into three routing keys based on the tag they carry, so users can mute monologues without losing hand-offs.
+  | "agent_comment_no_tag"
+  | "agent_comment_member_tag"
+  | "agent_comment_agent_tag"
+  // CEREBRO-PATCH(cerebro-inbox-add-issue): manually added by the member via the issue action menu.
+  | "manually_added";
 
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of

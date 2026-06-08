@@ -35,11 +35,11 @@ func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
 }
 
 func TestFirtalGatewayAgentEntryRegistersWhenRuntimeTypeAndCredsSet(t *testing.T) {
-	// CEREBRO-PATCH(daemon-config-test-firtal-gateway): validate MULTICA_RUNTIME_TYPE gate.
+	// CEREBRO-PATCH(daemon-config-test-firtal-gateway): validate MULTICA_RUNTIME_TYPE gate. FIR-2825 — env-var names renamed to FIRTAL_REGISTRY_*.
 	t.Setenv("MULTICA_RUNTIME_TYPE", "firtal-registry")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example.com")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_MODEL", "claude-sonnet-4-6")
+	t.Setenv("FIRTAL_REGISTRY_URL", "https://registry.example.com")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_MODEL", "claude-sonnet-4-6")
 
 	entry, ok, err := firtalGatewayAgentEntry()
 	if err != nil {
@@ -61,8 +61,8 @@ func TestFirtalGatewayAgentEntrySkipsWhenRuntimeTypeUnset(t *testing.T) {
 	// MULTICA_RUNTIME_TYPE=firtal-registry opt-in every dev machine that happens to
 	// share the registry credentials would silently register itself as its own gateway.
 	t.Setenv("MULTICA_RUNTIME_TYPE", "")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example.com")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", "https://registry.example.com")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	_, ok, err := firtalGatewayAgentEntry()
 	if err != nil {
@@ -78,8 +78,8 @@ func TestFirtalGatewayAgentEntrySkipsForUnknownRuntimeType(t *testing.T) {
 	// must NOT enable the gateway runtime — they're future runtime types this code does
 	// not yet handle.
 	t.Setenv("MULTICA_RUNTIME_TYPE", "something-else")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example.com")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_URL", "https://registry.example.com")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	_, ok, err := firtalGatewayAgentEntry()
 	if err != nil {
@@ -92,7 +92,7 @@ func TestFirtalGatewayAgentEntrySkipsForUnknownRuntimeType(t *testing.T) {
 
 func TestFirtalGatewayAgentEntryFailsFastWhenRuntimeTypeSetWithoutKey(t *testing.T) {
 	t.Setenv("MULTICA_RUNTIME_TYPE", "firtal-registry")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example.com")
+	t.Setenv("FIRTAL_REGISTRY_URL", "https://registry.example.com")
 
 	_, _, err := firtalGatewayAgentEntry()
 	if err == nil {
@@ -102,7 +102,7 @@ func TestFirtalGatewayAgentEntryFailsFastWhenRuntimeTypeSetWithoutKey(t *testing
 
 func TestFirtalGatewayAgentEntryFailsFastWhenRuntimeTypeSetWithoutURL(t *testing.T) {
 	t.Setenv("MULTICA_RUNTIME_TYPE", "firtal-registry")
-	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	_, _, err := firtalGatewayAgentEntry()
 	if err == nil {
@@ -314,6 +314,49 @@ func stageFakeAgent(t *testing.T) string {
 	// default, not whatever the developer happens to have exported.
 	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
 	return binDir
+}
+
+// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — fork-carried until
+// upstream multica-ai/multica#3574 merges, then dropped on sync.
+// TestLoadConfig_MaxToolCallDuration covers the per-tool-call cap (FIR-2610):
+// the default, an explicit env override (e.g. a deployment with genuinely long
+// single calls raising it), and the 0 = disabled opt-out.
+func TestLoadConfig_MaxToolCallDuration(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_MAX_TOOL_CALL_DURATION", "")
+		cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.MaxToolCallDuration != DefaultMaxToolCallDuration {
+			t.Fatalf("MaxToolCallDuration = %s, want default %s", cfg.MaxToolCallDuration, DefaultMaxToolCallDuration)
+		}
+	})
+
+	t.Run("env override", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_MAX_TOOL_CALL_DURATION", "45m")
+		cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.MaxToolCallDuration != 45*time.Minute {
+			t.Fatalf("MaxToolCallDuration = %s, want 45m", cfg.MaxToolCallDuration)
+		}
+	})
+
+	t.Run("disabled with zero", func(t *testing.T) {
+		stageFakeAgent(t)
+		t.Setenv("MULTICA_MAX_TOOL_CALL_DURATION", "0")
+		cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.MaxToolCallDuration != 0 {
+			t.Fatalf("MaxToolCallDuration = %s, want 0 (disabled)", cfg.MaxToolCallDuration)
+		}
+	})
 }
 
 // TestLoadConfig_AutoUpdateDefault_SelfHostOff is the regression guard for

@@ -222,12 +222,22 @@ function collectLinkifyMatches(text: string, offset: number, out: DetectedLink[]
     if (cjkIdx === 0) continue // match starts with CJK punct — skip
 
     const truncate = cjkIdx > 0
-    const matchText = truncate ? match.text.slice(0, cjkIdx) : match.text
+    let matchText = truncate ? match.text.slice(0, cjkIdx) : match.text
     // linkify-it may prepend a scheme (e.g. "http://" or "mailto:") to url
     // while leaving text as the raw substring. Preserve that prefix.
     const schemePrefix = match.url.slice(0, match.url.length - match.text.length)
-    const matchUrl = truncate ? schemePrefix + matchText : match.url
-    const matchEnd = truncate ? match.index + cjkIdx : match.lastIndex
+    let matchUrl = truncate ? schemePrefix + matchText : match.url
+    let matchEnd = truncate ? match.index + cjkIdx : match.lastIndex
+
+    // CEREBRO-PATCH(strip-md-bold-italic-trailing): asterisks are not valid URL characters;
+    // linkify-it includes trailing ** when agents write **url** (double-* isn't a URL boundary).
+    // Strip any trailing asterisks so they remain outside the link as markdown bold/italic markers.
+    const starTrail = /\*+$/.exec(matchText)
+    if (starTrail?.index) {
+      matchText = matchText.slice(0, starTrail.index)
+      matchUrl = schemePrefix + matchText
+      matchEnd = match.index + starTrail.index
+    }
 
     out.push({
       type: match.schema === 'mailto:' ? 'email' : 'url',

@@ -40,7 +40,7 @@ var codexBlockedArgs = map[string]blockedArgMode{
 const (
 	codexStderrTailBytes                   = 2048
 	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
-	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
+	defaultCodexFirstTurnNoProgressTimeout = 90 * time.Second // CEREBRO-PATCH(codex-first-turn-timeout-90s): TECH-3078 — cold OpenAI starts regularly exceed 30s; 90s matches observed cold-start p99.
 	codexVersionDiagnosticTimeout          = 2 * time.Second
 )
 

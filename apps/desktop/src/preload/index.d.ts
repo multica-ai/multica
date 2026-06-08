@@ -35,6 +35,9 @@ interface DesktopAPI {
   }) => void;
   /** Update the OS dock / taskbar unread badge. Pass 0 to clear. */
   setUnreadBadge: (count: number) => void;
+  /** FIR-2580: set the dock/window icon to the active workspace logo (data URL),
+   *  or pass null to restore the bundled default icon. */
+  setWorkspaceIcon: (iconDataUrl: string | null) => void;
   /** Listen for "open inbox row" requests from notification clicks. Returns an unsubscribe function. */
   onInboxOpen: (
     callback: (payload: {

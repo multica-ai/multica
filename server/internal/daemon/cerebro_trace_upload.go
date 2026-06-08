@@ -64,6 +64,11 @@ func (d *Daemon) enqueueTraceUpload(task Task, provider string, result TaskResul
 		Surface:         traceSurface(task), // CEREBRO-PATCH(daemon-trace-upload-channel-label): label channel/dm + trigger user id (FIR-2438)
 		TriggerUserID:   task.TriggerUserID,
 		TriggerUserName: traceTriggerUserName(task),
+		// CEREBRO-PATCH(daemon-trace-upload-display-titles): FIR-2763 M1 display
+		// titles resolved at claim time; empty when unknown.
+		IssueTitle:       task.IssueTitle,
+		ParentIssueTitle: task.ParentIssueTitle,
+		ProjectName:      task.ProjectTitle,
 	}
 	if task.Agent != nil {
 		sidecar.AgentName = task.Agent.Name

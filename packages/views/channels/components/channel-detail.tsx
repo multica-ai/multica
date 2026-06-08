@@ -3,7 +3,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Archive, Hash, MessageSquare, Pin, PinOff } from "lucide-react";
+import { Archive, Hash, MessageSquare, Pencil, Pin, PinOff } from "lucide-react"; // CEREBRO-PATCH(channel-detail-edit-icon): FIR-2660 edit-channel button.
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
@@ -38,10 +38,14 @@ import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useChannelDisplay } from "./use-channel-display";
 import { ParticipantsPanel } from "./participants-panel";
+// CEREBRO-PATCH(channel-detail-edit-dialog-import): FIR-2660 edit-channel modal (name + description in one round-trip).
+import { EditChannelDialog } from "./edit-channel-dialog";
 // CEREBRO-PATCH(channel-detail-listeners): JEH-699 — listeners popover.
 import { ChannelListenersPanel } from "./channel-listeners-panel";
 // CEREBRO-PATCH(channel-agent-inline-row): JEH-698 inline "agent is working" row mounted between the comment stream and CommentInput.
 import { ChannelAgentInlineRow } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(channel-cost-chip-import): FIR-39 channel-wide total cost chip in the header.
+import { ChannelCostChip } from "@multica/cerebro-channels";
 // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — DM/Channel åbner i bunden + sticky-bottom + "Ny besked"-pille.
 import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
 import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
@@ -54,9 +58,14 @@ interface ChannelDetailProps {
   /** Called after the user archives the channel from the thread header.
    *  Lets the inbox clear its selection. */
   onArchive?: () => void;
+  // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004 — comment ID from
+  // the inbox notification that triggered this channel open. On first load we
+  // find this comment in the timeline and auto-open its parent thread so the
+  // user lands directly on the relevant reply instead of having to scroll/guess.
+  initialCommentId?: string;
 }
 
-export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelDetailProps) {
+export function ChannelDetail({ channelId, initialChannel, onArchive, initialCommentId }: ChannelDetailProps) {
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
 
@@ -117,6 +126,44 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
     if (activeThreadId && !activeThreadEntry) setActiveThreadId(null);
   }, [activeThreadId, activeThreadEntry]);
 
+  // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004 — when the channel
+  // is opened from an inbox notification, find the notified comment in the
+  // timeline and auto-open its parent thread. A ref prevents re-triggering
+  // after the user manually closes/changes the thread.
+  const autoOpenedCommentRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialCommentId || autoOpenedCommentRef.current === initialCommentId) return;
+    if (!timeline.length) return;
+    const entry = timeline.find((e) => e.id === initialCommentId && e.type === "comment");
+    if (!entry) return;
+    autoOpenedCommentRef.current = initialCommentId;
+    if (entry.parent_id) setActiveThreadId(entry.parent_id);
+  }, [initialCommentId, timeline]);
+
+  // CEREBRO-PATCH(channel-thread-responsive-overlay): TECH-3004 — observe the
+  // component's own width so the thread overlays on any narrow container (e.g.
+  // when the channel is embedded in the inbox split view at medium viewport
+  // sizes), not only on mobile-width viewports.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(Infinity);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    // CEREBRO-PATCH(channel-thread-responsive-overlay): TECH-3009 fix — defer
+    // setState via rAF so it never fires during react-resizable-panels' commit,
+    // which caused React error #310 in the inbox split view.
+    let raf = 0;
+    const obs = new ResizeObserver((entries) => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() =>
+        setContainerWidth(entries[0]?.contentRect.width ?? Infinity),
+      );
+    });
+    obs.observe(el);
+    return () => { obs.disconnect(); cancelAnimationFrame(raf); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!channel]); // re-run when channel data loads (containerRef div only mounts after channel resolves)
+
   // CEREBRO-PATCH(channels-slack-message-view): hide the floating agent-chat
   // bubble while the channel/DM is open — the ThreadSidePanel docks where the
   // bubble sits and the two overlap. Mirrors the same pattern in
@@ -143,6 +190,7 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   const deletePin = useDeletePin();
 
   const [participantsOpen, setParticipantsOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false); // CEREBRO-PATCH(channel-detail-edit-state): FIR-2660 edit-channel dialog state.
 
   // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — pin DM/Channel
   // scroll to bottom on open; surface "Ny besked"-pille when scrolled up.
@@ -158,9 +206,12 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   // unreadably (see screenshot on the issue). When a thread is open and the
   // viewport is mobile-wide, hide the message column and let the thread panel
   // render full-screen with a Slack-style back-header.
+  // CEREBRO-PATCH(channel-thread-responsive-overlay): TECH-3004 — also overlay
+  // when the container itself is narrow (< 700px), e.g. when the channel is
+  // embedded inside the inbox split view on medium-sized screens.
   const isMobile = useIsMobile();
   const threadOpen = !!activeThreadEntry;
-  const threadFullScreen = isMobile && threadOpen;
+  const threadFullScreen = (isMobile || containerWidth < 700) && threadOpen;
   const threadBackLabel = display.isChannel ? `#${display.title}` : display.title;
 
   const archiveInbox = useArchiveInbox();
@@ -187,7 +238,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col">
+    // CEREBRO-PATCH(channel-thread-responsive-overlay): TECH-3004 — ref for ResizeObserver.
+    <div ref={containerRef} className="flex h-full min-h-0 flex-1 flex-col">
       {/* CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — hide the
           channel chrome (title, pin/archive, participants) while a thread is
           open on a narrow viewport. The thread panel's own back-header
@@ -215,7 +267,27 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
             </button>
           )}
           <div className="ml-auto flex items-center gap-1">
+            {/* CEREBRO-PATCH(channel-cost-chip): FIR-39 channel-wide total cost. */}
+            <ChannelCostChip channelId={channelId} />
             <ChannelListenersPanel channel={channel} />
+            {display.isChannel && (
+              // CEREBRO-PATCH(channel-detail-edit-button): FIR-2660 edit-channel modal (name + description).
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      onClick={() => setEditOpen(true)}
+                      aria-label="Edit channel"
+                      className="inline-flex size-7 items-center justify-center rounded border text-muted-foreground hover:bg-accent hover:text-foreground"
+                    />
+                  }
+                >
+                  <Pencil className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Edit channel</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -356,6 +428,14 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
         open={participantsOpen}
         onOpenChange={setParticipantsOpen}
       />
+      {/* CEREBRO-PATCH(channel-detail-edit-dialog-mount): FIR-2660 edit-channel modal (name + description). */}
+      {display.isChannel && (
+        <EditChannelDialog
+          channel={channel}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+        />
+      )}
     </div>
   );
 }

@@ -74,13 +74,15 @@ export type TaskFailureReason =
   | "runtime_offline"
   | "runtime_recovery"
   | "manual"
-  | "rate_limit"
   | "runtime_paused"
+  | "rate_limit"
+  | "auth_error"
   | "queued_expired"
+  | "idle_watchdog"
+  | "codex_semantic_inactivity"
   | "iteration_limit"
   | "agent_fallback_message"
-  | "api_invalid_request"
-  | "codex_semantic_inactivity";
+  | "api_invalid_request";
 
 // One daily bucket for the Agents-list ACTIVITY sparkline. The back-end
 // only returns days that had at least one completion; the front-end fills
@@ -163,6 +165,13 @@ export interface AgentTask {
    * generation fails — see CEREBRO-PATCH(task-title-builder).
    */
   title?: string;
+  /**
+   * CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717.
+   * When set on a queued task, explains why the task is waiting (e.g.
+   * `runtime_paused|rate_limit|2026-06-01T11:55:00Z` while the runtime is
+   * auto-paused).
+   */
+  wait_reason?: string;
   /**
    * Server-computed source discriminator used by the activity row to label
    * tasks that have no linked issue (so e.g. quick-create tasks render

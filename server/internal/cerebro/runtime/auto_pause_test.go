@@ -30,6 +30,8 @@ func TestClassifyAutoPause(t *testing.T) {
 		wantWorthy  bool
 		wantReset   bool
 		wantResetAt time.Time // only checked when wantReset
+		wantReason  string
+		wantManual  bool
 	}{
 		{
 			name:       "no runtime — never pause",
@@ -51,18 +53,22 @@ func TestClassifyAutoPause(t *testing.T) {
 			task:       mkTask(validRuntime, "You've hit your org's monthly usage limit"),
 			wantWorthy: true,
 			wantReset:  false,
+			wantReason: "rate_limit",
 		},
 		{
 			name:       "401 invalid auth — pause-worthy, no parseable reset",
 			task:       mkTask(validRuntime, "Failed to authenticate. API Error: 401 Invalid authentication credentials"),
 			wantWorthy: true,
 			wantReset:  false,
+			wantReason: "auth_error",
+			wantManual: true,
 		},
 		{
 			name:       "http 429 — pause-worthy, no parseable reset",
 			task:       mkTask(validRuntime, "Request failed: HTTP 429 Too Many Requests"),
 			wantWorthy: true,
 			wantReset:  false,
+			wantReason: "rate_limit",
 		},
 		{
 			name:        "explicit retry-after — parseable reset wins",
@@ -70,23 +76,30 @@ func TestClassifyAutoPause(t *testing.T) {
 			wantWorthy:  true,
 			wantReset:   true,
 			wantResetAt: now.Add(90 * time.Second),
+			wantReason:  "rate_limit",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resetAt, hasReset, worthy := classifyAutoPause(tc.task, now)
-			if worthy != tc.wantWorthy {
-				t.Fatalf("worthy=%v, want %v (input=%q)", worthy, tc.wantWorthy, tc.task.Error.String)
+			got := classifyAutoPause(tc.task, now)
+			if got.pauseWorthy != tc.wantWorthy {
+				t.Fatalf("worthy=%v, want %v (input=%q)", got.pauseWorthy, tc.wantWorthy, tc.task.Error.String)
 			}
-			if !worthy {
+			if !got.pauseWorthy {
 				return
 			}
-			if hasReset != tc.wantReset {
-				t.Fatalf("hasReset=%v, want %v", hasReset, tc.wantReset)
+			if got.hasReset != tc.wantReset {
+				t.Fatalf("hasReset=%v, want %v", got.hasReset, tc.wantReset)
 			}
-			if tc.wantReset && !resetAt.Equal(tc.wantResetAt) {
-				t.Fatalf("resetAt=%s, want %s", resetAt.Format(time.RFC3339), tc.wantResetAt.Format(time.RFC3339))
+			if got.pauseReason != tc.wantReason {
+				t.Fatalf("pauseReason=%q, want %q", got.pauseReason, tc.wantReason)
+			}
+			if got.manualOnly != tc.wantManual {
+				t.Fatalf("manualOnly=%v, want %v", got.manualOnly, tc.wantManual)
+			}
+			if tc.wantReset && !got.resetAt.Equal(tc.wantResetAt) {
+				t.Fatalf("resetAt=%s, want %s", got.resetAt.Format(time.RFC3339), tc.wantResetAt.Format(time.RFC3339))
 			}
 		})
 	}
@@ -142,7 +155,7 @@ func TestCircuitBreakerThreshold(t *testing.T) {
 				t.Errorf("count=%d: circuit should be closed", count)
 			}
 			if notifyOnce {
-				t.Errorf("count=%d: should not notify", count)
+				t.Errorf("count=%d: should not post issue comment", count)
 			}
 		case count == autoPauseCircuitLimit:
 			if !circuitOpen || !notifyOnce {

@@ -49,6 +49,19 @@ const nextConfig = {
   // the files traced — and the memory the step holds — without changing what
   // ships. Excludes are paths relative to outputFileTracingRoot.
   outputFileTracingRoot: resolve(currentDir, "../.."),
+  // Deliberately NO outputFileTracingIncludes here. A previous
+  // `"./node_modules/next/**/*"` pin (added for "Cannot find module 'next'",
+  // whose real cause was excluding .next/** below) backfired badly: include
+  // globs are PROJECT-relative (apps/web), so the glob resolved through the
+  // apps/web/node_modules/next pnpm symlink and materialized next as a real,
+  // flattened directory in the standalone output — shadowing the proper
+  // symlink into node_modules/.pnpm/. From that flattened copy, Node's
+  // realpath-based resolution can never reach next's deps inside .pnpm,
+  // crashing the container at boot with "Cannot find module
+  // '@swc/helpers/_/_interop_require_default'". Normal tracing (with .next/**
+  // NOT excluded) already emits next + all its deps as a correct .pnpm
+  // symlink farm. Do not re-add force-includes for packages that are
+  // reachable through pnpm symlinks.
   outputFileTracingExcludes: {
     "*": [
       "node_modules/.pnpm/@swc+core*/**",
@@ -60,6 +73,14 @@ const nextConfig = {
       "node_modules/.pnpm/typescript@*/**",
       "node_modules/.pnpm/@playwright+*/**",
       "node_modules/.pnpm/playwright*/**",
+      // .next.new and .next.old are safe to exclude — they are the atomic-swap
+      // side-directories from deploy.sh, never needed at runtime.
+      // DO NOT exclude apps/web/.next/** — the tracer starts from compiled
+      // route files in .next/server/ to discover runtime dependencies. Excluding
+      // that directory causes next (and other route-only deps) to be omitted
+      // from standalone/node_modules/, breaking container start-up.
+      "apps/web/.next.new/**",
+      "apps/web/.next.old/**",
     ],
   },
   // Allow deploy.sh to build into a side-by-side directory and atomically

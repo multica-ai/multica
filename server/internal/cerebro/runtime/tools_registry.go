@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -239,6 +241,29 @@ func normalizeAnthropicSchemaNode(node any) any {
 	}
 }
 
+// GetGrantConfig returns the config_json bytes stored on this agent's
+// agent_tool_grant row for the named tool, or (nil, nil) when no row exists,
+// the grant is disabled, the registry has no pool (test contexts), or the
+// agentID is invalid. The bytes are the raw stored JSON — the caller decides
+// how to parse them. Returns (nil, err) only on a real DB failure.
+func (r *Registry) GetGrantConfig(ctx context.Context, agentID pgtype.UUID, toolName string) ([]byte, error) {
+	if r == nil || r.db == nil || !agentID.Valid {
+		return nil, nil
+	}
+	var config []byte
+	err := r.db.QueryRow(ctx,
+		`SELECT config_json FROM agent_tool_grant WHERE agent_id = $1 AND tool_name = $2 AND enabled = true`,
+		agentID, toolName,
+	).Scan(&config)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return config, nil
+}
+
 // GrantAgentTool upserts an agent_tool_grant row. Pass nil configJSON for no
 // configuration. If the grant already exists the enabled flag and config are
 // updated.
@@ -270,7 +295,7 @@ const (
 
 var legacyGatewayToolMeta = []ToolMeta{
 	{Name: "web_fetch", Description: "Fetch the text content of an allowlisted URL.", Status: ToolStatusImplemented},
-	{Name: "firtal_bq_query", Description: "Run a BigQuery SQL query via Firtal Data Registry.", Status: ToolStatusImplemented},
+	{Name: "firtal_registry", Description: "Query the Firtal Data Registry: discover data sources, fetch schema, and execute structured queries.", Status: ToolStatusImplemented},
 	{Name: "gogcli_sheets_write", Description: "Write data to a Google Sheets spreadsheet range.", Status: ToolStatusImplemented},
 }
 
@@ -319,6 +344,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "list_project_groups", Description: "List groups with access to a project.", Status: ToolStatusExcluded},
 	{Name: "list_projects", Description: "List all projects in the current workspace.", Status: ToolStatusImplemented},
 	{Name: "list_runtimes", Description: "List agent runtimes in the current workspace.", Status: ToolStatusNewlyImplemented},
+	{Name: "list_wakeups", Description: "List pending and recent scheduled agent wakeups.", Status: ToolStatusImplemented},
 	{Name: "move_artifact", Description: "Move an artifact into another folder.", Status: ToolStatusExcluded},
 	{Name: "remove_group_agent", Description: "Remove an agent from a group allowlist.", Status: ToolStatusExcluded},
 	{Name: "remove_group_capability", Description: "Revoke a capability from a group.", Status: ToolStatusExcluded},
@@ -327,8 +353,10 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "remove_project_group", Description: "Remove a group's access to a project.", Status: ToolStatusExcluded},
 	{Name: "report_activity", Description: "Report progress activity for an attached work session.", Status: ToolStatusExcluded},
 	{Name: "resume_session", Description: "Resume an attached work session.", Status: ToolStatusExcluded},
+	{Name: "cancel_wakeup", Description: "Cancel a pending scheduled agent wakeup.", Status: ToolStatusImplemented},
 	{Name: "search_artifacts", Description: "Search artifacts by query text.", Status: ToolStatusNewlyImplemented},
 	{Name: "search_issues", Description: "Search issues by text query.", Status: ToolStatusExcluded},
+	{Name: "schedule_wakeup", Description: "Schedule an agent to wake up on an issue at a time or when a watched event happens.", Status: ToolStatusImplemented},
 	{Name: "set_artifact_folder", Description: "Set an artifact's folder.", Status: ToolStatusExcluded},
 	{Name: "set_group_capability", Description: "Grant a capability to a group.", Status: ToolStatusExcluded},
 	{Name: "skill_fork", Description: "Fork a skill into a new owned copy.", Status: ToolStatusExcluded},

@@ -11,6 +11,67 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bumpRuntimePauseInboxCard = `-- name: BumpRuntimePauseInboxCard :one
+UPDATE inbox_item
+SET read = false,
+    severity = $2,
+    title = $3,
+    body = $4,
+    details = jsonb_set(
+        jsonb_set(
+            jsonb_set(COALESCE(details, '{}'::jsonb),
+                '{failed_runs}', to_jsonb(((COALESCE(details->>'failed_runs', '0'))::int + 1)::text)),
+            '{resets_at}', to_jsonb($5::text)),
+        '{circuit_open}', to_jsonb($6::text))
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+`
+
+type BumpRuntimePauseInboxCardParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Severity string      `json:"severity"`
+	Title    string      `json:"title"`
+	Body     pgtype.Text `json:"body"`
+	Column5  string      `json:"column_5"`
+	Column6  string      `json:"column_6"`
+}
+
+// FIR-2611: a later auto-pause for the same runtime on the same day. Refresh
+// the card in place — bump the failed-run counter, update severity/title/body
+// and the parsed reset time, and force it unread so it resurfaces — instead of
+// adding another row.
+func (q *Queries) BumpRuntimePauseInboxCard(ctx context.Context, arg BumpRuntimePauseInboxCardParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, bumpRuntimePauseInboxCard,
+		arg.ID,
+		arg.Severity,
+		arg.Title,
+		arg.Body,
+		arg.Column5,
+		arg.Column6,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
 const clearInboxMute = `-- name: ClearInboxMute :one
 UPDATE inbox_item
 SET muted_until = NULL
@@ -69,6 +130,54 @@ func (q *Queries) ClearInboxMuteByIssue(ctx context.Context, arg ClearInboxMuteB
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const createManualInboxItem = `-- name: CreateManualInboxItem :one
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title,
+    actor_type, actor_id, route
+) VALUES ($1, 'member', $2, 'manually_added', 'info', $3, $4, 'member', $2, 'inbox')
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+`
+
+type CreateManualInboxItemParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Title       string      `json:"title"`
+}
+
+// Manually add an issue to the member's inbox. actor = the member themselves
+// (self-created), severity = info since no action is required.
+func (q *Queries) CreateManualInboxItem(ctx context.Context, arg CreateManualInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, createManualInboxItem,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.Title,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
 }
 
 const createPrivateAgentRunRequest = `-- name: CreatePrivateAgentRunRequest :one
@@ -185,6 +294,106 @@ func (q *Queries) CreateReminderInboxItem(ctx context.Context, arg CreateReminde
 	return i, err
 }
 
+const createRuntimePauseInboxCard = `-- name: CreateRuntimePauseInboxCard :one
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details, route
+) VALUES ($1, 'member', $2, 'runtime_auto_paused', $3, NULL, $4, $5, 'system', NULL, $6, 'inbox')
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+`
+
+type CreateRuntimePauseInboxCardParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	Severity    string      `json:"severity"`
+	Title       string      `json:"title"`
+	Body        pgtype.Text `json:"body"`
+	Details     []byte      `json:"details"`
+}
+
+// FIR-2611: first auth/quota auto-pause for this runtime today. Runtime-level
+// (issue_id NULL) so the card aggregates across every issue the runtime was
+// working. actor is the system.
+func (q *Queries) CreateRuntimePauseInboxCard(ctx context.Context, arg CreateRuntimePauseInboxCardParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, createRuntimePauseInboxCard,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.Severity,
+		arg.Title,
+		arg.Body,
+		arg.Details,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
+const findManualInboxItem = `-- name: FindManualInboxItem :one
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND issue_id = $3
+  AND type = 'manually_added'
+  AND archived = false
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindManualInboxItemParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// Dedup guard for manually_added items. Returns the active (non-archived) item
+// for (recipient, issue) so AddIssueToInbox can resurface it instead of
+// inserting a duplicate row.
+func (q *Queries) FindManualInboxItem(ctx context.Context, arg FindManualInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, findManualInboxItem, arg.WorkspaceID, arg.RecipientID, arg.IssueID)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
 const findPendingReminder = `-- name: FindPendingReminder :one
 SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
 FROM inbox_item
@@ -272,6 +481,60 @@ type FindPrivateAgentRunRequestParams struct {
 // (owner recipient, agent, comment) triple carried in details.
 func (q *Queries) FindPrivateAgentRunRequest(ctx context.Context, arg FindPrivateAgentRunRequestParams) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, findPrivateAgentRunRequest,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.Column3,
+		arg.Column4,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
+const findRuntimePauseInboxCard = `-- name: FindRuntimePauseInboxCard :one
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND type = 'runtime_auto_paused'
+  AND archived = false
+  AND details->>'runtime_id' = $3::text
+  AND details->>'pause_date' = $4::text
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindRuntimePauseInboxCardParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	Column3     string      `json:"column_3"`
+	Column4     string      `json:"column_4"`
+}
+
+// FIR-2611 dedup guard: collapse a runtime's auth/quota bounce-loop into ONE
+// card per (runtime, day) instead of N failed-run rows. Matches the open card
+// for this runtime on this UTC date carried in details.
+func (q *Queries) FindRuntimePauseInboxCard(ctx context.Context, arg FindRuntimePauseInboxCardParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, findRuntimePauseInboxCard,
 		arg.WorkspaceID,
 		arg.RecipientID,
 		arg.Column3,

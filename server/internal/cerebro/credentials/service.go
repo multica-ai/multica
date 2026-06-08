@@ -18,25 +18,25 @@ import (
 // Bus event types — broadcast on the workspace channel. The cerebro prefix
 // keeps the namespace separate from upstream `comment:created`-style events.
 const (
-	EventCredentialCreated      = "cerebro.credential.created"
-	EventCredentialUpdated      = "cerebro.credential.updated"
-	EventCredentialDeleted      = "cerebro.credential.deleted"
-	EventCredentialRotated      = "cerebro.credential.rotated"
-	EventCredentialBound        = "cerebro.credential.bound"
-	EventCredentialUnbound      = "cerebro.credential.unbound"
-	EventCredentialRevealed     = "cerebro.credential.revealed"
+	EventCredentialCreated  = "cerebro.credential.created"
+	EventCredentialUpdated  = "cerebro.credential.updated"
+	EventCredentialDeleted  = "cerebro.credential.deleted"
+	EventCredentialRotated  = "cerebro.credential.rotated"
+	EventCredentialBound    = "cerebro.credential.bound"
+	EventCredentialUnbound  = "cerebro.credential.unbound"
+	EventCredentialRevealed = "cerebro.credential.revealed"
 )
 
 var (
-	ErrCredentialNotFound   = errors.New("credential not found")
-	ErrBindingNotFound      = errors.New("credential binding not found")
-	ErrInvalidType          = errors.New("invalid credential type")
-	ErrInvalidName          = errors.New("name is required")
-	ErrInvalidValue         = errors.New("value is required")
-	ErrInvalidResourceType  = errors.New("resource_type is required")
-	ErrInvalidResourceID    = errors.New("resource_id is required")
-	ErrInvalidMetadata      = errors.New("metadata must be a JSON object")
-	ErrCredentialExists     = errors.New("a credential with this name and type already exists in this workspace")
+	ErrCredentialNotFound        = errors.New("credential not found")
+	ErrBindingNotFound           = errors.New("credential binding not found")
+	ErrInvalidType               = errors.New("invalid credential type")
+	ErrInvalidName               = errors.New("name is required")
+	ErrInvalidValue              = errors.New("value is required")
+	ErrInvalidResourceType       = errors.New("resource_type is required")
+	ErrInvalidResourceID         = errors.New("resource_id is required")
+	ErrInvalidMetadata           = errors.New("metadata must be a JSON object")
+	ErrCredentialExists          = errors.New("a credential with this name and type already exists in this workspace")
 	ErrCredentialBindingMismatch = errors.New("binding does not belong to credential")
 )
 
@@ -357,16 +357,25 @@ func (s *Service) Reveal(ctx context.Context, workspaceID, credentialID pgtype.U
 // caller is responsible for capping limit at a sensible value (the handler
 // uses 100).
 func (s *Service) ListAudit(ctx context.Context, workspaceID, credentialID pgtype.UUID, limit int32) ([]cerebrodb.CerebroCredentialAudit, error) {
-	if _, err := s.Get(ctx, workspaceID, credentialID); err != nil {
-		return nil, err
-	}
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	return s.Cerebro.ListCerebroCredentialAudit(ctx, cerebrodb.ListCerebroCredentialAuditParams{
+	rows, err := s.Cerebro.ListCerebroCredentialAudit(ctx, cerebrodb.ListCerebroCredentialAuditParams{
 		CredentialID: credentialID,
 		Limit:        limit,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrCredentialNotFound
+	}
+	for _, row := range rows {
+		if !uuidEqual(row.WorkspaceID, workspaceID) {
+			return nil, ErrCredentialNotFound
+		}
+	}
+	return rows, nil
 }
 
 // CreateBinding ties a credential to a resource. resource_type is free-form

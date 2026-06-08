@@ -18,7 +18,7 @@ import { useChatStore } from "@multica/core/chat";
 import { api } from "@multica/core/api";
 import { canAssignAgent } from "@multica/views/issues/components";
 import { ChatMessageList, ChatMessageSkeleton, ChatInput } from "@multica/views/chat";
-import { ChatStatusLine } from "@multica/cerebro-chat/views";
+import { ChatStatusLine, SessionCostChip } from "@multica/cerebro-chat/views";
 import type { Agent, ChatMessage, ChatPendingTask } from "@multica/core/types";
 import { Bot, ChevronDown, Check, MessageSquare } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
@@ -200,6 +200,14 @@ export function InboxChatPanel({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* CEREBRO-PATCH(chat-cost-session-total): FIR-31 — accumulated session
+          cost at the top of the inbox chat (the inbox panel has no header of
+          its own). empty:hidden keeps the strip out of the layout for new /
+          zero-cost sessions, so it only appears once spend exists. Per-reply
+          badges in the footer sum to this total. */}
+      <div className="flex shrink-0 items-center justify-end px-3 py-1 empty:hidden">
+        <SessionCostChip sessionId={sessionId} />
+      </div>
       {/* Messages — scrollable */}
       <div className="flex flex-col flex-1 min-h-0">
         {showSkeleton ? (

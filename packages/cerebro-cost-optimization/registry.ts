@@ -19,6 +19,7 @@
 
 export type CostSavingKey =
   | "snapshot_prompt"
+  | "snapshot_compression"
   | "bundled_read"
   | "model_routing"
   | "prune_tool_results"
@@ -96,6 +97,7 @@ export function runtimeScopeNote(scope: CostSavingRuntimeScope): string | null {
  */
 export const COST_SAVING_DEFAULTS: Record<CostSavingKey, CostSavingMode> = {
   snapshot_prompt: "off",
+  snapshot_compression: "off",
   bundled_read: "off",
   model_routing: "off",
   prune_tool_results: "off",
@@ -173,6 +175,12 @@ export interface CostSavingDefinition {
    * UI before real measurement exists. Measurement always overrides this.
    */
   estimateNote: string;
+  /**
+   * When set, this saving is only shown in the UI when the referenced saving
+   * has mode "on". Used for sub-settings that only make sense in the context
+   * of a parent saving being active.
+   */
+  dependsOn?: CostSavingKey;
 }
 
 /**
@@ -185,18 +193,29 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     label: "Snapshot in start prompt",
     description:
       "Put the issue and the latest comment thread directly into the run's start prompt, so the agent does not have to fetch the issue and its comments itself on every run.",
-    metric: "platform_calls",
+    metric: "context_tokens",
     runtimeScope: "both",
-    estimateNote: "Removes ~40% of platform calls per run.",
+    estimateNote: "Typically ~3,200 input tokens per run (issue + thread not fetched separately).",
+  },
+  {
+    key: "snapshot_compression",
+    label: "Snapshot overflow strategy",
+    description:
+      "Controls what happens when the snapshot grows too large for the model's context window (~40 000 characters). Off: fall back to a minimal start prompt and let the agent fetch its own context — safe, no information loss. On: use a small Haiku model to compress older comments into a summary before including them — retains more history but adds ~200ms latency per run.",
+    metric: "context_tokens",
+    runtimeScope: "both",
+    estimateNote:
+      "Activates only on large issues where the snapshot exceeds the overflow threshold.",
+    dependsOn: "snapshot_prompt",
   },
   {
     key: "bundled_read",
     label: "Bundled context read",
     description:
       "Serve a single combined \"issue context\" call (issue + comments + members + labels) instead of 4-5 separate calls.",
-    metric: "platform_calls",
+    metric: "context_tokens",
     runtimeScope: "both",
-    estimateNote: "Collapses 4-5 calls into 1 at run start.",
+    estimateNote: "Typically ~600 input tokens per run (four separate reads → one bundled payload).",
   },
   {
     key: "model_routing",

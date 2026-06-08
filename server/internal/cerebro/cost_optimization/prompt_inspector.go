@@ -15,10 +15,9 @@ import (
 )
 
 type promptInspectorResponse struct {
-	Provider    string                    `json:"provider"`
-	RepoURL     string                    `json:"repo_url,omitempty"`
-	RepoNote    string                    `json:"repo_note,omitempty"`
-	Inspection  execenv.MetaSkillInspection `json:"inspection"`
+	Provider   string                      `json:"provider"`
+	RepoURL    string                      `json:"repo_url,omitempty"`
+	Inspection execenv.MetaSkillInspection `json:"inspection"`
 }
 
 // PromptInspector returns the composed meta-skill the daemon injects for a
@@ -44,17 +43,15 @@ func (h *Handler) PromptInspector(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := buildInspectorTaskContext(ws, repoURL)
-	inspection := execenv.InspectMetaSkill("claude", ctx)
-
-	repoNote := ""
+	var repoSnap *execenv.RepoPromptSnapshot
 	if repoURL != "" {
-		repoNote = "Repo-specific AGENTS.md / CLAUDE.md from the checked-out repository is merged into the runtime file at task start; this view shows the server-built Multica brief only."
+		repoSnap = execenv.LoadRepoPromptSnapshot(r.Context(), repoURL, "")
 	}
+	inspection := execenv.InspectMetaSkill("claude", ctx, repoSnap)
 
 	writeJSON(w, http.StatusOK, promptInspectorResponse{
 		Provider:   "claude",
 		RepoURL:    repoURL,
-		RepoNote:   repoNote,
 		Inspection: inspection,
 	})
 }

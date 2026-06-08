@@ -189,15 +189,15 @@ describe("appliedValue", () => {
     ).toBe("9,000 tokens ($4.50)");
   });
 
-  it("shows native units for an unpriced applied saving", () => {
+  it("shows saved context tokens for bundled_read at 100% rollout", () => {
     expect(
       appliedValue(
         saving({
           savingKey: "bundled_read",
-          metric: "platform_calls",
-          applied: { savedUnits: 12, savedCents: 0, runCount: 4 },
+          metric: "context_tokens",
+          applied: { savedUnits: 12_000, savedCents: 0, runCount: 4 },
         }),
       ),
-    ).toBe("12 platform calls");
+    ).toBe("12,000 tokens");
   });
 });

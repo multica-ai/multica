@@ -339,6 +339,16 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:         "schedule_agent_wakeup",
+		Title:       "Schedule agent wakeup",
+		Category:    CategoryAgents,
+		Description: "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
+		Ops: []string{
+			"POST /api/cerebro/wakeups/",
+			"POST /api/cerebro/wakeups/{id}/cancel",
+		},
+	},
+	{
 		Key:         "manage_agent_passes",
 		Title:       "Manage agent passes",
 		Category:    CategoryAgents,
@@ -380,6 +390,7 @@ var catalog = []Capability{
 			"PATCH /api/runtimes/{runtimeId}/sandbox-policy",
 			"PATCH /api/runtimes/{runtimeId}/persona-sandbox",
 			"PATCH /api/runtimes/{runtimeId}/tools-config",
+			"PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
 			"PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
 			"POST /api/runtimes/{runtimeId}/tools/scan-now",
 			"POST /api/runtimes/{runtimeId}/local-skills",
@@ -591,6 +602,8 @@ var catalog = []Capability{
 			"POST /api/cerebro/status-models/",
 			"PUT /api/cerebro/status-models/{id}",
 			"DELETE /api/cerebro/status-models/{id}",
+			"PATCH /api/cerebro/status-models/{id}/set-default",
+			"DELETE /api/cerebro/status-models/default",
 			"PUT /api/cerebro/projects/{projectId}/status-model/",
 			"DELETE /api/cerebro/projects/{projectId}/status-model/",
 		},
@@ -604,6 +617,7 @@ var catalog = []Capability{
 			"PUT /api/cerebro/projects/{projectID}/sprint-settings/",
 			"DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
 			"POST /api/cerebro/projects/{projectID}/sprints/",
+			"POST /api/cerebro/projects/{projectID}/sprint-sweep",
 			"POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
 			"PUT /api/cerebro/sprint-recurring-tasks/{id}/",
 			"DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
@@ -643,8 +657,10 @@ var catalog = []Capability{
 			"DELETE /api/workspaces/{id}/cost-optimization/{key}",
 			"PUT /api/workspaces/{id}/cost-optimization/holdout/{key}",
 			"DELETE /api/workspaces/{id}/cost-optimization/holdout/{key}",
+			"PUT /api/workspaces/{id}/display-currency",
 			"PUT /api/cerebro/workspaces/{id}/auth-settings/",
 			"POST /api/workspaces/{id}/pause-tasks",
+			"POST /api/workspaces/{id}/generate-logo",
 		},
 	},
 	{
@@ -821,11 +837,25 @@ var excluded = map[string]string{
 	"POST /api/inbox/{id}/unread":                  "self_only — caller's own inbox",
 	"POST /api/inbox/{id}/unarchive":               "self_only — caller's own inbox",
 	"POST /api/inbox/{id}/run-private-agent":       "self_only — caller running their own private agent from their inbox",
-	"POST /api/invitations/{id}/accept":            "self_only — caller accepting their own invitation",
-	"POST /api/invitations/{id}/decline":           "self_only — caller declining their own invitation",
-	"POST /api/persona/approvals/{id}/approve":     "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
-	"POST /api/persona/approvals/{id}/deny":        "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
-	"POST /api/channels/{id}/read":                 "self_only — caller marking a channel read",
+
+	// cerebro focus-list — personal task queue, caller's own items only.
+	"POST /api/cerebro/focus-list/":            "self_only — caller's own focus list",
+	"PATCH /api/cerebro/focus-list/{id}":       "self_only — caller's own focus list",
+	"DELETE /api/cerebro/focus-list/{id}":      "self_only — caller's own focus list",
+	"POST /api/cerebro/focus-list/{id}/done":   "self_only — caller's own focus list",
+	"POST /api/cerebro/focus-list/{id}/snooze": "self_only — caller's own focus list",
+	"POST /api/cerebro/focus-list/reorder":     "self_only — caller's own focus list",
+
+	// cerebro interactive terminal — human watch/take-over of a live agent
+	// session. Workspace-member gated UI action, not an agent-governable
+	// capability; there is no agent tool that opens or closes a PTY session.
+	"POST /api/cerebro/terminal/sessions":               "interactive-terminal — human opens a live agent session to watch/take over; UI-only, no agent tool equivalent",
+	"DELETE /api/cerebro/terminal/sessions/{sessionId}": "interactive-terminal — human closes a live agent session; UI-only, no agent tool equivalent",
+	"POST /api/invitations/{id}/accept":                 "self_only — caller accepting their own invitation",
+	"POST /api/invitations/{id}/decline":                "self_only — caller declining their own invitation",
+	"POST /api/persona/approvals/{id}/approve":          "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
+	"POST /api/persona/approvals/{id}/deny":             "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
+	"POST /api/channels/{id}/read":                      "self_only — caller marking a channel read",
 
 	// chat sessions — the caller's own AI chat, not an admin-governed action.
 	"POST /api/chat/sessions/":                             "personal-chat — caller's own AI chat session",
@@ -863,6 +893,7 @@ var excluded = map[string]string{
 	"POST /api/webhooks/github":              "pre-auth signed webhook — GitHub HMAC authorises delivery",
 	"POST /api/webhooks/stripe":              "pre-auth signed webhook — Stripe HMAC authorises delivery",
 	"POST /api/cerebro/github/pull-requests": "pre-auth service-to-service — CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push (FIR-2568)",
+	"POST /api/cerebro/exchange-rates":       "pre-auth service-to-service — CEREBRO_EXCHANGE_INGEST_KEY bearer token authorises the multica-hatchet-worker's daily FX snapshot push (FIR-43)",
 	"POST /api/contact-sales":                "pre-auth — public marketing form",
 	"POST /api/runtime-setup/exchange":       "bootstrap — exchanges a single-use setup token before a daemon has a user session",
 

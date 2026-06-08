@@ -58,11 +58,11 @@ describe("Cost optimization empty states", () => {
     expect(screen.getByText("Select an issue to list runs.")).toBeInTheDocument();
   });
 
-  it("shows inspector empty state and keeps copy disabled without sections", () => {
+  it("shows inspector empty state and keeps copy disabled without layers", () => {
     render(<CostOptimizationInspectorTab />);
 
     expect(
-      screen.getByText("No sections returned for this workspace."),
+      screen.getByText("No layers returned for this workspace."),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Copy as markdown" }),

@@ -46,6 +46,17 @@ describe("cost-saving registry", () => {
     }
   });
 
+  it("measures snapshot and bundled in tokens (FIR-2786)", () => {
+    // FIR-2572 set the metric to "context_tokens" deliberately (commit
+    // d3f84f60d). This assertion was left at the older "tokens" value after
+    // the rename, breaking CI on origin/main. Drive-by fix landed under
+    // FIR-2825 so that PR could merge cleanly.
+    const metric = (key: CostSavingKey) =>
+      COST_SAVINGS.find((s) => s.key === key)?.metric;
+    expect(metric("snapshot_prompt")).toBe("context_tokens");
+    expect(metric("bundled_read")).toBe("context_tokens");
+  });
+
   it("marks model_routing and prune_tool_results as gateway-only", () => {
     // These two only change cost in the gateway runtime; the UI must badge them
     // so a daemon-only workspace is not shown a dead toggle. snapshot_prompt and

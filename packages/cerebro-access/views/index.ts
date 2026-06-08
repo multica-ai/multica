@@ -10,3 +10,7 @@ export {
   useEnsureMentionAccessData,
 } from "./mention-access";
 export { canTriggerPrivateAgentMention } from "./agent-trigger";
+// FIR-32: "you're starting an agent" send confirm for the comment composers.
+export { usePrivateAgentSendConfirm } from "./use-private-agent-send-confirm";
+export type { PrivateAgentSendConfirm } from "./use-private-agent-send-confirm";
+export { pickAgentNeedingConfirm, extractMentionedAgentIds } from "./private-agent-confirm";

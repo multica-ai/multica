@@ -53,7 +53,15 @@
     "private_agent_run_request": "运行请求",
     "_comment_cerebro_patch_date_reminders": "CEREBRO-PATCH(issue-date-reminders): FIR-2412 start/due date reminder labels",
     "due_date_reminder": "截止日期提醒",
-    "start_date_reminder": "开始日期提醒"
+    "start_date_reminder": "开始日期提醒",
+    "_comment_cerebro_patch_runtime_pause": "CEREBRO-PATCH(inbox-types-locale-zh): FIR-2611 runtime_auto_paused label",
+    "runtime_auto_paused": "运行时已暂停",
+    "_comment_cerebro_patch_agent_comment_split": "CEREBRO-PATCH(inbox-types-locale-zh): TECH-2961 agent-comment-by-tag split labels",
+    "agent_comment_no_tag": "智能体评论",
+    "agent_comment_member_tag": "智能体提及了你",
+    "agent_comment_agent_tag": "智能体交接",
+    "_comment_cerebro_patch_manually_added": "CEREBRO-PATCH(cerebro-inbox-add-issue): issue #3076 — manually added inbox item type label.",
+    "manually_added": "已添加到收件箱"
   },
   "labels": {
     "set_status_to": "状态设为",

@@ -14,6 +14,8 @@ import {
 } from "@multica/ui/components/ui/chart";
 import type { WeeklyCostStackData } from "../../utils";
 import { useT } from "../../../i18n";
+// CEREBRO-PATCH(display-currency-weekly-chart): FIR-40 — labels in workspace currency.
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 
 // Same three-segment stack as DailyCostChart — keeping series, colours, and
 // ordering identical so the user reads "Weekly" as a coarser cut of the same
@@ -27,6 +29,9 @@ export const weeklyCostStackConfig = {
 
 export function WeeklyCostChart({ data }: { data: WeeklyCostStackData[] }) {
   const { t } = useT("runtimes");
+  // CEREBRO-PATCH(display-currency-weekly-chart): FIR-40 — USD domain unchanged
+  // (linear conversion), labels converted; USD keeps exact "$5" axis ticks.
+  const { formatUsd, currency } = useCostFormatter();
   return (
     <ChartContainer config={weeklyCostStackConfig} className="aspect-[3/1] w-full">
       <BarChart data={data} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
@@ -42,7 +47,7 @@ export function WeeklyCostChart({ data }: { data: WeeklyCostStackData[] }) {
           tickLine={false}
           axisLine={false}
           tickMargin={8}
-          tickFormatter={(v: number) => `$${v}`}
+          tickFormatter={(v: number) => (currency === "USD" ? `$${v}` : formatUsd(v))}
           width={50}
         />
         <ChartTooltip
@@ -61,7 +66,7 @@ export function WeeklyCostChart({ data }: { data: WeeklyCostStackData[] }) {
               }}
               formatter={(value, name) =>
                 typeof value === "number"
-                  ? `$${value.toFixed(2)} ${name}`
+                  ? `${formatUsd(value)} ${name}`
                   : `${value} ${name}`
               }
               footer={(payload) => {
@@ -74,7 +79,7 @@ export function WeeklyCostChart({ data }: { data: WeeklyCostStackData[] }) {
                   <div className="flex items-center justify-between gap-2 font-medium">
                     <span>{t(($) => $.charts.tooltip_total)}</span>
                     <span className="font-mono tabular-nums">
-                      ${total.toFixed(2)}
+                      {formatUsd(total)}
                     </span>
                   </div>
                 );

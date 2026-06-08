@@ -7,6 +7,7 @@ package handler
 // `multica issue comment list` round-trip. Both the behaviour AND its
 // measurement live here, server-side at claim time — nothing in the daemon
 // runtime has to change, and no daemon→server reporting channel is needed.
+// CEREBRO-PATCH(cost-savings-context-tokens): FIR-2572 — measure snapshot_prompt in context_tokens.
 
 import (
 	"context"
@@ -25,11 +26,10 @@ import (
 // server/internal/cerebro/runtime/cost_savings_measure.go. "off" is the absence
 // of an override row, so it never appears as a value here.
 const (
-	costSavingSnapshotKey   = "snapshot_prompt"
-	costSavingModeShadow    = "shadow"
-	costSavingModeOn        = "on"
-	costMetricPlatformCalls = "platform_calls"
-
+	costSavingSnapshotKey    = "snapshot_prompt"
+	costSavingCompressionKey = "snapshot_compression" // CEREBRO-PATCH(daemon-snapshot-compression): overflow strategy key (FIR-3074)
+	costSavingModeShadow     = "shadow"
+	costSavingModeOn         = "on"
 	// snapshotInlinedReads is how many platform reads the snapshot replaces per
 	// run: the `multica issue get` + `multica issue comment list` the agent
 	// would otherwise run at the start of every comment-/assignment-triggered
@@ -40,6 +40,12 @@ const (
 	// snapshot inlines. Issue p99 is ~30 comments; bounding it keeps the start
 	// prompt from ballooning on long-running threads.
 	snapshotThreadCommentLimit = 30
+
+	// snapshotMaxChars is the overflow threshold. Snapshots exceeding this
+	// trigger the overflow strategy controlled by costSavingCompressionKey:
+	// "off" → size-guard fallback (agent fetches its own context, no snapshot);
+	// "on"  → Haiku-compressed tiered snapshot.
+	snapshotMaxChars = 40_000 // CEREBRO-PATCH(daemon-snapshot-compression): overflow threshold (FIR-3074)
 )
 
 // applySnapshotSaving wires the snapshot_prompt cost saving into a daemon task
@@ -57,6 +63,7 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 		return
 	}
 
+	var snapshotChars int64
 	if mode == costSavingModeOn {
 		comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
 			IssueID:     issue.ID,
@@ -68,10 +75,38 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 			slog.Warn("snapshot cost-saving: list comments failed", "error", err)
 			return
 		}
-		resp.IssueSnapshot = renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
+		snapshot := renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
+
+		// CEREBRO-PATCH(daemon-snapshot-compression): overflow guard — activate B or C when snapshot is too large (FIR-3074)
+		if int64(len(snapshot)) > snapshotMaxChars {
+			compressionMode := h.compressionSavingMode(ctx, issue.WorkspaceID)
+			if compressionMode == costSavingModeOn {
+				// C: tiered Haiku compression — summarize older comments, keep recent verbatim.
+				compressed := compressIssueSnapshot(ctx, issue, comments, triggerCommentID, resp.AgentID)
+				if compressed != "" {
+					snapshot = compressed
+				} else {
+					// Haiku failed — fall through to size-guard.
+					slog.Warn("snapshot compression: haiku failed, falling back to minimal prompt",
+						"issue_id", uuidToString(issue.ID), "snapshot_chars", len(snapshot))
+					return
+				}
+			} else {
+				// B: size-guard fallback — skip snapshot entirely; agent fetches its own context.
+				slog.Info("snapshot overflow: size guard activated, falling back to minimal prompt",
+					"issue_id", uuidToString(issue.ID), "snapshot_chars", len(snapshot))
+				return
+			}
+		}
+
+		resp.IssueSnapshot = snapshot
+		snapshotChars = int64(len(resp.IssueSnapshot))
+	} else {
+		// Shadow: estimate the context volume we would have inlined.
+		snapshotChars = estimateSnapshotContextChars(issue, triggerCommentID)
 	}
 
-	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode)); err != nil {
+	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode, snapshotChars)); err != nil {
 		slog.Warn("snapshot cost-saving: record measurement failed", "error", err)
 	}
 }
@@ -92,11 +127,30 @@ func (h *Handler) snapshotSavingMode(ctx context.Context, workspaceID pgtype.UUI
 	return ""
 }
 
+// compressionSavingMode returns the workspace's mode for the snapshot_compression
+// saving ("on"/"shadow"), or "" when off/absent or on lookup error.
+// CEREBRO-PATCH(daemon-snapshot-compression): overflow strategy mode lookup (FIR-3074)
+func (h *Handler) compressionSavingMode(ctx context.Context, workspaceID pgtype.UUID) string {
+	rows, err := h.CerebroQueries.ListCerebroCostOptimization(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("snapshot compression: list modes failed", "error", err)
+		return ""
+	}
+	for _, row := range rows {
+		if row.SavingKey == costSavingCompressionKey {
+			return row.Mode
+		}
+	}
+	return ""
+}
+
 // snapshotMeasurementParams builds the measurement row for one claim. Baseline
-// is the reads the snapshot removes (get + comment list); effective is 0 — there
-// is nothing left to fetch. The metric is platform_calls, not dollars: daemon
-// agents bill on a flat subscription, so the honest unit is calls saved, not $.
-func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+// is the estimated context tokens the snapshot inlines (chars/4); effective is 0.
+func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string, contextChars int64) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+	savedTokens := contextChars / 4
+	if savedTokens <= 0 {
+		savedTokens = int64(snapshotInlinedReads) * 8000
+	}
 	return cerebrodb.RecordCerebroCostOptimizationMeasurementParams{
 		WorkspaceID:     workspaceID,
 		TaskID:          taskID,
@@ -104,12 +158,28 @@ func snapshotMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cer
 		Mode:            mode,
 		Applied:         mode == costSavingModeOn,
 		HeldOut:         false,
-		Metric:          costMetricPlatformCalls,
-		BaselineValue:   snapshotInlinedReads,
+		Metric:          "context_tokens",
+		BaselineValue:   savedTokens,
 		EffectiveValue:  0,
 		SavedCents:      0,
 		ActualCostCents: 0,
 	}
+}
+
+// estimateSnapshotContextChars approximates the snapshot block size in shadow
+// mode when we do not render it into the prompt.
+func estimateSnapshotContextChars(issue db.Issue, triggerCommentID pgtype.UUID) int64 {
+	var n int64
+	n += int64(len(strings.TrimSpace(issue.Title)))
+	if issue.Description.Valid {
+		n += int64(len(strings.TrimSpace(issue.Description.String)))
+	}
+	// Conservative per-read allowance when we have not loaded the full thread.
+	n += int64(snapshotInlinedReads) * 4000
+	if triggerCommentID.Valid {
+		n += 2000
+	}
+	return n
 }
 
 // renderIssueSnapshot formats the issue core + its recent thread into the block

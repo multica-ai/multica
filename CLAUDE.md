@@ -22,6 +22,8 @@ The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the
 Authoritative, agent-facing reference docs that stay true to the live code. Read the relevant one before touching that area.
 
 - **`docs/agents/permission-system.md`** — what an agent is allowed and denied at runtime today, and by which mechanism. **Read this before touching anything that grants, denies, gates, or approves an agent action** (tool access, credentials, repo checkout, web fetch, sandbox, mentions, group/autopilot scope, the tool-policy chain). It separates what is enforced **live today** from what is **off by default** — do not assume "the tool-policy chain is off" means "agents are ungated." If you change behavior it describes, update the doc in the same PR.
+- **`docs/agents/runtime-pause-resume.md`** — how paused runtimes hold queued work, how unpause resumes suspended work, and how queued TTL must treat paused runtimes. **Read this before touching runtime pause/unpause, task queue TTL/sweepers, claim routing, retry, or resume behavior.**
+- **`docs/agents/production-gate.md`** — the `prod-ready` / `staging-only` PR label that decides whether a merged commit on `main` raises a `deploy_review` for `Multica.firtal.com`. **Read this before opening a PR.** Pin exactly one label on every PR before merging to `main`.
 
 ## Project Context
 
@@ -338,7 +340,9 @@ When using browser automation (blueprint, claude-in-chrome, etc.) to verify UI f
 
 1. Read the current URL via `browser_status` / `browser_tabs list` / a screenshot.
 2. If it points at a tunnel, production host, or any non-`localhost` origin, you are testing **someone else's deployment**, not your branch. Examples that LOOK local but aren't:
-   - `sara.tailbde0.ts.net/...` / `*.firtal.com` → Firtal production (sara.local mac mini, runs `origin/main`)
+   - `Sara.firtal.com` → Firtal **staging** (sara.local mac mini, runs `origin/main`)
+   - `Multica.firtal.com` → Firtal **production** (Sliplane containers, runs `origin/production`)
+   - `sara.tailbde0.ts.net/...` → also Firtal staging (tailscale alias for the same mac mini)
    - any tailscale `.ts.net` host → another machine
 3. To test your branch's running dev server, navigate explicitly to the port from your worktree's `.env.worktree` (`FRONTEND_PORT`, typically 13083 or 3000).
 4. Authenticating on your local dev: cerebro has removed the upstream `888888` master code as a security patch (`server/internal/handler/auth_master_code_test.go` enforces this). Use the real "Send code" flow — the code is printed to `/tmp/multica-server.log` when `RESEND_API_KEY` is unset.
@@ -459,24 +463,30 @@ make check
 
 **Quick iteration:** If you know only TypeScript or Go is affected, run individual checks first for faster feedback, then finish with a full `make check` before marking work complete.
 
-## Production Deploy (sara.tailbde0.ts.net)
+## Environments + Deploy
 
-Production runs on a self-hosted Mac mini at `/Users/sara/code/firtal-cerebro`. Backend, frontend, and daemon each run as a launchd job (`com.multica.backend`, `com.multica.frontend`, `com.multica.daemon`). There is no Vercel / Netlify / cloud deploy — everything ships from `origin/main` on the runner.
+| Branch | Environment | URL | Platform |
+|---|---|---|---|
+| `main` | Staging | `https://Sara.firtal.com` | Mac mini (sara.local, launchd) |
+| `production` | Production | `https://Multica.firtal.com` | Sliplane (Docker containers) |
 
-**Deploy trigger.** GitHub posts a push event for `main` to a webhook listener on the runner (port 9000, `com.multica.webhook`), which executes `.deploy/deploy.sh`. **Merging a PR into `main` IS the deploy.** No tag, no release, no manual step required for sara.tailbde0.ts.net to pick up the change.
+**Staging** runs on a self-hosted Mac mini at `/Users/sara/code/firtal-cerebro`. Backend, frontend, and daemon each run as a launchd job (`com.multica.backend`, `com.multica.frontend`, `com.multica.daemon`). It tracks `origin/main` and updates automatically on each push.
 
-**What `.deploy/deploy.sh` does:**
+**Production** runs on Sliplane as Docker containers built from `Dockerfile.web` (frontend) and `Dockerfile` (backend). It tracks `origin/production` and rebuilds on each push to that branch.
 
-1. `git fetch origin main` + `git reset --hard origin/main` — exits early if there are no new commits.
-2. `pnpm install --frozen-lockfile`.
-3. `make build` — rebuilds the Go server + CLI binaries.
-4. `make migrate-up` — apply DB migrations.
-5. `pnpm --filter @multica/web build` — `apps/web/.next` is deleted first to avoid stale client-reference-manifest entries from incremental builds (Next.js 16 quirk).
-6. `launchctl kickstart -k` for backend, frontend, AND daemon. All three must restart (JEH-438) — `make build` overwrites the binary on disk but the running launchd process keeps the old one until kickstart.
+**Gate rules for merge → live: see the `deploy` skill, section "Gate rules".** Summary: `main` (staging, `Sara.firtal.com`) merges itself when CI is green AND the change is reversible; only irreversible changes (destructive DB migrations, infra-mutations, prod-data) need approval before merge. `production` (prod, `Multica.firtal.com`) is a separate gated promotion — see the deploy-review flow below. This CLAUDE.md does not restate the rule so the two versions can't drift; the deploy skill is the single source of truth.
 
-The committed `.deploy/deploy.sh.example` is the canonical script; the runner's `.deploy/deploy.sh` is gitignored because it embeds local paths. Update the example whenever the live script changes.
+End-to-end:
 
-**Manual fallback** — when the webhook is silent or the runner was offline:
+1. PR merges into `main` (continuous, all day).
+2. `auto-deploy-trigger` autopilot fires (via GitHub webhook, with a scheduled fallback that polls `main` vs `production`). It looks up the app in `registry.firtal.com`, runs the `release-review` checklist on the `main..production` diff, and creates **one** release-issue in the Deployments project (`ecb4fb83-0995-48a5-97d2-3adce73aa800`) per pending release wave. Subsequent merges update the same issue (idempotent on repo + main-head-sha), so 5 PRs in 10 minutes land as 1 approval, not 5.
+3. App owner (or Jesper) comments `approve` + tags the agent on the release-issue. The agent merges the standing `main → production` PR via the GitHub API.
+4. The push to `origin/production` triggers the runner's webhook (port 9000, `com.multica.webhook`), which executes `.deploy/deploy.sh`.
+5. `.deploy/deploy.sh` resets to `origin/production`, runs `pnpm install --frozen-lockfile`, `make build`, `make migrate-up`, builds `apps/web` (deleting `.next` first to avoid stale client-reference-manifest entries — Next.js 16 quirk), and `launchctl kickstart -k`'s backend + frontend + daemon (JEH-438; binary is overwritten but the launchd process keeps the old one until kickstart).
+
+The committed `.deploy/deploy.sh.example` is the canonical script; the runner's `.deploy/deploy.sh` is gitignored because it embeds local paths. Both should track `origin/production` — update the example whenever the live script changes.
+
+**Manual fallback** — when the autopilot is silent or the runner was offline:
 
 ```bash
 ssh sara@<runner-host>
@@ -485,9 +495,9 @@ bash ~/code/firtal-cerebro/.deploy/deploy.sh
 
 Logs land in `.deploy/logs/deploy-latest.log` on the runner.
 
-**Verifying a deploy from outside the runner.** The server has no `/version` endpoint exposing the deployed git SHA, so an agent that merges to `main` cannot programmatically confirm the deploy fired. Either ask the runner operator, or trust the webhook fired and check the visible behaviour change at `https://sara.tailbde0.ts.net`.
+**Verifying a deploy from outside the runner.** Check `https://Multica.firtal.com` for production (Sliplane containers) or `https://Sara.firtal.com` for staging (mac mini). The server exposes a `/version` endpoint (commit SHA) for programmatic verification.
 
-**Important — CLI release is NOT a prod deploy.** Cutting a `v0.x.y` tag only publishes binaries to GitHub Releases + Homebrew. It does NOT push code to sara.tailbde0.ts.net. Prod always runs `origin/main`, regardless of the latest CLI tag. The two pipelines are fully independent.
+**Important — CLI release is NOT a prod deploy.** Cutting a `v0.x.y` tag only publishes binaries to GitHub Releases + Homebrew. It does NOT push code to `Multica.firtal.com`. Prod always runs `origin/production`, regardless of the latest CLI tag. The two pipelines are fully independent.
 
 ## CLI Release (binary distribution)
 

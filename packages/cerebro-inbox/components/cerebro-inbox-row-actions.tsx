@@ -63,7 +63,6 @@ import {
   SWIPE_ROW_TRANSITION_MS,
   commitThresholdPx,
   leftPanelCommitThresholdPx,
-  shouldArchiveOnRelease,
   shouldCommitHeldSwipe,
   shouldInstantArchive,
 } from "../swipe-thresholds";
@@ -536,7 +535,6 @@ function MobileRowActions({
       }
 
       if (
-        shouldArchiveOnRelease(live) ||
         shouldInstantArchive(live, rowWidth) ||
         shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)
       ) {
@@ -1301,7 +1299,6 @@ function SwipeArchiveOnly({
         swipeEndedAtRef.current = Date.now();
       }
       if (
-        shouldArchiveOnRelease(live) ||
         shouldInstantArchive(live, rowWidth) ||
         shouldCommitHeldSwipe(live, rowWidth, archiveHoldReadyRef.current)
       ) {

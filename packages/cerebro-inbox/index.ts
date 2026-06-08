@@ -26,6 +26,7 @@ export {
   useUnmuteInbox,
   useMarkInboxUnread,
   useUnarchiveInbox,
+  useAddIssueToInbox,
   useCreateInboxReminder,
   useRunPrivateAgentRequest,
 } from "./mutations";
@@ -63,3 +64,15 @@ export {
 // FIR-2474 — pin the open inbox row in place until the message is closed.
 export { sortInboxEntriesPinned, type PinnedSelection } from "./pin-selected";
 export { pinnedBucketizer, type PinnedGroup, type InboxBucket } from "./pin-selected-group";
+// TECH-2947 — inbox sort method/direction + focus-list visibility toggle.
+export {
+  useInboxSortPreference,
+  useFocusListVisibility,
+  sortByInboxPreference,
+  INBOX_SORT_METHOD_OPTIONS,
+  INBOX_SORT_DIRECTION_OPTIONS,
+  type InboxSortMethod,
+  type InboxSortDirection,
+  type InboxSortPreference,
+  type InboxSortSignals,
+} from "./inbox-sort";

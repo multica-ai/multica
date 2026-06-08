@@ -146,21 +146,51 @@ export function parseAnalyticsRunsResponse(body: unknown): AnalyticsRunRow[] {
   return out;
 }
 
+/** Legacy rows stored avoided platform calls as units; translate for display. */
+const LEGACY_TOKENS_PER_AVOIDED_PLATFORM_CALL = 800;
+
+function legacyCallsToTokens(units: number): number {
+  return units * LEGACY_TOKENS_PER_AVOIDED_PLATFORM_CALL;
+}
+
+function normalizeSavedTokens(metric: CostSavingMetric, units: number): number {
+  if (metric === "platform_calls") {
+    return legacyCallsToTokens(units);
+  }
+  return units;
+}
+
+/** Total saved tokens (handles legacy platform_calls rows). */
 export function formatAnalyticsSaved(
   metric: CostSavingMetric,
   units: number,
   cents: number,
 ): string {
-  if (
-    metric === "context_tokens" ||
-    metric === "input_tokens" ||
-    metric === "tokens"
-  ) {
-    const tokens = `${units.toLocaleString("en-US")} tokens`;
-    return cents > 0 ? `${tokens} (${formatUsd(cents)})` : tokens;
-  }
-  if (metric === "model_cost" || cents > 0) {
+  if (metric === "model_cost") {
     return formatUsd(cents);
   }
-  return `${units.toLocaleString("en-US")} calls`;
+  const tokens = normalizeSavedTokens(metric, units);
+  const label = `${tokens.toLocaleString("en-US")} tokens`;
+  return cents > 0 ? `${label} (${formatUsd(cents)})` : label;
+}
+
+/** Average tokens saved per measured run — the headline number for analytics. */
+export function formatAnalyticsPerRun(
+  metric: CostSavingMetric,
+  savedUnits: number,
+  savedCents: number,
+  runCount: number,
+): string {
+  if (runCount <= 0) {
+    return "—";
+  }
+  if (metric === "model_cost") {
+    const perRun = Math.round(savedCents / runCount);
+    return `${formatUsd(perRun)} / run`;
+  }
+  const tokens = Math.round(normalizeSavedTokens(metric, savedUnits) / runCount);
+  const label = `${tokens.toLocaleString("en-US")} tokens/run`;
+  return savedCents > 0
+    ? `${label} (${formatUsd(Math.round(savedCents / runCount))})`
+    : label;
 }

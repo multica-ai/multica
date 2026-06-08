@@ -164,6 +164,12 @@ type Daemon struct {
 	runUpdateFn func(targetVersion string) (string, error)
 
 	traceUploader *traceupload.Manager // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender; nil when flag off
+
+	// CEREBRO-PATCH(daemon-ws-write-accessor): expose write channel for cerebro term frames.
+	wsWrites atomic.Pointer[chan []byte]
+	// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to interactive terminal sink.
+	cerebroTermSinkMu sync.RWMutex
+	cerebroTermSink   func(taskID string, text string)
 }
 
 // New creates a new Daemon instance.
@@ -772,6 +778,9 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		displayName := strings.ToUpper(name[:1]) + name[1:]
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
+		}
+		if entry.DisplayName != "" { // CEREBRO-PATCH(daemon-firtal-gateway-runtime-name): per-entry display name beats auto-generated name
+			displayName = entry.DisplayName
 		}
 		runtimes = append(runtimes, map[string]any{
 			"name":         displayName,
@@ -2731,6 +2740,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
+	// CEREBRO-PATCH(daemon-attach-interactive-terminal): mirror agent stream to broker when interactive.
+	if task.PresentationMode == "interactive" {
+		teardown := d.cerebroAttachTerminal(ctx, task)
+		defer teardown()
+	}
 
 	// task.Repos is the authoritative repo list for this task — when the
 	// claimed task belongs to a project with github_repo resources the server
@@ -3309,6 +3323,28 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Usage:         usageEntries,
 			Logs:          result.Logs,
 		}, nil
+	case "tool_timeout":
+		// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — upstream PR multica-ai/multica#3574.
+		// The tool-call watchdog force-stopped the run because a single tool
+		// call stayed in-flight past MaxToolCallDuration (a hung poll loop,
+		// frozen network call, or unresponsive MCP server). Route through the
+		// blocked path with a dedicated failure_reason so the run leaves
+		// "running" state and operators can tell a hung tool call apart from a
+		// silent backend (idle_watchdog) or a real overall timeout.
+		comment := result.Error
+		if comment == "" {
+			comment = maxToolCallReason(d.cfg.MaxToolCallDuration)
+		}
+		return TaskResult{
+			Status:        "blocked",
+			Comment:       comment,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: "tool_timeout",
+			Usage:         usageEntries,
+			Logs:          result.Logs,
+		}, nil
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).
 		// handleTask's cancelledByPoll branch already discards this result,
@@ -3403,10 +3439,20 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	// that may run far longer than the idle window without emitting any
 	// message — so the watchdog must not interpret that silence as a hang.
 	var inFlightTools atomic.Int32
+	// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — per-tool-call cap;
+	// fork-carried until upstream multica-ai/multica#3574 merges, then dropped on sync.
+	// oldestInFlightAt records (as unix nanos) when the in-flight tool set last
+	// became non-empty, re-stamped on each tool_result that still leaves a tool
+	// outstanding. The tool-call watchdog reads it to cap how long any single
+	// tool call may sit in-flight (tool_use with no tool_result) — the gap the
+	// idle watchdog deliberately ignores. 0 means no tool is in-flight.
+	var oldestInFlightAt atomic.Int64
 	var idleWatchdogFired atomic.Bool
+	var toolTimeoutFired atomic.Bool
 	idleWindow := d.cfg.AgentIdleWatchdog
-	if idleWindow > 0 {
-		go d.runIdleWatchdog(agentCtx, idleWindow, &lastActivityAt, &inFlightTools, &idleWatchdogFired, agentCancel, session.Messages, taskLog, taskID)
+	maxToolWindow := d.cfg.MaxToolCallDuration
+	if idleWindow > 0 || maxToolWindow > 0 {
+		go d.runIdleWatchdog(agentCtx, idleWindow, maxToolWindow, &lastActivityAt, &inFlightTools, &oldestInFlightAt, &idleWatchdogFired, &toolTimeoutFired, agentCancel, session.Messages, taskLog, taskID)
 	}
 
 	go func() {
@@ -3480,6 +3526,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
 				lastActivityAt.Store(time.Now().UnixNano())
+				// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to interactive terminal sink.
+				if sink := d.getCerebroTermSink(); sink != nil {
+					sink(taskID, formatMessageAsText(msg))
+				}
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -3499,7 +3549,15 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					}
 				case agent.MessageToolUse:
 					n := toolCount.Add(1)
-					inFlightTools.Add(1)
+					// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — upstream PR multica-ai/multica#3574.
+					// Stamp the in-flight clock only on the 0->1 transition so
+					// the tool-call watchdog measures from when the first
+					// outstanding call started. Parallel tool_use messages in
+					// the same batch share that start. Message processing is
+					// single-goroutine, so the load-then-store is race-free.
+					if inFlightTools.Add(1) == 1 {
+						oldestInFlightAt.Store(time.Now().UnixNano())
+					}
 					taskLog.Info(fmt.Sprintf("tool #%d: %s", n, msg.Tool))
 					if msg.CallID != "" {
 						mu.Lock()
@@ -3529,6 +3587,17 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						if inFlightTools.CompareAndSwap(cur, cur-1) {
 							break
 						}
+					}
+					// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — upstream PR multica-ai/multica#3574.
+					// A tool_result is forward progress. Clear the in-flight
+					// clock when nothing is outstanding, otherwise re-stamp it
+					// so a remaining call gets a fresh window rather than
+					// inheriting a sibling's elapsed time — we only kill a call
+					// that produces no result at all for the full window.
+					if inFlightTools.Load() == 0 {
+						oldestInFlightAt.Store(0)
+					} else {
+						oldestInFlightAt.Store(time.Now().UnixNano())
 					}
 					s := seq.Add(1)
 					output := msg.Output
@@ -3585,16 +3654,27 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	select {
 	case result := <-session.Result:
-		if idleWatchdogFired.Load() {
+		// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — upstream PR multica-ai/multica#3574.
+		if toolTimeoutFired.Load() {
+			// A single tool call exceeded MaxToolCallDuration. Re-tag the
+			// SIGKILL-induced "aborted" as "tool_timeout" so runTask routes
+			// it through a dedicated failure_reason instead of the generic
+			// agent_error bucket. CEREBRO-PATCH(daemon-per-tool-call-timeout):
+			// always overwrite Error — the backend's post-cancel message is
+			// just ctx.Err() ("context canceled"), which hides the actual
+			// reason (the cap).
+			result.Status = "tool_timeout"
+			result.Error = maxToolCallReason(maxToolWindow)
+		} else if idleWatchdogFired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
 			// Re-tag it as "idle_watchdog" so runTask routes the
 			// disposition through a dedicated failure_reason, not the
 			// generic "agent_error" bucket the aborted path falls into.
+			// CEREBRO-PATCH(daemon-per-tool-call-timeout): always overwrite
+			// Error for the same reason as the tool_timeout branch above.
 			result.Status = "idle_watchdog"
-			if result.Error == "" {
-				result.Error = idleWatchdogReason(idleWindow)
-			}
+			result.Error = idleWatchdogReason(idleWindow)
 		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
@@ -3602,6 +3682,13 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// context.Canceled. Check this BEFORE the generic cancelled/timeout
 		// classifiers so a watchdog-induced stop isn't misreported as
 		// "task cancelled by server".
+		// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — upstream PR multica-ai/multica#3574.
+		if toolTimeoutFired.Load() {
+			return agent.Result{
+				Status: "tool_timeout",
+				Error:  maxToolCallReason(maxToolWindow),
+			}, toolCount.Load(), nil
+		}
 		if idleWatchdogFired.Load() {
 			return agent.Result{
 				Status: "idle_watchdog",
@@ -3633,31 +3720,57 @@ func idleWatchdogReason(window time.Duration) string {
 	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
 }
 
-// runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
-// been silent for at least window with no in-flight tool call. On firing, it
-// sets fired and calls cancel, which propagates to the agent subprocess (via
-// the ctx passed to backend.Execute) and to drainCtx. The check requires:
+// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — upstream PR multica-ai/multica#3574.
+// maxToolCallReason formats the human-facing explanation surfaced on
+// tool_timeout dispositions, when a single tool call stayed in-flight longer
+// than MaxToolCallDuration with no tool_result.
+func maxToolCallReason(window time.Duration) string {
+	return fmt.Sprintf("tool call exceeded MaxToolCallDuration (%s) with no result; force-stopped by tool-call watchdog", window)
+}
+
+// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — the tool-call cap (net
+// 2 below, maxToolWindow + oldestInFlightAt + toolFired) is fork-carried until
+// upstream multica-ai/multica#3574 merges, then dropped on sync. The idle
+// watchdog (net 1) is upstream.
+// runIdleWatchdog ticks until either agentCtx is cancelled or one of two
+// safety nets fires. On firing it sets the matching flag and calls cancel,
+// which propagates to the agent subprocess (via the ctx passed to
+// backend.Execute) and to drainCtx. The two nets are complementary — they
+// cover the two distinct ways a run can stall:
 //
-//  1. inFlightTools == 0 — the backend has emitted a tool_use whose
-//     matching tool_result hasn't arrived yet, meaning a real tool (e.g.
-//     `npm install`, `docker build`) is legitimately running. Long tool
-//     calls produce no messages between use and result; killing here would
-//     yank the agent mid-build. AND
-//  2. time since lastActivityAt exceeds window — the drain loop is single
-//     reader, so a stale stamp means no message has actually arrived; AND
-//  3. session.Messages buffer is empty — defensive against a hypothetical
-//     drain stall where unprocessed messages would still imply progress.
+//  1. Idle watchdog (window = idleWindow > 0). Fires when the backend has gone
+//     silent for at least idleWindow AND no tool call is in-flight AND the
+//     message buffer is empty. This is the "backend died mid-thought" case.
+//     It deliberately stands down while a tool call is in-flight: a long
+//     `npm install` / `docker build` produces no messages between tool_use and
+//     tool_result, so killing there would yank the agent mid-build.
 //
-// Tick interval is window/2 (floored at 30 s in production, but the floor only
-// kicks in for windows >= 1 min so tests can pass tiny windows like 50 ms and
-// see the watchdog fire within a few ticks).
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
-	interval := window / 2
-	if window >= time.Minute && interval < 30*time.Second {
+//  2. Tool-call watchdog (maxToolWindow > 0). Covers the blind spot of (1):
+//     a single tool call that hangs forever (a `sleep`/`until` poll loop, a
+//     frozen network call, an MCP server that never answers) is "in-flight",
+//     so the idle watchdog never catches it and the run sits at "running"
+//     until the 2 h DefaultAgentTimeout. This net fires when a tool call has
+//     stayed in-flight (oldestInFlightAt) longer than maxToolWindow with no
+//     tool_result, killing a hung call in minutes instead of hours.
+//
+// Either window may be 0 (disabled); the caller starts the goroutine when at
+// least one is positive. Tick interval is half the smallest active window
+// (floored at 30 s in production, but the floor only kicks in for windows
+// >= 1 min so tests can pass tiny windows like 50 ms and see a fire within a
+// few ticks).
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, idleWindow, maxToolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, oldestInFlightAt *atomic.Int64, fired *atomic.Bool, toolFired *atomic.Bool, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
+	// Drive the ticker off the smallest active window so neither net is
+	// checked later than roughly half its own window.
+	tickBase := idleWindow
+	if maxToolWindow > 0 && (tickBase == 0 || maxToolWindow < tickBase) {
+		tickBase = maxToolWindow
+	}
+	interval := tickBase / 2
+	if tickBase >= time.Minute && interval < 30*time.Second {
 		interval = 30 * time.Second
 	}
 	if interval <= 0 {
-		interval = window
+		interval = tickBase
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -3666,16 +3779,37 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window time.Duration,
 		case <-agentCtx.Done():
 			return
 		case <-ticker.C:
-			// In-flight tool call: the agent has emitted tool_use and
-			// the corresponding tool_result hasn't landed yet. A long
-			// build/install/test can sit here silently for many minutes
-			// — that is forward progress, not a hang.
+			// In-flight tool call: the agent has emitted tool_use and the
+			// corresponding tool_result hasn't landed yet. A long
+			// build/install/test can sit here silently for many minutes —
+			// that is forward progress, not a hang — so the idle watchdog
+			// stands down. But an in-flight call that never returns is the
+			// 2 h-hang we must catch, so apply the per-tool-call hard cap.
 			if inFlightTools.Load() > 0 {
+				if maxToolWindow > 0 {
+					if startedNanos := oldestInFlightAt.Load(); startedNanos > 0 {
+						if inFlightFor := time.Since(time.Unix(0, startedNanos)); inFlightFor >= maxToolWindow {
+							taskLog.Warn("tool-call watchdog firing: in-flight tool exceeded max duration, force-stopping run",
+								"task", shortID(taskID),
+								"in_flight_for", inFlightFor.Round(time.Second).String(),
+								"threshold", maxToolWindow.String(),
+							)
+							toolFired.Store(true)
+							cancel()
+							return
+						}
+					}
+				}
+				continue
+			}
+			if idleWindow <= 0 {
+				// Idle watchdog disabled; only the tool-call cap is active and
+				// there is no in-flight call to cap right now.
 				continue
 			}
 			last := time.Unix(0, lastActivityAt.Load())
 			idleFor := time.Since(last)
-			if idleFor < window {
+			if idleFor < idleWindow {
 				continue
 			}
 			// A buffered-but-undrained message means the drain loop is
@@ -3687,7 +3821,7 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window time.Duration,
 			taskLog.Warn("idle watchdog firing: no agent activity, force-stopping run",
 				"task", shortID(taskID),
 				"idle_for", idleFor.Round(time.Second).String(),
-				"threshold", window.String(),
+				"threshold", idleWindow.String(),
 			)
 			fired.Store(true)
 			cancel()

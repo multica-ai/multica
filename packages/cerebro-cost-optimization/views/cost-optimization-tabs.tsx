@@ -45,11 +45,22 @@ export function CostOptimizationTabs() {
   );
 
   return (
-    <Tabs value={activeSubtab} onValueChange={onSubtabChange} className="space-y-4">
-      <TabsList>
-        <TabsTrigger value="settings">Settings</TabsTrigger>
-        <TabsTrigger value="analytics">Analytics</TabsTrigger>
-        <TabsTrigger value="inspector">System prompt inspector</TabsTrigger>
+    <Tabs
+      value={activeSubtab}
+      onValueChange={onSubtabChange}
+      orientation="horizontal"
+      className="space-y-4"
+    >
+      <TabsList className="!h-auto w-full !flex-row flex-wrap justify-start gap-1">
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="settings">
+          Settings
+        </TabsTrigger>
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="analytics">
+          Analytics
+        </TabsTrigger>
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="inspector">
+          System prompt inspector
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="settings">
         <CostOptimizationSettingsPanel />

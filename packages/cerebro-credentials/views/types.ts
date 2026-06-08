@@ -36,6 +36,7 @@ export interface Credential {
   updated_at: string;
   expires_at?: string;
   last_rotated_at?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CredentialPolicy {
@@ -54,7 +55,7 @@ export interface AuditEntry {
   actor_kind: SubjectKind;
   actor_id: string;
   actor_label: string;
-  action: Permission | "list" | "create" | "update" | "delete";
+  action: Permission | "list" | "create" | "update" | "delete" | "revoke";
   outcome: AuditOutcome;
   reason?: string;
   occurred_at: string;

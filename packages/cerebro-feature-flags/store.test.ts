@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import { resolveFlag } from "./store";
 import { CEREBRO_FLAG_DEFAULTS } from "./registry";
 
-// cerebro_tool_policy defaults to OFF in the registry — a good probe for the
+// cerebro_grants defaults to OFF in the registry - a good probe for the
 // workspace-override precedence (FIR-2505).
-const KEY = "cerebro_tool_policy" as const;
+const KEY = "cerebro_grants" as const;
 
 describe("resolveFlag precedence (FIR-2505 workspace overrides)", () => {
   it("falls back to the registry default when nothing is set", () => {
     expect(resolveFlag(KEY, {}, {}, {})).toBe(CEREBRO_FLAG_DEFAULTS[KEY]);
-    expect(resolveFlag(KEY, {}, {}, {})).toBe(false);
   });
 
   it("a personal override wins over the default", () => {

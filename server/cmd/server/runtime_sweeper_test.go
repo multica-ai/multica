@@ -557,7 +557,7 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	var oldTaskID, freshTaskID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
-		VALUES ($1, $2, $3, 'queued', 0, now() - interval '5 hours')
+		VALUES ($1, $2, $3, 'queued', 0, timestamp '2000-01-01 00:00:00+00')
 		RETURNING id
 	`, agentID, runtimeID, oldIssueID).Scan(&oldTaskID); err != nil {
 		t.Fatalf("failed to insert old queued task: %v", err)
@@ -572,8 +572,9 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 
 	queries := db.New(testPool)
 	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    3600.0, // 1h TTL — old task is 5h, fresh task is 0s
-		MaxPerTick: 100,
+		TtlSecs: 3600.0, // 1h TTL — old task is ancient, fresh task is 0s
+		// CEREBRO-PATCH(runtime-sweeper-test-isolation): keep shared test DB stale rows out of this assertion.
+		MaxPerTick: 1,
 	})
 	if err != nil {
 		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
@@ -611,6 +612,115 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	}
 	if freshStatus != "queued" {
 		t.Fatalf("fresh task: expected status=queued, got %q", freshStatus)
+	}
+}
+
+// TestExpireStaleQueuedTasksSkipsPausedRuntime verifies the runtime-pause
+// CEREBRO-PATCH(paused-runtime-queued-ttl-test): paused queues are protected
+// from generic queued-TTL expiry while still claimable after unpause.
+// contract: queued work on a paused runtime must wait for unpause, not be
+// failed by the generic queued-TTL sweeper.
+func TestExpireStaleQueuedTasksSkipsPausedRuntime(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID, userID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT m.user_id FROM member m
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&userID); err != nil {
+		t.Fatalf("failed to find test user: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, owner_id)
+		VALUES ($1, 'paused-ttl-test-daemon', 'paused-ttl-test-runtime', 'local', 'claude', 'online', '', $2)
+		RETURNING id
+	`, testWorkspaceID, userID).Scan(&runtimeID); err != nil {
+		t.Fatalf("failed to create test runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id)
+		VALUES ($1, 'paused-ttl-test-agent', 'local', $2)
+		RETURNING id
+	`, testWorkspaceID, runtimeID).Scan(&agentID); err != nil {
+		t.Fatalf("failed to create test agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		WITH bumped AS (
+			UPDATE workspace SET issue_counter = issue_counter + 1
+			WHERE id = $1 RETURNING issue_counter
+		)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
+		SELECT $1, 'Paused queued TTL test', 'todo', 'none', 'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
+		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		RETURNING id
+	`, testWorkspaceID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET paused_at = now(), unpause_at = now() + interval '1 hour', pause_reason = 'test'
+		WHERE id = $1
+	`, runtimeID); err != nil {
+		t.Fatalf("failed to pause runtime: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at, wait_reason)
+		VALUES ($1, $2, $3, 'queued', 0, timestamp '2000-01-01 00:00:00+00', 'runtime_paused|test|')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("failed to insert paused queued task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	if _, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		TtlSecs:    3600.0,
+		MaxPerTick: 10000,
+	}); err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
+	}
+
+	var status, reason string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, COALESCE(failure_reason, '')
+		FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&status, &reason); err != nil {
+		t.Fatalf("failed to read paused queued task: %v", err)
+	}
+	if status != "queued" {
+		t.Fatalf("paused queued task: expected status=queued, got %q (reason=%q)", status, reason)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime SET paused_at = NULL, unpause_at = NULL, pause_reason = NULL
+		WHERE id = $1
+	`, runtimeID); err != nil {
+		t.Fatalf("failed to unpause runtime: %v", err)
+	}
+	claimed, err := queries.ClaimAgentTask(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("ClaimAgentTask after unpause failed: %v", err)
+	}
+	if claimed.ID.Bytes != parseUUIDBytes(taskID) {
+		t.Fatalf("claimed wrong task after unpause: got %x want %x", claimed.ID.Bytes, parseUUIDBytes(taskID))
 	}
 }
 

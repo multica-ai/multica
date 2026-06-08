@@ -84,6 +84,15 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+// CEREBRO-PATCH(agent-live-card-terminal-link): stub the cerebro-terminal
+// hook so this test doesn't need to mount a QueryClient + workspace slug
+// provider just to render the live banner. The "Open terminal" affordance
+// has its own coverage in @multica/cerebro-terminal.
+vi.mock("@multica/cerebro-terminal", () => ({
+  useIssueTerminalLink: () => ({ shouldShow: false, popoutUrl: null }),
+  openTerminalPopout: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

@@ -55,6 +55,8 @@ import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { useT } from "../../i18n";
 // CEREBRO-PATCH(runtime-detail-accounts): JEH-999 filter card to runtime's own account
 import { RuntimeAccountsCard } from "@multica/cerebro-runtime";
+// CEREBRO-PATCH(runtime-detail-presentation-mode): interactive-terminal toggle.
+import { PresentationModeToggle } from "@multica/cerebro-terminal";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
   if (
@@ -557,6 +559,11 @@ function DiagnosticsCard({
             />
           </div>
         )}
+
+        {/* CEREBRO-PATCH(runtime-detail-presentation-mode): mount interactive-terminal toggle. */}
+        <div className="border-t pt-3">
+          <PresentationModeToggle runtimeId={runtime.id} readOnly={!isAdmin} />
+        </div>
 
         {canDelete && (
           <div className="border-t pt-3">

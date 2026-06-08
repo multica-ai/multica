@@ -20,6 +20,7 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatSession,
+  ChatSessionUsage,
   Comment,
   CreateIssueRequest,
   CreateLabelRequest,
@@ -75,6 +76,7 @@ import {
   ChatPendingTaskSchema,
   ChatSessionListSchema,
   ChatSessionSchema,
+  ChatSessionUsageSchema,
   EMPTY_ACTIVE_TASKS_RESPONSE,
   EMPTY_AGENT_LIST,
   EMPTY_AGENT_TASK_LIST,
@@ -82,6 +84,7 @@ import {
   EMPTY_CHAT_MESSAGE_LIST,
   EMPTY_CHAT_PENDING_TASK,
   EMPTY_CHAT_SESSION_LIST,
+  EMPTY_CHAT_SESSION_USAGE,
   EMPTY_COMMENT,
   EMPTY_FEATURE_FLAGS,
   EMPTY_INBOX_LIST,
@@ -1141,6 +1144,21 @@ class ApiClient {
 
   async cancelTaskById(taskId: string): Promise<void> {
     await this.fetch<void>(`/api/tasks/${taskId}/cancel`, { method: "POST" });
+  }
+
+  /** FIR-31 — accumulated token + cost spend for a chat session. Same endpoint
+   *  web uses (packages/core/api/client.ts getChatSessionUsage); the mobile
+   *  chat header renders cost_cents as "cost $X.XX". */
+  async getChatSessionUsage(
+    sessionId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<ChatSessionUsage> {
+    return this.fetchValidated(
+      `/api/chat/sessions/${sessionId}/usage`,
+      ChatSessionUsageSchema,
+      EMPTY_CHAT_SESSION_USAGE,
+      { ...opts, endpoint: "GET /api/chat/sessions/:id/usage" },
+    );
   }
 
   /** Live execution timeline for a task — used by the chat screen to

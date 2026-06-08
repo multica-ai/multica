@@ -72,6 +72,13 @@ func (c *client) markSeen(eventID string) bool {
 type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
 // CEREBRO-PATCH(ws-heartbeat-handler-payload): JEH-997 takes the full
 
+// MessageHandler is the fall-through callback for daemon-originated frames
+// that the hub's built-in switch doesn't recognise (today: anything not
+// daemon:heartbeat). Returning an error is logged at debug level.
+//
+// CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
+type MessageHandler func(ctx context.Context, identity ClientIdentity, msg protocol.Message) error
+
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
 // best-effort wakeup hints; the daemon still uses HTTP claim for correctness.
 type Hub struct {
@@ -83,6 +90,9 @@ type Hub struct {
 
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
+
+	msgMu      sync.RWMutex
+	onMessage  MessageHandler // CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
 }
 
 func NewHub() *Hub {
@@ -118,6 +128,25 @@ func (h *Hub) heartbeatHandler() HeartbeatHandler {
 	h.hbMu.RLock()
 	defer h.hbMu.RUnlock()
 	return h.onHeartbeat
+}
+
+// SetMessageHandler installs the fall-through handler for non-heartbeat
+// frames. A nil handler disables fall-through dispatch (the default).
+//
+// CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
+func (h *Hub) SetMessageHandler(fn MessageHandler) {
+	if h == nil {
+		return
+	}
+	h.msgMu.Lock()
+	h.onMessage = fn
+	h.msgMu.Unlock()
+}
+
+func (h *Hub) messageHandler() MessageHandler {
+	h.msgMu.RLock()
+	defer h.msgMu.RUnlock()
+	return h.onMessage
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity ClientIdentity) {
@@ -321,7 +350,7 @@ func (c *client) readPump() {
 		c.conn.Close()
 	}()
 
-	c.conn.SetReadLimit(4096)
+	c.conn.SetReadLimit(128 * 1024) // CEREBRO-PATCH(daemonws-term-read-limit): cerebro:term_stdout frames are base64-encoded and can exceed 4 KB; 128 KB matches the daemon flush ceiling.
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -350,8 +379,12 @@ func (c *client) handleFrame(raw []byte) {
 	case protocol.EventDaemonHeartbeat:
 		c.handleHeartbeatFrame(msg.Payload)
 	default:
-		// Unknown app messages are intentionally ignored for forward
-		// compatibility with future daemon → server message types.
+		// CEREBRO-PATCH(daemonws-message-handler): cerebro-only frame types (cerebro:*) flow through the message handler seam.
+		if handler := c.hub.messageHandler(); handler != nil {
+			if err := handler(context.Background(), c.identity, msg); err != nil {
+				slog.Debug("daemon websocket message handler error", "error", err, "type", msg.Type, "daemon_id", c.identity.DaemonID)
+			}
+		}
 	}
 }
 

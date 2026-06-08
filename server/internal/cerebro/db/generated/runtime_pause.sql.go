@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearQueuedTasksRuntimePauseWaitReason = `-- name: ClearQueuedTasksRuntimePauseWaitReason :exec
+UPDATE agent_task_queue
+SET wait_reason = NULL
+WHERE runtime_id = $1
+  AND status = 'queued'
+  AND wait_reason LIKE 'runtime_paused|%'
+`
+
+// Clears the pause stamp when the runtime unpauses. Scoped to our prefix so
+// unrelated wait_reason values (e.g. local_directory holds) are untouched.
+func (q *Queries) ClearQueuedTasksRuntimePauseWaitReason(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearQueuedTasksRuntimePauseWaitReason, runtimeID)
+	return err
+}
+
 const createAutoPauseAlertComment = `-- name: CreateAutoPauseAlertComment :one
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
 SELECT i.id, i.workspace_id, 'agent', $1, $2, 'comment'
@@ -179,6 +194,34 @@ func (q *Queries) GetAgentRuntimePauseSnapshot(ctx context.Context, id pgtype.UU
 	return i, err
 }
 
+const getRuntimeOwnerForInbox = `-- name: GetRuntimeOwnerForInbox :one
+SELECT id, name, workspace_id, owner_id
+FROM agent_runtime
+WHERE id = $1
+`
+
+type GetRuntimeOwnerForInboxRow struct {
+	ID          pgtype.UUID `json:"id"`
+	Name        string      `json:"name"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+// Resolves the human recipient + display name for a runtime so the auto-pause
+// aggregated inbox card (FIR-2611) can be addressed to a member. owner_id is
+// nullable; the caller skips the card when it is NULL (no one to notify).
+func (q *Queries) GetRuntimeOwnerForInbox(ctx context.Context, id pgtype.UUID) (GetRuntimeOwnerForInboxRow, error) {
+	row := q.db.QueryRow(ctx, getRuntimeOwnerForInbox, id)
+	var i GetRuntimeOwnerForInboxRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.WorkspaceID,
+		&i.OwnerID,
+	)
+	return i, err
+}
+
 const incrementAutoPauseCount = `-- name: IncrementAutoPauseCount :one
 UPDATE agent_runtime
 SET auto_pause_count = auto_pause_count + 1,
@@ -306,7 +349,7 @@ func (q *Queries) ListResumableTasksForRuntime(ctx context.Context, arg ListResu
 }
 
 const listRuntimesDueForUnpause = `-- name: ListRuntimesDueForUnpause :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE paused_at IS NOT NULL
   AND unpause_at IS NOT NULL
   AND unpause_at <= now()
@@ -344,6 +387,7 @@ func (q *Queries) ListRuntimesDueForUnpause(ctx context.Context) ([]AgentRuntime
 			&i.UnpauseAt,
 			&i.PauseReason,
 			&i.CurrentAccountID,
+			&i.PresentationMode,
 			&i.PersonaSandbox,
 			&i.Capabilities,
 			&i.CliVersion,
@@ -369,7 +413,7 @@ SET paused_at    = COALESCE(paused_at, now()),
     pause_reason = $3,
     updated_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 type PauseAgentRuntimeParams struct {
@@ -409,6 +453,7 @@ func (q *Queries) PauseAgentRuntime(ctx context.Context, arg PauseAgentRuntimePa
 		&i.UnpauseAt,
 		&i.PauseReason,
 		&i.CurrentAccountID,
+		&i.PresentationMode,
 		&i.PersonaSandbox,
 		&i.Capabilities,
 		&i.CliVersion,
@@ -454,6 +499,25 @@ WHERE id = $1
 // instead of a needless row write on every completion.
 func (q *Queries) ResetAutoPauseCount(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, resetAutoPauseCount, id)
+	return err
+}
+
+const stampQueuedTasksRuntimePauseWaitReason = `-- name: StampQueuedTasksRuntimePauseWaitReason :exec
+UPDATE agent_task_queue
+SET wait_reason = $2
+WHERE runtime_id = $1
+  AND status = 'queued'
+`
+
+type StampQueuedTasksRuntimePauseWaitReasonParams struct {
+	RuntimeID  pgtype.UUID `json:"runtime_id"`
+	WaitReason pgtype.Text `json:"wait_reason"`
+}
+
+// FIR-2717: explain queued waits on the task row instead of posting an issue
+// comment. Only touches still-queued tasks on the paused runtime.
+func (q *Queries) StampQueuedTasksRuntimePauseWaitReason(ctx context.Context, arg StampQueuedTasksRuntimePauseWaitReasonParams) error {
+	_, err := q.db.Exec(ctx, stampQueuedTasksRuntimePauseWaitReason, arg.RuntimeID, arg.WaitReason)
 	return err
 }
 
@@ -533,7 +597,7 @@ SET paused_at    = NULL,
     pause_reason = NULL,
     updated_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 // Clears all pause fields. Idempotent on already-unpaused runtimes.
@@ -561,6 +625,7 @@ func (q *Queries) UnpauseAgentRuntime(ctx context.Context, id pgtype.UUID) (Agen
 		&i.UnpauseAt,
 		&i.PauseReason,
 		&i.CurrentAccountID,
+		&i.PresentationMode,
 		&i.PersonaSandbox,
 		&i.Capabilities,
 		&i.CliVersion,

@@ -3,7 +3,9 @@
 // CEREBRO-PATCH(agent-live-card-cerebro): cerebro modification of upstream file
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, ChevronDown, Loader2, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus } from "lucide-react";
+import { Bot, ChevronRight, ChevronDown, Loader2, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus, Terminal as TerminalIcon } from "lucide-react";
+// CEREBRO-PATCH(agent-live-card-terminal-link): use cerebro-terminal hook to render an "Open terminal" affordance for tasks running in interactive presentation mode.
+import { useIssueTerminalLink, openTerminalPopout } from "@multica/cerebro-terminal";
 import { api } from "@multica/core/api";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@multica/core/types/events";
@@ -26,6 +28,11 @@ import { AgentTranscriptDialog } from "../../common/task-transcript/agent-transc
 import { redactSecrets } from "../../common/task-transcript/redact";
 // CEREBRO-PATCH(agent-live-card-cerebro): import getToolSummary from cerebro-chat after Phase 6 relocation
 import { getToolSummary } from "@multica/cerebro-chat/views";
+// CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717 — render the runtime-pause detail on queued banners.
+import {
+  parseRuntimePauseWaitReason,
+  runtimePauseQueuedLabel,
+} from "@multica/cerebro-runtime/views";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
@@ -246,6 +253,11 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   useWSEvent("task:waiting_local_directory", handleTaskActive);
   useWSEvent("task:running", handleTaskActive);
 
+  // FIR-2717: refresh queued banners when a runtime pauses/unpauses so
+  // wait_reason on queued tasks is reflected without an issue comment.
+  useWSEvent("runtime:paused", reconcile);
+  useWSEvent("runtime:unpaused", reconcile);
+
   // Fire the actual cancel once the user confirms. The banner is dropped
   // optimistically by handleTaskEnd / reconcile when the task:cancelled
   // event lands, so `cancellingIds` only needs to gate the button between
@@ -399,6 +411,8 @@ interface AgentLiveRowProps {
 function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: AgentLiveRowProps) {
   const { t } = useT("issues");
   const [elapsed, setElapsed] = useState("");
+  // CEREBRO-PATCH(agent-live-card-terminal-link): derive popout availability for this task's runtime.
+  const terminalLink = useIssueTerminalLink(task.runtime_id);
 
   const isQueued = task.status === "queued";
   // `waiting_local_directory` is the daemon-parked stage of an otherwise-
@@ -422,6 +436,7 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
   }, [task.started_at, task.dispatched_at, task.created_at]);
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
+  const runtimePauseWait = parseRuntimePauseWaitReason(task.wait_reason);
 
   // Queued / waiting tasks render with a non-spinning Clock and dimmer
   // accent so the banner reads as "waiting" rather than "working" at a
@@ -445,6 +460,11 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
           <span className="font-medium text-foreground truncate">
             {isWaitingLocalDirectory
               ? t(($) => $.agent_live.is_waiting_local_directory, { name: agentName })
+              : isQueued && runtimePauseWait
+                ? t(($) => $.agent_live.is_queued_runtime_paused, {
+                    name: agentName,
+                    detail: runtimePauseQueuedLabel(runtimePauseWait),
+                  })
               : isQueued
                 ? t(($) => $.agent_live.is_queued, { name: agentName })
                 : t(($) => $.agent_live.is_working, { name: agentName })}
@@ -466,6 +486,10 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
+          {/* CEREBRO-PATCH(agent-live-card-terminal-link): open interactive-terminal popout for the agent's runtime. */}
+          {!isQueued && terminalLink.shouldShow && terminalLink.popoutUrl && (
+            <button type="button" onClick={() => openTerminalPopout(terminalLink.popoutUrl!, task.runtime_id)} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors" title="Open terminal in new window"><TerminalIcon className="h-3 w-3" /><span>Terminal</span></button>
+          )}
           {!isParked && (
             <TranscriptButton
               task={task}

@@ -1046,8 +1046,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 		suppressSubscriberMobilePush := collectMentionedMemberIDs(ctx, queries, e.WorkspaceID, mentions)
 		delete(suppressSubscriberMobilePush, e.ActorID)
 
+		// CEREBRO-PATCH(agent-comment-tag-split): TECH-2961 — agent-authored comments fan out to three routing keys based on who they tag, so users can mute monologues without losing hand-offs.
+		newCommentKey := pickAgentCommentRoutingKey(authorType, mentions)
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
-			nil, "new_comment", "info",
+			nil, newCommentKey, "info",
 			issueTitle, commentContent,
 			commentDetails, commentAssigneeMemberID, suppressSubscriberMobilePush)
 

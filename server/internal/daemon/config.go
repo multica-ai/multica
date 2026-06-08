@@ -36,7 +36,29 @@ const (
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
-	DefaultAgentIdleWatchdog       = 30 * time.Minute
+	DefaultAgentIdleWatchdog = 30 * time.Minute
+	// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — fork-carried
+	// until upstream multica-ai/multica#3574 merges, then dropped on sync.
+	// DefaultMaxToolCallDuration is the per-tool-call hard cap. The idle
+	// watchdog above deliberately treats an in-flight tool call (a tool_use
+	// with no matching tool_result yet) as forward progress and never fires
+	// while one is outstanding — long `npm install` / `docker build` calls
+	// emit no messages for minutes and must not be killed mid-build. The
+	// blind spot: a tool call that hangs forever (a `sleep`/`until` poll loop
+	// on a CI/deploy, a frozen network call, an MCP server that never
+	// answers) is also "in-flight", so the idle watchdog can never catch it.
+	// It then sits at "running" until the coarse DefaultAgentTimeout (2 h),
+	// burning the dispatch slot and 50-200k tokens of accumulated context per
+	// hung run — the single largest token cost from failed runs in the whole
+	// catalogue. This cap force-stops any single tool call that stays
+	// in-flight longer than the limit, so a hung call dies in minutes instead
+	// of hours. 30 min sits far below the 2 h ceiling (catches every truly
+	// stuck call early) while leaving headroom above almost every legitimate
+	// long call — including a full `make check` (typecheck + unit + Go + e2e)
+	// on a cold checkout. Deployments with genuinely longer single calls
+	// (e.g. a 40-min build) raise it via MULTICA_MAX_TOOL_CALL_DURATION;
+	// set 0 to disable.
+	DefaultMaxToolCallDuration     = 30 * time.Minute
 	DefaultRuntimeName             = "Local Agent"
 	DefaultWorkspaceSyncInterval   = 30 * time.Second
 	DefaultHealthPort              = 19514
@@ -84,8 +106,10 @@ type Config struct {
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
-	ClaudeArgs                     []string
-	CodexArgs                      []string
+	// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — see upstream PR multica-ai/multica#3574.
+	MaxToolCallDuration time.Duration // force-stop a run when a single tool call stays in-flight (tool_use with no tool_result) longer than this (0 = disabled)
+	ClaudeArgs          []string
+	CodexArgs           []string
 
 	// CEREBRO-PATCH(daemon-config): cerebro sandbox config (EnableSandbox,
 	// SandboxAllowlist) is embedded so callers continue to access fields
@@ -251,7 +275,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agents["firtal-gateway"] = entry
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent runtime found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy on PATH, or set MULTICA_RUNTIME_TYPE=%s together with FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", FirtalRegistryRuntimeType)
+		return Config{}, fmt.Errorf("no agent runtime found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy on PATH, or set MULTICA_RUNTIME_TYPE=%s together with FIRTAL_REGISTRY_URL and FIRTAL_REGISTRY_KEY", FirtalRegistryRuntimeType)
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -306,6 +330,16 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// route 0 through durationFromEnv so the operator can opt out without
 	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
 	agentIdleWatchdog, err := durationFromEnv("MULTICA_AGENT_IDLE_WATCHDOG", DefaultAgentIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — upstream PR multica-ai/multica#3574.
+	// MULTICA_MAX_TOOL_CALL_DURATION=0 disables the per-tool-call hard cap.
+	// Routed through durationFromEnv so an operator with genuinely long single
+	// calls can raise it (or disable it) without patching the binary; any
+	// positive duration overrides DefaultMaxToolCallDuration.
+	maxToolCallDuration, err := durationFromEnv("MULTICA_MAX_TOOL_CALL_DURATION", DefaultMaxToolCallDuration)
 	if err != nil {
 		return Config{}, err
 	}
@@ -472,12 +506,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
-		ClaudeArgs:                     claudeArgs,
-		CodexArgs:                      codexArgs,
+		// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — upstream PR multica-ai/multica#3574.
+		MaxToolCallDuration: maxToolCallDuration,
+		ClaudeArgs:          claudeArgs,
+		CodexArgs:           codexArgs,
 		// CEREBRO-PATCH(daemon-config): embedded sandbox config.
-		SandboxConfig: cerebroSandbox,
-		PersonaURL:    personaURL,
-		PersonaToken:  personaToken,
+		SandboxConfig:  cerebroSandbox,
+		PersonaURL:     personaURL,
+		PersonaToken:   personaToken,
 		PersonaHookBin: personaHookBin,
 	}, nil
 }
@@ -600,39 +636,21 @@ func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
 		return AgentEntry{}, false, nil
 	}
 
-	baseURL := firstNonEmptyEnv(
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
-		"FIRTAL_AE_GATEWAY_URL",
-		"FIRTAL_DATA_REGISTRY_URL",
-	)
-	apiKey := firstNonEmptyEnv(
-		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
-		"FIRTAL_AE_GATEWAY_KEY",
-		"FIRTAL_DATA_REGISTRY_API_KEY",
-	)
+	// CEREBRO-PATCH(daemon-config-firtal-gateway-single-source): FIR-2825 — one canonical URL+key env pair.
+	baseURL := strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_URL"))
+	apiKey := strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_KEY"))
 	if baseURL == "" {
-		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL is not set", FirtalRegistryRuntimeType)
+		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_REGISTRY_URL is not set", FirtalRegistryRuntimeType)
 	}
 	if apiKey == "" {
-		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY is not set", FirtalRegistryRuntimeType)
+		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_REGISTRY_KEY is not set", FirtalRegistryRuntimeType)
 	}
 
 	return AgentEntry{
-		Path: "",
-		Model: firstNonEmptyEnv(
-			"FIRTAL_DATA_REGISTRY_AI_MODEL",
-			"FIRTAL_AE_GATEWAY_MODEL",
-		),
+		Path:        "",
+		Model:       strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_MODEL")),
+		DisplayName: strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_RUNTIME_NAME")), // CEREBRO-PATCH(daemon-firtal-gateway-runtime-name): custom runtime display name
 	}, true, nil
-}
-
-func firstNonEmptyEnv(keys ...string) string {
-	for _, key := range keys {
-		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func shellArgsFromEnv(name string) ([]string, error) {

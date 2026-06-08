@@ -149,6 +149,11 @@ type fetchFailureResponse struct {
 func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
+	// CEREBRO-PATCH(create-agent-from-template-capability-gate): MUL-2443 require create_agent
+	if !h.cerebroRequireCapability(w, r, workspaceID, "create_agent") {
+		return
+	}
+
 	ownerID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -190,6 +195,11 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// CEREBRO-PATCH(create-agent-from-template-runtime-allowlist): MUL-2443 — also gate runtime allowlist, mirroring CreateAgent.
+	if !h.cerebroRequireRuntimeAccess(w, r, workspaceID, runtimeUUID, req.Name) {
+		return
+	}
+
 	// Runtime validation reproduces the gating done by CreateAgent
 	// (handler/agent.go) — keep the two paths in sync. Done before fetch so
 	// we don't waste GitHub API calls for a request that's going to 403.
@@ -205,7 +215,8 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if !roleAllowed(member.Role, "owner", "admin") {
+	// CEREBRO-PATCH(create-agent-from-template-group-capability): MUL-2443 — when the cerebro group-capability seam is wired, the capability gate above is the only role check, so a group member with create_agent passes. Without the seam (upstream-only fixtures) keep the owner/admin requirement.
+	if h.GroupPermissions == nil && !roleAllowed(member.Role, "owner", "admin") {
 		writeError(w, http.StatusForbidden, "only workspace owners and admins can create agents")
 		return
 	}

@@ -17,6 +17,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+// CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717 — show runtime-pause detail on the queued execution-log status.
+import {
+  parseRuntimePauseWaitReason,
+  runtimePauseQueuedLabel,
+} from "@multica/cerebro-runtime/views";
 import { useT } from "../../i18n";
 
 // Mask gradient that fades the trigger-summary text into transparency at
@@ -257,10 +262,19 @@ function useTriggerText(task: AgentTask): string {
   return t(($) => $.execution_log.trigger_initial);
 }
 
-function useStatusLabel(status: AgentTask["status"]): string {
+function useStatusLabel(task: AgentTask): string {
   const { t } = useT("issues");
+  const status = task.status;
   switch (status) {
-    case "queued": return t(($) => $.execution_log.status_queued);
+    case "queued": {
+      const pauseWait = parseRuntimePauseWaitReason(task.wait_reason);
+      if (pauseWait) {
+        return t(($) => $.execution_log.status_queued_runtime_paused, {
+          detail: runtimePauseQueuedLabel(pauseWait),
+        });
+      }
+      return t(($) => $.execution_log.status_queued);
+    }
     case "dispatched": return t(($) => $.execution_log.status_dispatched);
     case "waiting_local_directory":
       return t(($) => $.execution_log.status_waiting_local_directory);
@@ -277,7 +291,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
-  const label = useStatusLabel(task.status);
+  const label = useStatusLabel(task);
   const trigger = useTriggerText(task);
   const time = activeTimeText(task, timeAgo);
 
@@ -359,7 +373,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
   const tone = STATUS_TONE[task.status];
-  const label = useStatusLabel(task.status);
+  const label = useStatusLabel(task);
   const trigger = useTriggerText(task);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
   const failureLabel =
@@ -377,7 +391,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     if (retrying) return;
     setRetrying(true);
     try {
-      await api.rerunIssue(issueId);
+      await api.rerunIssue(issueId, task.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
     } finally {

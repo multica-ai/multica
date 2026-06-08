@@ -126,3 +126,74 @@ INSERT INTO inbox_item (
     actor_type, actor_id, details, route
 ) VALUES ($1, 'member', $2, 'private_agent_run_request', 'action_required', $3, $4, $5, 'member', $6, $7, 'inbox')
 RETURNING *;
+
+-- name: FindRuntimePauseInboxCard :one
+-- FIR-2611 dedup guard: collapse a runtime's auth/quota bounce-loop into ONE
+-- card per (runtime, day) instead of N failed-run rows. Matches the open card
+-- for this runtime on this UTC date carried in details.
+SELECT *
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND type = 'runtime_auto_paused'
+  AND archived = false
+  AND details->>'runtime_id' = $3::text
+  AND details->>'pause_date' = $4::text
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: CreateRuntimePauseInboxCard :one
+-- FIR-2611: first auth/quota auto-pause for this runtime today. Runtime-level
+-- (issue_id NULL) so the card aggregates across every issue the runtime was
+-- working. actor is the system.
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details, route
+) VALUES ($1, 'member', $2, 'runtime_auto_paused', $3, NULL, $4, $5, 'system', NULL, $6, 'inbox')
+RETURNING *;
+
+-- name: FindManualInboxItem :one
+-- Dedup guard for manually_added items. Returns the active (non-archived) item
+-- for (recipient, issue) so AddIssueToInbox can resurface it instead of
+-- inserting a duplicate row.
+SELECT *
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND issue_id = $3
+  AND type = 'manually_added'
+  AND archived = false
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: CreateManualInboxItem :one
+-- Manually add an issue to the member's inbox. actor = the member themselves
+-- (self-created), severity = info since no action is required.
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title,
+    actor_type, actor_id, route
+) VALUES ($1, 'member', $2, 'manually_added', 'info', $3, $4, 'member', $2, 'inbox')
+RETURNING *;
+
+-- name: BumpRuntimePauseInboxCard :one
+-- FIR-2611: a later auto-pause for the same runtime on the same day. Refresh
+-- the card in place — bump the failed-run counter, update severity/title/body
+-- and the parsed reset time, and force it unread so it resurfaces — instead of
+-- adding another row.
+UPDATE inbox_item
+SET read = false,
+    severity = $2,
+    title = $3,
+    body = $4,
+    details = jsonb_set(
+        jsonb_set(
+            jsonb_set(COALESCE(details, '{}'::jsonb),
+                '{failed_runs}', to_jsonb(((COALESCE(details->>'failed_runs', '0'))::int + 1)::text)),
+            '{resets_at}', to_jsonb($5::text)),
+        '{circuit_open}', to_jsonb($6::text))
+WHERE id = $1
+RETURNING *;

@@ -78,6 +78,23 @@ WHERE paused_at IS NOT NULL
   AND unpause_at IS NOT NULL
   AND unpause_at <= now();
 
+-- name: StampQueuedTasksRuntimePauseWaitReason :exec
+-- FIR-2717: explain queued waits on the task row instead of posting an issue
+-- comment. Only touches still-queued tasks on the paused runtime.
+UPDATE agent_task_queue
+SET wait_reason = $2
+WHERE runtime_id = $1
+  AND status = 'queued';
+
+-- name: ClearQueuedTasksRuntimePauseWaitReason :exec
+-- Clears the pause stamp when the runtime unpauses. Scoped to our prefix so
+-- unrelated wait_reason values (e.g. local_directory holds) are untouched.
+UPDATE agent_task_queue
+SET wait_reason = NULL
+WHERE runtime_id = $1
+  AND status = 'queued'
+  AND wait_reason LIKE 'runtime_paused|%';
+
 -- name: SuspendActiveTasksForRuntime :many
 -- Called when a runtime is paused: marks any in-flight (dispatched/running)
 -- task as failed with failure_reason='runtime_paused'. The matching
@@ -153,6 +170,14 @@ UPDATE agent_task_queue
 SET failure_reason = 'rate_limit'
 WHERE id = $1
   AND failure_reason = 'agent_error';
+
+-- name: GetRuntimeOwnerForInbox :one
+-- Resolves the human recipient + display name for a runtime so the auto-pause
+-- aggregated inbox card (FIR-2611) can be addressed to a member. owner_id is
+-- nullable; the caller skips the card when it is NULL (no one to notify).
+SELECT id, name, workspace_id, owner_id
+FROM agent_runtime
+WHERE id = $1;
 
 -- name: CreateResumeFromPauseTask :one
 -- Like CreateRetryTask but resets the attempt counter to 1. Used when

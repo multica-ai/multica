@@ -582,16 +582,39 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
   });
 
-  it("renders the issue title leaf as a link to the issue detail page", async () => {
+  it("renders the issue title leaf as a context trigger even when linkSelfInBreadcrumb=true", async () => {
     renderIssueDetail("issue-1", { linkSelfInBreadcrumb: true });
 
-    // linkSelfInBreadcrumb wraps the identifier+title leaf in a single link to
-    // the issue's own detail route (used to open the full page from the inline
-    // Inbox pane). Cerebro renders identifier and title as two spans.
-    const identifier = await screen.findByText("TES-1");
-    const link = identifier.closest("a");
-    expect(link).toHaveAttribute("href", "/test/issues/issue-1");
-    expect(link).toHaveTextContent("Implement authentication");
+    // Non-chat issues always use IssueContextTrigger (context sheet) for the
+    // breadcrumb title, regardless of linkSelfInBreadcrumb. The context sheet
+    // is more useful than navigation in the inline Inbox pane where you're
+    // already viewing the issue.
+    const triggers = await screen.findAllByRole("button", {
+      name: "Vis fuld kontekst for opgaven",
+    });
+    expect(triggers.length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(triggers[0]!);
+    const preview = await screen.findByTestId("issue-context-description");
+    expect(preview).toHaveTextContent("Add JWT auth to the backend");
+  });
+
+  it("opens the context top-sheet when the breadcrumb title is clicked (TECH-2969)", async () => {
+    renderIssueDetail();
+
+    // Both the mobile bar and the desktop breadcrumb render their own
+    // trigger button — CSS (`md:hidden` / `hidden md:flex`) gates which
+    // one is actually visible at runtime, but jsdom keeps both in the
+    // tree. We only need one of them to drive the sheet for this test.
+    const triggers = await screen.findAllByRole("button", {
+      name: "Vis fuld kontekst for opgaven",
+    });
+    expect(triggers.length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(triggers[0]!);
+
+    // The sheet renders the description preview so a reader who is deep
+    // in the comment thread can catch up on what the issue is about.
+    const preview = await screen.findByTestId("issue-context-description");
+    expect(preview).toHaveTextContent("Add JWT auth to the backend");
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {

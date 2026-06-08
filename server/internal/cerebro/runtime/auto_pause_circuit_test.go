@@ -10,12 +10,12 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TestAutoPauseCircuitBreaker is the FIR-2476 regression: a runtime that keeps
-// hitting a usage cap (no parseable reset time) must back off with a growing
-// pause and post the retry time on the issue, then — after
+// TestAutoPauseCircuitBreaker is the FIR-2476 regression, updated for FIR-2717:
+// a runtime that keeps hitting a usage cap (no parseable reset time) must back
+// off with a growing pause WITHOUT posting routine-pause comments, then — after
 // autoPauseCircuitLimit consecutive auto-pauses without an intervening success
 // — stop auto-resuming (unpause_at NULL) and post the manual-intervention
-// notice once. A later success resets the counter.
+// notice exactly once. A later success resets the counter.
 func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if runtimeAccountTestPool == nil {
 		t.Skip("DATABASE_URL not configured; skipping circuit-breaker integration test")
@@ -46,6 +46,10 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 		_, _ = pool.Exec(bg, `DELETE FROM issue WHERE id = $1`, issueID)
 		_, _ = pool.Exec(bg, `DELETE FROM agent WHERE id = $1`, agentID)
 		_, _ = pool.Exec(bg, `UPDATE agent_runtime SET paused_at = NULL, unpause_at = NULL, pause_reason = NULL, auto_pause_count = 0 WHERE id = $1`, runtimeID)
+		// MaybeAutoPauseOnFailure calls upsertRuntimePauseCard for the shared
+		// recipient; wipe the aggregated card so siblings (TestUpsertRuntimePauseCard)
+		// see an empty inbox.
+		_, _ = pool.Exec(bg, `DELETE FROM inbox_item WHERE recipient_id = $1 AND type = 'runtime_auto_paused'`, runtimeAccountTestUserID)
 	})
 	// Start from a clean counter — the shared runtime fixture may carry state
 	// from a sibling test in this package.
@@ -96,8 +100,8 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 
 	svc := &Service{Cerebro: queries} // nil TaskSvc/Bus: the failed task is never suspended.
 
-	// Cycles below the limit: counter climbs, unpause_at stays scheduled, and
-	// the fallback backoff grows.
+	// Cycles below the limit: counter climbs, unpause_at stays scheduled, the
+	// fallback backoff grows, and each pause posts the issue-facing reason.
 	for cycle := int32(1); cycle < autoPauseCircuitLimit; cycle++ {
 		before := time.Now()
 		if !svc.MaybeAutoPauseOnFailure(ctx, loadTask()) {
@@ -121,12 +125,12 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 			t.Fatalf("cycle %d: backoff %s, want ≈%s", cycle, got, want)
 		}
 		if c := countComments(); c != int(cycle) {
-			t.Fatalf("cycle %d: expected %d pause notices, got %d", cycle, cycle, c)
+			t.Fatalf("cycle %d: expected %d notice(s), got %d", cycle, cycle, c)
 		}
 	}
 
 	// The trip cycle: counter hits the limit, unpause_at clears (manual-only),
-	// and the manual-intervention notice is posted.
+	// and the trip reason is posted.
 	if !svc.MaybeAutoPauseOnFailure(ctx, loadTask()) {
 		t.Fatal("trip cycle: expected a pause")
 	}
@@ -144,7 +148,8 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 		t.Fatalf("trip cycle: expected %d notices, got %d", autoPauseCircuitLimit, c)
 	}
 
-	// Past the trip: circuit stays open, no duplicate notice.
+	// Past the trip: circuit stays open and still records why this attempt
+	// failed without scheduling auto-resume.
 	if !svc.MaybeAutoPauseOnFailure(ctx, loadTask()) {
 		t.Fatal("post-trip cycle: expected a pause")
 	}
@@ -155,8 +160,8 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if unpauseAt.Valid {
 		t.Fatal("post-trip: unpause_at must stay NULL")
 	}
-	if c := countComments(); c != int(autoPauseCircuitLimit) {
-		t.Fatalf("post-trip: notice must not repeat, got %d", c)
+	if c := countComments(); c != int(autoPauseCircuitLimit+1) {
+		t.Fatalf("post-trip: expected %d notices, got %d", autoPauseCircuitLimit+1, c)
 	}
 
 	// A successful run resets the counter.

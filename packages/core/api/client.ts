@@ -60,6 +60,7 @@ import type {
   CreateRuntimeSetupTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  IssueCommentCosts, // CEREBRO-PATCH(issue-comment-cost-client): FIR-39
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -90,6 +91,7 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatSessionUsage,
+  ChatSessionMessageCosts, // CEREBRO-PATCH(chat-message-cost-client): FIR-31
   PendingChatTasksResponse,
   SendChatMessageResponse,
   Channel,
@@ -158,6 +160,8 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  // CEREBRO-PATCH(cerebro-focus-list-client): TECH-2947
+  FocusListItem,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -233,6 +237,9 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
 } from "./schemas";
+// CEREBRO-PATCH(api-client-active-terminal-session): inline zod schema for active terminal session lookup.
+import { z } from "zod";
+const ActiveTerminalSessionSchema = z.object({ session_id: z.string(), attach_path: z.string(), created_at: z.string() }).loose();
 
 /** Identifies the calling client to the server.
  *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
@@ -852,13 +859,28 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-credentials-client): JEH-1199 read-only credential
+  // CEREBRO-PATCH(cerebro-credentials-client): JEH-1199 credential
   // registry methods. Bodies are `unknown` so the cerebro-credentials package
   // owns the schema via parseWithFallback (the API Response Compatibility
-  // rule in CLAUDE.md). Mutating endpoints (create/reveal/rotate/delete)
-  // are not exposed here yet — the admin UI today only reads.
+  // rule in CLAUDE.md).
   async listCerebroCredentials<T = unknown>(wsId: string): Promise<T> {
     return this.fetch<T>(`/api/workspaces/${wsId}/credentials`);
+  }
+  async createCerebroCredential<T = unknown>(
+    wsId: string,
+    body: {
+      type: string;
+      name: string;
+      description?: string;
+      value: string;
+      metadata?: unknown;
+      expires_at?: string | null;
+    },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/credentials`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
   async listCerebroCredentialAudit<T = unknown>(
     wsId: string,
@@ -2160,6 +2182,30 @@ export class ApiClient {
     );
   }
 
+  // CEREBRO-PATCH(api-client-terminal): cerebro interactive-terminal endpoints.
+  async getRuntimePresentationMode(runtimeId: string): Promise<{ runtime_id: string; presentation_mode: "headless" | "interactive" }> {
+    return this.fetch(`/api/cerebro/terminal/runtimes/${runtimeId}/presentation-mode`);
+  }
+  async setRuntimePresentationMode(runtimeId: string, mode: "headless" | "interactive"): Promise<{ runtime_id: string; presentation_mode: "headless" | "interactive" }> {
+    return this.fetch(`/api/cerebro/terminal/runtimes/${runtimeId}/presentation-mode`, { method: "PUT", body: JSON.stringify({ presentation_mode: mode }) });
+  }
+  async createTerminalSession(runtimeId: string, command?: string[]): Promise<{ id: string; runtime_id: string; command: string[]; created_at: string; attach_path: string }> {
+    return this.fetch(`/api/cerebro/terminal/sessions`, { method: "POST", body: JSON.stringify({ runtime_id: runtimeId, command }) });
+  }
+  async deleteTerminalSession(sessionId: string): Promise<void> {
+    await this.fetch(`/api/cerebro/terminal/sessions/${sessionId}`, { method: "DELETE" });
+  }
+  terminalAttachUrl(attachPath: string): string {
+    const base = this.baseUrl.replace(/^http/, "ws");
+    return `${base}${attachPath}`;
+  }
+  // CEREBRO-PATCH(api-client-active-terminal-session): runtime-keyed lookup of a daemon-published terminal session.
+  async getActiveTerminalSession(runtimeId: string): Promise<{ session_id: string; attach_path: string; created_at: string } | null> {
+    const raw = await this.fetch<unknown>(`/api/cerebro/terminal/runtimes/${runtimeId}/session`);
+    if (raw === undefined) return null; // 204 No Content path
+    return parseWithFallback(raw, ActiveTerminalSessionSchema, null, { endpoint: "GET /api/cerebro/terminal/runtimes/:id/session" });
+  }
+
   async updateRuntimeSandbox(
     runtimeId: string,
     sandboxEnabled: boolean | null,
@@ -2442,6 +2488,11 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }
 
+  // CEREBRO-PATCH(issue-comment-cost-client): FIR-39 per-comment cost badge.
+  async getIssueCommentCosts(issueId: string): Promise<IssueCommentCosts> {
+    return this.fetch(`/api/issues/${issueId}/comment-costs`);
+  }
+
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
@@ -2504,9 +2555,10 @@ export class ApiClient {
     );
   }
 
-  async rerunIssue(issueId: string): Promise<AgentTask> {
+  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
+      body: taskId ? JSON.stringify({ task_id: taskId }) : undefined,
     });
   }
 
@@ -2583,6 +2635,56 @@ export class ApiClient {
   // InboxItem (the row is removed from the active inbox on settle).
   async runPrivateAgentRunRequest(id: string): Promise<{ id: string; status: string }> {
     return this.fetch(`/api/inbox/${id}/run-private-agent`, { method: "POST" });
+  }
+
+  // CEREBRO-PATCH(cerebro-inbox-add-issue): manually place an issue in the member's inbox.
+  async addIssueToInbox(issueId: string): Promise<InboxItem> {
+    return this.fetch("/api/inbox/add-issue", {
+      method: "POST",
+      body: JSON.stringify({ issue_id: issueId }),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-focus-list-client): TECH-2947 — personal focus list API.
+  async listFocusListItems(): Promise<FocusListItem[]> {
+    return this.fetch("/api/cerebro/focus-list");
+  }
+
+  async createFocusListItem(params: { text: string; issueId?: string | null }): Promise<FocusListItem> {
+    return this.fetch("/api/cerebro/focus-list", {
+      method: "POST",
+      body: JSON.stringify({ text: params.text, issue_id: params.issueId ?? null }),
+    });
+  }
+
+  async updateFocusListItem(id: string, params: { text?: string; issueId?: string | null }): Promise<FocusListItem> {
+    return this.fetch(`/api/cerebro/focus-list/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text: params.text, issue_id: params.issueId ?? null }),
+    });
+  }
+
+  async markFocusListItemDone(id: string): Promise<FocusListItem> {
+    return this.fetch(`/api/cerebro/focus-list/${id}/done`, { method: "POST" });
+  }
+
+  async snoozeFocusListItem(id: string, until: Date): Promise<FocusListItem> {
+    return this.fetch(`/api/cerebro/focus-list/${id}/snooze`, {
+      method: "POST",
+      body: JSON.stringify({ until: until.toISOString() }),
+    });
+  }
+
+  async deleteFocusListItem(id: string): Promise<void> {
+    return this.fetch(`/api/cerebro/focus-list/${id}`, { method: "DELETE" });
+  }
+
+  // CEREBRO-PATCH(cerebro-focus-list-client): TECH-2947 reorder for drag-and-drop priorities.
+  async reorderFocusListItems(ids: string[]): Promise<void> {
+    return this.fetch(`/api/cerebro/focus-list/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
   }
 
   async getUnreadInboxCount(): Promise<{ count: number }> {
@@ -2673,7 +2775,8 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string }): Promise<Workspace> {
+  // CEREBRO-PATCH(workspace-avatar-update): FIR-2580 — accept avatar_url ("" clears the logo).
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -3031,6 +3134,11 @@ export class ApiClient {
 
   async getChatSessionUsage(sessionId: string): Promise<ChatSessionUsage> {
     return this.fetch(`/api/chat/sessions/${sessionId}/usage`);
+  }
+
+  // CEREBRO-PATCH(chat-message-cost-client): FIR-31 per-reply cost badge.
+  async getChatSessionMessageCosts(sessionId: string): Promise<ChatSessionMessageCosts> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/message-costs`);
   }
 
   async getPendingChatTask(sessionId: string): Promise<ChatPendingTask> {
@@ -3680,5 +3788,21 @@ export class ApiClient {
   async generateAgentAvatar(agentName: string, customPrompt?: string): Promise<{ url: string }> {
     const body = JSON.stringify({ agent_name: agentName, custom_prompt: customPrompt });
     return this.fetch("/api/agents/generate-avatar", { method: "POST", body });
+  }
+
+  // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (up to 5 square icon variants).
+  async generateWorkspaceLogos(
+    workspaceId: string,
+    prompt: string,
+    count = 5,
+  ): Promise<{ urls: string[] }> {
+    const body = JSON.stringify({ prompt, count });
+    const res = await this.fetch<{ urls?: string[] }>(
+      `/api/workspaces/${workspaceId}/generate-logo`,
+      { method: "POST", body },
+    );
+    // Defensive: tolerate a malformed/empty body so the UI shows a clean
+    // "no images" state instead of throwing (API Response Compatibility).
+    return { urls: Array.isArray(res?.urls) ? res.urls.filter((u) => typeof u === "string") : [] };
   }
 }

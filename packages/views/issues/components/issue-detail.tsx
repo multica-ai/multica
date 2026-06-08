@@ -4,6 +4,8 @@
 // CEREBRO-PATCH(channels-flag-gate): cerebro_channels feature flag controls channel/DM chrome
 
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
@@ -42,6 +44,8 @@ import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-lates
 import { useNavScrollState } from "@multica/cerebro-ui/hooks/use-nav-scroll-state";
 // CEREBRO-PATCH(issue-detail-highlight-scroll-hook): JEH-1002 retry-based inbox→comment scroll lives in cerebro-ui (replaces the prior single-shot inline effect).
 import { useHighlightCommentScroll } from "@multica/cerebro-ui/hooks/use-highlight-comment-scroll";
+// CEREBRO-PATCH(issue-detail-context-trigger-import): TECH-2969 — click title in topbar to open context top-sheet.
+import { IssueContextTrigger } from "@multica/cerebro-ui/components/issue-context-trigger";
 // CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — unarchive button rendered in detail toolbar when host embeds IssueDetail in archived inbox view.
 import { CerebroUnarchiveToolbarButton } from "@multica/cerebro-inbox";
 import {
@@ -285,15 +289,6 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
-}
-
-// Render server-returned cents as USD with a precision floor so single-digit
-// cent runs don't render as "$0.00".
-function formatCostCents(cents: number): string {
-  const usd = cents / 100;
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
 }
 
 function TimelineSkeleton() {
@@ -650,6 +645,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
   const workspace = useCurrentWorkspace();
+  // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 — cost rendered in the
+  // workspace display currency (standard 2-decimal precision, as before for USD).
+  const { formatCents: formatCostCents } = useCostFormatter();
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
@@ -1194,6 +1192,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     }
   };
 
+  // CEREBRO-PATCH(issue-detail-column-ref): TECH-2969 — ref lets IssueContextTrigger portal its panel into the issue column only.
+  const issueColumnRef = useRef<HTMLDivElement>(null);
+
   if (loading) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
@@ -1685,11 +1686,20 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   );
 
   const detailContent = (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div ref={issueColumnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
           {/* CEREBRO-PATCH(issue-detail-mobile-topbar-title): Mobile shows the issue title only; long titles scroll horizontally instead of truncating (JEH-1515). */}
           <div className="flex flex-1 items-center gap-1.5 min-w-0 md:hidden">
-            <span className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-medium text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{displayTitle}</span>
+            {/* CEREBRO-PATCH(issue-detail-context-trigger-mobile): TECH-2969 — tap title on mobile to open context top-sheet. */}
+            <IssueContextTrigger
+              fullTitle={displayTitle}
+              description={issue.description}
+              identifier={isChat ? null : issue.identifier}
+              className="min-w-0 flex-1"
+              containerRef={issueColumnRef}
+            >
+              <span className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-medium text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{displayTitle}</span>
+            </IssueContextTrigger>
           </div>
           <div className="hidden md:flex flex-1 items-center gap-1.5 min-w-0 overflow-x-auto">
             {workspace && (
@@ -1733,43 +1743,37 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            {linkSelfInBreadcrumb ? (
-              <AppLink
-                href={isChat ? paths.channelDetail(issue.id) : paths.issueDetail(issue.id)}
-                className="flex min-w-0 items-center gap-1.5 hover:text-foreground/80 transition-colors"
-              >
-                {isChat ? (
+            {isChat ? (
+              linkSelfInBreadcrumb ? (
+                <AppLink
+                  href={paths.channelDetail(issue.id)}
+                  className="flex min-w-0 items-center gap-1.5 hover:text-foreground/80 transition-colors"
+                >
                   <span className="truncate font-medium text-foreground">
                     {isChannel ? `# ${displayTitle}` : displayTitle}
                   </span>
-                ) : (
-                  <>
-                    <span className="shrink-0 text-muted-foreground">
-                      {issue.identifier}
-                    </span>
-                    <span className="truncate font-medium text-foreground">
-                      {displayTitle}
-                    </span>
-                  </>
-                )}
-              </AppLink>
+                </AppLink>
+              ) : (
+                <span className="truncate font-medium text-foreground">
+                  {isChannel ? `# ${displayTitle}` : displayTitle}
+                </span>
+              )
             ) : (
-              <>
-                {isChat ? (
-                  <span className="truncate font-medium text-foreground">
-                    {isChannel ? `# ${displayTitle}` : displayTitle}
-                  </span>
-                ) : (
-                  <>
-                    <span className="shrink-0 text-muted-foreground">
-                      {issue.identifier}
-                    </span>
-                    <span className="truncate font-medium text-foreground">
-                      {displayTitle}
-                    </span>
-                  </>
-                )}
-              </>
+              /* CEREBRO-PATCH(issue-detail-context-trigger-desktop): TECH-2969 — click identifier+title in desktop breadcrumb to open context top-sheet. Also fires from inbox (linkSelfInBreadcrumb=true) — non-chat issues always use the context trigger. */
+              <IssueContextTrigger
+                fullTitle={displayTitle}
+                description={issue.description}
+                identifier={issue.identifier}
+                className="min-w-0"
+                containerRef={issueColumnRef}
+              >
+                <span className="shrink-0 text-muted-foreground">
+                  {issue.identifier}
+                </span>
+                <span className="truncate font-medium text-foreground">
+                  {displayTitle}
+                </span>
+              </IssueContextTrigger>
             )}
             {/* CEREBRO-PATCH(issue-private-badge-header): inherited-privacy badge in issue header (JEH-1750). */}
             {issue.is_private && <PrivateBadge size="sm" className="ml-1 shrink-0" />}

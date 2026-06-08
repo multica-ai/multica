@@ -32,6 +32,13 @@ type Sidecar struct {
 	Surface         string
 	TriggerUserID   string
 	TriggerUserName string
+	// Display titles (FIR-2763 M1): daemon-resolved human-readable names so the
+	// registry trace-list page never has to render bare UUIDs. Empty when the
+	// daemon could not resolve them (e.g. deleted issue) — the registry stores
+	// null and the UI falls back to the ID column.
+	IssueTitle       string
+	ParentIssueTitle string
+	ProjectName      string
 }
 
 // Valid reports whether the sidecar carries the minimum the registry requires:
@@ -55,42 +62,48 @@ func (s Sidecar) Key() string {
 // "trace_meta" so the endpoint can distinguish the meta line from transcript
 // events. Empty strings are omitted so the registry reads them as null.
 type metaLine struct {
-	Type            string `json:"type"`
-	Runtime         string `json:"runtime"`
-	TaskID          string `json:"task_id"`
-	SessionID       string `json:"session_id"`
-	IssueID         string `json:"issue_id,omitempty"`
-	AgentID         string `json:"agent_id,omitempty"`
-	AgentName       string `json:"agent_name,omitempty"`
-	WorkspaceID     string `json:"workspace_id,omitempty"`
-	ProjectID       string `json:"project_id,omitempty"`
-	AutopilotID     string `json:"autopilot_id,omitempty"`
-	ParentTaskID    string `json:"parent_task_id,omitempty"`
-	CreatedByType   string `json:"created_by_type,omitempty"`
-	Surface         string `json:"surface,omitempty"`
-	TriggerUserID   string `json:"trigger_user_id,omitempty"`
-	TriggerUserName string `json:"trigger_user_name,omitempty"`
+	Type             string `json:"type"`
+	Runtime          string `json:"runtime"`
+	TaskID           string `json:"task_id"`
+	SessionID        string `json:"session_id"`
+	IssueID          string `json:"issue_id,omitempty"`
+	AgentID          string `json:"agent_id,omitempty"`
+	AgentName        string `json:"agent_name,omitempty"`
+	WorkspaceID      string `json:"workspace_id,omitempty"`
+	ProjectID        string `json:"project_id,omitempty"`
+	AutopilotID      string `json:"autopilot_id,omitempty"`
+	ParentTaskID     string `json:"parent_task_id,omitempty"`
+	CreatedByType    string `json:"created_by_type,omitempty"`
+	Surface          string `json:"surface,omitempty"`
+	TriggerUserID    string `json:"trigger_user_id,omitempty"`
+	TriggerUserName  string `json:"trigger_user_name,omitempty"`
+	IssueTitle       string `json:"issue_title,omitempty"`
+	ParentIssueTitle string `json:"parent_issue_title,omitempty"`
+	ProjectName      string `json:"project_name,omitempty"`
 }
 
 // MetaLine returns the JSON-encoded trace_meta object (no trailing newline)
 // that prefixes the uploaded JSONL batch.
 func (s Sidecar) MetaLine() ([]byte, error) {
 	b, err := json.Marshal(metaLine{
-		Type:            "trace_meta",
-		Runtime:         s.Runtime,
-		TaskID:          s.TaskID,
-		SessionID:       s.SessionID,
-		IssueID:         s.IssueID,
-		AgentID:         s.AgentID,
-		AgentName:       s.AgentName,
-		WorkspaceID:     s.WorkspaceID,
-		ProjectID:       s.ProjectID,
-		AutopilotID:     s.AutopilotID,
-		ParentTaskID:    s.ParentTaskID,
-		CreatedByType:   s.CreatedByType,
-		Surface:         s.Surface,
-		TriggerUserID:   s.TriggerUserID,
-		TriggerUserName: s.TriggerUserName,
+		Type:             "trace_meta",
+		Runtime:          s.Runtime,
+		TaskID:           s.TaskID,
+		SessionID:        s.SessionID,
+		IssueID:          s.IssueID,
+		AgentID:          s.AgentID,
+		AgentName:        s.AgentName,
+		WorkspaceID:      s.WorkspaceID,
+		ProjectID:        s.ProjectID,
+		AutopilotID:      s.AutopilotID,
+		ParentTaskID:     s.ParentTaskID,
+		CreatedByType:    s.CreatedByType,
+		Surface:          s.Surface,
+		TriggerUserID:    s.TriggerUserID,
+		TriggerUserName:  s.TriggerUserName,
+		IssueTitle:       s.IssueTitle,
+		ParentIssueTitle: s.ParentIssueTitle,
+		ProjectName:      s.ProjectName,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal trace_meta: %w", err)

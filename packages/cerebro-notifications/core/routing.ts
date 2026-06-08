@@ -38,6 +38,10 @@ export type EmittedNotificationType = Extract<
   | "status_changed"
   | "priority_changed"
   | "due_date_changed"
+  // TECH-2961: agent-authored comments split by the tag they carry.
+  | "agent_comment_no_tag"
+  | "agent_comment_member_tag"
+  | "agent_comment_agent_tag"
 >;
 
 // Two types route differently depending on whether the recipient is the
@@ -66,7 +70,13 @@ export type RoutingKey =
   | "priority_changed.follower"
   // Fired by the server-side sweeper when an issue's date arrives (the day-of).
   | "due_date_reminder"
-  | "start_date_reminder";
+  | "start_date_reminder"
+  // TECH-2961: agent-authored comments are split by the tag they carry, so
+  // monologues, member-tag escalations and agent-to-agent hand-offs can be
+  // controlled independently of one another and of human comment traffic.
+  | "agent_comment_no_tag"
+  | "agent_comment_member_tag"
+  | "agent_comment_agent_tag";
 
 // Per-channel default when the user has no override for a given key. Mirrors
 // `defaultChannelChoices` on the server — keep in sync.
@@ -90,6 +100,9 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "priority_changed.follower": "off",
     due_date_reminder: "on",
     start_date_reminder: "on",
+    agent_comment_no_tag: "off",
+    agent_comment_member_tag: "on",
+    agent_comment_agent_tag: "on",
   },
   notifications: {
     issue_assigned: "off",
@@ -107,6 +120,9 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "priority_changed.follower": "on",
     due_date_reminder: "off",
     start_date_reminder: "off",
+    agent_comment_no_tag: "on",
+    agent_comment_member_tag: "on",
+    agent_comment_agent_tag: "on",
   },
   mobile: {
     issue_assigned: "on",
@@ -124,6 +140,9 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "priority_changed.follower": "off",
     due_date_reminder: "on",
     start_date_reminder: "on",
+    agent_comment_no_tag: "off",
+    agent_comment_member_tag: "on",
+    agent_comment_agent_tag: "off",
   },
   desktop: {
     issue_assigned: "on",
@@ -141,6 +160,9 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "priority_changed.follower": "off",
     due_date_reminder: "on",
     start_date_reminder: "on",
+    agent_comment_no_tag: "off",
+    agent_comment_member_tag: "on",
+    agent_comment_agent_tag: "off",
   },
   // Mail is forward-compatible; no events fire by default until the
   // transport is built.
@@ -160,6 +182,9 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "priority_changed.follower": "off",
     due_date_reminder: "off",
     start_date_reminder: "off",
+    agent_comment_no_tag: "off",
+    agent_comment_member_tag: "off",
+    agent_comment_agent_tag: "off",
   },
 };
 
@@ -180,9 +205,9 @@ export const DEFAULT_CHANNEL_TRANSPORT: Record<Channel, ChannelTransport> = {
   mail: { digest: "daily" },
 };
 
-// Read the master "send a mobile push for everything that lands in inbox"
-// toggle out of the preferences blob. When true, the server resolves mobile
-// routing by mirroring the inbox channel's per-key resolution — see
+// Read the master "send a mobile push for primary inbox events" toggle out
+// of the preferences blob. When true, the server resolves mobile routing by
+// checking whether the event's primary routing channel is inbox — see
 // `resolveChannelChoice` in server/cmd/server/notification_routing.go (the
 // JEH-737 master toggle). Mirror of the JSON path
 // `preferences.notifications.notify_all_mobile_inbox`.

@@ -397,4 +397,47 @@ describe("NewMessageModal", () => {
     // Star toggle did not start a DM either.
     expect(mockCreateChannel).not.toHaveBeenCalled();
   });
+
+  // CEREBRO-PATCH(new-message-modal-add-all-members-test): FIR-2660 — "Add everyone" one-click affordance for #general-style channels.
+  it("group mode shows 'Add everyone' and picks every workspace member in one click", async () => {
+    const user = userEvent.setup();
+    render(<NewMessageModal open onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: /^Switch to channel$/ }));
+
+    const addAll = screen.getByRole("button", { name: /Add all workspace members/i });
+    await user.click(addAll);
+
+    // Footer shows the count = number of non-self members (Alice, Mads).
+    expect(screen.getByText("Create channel (2)")).toBeInTheDocument();
+
+    // The button hides once everyone is picked.
+    expect(
+      screen.queryByRole("button", { name: /Add all workspace members/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("'Add everyone' is hidden in DM mode (default) and skips agents", async () => {
+    const user = userEvent.setup();
+    render(<NewMessageModal open onClose={() => {}} />);
+
+    // DM mode: button not present at all.
+    expect(
+      screen.queryByRole("button", { name: /Add all workspace members/i }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Switch to channel$/ }));
+    await user.click(screen.getByRole("button", { name: /Add all workspace members/i }));
+    await user.click(screen.getByText("Create channel (2)"));
+
+    await waitFor(() => {
+      expect(mockCreateChannel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "channel",
+          member_ids: ["alice", "mads"],
+          agent_ids: [],
+        }),
+      );
+    });
+  });
 });

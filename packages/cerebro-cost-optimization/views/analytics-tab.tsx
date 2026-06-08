@@ -6,6 +6,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { COST_SAVINGS, type CostSavingKey } from "../registry";
 import {
+  formatAnalyticsPerRun,
   formatAnalyticsSaved,
   type AnalyticsIssueRow,
   type AnalyticsSavingSummary,
@@ -38,16 +39,25 @@ function SummaryRow({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">{label}</span>
-        <Badge variant="secondary" className="text-xs">
+        <Badge variant="secondary" className="text-xs tabular-nums">
           {row.runs30d} runs · 30d
         </Badge>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-        Saved: {formatAnalyticsSaved(row.metric, row.savedUnits30d, row.savedCents30d)}
+      <p className="mt-1 text-sm font-semibold tabular-nums">
+        {formatAnalyticsPerRun(
+          row.metric,
+          row.savedUnits30d,
+          row.savedCents30d,
+          row.runs30d,
+        )}{" "}
+        <span className="text-xs font-normal text-muted-foreground">avg · 30d</span>
+      </p>
+      <p className="text-xs text-muted-foreground tabular-nums">
+        7d total:{" "}
+        {formatAnalyticsSaved(row.metric, row.savedUnits7d, row.savedCents7d)}
         {" · "}
-        7d: {formatAnalyticsSaved(row.metric, row.savedUnits7d, row.savedCents7d)}
-        {" · "}
-        Today: {formatAnalyticsSaved(row.metric, row.savedUnitsToday, row.savedCentsToday)}
+        today:{" "}
+        {formatAnalyticsSaved(row.metric, row.savedUnitsToday, row.savedCentsToday)}
       </p>
     </button>
   );
@@ -78,6 +88,8 @@ function IssueList({
     );
   }
   const issues = issuesQuery.data ?? [];
+  const metric =
+    COST_SAVINGS.find((s) => s.key === savingKey)?.metric ?? "input_tokens";
   if (issues.length === 0) {
     return (
       <p className="text-xs text-muted-foreground italic">
@@ -104,7 +116,12 @@ function IssueList({
             </span>{" "}
             {issue.issueTitle || "(untitled)"}
             <span className="float-right tabular-nums text-muted-foreground">
-              {issue.runCount} runs
+              {formatAnalyticsPerRun(
+                metric,
+                issue.savedUnits,
+                issue.savedCents,
+                issue.runCount,
+              )}
             </span>
           </button>
         </li>
@@ -149,7 +166,7 @@ function RunList({
           <tr className="border-b text-left text-muted-foreground">
             <th className="py-1 pr-2">When</th>
             <th className="py-1 pr-2">Mode</th>
-            <th className="py-1 pr-2">Saved</th>
+            <th className="py-1 pr-2">Saved this run</th>
             <th className="py-1">Arms</th>
           </tr>
         </thead>
@@ -208,9 +225,9 @@ export function CostOptimizationAnalyticsTab() {
   return (
     <section className="space-y-6">
       <p className="text-xs text-muted-foreground">
-        Estimated vs. measured savings per agent saving. Use the dashboard for
-        holdout A/B when a control arm exists; drill down by saving to see top
-        issues and individual runs from measurement data.
+        Savings are shown as tokens per run (not platform-call counts). Use the
+        dashboard for holdout A/B when a control arm exists; drill down by saving
+        to see top issues and per-run token savings.
       </p>
 
       <CostOptimizationDashboard />

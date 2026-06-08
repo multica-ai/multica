@@ -72,6 +72,25 @@ describe("preprocessLinks — CJK punctuation boundary", () => {
     );
   });
 
+  it("strips trailing ** from a bold-wrapped URL", () => {
+    const out = preprocessLinks("**https://console.cloud.google.com/billing**");
+    expect(out).toBe(
+      "**[https://console.cloud.google.com/billing](https://console.cloud.google.com/billing)**",
+    );
+  });
+
+  it("strips trailing ** from bold URL mid-sentence", () => {
+    const out = preprocessLinks("Gå til **https://console.cloud.google.com/billing** og log ind");
+    expect(out).toBe(
+      "Gå til **[https://console.cloud.google.com/billing](https://console.cloud.google.com/billing)** og log ind",
+    );
+  });
+
+  it("does not strip * from a single-star wrapped URL (linkify-it handles these correctly)", () => {
+    const out = preprocessLinks("*https://example.com*");
+    expect(out).toBe("*[https://example.com](https://example.com)*");
+  });
+
   it("does not re-link an already-linked URL that contains 。", () => {
     // If a user or upstream already wrote [text](url。), we leave it alone.
     const input = "见 [link](https://example.com/x。)后文";

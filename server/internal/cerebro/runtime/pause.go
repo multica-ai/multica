@@ -103,6 +103,22 @@ func (s *Service) PauseRuntime(ctx context.Context, runtimeID pgtype.UUID, opts 
 		)
 	}
 
+	// FIR-2717: surface pause reason on queued tasks instead of issue comments.
+	unpauseTime := time.Time{}
+	if rt.UnpauseAt.Valid {
+		unpauseTime = rt.UnpauseAt.Time
+	}
+	waitReason := FormatRuntimePauseWaitReason(textOrEmpty(rt.PauseReason), unpauseTime, !rt.UnpauseAt.Valid)
+	if err := s.Cerebro.StampQueuedTasksRuntimePauseWaitReason(ctx, cerebrodb.StampQueuedTasksRuntimePauseWaitReasonParams{
+		RuntimeID:  runtimeID,
+		WaitReason: pgtype.Text{String: waitReason, Valid: true},
+	}); err != nil {
+		slog.Warn("pause runtime: stamp queued wait_reason failed",
+			"runtime_id", util.UUIDToString(runtimeID),
+			"error", err,
+		)
+	}
+
 	s.publishRuntimePaused(rt)
 	return toState(rt), nil
 }
@@ -131,6 +147,13 @@ func (s *Service) UnpauseRuntime(ctx context.Context, runtimeID pgtype.UUID) (ha
 		pausedAt = snap.PausedAt
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		slog.Warn("unpause runtime: failed to snapshot paused_at",
+			"runtime_id", util.UUIDToString(runtimeID),
+			"error", err,
+		)
+	}
+
+	if err := s.Cerebro.ClearQueuedTasksRuntimePauseWaitReason(ctx, runtimeID); err != nil {
+		slog.Warn("unpause runtime: clear queued wait_reason failed",
 			"runtime_id", util.UUIDToString(runtimeID),
 			"error", err,
 		)

@@ -2,8 +2,8 @@
 
 // CEREBRO-PATCH(workspace-tab-cerebro): cerebro modification of upstream file
 
-import { useEffect, useState, useCallback } from "react";
-import { Cloud, KeyRound, LogOut, Save, Wrench, CheckCircle2, FlaskConical } from "lucide-react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Cloud, KeyRound, LogOut, Save, Wrench, CheckCircle2, FlaskConical, Camera, Loader2, Sparkles, Check, Palette } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -20,6 +20,15 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@multica/ui/components/ui/alert-dialog";
+// CEREBRO-PATCH(workspace-logo-generate): FIR-2580 — AI logo generation modal.
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -43,6 +52,12 @@ import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { KillSwitchSection } from "@multica/cerebro-budgets/views";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(workspace-logo-uploader): FIR-2580 — workspace logo upload UI.
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(workspace-accent-color): TECH-3002 — color utilities for accent color section.
+import { hexToHue, hueToOklchPair, hueToHex, extractHueFromUrl } from "@multica/cerebro-workspace-branding";
 
 interface FirtalGatewaySettings {
   enabled?: boolean;
@@ -161,6 +176,8 @@ export function WorkspaceTab() {
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
+  // CEREBRO-PATCH(workspace-logo-uploader): FIR-2580 — gate the logo uploader behind the feature flag.
+  const logoEnabled = useFeatureFlag("cerebro_workspace_logo");
   const isOwner = currentMember?.role === "owner";
   const gatewaySettings = getFirtalGatewaySettings(workspace);
   const gatewayApiKeyConfigured = gatewaySettings.api_key_configured === true;
@@ -188,7 +205,10 @@ export function WorkspaceTab() {
     setGatewayApiKey("");
     setGatewayModel(gatewaySettings.model ?? "");
     setGoogleServiceAccountJson(""); // CEREBRO-PATCH(workspace-tool-credentials)
-  }, [workspace]);
+    // CEREBRO-PATCH(workspace-logo-uploader): FIR-2580 — key the form-reset on the
+    // workspace identity, not the whole object. A logo upload mutates the cached
+    // workspace (new reference) and would otherwise wipe unsaved name/description edits.
+  }, [workspace?.id]);
 
   // Letters + digits only, uppercase, capped at 10 chars. The backend
   // uppercases and trims on its side too; this keeps the visible value aligned.
@@ -389,6 +409,10 @@ export function WorkspaceTab() {
 
         <Card>
           <CardContent className="space-y-3">
+            {/* CEREBRO-PATCH(workspace-logo-uploader): FIR-2580 — logo uploader at the top of General; owner/admin only. */}
+            {logoEnabled && canManageWorkspace && (
+              <WorkspaceLogoUploader workspace={workspace} canManage={canManageWorkspace} />
+            )}
             <div>
               <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.name_label)}</Label>
               <Input
@@ -462,6 +486,9 @@ export function WorkspaceTab() {
           </CardContent>
         </Card>
       </section>
+
+      {/* CEREBRO-PATCH(workspace-accent-color): TECH-3002 — accent color picker section. */}
+      <WorkspaceColorSection workspace={workspace} canManage={canManageWorkspace} />
 
       <section className="space-y-4">
         <div className="flex items-center gap-2">
@@ -791,6 +818,452 @@ export function WorkspaceTab() {
         }}
         onConfirm={handleConfirmDelete}
       />
+    </div>
+  );
+}
+
+// CEREBRO-PATCH(workspace-accent-color): TECH-3002 — accent color picker section.
+// Shows light/dark sidebar preview swatches and injects a live preview <style>
+// that overrides --sidebar while the settings page is open. On save, writes
+// accent_color_manual to workspace.settings. Reset clears the manual override.
+// Fallback hash color (same algorithm as CerebroWorkspaceSidebarColor) ensures
+// the picker always has a sensible starting value even with no logo.
+const FALLBACK_HUES = [240, 155, 295, 35, 15, 205];
+function fallbackHueForId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  return FALLBACK_HUES[Math.abs(h) % FALLBACK_HUES.length]!;
+}
+const ACCENT_PREVIEW_STYLE_ID = "cerebro-ws-accent-preview";
+
+function WorkspaceColorSection({
+  workspace,
+  canManage,
+}: {
+  workspace: Workspace;
+  canManage: boolean;
+}) {
+  const { t } = useT("settings");
+  const qc = useQueryClient();
+
+  const manualHex = typeof workspace.settings?.accent_color_manual === "string"
+    ? workspace.settings.accent_color_manual
+    : null;
+  const autoHex = typeof workspace.settings?.accent_color_auto === "string"
+    ? workspace.settings.accent_color_auto
+    : null;
+  const fallbackHex = hueToHex(fallbackHueForId(workspace.id));
+  const effectiveHex = manualHex ?? autoHex ?? fallbackHex;
+
+  const [localHex, setLocalHex] = useState(effectiveHex);
+  const [saving, setSaving] = useState(false);
+
+  // Sync local color when workspace settings change (e.g. after auto-extract completes).
+  useEffect(() => {
+    setLocalHex(manualHex ?? autoHex ?? fallbackHex);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualHex, autoHex, workspace.id]);
+
+  // Live preview: inject a temporary sidebar color override while on this page.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const [dark, light] = hueToOklchPair(hexToHue(localHex));
+    let el = document.getElementById(ACCENT_PREVIEW_STYLE_ID) as HTMLStyleElement | null;
+    if (!el) {
+      el = document.createElement("style");
+      el.id = ACCENT_PREVIEW_STYLE_ID;
+      document.head.appendChild(el);
+    }
+    el.textContent = `:root { --sidebar: ${light}; }\n@media (prefers-color-scheme: dark) { :root { --sidebar: ${dark}; } }`;
+    return () => { document.getElementById(ACCENT_PREVIEW_STYLE_ID)?.remove(); };
+  }, [localHex]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: { ...workspace.settings, accent_color_manual: localHex },
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      toast.success(t(($) => $.workspace.accent_color_toast_saved));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.accent_color_toast_failed));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setSaving(true);
+    try {
+      const restSettings = Object.fromEntries(
+        Object.entries(workspace.settings ?? {}).filter(([k]) => k !== "accent_color_manual"),
+      );
+      const updated = await api.updateWorkspace(workspace.id, { settings: restSettings });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      setLocalHex(autoHex ?? fallbackHex);
+      toast.success(t(($) => $.workspace.accent_color_toast_reset));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.accent_color_toast_failed));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const [previewDark, previewLight] = hueToOklchPair(hexToHue(localHex));
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Palette className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">{t(($) => $.workspace.accent_color_section)}</h2>
+      </div>
+      <Card>
+        <CardContent className="space-y-4">
+          <div>
+            <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.accent_color_label)}</Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t(($) => $.workspace.accent_color_hint)}</p>
+            <div className="mt-2 flex items-center gap-3">
+              <input
+                type="color"
+                value={localHex}
+                onChange={(e) => setLocalHex(e.target.value)}
+                disabled={!canManage || saving}
+                className="h-8 w-12 cursor-pointer rounded border bg-background p-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={t(($) => $.workspace.accent_color_label)}
+              />
+              <div className="flex items-center gap-1.5" aria-hidden>
+                <div
+                  className="flex h-8 w-12 items-center justify-center rounded border text-xs font-medium"
+                  style={{ background: previewLight, color: "oklch(0.30 0.02 0)" }}
+                  title={t(($) => $.workspace.accent_color_preview_light)}
+                >
+                  Aa
+                </div>
+                <div
+                  className="flex h-8 w-12 items-center justify-center rounded border text-xs font-medium"
+                  style={{ background: previewDark, color: "oklch(0.85 0.02 0)" }}
+                  title={t(($) => $.workspace.accent_color_preview_dark)}
+                >
+                  Aa
+                </div>
+              </div>
+              <code className="font-mono text-xs text-muted-foreground">{localHex}</code>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            {manualHex && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleReset()}
+                disabled={!canManage || saving}
+              >
+                {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                {saving ? t(($) => $.workspace.accent_color_resetting) : t(($) => $.workspace.accent_color_reset)}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={() => void handleSave()}
+              disabled={!canManage || saving}
+            >
+              <Save className="h-3 w-3" />
+              {saving ? t(($) => $.workspace.accent_color_saving) : t(($) => $.workspace.accent_color_save)}
+            </Button>
+          </div>
+          {!canManage && (
+            <p className="text-xs text-muted-foreground">{t(($) => $.workspace.accent_color_owner_hint)}</p>
+          )}
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+// CEREBRO-PATCH(workspace-logo-uploader): FIR-2580 — owner/admin logo upload at
+// the top of workspace settings. Accepts PNG/JPEG/WebP, reuses useFileUpload +
+// the WorkspaceAvatar fallback look, and persists via updateWorkspace({avatar_url}).
+// Updating the cache here is safe for unsaved text edits because the General
+// form effect is keyed on workspace.id (see the form-reset effect above).
+// CEREBRO-PATCH(workspace-logo-generate): FIR-2580 — SVG added to the accepted
+// logo formats. The upload backend already maps .svg → image/svg+xml.
+const ACCEPTED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+
+function WorkspaceLogoUploader({
+  workspace,
+  canManage,
+}: {
+  workspace: Workspace;
+  canManage: boolean;
+}) {
+  const { t } = useT("settings");
+  const qc = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { upload, uploading } = useFileUpload(api);
+  const [saving, setSaving] = useState(false);
+  // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 — AI logo generation state.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [results, setResults] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const busy = uploading || saving;
+  const resolved = resolvePublicFileUrl(workspace.avatar_url);
+
+  const persist = async (avatarUrl: string) => {
+    setSaving(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, { avatar_url: avatarUrl });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      toast.success(t(($) => $.workspace.logo_toast_success));
+      // CEREBRO-PATCH(workspace-accent-color): TECH-3002 — auto-extract accent color
+      // from the new logo and store it as accent_color_auto in settings.
+      if (avatarUrl) {
+        const resolved2 = resolvePublicFileUrl(avatarUrl);
+        if (resolved2) {
+          void extractHueFromUrl(resolved2).then((hue) => {
+            if (hue == null) return;
+            void api.updateWorkspace(workspace.id, {
+              settings: { ...workspace.settings, accent_color_auto: hueToHex(hue) },
+            }).then((updated2) => {
+              qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+                old?.map((ws) => (ws.id === updated2.id ? updated2 : ws)),
+              );
+            });
+          });
+        }
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.logo_toast_error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    if (!ACCEPTED_LOGO_TYPES.includes(file.type)) {
+      toast.error(t(($) => $.workspace.logo_toast_type_error));
+      return;
+    }
+    try {
+      const result = await upload(file);
+      if (!result) return;
+      await persist(result.link);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.workspace.logo_toast_error));
+    }
+  };
+
+  // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 — open the AI modal with a
+  // ready-made suggestion prompt seeded from the workspace name, so the user can
+  // generate straight away or tweak the wording first.
+  const openAiModal = () => {
+    setResults([]);
+    setSelected(null);
+    setPrompt(t(($) => $.workspace.logo_ai_prompt_suggestion, { name: workspace.name }));
+    setAiOpen(true);
+  };
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) return;
+    setGenerating(true);
+    setResults([]);
+    setSelected(null);
+    try {
+      const { urls } = await api.generateWorkspaceLogos(workspace.id, prompt.trim(), 5);
+      if (urls.length === 0) {
+        toast.error(t(($) => $.workspace.logo_ai_empty));
+        return;
+      }
+      setResults(urls);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.workspace.logo_ai_error));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleUseSelected = async () => {
+    if (!selected) return;
+    await persist(selected);
+    setAiOpen(false);
+  };
+
+  return (
+    <div>
+      <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.logo_label)}</Label>
+      <div className="mt-1 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!canManage || busy}
+          aria-label={t(($) => $.workspace.logo_label)}
+          className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-md border bg-muted disabled:cursor-not-allowed"
+        >
+          {resolved ? (
+            <img src={resolved} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-muted-foreground">
+              {workspace.name.charAt(0).toUpperCase()}
+            </span>
+          )}
+          {canManage && (
+            <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin text-white" />
+              ) : (
+                <Camera className="h-4 w-4 text-white" />
+              )}
+            </span>
+          )}
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-muted-foreground">{t(($) => $.workspace.logo_upload_hint)}</p>
+          <div className="mt-1 flex items-center gap-1">
+            {/* CEREBRO-PATCH(workspace-logo-generate): FIR-2580 — AI generate trigger next to upload. */}
+            {canManage && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={openAiModal}
+                className="h-7 px-2 text-xs"
+              >
+                <Sparkles className="h-3 w-3" />
+                {t(($) => $.workspace.logo_ai_button)}
+              </Button>
+            )}
+            {!!workspace.avatar_url && canManage && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => void persist("")}
+                className="h-7 px-2 text-xs text-muted-foreground"
+              >
+                {t(($) => $.workspace.logo_remove)}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        className="hidden"
+        onChange={handleFile}
+      />
+
+      {/* CEREBRO-PATCH(workspace-logo-generate): FIR-2580 — AI logo generation modal. */}
+      <Dialog
+        open={aiOpen}
+        onOpenChange={(next) => {
+          // Don't let a backdrop click or Esc abandon an in-flight generation —
+          // the requests keep running server-side and would resolve against a
+          // closed dialog.
+          if (!generating && !saving) setAiOpen(next);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.workspace.logo_ai_modal_title)}</DialogTitle>
+            <DialogDescription>{t(($) => $.workspace.logo_ai_modal_description)}</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="logo-ai-prompt" className="text-xs text-muted-foreground">
+                {t(($) => $.workspace.logo_ai_prompt_label)}
+              </Label>
+              <Textarea
+                id="logo-ai-prompt"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={3}
+                disabled={generating}
+                className="mt-1 resize-none"
+              />
+            </div>
+
+            {generating && (
+              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t(($) => $.workspace.logo_ai_generating)}
+              </div>
+            )}
+
+            {!generating && results.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  {t(($) => $.workspace.logo_ai_pick_hint)}
+                </p>
+                <div className="grid grid-cols-5 gap-2">
+                  {results.map((url, i) => {
+                    const isSelected = selected === url;
+                    return (
+                      <button
+                        key={url}
+                        type="button"
+                        aria-label={t(($) => $.workspace.logo_ai_option, { index: i + 1 })}
+                        aria-pressed={isSelected}
+                        onClick={() => setSelected(url)}
+                        disabled={saving}
+                        className={`relative aspect-square overflow-hidden rounded-md border-2 transition-colors ${
+                          isSelected ? "border-primary" : "border-transparent hover:border-muted-foreground/40"
+                        }`}
+                      >
+                        <img
+                          src={resolvePublicFileUrl(url) ?? url}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                        {isSelected && (
+                          <span className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                            <Check className="h-3 w-3" />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={generating || saving}
+              onClick={() => setAiOpen(false)}
+            >
+              {t(($) => $.workspace.logo_ai_cancel)}
+            </Button>
+            {results.length > 0 ? (
+              <Button type="button" disabled={!selected || saving} onClick={() => void handleUseSelected()}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                {t(($) => $.workspace.logo_ai_use)}
+              </Button>
+            ) : (
+              <Button type="button" disabled={generating || !prompt.trim()} onClick={() => void handleGenerate()}>
+                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                {generating ? t(($) => $.workspace.logo_ai_generating) : t(($) => $.workspace.logo_ai_generate)}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

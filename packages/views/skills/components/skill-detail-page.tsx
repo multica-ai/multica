@@ -64,11 +64,10 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { AppLink, useNavigation } from "../../navigation";
 import { MobileSidebarTrigger } from "../../layout/page-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
+import { CerebroSkillDetailExtension, SkillProposeBar } from "@multica/cerebro-skill-ownership/views"; // CEREBRO-PATCH(skill-ownership-ui): FIR-2629 — sidebar panels + propose bar
 import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import { readOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
-// CEREBRO-PATCH(skill-ownership-ui): JEH-216 ownership/versions/CR/forks panel + fork action.
-import { SkillOwnershipPanel, ForkSkillButton } from "@multica/cerebro-skill-ownership/views";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
 import { useT } from "../../i18n";
@@ -495,7 +494,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   };
 
   const handleFileContentChange = (newContent: string) => {
-    if (!canEdit) return;
+    // CEREBRO-PATCH(skill-ownership-propose): FIR-2629 — guard removed; non-owners can edit locally for propose flow (propose bar controls the submit path)
     if (selectedPath === SKILL_MD) {
       setContent(newContent);
     } else {
@@ -716,9 +715,6 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               : t(($) => $.detail.sidebar.permissions_locked)}
         </p>
       </div>
-
-      {/* CEREBRO-PATCH(skill-ownership-ui): JEH-216 ownership/versions/CR/forks panel */}
-      <SkillOwnershipPanel skill={skill} />
     </div>
   );
 
@@ -763,8 +759,6 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           {skill.name}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          {/* CEREBRO-PATCH(skill-ownership-ui): JEH-216 fork action in skill header */}
-          <ForkSkillButton skill={skill} />
           {!canEdit && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
@@ -935,6 +929,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             />
           </div>
 
+          {/* CEREBRO-PATCH(skill-ownership-propose): FIR-2629 — propose-change bar shown to non-owners when they have local edits */}
+          {isDirty && !canEdit && <SkillProposeBar skill={skill} content={content} files={files} name={name} onDiscard={handleDiscard} />}
           {/* Save bar */}
           {isDirty && canEdit && (
             <div
@@ -982,6 +978,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         {/* CEREBRO-PATCH(skills-mobile-detail-layout): hide inline metadata sidebar under md; mobile opens it from the Info trigger. */}
         <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l bg-muted/20 px-4 py-4 md:flex">
           {metadataPaneContent}
+          {/* CEREBRO-PATCH(skill-ownership-ui): FIR-2629 — ownership / versions / forks / change-request panels */}
+          <CerebroSkillDetailExtension skill={skill} wsId={wsId} members={members} canEdit={canEdit} />
         </aside>
       </div>
 
@@ -1002,6 +1000,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           className="w-[85vw] max-w-xs overflow-y-auto p-4"
         >
           {metadataPaneContent}
+          {/* CEREBRO-PATCH(skill-ownership-ui-mobile): FIR-2629 — ownership panels in mobile info sheet */}
+          <CerebroSkillDetailExtension skill={skill} wsId={wsId} members={members} canEdit={canEdit} />
         </SheetContent>
       </Sheet>
 

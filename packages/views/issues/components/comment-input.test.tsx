@@ -39,6 +39,15 @@ vi.mock("./trigger-target-bar", () => ({
   memberMentionMarkdown: () => "",
 }));
 
+// CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — stub the send-confirm hook
+// (reaches the flag/query/auth stores) so these focus-wiring tests stay platform-free.
+vi.mock("@multica/cerebro-access/views", () => ({
+  usePrivateAgentSendConfirm: () => ({
+    confirmBeforeSend: async () => true,
+    confirmDialog: null,
+  }),
+}));
+
 vi.mock("../../editor", () => {
   const ContentEditor = forwardRef(
     (

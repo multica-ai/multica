@@ -31,6 +31,7 @@ import type {
   AgentToolOverride,
   RuntimeTool,
 } from "@multica/cerebro-types";
+import { FirtalRegistryRowConfigure } from "@multica/cerebro-tool-policy/views";
 import {
   clearAgentToolOverride,
   listAgentToolOverrides,
@@ -189,6 +190,7 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
         rows={rows}
         filteredRows={filteredRows}
         canEdit={canEdit}
+        agentId={agent.id}
         onSetOverride={(toolName, enabled) =>
           setOverrideMutation.mutate({ toolName, enabled })
         }
@@ -275,6 +277,7 @@ interface AgentToolsBodyProps {
   rows: ToolRowData[];
   filteredRows: ToolRowData[];
   canEdit: boolean;
+  agentId: string;
   onSetOverride: (toolName: string, enabled: boolean) => void;
   onClearOverride: (toolName: string) => void;
   mutating: boolean;
@@ -285,6 +288,7 @@ function AgentToolsBody({
   rows,
   filteredRows,
   canEdit,
+  agentId,
   onSetOverride,
   onClearOverride,
   mutating,
@@ -360,6 +364,7 @@ function AgentToolsBody({
               key={row.tool.name}
               row={row}
               canEdit={canEdit}
+              agentId={agentId}
               mutating={mutating}
               onSetOverride={onSetOverride}
               onClearOverride={onClearOverride}
@@ -374,12 +379,14 @@ function AgentToolsBody({
 function AgentToolRow({
   row,
   canEdit,
+  agentId,
   mutating,
   onSetOverride,
   onClearOverride,
 }: {
   row: ToolRowData;
   canEdit: boolean;
+  agentId: string;
   mutating: boolean;
   onSetOverride: (toolName: string, enabled: boolean) => void;
   onClearOverride: (toolName: string) => void;
@@ -417,17 +424,26 @@ function AgentToolRow({
         <EffectiveState effective={effective} />
       </td>
       <td className="px-2 py-3 align-top">
-        {canEdit && (
-          <OverrideSelect
-            mode={overrideMode}
-            disabled={mutating}
-            onChange={(next) => {
-              if (next === "inherit") onClearOverride(tool.name);
-              else onSetOverride(tool.name, next === "force_on");
-            }}
-            highlight={isOverride}
-          />
-        )}
+        <div className="flex flex-col items-end gap-1">
+          {canEdit && (
+            <OverrideSelect
+              mode={overrideMode}
+              disabled={mutating}
+              onChange={(next) => {
+                if (next === "inherit") onClearOverride(tool.name);
+                else onSetOverride(tool.name, next === "force_on");
+              }}
+              highlight={isOverride}
+            />
+          )}
+          {canEdit && (
+            <FirtalRegistryRowConfigure
+              toolKey={tool.name}
+              agentId={agentId}
+              variant="outline"
+            />
+          )}
+        </div>
       </td>
     </tr>
   );

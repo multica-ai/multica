@@ -30,6 +30,7 @@ import {
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { chatSessionUsageOptions } from "@multica/core/chat/queries";
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import type { ChatSession } from "@multica/core/types";
 import {
   useUpdateChatSession,
@@ -50,6 +51,7 @@ type Pending = "archive" | "unarchive" | "convert" | null;
  */
 export function ChatSessionHeader({ session }: { session: ChatSession | null }) {
   const s = useCerebroChatHeaderStrings();
+  const { formatCents } = useCostFormatter();
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const update = useUpdateChatSession();
@@ -216,12 +218,12 @@ export function ChatSessionHeader({ session }: { session: ChatSession | null }) 
                   aria-label={s.session_price_aria}
                   className="rounded-md bg-accent/60 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
                 >
-                  {formatChatCost(usage.cost_cents)}
+                  {formatCents(usage.cost_cents)}
                 </span>
               }
             />
             <TooltipContent side="bottom" className="text-xs">
-              <div className="font-medium">{s.session_price_label}: {formatChatCost(usage.cost_cents)}</div>
+              <div className="font-medium">{s.session_price_label}: {formatCents(usage.cost_cents)}</div>
               <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] text-muted-foreground">
                 <span>{s.session_token_breakdown_input}</span>
                 <span className="text-right">{formatChatTokens(usage.total_input_tokens)}</span>
@@ -351,15 +353,10 @@ export function ChatSessionHeader({ session }: { session: ChatSession | null }) 
   );
 }
 
-// JEH-736 — keep the formatters local so this component does not depend
-// on @multica/views (which would create a circular package edge).
-function formatChatCost(cents: number): string {
-  const usd = cents / 100;
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
-}
-
+// JEH-736 / FIR-40 — cost formatting now flows through the useCostFormatter
+// hook (@multica/cerebro-format-cost), so the workspace display currency is
+// honored. That formatter is a zero-dependency leaf package, so it does not
+// recreate the @multica/views circular edge the original note guarded against.
 function formatChatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;

@@ -444,6 +444,47 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 	}
 }
 
+func TestMergeEnvStripsClaudeAuthByDefault(t *testing.T) {
+	// CEREBRO-PATCH(claude-oauth-strips-api-key): default keeps OAuth — API-key auth
+	// is stripped from both host env and CustomEnv so it cannot shadow CLAUDE_CONFIG_DIR.
+	// Not parallel: mutates process env via t.Setenv.
+	t.Setenv("MULTICA_RUNTIME_ALLOW_API_KEY", "")
+
+	env := mergeEnv([]string{
+		"PATH=/usr/bin",
+		"ANTHROPIC_API_KEY=sk-host",
+	}, map[string]string{"ANTHROPIC_AUTH_TOKEN": "tok-custom"})
+
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "ANTHROPIC_API_KEY=") || strings.HasPrefix(entry, "ANTHROPIC_AUTH_TOKEN=") {
+			t.Fatalf("expected Claude auth vars stripped by default, got %v", env)
+		}
+	}
+}
+
+func TestMergeEnvKeepsClaudeAuthWhenRuntimeOptsIn(t *testing.T) {
+	// CEREBRO-PATCH(claude-oauth-strips-api-key): a cloud runtime opts into API-key
+	// auth by setting MULTICA_RUNTIME_ALLOW_API_KEY; the key must then survive merge.
+	// Not parallel: mutates process env via t.Setenv.
+	t.Setenv("MULTICA_RUNTIME_ALLOW_API_KEY", "1")
+
+	env := mergeEnv([]string{
+		"PATH=/usr/bin",
+		"ANTHROPIC_API_KEY=sk-host",
+	}, map[string]string{"ANTHROPIC_AUTH_TOKEN": "tok-custom"})
+
+	found := map[string]bool{}
+	for _, entry := range env {
+		found[entry] = true
+	}
+	if !found["ANTHROPIC_API_KEY=sk-host"] {
+		t.Fatalf("expected ANTHROPIC_API_KEY preserved when runtime opts in, got %v", env)
+	}
+	if !found["ANTHROPIC_AUTH_TOKEN=tok-custom"] {
+		t.Fatalf("expected ANTHROPIC_AUTH_TOKEN preserved when runtime opts in, got %v", env)
+	}
+}
+
 func TestBuildEnvAppendsExtras(t *testing.T) {
 	t.Parallel()
 

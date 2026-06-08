@@ -59,6 +59,27 @@ jobs:
           RELEASE_NOTES_FILE: ${{ github.workspace }}/release-notes.md
         run: python3 scripts/release/compute_friday_release.py
 
+      - name: Render and commit docs release notes
+        if: steps.bump.outputs.tag != '' && (github.event.inputs.dry_run || 'false') != 'true'
+        env:
+          RELEASE_NOTES_FILE: ${{ github.workspace }}/release-notes.md
+          RELEASE_TAG: ${{ steps.bump.outputs.tag }}
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          python3 scripts/release/render_docs_release_notes.py \
+            --tag "$RELEASE_TAG" \
+            --date "$(date -u +%Y-%m-%d)" \
+            --notes "$RELEASE_NOTES_FILE" \
+            --notes-dir apps/web/content/docs/cerebro/release-notes \
+            --index apps/web/content/docs/cerebro/release-notes/index.mdx
+          git add apps/web/content/docs/cerebro/release-notes
+          if git diff --cached --quiet; then
+            echo "Docs release notes already up to date."
+          else
+            git commit -m "docs: add $RELEASE_TAG release notes"
+            git push origin "HEAD:$TARGET_BRANCH"
+          fi
+
       - name: Job summary
         if: always()
         run: |

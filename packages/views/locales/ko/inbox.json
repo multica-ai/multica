@@ -53,7 +53,15 @@
     "private_agent_run_request": "Run request",
     "_comment_cerebro_patch_date_reminders": "CEREBRO-PATCH(issue-date-reminders): FIR-2412 start/due date reminder labels",
     "due_date_reminder": "Due date reminder",
-    "start_date_reminder": "Start date reminder"
+    "start_date_reminder": "Start date reminder",
+    "_comment_cerebro_patch_runtime_pause": "CEREBRO-PATCH(inbox-types-locale-ko): FIR-2611 runtime_auto_paused label",
+    "runtime_auto_paused": "런타임 일시 중지",
+    "_comment_cerebro_patch_agent_comment_split": "CEREBRO-PATCH(inbox-types-locale-ko): TECH-2961 agent-comment-by-tag split labels",
+    "agent_comment_no_tag": "에이전트 댓글",
+    "agent_comment_member_tag": "에이전트가 멘션함",
+    "agent_comment_agent_tag": "에이전트 인계",
+    "_comment_cerebro_patch_manually_added": "CEREBRO-PATCH(cerebro-inbox-add-issue): issue #3076 — manually added inbox item type label.",
+    "manually_added": "받은 편지함에 추가됨"
   },
   "labels": {
     "set_status_to": "상태 변경:",

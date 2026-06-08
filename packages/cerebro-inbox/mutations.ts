@@ -193,6 +193,22 @@ export function useRunPrivateAgentRequest() {
   });
 }
 
+/**
+ * Manually add an issue to the member's inbox. Idempotent: if the issue is
+ * already in the active inbox it is surfaced (marked unread) rather than
+ * duplicated. Invalidates the inbox list on settle so the new row appears.
+ */
+export function useAddIssueToInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (issueId: string) => api.addIssueToInbox(issueId),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+    },
+  });
+}
+
 export function useCreateInboxReminder() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

@@ -28,6 +28,7 @@ import {
   type ToolEffectiveSetting,
   type ToolPolicyRow,
 } from "../core";
+import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
 
 export interface SimpleToolPolicyTableProps {
   wsId: string;
@@ -219,11 +220,18 @@ export function SimpleToolPolicyTable({
                       {row.tool_key}
                     </div>
                   </div>
-                  <VerdictToggle
-                    value={agentVerdict(row)}
-                    disabled={setPolicy.isPending}
-                    onChange={(s) => onSet(row.tool_key, s)}
-                  />
+                  <div className="flex items-center gap-2">
+                    <FirtalRegistryRowConfigure
+                      toolKey={row.tool_key}
+                      agentId={agentId}
+                      variant="outline"
+                    />
+                    <VerdictToggle
+                      value={agentVerdict(row)}
+                      disabled={setPolicy.isPending}
+                      onChange={(s) => onSet(row.tool_key, s)}
+                    />
+                  </div>
                 </div>
               ))}
             </div>

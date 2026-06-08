@@ -3,6 +3,7 @@ package handler
 // CEREBRO-PATCH(daemon-bundled-saving): claim-time half of the "bundled_read"
 // cost saving (FIR-2384 step 2). The other half — the actual bundled endpoint
 // and its real-usage measurement — lives in issue_context_cerebro.go.
+// CEREBRO-PATCH(cost-savings-context-tokens): FIR-2572 — measure bundled_read in context_tokens.
 //
 // Three states, mapped to a tool-based saving:
 //   - "off"    — start prompt steers the agent to the separate `multica issue
@@ -22,6 +23,7 @@ package handler
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -63,19 +65,25 @@ func (h *Handler) applyBundledReadSaving(ctx context.Context, resp *AgentTaskRes
 		resp.BundleContextHint = true
 	case costSavingModeShadow:
 		// Behaviour unchanged; record the hypothetical would-save for this run.
-		if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, bundledReadMeasurementParams(issue.WorkspaceID, taskID, costSavingModeShadow)); err != nil {
+		if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, bundledReadMeasurementParams(issue.WorkspaceID, taskID, costSavingModeShadow, estimateBundledPayloadChars(issue))); err != nil {
 			slog.Warn("bundled-read cost-saving: record would-save failed", "error", err)
 		}
 	}
 }
 
 // bundledReadMeasurementParams builds the measurement row for one run. Baseline
-// is the separate reads the single bundled call replaces; effective is 1 (that
-// one call). "on" is an applied (real) save, "shadow" a would-save. The metric
-// is platform_calls, not dollars: daemon agents bill on a flat subscription, so
-// the honest unit is calls saved. Used by both the claim-time shadow path and
-// the endpoint's real-usage path so the two arms stay identically shaped.
-func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+// is the estimated context tokens avoided by collapsing separate reads into one
+// bundled call; effective is 0 (FIR-2572).
+func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string, payloadChars int64) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+	perCall := payloadChars / bundledReadBaseline
+	if perCall <= 0 {
+		perCall = payloadChars
+	}
+	avoidedChars := perCall * (bundledReadBaseline - 1)
+	savedTokens := avoidedChars / 4
+	if savedTokens <= 0 {
+		savedTokens = int64(bundledReadBaseline-1) * 8000
+	}
 	return cerebrodb.RecordCerebroCostOptimizationMeasurementParams{
 		WorkspaceID:     workspaceID,
 		TaskID:          taskID,
@@ -83,12 +91,23 @@ func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) 
 		Mode:            mode,
 		Applied:         mode == costSavingModeOn,
 		HeldOut:         false,
-		Metric:          costMetricPlatformCalls,
-		BaselineValue:   bundledReadBaseline,
-		EffectiveValue:  1,
+		Metric:          "context_tokens",
+		BaselineValue:   savedTokens,
+		EffectiveValue:  0,
 		SavedCents:      0,
 		ActualCostCents: 0,
 	}
+}
+
+// estimateBundledPayloadChars is a conservative bundled-response size estimate
+// for shadow measurement at claim time (before the agent calls issue context).
+func estimateBundledPayloadChars(issue db.Issue) int64 {
+	var n int64
+	n += int64(len(strings.TrimSpace(issue.Title)))
+	if issue.Description.Valid {
+		n += int64(len(strings.TrimSpace(issue.Description.String)))
+	}
+	return n + int64(bundledReadBaseline)*3000
 }
 
 // shouldCreditBundledReadUsage decides whether a real `multica issue context`

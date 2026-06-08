@@ -39,6 +39,12 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 inline Danish labels (cerebro feature) — keeps en/ko/zh-Hans parity untouched.
     skill_change_request_created: "Foreslået ændring til skill",
     skill_change_request_reviewed: "Dit skill-forslag er behandlet",
+    runtime_auto_paused: t(($) => $.types.runtime_auto_paused), // CEREBRO-PATCH(inbox-runtime-pause-label): FIR-2611.
+    // CEREBRO-PATCH(inbox-detail-label-agent-comment-split): TECH-2961 — three labels for agent-authored comments split by the tag they carry.
+    agent_comment_no_tag: t(($) => $.types.agent_comment_no_tag),
+    agent_comment_member_tag: t(($) => $.types.agent_comment_member_tag),
+    agent_comment_agent_tag: t(($) => $.types.agent_comment_agent_tag),
+    manually_added: t(($) => $.types.manually_added), // CEREBRO-PATCH(cerebro-inbox-add-issue): label for manually added inbox items.
   };
 }
 
@@ -101,7 +107,11 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       if (details.to) return <span>{t(($) => $.labels.set_due_date_to, { date: shortDate(details.to) })}</span>;
       return <span>{t(($) => $.labels.removed_due_date)}</span>;
     }
-    case "new_comment": {
+    case "new_comment":
+    // CEREBRO-PATCH(inbox-detail-label-agent-comment-split): TECH-2961 — every agent-comment variant renders the same body line as a normal comment.
+    case "agent_comment_no_tag":
+    case "agent_comment_member_tag":
+    case "agent_comment_agent_tag": {
       if (item.body) return <span>{item.body}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
@@ -122,6 +132,8 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "reminder": // CEREBRO-PATCH(inbox-reminders-label): show reminder body in detail labels.
       return <span>{item.body || details.text || typeLabels[item.type]}</span>;
+    case "runtime_auto_paused": // CEREBRO-PATCH(inbox-runtime-pause-label): FIR-2611 — show resume/manual line.
+      return <span>{item.body || typeLabels[item.type]}</span>;
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;
   }

@@ -1,6 +1,7 @@
 package handler
 
 // CEREBRO-PATCH(daemon-snapshot-saving): tests for the snapshot_prompt renderer + measurement params (FIR-2384).
+// CEREBRO-PATCH(cost-savings-context-tokens): FIR-2572 — context_tokens measurement expectations.
 
 import (
 	"fmt"
@@ -98,22 +99,23 @@ func TestSnapshotMeasurementParams(t *testing.T) {
 	ws := parseUUID("44444444-4444-4444-4444-444444444444")
 	task := parseUUID("55555555-5555-5555-5555-555555555555")
 
-	on := snapshotMeasurementParams(ws, task, costSavingModeOn)
+	const contextChars = 8000
+	on := snapshotMeasurementParams(ws, task, costSavingModeOn, contextChars)
 	if !on.Applied || on.HeldOut {
 		t.Fatalf("on mode must be applied and not held out, got applied=%v held=%v", on.Applied, on.HeldOut)
 	}
-	if on.SavingKey != costSavingSnapshotKey || on.Metric != costMetricPlatformCalls {
+	if on.SavingKey != costSavingSnapshotKey || on.Metric != "context_tokens" {
 		t.Fatalf("unexpected key/metric: %+v", on)
 	}
-	if on.BaselineValue != snapshotInlinedReads || on.EffectiveValue != 0 {
-		t.Fatalf("expected baseline=%d effective=0, got baseline=%d effective=%d", snapshotInlinedReads, on.BaselineValue, on.EffectiveValue)
+	if on.BaselineValue != contextChars/4 || on.EffectiveValue != 0 {
+		t.Fatalf("expected baseline=%d effective=0, got baseline=%d effective=%d", contextChars/4, on.BaselineValue, on.EffectiveValue)
 	}
 
-	shadow := snapshotMeasurementParams(ws, task, costSavingModeShadow)
+	shadow := snapshotMeasurementParams(ws, task, costSavingModeShadow, contextChars)
 	if shadow.Applied {
 		t.Fatalf("shadow mode must not be applied, got %+v", shadow)
 	}
-	if shadow.BaselineValue != snapshotInlinedReads {
-		t.Fatalf("shadow would-save baseline must still be %d, got %d", snapshotInlinedReads, shadow.BaselineValue)
+	if shadow.BaselineValue != contextChars/4 {
+		t.Fatalf("shadow would-save baseline must be %d tokens, got %d", contextChars/4, shadow.BaselineValue)
 	}
 }

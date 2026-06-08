@@ -78,6 +78,8 @@ export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferen
 // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 export thread move response type.
 // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 export MoveCommentsToThreadResponse.
 export type { Comment, CommentType, CommentAuthorType, Reaction, MoveCommentToSubIssueResponse, MoveCommentsToThreadResponse } from "./comment";
+// CEREBRO-PATCH(issue-comment-cost-types): FIR-39 per-comment cost badge response types.
+export type { IssueCommentCost, IssueCommentCosts } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type {
   TimelineEntry,
@@ -104,6 +106,8 @@ export type {
   ListArtifactsParams,
 } from "./artifact";
 export type { ChatSession, ChatMessage, ChatPendingTask, ChatSessionUsage, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
+// CEREBRO-PATCH(chat-message-cost-types): FIR-31 per-reply cost badge response types.
+export type { ChatMessageCost, ChatSessionMessageCosts } from "./chat";
 // CEREBRO-PATCH(core-types-index-channel-listen): JEH-699 — re-export
 // listen-mode types alongside the upstream channel types.
 export type {
@@ -206,3 +210,5 @@ export type {
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
 } from "./billing";
+// CEREBRO-PATCH(cerebro-focus-list-types): TECH-2947 — personal focus list type.
+export type { FocusListItem } from "./focus_list";
