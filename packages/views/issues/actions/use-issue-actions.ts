@@ -8,6 +8,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
+import { ApiError } from "@multica/core/api";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -84,12 +85,17 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       updateIssue.mutate(
         { id: issueId, ...updates },
         {
-          onError: (err) =>
+          onError: (err) => {
+            if (err instanceof ApiError && err.status === 409) {
+              toast.warning(t(($) => $.detail.description_conflict));
+              return;
+            }
             toast.error(
               err instanceof Error && err.message
                 ? err.message
                 : t(($) => $.detail.update_failed),
-            ),
+            );
+          },
         },
       );
       // Hint: assigning an agent to a backlog issue won't trigger execution
