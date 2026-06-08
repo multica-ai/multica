@@ -930,3 +930,88 @@ func (h *Handler) AllMessages(w http.ResponseWriter, r *http.Request) {
 		Messages: msgs,
 	})
 }
+
+type sessionMessage struct {
+	ID         string `json:"id"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	CreatedAt  string `json:"created_at"`
+	SenderName string `json:"sender_name,omitempty"`
+	AgentName  string `json:"agent_name"`
+}
+
+type sessionMessagesResponse struct {
+	SessionID string           `json:"session_id"`
+	CostCents int64            `json:"cost_cents"`
+	Messages  []sessionMessage `json:"messages"`
+}
+
+// SessionMessages returns every message (member + agent) in one chat session,
+// chronological, plus the session's total cost. Powers the dashboard message
+// detail sheet so it shows the agent's replies and the cost, not just the
+// member's own messages. TECH-3139.
+func (h *Handler) SessionMessages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+
+	sessionIDStr := r.URL.Query().Get("session_id")
+	if sessionIDStr == "" {
+		writeError(w, http.StatusBadRequest, "session_id required")
+		return
+	}
+	sessionUUID, err := util.ParseUUID(sessionIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid session_id")
+		return
+	}
+
+	rows, err := h.Cerebro.DashboardSessionMessages(r.Context(), cerebrodb.DashboardSessionMessagesParams{
+		WorkspaceID: wsUUID,
+		ID:          sessionUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	msgs := make([]sessionMessage, 0, len(rows))
+	for _, row := range rows {
+		m := sessionMessage{
+			ID:        util.UUIDToString(row.ID),
+			Role:      row.Role,
+			Content:   row.Content,
+			CreatedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339),
+			AgentName: row.AgentName,
+		}
+		if row.SenderName != "" {
+			m.SenderName = row.SenderName
+		}
+		msgs = append(msgs, m)
+	}
+
+	cost, err := h.Cerebro.DashboardSessionCost(r.Context(), cerebrodb.DashboardSessionCostParams{
+		WorkspaceID: wsUUID,
+		ID:          sessionUUID,
+	})
+	if err != nil {
+		// Cost is best-effort; a usage-table hiccup must not blank the sheet.
+		cost = 0
+	}
+
+	writeJSON(w, http.StatusOK, sessionMessagesResponse{
+		SessionID: sessionIDStr,
+		CostCents: cost,
+		Messages:  msgs,
+	})
+}

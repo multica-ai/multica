@@ -93,6 +93,23 @@ export interface AllMessagesResponse {
   messages: ActorMessage[];
 }
 
+// One message inside a chat session — either a member ("user") message or an
+// agent ("assistant") reply. TECH-3139.
+export interface SessionMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  sender_name?: string;
+  agent_name: string;
+}
+
+export interface SessionMessagesResponse {
+  session_id: string;
+  cost_cents: number;
+  messages: SessionMessage[];
+}
+
 export interface DashboardOverview {
   range: TimeRange;
   period_start: string;
@@ -149,6 +166,12 @@ export async function fetchAllMessages(
     actor_type: actorType,
     actor_id: actorType ? actorId : null,
   });
+}
+
+export async function fetchSessionMessages(
+  sessionId: string,
+): Promise<SessionMessagesResponse> {
+  return api.getCerebroDashboardSessionMessages<SessionMessagesResponse>(sessionId);
 }
 
 function scopeToActorType(scope: ActorScope): ActorType | undefined {

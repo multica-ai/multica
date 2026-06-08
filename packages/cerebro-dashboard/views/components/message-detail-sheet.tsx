@@ -1,6 +1,7 @@
 "use client";
 
 import { Bot, ExternalLink, User } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "@multica/views/navigation";
 import {
   Sheet,
@@ -10,7 +11,8 @@ import {
   SheetDescription,
 } from "@multica/ui/components/ui/sheet";
 import { cn } from "@multica/ui/lib/utils";
-import type { ActorMessage } from "../../core/api";
+import { sessionMessagesOptions } from "../../core/queries";
+import type { ActorMessage, SessionMessage } from "../../core/api";
 
 function formatDateTime(iso: string): string {
   try {
@@ -38,24 +40,37 @@ function formatTime(iso: string): string {
   }
 }
 
+function formatCost(cents: number): string {
+  const dollars = cents / 100;
+  // Show enough precision for sub-cent sessions without trailing noise.
+  const digits = dollars > 0 && dollars < 0.01 ? 4 : 2;
+  return `$${dollars.toFixed(digits)}`;
+}
+
+function senderLabel(msg: SessionMessage): string {
+  if (msg.role === "assistant") return msg.agent_name || "Agent";
+  return msg.sender_name || "Unknown";
+}
+
 export function MessageDetailSheet({
   message,
-  allMessages,
+  wsId,
   workspaceSlug,
   onClose,
 }: {
   message: ActorMessage | null;
-  allMessages: ActorMessage[];
+  wsId: string;
   workspaceSlug: string;
   onClose: () => void;
 }) {
   const { push } = useNavigation();
 
-  const sessionMessages = message
-    ? allMessages
-        .filter((m) => m.session_id === message.session_id)
-        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-    : [];
+  const { data, isLoading } = useQuery(
+    sessionMessagesOptions(wsId, message?.session_id ?? null),
+  );
+
+  const sessionMessages = data?.messages ?? [];
+  const costCents = data?.cost_cents ?? 0;
 
   return (
     <Sheet open={message !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -78,8 +93,8 @@ export function MessageDetailSheet({
               </div>
             </SheetHeader>
 
-            {/* Meta row */}
-            <div className="shrink-0 grid grid-cols-2 gap-x-4 border-b bg-muted/20 px-5 py-3">
+            {/* Meta row: participants + session cost */}
+            <div className="shrink-0 grid grid-cols-3 gap-x-4 border-b bg-muted/20 px-5 py-3">
               <div className="flex items-center gap-1.5 text-xs">
                 <User className="size-3 shrink-0 text-muted-foreground" />
                 <span className="text-muted-foreground">Fra</span>
@@ -90,37 +105,54 @@ export function MessageDetailSheet({
                 <span className="text-muted-foreground">Til</span>
                 <span className="font-medium truncate">{message.agent_name}</span>
               </div>
+              <div className="flex items-center justify-end gap-1.5 text-xs">
+                <span className="text-muted-foreground">Pris</span>
+                <span className="font-medium tabular-nums">
+                  {isLoading ? "…" : formatCost(costCents)}
+                </span>
+              </div>
             </div>
 
-            {/* Session messages — scrollable */}
+            {/* Conversation — scrollable, both member + agent messages */}
             <div className="flex-1 min-h-0 overflow-y-auto">
-              <div className="flex flex-col divide-y">
-                {sessionMessages.length <= 1 ? (
-                  <div className="p-5">
-                    <div className="rounded-lg border bg-muted/30 px-4 py-3">
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
-                        {message.content}
-                      </p>
-                    </div>
+              {isLoading ? (
+                <div className="space-y-2 p-5">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />
+                  ))}
+                </div>
+              ) : sessionMessages.length === 0 ? (
+                <div className="p-5">
+                  <div className="rounded-lg border bg-muted/30 px-4 py-3">
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+                      {message.content}
+                    </p>
                   </div>
-                ) : (
-                  <>
-                    <div className="px-5 pt-4 pb-2">
-                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                        {sessionMessages.length} beskeder i denne session
-                      </p>
-                    </div>
-                    {sessionMessages.map((msg) => (
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 p-5">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {sessionMessages.length} beskeder i denne session
+                  </p>
+                  {sessionMessages.map((msg) => {
+                    const isAgent = msg.role === "assistant";
+                    return (
                       <div
                         key={msg.id}
                         className={cn(
-                          "px-5 py-3 transition-colors",
-                          msg.id === message.id && "bg-accent/40"
+                          "rounded-lg border px-4 py-3",
+                          isAgent ? "bg-accent/30" : "bg-muted/30",
+                          msg.id === message.id && "ring-1 ring-primary/40",
                         )}
                       >
                         <div className="mb-1 flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-medium text-foreground">
-                            {msg.sender_name ?? "Unknown"}
+                          <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+                            {isAgent ? (
+                              <Bot className="size-3 text-muted-foreground" />
+                            ) : (
+                              <User className="size-3 text-muted-foreground" />
+                            )}
+                            {senderLabel(msg)}
                           </span>
                           <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                             {formatTime(msg.created_at)}
@@ -130,10 +162,10 @@ export function MessageDetailSheet({
                           {msg.content}
                         </p>
                       </div>
-                    ))}
-                  </>
-                )}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Footer */}

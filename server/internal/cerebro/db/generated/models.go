@@ -1600,6 +1600,21 @@ type WorkspaceBudgetConfig struct {
 	LastModifiedBy              pgtype.UUID        `json:"last_modified_by"`
 }
 
+type WorkspaceConnection struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	Name                string             `json:"name"`
+	DisplayName         string             `json:"display_name"`
+	Type                string             `json:"type"`
+	Url                 string             `json:"url"`
+	Internal            bool               `json:"internal"`
+	AuthConfig          []byte             `json:"auth_config"`
+	EndpointPermissions []byte             `json:"endpoint_permissions"`
+	Enabled             bool               `json:"enabled"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type WorkspaceInvitation struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

@@ -89,7 +89,7 @@ export function AllMessagesTable({ wsId, workspaceSlug }: { wsId: string; worksp
 
       <MessageDetailSheet
         message={selectedMessage}
-        allMessages={messages}
+        wsId={wsId}
         workspaceSlug={workspaceSlug}
         onClose={() => setSelectedMessage(null)}
       />

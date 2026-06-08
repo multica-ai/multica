@@ -405,3 +405,35 @@ WHERE cs.workspace_id = $1
   AND ($4::text = '' OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid)))
 ORDER BY cm.created_at DESC
 LIMIT 200;
+
+-- name: DashboardSessionMessages :many
+-- Every message (user + assistant) in one chat session, oldest first. Powers
+-- the dashboard message detail sheet so it shows the agent's replies, not just
+-- the member's messages. TECH-3139.
+SELECT cm.id::uuid AS id,
+       cm.role,
+       cm.content,
+       cm.created_at,
+       u.id::uuid AS sender_id,
+       COALESCE(u.name, u.email, 'Unknown') AS sender_name,
+       a.id::uuid AS agent_id,
+       a.name AS agent_name
+FROM chat_message cm
+JOIN chat_session cs ON cs.id = cm.chat_session_id
+JOIN "user" u ON u.id = cs.creator_id
+JOIN agent a ON a.id = cs.agent_id
+WHERE cs.workspace_id = $1
+  AND cs.id = $2
+ORDER BY cm.created_at ASC
+LIMIT 500;
+
+-- name: DashboardSessionCost :one
+-- Total cost (USD cents) of every agent task belonging to a chat session.
+-- task_usage.cost_cents is the gateway's exact per-task charge (cerebro 9047).
+-- TECH-3139.
+SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cost_cents
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN chat_session cs ON cs.id = atq.chat_session_id
+WHERE cs.workspace_id = $1
+  AND cs.id = $2;

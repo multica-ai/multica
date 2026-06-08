@@ -1067,6 +1067,97 @@ func (q *Queries) DashboardRecentTasks(ctx context.Context, arg DashboardRecentT
 	return items, nil
 }
 
+const dashboardSessionCost = `-- name: DashboardSessionCost :one
+SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cost_cents
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN chat_session cs ON cs.id = atq.chat_session_id
+WHERE cs.workspace_id = $1
+  AND cs.id = $2
+`
+
+type DashboardSessionCostParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+// Total cost (USD cents) of every agent task belonging to a chat session.
+// task_usage.cost_cents is the gateway's exact per-task charge (cerebro 9047).
+// TECH-3139.
+func (q *Queries) DashboardSessionCost(ctx context.Context, arg DashboardSessionCostParams) (int64, error) {
+	row := q.db.QueryRow(ctx, dashboardSessionCost, arg.WorkspaceID, arg.ID)
+	var cost_cents int64
+	err := row.Scan(&cost_cents)
+	return cost_cents, err
+}
+
+const dashboardSessionMessages = `-- name: DashboardSessionMessages :many
+SELECT cm.id::uuid AS id,
+       cm.role,
+       cm.content,
+       cm.created_at,
+       u.id::uuid AS sender_id,
+       COALESCE(u.name, u.email, 'Unknown') AS sender_name,
+       a.id::uuid AS agent_id,
+       a.name AS agent_name
+FROM chat_message cm
+JOIN chat_session cs ON cs.id = cm.chat_session_id
+JOIN "user" u ON u.id = cs.creator_id
+JOIN agent a ON a.id = cs.agent_id
+WHERE cs.workspace_id = $1
+  AND cs.id = $2
+ORDER BY cm.created_at ASC
+LIMIT 500
+`
+
+type DashboardSessionMessagesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+type DashboardSessionMessagesRow struct {
+	ID         pgtype.UUID        `json:"id"`
+	Role       string             `json:"role"`
+	Content    string             `json:"content"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	SenderID   pgtype.UUID        `json:"sender_id"`
+	SenderName string             `json:"sender_name"`
+	AgentID    pgtype.UUID        `json:"agent_id"`
+	AgentName  string             `json:"agent_name"`
+}
+
+// Every message (user + assistant) in one chat session, oldest first. Powers
+// the dashboard message detail sheet so it shows the agent's replies, not just
+// the member's messages. TECH-3139.
+func (q *Queries) DashboardSessionMessages(ctx context.Context, arg DashboardSessionMessagesParams) ([]DashboardSessionMessagesRow, error) {
+	rows, err := q.db.Query(ctx, dashboardSessionMessages, arg.WorkspaceID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardSessionMessagesRow{}
+	for rows.Next() {
+		var i DashboardSessionMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Role,
+			&i.Content,
+			&i.CreatedAt,
+			&i.SenderID,
+			&i.SenderName,
+			&i.AgentID,
+			&i.AgentName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dashboardTopAgentsByActivityInPeriod = `-- name: DashboardTopAgentsByActivityInPeriod :many
 SELECT a.id::uuid AS actor_id, a.name, COUNT(*)::int AS activity_count
 FROM agent_task_queue atq

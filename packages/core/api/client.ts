@@ -1172,6 +1172,12 @@ export class ApiClient {
     return this.fetch<T>(`/api/cerebro/dashboard/all-messages?${params.toString()}`);
   }
 
+  // CEREBRO-PATCH(cerebro-dashboard-session-messages-client): TECH-3139 full session + cost for detail sheet
+  async getCerebroDashboardSessionMessages<T = unknown>(sessionId: string): Promise<T> {
+    const params = new URLSearchParams({ session_id: sessionId });
+    return this.fetch<T>(`/api/cerebro/dashboard/session-messages?${params.toString()}`);
+  }
+
   // CEREBRO-PATCH(cerebro-tasks-client): JEH-900 cross-agent tasks list endpoint
   async getCerebroTasks<T = unknown>(filter: {
     agent_id?: string | null;
