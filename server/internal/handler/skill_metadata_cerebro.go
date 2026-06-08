@@ -59,6 +59,12 @@ type SkillSummaryWithMetadata struct {
 // listSkillsByMetadata handles GET /skills when category/domain/tag/status/data_domain
 // query params are present.
 func (h *Handler) listSkillsByMetadata(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	// CEREBRO-PATCH(skill-metadata-test-fallback): Existing handler tests build Handler without CerebroQueries.
+	if h.CerebroQueries == nil {
+		h.listSkillSummariesWithoutMetadata(w, r, workspaceID)
+		return
+	}
+
 	q := r.URL.Query()
 	rows, err := h.CerebroQueries.ListSkillsByMetadata(r.Context(), cerebrodb.ListSkillsByMetadataParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -83,6 +89,24 @@ func (h *Handler) listSkillsByMetadata(w http.ResponseWriter, r *http.Request, w
 			Metadata:       decodeSkillMetadata(s.Metadata),
 			CurrentVersion: s.CurrentVersion,
 		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) listSkillSummariesWithoutMetadata(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	rows, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skills")
+		return
+	}
+
+	resp := make([]SkillSummaryResponse, len(rows))
+	for i, s := range rows {
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

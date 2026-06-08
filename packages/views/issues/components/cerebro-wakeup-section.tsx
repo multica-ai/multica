@@ -92,11 +92,16 @@ export function CerebroWakeupSection({ issueId }: { issueId: string }) {
                 <p className="text-muted-foreground truncate">{w.prompt}</p>
               </div>
               <Tooltip>
+                {/* CEREBRO-PATCH(wakeup-cancel-tooltip-render): Use Base UI render prop; TooltipTrigger does not accept button props directly. */}
                 <TooltipTrigger
-                  type="button"
-                  className="shrink-0 mt-0.5 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
-                  onClick={() => handleCancel(w.id)}
-                  aria-label="Annuller wakeup"
+                  render={
+                    <button
+                      type="button"
+                      className="shrink-0 mt-0.5 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
+                      onClick={() => handleCancel(w.id)}
+                      aria-label="Annuller wakeup"
+                    />
+                  }
                 >
                   <X className="!size-3" />
                 </TooltipTrigger>
