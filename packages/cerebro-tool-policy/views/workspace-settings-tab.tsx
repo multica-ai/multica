@@ -10,13 +10,7 @@
 import { Wrench } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@multica/ui/components/ui/tabs";
-import { ToolPolicyTable } from "./tool-policy-table";
+import { ToolPolicySurface } from "./tool-policy-surface";
 
 // Mirrors @multica/views ExtraSettingsTab structurally. Defined locally so this
 // entrypoint stays free of a views dependency (and the topo-sort coupling it
@@ -48,26 +42,7 @@ export function WorkspacePermissionsTab() {
           and member below can only tighten what is set here — never loosen it.
         </p>
       </div>
-      <Tabs defaultValue="multica" className="flex-col">
-        <TabsList>
-          <TabsTrigger value="multica">Multica</TabsTrigger>
-          <TabsTrigger value="runtime">Runtime</TabsTrigger>
-          <TabsTrigger value="repos">Repos</TabsTrigger>
-          <TabsTrigger value="connections">Connections</TabsTrigger>
-        </TabsList>
-        <TabsContent value="multica" className="mt-4">
-          <ToolPolicyTable wsId={wsId} view="workspace" subjectId={wsId} tabFilter="multica" />
-        </TabsContent>
-        <TabsContent value="runtime" className="mt-4">
-          <ToolPolicyTable wsId={wsId} view="workspace" subjectId={wsId} tabFilter="runtime" />
-        </TabsContent>
-        <TabsContent value="repos" className="mt-4">
-          <ToolPolicyTable wsId={wsId} view="workspace" subjectId={wsId} tabFilter="repos" />
-        </TabsContent>
-        <TabsContent value="connections" className="mt-4">
-          <ToolPolicyTable wsId={wsId} view="workspace" subjectId={wsId} tabFilter="connections" />
-        </TabsContent>
-      </Tabs>
+      <ToolPolicySurface wsId={wsId} view="workspace" subjectId={wsId} />
     </div>
   );
 }

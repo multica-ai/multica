@@ -60,7 +60,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { ToolPolicyTable } from "@multica/cerebro-tool-policy/views";
+import { ToolPolicySurface } from "@multica/cerebro-tool-policy/views";
 import {
   useDeleteCerebroGroup,
   useUpdateCerebroGroup,
@@ -186,7 +186,7 @@ export function GroupDetailView({ groupId, onBack }: GroupDetailViewProps) {
               <span>Permissions</span>
             </header>
             <div className="p-4">
-              <ToolPolicyTable wsId={wsId} view="group" subjectId={groupId} />
+              <ToolPolicySurface wsId={wsId} view="group" subjectId={groupId} />
             </div>
           </section>
         )}

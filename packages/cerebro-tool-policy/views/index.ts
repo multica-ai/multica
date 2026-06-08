@@ -14,6 +14,10 @@ export {
   type ExtraSettingsTab,
 } from "./workspace-settings-tab";
 export {
+  ToolPolicySurface,
+  type ToolPolicySurfaceProps,
+} from "./tool-policy-surface";
+export {
   RepoDefaultPolicySelect,
   RepoPolicyBadge,
   useWriteRepoDefaultPolicy,
