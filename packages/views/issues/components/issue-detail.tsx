@@ -108,6 +108,8 @@ import { CerebroIssueDetailStatusSubmenu } from "./cerebro-issue-detail-status-s
 import { useMoveCommentToSubIssue, useMoveCommentsToNewThread, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
+// CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 assign issue to a sprint sub-project from the sidebar, gated on cerebro_sprints.
+import { SprintPicker } from "@multica/cerebro-sprints/views";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -1072,6 +1074,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const moveCommentToSubIssueEnabled = useFeatureFlag("cerebro_move_comment_to_subissue");
   // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 gate the new-thread action.
   const moveCommentToThreadEnabled = useFeatureFlag("cerebro_move_comment_to_thread");
+  // CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 gate the sidebar sprint picker.
+  const sprintsEnabled = useFeatureFlag("cerebro_sprints");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -1376,6 +1380,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
+          {/* CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 sprint picker; renders only with the flag on and a project with sprint children. */}
+          {sprintsEnabled && issue.project_id && (
+            <PropRow label="Sprint">
+              <SprintPicker workspaceId={wsId} projectId={issue.project_id} issueId={issue.id} />
+            </PropRow>
+          )}
           {/* CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — show the human an agent created this issue for, so it traces back to a member. Label translated to English (TECH-3099). */}
           {issue.on_behalf_of ? (
             <PropRow label="On behalf of" interactive={false}>

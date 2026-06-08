@@ -2,6 +2,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { projectTreeOptions } from "@multica/core/projects/nesting";
+import type { ProjectTreeItem } from "@multica/core/types";
 import {
   Select,
   SelectContent,
@@ -10,36 +13,41 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 
-import {
-  issueSprintAssignmentOptions,
-  projectSprintsOptions,
-  useAssignIssueToSprint,
-} from "../core/queries";
-
 interface Props {
   workspaceId: string;
-  projectId: string;
+  projectId: string | null | undefined;
   issueId: string;
   /** Optional className for layout wrapping. */
   className?: string;
 }
 
+function flatten(nodes: ProjectTreeItem[]): ProjectTreeItem[] {
+  const out: ProjectTreeItem[] = [];
+  for (const node of nodes) {
+    out.push(node);
+    if (node.children?.length) out.push(...flatten(node.children));
+  }
+  return out;
+}
+
 // SprintPicker drops into the issue side panel next to status / assignee /
-// priority pickers. It only renders when the issue's project actually has
-// sprints — the caller is expected to gate this on the cerebro_sprints flag
-// and on whether sprint settings exist for the project.
+// priority pickers. The active product model after FIR-2718 is "sprints as
+// sub-projects", so selecting a sprint moves the issue's Project to that
+// sprint project. Selecting "No sprint" moves it back to the sprint container.
 export function SprintPicker({ workspaceId, projectId, issueId, className }: Props) {
-  const sprintsQuery = useQuery(projectSprintsOptions(workspaceId, projectId));
-  const assignmentQuery = useQuery(issueSprintAssignmentOptions(workspaceId, issueId));
-  const assign = useAssignIssueToSprint(workspaceId);
+  const treeQuery = useQuery(projectTreeOptions(workspaceId));
+  const updateIssue = useUpdateIssue();
+  const projects = flatten(treeQuery.data ?? []);
+  const currentProject = projects.find((project) => project.id === projectId);
+  const sprintContainerId = currentProject?.parent_project_id ?? currentProject?.id ?? "";
+  const sprints = projects.filter((project) => project.parent_project_id === sprintContainerId);
+  const currentSprintId = currentProject?.parent_project_id === sprintContainerId ? currentProject.id : "";
 
-  const sprints = sprintsQuery.data?.sprints ?? [];
-  const currentSprintId = assignmentQuery.data?.sprint_id ?? "";
-
-  if (sprintsQuery.isLoading || assignmentQuery.isLoading) {
+  if (!projectId) return null;
+  if (treeQuery.isLoading) {
     return <div className={className}>Loading sprint…</div>;
   }
-  if (sprints.length === 0) {
+  if (!sprintContainerId || sprints.length === 0) {
     return null;
   }
 
@@ -48,10 +56,10 @@ export function SprintPicker({ workspaceId, projectId, issueId, className }: Pro
       <Select
         value={currentSprintId || "__none__"}
         onValueChange={(value) =>
-          assign.mutate(
+          updateIssue.mutate(
             {
-              issueId,
-              sprintId: value === "__none__" || value == null ? "" : value,
+              id: issueId,
+              project_id: value === "__none__" || value == null ? sprintContainerId : value,
             },
             {
               onError: () => toast.error("Failed to update sprint"),
@@ -66,7 +74,7 @@ export function SprintPicker({ workspaceId, projectId, issueId, className }: Pro
           <SelectItem value="__none__">No sprint</SelectItem>
           {sprints.map((s) => (
             <SelectItem key={s.id} value={s.id}>
-              {s.name} ({s.status})
+              {s.title}
             </SelectItem>
           ))}
         </SelectContent>

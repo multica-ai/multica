@@ -8,6 +8,24 @@ import type {} from "@multica/core/types/autopilot";
 import type {} from "@multica/core/types/workspace";
 import type {} from "@multica/core/types/issue";
 
+// TECH-3077: skill metadata shape returned by the cerebro-enriched list endpoint.
+export interface SkillMetadata {
+  category?: string;
+  domain?: string;
+  type?: string;
+  scope?: string;
+  status?: string;
+  tags: string[];
+  auto_learn: boolean;
+}
+
+declare module "@multica/core/types/agent" {
+  interface SkillSummary {
+    // TECH-3077: included when the server returns metadata (cerebro skill-metadata feature).
+    metadata?: SkillMetadata | null;
+  }
+}
+
 // FIR-2580: per-workspace logo. Server adds the column via
 // 9055_cerebro_workspace_avatar and surfaces it on WorkspaceResponse
 // (ListWorkspaces projection + GetWorkspace/UpdateWorkspace). Nullable

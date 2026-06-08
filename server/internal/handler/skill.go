@@ -233,27 +233,8 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
-	// CEREBRO-PATCH(skill-metadata-filter): TECH-3077 — delegate to filtered query when params present.
-	if q := r.URL.Query(); q.Get("category") != "" || q.Get("domain") != "" || q.Get("tag") != "" || q.Get("status") != "" || q.Get("data_domain") != "" {
-		h.listSkillsByMetadata(w, r, workspaceID)
-		return
-	}
-
-	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), parseUUID(workspaceID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list skills")
-		return
-	}
-
-	resp := make([]SkillSummaryResponse, len(skills))
-	for i, s := range skills {
-		resp[i] = skillSummaryToResponse(
-			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
-			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
-		)
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	// CEREBRO-PATCH(skill-metadata-filter): TECH-3077 — always use metadata query so category/domain are always returned.
+	h.listSkillsByMetadata(w, r, workspaceID)
 }
 
 func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
