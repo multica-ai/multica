@@ -27,6 +27,7 @@ export function coalesceTimelineItems(items: TimelineItem[]): TimelineItem[] {
       out[out.length - 1] = {
         ...prev,
         content: `${prev.content ?? ""}${item.content ?? ""}`,
+        created_at: item.created_at ?? prev.created_at,
       };
       continue;
     }
