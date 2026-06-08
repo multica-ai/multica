@@ -17,7 +17,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { Maximize2 } from "lucide-react";
+import { Maximize2, X } from "lucide-react";
 import { useT } from "../i18n";
 
 type MermaidAPI = typeof import("mermaid").default;
@@ -231,6 +231,14 @@ function MermaidLightbox({
       aria-label="Mermaid diagram fullscreen view"
       onClick={onClose}
     >
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white/90 transition-colors hover:bg-black/70 hover:text-white"
+        aria-label="Close"
+      >
+        <X className="h-5 w-5" />
+      </button>
       <iframe
         className="mermaid-diagram-lightbox-frame"
         sandbox=""
