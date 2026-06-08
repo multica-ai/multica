@@ -19,8 +19,8 @@ func TestCatalogInvariants(t *testing.T) {
 		CategoryArtifacts: true, CategoryAgents: true, CategoryRuntimes: true,
 		CategoryGroups: true, CategoryPermissions: true, CategoryProjects: true,
 		CategoryWorkspace: true, CategorySkills: true, CategorySquads: true,
-		CategoryCredentials: true, CategoryWorkflows: true, CategoryChannels: true,
-		CategoryReadAccess: true,
+		CategoryCredentials: true, CategoryConnections: true, CategoryWorkflows: true,
+		CategoryChannels: true, CategoryReadAccess: true,
 	}
 	evidenceRe := regexp.MustCompile(`\.go(:\d+| )`) // "...go:123" or "...go (note)"
 	seen := map[string]bool{}
