@@ -36,9 +36,19 @@ type Connection struct {
 	Internal            bool                `json:"internal"`
 	AuthConfig          AuthConfig          `json:"auth_config"`
 	EndpointPermissions []EndpointPermission `json:"endpoint_permissions"`
+	// Tools is the tool list discovered the last time the connection was tested
+	// (mcp_http only). Persisted so the permissions UI can render one row per
+	// underlying tool without re-probing the server. Empty for API connections.
+	Tools               []Tool              `json:"tools"`
 	Enabled             bool                `json:"enabled"`
 	CreatedAt           time.Time           `json:"created_at"`
 	UpdatedAt           time.Time           `json:"updated_at"`
+}
+
+// Tool is one MCP tool exposed by a connection, persisted on the connection row.
+type Tool struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // AuthConfig holds connection credentials. Fields are optional; only the
@@ -99,7 +109,7 @@ func New(pool *pgxpool.Pool) *Store {
 func (s *Store) List(ctx context.Context, workspaceID pgtype.UUID) ([]Connection, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
 		FROM workspace_connection
 		WHERE workspace_id = $1
 		ORDER BY created_at ASC
@@ -116,7 +126,7 @@ func (s *Store) List(ctx context.Context, workspaceID pgtype.UUID) ([]Connection
 func (s *Store) ListEnabled(ctx context.Context, workspaceID pgtype.UUID) ([]Connection, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
 		FROM workspace_connection
 		WHERE workspace_id = $1 AND enabled = true
 		ORDER BY created_at ASC
@@ -132,7 +142,7 @@ func (s *Store) ListEnabled(ctx context.Context, workspaceID pgtype.UUID) ([]Con
 func (s *Store) Get(ctx context.Context, id, workspaceID pgtype.UUID) (Connection, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
 		FROM workspace_connection
 		WHERE id = $1 AND workspace_id = $2
 	`, id, workspaceID)
@@ -161,7 +171,7 @@ func (s *Store) Create(ctx context.Context, p CreateParams) (Connection, error) 
 		  (workspace_id, name, display_name, type, url, internal, auth_config, endpoint_permissions)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, workspace_id, name, display_name, type, url, internal,
-		          auth_config, endpoint_permissions, enabled, created_at, updated_at
+		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
 	`, p.WorkspaceID, p.Name, p.DisplayName, p.Type, p.URL, p.Internal, authJSON, epJSON)
 	c, err := scanRow(row)
 	if err != nil && strings.Contains(err.Error(), "workspace_connection_name_unique") {
@@ -187,7 +197,7 @@ func (s *Store) Update(ctx context.Context, p UpdateParams) (Connection, error) 
 		       updated_at = now()
 		 WHERE id = $1 AND workspace_id = $2
 		RETURNING id, workspace_id, name, display_name, type, url, internal,
-		          auth_config, endpoint_permissions, enabled, created_at, updated_at
+		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
 	`, p.ID, p.WorkspaceID, p.DisplayName, p.URL, p.Internal, authJSON, epJSON, p.Enabled)
 	c, err := scanRow(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -305,11 +315,11 @@ func scanRowValues(scan scanFn) (Connection, error) {
 		id, wsID                     pgtype.UUID
 		name, displayName, typ, url  string
 		internal, enabled            bool
-		authRaw, epRaw               []byte
+		authRaw, epRaw, toolsRaw     []byte
 		createdAt, updatedAt         pgtype.Timestamptz
 	)
 	if err := scan(&id, &wsID, &name, &displayName, &typ, &url, &internal,
-		&authRaw, &epRaw, &enabled, &createdAt, &updatedAt); err != nil {
+		&authRaw, &epRaw, &enabled, &createdAt, &updatedAt, &toolsRaw); err != nil {
 		return Connection{}, fmt.Errorf("connections: scan: %w", err)
 	}
 	var auth AuthConfig
@@ -318,6 +328,11 @@ func scanRowValues(scan scanFn) (Connection, error) {
 	_ = json.Unmarshal(epRaw, &eps)
 	if eps == nil {
 		eps = []EndpointPermission{}
+	}
+	var tools []Tool
+	_ = json.Unmarshal(toolsRaw, &tools)
+	if tools == nil {
+		tools = []Tool{}
 	}
 	return Connection{
 		ID:                  util.UUIDToString(id),
@@ -329,8 +344,31 @@ func scanRowValues(scan scanFn) (Connection, error) {
 		Internal:            internal,
 		AuthConfig:          auth,
 		EndpointPermissions: eps,
+		Tools:               tools,
 		Enabled:             enabled,
 		CreatedAt:           createdAt.Time,
 		UpdatedAt:           updatedAt.Time,
 	}, nil
+}
+
+// UpdateTools persists the tool list discovered by a connection test so the
+// permissions UI can render one row per tool. Best-effort: callers ignore the
+// error when the connection was an ad-hoc (unsaved) test.
+func (s *Store) UpdateTools(ctx context.Context, id, workspaceID pgtype.UUID, tools []Tool) error {
+	if tools == nil {
+		tools = []Tool{}
+	}
+	toolsJSON, err := json.Marshal(tools)
+	if err != nil {
+		return fmt.Errorf("connections: marshal tools: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
+		UPDATE workspace_connection
+		   SET tools = $3, updated_at = now()
+		 WHERE id = $1 AND workspace_id = $2
+	`, id, workspaceID, toolsJSON)
+	if err != nil {
+		return fmt.Errorf("connections: update tools: %w", err)
+	}
+	return nil
 }
