@@ -9,6 +9,7 @@ import {
   Calendar,
   CalendarClock,
   FolderOpen,
+  Inbox,
   Link2,
   MoreHorizontal,
   Pin,
@@ -16,7 +17,7 @@ import {
   Plus,
   Trash2,
   UserMinus,
-} from "lucide-react";
+} from "lucide-react"; // CEREBRO-PATCH(cerebro-inbox-add-issue): Inbox icon for "Add to inbox" menu action.
 import type { AgentTask, Issue } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import {
@@ -28,6 +29,8 @@ import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 // CEREBRO-PATCH(status-menu-model): FIR-1550 v2b — model-aware status rows so the 3-dot/right-click menu matches the shared picker.
 import { useStatusMenuRows } from "@multica/cerebro-status-models/views";
+// CEREBRO-PATCH(cerebro-inbox-add-issue): "Add to inbox" action wired to the cerebro manual-add endpoint.
+import { useAddIssueToInbox } from "@multica/cerebro-inbox";
 import {
   DropdownMenuItem,
   DropdownMenuSub,
@@ -131,6 +134,8 @@ export function IssueActionsMenuItems({
   // CEREBRO-PATCH(status-menu-model): FIR-1550 v2b — model statuses when the
   // project has one, the 7 base statuses otherwise (upstream behavior).
   const statusRows = useStatusMenuRows(issue.status, issue.custom_status?.custom_status_key);
+  // CEREBRO-PATCH(cerebro-inbox-add-issue): manually add this issue to the member's inbox.
+  const addToInbox = useAddIssueToInbox();
 
   // Synchronous click handler — the awaited fetch in the previous version
   // dropped the browser's transient user activation, which made
@@ -292,6 +297,11 @@ export function IssueActionsMenuItems({
       <P.Item onClick={handleCopyWorkdirPath}>
         <FolderOpen className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_workdir_path)}
+      </P.Item>
+      {/* CEREBRO-PATCH(cerebro-inbox-add-issue): manually add this issue to the member's inbox. */}
+      <P.Item onClick={() => addToInbox.mutate(issue.id, { onSuccess: () => toast.success(t(($) => $.actions.added_to_inbox)) })}>
+        <Inbox className="h-3.5 w-3.5" />
+        {t(($) => $.actions.add_to_inbox)}
       </P.Item>
 
       <P.Separator />

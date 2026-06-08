@@ -20,9 +20,9 @@ const FOCUS_MODE_KEY = "multica:chat:focusMode";
 /**
  * Open/closed preference, persisted globally (not per-workspace) — most users
  * have one habitual chat-panel preference across workspaces. Missing key =
- * new user (or cleared storage); default to OPEN so the chat is discoverable.
- * Once the user toggles even once, their explicit choice is respected on
- * every subsequent reload.
+ * new user (or cleared storage); default to CLOSED (cerebro inbox owns the
+ * chat surface). Once the user toggles even once, their explicit choice is
+ * respected on every subsequent reload.
  */
 const OPEN_KEY = "multica:chat:isOpen";
 
@@ -130,10 +130,10 @@ export function createChatStore(options: ChatStoreOptions) {
   };
 
   // Resolve initial isOpen from storage. The three-state read (null /
-  // "true" / "false") is what enables the "new user → open" default while
-  // still honouring an explicit "I closed it" choice on every reload.
+  // "true" / "false") honours an explicit toggle choice on every reload.
   const storedOpen = storage.getItem(OPEN_KEY);
-  const initialIsOpen = storedOpen === null ? true : storedOpen === "true";
+  // CEREBRO-PATCH(chat-popup-default-closed): default to closed for new users — the inbox cerebro feature owns the chat surface; floating popup should not appear unsolicited (TECH-3035).
+  const initialIsOpen = storedOpen === null ? false : storedOpen === "true";
 
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,

@@ -1406,6 +1406,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/notifications/archive-all", cerebroInboxHandler.ArchiveAllNotifications)
 				// CEREBRO-PATCH(cerebro-inbox-routes): FIR-2385 — owner accepts a private-agent run-request.
 				r.Post("/{id}/run-private-agent", cerebroInboxHandler.RunPrivateAgentRequest)
+				// CEREBRO-PATCH(cerebro-inbox-add-issue): manually place any issue in the member's inbox.
+				r.Post("/add-issue", cerebroInboxHandler.AddIssueToInbox)
 
 			})
 

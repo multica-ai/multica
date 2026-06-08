@@ -37,7 +37,9 @@ export type InboxItemType =
   // CEREBRO-PATCH(core-types-inbox): TECH-2961 — agent-authored comments are split into three routing keys based on the tag they carry, so users can mute monologues without losing hand-offs.
   | "agent_comment_no_tag"
   | "agent_comment_member_tag"
-  | "agent_comment_agent_tag";
+  | "agent_comment_agent_tag"
+  // CEREBRO-PATCH(cerebro-inbox-add-issue): manually added by the member via the issue action menu.
+  | "manually_added";
 
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of
