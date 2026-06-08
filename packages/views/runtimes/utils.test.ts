@@ -95,6 +95,19 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(18, 5);
   });
 
+  it("prices cache reads and writes with their own Anthropic token rates", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-sonnet-4-6",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    // 1M × ($3 input + $15 output + $0.30 cache read + $3.75 cache write).
+    expect(cost).toBeCloseTo(22.05, 5);
+  });
+
   it("prices a Codex CLI session reporting gpt-5-codex", () => {
     const cost = estimateCost({
       ...zeroUsage,

@@ -399,47 +399,38 @@ func goSDKPermissionMode(opts ExecOptions) claudecode.PermissionMode {
 	}
 }
 
-// goSDKParseUsage extracts token usage from the SDK's ResultMessage.Usage map.
 func goSDKParseUsage(rawUsage map[string]any, defaultModel string, usage map[string]TokenUsage) {
-	// The SDK returns usage as map[string]any with model-keyed entries or flat fields
-	// Try to extract from the raw map
+	for _, key := range []string{"modelUsage", "model_usage", "models"} {
+		container, ok := tokenUsageNestedMap(rawUsage, key)
+		if !ok {
+			continue
+		}
+		for model, value := range container {
+			if model == "" {
+				continue
+			}
+			usageMap, ok := tokenUsageAsMap(value)
+			if !ok {
+				continue
+			}
+			if u := tokenUsageFromMap(usageMap); tokenUsageHasTokens(u) {
+				usage[model] = u
+			}
+		}
+		if len(usage) > 0 {
+			return
+		}
+	}
+
+	u := tokenUsageFromMap(rawUsage)
+	if !tokenUsageHasTokens(u) {
+		return
+	}
 	model := defaultModel
 	if model == "" {
 		model = "claude"
 	}
-
-	var tu TokenUsage
-	if v, ok := rawUsage["input_tokens"]; ok {
-		tu.InputTokens = toInt64(v)
-	}
-	if v, ok := rawUsage["output_tokens"]; ok {
-		tu.OutputTokens = toInt64(v)
-	}
-	if v, ok := rawUsage["cache_read_input_tokens"]; ok {
-		tu.CacheReadTokens = toInt64(v)
-	}
-	if v, ok := rawUsage["cache_creation_input_tokens"]; ok {
-		tu.CacheWriteTokens = toInt64(v)
-	}
-	if tu.InputTokens > 0 || tu.OutputTokens > 0 {
-		usage[model] = tu
-	}
-}
-
-func toInt64(v any) int64 {
-	switch n := v.(type) {
-	case float64:
-		return int64(n)
-	case int64:
-		return n
-	case int:
-		return int64(n)
-	case json.Number:
-		i, _ := n.Int64()
-		return i
-	default:
-		return 0
-	}
+	usage[model] = u
 }
 
 // toolResultContent extracts text content from a ToolResultBlock.
