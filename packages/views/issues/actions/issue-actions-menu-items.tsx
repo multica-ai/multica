@@ -309,8 +309,8 @@ export function IssueActionsMenuItems({
 
       <P.Separator />
 
-      {/* Archive actions */}
-      {!issue.archived_at && (
+      {/* Archive actions — only available for terminal issues */}
+      {!issue.archived_at && (issue.status === "done" || issue.status === "cancelled") && (
         <P.Item onClick={actions.openArchiveConfirm}>
           <Archive className="h-3.5 w-3.5" />
           {t(($) => $.actions.archive_issue)}

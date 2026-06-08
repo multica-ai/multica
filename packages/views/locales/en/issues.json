@@ -5,7 +5,7 @@
     "empty_title": "No issues yet",
     "empty_hint": "Create an issue to get started.",
     "move_failed": "Failed to move issue",
-    "show_archived": "Show archived ({{count}}) →",
+    "show_archived": "Show archived",
     "hide_archived": "Hide archived"
   },
   "status": {

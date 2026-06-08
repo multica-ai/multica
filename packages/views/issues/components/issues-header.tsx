@@ -1106,21 +1106,15 @@ export function IssueDisplayControls({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant={showArchived ? "default" : "outline"}
-                size="sm"
-                className={showArchived ? "gap-1 bg-brand text-white hover:bg-brand/90" : "gap-1 text-muted-foreground"}
-                onClick={() => act.toggleShowArchived()}
-              >
-                <Archive className="size-3.5" />
-              </Button>
-            }
-          />
-          <TooltipContent side="bottom">{showArchived ? t(($) => $.page.hide_archived) : t(($) => $.page.show_archived)}</TooltipContent>
-        </Tooltip>
+        <Button
+          variant={showArchived ? "default" : "outline"}
+          size="sm"
+          className={showArchived ? "gap-1 bg-brand text-white hover:bg-brand/90" : "gap-1 text-muted-foreground"}
+          onClick={() => act.toggleShowArchived()}
+          title={showArchived ? t(($) => $.page.hide_archived) : t(($) => $.page.show_archived)}
+        >
+          <Archive className="size-3.5" />
+        </Button>
     </div>
   );
 }

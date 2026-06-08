@@ -412,12 +412,20 @@ export function useArchiveIssue() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (id: string) => api.archiveIssue(id),
-    onMutate: async (id) => {
-      await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+    onMutate: (id) => {
+      // Fire-and-forget — keeps onMutate synchronous so the cache update
+      // lands in the same tick as mutate().
+      qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      qc.cancelQueries({ queryKey: issueKeys.detail(wsId, id) });
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
+      const archivedAt = new Date().toISOString();
       qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
-        old ? { ...old, archived_at: new Date().toISOString() } : old,
+        old ? { ...old, archived_at: archivedAt } : old,
       );
+      // Also patch list caches so the list page reflects the change immediately.
+      for (const [key, cached] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, { archived_at: archivedAt }));
+      }
       return { prevDetail, id };
     },
     onError: (_err, _vars, ctx) => {
@@ -439,12 +447,19 @@ export function useUnarchiveIssue() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (id: string) => api.unarchiveIssue(id),
-    onMutate: async (id) => {
-      await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+    onMutate: (id) => {
+      // Fire-and-forget — keeps onMutate synchronous so the cache update
+      // lands in the same tick as mutate().
+      qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      qc.cancelQueries({ queryKey: issueKeys.detail(wsId, id) });
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
       qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
         old ? { ...old, archived_at: null, archived_by: null } : old,
       );
+      // Also patch list caches so the list page reflects the change immediately.
+      for (const [key, cached] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, { archived_at: null, archived_by: null }));
+      }
       return { prevDetail, id };
     },
     onError: (_err, _vars, ctx) => {
