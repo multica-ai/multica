@@ -9,13 +9,27 @@ metadata:
 data:
   runtime.yaml: |
     workspaces:
+{{- $profiles := default (dict) .Values.runtime.worker.profiles }}
 {{- range $w := default (list (dict "id" .Values.runtime.workspaceId)) (default list .Values.runtime.workspaces) }}
+{{- /*
+Resolve the workspace's workerProfile → ServiceAccount name. An unset profile
+(or one not present in runtime.worker.profiles) yields an empty SA, which the
+controller passes through to PodSpec.ServiceAccountName — pods run as the
+namespace `default` SA with no cluster API access. This is the intended "agent
+without K8S access" path.
+*/ -}}
+{{- $sa := "" -}}
+{{- if $w.workerProfile -}}
+  {{- $p := index $profiles $w.workerProfile -}}
+  {{- if $p -}}{{- $sa = $p.serviceAccountName -}}{{- end -}}
+{{- end }}
       - id: {{ required "runtime.workspaceId or runtime.workspaces[].id required" $w.id | quote }}
         provider: {{ default "claude" $w.provider }}
         agentName: {{ default "multica-cluster" $w.agentName }}
         runtimeImage: {{ default (include "multica.runtimeImage" $) $w.runtimeImage | quote }}
         pvcSize: {{ default $.Values.runtime.controller.workdir.size "5Gi" | quote }}
         storageClass: {{ default $.Values.runtime.controller.workdir.storageClass "" | quote }}
+        serviceAccountName: {{ $sa | quote }}
 {{- end }}
     imagePullSecret: {{ .Values.image.pullSecret | quote }}
     {{- if .Values.runtime.repocache.enabled }}

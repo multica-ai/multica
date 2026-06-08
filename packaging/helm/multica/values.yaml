@@ -135,6 +135,46 @@ runtime:
       requests: { cpu: 100m, memory: 128Mi }
       limits:   { cpu: 500m, memory: 256Mi }
 
+  # ── Worker pod identity + cluster API access ─────────────────────────────
+  # Each agent runtime can independently pick a "worker profile" that controls
+  # what (if any) cluster API access its Job pods have. Profiles defined here
+  # produce a ServiceAccount + bindings; workspaces reference a profile by name
+  # via runtime.workspaces[].workerProfile. A workspace with no workerProfile
+  # gets the namespace default SA → no cluster API access.
+  #
+  # Examples:
+  #   runtime.workspaces:
+  #     - id: ws-1
+  #       agentName: claude-k8s          # full cluster-admin
+  #       workerProfile: k8s-admin
+  #     - id: ws-1
+  #       agentName: claude-vanilla      # no K8S access at all
+  worker:
+    profiles:
+      # Built-in profile: full cluster-admin. Any workspace that picks this
+      # profile gets a SA bound to the cluster-admin ClusterRole. DANGEROUS in
+      # shared / multi-tenant clusters — any compromised agent task can destroy
+      # anything. Use only for agents you trust like your laptop.
+      k8s-admin:
+        serviceAccountName: multica-runtime-worker-k8s-admin
+        rbac:
+          enabled: true
+          clusterAdmin: true
+          targetNamespaces: []
+          extraRules: []
+          extraClusterRules: []
+      # Add your own profiles below. Example: a "deploy-only" profile scoped
+      # to one namespace.
+      #
+      # deploy-only:
+      #   serviceAccountName: multica-runtime-worker-deploy
+      #   rbac:
+      #     enabled: true
+      #     clusterAdmin: false
+      #     targetNamespaces: [apps]
+      #     extraRules: []
+      #     extraClusterRules: []
+
   # ── In-cluster repo cache (Plan F.1) ──────────────────────────────────────
   # Long-lived Deployment that maintains bare clones of every workspace's repos
   # on an RWX PVC. Worker Job pods mount the same PVC read-only and `git clone`

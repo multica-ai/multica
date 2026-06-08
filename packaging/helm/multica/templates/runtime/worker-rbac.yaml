@@ -1,0 +1,133 @@
+{{- /*
+Per-profile Worker SA + RBAC. Each entry in runtime.worker.profiles becomes a
+separate ServiceAccount + bindings, so different agents can have different
+cluster API access by picking different profiles via
+runtime.workspaces[].workerProfile.
+
+Each profile supports the same shape:
+  serviceAccountName: <string>
+  rbac:
+    enabled: bool          # gate; false = render nothing for this profile
+    clusterAdmin: bool     # bind cluster-admin (skips all other rules)
+    targetNamespaces: []   # ns-scoped Role bound in each; defaults to release ns
+    extraRules: []         # appended to default ns Role rules
+    extraClusterRules: []  # appended to default cluster read rules
+*/ -}}
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") }}
+{{- $root := . -}}
+{{- range $profileName, $profile := default (dict) .Values.runtime.worker.profiles }}
+{{- if $profile.rbac.enabled }}
+{{- $saName := $profile.serviceAccountName -}}
+{{- $saNs := $root.Release.Namespace -}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $saName }}
+  namespace: {{ $saNs }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" (printf "worker-%s" $profileName) "ctx" $root) | nindent 4 }}
+    multica.ai/worker-profile: {{ $profileName | quote }}
+{{- if $profile.rbac.clusterAdmin }}
+---
+# DANGEROUS: cluster-admin gives every agent Job using this profile full
+# control of the cluster. Only enable for trusted single-tenant deployments.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: multica-runtime-worker-{{ $profileName }}-cluster-admin
+  labels:
+    {{- include "multica.componentLabels" (dict "name" (printf "worker-%s" $profileName) "ctx" $root) | nindent 4 }}
+    multica.ai/worker-profile: {{ $profileName | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ $saNs }}
+{{- else }}
+{{- $defaultRules := list
+    (dict "apiGroups" (list "") "resources" (list "pods" "pods/log" "pods/exec" "services" "endpoints" "configmaps" "secrets" "persistentvolumeclaims" "serviceaccounts" "events") "verbs" (list "get" "list" "watch" "create" "update" "patch" "delete"))
+    (dict "apiGroups" (list "apps") "resources" (list "deployments" "statefulsets" "daemonsets" "replicasets") "verbs" (list "get" "list" "watch" "create" "update" "patch" "delete"))
+    (dict "apiGroups" (list "batch") "resources" (list "jobs" "cronjobs") "verbs" (list "get" "list" "watch" "create" "update" "patch" "delete"))
+    (dict "apiGroups" (list "networking.k8s.io") "resources" (list "ingresses" "networkpolicies") "verbs" (list "get" "list" "watch" "create" "update" "patch" "delete"))
+    (dict "apiGroups" (list "policy") "resources" (list "poddisruptionbudgets") "verbs" (list "get" "list" "watch" "create" "update" "patch" "delete"))
+    (dict "apiGroups" (list "autoscaling") "resources" (list "horizontalpodautoscalers") "verbs" (list "get" "list" "watch" "create" "update" "patch" "delete"))
+    (dict "apiGroups" (list "rbac.authorization.k8s.io") "resources" (list "roles" "rolebindings") "verbs" (list "get" "list" "watch" "create" "update" "patch" "delete"))
+}}
+{{- $extraRules := default (list) $profile.rbac.extraRules }}
+{{- $allRules := concat $defaultRules $extraRules }}
+{{- $namespaces := default (list $saNs) $profile.rbac.targetNamespaces }}
+{{- range $ns := $namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: multica-runtime-worker-{{ $profileName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" (printf "worker-%s" $profileName) "ctx" $root) | nindent 4 }}
+    multica.ai/worker-profile: {{ $profileName | quote }}
+rules:
+{{ toYaml $allRules | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: multica-runtime-worker-{{ $profileName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" (printf "worker-%s" $profileName) "ctx" $root) | nindent 4 }}
+    multica.ai/worker-profile: {{ $profileName | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: multica-runtime-worker-{{ $profileName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ $saNs }}
+{{- end }}
+{{- /*
+Cluster-scoped reads — Helm needs CRDs, namespaces, nodes, apiservices for
+chart discovery. Read-only on purpose; write access stays bounded by Role(s).
+*/ -}}
+{{- $defaultClusterRules := list
+    (dict "apiGroups" (list "apiextensions.k8s.io") "resources" (list "customresourcedefinitions") "verbs" (list "get" "list" "watch"))
+    (dict "apiGroups" (list "") "resources" (list "namespaces" "nodes") "verbs" (list "get" "list" "watch"))
+    (dict "apiGroups" (list "apiregistration.k8s.io") "resources" (list "apiservices") "verbs" (list "get" "list" "watch"))
+}}
+{{- $extraClusterRules := default (list) $profile.rbac.extraClusterRules }}
+{{- $allClusterRules := concat $defaultClusterRules $extraClusterRules }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: multica-runtime-worker-{{ $profileName }}-read
+  labels:
+    {{- include "multica.componentLabels" (dict "name" (printf "worker-%s" $profileName) "ctx" $root) | nindent 4 }}
+    multica.ai/worker-profile: {{ $profileName | quote }}
+rules:
+{{ toYaml $allClusterRules | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: multica-runtime-worker-{{ $profileName }}-read
+  labels:
+    {{- include "multica.componentLabels" (dict "name" (printf "worker-%s" $profileName) "ctx" $root) | nindent 4 }}
+    multica.ai/worker-profile: {{ $profileName | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: multica-runtime-worker-{{ $profileName }}-read
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ $saNs }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
