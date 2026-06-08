@@ -59,6 +59,46 @@ func TestFormatAdmissionReason(t *testing.T) {
 	}
 }
 
+// TestIsRuntimeOfflineAdmissionReason locks in the MUL-2863 reason-string
+// contract that routes a runtime-offline admission outcome to the durable
+// 'pending_runtime' run path. The classifier must:
+//
+//  1. Match every admission reason whose root cause is "the runtime is
+//     offline" — including the prefixed variants produced by
+//     formatAdmissionReason (assignee…, squad leader…) and the legacy
+//     "at dispatch time" suffix. The MUL-1899 alert dashboards group on
+//     "offline at dispatch time" so we cannot rename the suffix.
+//  2. NOT match other admission failures (agent archived, no runtime
+//     bound, private-agent gate, etc.) — those remain terminal skips.
+//     Misclassifying a private-agent failure as runtime-offline would
+//     cause the run to stay pending forever waiting for a runtime that
+//     is already online but blocked by a different gate.
+func TestIsRuntimeOfflineAdmissionReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason string
+		want   bool
+	}{
+		{"agent runtime offline (legacy format)", "agent runtime is offline at dispatch time", true},
+		{"assignee agent runtime offline (formatted)", "assignee agent runtime is offline at dispatch time", true},
+		{"squad leader agent runtime offline (formatted)", "squad leader agent runtime is offline at dispatch time", true},
+		{"runtime starting", "agent runtime is starting at dispatch time", true},
+		{"runtime unstable", "agent runtime is unstable at dispatch time", true},
+		{"agent archived (terminal skip)", "assignee agent is archived", false},
+		{"agent no runtime (terminal skip)", "assignee agent has no runtime bound", false},
+		{"squad archived (terminal skip)", "assignee squad is archived", false},
+		{"private agent gate (terminal skip)", "autopilot creator lacks access to private assignee agent", false},
+		{"empty reason", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isRuntimeOfflineAdmissionReason(tc.reason); got != tc.want {
+				t.Fatalf("isRuntimeOfflineAdmissionReason(%q) = %v, want %v", tc.reason, got, tc.want)
+			}
+		})
+	}
+}
+
 // errDispatchSkipped must be distinguishable via errors.As from a wrapped
 // fmt.Errorf, otherwise DispatchAutopilot's failure-vs-skip switch will treat
 // it as a generic failure and the manual-trigger handler will 500. Locks in

@@ -214,6 +214,80 @@ SET status = 'skipped', completed_at = now(), failure_reason = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: CreateAutopilotRunPendingRuntime :one
+-- MUL-2863: durable dispatch when the runtime is offline. The cron tick
+-- creates a run row in 'pending_runtime' (terminal-state-equivalent) and
+-- records which runtime it's queued behind. When the runtime comes back
+-- online, the runtime-comes-online hook re-dispatches the oldest pending
+-- run. This is the durable alternative to UpdateAutopilotRunSkipped: rather
+-- than recording a "we deliberately dropped this" outcome, we record a
+-- "we evaluated the trigger and parked it for later" outcome.
+--
+-- Mapped to the agent on whose bound runtime we're waiting, so the
+-- runtime-comes-online path can fan out across agents on the same
+-- runtime without an extra join. NULL is fine (offline agent with no
+-- runtime bound — see MUL-1899's "agent has no runtime bound" branch)
+-- because the agent-resolution re-check at dispatch time catches that
+-- case and fails closed.
+INSERT INTO autopilot_run (
+    autopilot_id, trigger_id, source, status, trigger_payload,
+    squad_id, failure_reason, pending_runtime_id
+) VALUES (
+    $1, sqlc.narg('trigger_id'), $2, 'pending_runtime',
+    sqlc.narg('trigger_payload'), sqlc.narg('squad_id'),
+    $3, $4
+) RETURNING *;
+
+-- name: ListPendingRuntimeAutopilotRunsForRuntime :many
+-- MUL-2863: when a runtime transitions back to online, the runtime-comes-
+-- online hook calls this with the runtime_id to walk the durable queue.
+-- Oldest-first (per migration 111's partial index ordering) matches the
+-- "oldest eligible run goes first" semantics: if a laptop was offline for
+-- 8 hours and the cron was hourly, we dispatch the original 8 missing
+-- runs in order rather than the newest, which is what a user looking at
+-- the autopilot history would expect.
+--
+-- JOIN to autopilot so the caller can re-validate the assignee's runtime
+-- at dispatch time without a second round-trip per row, and so a paused
+-- / archived autopilot short-circuits cleanly.
+SELECT r.*, a.workspace_id AS autopilot_workspace_id,
+       a.status AS autopilot_status, a.assignee_type, a.assignee_id,
+       a.execution_mode
+FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.pending_runtime_id = $1
+  AND r.status = 'pending_runtime'
+  AND a.status = 'active'
+ORDER BY r.triggered_at ASC
+LIMIT $2;
+
+-- name: ClearAutopilotRunPendingRuntime :one
+-- MUL-2863: when a 'pending_runtime' run is dispatched (or otherwise
+-- transitioned to a non-pending status), clear pending_runtime_id so a
+-- stale value can't keep matching future ListPendingRuntimeAutopilotRunsForRuntime
+-- calls. Failure_reason and completed_at are deliberately NOT touched
+-- here: callers transition the status themselves (UpdateAutopilotRunIssueCreated
+-- / UpdateAutopilotRunRunning / UpdateAutopilotRunSkipped) and own those
+-- columns. The dispatcher composes the two updates: this one to clear the
+-- queue pointer, the status-specific one to finalize.
+UPDATE autopilot_run
+SET pending_runtime_id = NULL
+WHERE id = $1
+  AND status = 'pending_runtime'
+RETURNING *;
+
+-- name: GetAutopilotByRunID :one
+-- MUL-2863: reverse lookup for the runtime-comes-online skip-transition
+-- path. The dispatch loop holds a run row and needs the parent autopilot
+-- (and its workspace_id) to publish a run:done event; loading the autopilot
+-- directly via the run's autopilot_id saves a join. Used only on the
+-- transitionPendingToSkipped hot path; happy-path dispatch re-uses the
+-- autopilot already loaded in DispatchPendingRuntimeRunsForRuntime.
+SELECT a.*
+FROM autopilot a
+JOIN autopilot_run r ON r.autopilot_id = a.id
+WHERE r.id = $1;
+
 -- name: UpdateAutopilotRunSkippedWithResult :one
 UPDATE autopilot_run
 SET status = 'skipped',
@@ -290,13 +364,14 @@ WHERE t.kind = 'schedule'
 
 -- name: SelectAutopilotsExceedingFailureThreshold :many
 -- Find active autopilots whose recent run failure rate exceeds the threshold.
--- Counts only "real" terminal runs (completed | failed). 'skipped' is
--- excluded from BOTH numerator and denominator: an admission-skipped run
--- (e.g. assignee runtime offline at dispatch time, MUL-1899) is neither a
--- success nor a failure, so it must not dilute the failure ratio (which
--- would let a 100%-failing autopilot mask itself behind a wall of skips)
--- nor inflate it. issue_created/running are still excluded so in-flight
--- work isn't penalised.
+-- Counts only "real" terminal runs (completed | failed). 'skipped' and
+-- 'pending_runtime' are both excluded from BOTH numerator and denominator:
+-- an admission-skipped run (e.g. assignee agent hard-deleted, MUL-1899) and
+-- a parked pending_runtime run (assignee runtime offline, MUL-2863) are
+-- neither a success nor a failure, so neither must dilute the failure ratio
+-- (which would let a 100%-failing autopilot mask itself behind a wall of
+-- skips / parked runs) nor inflate it. issue_created/running are still
+-- excluded so in-flight work isn't penalised.
 -- Used by the failure monitor to auto-pause sustained-failure autopilots
 -- (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
 -- that 100% failed for days, burning ~1.5k useless tasks per week).

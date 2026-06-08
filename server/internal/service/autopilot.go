@@ -48,10 +48,20 @@ func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *
 // depending on execution_mode.
 //
 // Before any work is queued we run an admission check against the assignee
-// agent's runtime: if it is not online, we record a `skipped` run with a
-// failure_reason and return without enqueueing. This is the "触发时准入" gate
-// from MUL-1899 — without it a paused laptop / offline daemon causes scheduled
-// autopilots to pile thousands of doomed tasks onto agent_task_queue.
+// agent's runtime. Two skip outcomes are possible (MUL-1899 + MUL-2863):
+//
+//  1. The runtime is offline. MUL-2863 makes this a *durable* skip: we
+//     persist a `pending_runtime` run with the runtime_id it was waiting
+//     behind, so when the runtime/daemon reappears the
+//     DispatchPendingRuntimeRunsForRuntime hook picks it up and dispatches
+//     the actual work. This is the "the cron should not be silently lost
+//     while my laptop is asleep" fix from MUL-2863.
+//
+//  2. Any other admission failure (agent archived, squad archived, no
+//     runtime bound, private-agent gate, etc.) is a *terminal* skip. The
+//     cron is recorded as `skipped` with a failure_reason, mirroring the
+//     legacy MUL-1899 behaviour. Retrying wouldn't change anything, and
+//     retrying would inflate the failure-rate auto-pause monitor.
 //
 // When assignee_type='squad' the gate runs against the squad leader (Path A
 // from MUL-2429: Autopilot-on-squad ≈ Autopilot-on-leader), so an offline or
@@ -64,6 +74,20 @@ func (s *AutopilotService) DispatchAutopilot(
 	payload []byte,
 ) (*db.AutopilotRun, error) {
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
+		if isRuntimeOfflineAdmissionReason(reason) {
+			if run, err := s.recordPendingRuntimeRun(ctx, autopilot, triggerID, source, payload, reason); err == nil {
+				return run, nil
+			} else {
+				// Falling back to a terminal skip keeps a DB error from
+				// silently dropping the cron: the run row still gets
+				// written, the failure reason still surfaces in the UI,
+				// and the next tick gets another chance.
+				slog.Warn("autopilot dispatch: pending_runtime insert failed, falling back to skipped",
+					"autopilot_id", util.UUIDToString(autopilot.ID),
+					"error", err,
+				)
+			}
+		}
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
 	}
 
@@ -664,6 +688,345 @@ func autopilotSquadAttribution(ap db.Autopilot) pgtype.UUID {
 		return ap.AssigneeID
 	}
 	return pgtype.UUID{}
+}
+
+// isRuntimeOfflineAdmissionReason reports whether a shouldSkipDispatch
+// failure_reason indicates "the assignee agent's runtime is offline". This
+// is the only admission outcome that is durable (MUL-2863): we persist the
+// run as 'pending_runtime' so the runtime-comes-online hook can re-dispatch
+// it. All other admission failures (agent archived, squad archived, no
+// runtime bound, private-agent gate failure) are terminal — retrying the
+// cron would not change anything, so we keep the legacy 'skipped' status.
+//
+// We match on the formatted reason rather than re-running AgentReadiness
+// here: the admission gate has already loaded the runtime row, and the
+// "at dispatch time" suffix is the load-bearing string the MUL-1899
+// failure-monitor alert already groups on. Adding a second reason-string
+// would silently break that alert query.
+func isRuntimeOfflineAdmissionReason(reason string) bool {
+	return strings.HasPrefix(reason, "agent runtime is ") ||
+		strings.HasPrefix(reason, "assignee agent runtime is ") ||
+		strings.HasPrefix(reason, "squad leader agent runtime is ")
+}
+
+// recordPendingRuntimeRun persists a 'pending_runtime' autopilot_run for the
+// MUL-2863 durable-dispatch path. Mirrors recordSkippedRun's contract
+// (returns run + nil error so callers treat this as a successful no-op
+// dispatch), but:
+//   - status='pending_runtime' instead of 'skipped'
+//   - pending_runtime_id is set to the runtime we're queued behind, so the
+//     runtime-comes-online hook can find it
+//   - failure_reason is the admission-gate text (e.g. "agent runtime is
+//     offline at dispatch time") so the UI's existing failure_reason field
+//     can surface "Waiting for agent runtime to come online" without a
+//     schema change. The mapping from "offline at dispatch time" →
+//     "Waiting for agent runtime" lives in the frontend
+//     (AutopilotRunStatus handler) so the wire contract stays text-only.
+//
+// Returns nil run + err on a DB error so the caller can fall back to
+// recordSkippedRun; we deliberately do not propagate a partial state
+// (pending row without a queued runtime id) because that would create the
+// exact "orphaned pending row" the durable path is meant to prevent.
+func (s *AutopilotService) recordPendingRuntimeRun(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	reason string,
+) (*db.AutopilotRun, error) {
+	runtimeID, err := s.resolveAssigneeRuntimeID(ctx, autopilot)
+	if err != nil || !runtimeID.Valid {
+		// Either the assignee agent row is gone, the squad row is archived,
+		// or the agent has no runtime bound. The admission gate already
+		// classified this as a non-runtime-offline skip, so the caller
+		// would have routed to recordSkippedRun — we should never reach
+		// here. If we do (e.g. a race between the gate and this lookup),
+		// bail with no row so the caller falls back to the legacy skip.
+		slog.Warn("autopilot dispatch: cannot resolve runtime for pending run",
+			"autopilot_id", util.UUIDToString(autopilot.ID),
+			"reason", reason,
+			"err", err,
+		)
+		return nil, fmt.Errorf("resolve runtime: %w", err)
+	}
+
+	run, err := s.Queries.CreateAutopilotRunPendingRuntime(ctx, db.CreateAutopilotRunPendingRuntimeParams{
+		AutopilotID:      autopilot.ID,
+		Source:           source,
+		FailureReason:    pgtype.Text{String: reason, Valid: true},
+		PendingRuntimeID: runtimeID,
+		TriggerID:        triggerID,
+		TriggerPayload:   payload,
+		SquadID:          autopilotSquadAttribution(autopilot),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create pending_runtime run: %w", err)
+	}
+
+	// Mirror recordSkippedRun's last_run_at bump + WS event. From the
+	// scheduler's / UI's point of view we *did* evaluate the trigger this
+	// tick; the runtime was just offline, so we parked the run for later.
+	s.Queries.UpdateAutopilotLastRunAt(ctx, autopilot.ID)
+
+	slog.Info("autopilot dispatch parked pending runtime",
+		"autopilot_id", util.UUIDToString(autopilot.ID),
+		"run_id", util.UUIDToString(run.ID),
+		"source", source,
+		"runtime_id", util.UUIDToString(runtimeID),
+		"reason", reason,
+	)
+
+	// Publish the same run-done event the skipped path publishes, but with
+	// status='pending_runtime' so the frontend renders the new "Waiting
+	// for runtime" pill without a new event type.
+	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), run, "pending_runtime")
+	return &run, nil
+}
+
+// resolveAssigneeRuntimeID returns the runtime_id bound to the autopilot's
+// resolved leader (the agent for assignee_type='agent', the squad's leader
+// for assignee_type='squad'). Returns an invalid UUID when the agent has
+// no runtime bound so the caller can decide what to do.
+func (s *AutopilotService) resolveAssigneeRuntimeID(ctx context.Context, ap db.Autopilot) (pgtype.UUID, error) {
+	agent, _, err := s.resolveAutopilotLeader(ctx, ap)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	return agent.RuntimeID, nil
+}
+
+// maxPendingRuntimeRunsPerSweep caps the number of pending_runtime runs
+// one runtime-online sweep dispatches in a single transaction. Keeps the
+// heartbeat hot path bounded when a long-offline laptop comes back with
+// hundreds of queued cron runs: dispatch the oldest, leave the rest
+// pending for the next beat (or, more likely, the immediate next iteration
+// of the loop after this batch commits).
+const maxPendingRuntimeRunsPerSweep = 50
+
+// DispatchPendingRuntimeRunsForRuntime is the runtime-comes-online hook
+// for MUL-2863. It walks every 'pending_runtime' autopilot_run queued
+// behind the given runtime_id and tries to dispatch each one, oldest first.
+//
+// Per-run dispatch mirrors DispatchAutopilot: re-validate the admission
+// gate (in case the agent was archived, the squad was archived, or the
+// agent was re-bound to a different runtime while we were waiting), then
+// run the standard create_issue / run_only branch. A re-check is necessary
+// because the run may have been parked for hours/days; the world may have
+// moved on.
+//
+// The 3-outcome contract from DispatchAutopilot is preserved:
+//
+//   - success → run is moved to 'issue_created' or 'running' and the
+//     autopilot_run.issue_id / task_id is set by the per-mode dispatcher.
+//   - admission still failing for the same runtime-offline reason →
+//     keep the run as 'pending_runtime' (no row changes). The next time
+//     the runtime goes offline → online, we'll try again. (Defensive
+//     in case the runtime went online briefly and the agent hasn't
+//     heartbeated yet.)
+//   - admission failing for a non-runtime reason (agent archived, etc.) →
+//     rewind the run to 'skipped' with the new failure_reason so it
+//     doesn't sit in pending forever. We treat this as a terminal skip
+//     rather than a failure so it doesn't pollute the failure-rate auto-
+//     pause monitor.
+//
+// The function is safe to call from heartbeat hot paths: it short-circuits
+// on an empty pending set, and the per-row queries are bounded by
+// maxPendingRuntimeRunsPerSweep.
+func (s *AutopilotService) DispatchPendingRuntimeRunsForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	if !runtimeID.Valid {
+		return nil
+	}
+	rows, err := s.Queries.ListPendingRuntimeAutopilotRunsForRuntime(ctx, db.ListPendingRuntimeAutopilotRunsForRuntimeParams{
+		PendingRuntimeID: runtimeID,
+		Limit:            maxPendingRuntimeRunsPerSweep,
+	})
+	if err != nil {
+		return fmt.Errorf("list pending runtime runs: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	slog.Info("autopilot dispatch: runtime came online, draining pending runs",
+		"runtime_id", util.UUIDToString(runtimeID),
+		"pending_count", len(rows),
+	)
+
+	for _, row := range rows {
+		// Re-load the autopilot fresh. The SQL JOIN returned a snapshot
+		// at SELECT time, but the autopilot may have been reassigned,
+		// paused, or archived in the gap between SELECT and this loop
+		// iteration. The post-admission branch (DispatchAutopilot's
+		// `running` path) is idempotent on re-call, so a re-dispatch
+		// of a run that already slipped through is at worst a no-op
+		// double-skip — acceptable for the first version.
+		autopilot, err := s.Queries.GetAutopilot(ctx, row.AutopilotID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Autopilot hard-deleted while pending. Mark the run
+				// skipped with a useful reason so the UI doesn't show
+				// a forever-pending row.
+				s.transitionPendingToSkipped(ctx, row.ID, "autopilot was deleted while waiting for runtime")
+				continue
+			}
+			slog.Warn("autopilot dispatch: failed to reload autopilot for pending run",
+				"run_id", util.UUIDToString(row.ID),
+				"autopilot_id", util.UUIDToString(row.AutopilotID),
+				"error", err,
+			)
+			continue
+		}
+		if autopilot.Status != "active" {
+			// The SQL WHERE clause already filters to status='active',
+			// but a race (paused/archived between SELECT and reload)
+			// can still flip it. Re-check defensively.
+			s.transitionPendingToSkipped(ctx, row.ID, "autopilot is no longer active (paused or archived)")
+			continue
+		}
+
+		// Re-run the admission gate. If the runtime is still offline
+		// (e.g. another agent on this runtime is up but the autopilot's
+		// agent is on a different runtime that flapped), leave the run
+		// pending. Any other failure → terminal skip.
+		if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
+			if isRuntimeOfflineAdmissionReason(reason) {
+				// Still offline. Leave as pending; the next time the
+				// runtime comes online we'll re-try. No log line per
+				// pending run per tick — that would be noisy on a
+				// stable-but-offline agent.
+				continue
+			}
+			s.transitionPendingToSkipped(ctx, row.ID, reason)
+			continue
+		}
+
+		// Clear the pending_runtime_id pointer *before* the dispatch,
+		// so a later ListPendingRuntimeAutopilotRunsForRuntime call (in
+		// this same sweep or a concurrent heartbeat) does not double-
+		// dispatch. If dispatch itself fails, the row is left in
+		// 'pending_runtime' via the fallback in DispatchAutopilot and
+		// would re-appear on a subsequent sweep.
+		if _, err := s.Queries.ClearAutopilotRunPendingRuntime(ctx, row.ID); err != nil {
+			slog.Warn("autopilot dispatch: failed to clear pending_runtime_id before re-dispatch",
+				"run_id", util.UUIDToString(row.ID), "error", err)
+			continue
+		}
+
+		// Re-dispatch through the standard entry point. The run row
+		// already exists (we did not create a new one); pass
+		// existing=true semantics via the run pointer in DispatchAutopilot.
+		s.dispatchExistingPendingRun(ctx, autopilot, row)
+	}
+	return nil
+}
+
+// dispatchExistingPendingRun re-dispatches a pre-existing pending_runtime
+// run. It mirrors DispatchAutopilot's per-mode branch but does not create
+// a new autopilot_run row (one was already created when the cron fired
+// and the runtime was offline). The Status transition (pending_runtime
+// → issue_created / running) and the side effects (issue creation, task
+// enqueue) are identical to a fresh dispatch.
+func (s *AutopilotService) dispatchExistingPendingRun(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	row db.ListPendingRuntimeAutopilotRunsForRuntimeRow,
+) {
+	run := db.AutopilotRun{
+		ID:               row.ID,
+		AutopilotID:      row.AutopilotID,
+		TriggerID:        row.TriggerID,
+		Source:           row.Source,
+		Status:           row.Status,
+		IssueID:          row.IssueID,
+		TaskID:           row.TaskID,
+		TriggeredAt:      row.TriggeredAt,
+		CompletedAt:      row.CompletedAt,
+		FailureReason:    row.FailureReason,
+		TriggerPayload:   row.TriggerPayload,
+		Result:           row.Result,
+		CreatedAt:        row.CreatedAt,
+		SquadID:          row.SquadID,
+		PendingRuntimeID: row.PendingRuntimeID,
+	}
+
+	switch autopilot.ExecutionMode {
+	case "create_issue":
+		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, run.TriggerID)
+		if err := s.dispatchCreateIssue(ctx, autopilot, &run, triggerTimezone); err != nil {
+			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
+				return
+			}
+			s.failRun(ctx, run.ID, err.Error())
+			s.captureAutopilotRunFailed(autopilot, run, run.Source, err.Error())
+			return
+		}
+	case "run_only":
+		if err := s.dispatchRunOnly(ctx, autopilot, &run); err != nil {
+			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
+				return
+			}
+			s.failRun(ctx, run.ID, err.Error())
+			s.captureAutopilotRunFailed(autopilot, run, run.Source, err.Error())
+			return
+		}
+	default:
+		s.failRun(ctx, run.ID, "unknown execution_mode: "+autopilot.ExecutionMode)
+		return
+	}
+
+	// Mirror DispatchAutopilot's last_run_at + WS event so the UI
+	// observes the transition from 'pending_runtime' to 'issue_created'
+	// / 'running' identically to a fresh dispatch.
+	s.Queries.UpdateAutopilotLastRunAt(ctx, autopilot.ID)
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventAutopilotRunStart,
+		WorkspaceID: util.UUIDToString(autopilot.WorkspaceID),
+		ActorType:   "system",
+		Payload: map[string]any{
+			"run_id":       util.UUIDToString(run.ID),
+			"autopilot_id": util.UUIDToString(autopilot.ID),
+			"source":       run.Source,
+			"status":       run.Status,
+			// 'resumed_from_pending_runtime' lets the UI distinguish
+			// "the cron fired now and started work" from "we just
+			// resumed a run that was parked waiting for the runtime".
+			// Both produce a fresh issue / task; the diagnostic value
+			// is in user-facing run history and analytics.
+			"resumed_from": "pending_runtime",
+		},
+	})
+}
+
+// transitionPendingToSkipped rewinds a pending_runtime run to the
+// 'skipped' terminal status. Used by the runtime-comes-online hook when
+// the re-validated admission gate fails for a non-runtime reason (agent
+// archived, autopilot paused/archived/deleted, etc.). Mirrors
+// recordSkippedRun's row finalization but on an existing run id.
+func (s *AutopilotService) transitionPendingToSkipped(ctx context.Context, runID pgtype.UUID, reason string) {
+	updated, err := s.Queries.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
+		ID:            runID,
+		FailureReason: pgtype.Text{String: reason, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("autopilot dispatch: failed to transition pending_runtime to skipped",
+			"run_id", util.UUIDToString(runID), "error", err)
+		return
+	}
+	// Clear the queue pointer so future sweeps don't see this row.
+	if _, err := s.Queries.ClearAutopilotRunPendingRuntime(ctx, runID); err != nil {
+		slog.Warn("autopilot dispatch: failed to clear pending_runtime_id after skip",
+			"run_id", util.UUIDToString(runID), "error", err)
+	}
+	slog.Info("autopilot dispatch: pending_runtime → skipped",
+		"run_id", util.UUIDToString(runID),
+		"reason", reason,
+	)
+	// publishRunDone uses run.WorkspaceID indirectly via autopilot_id;
+	// we don't have the autopilot loaded here, so load it for the event.
+	if ap, err := s.Queries.GetAutopilotByRunID(ctx, runID); err == nil {
+		s.publishRunDone(util.UUIDToString(ap.WorkspaceID), updated, "skipped")
+	}
 }
 
 // recordSkippedRun persists a `skipped` autopilot_run with the given reason

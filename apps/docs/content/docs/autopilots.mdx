@@ -240,8 +240,13 @@ your provider's webhook-retry machinery doesn't keep hammering the URL:
 
 - `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}`
   — a run was dispatched.
-- `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}`
-  — the assignee's runtime is offline; recorded as a `skipped` run.
+- `{"status":"pending_runtime","run_id":"…","reason":"agent runtime is offline at dispatch time"}`
+  — the assignee's runtime is offline; the run is parked and will be
+  auto-dispatched when the runtime/daemon comes back online (MUL-2863).
+  The work is not lost.
+- `{"status":"skipped","run_id":"…","reason":"…"}`
+  — the cron was deliberately dropped (assignee agent hard-deleted, squad
+  archived, etc.). The reason in `failure_reason` explains why.
 - `{"status":"ignored","reason":"trigger_disabled"}` — the trigger is disabled.
 - `{"status":"ignored","reason":"autopilot_paused"}` — the autopilot is paused.
 - `{"status":"ignored","reason":"autopilot_archived"}` — the autopilot is archived.
@@ -270,9 +275,11 @@ Every trigger produces a **run record**, visible on the "History" tab of the aut
 
 - Trigger source (`schedule` / `manual` / `webhook`)
 - Start time, completion time
-- Status (`issue_created` / `running` / `completed` / `failed` / `skipped`)
+- Status (`issue_created` / `running` / `completed` / `failed` / `skipped` / `pending_runtime`)
 - The linked issue (create issue mode) or `task` (run-only mode)
 - Failure reason (if failed or skipped)
+- For `pending_runtime` runs, the runtime the run is queued behind; the
+  server re-dispatches automatically when the runtime comes back online.
 
 ## What happens when an autopilot fails
 

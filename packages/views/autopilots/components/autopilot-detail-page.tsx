@@ -71,11 +71,23 @@ function formatDate(date: string): string {
   });
 }
 
-type RunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
+type RunStatus =
+  | "issue_created"
+  | "running"
+  | "pending_runtime"
+  | "completed"
+  | "failed"
+  | "skipped";
 
 const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
   issue_created: { color: "text-blue-500", icon: Clock },
   running: { color: "text-blue-500", icon: Loader2, spin: true },
+  // `pending_runtime` (MUL-2863) is the durable-dispatch outcome: the
+  // cron fired but the runtime was offline, so the run is parked waiting
+  // for the runtime to come back. It is NOT a failure — the row is muted
+  // blue with a small hourglass-like icon so the user reads it as "this
+  // will run later" rather than "this failed silently".
+  pending_runtime: { color: "text-blue-400", icon: Clock },
   // `skipped` (admission check found the assignee runtime offline,
   // MUL-1899) is muted so it doesn't read as a failure-ratio inflator.
   // The row still shows failure_reason which carries the skip context.
@@ -144,6 +156,13 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
       <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
         {run.issue_id ? (
           t(($) => $.run.issue_linked)
+        ) : run.status === "pending_runtime" ? (
+          <span
+            className="text-muted-foreground"
+            title={t(($) => $.run.pending_runtime_tooltip) ?? undefined}
+          >
+            {t(($) => $.run.pending_runtime_reason) ?? run.failure_reason}
+          </span>
         ) : run.failure_reason ? (
           <span className="text-destructive">{run.failure_reason}</span>
         ) : null}
@@ -189,16 +208,78 @@ function RunHistoryList({
   agentId: string;
   agentName: string;
 }) {
-  const visibleRuns = runs.filter((run) => run.status !== "skipped");
+  const activeRuns = runs.filter(
+    (run) => run.status !== "skipped" && run.status !== "pending_runtime",
+  );
+  const pendingRuntimeRuns = runs.filter((run) => run.status === "pending_runtime");
   const skippedRuns = runs.filter((run) => run.status === "skipped");
 
   return (
     <div className="rounded-md border overflow-hidden">
-      {visibleRuns.map((run) => (
+      {activeRuns.map((run) => (
         <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
       ))}
+      {pendingRuntimeRuns.length > 0 && (
+        <PendingRuntimeRunsGroup
+          runs={pendingRuntimeRuns}
+          agentId={agentId}
+          agentName={agentName}
+        />
+      )}
       {skippedRuns.length > 0 && (
         <SkippedRunsGroup runs={skippedRuns} agentId={agentId} agentName={agentName} />
+      )}
+    </div>
+  );
+}
+
+function PendingRuntimeRunsGroup({
+  runs,
+  agentId,
+  agentName,
+}: {
+  runs: AutopilotRun[];
+  agentId: string;
+  agentName: string;
+}) {
+  // MUL-2863: parked-runs group. Sits between active runs and the
+  // collapsed SkippedRunsGroup so the user sees "the cron fired, we're
+  // waiting for the runtime" in the natural reading order — after the
+  // currently-running rows, before the failures.
+  const { t } = useT("autopilots");
+  const [open, setOpen] = useState(false);
+  const latestRun = runs[0];
+  const ToggleIcon = open ? ChevronDown : ChevronRight;
+
+  return (
+    <div className="border-t bg-blue-50/40 dark:bg-blue-950/20">
+      <button
+        type="button"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-accent/30 transition-colors"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        title={t(($) => $.run.pending_runtime_tooltip) ?? undefined}
+      >
+        <ToggleIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <Clock className="h-4 w-4 shrink-0 text-blue-400" />
+        <span className="w-24 shrink-0 text-xs font-medium text-blue-400">
+          {t(($) => $.run.pending_runtime_group.label)}
+        </span>
+        <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
+          {t(($) => $.run.pending_runtime_group.summary, { count: runs.length })}
+        </span>
+        {latestRun && (
+          <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+            {formatDate(latestRun.triggered_at || latestRun.created_at)}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t bg-background">
+          {runs.map((run) => (
+            <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
+          ))}
+        </div>
       )}
     </div>
   );

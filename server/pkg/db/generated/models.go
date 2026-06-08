@@ -135,20 +135,21 @@ type Autopilot struct {
 }
 
 type AutopilotRun struct {
-	ID             pgtype.UUID        `json:"id"`
-	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
-	TriggerID      pgtype.UUID        `json:"trigger_id"`
-	Source         string             `json:"source"`
-	Status         string             `json:"status"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	TaskID         pgtype.UUID        `json:"task_id"`
-	TriggeredAt    pgtype.Timestamptz `json:"triggered_at"`
-	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
-	FailureReason  pgtype.Text        `json:"failure_reason"`
-	TriggerPayload []byte             `json:"trigger_payload"`
-	Result         []byte             `json:"result"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	SquadID        pgtype.UUID        `json:"squad_id"`
+	ID               pgtype.UUID        `json:"id"`
+	AutopilotID      pgtype.UUID        `json:"autopilot_id"`
+	TriggerID        pgtype.UUID        `json:"trigger_id"`
+	Source           string             `json:"source"`
+	Status           string             `json:"status"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	TriggeredAt      pgtype.Timestamptz `json:"triggered_at"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	FailureReason    pgtype.Text        `json:"failure_reason"`
+	TriggerPayload   []byte             `json:"trigger_payload"`
+	Result           []byte             `json:"result"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	SquadID          pgtype.UUID        `json:"squad_id"`
+	PendingRuntimeID pgtype.UUID        `json:"pending_runtime_id"`
 }
 
 type AutopilotTrigger struct {

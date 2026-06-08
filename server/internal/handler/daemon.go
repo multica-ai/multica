@@ -398,6 +398,28 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// MUL-2863: durable dispatch hook. DaemonRegister is the second of
+		// two runtime-comes-online transition points (the first is the
+		// heartbeat path's recordHeartbeat). For a freshly inserted runtime
+		// row the new ID is brand-new — it cannot have pending runs queued
+		// against it — so the hook is a no-op in that case. For an upsert
+		// (daemon reconnect on an existing row that was previously
+		// offline) the same logic as the heartbeat hook applies: drain
+		// any 'pending_runtime' autopilot_run rows that were waiting for
+		// this runtime.
+		//
+		// We always call — the function is idempotent and short-circuits
+		// on an empty pending set — rather than gating on row.Inserted
+		// because a reconnect on an offline runtime is exactly the case
+		// the user is asking us to handle ("my laptop slept, the cron
+		// fired while the daemon was offline, now the daemon came back").
+		if registered.Status == "online" && h.AutopilotService != nil {
+			if err := h.AutopilotService.DispatchPendingRuntimeRunsForRuntime(r.Context(), registered.ID); err != nil {
+				slog.Warn("autopilot dispatch: failed to drain pending_runtime runs on register",
+					"runtime_id", uuidToString(registered.ID), "error", err)
+			}
+		}
+
 		// Seamless migration from the previous hostname-derived identity. The
 		// daemon sends every legacy daemon_id it may have registered under
 		// (e.g. "host.local", "host", "host-staging"); for each match we
@@ -836,7 +858,30 @@ func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error
 	// Either bumps last_seen_at on an already-online row (Touch + race
 	// fallback) or flips status from offline to online. The scheduler
 	// chooses sync vs batched per case; see HeartbeatScheduler doc.
-	return h.HeartbeatScheduler.Schedule(ctx, rt)
+	if err := h.HeartbeatScheduler.Schedule(ctx, rt); err != nil {
+		return err
+	}
+
+	// MUL-2863: durable dispatch hook. After a successful DB write on the
+	// heartbeat path (which is the only way a runtime's DB row transitions
+	// from offline to online, since the sweeper only flips the other way),
+	// drain any autopilot_run rows that were parked waiting for this
+	// runtime to come back online. We dispatch the hook from here rather
+	// than from the autopilot listeners so the call site is co-located
+	// with the runtime-online transition itself — the only other flip
+	// point is DaemonRegister, which hooks the same call below.
+	//
+	// Errors are logged, not returned: a failed dispatch drain should not
+	// turn a healthy 200 heartbeat into a 500, and the next beat (or
+	// registration) will retry. The function is itself idempotent and
+	// short-circuits on an empty pending set.
+	if h.AutopilotService != nil {
+		if err := h.AutopilotService.DispatchPendingRuntimeRunsForRuntime(ctx, rt.ID); err != nil {
+			slog.Warn("autopilot dispatch: failed to drain pending_runtime runs on heartbeat",
+				"runtime_id", uuidToString(rt.ID), "error", err)
+		}
+	}
+	return nil
 }
 
 // heartbeatMetrics carries per-stage timings out of processHeartbeat so the

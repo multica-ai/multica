@@ -99,9 +99,14 @@ type AutopilotRunResponse struct {
 	TriggeredAt    string  `json:"triggered_at"`
 	CompletedAt    *string `json:"completed_at"`
 	FailureReason  *string `json:"failure_reason"`
-	TriggerPayload any     `json:"trigger_payload"`
-	Result         any     `json:"result"`
-	CreatedAt      string  `json:"created_at"`
+	// PendingRuntimeID is the runtime_id the run is queued behind when
+	// status='pending_runtime' (MUL-2863). Null for every other status;
+	// cleared on the runtime-comes-online re-dispatch. Used by the
+	// frontend to render "Waiting for runtime <name>" in the run history.
+	PendingRuntimeID *string `json:"pending_runtime_id,omitempty"`
+	TriggerPayload   any     `json:"trigger_payload"`
+	Result           any     `json:"result"`
+	CreatedAt        string  `json:"created_at"`
 }
 
 // ── Converters ──────────────────────────────────────────────────────────────
@@ -207,19 +212,20 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 		json.Unmarshal(r.Result, &result)
 	}
 	return AutopilotRunResponse{
-		ID:             uuidToString(r.ID),
-		AutopilotID:    uuidToString(r.AutopilotID),
-		TriggerID:      uuidToPtr(r.TriggerID),
-		Source:         r.Source,
-		Status:         r.Status,
-		IssueID:        uuidToPtr(r.IssueID),
-		TaskID:         uuidToPtr(r.TaskID),
-		TriggeredAt:    timestampToString(r.TriggeredAt),
-		CompletedAt:    timestampToPtr(r.CompletedAt),
-		FailureReason:  textToPtr(r.FailureReason),
-		TriggerPayload: payload,
-		Result:         result,
-		CreatedAt:      timestampToString(r.CreatedAt),
+		ID:               uuidToString(r.ID),
+		AutopilotID:      uuidToString(r.AutopilotID),
+		TriggerID:        uuidToPtr(r.TriggerID),
+		Source:           r.Source,
+		Status:           r.Status,
+		IssueID:          uuidToPtr(r.IssueID),
+		TaskID:           uuidToPtr(r.TaskID),
+		TriggeredAt:      timestampToString(r.TriggeredAt),
+		CompletedAt:      timestampToPtr(r.CompletedAt),
+		FailureReason:    textToPtr(r.FailureReason),
+		PendingRuntimeID: uuidToPtr(r.PendingRuntimeID),
+		TriggerPayload:   payload,
+		Result:           result,
+		CreatedAt:        timestampToString(r.CreatedAt),
 	}
 }
 

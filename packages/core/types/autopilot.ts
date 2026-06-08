@@ -14,9 +14,18 @@ export type AutopilotTriggerKind = "schedule" | "webhook" | "api";
 // (assignee runtime offline at dispatch time, MUL-1899). The frontend MUST
 // handle it explicitly — falling through to a generic case used to show
 // the run as still-pending which masked the no-op.
+//
+// `pending_runtime` (MUL-2863) is the durable-dispatch outcome: the cron
+// fired but the assignee agent's runtime is offline, so the run is parked
+// with status='pending_runtime' and pending_runtime_id set. The
+// runtime-comes-online hook on the server drains the queue and dispatches
+// the parked run at the next opportunity. The frontend surfaces this as
+// "Waiting for agent runtime to come online" so the user knows the run
+// is durable, not lost.
 export type AutopilotRunStatus =
   | "issue_created"
   | "running"
+  | "pending_runtime"
   | "completed"
   | "failed"
   | "skipped";
@@ -83,6 +92,12 @@ export interface AutopilotRun {
   triggered_at: string;
   completed_at: string | null;
   failure_reason: string | null;
+  // pending_runtime_id is the runtime the run is parked behind when
+  // status='pending_runtime' (MUL-2863). Null for every other status;
+  // cleared on the runtime-comes-online re-dispatch. The frontend uses
+  // this to render "Waiting for runtime <name>" alongside the failure
+  // reason in the run history.
+  pending_runtime_id?: string | null;
   trigger_payload: unknown;
   result: unknown;
   created_at: string;

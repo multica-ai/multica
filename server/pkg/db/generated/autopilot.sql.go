@@ -104,6 +104,45 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 	return items, nil
 }
 
+const clearAutopilotRunPendingRuntime = `-- name: ClearAutopilotRunPendingRuntime :one
+UPDATE autopilot_run
+SET pending_runtime_id = NULL
+WHERE id = $1
+  AND status = 'pending_runtime'
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id
+`
+
+// MUL-2863: when a 'pending_runtime' run is dispatched (or otherwise
+// transitioned to a non-pending status), clear pending_runtime_id so a
+// stale value can't keep matching future ListPendingRuntimeAutopilotRunsForRuntime
+// calls. Failure_reason and completed_at are deliberately NOT touched
+// here: callers transition the status themselves (UpdateAutopilotRunIssueCreated
+// / UpdateAutopilotRunRunning / UpdateAutopilotRunSkipped) and own those
+// columns. The dispatcher composes the two updates: this one to clear the
+// queue pointer, the status-specific one to finalize.
+func (q *Queries) ClearAutopilotRunPendingRuntime(ctx context.Context, id pgtype.UUID) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, clearAutopilotRunPendingRuntime, id)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PendingRuntimeID,
+	)
+	return i, err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
@@ -172,7 +211,7 @@ INSERT INTO autopilot_run (
 ) VALUES (
     $1, $4, $2, $3, $5,
     $6
-) RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+) RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id
 `
 
 type CreateAutopilotRunParams struct {
@@ -216,6 +255,73 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PendingRuntimeID,
+	)
+	return i, err
+}
+
+const createAutopilotRunPendingRuntime = `-- name: CreateAutopilotRunPendingRuntime :one
+INSERT INTO autopilot_run (
+    autopilot_id, trigger_id, source, status, trigger_payload,
+    squad_id, failure_reason, pending_runtime_id
+) VALUES (
+    $1, $5, $2, 'pending_runtime',
+    $6, $7,
+    $3, $4
+) RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id
+`
+
+type CreateAutopilotRunPendingRuntimeParams struct {
+	AutopilotID      pgtype.UUID `json:"autopilot_id"`
+	Source           string      `json:"source"`
+	FailureReason    pgtype.Text `json:"failure_reason"`
+	PendingRuntimeID pgtype.UUID `json:"pending_runtime_id"`
+	TriggerID        pgtype.UUID `json:"trigger_id"`
+	TriggerPayload   []byte      `json:"trigger_payload"`
+	SquadID          pgtype.UUID `json:"squad_id"`
+}
+
+// MUL-2863: durable dispatch when the runtime is offline. The cron tick
+// creates a run row in 'pending_runtime' (terminal-state-equivalent) and
+// records which runtime it's queued behind. When the runtime comes back
+// online, the runtime-comes-online hook re-dispatches the oldest pending
+// run. This is the durable alternative to UpdateAutopilotRunSkipped: rather
+// than recording a "we deliberately dropped this" outcome, we record a
+// "we evaluated the trigger and parked it for later" outcome.
+//
+// Mapped to the agent on whose bound runtime we're waiting, so the
+// runtime-comes-online path can fan out across agents on the same
+// runtime without an extra join. NULL is fine (offline agent with no
+// runtime bound — see MUL-1899's "agent has no runtime bound" branch)
+// because the agent-resolution re-check at dispatch time catches that
+// case and fails closed.
+func (q *Queries) CreateAutopilotRunPendingRuntime(ctx context.Context, arg CreateAutopilotRunPendingRuntimeParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, createAutopilotRunPendingRuntime,
+		arg.AutopilotID,
+		arg.Source,
+		arg.FailureReason,
+		arg.PendingRuntimeID,
+		arg.TriggerID,
+		arg.TriggerPayload,
+		arg.SquadID,
+	)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PendingRuntimeID,
 	)
 	return i, err
 }
@@ -398,6 +504,42 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 	return i, err
 }
 
+const getAutopilotByRunID = `-- name: GetAutopilotByRunID :one
+SELECT a.id, a.workspace_id, a.title, a.description, a.assignee_id, a.status, a.execution_mode, a.issue_title_template, a.created_by_type, a.created_by_id, a.last_run_at, a.created_at, a.updated_at, a.assignee_type, a.project_id
+FROM autopilot a
+JOIN autopilot_run r ON r.autopilot_id = a.id
+WHERE r.id = $1
+`
+
+// MUL-2863: reverse lookup for the runtime-comes-online skip-transition
+// path. The dispatch loop holds a run row and needs the parent autopilot
+// (and its workspace_id) to publish a run:done event; loading the autopilot
+// directly via the run's autopilot_id saves a join. Used only on the
+// transitionPendingToSkipped hot path; happy-path dispatch re-uses the
+// autopilot already loaded in DispatchPendingRuntimeRunsForRuntime.
+func (q *Queries) GetAutopilotByRunID(ctx context.Context, id pgtype.UUID) (Autopilot, error) {
+	row := q.db.QueryRow(ctx, getAutopilotByRunID, id)
+	var i Autopilot
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.AssigneeID,
+		&i.Status,
+		&i.ExecutionMode,
+		&i.IssueTitleTemplate,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.LastRunAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AssigneeType,
+		&i.ProjectID,
+	)
+	return i, err
+}
+
 const getAutopilotInWorkspace = `-- name: GetAutopilotInWorkspace :one
 SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
 WHERE id = $1 AND workspace_id = $2
@@ -432,7 +574,7 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 }
 
 const getAutopilotRun = `-- name: GetAutopilotRun :one
-SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM autopilot_run
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id FROM autopilot_run
 WHERE id = $1
 `
 
@@ -454,13 +596,14 @@ func (q *Queries) GetAutopilotRun(ctx context.Context, id pgtype.UUID) (Autopilo
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PendingRuntimeID,
 	)
 	return i, err
 }
 
 const getAutopilotRunByIssue = `-- name: GetAutopilotRunByIssue :one
 
-SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM autopilot_run
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id FROM autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
 LIMIT 1
 `
@@ -486,6 +629,7 @@ func (q *Queries) GetAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUI
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PendingRuntimeID,
 	)
 	return i, err
 }
@@ -575,7 +719,7 @@ func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgt
 }
 
 const listAutopilotRuns = `-- name: ListAutopilotRuns :many
-SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM autopilot_run
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id FROM autopilot_run
 WHERE autopilot_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -611,6 +755,7 @@ func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsPa
 			&i.Result,
 			&i.CreatedAt,
 			&i.SquadID,
+			&i.PendingRuntimeID,
 		); err != nil {
 			return nil, err
 		}
@@ -709,6 +854,99 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 			&i.UpdatedAt,
 			&i.AssigneeType,
 			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingRuntimeAutopilotRunsForRuntime = `-- name: ListPendingRuntimeAutopilotRunsForRuntime :many
+SELECT r.id, r.autopilot_id, r.trigger_id, r.source, r.status, r.issue_id, r.task_id, r.triggered_at, r.completed_at, r.failure_reason, r.trigger_payload, r.result, r.created_at, r.squad_id, r.pending_runtime_id, a.workspace_id AS autopilot_workspace_id,
+       a.status AS autopilot_status, a.assignee_type, a.assignee_id,
+       a.execution_mode
+FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.pending_runtime_id = $1
+  AND r.status = 'pending_runtime'
+  AND a.status = 'active'
+ORDER BY r.triggered_at ASC
+LIMIT $2
+`
+
+type ListPendingRuntimeAutopilotRunsForRuntimeParams struct {
+	PendingRuntimeID pgtype.UUID `json:"pending_runtime_id"`
+	Limit            int32       `json:"limit"`
+}
+
+type ListPendingRuntimeAutopilotRunsForRuntimeRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	AutopilotID          pgtype.UUID        `json:"autopilot_id"`
+	TriggerID            pgtype.UUID        `json:"trigger_id"`
+	Source               string             `json:"source"`
+	Status               string             `json:"status"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
+	TaskID               pgtype.UUID        `json:"task_id"`
+	TriggeredAt          pgtype.Timestamptz `json:"triggered_at"`
+	CompletedAt          pgtype.Timestamptz `json:"completed_at"`
+	FailureReason        pgtype.Text        `json:"failure_reason"`
+	TriggerPayload       []byte             `json:"trigger_payload"`
+	Result               []byte             `json:"result"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	SquadID              pgtype.UUID        `json:"squad_id"`
+	PendingRuntimeID     pgtype.UUID        `json:"pending_runtime_id"`
+	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
+	AutopilotStatus      string             `json:"autopilot_status"`
+	AssigneeType         string             `json:"assignee_type"`
+	AssigneeID           pgtype.UUID        `json:"assignee_id"`
+	ExecutionMode        string             `json:"execution_mode"`
+}
+
+// MUL-2863: when a runtime transitions back to online, the runtime-comes-
+// online hook calls this with the runtime_id to walk the durable queue.
+// Oldest-first (per migration 111's partial index ordering) matches the
+// "oldest eligible run goes first" semantics: if a laptop was offline for
+// 8 hours and the cron was hourly, we dispatch the original 8 missing
+// runs in order rather than the newest, which is what a user looking at
+// the autopilot history would expect.
+//
+// JOIN to autopilot so the caller can re-validate the assignee's runtime
+// at dispatch time without a second round-trip per row, and so a paused
+// / archived autopilot short-circuits cleanly.
+func (q *Queries) ListPendingRuntimeAutopilotRunsForRuntime(ctx context.Context, arg ListPendingRuntimeAutopilotRunsForRuntimeParams) ([]ListPendingRuntimeAutopilotRunsForRuntimeRow, error) {
+	rows, err := q.db.Query(ctx, listPendingRuntimeAutopilotRunsForRuntime, arg.PendingRuntimeID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingRuntimeAutopilotRunsForRuntimeRow{}
+	for rows.Next() {
+		var i ListPendingRuntimeAutopilotRunsForRuntimeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AutopilotID,
+			&i.TriggerID,
+			&i.Source,
+			&i.Status,
+			&i.IssueID,
+			&i.TaskID,
+			&i.TriggeredAt,
+			&i.CompletedAt,
+			&i.FailureReason,
+			&i.TriggerPayload,
+			&i.Result,
+			&i.CreatedAt,
+			&i.SquadID,
+			&i.PendingRuntimeID,
+			&i.AutopilotWorkspaceID,
+			&i.AutopilotStatus,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.ExecutionMode,
 		); err != nil {
 			return nil, err
 		}
@@ -877,13 +1115,14 @@ type SelectAutopilotsExceedingFailureThresholdRow struct {
 // Failure-rate auto-pause
 // =====================
 // Find active autopilots whose recent run failure rate exceeds the threshold.
-// Counts only "real" terminal runs (completed | failed). 'skipped' is
-// excluded from BOTH numerator and denominator: an admission-skipped run
-// (e.g. assignee runtime offline at dispatch time, MUL-1899) is neither a
-// success nor a failure, so it must not dilute the failure ratio (which
-// would let a 100%-failing autopilot mask itself behind a wall of skips)
-// nor inflate it. issue_created/running are still excluded so in-flight
-// work isn't penalised.
+// Counts only "real" terminal runs (completed | failed). 'skipped' and
+// 'pending_runtime' are both excluded from BOTH numerator and denominator:
+// an admission-skipped run (e.g. assignee agent hard-deleted, MUL-1899) and
+// a parked pending_runtime run (assignee runtime offline, MUL-2863) are
+// neither a success nor a failure, so neither must dilute the failure ratio
+// (which would let a 100%-failing autopilot mask itself behind a wall of
+// skips / parked runs) nor inflate it. issue_created/running are still
+// excluded so in-flight work isn't penalised.
 // Used by the failure monitor to auto-pause sustained-failure autopilots
 // (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
 // that 100% failed for days, burning ~1.5k useless tasks per week).
@@ -1123,7 +1362,7 @@ const updateAutopilotRunCompleted = `-- name: UpdateAutopilotRunCompleted :one
 UPDATE autopilot_run
 SET status = 'completed', completed_at = now(), result = $2
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id
 `
 
 type UpdateAutopilotRunCompletedParams struct {
@@ -1149,6 +1388,7 @@ func (q *Queries) UpdateAutopilotRunCompleted(ctx context.Context, arg UpdateAut
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PendingRuntimeID,
 	)
 	return i, err
 }
@@ -1157,7 +1397,7 @@ const updateAutopilotRunFailed = `-- name: UpdateAutopilotRunFailed :one
 UPDATE autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = $2
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id
 `
 
 type UpdateAutopilotRunFailedParams struct {
@@ -1183,6 +1423,7 @@ func (q *Queries) UpdateAutopilotRunFailed(ctx context.Context, arg UpdateAutopi
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PendingRuntimeID,
 	)
 	return i, err
 }
@@ -1191,7 +1432,7 @@ const updateAutopilotRunIssueCreated = `-- name: UpdateAutopilotRunIssueCreated 
 UPDATE autopilot_run
 SET status = 'issue_created', issue_id = $2
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id
 `
 
 type UpdateAutopilotRunIssueCreatedParams struct {
@@ -1217,6 +1458,7 @@ func (q *Queries) UpdateAutopilotRunIssueCreated(ctx context.Context, arg Update
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PendingRuntimeID,
 	)
 	return i, err
 }
@@ -1225,7 +1467,7 @@ const updateAutopilotRunRunning = `-- name: UpdateAutopilotRunRunning :one
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id
 `
 
 type UpdateAutopilotRunRunningParams struct {
@@ -1251,6 +1493,7 @@ func (q *Queries) UpdateAutopilotRunRunning(ctx context.Context, arg UpdateAutop
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PendingRuntimeID,
 	)
 	return i, err
 }
@@ -1259,7 +1502,7 @@ const updateAutopilotRunSkipped = `-- name: UpdateAutopilotRunSkipped :one
 UPDATE autopilot_run
 SET status = 'skipped', completed_at = now(), failure_reason = $2
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id
 `
 
 type UpdateAutopilotRunSkippedParams struct {
@@ -1291,6 +1534,7 @@ func (q *Queries) UpdateAutopilotRunSkipped(ctx context.Context, arg UpdateAutop
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PendingRuntimeID,
 	)
 	return i, err
 }
@@ -1302,7 +1546,7 @@ SET status = 'skipped',
     failure_reason = $2,
     result = $3
 WHERE id = $1
-RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, pending_runtime_id
 `
 
 type UpdateAutopilotRunSkippedWithResultParams struct {
@@ -1329,6 +1573,7 @@ func (q *Queries) UpdateAutopilotRunSkippedWithResult(ctx context.Context, arg U
 		&i.Result,
 		&i.CreatedAt,
 		&i.SquadID,
+		&i.PendingRuntimeID,
 	)
 	return i, err
 }

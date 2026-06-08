@@ -96,7 +96,7 @@
     "skipped": "Skipped",
     "completed": "Completed",
     "failed": "Failed",
-    "skipped": "Skipped"
+    "pending_runtime": "Waiting for runtime"
   },
   "run_source": {
     "schedule": "Schedule",
@@ -107,9 +107,15 @@
   "run": {
     "issue_linked": "Issue linked",
     "view_log": "View execution log",
+    "pending_runtime_reason": "Waiting for agent runtime to come online",
+    "pending_runtime_tooltip": "The cron fired but the agent's runtime was offline. The run will be dispatched automatically when the runtime comes back online.",
     "skipped_group": {
       "label": "Skipped",
       "summary": "{{count}} skipped runs"
+    },
+    "pending_runtime_group": {
+      "label": "Waiting for runtime",
+      "summary": "{{count}} runs waiting for runtime"
     }
   },
   "webhook_payload": {

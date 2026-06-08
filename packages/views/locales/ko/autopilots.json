@@ -95,7 +95,8 @@
     "running": "실행 중",
     "skipped": "건너뜀",
     "completed": "완료됨",
-    "failed": "실패함"
+    "failed": "실패함",
+    "pending_runtime": "런타임 대기 중"
   },
   "run_source": {
     "schedule": "일정",
@@ -106,9 +107,15 @@
   "run": {
     "issue_linked": "이슈 연결됨",
     "view_log": "실행 로그 보기",
+    "pending_runtime_reason": "에이전트 런타임이 온라인 상태가 될 때까지 대기 중",
+    "pending_runtime_tooltip": "크론 예약은 이미 실행되었지만 에이전트의 런타임이 오프라인입니다. 런타임이 다시 온라인이 되면 자동으로 실행이 디스패치됩니다.",
     "skipped_group": {
       "label": "건너뜀",
       "summary": "건너뛴 실행 {{count}}개"
+    },
+    "pending_runtime_group": {
+      "label": "런타임 대기 중",
+      "summary": "런타임을 기다리는 실행 {{count}}개"
     }
   },
   "webhook_payload": {

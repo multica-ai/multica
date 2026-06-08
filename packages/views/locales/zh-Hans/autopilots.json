@@ -96,7 +96,7 @@
     "skipped": "已跳过",
     "completed": "已完成",
     "failed": "失败",
-    "skipped": "已跳过"
+    "pending_runtime": "等待运行时"
   },
   "run_source": {
     "schedule": "时间表",
@@ -107,9 +107,15 @@
   "run": {
     "issue_linked": "已关联 issue",
     "view_log": "查看执行日志",
+    "pending_runtime_reason": "等待智能体运行时上线",
+    "pending_runtime_tooltip": "时间表已触发，但智能体运行时当前离线。运行时恢复在线后，运行会自动派发。",
     "skipped_group": {
       "label": "已跳过",
       "summary": "{{count}} 条跳过的运行"
+    },
+    "pending_runtime_group": {
+      "label": "等待运行时",
+      "summary": "{{count}} 条运行在等待运行时"
     }
   },
   "webhook_payload": {

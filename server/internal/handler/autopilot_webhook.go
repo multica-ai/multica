@@ -62,9 +62,10 @@ const (
 //
 // "Duplicate" is a *response* status, not a delivery status — duplicates
 // don't get their own row; they bump attempt_count on the existing dedupe
-// target. Likewise "skipped" is a *response* status reported when the
-// autopilot service skipped the run (e.g. runtime offline); the delivery
-// row itself records `dispatched` and links the skipped run via
+// target. Likewise "skipped" and "pending_runtime" (MUL-2863) are
+// *response* statuses reported when the autopilot service declined or
+// parked the run (e.g. runtime offline, agent hard-deleted); the delivery
+// row itself records `dispatched` and links the affected run via
 // autopilot_run_id, because from the ingress's perspective we DID hand
 // the payload to the autopilot machinery.
 const (
@@ -330,9 +331,10 @@ func selectedHeadersJSON(headers http.Header) []byte {
 //     trigger's "last seen" is accurate.
 //
 // Response shapes:
-//   - 200 {"status":"accepted",  "delivery_id", "run_id", "autopilot_id", "trigger_id"}
-//   - 200 {"status":"skipped",   "delivery_id", "run_id", "reason"}
-//   - 200 {"status":"ignored",   "delivery_id", "reason"}
+//   - 200 {"status":"accepted",         "delivery_id", "run_id", "autopilot_id", "trigger_id"}
+//   - 200 {"status":"skipped",          "delivery_id", "run_id", "reason"}
+//   - 200 {"status":"pending_runtime",  "delivery_id", "run_id", "reason"} (MUL-2863)
+//   - 200 {"status":"ignored",          "delivery_id", "reason"}
 //   - 200 {"status":"duplicate", "delivery_id", "run_id?"}
 //   - 400 {"error":"..."}                                          — invalid JSON / scalar / empty
 //   - 401 {"status":"rejected",  "delivery_id", "reason":"..."}    — signature failure
@@ -583,10 +585,12 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	// The delivery row is always `dispatched` once we reach here: from the
 	// ingress's perspective we handed the payload off to the autopilot
 	// machinery and got a run id back. The autopilot may have skipped the
-	// run (e.g. runtime offline) — that's reflected in the response status
-	// + reason and in the linked run row, not in the delivery status. This
-	// keeps the delivery enum tight and the Deliveries UI unambiguous
-	// (`run.status` is the source of truth for what the run did).
+	// run (e.g. assignee agent hard-deleted) or parked it pending_runtime
+	// (e.g. runtime offline, MUL-2863) — that's reflected in the response
+	// status + reason and in the linked run row, not in the delivery
+	// status. This keeps the delivery enum tight and the Deliveries UI
+	// unambiguous (`run.status` is the source of truth for what the run
+	// did).
 	respBody := map[string]any{
 		"status":       "accepted",
 		"delivery_id":  uuidToString(delivery.ID),
@@ -594,9 +598,10 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		"autopilot_id": uuidToString(autopilot.ID),
 		"trigger_id":   uuidToString(trigRow.ID),
 	}
-	if run.Status == "skipped" {
+	switch run.Status {
+	case "skipped", "pending_runtime":
 		respBody = map[string]any{
-			"status":      "skipped",
+			"status":      run.Status,
 			"delivery_id": uuidToString(delivery.ID),
 			"run_id":      uuidToString(run.ID),
 		}
