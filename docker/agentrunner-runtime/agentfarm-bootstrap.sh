@@ -182,9 +182,9 @@ else
   )"
 
   set +e
-  _get_resp="$(curl -fsS "${MULTICA_SERVER_URL}/api/workspaces/${MULTICA_WORKSPACE_ID}" \
+  _get_resp="$(curl -fsS "${MULTICA_SERVER_URL}/api/workspaces/${AGENTFARM_WORKSPACE_ID}" \
     -H "Authorization: Bearer ${MULTICA_PAT}" \
-    -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}")"
+    -H "X-Workspace-ID: ${AGENTFARM_WORKSPACE_ID}")"
   _rc=$?
   set -e
 
@@ -203,9 +203,9 @@ else
       echo "agentfarm-bootstrap: repos already seeded"
     else
       set +e
-      curl -fsS -X PATCH "${MULTICA_SERVER_URL}/api/workspaces/${MULTICA_WORKSPACE_ID}" \
+      curl -fsS -X PATCH "${MULTICA_SERVER_URL}/api/workspaces/${AGENTFARM_WORKSPACE_ID}" \
         -H "Authorization: Bearer ${MULTICA_PAT}" \
-        -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}" \
+        -H "X-Workspace-ID: ${AGENTFARM_WORKSPACE_ID}" \
         -H "Content-Type: application/json" \
         -d "{\"repos\": ${_desired_json}}"
       _rc=$?
