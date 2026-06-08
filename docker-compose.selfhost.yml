@@ -74,6 +74,16 @@ services:
       CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
       CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
       CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
+      # Aliyun OSS native SDK settings (takes precedence over S3-compatible when OSS_BUCKET is set)
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_REGION: ${OSS_REGION:-cn-hangzhou}
+      ALIBABA_CLOUD_ACCESS_KEY_ID: ${ALIBABA_CLOUD_ACCESS_KEY_ID:-}
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${ALIBABA_CLOUD_ACCESS_KEY_SECRET:-}
+      OSS_CDN_DOMAIN: ${OSS_CDN_DOMAIN:-}
+      OSS_CDN_AUTH_KEY: ${OSS_CDN_AUTH_KEY:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-}
+      # Set to "true" to disable OSS presigned URL generation (returns empty URL instead)
+      OSS_PRESIGN_DISABLED: ${OSS_PRESIGN_DISABLED:-false}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       APP_ENV: ${APP_ENV:-production}
       MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}

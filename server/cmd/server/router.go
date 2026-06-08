@@ -128,11 +128,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		daemonHub = daemonws.NewHub()
 	}
 
-	// Initialize storage with S3 as primary, fallback to local
+	// Initialize storage with S3 as primary, OSS as secondary, fallback to local
 	var store storage.Storage
 	s3 := storage.NewS3StorageFromEnv()
 	if s3 != nil {
 		store = s3
+	} else if oss := storage.NewOSSStorageFromEnv(); oss != nil {
+		store = oss
 	} else {
 		local := storage.NewLocalStorageFromEnv()
 		if local != nil {
