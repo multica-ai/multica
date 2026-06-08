@@ -97,13 +97,6 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 			return true, ""
 		}
 	}
-	// Ungated tools are always allowed regardless of workspace feature flags.
-	// Checked early to avoid a DB round-trip for the common case.
-	capKey := toolCapabilityKey(toolName)
-	if capKey == "" {
-		return true, ""
-	}
-
 	// Workspace feature flag: cerebro_approval_gate. Defaults true (gate on).
 	// A workspace admin can turn it off from Settings → Features without a
 	// server restart. Any DB error → fail-open (keep gate on, don't block work).
@@ -111,13 +104,18 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		return true, ""
 	}
 
-	// FIR-2230: when the unified per-tool policy chain is wired, it — not the
-	// capability resolver — decides this call. Every tool is resolved through
-	// Runtime › Agent › Group › User; unconfigured tools fall back to the chain's
-	// Base default (Allow), so the blast radius is exactly the tools an operator
-	// gave an explicit Ask/Deny row.
+	// FIR-2230: when the unified per-tool policy chain is wired, it decides this
+	// call before the legacy capability resolver. That lets explicit per-tool
+	// rows gate every platform tool, including older tools with no capability key.
 	if e.toolPolicy != nil {
 		return e.guardToolCallViaPolicy(ctx, agentID, workspaceID, toolName, args, meta)
+	}
+
+	// Legacy approval gate: ungated tools are allowed. Checked after the workspace
+	// flag so the zero-value test executor can still exercise the old resolver.
+	capKey := toolCapabilityKey(toolName)
+	if capKey == "" {
+		return true, ""
 	}
 
 	req := permgate.Request{
@@ -277,6 +275,9 @@ func toolPolicyDecision(eff toolpolicy.Effective) permissions.Decision {
 // feature_flags.sql.go). When no override row exists → use the default (true).
 // Any DB error → fail-open (true) so a DB glitch never blocks an active workspace.
 func (e *FirtalGatewayExecutor) workspaceApprovalGateEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	if e == nil || e.cerebro == nil {
+		return true
+	}
 	enabled, err := e.cerebro.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
 		WorkspaceID: workspaceID,
 		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
