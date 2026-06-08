@@ -68,6 +68,15 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var issueID pgtype.UUID
+	if raw := strings.TrimSpace(r.URL.Query().Get("issue_id")); raw != "" {
+		var err error
+		issueID, err = util.ParseUUID(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue_id")
+			return
+		}
+	}
 	var state pgtype.Text
 	if raw := strings.TrimSpace(r.URL.Query().Get("state")); raw != "" {
 		state = pgtype.Text{String: raw, Valid: true}
@@ -81,7 +90,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = int32(n)
 	}
-	rows, err := h.Service.List(r.Context(), workspaceID, agentID, state, limit)
+	rows, err := h.Service.List(r.Context(), workspaceID, agentID, issueID, state, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list wakeups failed")
 		return

@@ -355,6 +355,7 @@ FROM cerebro_agent_wakeup
 WHERE workspace_id = $1
   AND ($3::uuid IS NULL OR agent_id = $3::uuid)
   AND ($4::text IS NULL OR state = $4::text)
+  AND ($5::uuid IS NULL OR issue_id = $5::uuid)
 ORDER BY created_at DESC
 LIMIT $2
 `
@@ -364,6 +365,7 @@ type ListCerebroAgentWakeupsParams struct {
 	Limit       int32       `json:"limit"`
 	AgentID     pgtype.UUID `json:"agent_id"`
 	State       pgtype.Text `json:"state"`
+	IssueID     pgtype.UUID `json:"issue_id"`
 }
 
 func (q *Queries) ListCerebroAgentWakeups(ctx context.Context, arg ListCerebroAgentWakeupsParams) ([]CerebroAgentWakeup, error) {
@@ -372,6 +374,7 @@ func (q *Queries) ListCerebroAgentWakeups(ctx context.Context, arg ListCerebroAg
 		arg.Limit,
 		arg.AgentID,
 		arg.State,
+		arg.IssueID,
 	)
 	if err != nil {
 		return nil, err
