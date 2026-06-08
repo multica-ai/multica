@@ -129,6 +129,26 @@ const artifacts: Artifact[] = [
     created_at: "2026-04-28T00:00:00Z",
     updated_at: "2026-04-28T00:00:00Z",
   },
+  {
+    id: "art-2",
+    workspace_id: "ws-1",
+    project_id: null,
+    issue_id: null,
+    folder_id: null,
+    origin_issue_id: null,
+    kind: "report",
+    format: "html",
+    title: "HTML report",
+    body: "<p>Body</p>",
+    file_url: null,
+    file_size_bytes: null,
+    metadata: {},
+    author_type: "agent",
+    author_id: "agent-1",
+    requester_user_id: null,
+    created_at: "2026-04-28T00:00:00Z",
+    updated_at: "2026-04-28T00:00:00Z",
+  },
 ];
 
 vi.mock("@multica/cerebro-artifacts/core/queries", () => ({
@@ -318,14 +338,21 @@ describe("FileManagerPage artifact row menu actions", () => {
     expect(input).toBeTruthy();
   }, 10_000);
 
-  it("Edit body action navigates to the document edit page", () => {
+  it("Edit body action navigates non-markdown artifacts to the document edit page", () => {
     renderPage();
-    openArtifactKebab("Daily sales report");
+    openArtifactKebab("HTML report");
 
     const editBody = screen.getByText("Edit body");
     fireEvent.click(editBody);
 
-    expect(navigationPush).toHaveBeenCalledWith("/ws/documents/art-1/edit");
+    expect(navigationPush).toHaveBeenCalledWith("/ws/documents/art-2/edit");
+  });
+
+  it("does not show Edit body for markdown artifacts", () => {
+    renderPage();
+    openArtifactKebab("Daily sales report");
+
+    expect(screen.queryByText("Edit body")).not.toBeInTheDocument();
   });
 
   it("Delete action opens the delete confirmation dialog", () => {
