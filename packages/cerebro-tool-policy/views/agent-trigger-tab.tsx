@@ -40,20 +40,20 @@ const CHOICES: {
 }[] = [
   {
     value: "allow",
-    label: "Andre må starte",
-    help: "Alle med adgang kan starte agenten.",
+    label: "Others can start",
+    help: "Anyone with access can start the agent.",
     icon: ShieldCheck,
   },
   {
     value: "ask",
-    label: "Kør-anmodning",
-    help: "Et tag bliver til en kør-anmodning hos ejeren.",
+    label: "Run request",
+    help: "A mention becomes a run request to the owner.",
     icon: ShieldQuestion,
   },
   {
     value: "deny",
-    label: "Kun ejeren",
-    help: "Kun ejeren selv kan starte agenten.",
+    label: "Owner only",
+    help: "Only the owner can start the agent.",
     icon: ShieldAlert,
   },
 ];
@@ -82,7 +82,7 @@ function SegmentedChoice({
           disabled={disabled}
           onClick={() => onChange("inherit")}
         >
-          Følg standard
+          Follow default
         </Button>
       ) : null}
       {CHOICES.map((c) => {
@@ -120,11 +120,11 @@ function WorkspaceDefault({ wsId }: { wsId: string }) {
   return (
     <div className="rounded-lg border p-4 space-y-3">
       <div>
-        <h3 className="text-sm font-semibold">Standard for hele arbejdsområdet</h3>
+        <h3 className="text-sm font-semibold">Default for the entire workspace</h3>
         <p className="text-sm text-muted-foreground">
-          Gælder når en agent ikke har sin egen regel nedenfor. Ændrer du intet,
-          gælder dagens adfærd: ejere og admins kan starte alt, almindelige
-          medlemmer sender en kør-anmodning.
+          Applies when an agent has no own rule below. If you change nothing,
+          today's behavior applies: owners and admins can start anything, ordinary
+          members send a run request.
         </p>
       </div>
       <SegmentedChoice
@@ -196,24 +196,24 @@ export function AgentTriggerTab() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold">Agent-start</h2>
+        <h2 className="text-base font-semibold">Agent start</h2>
         <p className="text-sm text-muted-foreground">
-          Styr hvem der må starte (trigge) en agent, de ikke selv ejer. Sæt en
-          standard for hele arbejdsområdet, og giv enkelte agenter deres egen
-          regel hvor det giver mening.
+          Control who may start (trigger) an agent they do not own. Set a
+          default for the entire workspace, and give individual agents their own
+          rule where it makes sense.
         </p>
       </div>
 
       <WorkspaceDefault wsId={wsId} />
 
       <div className="rounded-lg border p-4">
-        <h3 className="mb-1 text-sm font-semibold">Pr. agent</h3>
+        <h3 className="mb-1 text-sm font-semibold">Per agent</h3>
         <p className="mb-2 text-sm text-muted-foreground">
-          En regel her slår standarden for netop den agent. "Følg standard"
-          fjerner reglen igen.
+          A rule here overrides the default for that specific agent. "Follow default"
+          removes the rule again.
         </p>
         {active.length === 0 ? (
-          <p className="py-3 text-sm text-muted-foreground">Ingen agenter endnu.</p>
+          <p className="py-3 text-sm text-muted-foreground">No agents yet.</p>
         ) : (
           <div>
             {active.map((a) => (

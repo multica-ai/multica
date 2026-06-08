@@ -22,19 +22,19 @@ export function MessageTracker({ data, isLoading, workspaceSlug }: MessageTracke
   return (
     <div className="grid gap-3 lg:grid-cols-2">
       <ActorList
-        title="Mest aktive afsendere"
+        title="Most active senders"
         icon={<Send className="size-3.5" />}
         list={senders}
         isLoading={isLoading}
-        emptyText="Ingen beskeder sendt i perioden."
+        emptyText="No messages sent in this period."
         onRowClick={(actor) => openMessagePanel(actor.id, actor.name || "Unknown")}
       />
       <ActorList
-        title="Mest beskedte agenter"
+        title="Most messaged agents"
         icon={<Bot className="size-3.5" />}
         list={recipients}
         isLoading={isLoading}
-        emptyText="Ingen chat-beskeder modtaget i perioden."
+        emptyText="No chat messages received in this period."
         onRowClick={(actor) => push(`/${workspaceSlug}/agents/${actor.id}`)}
       />
     </div>
@@ -123,7 +123,7 @@ function Row({
               </span>
             )}
             <span className="text-[11px] tabular-nums text-muted-foreground">
-              {actor.count.toLocaleString("da-DK")} beskeder
+              {actor.count.toLocaleString()} messages
             </span>
           </div>
         </div>

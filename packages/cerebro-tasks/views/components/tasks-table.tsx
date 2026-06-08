@@ -34,7 +34,7 @@ export function TasksTable({
   if (isError) {
     return (
       <div className="rounded-md border border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
-        Kunne ikke hente tasks: {errorMessage ?? "ukendt fejl"}
+        Failed to fetch tasks: {errorMessage ?? "unknown error"}
       </div>
     );
   }
@@ -52,9 +52,9 @@ export function TasksTable({
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center gap-1 rounded-md border p-12 text-center">
-        <p className="text-sm font-medium">Ingen tasks matcher dine filtre</p>
+        <p className="text-sm font-medium">No tasks match your filters</p>
         <p className="text-xs text-muted-foreground">
-          Prøv at nulstille filtre eller vælge en bredere tidsperiode.
+          Try resetting filters or selecting a wider time range.
         </p>
       </div>
     );

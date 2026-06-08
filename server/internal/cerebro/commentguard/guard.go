@@ -36,8 +36,8 @@ import (
 const MissingTargetMessage = "comment must mention a target — a person, an agent, or an issue (e.g. MUL-123). Comments with no target are not allowed (FIR-2674)."
 
 // OwnerMentionOnSubIssueMessage is returned when an agent on a sub-issue tries
-// to @mention the workspace owner directly (TECH-3099).
-const OwnerMentionOnSubIssueMessage = "Comments on sub-issues must not mention the workspace owner directly — post on the parent issue instead."
+// to @mention the user the task was started for directly (TECH-3099).
+const OwnerMentionOnSubIssueMessage = "Comments on sub-issues must not mention the user this task was started for directly — post on the parent issue instead."
 
 // MissingAgentTagOnSubIssueMessage is returned when an agent posts on a
 // sub-issue without tagging any agent (TECH-3099).

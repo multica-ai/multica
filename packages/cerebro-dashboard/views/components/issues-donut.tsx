@@ -58,7 +58,7 @@ export function IssuesDonut({ data, isLoading, kind }: IssuesDonutProps) {
           <div className="h-40 w-full animate-pulse rounded bg-muted" />
         ) : series.length === 0 ? (
           <div className="flex h-40 w-full items-center justify-center text-xs text-muted-foreground">
-            Ingen issues.
+            No issues.
           </div>
         ) : (
           <>

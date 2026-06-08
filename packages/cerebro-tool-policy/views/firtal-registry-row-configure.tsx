@@ -43,16 +43,16 @@ function summarise(
   totalLoaded: boolean,
   total: number | undefined,
 ): string {
-  if (!configLoaded) return "Konfigurer";
-  if (config?.allowed_data_sources_all) return "Alle data sources";
+  if (!configLoaded) return "Configure";
+  if (config?.allowed_data_sources_all) return "All data sources";
   const picked = Array.isArray(config?.allowed_data_sources)
     ? config!.allowed_data_sources!.filter(
         (id): id is string => typeof id === "string" && id.trim().length > 0,
       ).length
     : 0;
-  if (picked === 0) return "Ingen tilladt";
+  if (picked === 0) return "None allowed";
   if (totalLoaded && typeof total === "number") {
-    return `${picked} af ${total} data sources`;
+    return `${picked} of ${total} data sources`;
   }
   return `${picked} data sources`;
 }
@@ -107,7 +107,7 @@ export function FirtalRegistryRowConfigure({
         className="gap-1.5"
         onClick={() => setOpen(true)}
         data-testid="firtal-registry-configure"
-        title={`Konfigurer data sources for firtal_registry — ${label}`}
+        title={`Configure data sources for firtal_registry — ${label}`}
       >
         <Settings2 className="h-3.5 w-3.5" />
         {label}

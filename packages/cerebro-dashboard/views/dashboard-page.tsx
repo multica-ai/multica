@@ -46,7 +46,7 @@ export function DashboardPage() {
   if (!workspace) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace context…
       </div>
     );
   }
@@ -62,7 +62,7 @@ export function DashboardPage() {
             <p className="truncate text-[11px] text-muted-foreground">
               {data
                 ? `${formatPeriodLabel(data.period_start, data.period_end)} — ${actorName ?? scopeLabel(scope)}`
-                : "Henter overblik…"}
+                : "Loading overview…"}
             </p>
           </div>
           <DashboardTabBar />
@@ -88,7 +88,7 @@ export function DashboardPage() {
         <div className="flex flex-col gap-6 p-6">
           {overview.isError && (
             <p className="text-xs text-destructive">
-              Could not load dashboard:{" "}
+              Failed to load dashboard:{" "}
               {overview.error instanceof Error ? overview.error.message : "unknown error"}
             </p>
           )}
@@ -185,7 +185,7 @@ function formatPeriodLabel(start: string, end: string): string {
     const s = new Date(start);
     const e = new Date(end);
     const fmt = (d: Date) =>
-      d.toLocaleDateString("da-DK", { day: "2-digit", month: "short" });
+      d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
     return `${fmt(s)} – ${fmt(e)}`;
   } catch {
     return "";
@@ -195,5 +195,5 @@ function formatPeriodLabel(start: string, end: string): string {
 function scopeLabel(scope: "all" | "members" | "agents"): string {
   if (scope === "members") return "Members";
   if (scope === "agents") return "Agents";
-  return "Alle";
+  return "All";
 }

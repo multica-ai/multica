@@ -64,11 +64,11 @@ export function CreateAgentPassDialog({
       try {
         parsedScope = JSON.parse(trimmed);
         if (typeof parsedScope !== "object" || parsedScope === null || Array.isArray(parsedScope)) {
-          throw new Error("scope skal være et JSON-objekt");
+          throw new Error("scope must be a JSON object");
         }
       } catch (err) {
         setScopeParseError(
-          err instanceof Error ? err.message : "kunne ikke parse scope JSON",
+          err instanceof Error ? err.message : "could not parse scope JSON",
         );
         return;
       }
@@ -91,7 +91,7 @@ export function CreateAgentPassDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Udsted agent pass</DialogTitle>
+          <DialogTitle>Issue agent pass</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           {submitError && (
@@ -123,7 +123,7 @@ export function CreateAgentPassDialog({
             <Label htmlFor="parent-pass-id">
               Parent pass ID{" "}
               <span className="text-xs text-muted-foreground">
-                (valgfri — kun ved downscoping)
+                (optional — only for downscoping)
               </span>
             </Label>
             <Input
@@ -165,7 +165,7 @@ export function CreateAgentPassDialog({
               />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="expires-at">Udløber</Label>
+              <Label htmlFor="expires-at">Expires</Label>
               <Input
                 id="expires-at"
                 type="datetime-local"
@@ -181,10 +181,10 @@ export function CreateAgentPassDialog({
               onClick={onClose}
               disabled={mutation.isPending}
             >
-              Annuller
+              Cancel
             </Button>
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? "Udsteder…" : "Udsted"}
+              {mutation.isPending ? "Issuing…" : "Issue"}
             </Button>
           </DialogFooter>
         </form>
@@ -194,13 +194,13 @@ export function CreateAgentPassDialog({
 }
 
 function extractErrorMessage(err: unknown): string {
-  if (!err) return "Ukendt fejl";
+  if (!err) return "Unknown error";
   if (err instanceof Error) {
     if (err.message.includes("scope_widening")) {
-      return "Scope-fejl: barn-pas må ikke udvide forælder-passets scope. Indsnævr scope og prøv igen.";
+      return "Scope error: child pass may not expand parent pass scope. Narrow the scope and try again.";
     }
     if (err.message.includes("409")) {
-      return "Der findes allerede et aktivt pas for denne agent + issue. Tilbagekald det først.";
+      return "An active pass already exists for this agent + issue. Revoke it first.";
     }
     return err.message;
   }

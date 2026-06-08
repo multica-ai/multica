@@ -43,7 +43,7 @@ export function ActivityFeed({ data, isLoading, workspaceSlug }: ActivityFeedPro
           </div>
         ) : entries.length === 0 ? (
           <p className="p-6 text-center text-sm text-muted-foreground">
-            Ingen aktivitet i perioden.
+            No activity in this period.
           </p>
         ) : (
           <ul className="divide-y">

@@ -902,18 +902,27 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		var ownerUserIDs []string
 		var taskPostedOnParent bool
 		if isSubIssue && authorType == "agent" {
-			if members, err := h.Queries.ListMembers(r.Context(), issue.WorkspaceID); err == nil {
-				for _, m := range members {
-					if m.Role == "owner" {
-						ownerUserIDs = append(ownerUserIDs, uuidToString(m.UserID))
+			// CEREBRO-PATCH(sub-issue-on-behalf-of): TECH-3099 fix — use task.OriginalUserID (the user the task was started for) instead of workspace role "owner", so the guard blocks the actual triggering human regardless of workspace role.
+			if taskIDHdr := r.Header.Get("X-Task-ID"); taskIDHdr != "" {
+				if taskUUID, err := util.ParseUUID(taskIDHdr); err == nil {
+					if task, err := h.Queries.GetAgentTask(r.Context(), taskUUID); err == nil && task.OriginalUserID.Valid {
+						ownerUserIDs = []string{uuidToString(task.OriginalUserID)}
+					}
+					if h.CerebroQueries != nil {
+						posted, err := h.CerebroQueries.HasTaskPostedOnIssue(r.Context(), cerebrodb.HasTaskPostedOnIssueParams{TaskID: taskUUID, IssueID: issue.ParentIssueID})
+						if err == nil {
+							taskPostedOnParent = posted
+						}
 					}
 				}
 			}
-			if taskIDHdr := r.Header.Get("X-Task-ID"); taskIDHdr != "" {
-				if taskUUID, err := util.ParseUUID(taskIDHdr); err == nil && h.CerebroQueries != nil {
-					posted, err := h.CerebroQueries.HasTaskPostedOnIssue(r.Context(), cerebrodb.HasTaskPostedOnIssueParams{TaskID: taskUUID, IssueID: issue.ParentIssueID})
-					if err == nil {
-						taskPostedOnParent = posted
+			// Fall back to workspace owners when no task context is available.
+			if len(ownerUserIDs) == 0 {
+				if members, err := h.Queries.ListMembers(r.Context(), issue.WorkspaceID); err == nil {
+					for _, m := range members {
+						if m.Role == "owner" {
+							ownerUserIDs = append(ownerUserIDs, uuidToString(m.UserID))
+						}
 					}
 				}
 			}

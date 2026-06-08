@@ -43,9 +43,9 @@ export interface SimpleToolPolicyTableProps {
 // The three authorable verdicts in display order, with their Danish labels.
 const SETTINGS: ToolEffectiveSetting[] = ["allow", "ask", "deny"];
 const SETTING_LABEL: Record<ToolEffectiveSetting, string> = {
-  allow: "Tillad",
-  ask: "Spørg",
-  deny: "Bloker",
+  allow: "Allow",
+  ask: "Ask",
+  deny: "Block",
 };
 // Active-state colour per verdict, matching the cerebro fork's emerald/amber/
 // destructive palette (see cerebro-agent-tools, cerebro-access).
@@ -65,10 +65,10 @@ interface GroupDef {
 
 // Display order of the four sections. Destruktivt renders last and red.
 const GROUPS: GroupDef[] = [
-  { key: "read", label: "Læs", danger: false },
-  { key: "execute", label: "Udfør", danger: false },
-  { key: "fetch", label: "Hent", danger: false },
-  { key: "destructive", label: "Destruktivt", danger: true },
+  { key: "read", label: "Read", danger: false },
+  { key: "execute", label: "Execute", danger: false },
+  { key: "fetch", label: "Fetch", danger: false },
+  { key: "destructive", label: "Destructive", danger: true },
 ];
 
 // classifyTool buckets one tool into a section. Priority order is destructive →
@@ -166,33 +166,33 @@ export function SimpleToolPolicyTable({
     <div className="flex flex-col gap-4" data-testid="simple-tool-policy-table">
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">
-          Sæt hver evne til Tillad, Spørg eller Bloker. Gælder for denne agent.
+          Set each capability to Allow, Ask, or Block. Applies to this agent.
         </p>
         <div className="relative w-full max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Søg efter evne …"
+            placeholder="Search capabilities…"
             className="h-9 pl-9"
-            aria-label="Søg efter evne"
+            aria-label="Search capabilities"
           />
         </div>
       </div>
 
       {query.isLoading ? (
-        <p className="text-sm text-muted-foreground">Indlæser evner …</p>
+        <p className="text-sm text-muted-foreground">Loading capabilities…</p>
       ) : sections.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {rows.length === 0
-            ? "Ingen evner rapporteret endnu."
-            : "Ingen evner matcher søgningen."}
+            ? "No capabilities reported yet."
+            : "No capabilities match the search."}
         </p>
       ) : (
         <div className="overflow-hidden rounded-lg border">
           <div className="grid grid-cols-[1fr_auto] items-center gap-4 border-b px-5 py-2.5 text-xs font-medium text-muted-foreground">
-            <span>Evne</span>
-            <span className="justify-self-center">Regel</span>
+            <span>Capability</span>
+            <span className="justify-self-center">Rule</span>
           </div>
           {sections.map((section) => (
             <div key={section.def.key}>
@@ -258,7 +258,7 @@ function VerdictToggle({
     <div
       className="inline-flex gap-0.5 rounded-md bg-muted p-0.5"
       role="group"
-      aria-label="Regel"
+      aria-label="Rule"
     >
       {SETTINGS.map((setting) => {
         const isActive = setting === value;

@@ -1374,9 +1374,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
-          {/* CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — show the human an agent created this issue for, so it traces back to a member. */}
+          {/* CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — show the human an agent created this issue for, so it traces back to a member. Label translated to English (TECH-3099). */}
           {issue.on_behalf_of ? (
-            <PropRow label="På vegne af" interactive={false}>
+            <PropRow label="On behalf of" interactive={false}>
               <ActorAvatar actorType="member" actorId={issue.on_behalf_of.user_id} size={16} />
               <span className="truncate">{issue.on_behalf_of.name}</span>
             </PropRow>

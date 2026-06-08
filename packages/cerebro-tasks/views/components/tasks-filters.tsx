@@ -18,7 +18,7 @@ import {
 } from "../../core/types";
 
 const STATUSES: { value: TaskStatus | "all"; label: string }[] = [
-  { value: "all", label: "Alle" },
+  { value: "all", label: "All" },
   { value: "queued", label: "Queued" },
   { value: "dispatched", label: "Dispatched" },
   { value: "running", label: "Running" },
@@ -28,13 +28,13 @@ const STATUSES: { value: TaskStatus | "all"; label: string }[] = [
 ];
 
 const TYPES: { value: TaskType | "all"; label: string }[] = [
-  { value: "all", label: "Alle" },
+  { value: "all", label: "All" },
   { value: "issue", label: "Issue" },
   { value: "chat", label: "Chat" },
 ];
 
 const RANGES: { value: TaskTimeRange; label: string }[] = [
-  { value: "all", label: "Alle" },
+  { value: "all", label: "All" },
   { value: "24h", label: "24h" },
   { value: "7d", label: "7d" },
   { value: "30d", label: "30d" },
@@ -42,7 +42,7 @@ const RANGES: { value: TaskTimeRange; label: string }[] = [
 ];
 
 const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
-  { value: "none", label: "Ingen" },
+  { value: "none", label: "None" },
   { value: "issue", label: "Issue" },
   { value: "project", label: "Projekt" },
   { value: "parent_issue", label: "Parent issue" },
@@ -114,7 +114,7 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
-            placeholder="Søg i tasks…"
+            placeholder="Search tasks…"
             value={draftSearch}
             onChange={(e) => setDraftSearch(e.target.value)}
             className="h-7 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -127,7 +127,7 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
             onClick={reset}
             className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground sm:ml-auto"
           >
-            Nulstil
+            Reset
           </button>
         )}
       </div>
@@ -345,7 +345,7 @@ function AdvancedFilters({
           </FilterGroup>
         )}
 
-        <FilterGroup label="Gruppér på">
+        <FilterGroup label="Group by">
           <PillRow
             ariaLabel="Group by"
             options={GROUP_BY_OPTIONS}
@@ -478,7 +478,7 @@ function ColumnToggle({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label="Vælg kolonner"
+        aria-label="Select columns"
         className={cn(
           "inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground",
           open && "bg-muted text-foreground",

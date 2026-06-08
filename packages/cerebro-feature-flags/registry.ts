@@ -685,10 +685,10 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   },
   {
     key: "cerebro_sub_issue_no_owner_mention",
-    label: "Block owner @mention on sub-issues",
+    label: "Block on-behalf-of user @mention on sub-issues",
     group: "issues",
     description:
-      "Reject an agent comment on a sub-issue that @mentions the workspace owner directly. Agents must post status on the parent issue instead of mentioning the owner from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
+      "Reject an agent comment on a sub-issue that @mentions the user the task was started for (on-behalf-of user) directly. Agents must post status on the parent issue instead of mentioning that user from a sub-issue. Requires cerebro_comment_target_guard to be on. TECH-3099.",
   },
   {
     key: "cerebro_sub_issue_require_agent_tag",

@@ -56,7 +56,7 @@ export function WorkflowsPage() {
   if (!workspace) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace context…
       </div>
     );
   }
@@ -69,7 +69,7 @@ export function WorkflowsPage() {
         <div className="flex min-w-0 flex-col">
           <h1 className="text-sm font-semibold">Workflows</h1>
           <p className="truncate text-[11px] text-muted-foreground">
-            Data-drevne regler der reagerer på issue-events
+            Data-driven rules that react to issue events
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -78,14 +78,14 @@ export function WorkflowsPage() {
             onClick={() => navigation.push(`/${workspace.slug}/workflows/new`)}
           >
             <Plus className="size-4" />
-            Nyt workflow
+            New workflow
           </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={() => navigation.push(`/${workspace.slug}/workflows/runs`)}
           >
-            Workflow-log
+            Workflow log
           </Button>
         </div>
       </PageHeader>
@@ -94,25 +94,25 @@ export function WorkflowsPage() {
         <div className="flex flex-col gap-4 p-6">
           {list.isError && (
             <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-              Kunne ikke hente workflows. {list.error instanceof Error ? list.error.message : ""}
+              Failed to load workflows. {list.error instanceof Error ? list.error.message : ""}
             </div>
           )}
 
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[28%]">Navn</TableHead>
+                <TableHead className="w-[28%]">Name</TableHead>
                 <TableHead className="w-[22%]">Trigger</TableHead>
                 <TableHead className="w-[22%]">Action</TableHead>
-                <TableHead className="w-[12%]">Aktiv</TableHead>
-                <TableHead className="w-[16%] text-right">Handlinger</TableHead>
+                <TableHead className="w-[12%]">Active</TableHead>
+                <TableHead className="w-[16%] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {workflows.length === 0 && !list.isLoading && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                    Ingen workflows endnu. Tryk på <strong>Nyt workflow</strong> for at oprette en regel.
+                    No workflows yet. Press <strong>New workflow</strong> to create a rule.
                   </TableCell>
                 </TableRow>
               )}
@@ -126,7 +126,7 @@ export function WorkflowsPage() {
                     >
                       <div className="font-medium">{wf.name}</div>
                       <div className="text-[11px] text-muted-foreground">
-                        Oprettet {new Date(wf.created_at).toLocaleString()}
+                        Created {new Date(wf.created_at).toLocaleString()}
                       </div>
                     </button>
                   </TableCell>
@@ -152,10 +152,10 @@ export function WorkflowsPage() {
                       variant="ghost"
                       className="text-destructive"
                       onClick={() => {
-                        if (confirm(`Slet workflow "${wf.name}"?`)) remove.mutate(wf.id);
+                        if (confirm(`Delete workflow "${wf.name}"?`)) remove.mutate(wf.id);
                       }}
                     >
-                      Slet
+                      Delete
                     </Button>
                   </TableCell>
                 </TableRow>

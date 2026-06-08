@@ -33,7 +33,7 @@ export function RuntimeAccountsCard({ runtime }: RuntimeAccountsCardProps) {
       </div>
       {isLoading ? (
         <div className="px-4 py-6 text-center">
-          <p className="text-xs text-muted-foreground">Indlæser…</p>
+          <p className="text-xs text-muted-foreground">Loading…</p>
         </div>
       ) : !account ? (
         <div className="flex flex-col items-center px-4 py-6 text-center">

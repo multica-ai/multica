@@ -35,7 +35,7 @@ export function CredentialsListPage() {
   if (!wsId || isMemberLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Indlæser…
+        Loading…
       </div>
     );
   }
@@ -45,11 +45,11 @@ export function CredentialsListPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <ShieldOff className="size-8 text-muted-foreground" />
-        <h2 className="text-base font-medium">Adgang nægtet</h2>
+        <h2 className="text-base font-medium">Access denied</h2>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Kun workspace-owners og -admins kan administrere credentials.
-          Backenden gater alle skrive-handlinger via policy-checkeren
-          (JEH-1197); denne side er skjult i UI'et som et ekstra lag.
+          Only workspace owners and admins can manage credentials.
+          The backend gates all write operations via the policy checker
+          (JEH-1197); this page is hidden in the UI as an extra layer.
         </p>
       </div>
     );

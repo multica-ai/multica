@@ -49,7 +49,7 @@ export function IssuesOnBehalfOf({ data, isLoading }: IssuesOnBehalfOfProps) {
     <Card>
       <div className="flex items-center justify-between border-b px-3 py-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Issues startet på vegne af
+          Issues started on behalf of
         </h3>
         {total > 0 && (
           <span className="text-[11px] text-muted-foreground">{total}</span>
@@ -60,7 +60,7 @@ export function IssuesOnBehalfOf({ data, isLoading }: IssuesOnBehalfOfProps) {
           <div className="h-48 w-full animate-pulse rounded bg-muted" />
         ) : series.length === 0 ? (
           <div className="flex h-48 w-full items-center justify-center text-xs text-muted-foreground">
-            Ingen issues startet af agenter på vegne af et medlem endnu.
+            No issues started by agents on behalf of a member yet.
           </div>
         ) : (
           <div style={{ height: Math.max(120, series.length * 34 + 16) }}>

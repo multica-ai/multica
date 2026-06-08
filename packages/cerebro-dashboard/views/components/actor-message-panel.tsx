@@ -10,10 +10,10 @@ import type { ActorMessage } from "../../core/api";
 function timeAgo(iso: string): string {
   try {
     const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-    if (diff < 60) return "lige nu";
-    if (diff < 3600) return `${Math.floor(diff / 60)} min siden`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)} t siden`;
-    return new Date(iso).toLocaleDateString("da-DK", { day: "numeric", month: "short" });
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} h ago`;
+    return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
   } catch {
     return "";
   }
@@ -38,9 +38,9 @@ export function ActorMessagePanel({ wsId, workspaceSlug }: { wsId: string; works
         <div className="flex items-center gap-2">
           <MessageSquare className="size-4 text-muted-foreground" />
           <div>
-            <p className="text-sm font-semibold">{actorName ?? "Beskeder"}</p>
+            <p className="text-sm font-semibold">{actorName ?? "Messages"}</p>
             <p className="text-xs text-muted-foreground">
-              {isLoading ? "Henter…" : `${messages.length} beskeder i perioden`}
+              {isLoading ? "Loading…" : `${messages.length} messages in period`}
             </p>
           </div>
         </div>
@@ -66,7 +66,7 @@ export function ActorMessagePanel({ wsId, workspaceSlug }: { wsId: string; works
           </div>
         ) : messages.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            Ingen beskeder i den valgte periode.
+            No messages in the selected period.
           </p>
         ) : (
           <div className="space-y-2">

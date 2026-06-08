@@ -21,7 +21,7 @@ export function MessageFlow({ data, isLoading, workspaceSlug }: MessageFlowProps
       <div className="flex items-center gap-1.5 border-b px-3 py-2">
         <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           <ArrowRight className="size-3.5" />
-          Hvem skriver til hvem
+          Who writes to whom
         </h3>
       </div>
       <CardContent className="p-3">
@@ -33,7 +33,7 @@ export function MessageFlow({ data, isLoading, workspaceSlug }: MessageFlowProps
           </div>
         ) : flow.length === 0 ? (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            Ingen chat-beskeder i perioden.
+            No chat messages in this period.
           </p>
         ) : (
           <div className="space-y-1.5">
@@ -87,7 +87,7 @@ function FlowRow({
         </div>
       </div>
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-        {entry.count.toLocaleString("da-DK")}
+        {entry.count.toLocaleString()}
       </span>
     </button>
   );

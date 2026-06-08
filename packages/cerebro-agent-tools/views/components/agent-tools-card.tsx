@@ -107,7 +107,7 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
     },
     onError: (err) => {
       toast.error(
-        err instanceof Error ? err.message : "Kunne ikke gemme override",
+        err instanceof Error ? err.message : "Failed to save override",
       );
     },
   });
@@ -123,7 +123,7 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
     },
     onError: (err) => {
       toast.error(
-        err instanceof Error ? err.message : "Kunne ikke fjerne override",
+        err instanceof Error ? err.message : "Failed to remove override",
       );
     },
   });
@@ -143,14 +143,14 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
       let overrideMode: OverrideMode = "inherit";
       let effective = tool.enabled;
       let effectiveReason = tool.enabled
-        ? "Runtime-default er aktiv"
-        : "Runtime-default er slået fra";
+        ? "Runtime default is active"
+        : "Runtime default is disabled";
       if (override) {
         overrideMode = override.enabled ? "force_on" : "force_off";
         effective = override.enabled;
         effectiveReason = override.enabled
-          ? "Agent override forsøger at åbne tool'et"
-          : "Agent override lukker tool'et";
+          ? "Agent override opens this tool"
+          : "Agent override closes this tool";
       }
       if (access) {
         effective = access.exposure_effective.effective;
@@ -187,8 +187,7 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
   if (!runtimeId) {
     return (
       <div className="rounded-md border bg-card p-6 text-center text-sm text-muted-foreground">
-        Agenten har ikke en runtime tilknyttet endnu — tildel én før du
-        konfigurerer override.
+        The agent has no runtime assigned yet — assign one before configuring overrides.
       </div>
     );
   }
@@ -196,10 +195,10 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
   return (
     <div className="rounded-md border bg-card">
       <div className="border-b p-4">
-        <h3 className="text-sm font-medium">Tools på agenten</h3>
+        <h3 className="text-sm font-medium">Agent tools</h3>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Effektiv liste over hvad <span className="font-medium">{agent.name}</span>{" "}
-          kan kalde — arvet fra runtime'en, med agent-specifikke override.
+          Effective list of what <span className="font-medium">{agent.name}</span>{" "}
+          can call — inherited from the runtime, with agent-specific overrides.
         </p>
       </div>
 
@@ -212,7 +211,7 @@ export function AgentToolsCard({ agent, canEdit, runtimeName }: AgentToolsCardPr
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Søg tools…"
+            placeholder="Search tools…"
             className="h-8 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
@@ -257,9 +256,9 @@ function InheritBanner({ runtimeName }: { runtimeName: string }) {
           .
         </p>
         <p className="text-muted-foreground">
-          Override bruges kun til at afvige fra runtime'ens default — slå et tool
-          fra for denne agent, eller åbn et tool runtime'en har lukket. Lad være
-          med at sætte alt op her; gør det på runtime-niveau.
+          Overrides are only for deviating from the runtime's default — disable a tool
+          for this agent, or open a tool the runtime has closed. Don't configure
+          everything here; do it at the runtime level.
         </p>
       </div>
     </div>
@@ -276,9 +275,9 @@ function FilterChips({
   counts: { all: number; override: number; effective_on: number };
 }) {
   const options: { value: RowFilter; label: string; count: number }[] = [
-    { value: "all", label: "Alle", count: counts.all },
-    { value: "override", label: "Kun override", count: counts.override },
-    { value: "effective_on", label: "Effektivt aktive", count: counts.effective_on },
+    { value: "all", label: "All", count: counts.all },
+    { value: "override", label: "Override only", count: counts.override },
+    { value: "effective_on", label: "Effectively active", count: counts.effective_on },
   ];
   return (
     <div role="radiogroup" className="inline-flex items-center rounded-md border p-0.5">
@@ -352,7 +351,7 @@ function AgentToolsBody({
       <div className="flex flex-col items-center justify-center gap-1 p-10 text-center">
         <AlertCircle className="h-7 w-7 text-muted-foreground/50" />
         <p className="mt-2 text-sm text-muted-foreground">
-          Kunne ikke hente tools for runtime'en.
+          Failed to fetch tools for the runtime.
         </p>
         <Button
           variant="outline"
@@ -360,7 +359,7 @@ function AgentToolsBody({
           onClick={() => runtimeToolsQuery.refetch()}
           className="mt-2"
         >
-          Prøv igen
+          Retry
         </Button>
       </div>
     );
@@ -372,8 +371,8 @@ function AgentToolsBody({
         <Wrench className="h-7 w-7 text-muted-foreground/40" />
         <p className="mt-2 text-sm text-muted-foreground">
           {rows.length > 0
-            ? "Ingen tools matcher dine filtre."
-            : "Runtime'en har ingen tools endnu — daemon scanner ved næste heartbeat."}
+            ? "No tools match your filters."
+            : "The runtime has no tools yet — daemon will scan on next heartbeat."}
         </p>
       </div>
     );
@@ -385,10 +384,10 @@ function AgentToolsBody({
         <thead className="bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
           <tr>
             <th className="px-4 py-2.5 text-left font-medium">Tool</th>
-            <th className="px-4 py-2.5 text-left font-medium">Kilde</th>
-            <th className="px-4 py-2.5 text-left font-medium">Runtime-default</th>
+            <th className="px-4 py-2.5 text-left font-medium">Source</th>
+            <th className="px-4 py-2.5 text-left font-medium">Runtime default</th>
             <th className="px-4 py-2.5 text-left font-medium">Override</th>
-            <th className="px-4 py-2.5 text-left font-medium">Effektiv</th>
+            <th className="px-4 py-2.5 text-left font-medium">Effective</th>
             <th className="w-8 px-2 py-2.5" />
           </tr>
         </thead>
@@ -500,22 +499,22 @@ function SourceBadge({
     case "mcp":
       return (
         <Badge variant="outline" className="gap-1 font-mono text-[11px]">
-          MCP · {mcpServerName || "ukendt server"}
+          MCP · {mcpServerName || "unknown server"}
         </Badge>
       );
     default:
-      return <Badge variant="outline">{source || "ukendt"}</Badge>;
+      return <Badge variant="outline">{source || "unknown"}</Badge>;
   }
 }
 
 function RuntimeDefaultBadge({ enabled }: { enabled: boolean }) {
   return enabled ? (
     <Badge variant="secondary" className="gap-1">
-      <Check className="h-3 w-3" /> På
+      <Check className="h-3 w-3" /> On
     </Badge>
   ) : (
     <Badge variant="outline" className="gap-1 text-muted-foreground">
-      <Circle className="h-3 w-3" /> Fra
+      <Circle className="h-3 w-3" /> Off
     </Badge>
   );
 }
@@ -524,19 +523,19 @@ function OverrideTag({ mode }: { mode: OverrideMode }) {
   if (mode === "force_on") {
     return (
       <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-        <Check className="h-3 w-3" /> Tving på
+        <Check className="h-3 w-3" /> Force on
       </span>
     );
   }
   if (mode === "force_off") {
     return (
       <span className="inline-flex items-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/10 px-1.5 py-0.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">
-        <X className="h-3 w-3" /> Tving fra
+        <X className="h-3 w-3" /> Force off
       </span>
     );
   }
   return (
-    <span className="text-xs italic text-muted-foreground">— Arver</span>
+    <span className="text-xs italic text-muted-foreground">— Inherits</span>
   );
 }
 
@@ -551,11 +550,11 @@ function EffectiveState({
     <div className="max-w-[260px] space-y-1">
       {effective ? (
         <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Aktiv
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Active
         </span>
       ) : (
         <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
-          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" /> Inaktiv
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" /> Inactive
         </span>
       )}
       {reason && (
@@ -593,9 +592,9 @@ function OverrideSelect({
         highlight && "text-foreground",
       )}
     >
-      <option value="inherit">Arv runtime</option>
-      <option value="force_on">Tving på</option>
-      <option value="force_off">Tving fra</option>
+      <option value="inherit">Inherit runtime</option>
+      <option value="force_on">Force on</option>
+      <option value="force_off">Force off</option>
     </select>
   );
 }
@@ -605,14 +604,14 @@ function Legend() {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t bg-muted/20 px-4 py-2 text-[11px] text-muted-foreground">
       <span className="inline-flex items-center gap-1">
         <span className="inline-block h-3 w-1 rounded-sm bg-emerald-500" />
-        Override: tvunget på
+        Override: forced on
       </span>
       <span className="inline-flex items-center gap-1">
         <span className="inline-block h-3 w-1 rounded-sm bg-rose-500" />
-        Override: tvunget fra
+        Override: forced off
       </span>
       <span>
-        <span className="italic">Arver</span> = følger runtime-default
+        <span className="italic">Inherits</span> = follows runtime default
       </span>
     </div>
   );

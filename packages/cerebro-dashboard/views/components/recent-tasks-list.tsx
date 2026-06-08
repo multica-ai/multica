@@ -40,7 +40,7 @@ export function RecentTasksList({
           </div>
         ) : tasks.length === 0 ? (
           <p className="p-6 text-center text-sm text-muted-foreground">
-            Ingen tasks endnu.
+            No tasks yet.
           </p>
         ) : (
           <ul className="divide-y">
@@ -60,7 +60,7 @@ function Row({ task, workspaceSlug }: { task: RecentTask; workspaceSlug: string 
     if (task.issue_id) push(`/${workspaceSlug}/issues/${task.issue_id}`);
   };
   const ts = task.completed_at ?? task.started_at ?? task.created_at;
-  const title = task.task_title || task.issue_title || (task.chat_session_id ? "Chat task" : "ingen issue");
+  const title = task.task_title || task.issue_title || (task.chat_session_id ? "Chat task" : "no issue");
 
   return (
     <li>

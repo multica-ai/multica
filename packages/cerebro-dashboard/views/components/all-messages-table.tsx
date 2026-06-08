@@ -9,7 +9,7 @@ import type { ActorMessage } from "../../core/api";
 
 function formatTime(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("da-DK", {
+    return new Date(iso).toLocaleString(undefined, {
       day: "2-digit",
       month: "short",
       hour: "2-digit",
@@ -33,10 +33,10 @@ export function AllMessagesTable({ wsId, workspaceSlug }: { wsId: string; worksp
     <div className="rounded-lg border bg-card">
       <div className="flex items-center justify-between border-b px-4 py-2.5">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Alle beskeder i perioden
+          All messages in period
         </h3>
         {!isLoading && (
-          <span className="text-xs text-muted-foreground">{messages.length} beskeder</span>
+          <span className="text-xs text-muted-foreground">{messages.length} messages</span>
         )}
       </div>
 
@@ -48,14 +48,14 @@ export function AllMessagesTable({ wsId, workspaceSlug }: { wsId: string; worksp
         </div>
       ) : messages.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          Ingen beskeder i den valgte periode.
+          No messages in the selected period.
         </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b text-left text-[11px] text-muted-foreground">
-                <th className="px-3 py-2 font-medium">Timestamp</th>
+                <th className="px-3 py-2 font-medium">Time</th>
                 <th className="px-3 py-2 font-medium">From</th>
                 <th className="px-3 py-2 font-medium">To (agent)</th>
                 <th className="px-3 py-2 font-medium">Issue</th>

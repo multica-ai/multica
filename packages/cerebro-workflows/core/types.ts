@@ -238,7 +238,7 @@ export const ACTION_OPTIONS: ReadonlyArray<{
     value: "escalate_to_owner",
     label: "Escalate to owner",
     description:
-      "Walker parent-issue-kæden op og poster en kommentar på første ancestor med assignee, hvis det stallede issue er ældre end tærsklen.",
+      "Walks the parent-issue chain and posts a comment on the first ancestor with an assignee, if the stalled issue is older than the threshold.",
   },
   {
     value: "webhook_outbound",
