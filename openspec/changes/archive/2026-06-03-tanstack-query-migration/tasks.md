@@ -32,4 +32,4 @@
 
 - [x] 6.1 Add or update `apps/workspace` tests for auth/bootstrap, workspace switching, and query-backed list/detail rendering.
 - [x] 6.2 Add or update workspace coverage for optimistic mutations and realtime-driven cache refresh behavior.
-- [ ] 6.3 Run the relevant workspace, backend, and end-to-end checks before archiving the change.
+- [x] 6.3 Run the relevant workspace, backend, and end-to-end checks before archiving the change.
