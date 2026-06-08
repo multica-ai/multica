@@ -9,6 +9,7 @@
 # Reads from Downward API (env): WORKSPACE_SLUG (set from metadata.namespace)
 # Optional from secret bag:      GIT_USER_EMAIL, JIRA_PAT
 #                                (both together trigger acli auth; either missing skips)
+#                                DEFAULT_GIT_REPO (comma-separated URLs; seeds workspace repos)
 # Defaulted constant:            ATLASSIAN_SITE (https://g2crowd.atlassian.net)
 # Env-overridable (default set): MULTICA_SERVER_URL (dev pipeline points it at the dev server)
 # Hardcoded constants:           LITELLM_BASE_URL (workspace-invariant)
@@ -161,4 +162,62 @@ for tmpl in /etc/multica/agent-templates/*.yaml; do
 done
 
 rm -f "${CUSTOM_ENV_FILE}"
+
+# ── 7. Seed workspace repos from DEFAULT_GIT_REPO. ───────────────────────────
+#    Add-only merge: existing user-added repos are preserved; seeds are appended
+#    only when absent. Idempotent: no PATCH if the desired state already matches.
+#    Non-fatal: GET/PATCH failure logs a warning and lets boot continue.
+#    TODO: if future migrations add per-repo fields (e.g. default_branch), the
+#    bare {"url": "..."} shape here may overwrite those fields for seeded repos.
+if [[ -z "${DEFAULT_GIT_REPO:-}" ]]; then
+  echo "agentfarm-bootstrap: DEFAULT_GIT_REPO unset — skipping repo seeding"
+else
+  _seed_json="$(
+    printf '%s' "${DEFAULT_GIT_REPO}" \
+      | tr ',' '\n' \
+      | sed 's/[[:space:]]//g' \
+      | grep -v '^$' \
+      | jq -R '{"url": .}' \
+      | jq -s '.'
+  )"
+
+  set +e
+  _get_resp="$(curl -fsS "${MULTICA_SERVER_URL}/api/workspaces/${MULTICA_WORKSPACE_ID}" \
+    -H "Authorization: Bearer ${MULTICA_PAT}" \
+    -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}")"
+  _rc=$?
+  set -e
+
+  if [[ ${_rc} -ne 0 ]]; then
+    echo "agentfarm-bootstrap: workspace repo seeding failed (rc=${_rc}) — continuing" >&2
+  else
+    _current_json="$(printf '%s' "${_get_resp}" | jq '.repos // []')"
+    _desired_json="$(
+      jq -n \
+        --argjson current "${_current_json}" \
+        --argjson seed "${_seed_json}" \
+        '$current + ($seed | map(select(.url as $u | $current | map(.url) | index($u) == null)))'
+    )"
+
+    if jq -e --argjson a "${_desired_json}" --argjson b "${_current_json}" '$a == $b' > /dev/null; then
+      echo "agentfarm-bootstrap: repos already seeded"
+    else
+      set +e
+      curl -fsS -X PATCH "${MULTICA_SERVER_URL}/api/workspaces/${MULTICA_WORKSPACE_ID}" \
+        -H "Authorization: Bearer ${MULTICA_PAT}" \
+        -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}" \
+        -H "Content-Type: application/json" \
+        -d "{\"repos\": ${_desired_json}}"
+      _rc=$?
+      set -e
+
+      if [[ ${_rc} -ne 0 ]]; then
+        echo "agentfarm-bootstrap: workspace repo seeding failed (rc=${_rc}) — continuing" >&2
+      else
+        echo "agentfarm-bootstrap: workspace repos seeded"
+      fi
+    fi
+  fi
+fi
+
 echo "agentfarm-bootstrap: agentfarm provisioning complete — returning to entrypoint"
