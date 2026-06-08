@@ -785,6 +785,17 @@ const TranscriptEventRow = ({
           <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
             #{item.seq}
           </span>
+
+          {/* Timestamp */}
+          {item.created_at && (
+            <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1" title={new Date(item.created_at).toLocaleString()}>
+              {new Date(item.created_at).toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </span>
+          )}
         </div>
 
         {/* Expanded detail */}

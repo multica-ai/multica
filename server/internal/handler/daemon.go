@@ -2080,7 +2080,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if msg.Input != nil {
 			inputJSON, _ = json.Marshal(msg.Input)
 		}
-		h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
+		created, createErr := h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
 			TaskID:  parseUUID(taskID),
 			Seq:     int32(msg.Seq),
 			Type:    msg.Type,
@@ -2091,15 +2091,20 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		})
 
 		if workspaceID != "" {
+			createdAt := ""
+			if createErr == nil && created.CreatedAt.Valid {
+				createdAt = created.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+			}
 			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
-				TaskID:  taskID,
-				IssueID: uuidToString(task.IssueID),
-				Seq:     msg.Seq,
-				Type:    msg.Type,
-				Tool:    msg.Tool,
-				Content: msg.Content,
-				Input:   msg.Input,
-				Output:  msg.Output,
+				TaskID:    taskID,
+				IssueID:   uuidToString(task.IssueID),
+				Seq:       msg.Seq,
+				Type:      msg.Type,
+				Tool:      msg.Tool,
+				Content:   msg.Content,
+				Input:     msg.Input,
+				Output:    msg.Output,
+				CreatedAt: createdAt,
 			})
 		}
 	}
@@ -2147,15 +2152,20 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if m.Input != nil {
 			json.Unmarshal(m.Input, &input)
 		}
+		createdAt := ""
+		if m.CreatedAt.Valid {
+			createdAt = m.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+		}
 		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
+			TaskID:    taskID,
+			IssueID:   issueID,
+			Seq:       int(m.Seq),
+			Type:      m.Type,
+			Tool:      m.Tool.String,
+			Content:   m.Content.String,
+			Input:     input,
+			Output:    m.Output.String,
+			CreatedAt: createdAt,
 		}
 	}
 
@@ -2290,15 +2300,20 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 		if m.Input != nil {
 			json.Unmarshal(m.Input, &input)
 		}
+		createdAt := ""
+		if m.CreatedAt.Valid {
+			createdAt = m.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+		}
 		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
+			TaskID:    taskID,
+			IssueID:   issueID,
+			Seq:       int(m.Seq),
+			Type:      m.Type,
+			Tool:      m.Tool.String,
+			Content:   m.Content.String,
+			Input:     input,
+			Output:    m.Output.String,
+			CreatedAt: createdAt,
 		}
 	}
 

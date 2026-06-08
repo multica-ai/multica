@@ -9,6 +9,7 @@ export interface TimelineItem {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  created_at?: string;
 }
 
 function canMergeStreamingText(prev: TimelineItem, next: TimelineItem): boolean {
@@ -58,6 +59,7 @@ export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
       content: msg.content,
       input: msg.input,
       output: msg.output,
+      created_at: msg.created_at,
     });
   }
   return redactTimelineItems(coalesceTimelineItems(items));
