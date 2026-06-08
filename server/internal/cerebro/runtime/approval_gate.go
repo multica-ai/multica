@@ -97,6 +97,13 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 			return true, ""
 		}
 	}
+	// Ungated tools are always allowed regardless of workspace feature flags.
+	// Checked early to avoid a DB round-trip for the common case.
+	capKey := toolCapabilityKey(toolName)
+	if capKey == "" {
+		return true, ""
+	}
+
 	// Workspace feature flag: cerebro_approval_gate. Defaults true (gate on).
 	// A workspace admin can turn it off from Settings → Features without a
 	// server restart. Any DB error → fail-open (keep gate on, don't block work).
@@ -111,11 +118,6 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// gave an explicit Ask/Deny row.
 	if e.toolPolicy != nil {
 		return e.guardToolCallViaPolicy(ctx, agentID, workspaceID, toolName, args, meta)
-	}
-
-	capKey := toolCapabilityKey(toolName)
-	if capKey == "" {
-		return true, ""
 	}
 
 	req := permgate.Request{

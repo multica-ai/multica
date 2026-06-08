@@ -688,7 +688,7 @@ var catalog = []Capability{
 		Key:         "manage_skills",
 		Title:       "Create / edit / delete skills",
 		Category:    CategorySkills,
-		Description: "Create, import, edit, fork, delete skills and their files, review change-requests, and transfer skill ownership.",
+		Description: "Create, import, edit, fork, delete skills and their files, review change-requests, transfer skill ownership, and record behavioral observations.",
 		Ops: []string{
 			"POST /api/skills/",
 			"POST /api/skills/import",
@@ -700,6 +700,8 @@ var catalog = []Capability{
 			"PUT /api/skills/{id}/ownership",
 			"DELETE /api/skills/{id}/",
 			"DELETE /api/skills/{id}/files/{fileId}",
+			// CEREBRO-PATCH(skill-observations-catalog): TECH-3077 agent runtime learning signal.
+			"POST /api/skill-observations",
 		},
 	},
 

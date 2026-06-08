@@ -823,6 +823,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/tool-policy", cerebroToolPolicyHandler.Clear)
 					// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection writes (admin/owner only).
 					r.Post("/connections", cerebroConnectionsHandler.Create)
+					r.Post("/connections/test", cerebroConnectionsHandler.Test) // CEREBRO-PATCH(cerebro-connections-test): TECH-3108 connection reachability + MCP tool discovery.
 					r.Put("/connections/{connId}", cerebroConnectionsHandler.Update)
 					r.Delete("/connections/{connId}", cerebroConnectionsHandler.Delete)
 					// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 saving-mode writes (admin/owner only).

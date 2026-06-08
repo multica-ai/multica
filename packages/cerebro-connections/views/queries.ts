@@ -64,16 +64,50 @@ const EMPTY_CONNECTION_STUB = (wsId: string): Connection => ({
 });
 
 // ---------------------------------------------------------------------------
+// Schemas — test result
+// ---------------------------------------------------------------------------
+
+const ToolInfoSchema = z.object({ name: z.string(), description: z.string().optional() }).loose();
+
+export const TestResultSchema = z
+  .object({
+    reachable: z.boolean(),
+    status_code: z.number().optional(),
+    tools: z.array(ToolInfoSchema).optional(),
+    error: z.string().optional(),
+  })
+  .loose();
+
+export type TestResult = z.infer<typeof TestResultSchema>;
+
+// ---------------------------------------------------------------------------
 // Query keys
 // ---------------------------------------------------------------------------
 
 export const connectionsKeys = {
   all: (wsId: string) => ["connections", wsId] as const,
+  one: (wsId: string, connId: string) => ["connections", wsId, connId] as const,
 };
 
 // ---------------------------------------------------------------------------
 // Hooks
 // ---------------------------------------------------------------------------
+
+export function useConnection(wsId: string, connId: string) {
+  return useQuery({
+    queryKey: connectionsKeys.one(wsId, connId),
+    queryFn: async (): Promise<Connection> => {
+      const raw = await api.getCerebroConnection(wsId, connId);
+      return parseWithFallback(
+        raw,
+        ConnectionSchema,
+        EMPTY_CONNECTION_STUB(wsId),
+        { endpoint: "GET /api/workspaces/:id/connections/:connId" },
+      ) as Connection;
+    },
+    enabled: !!wsId && !!connId,
+  });
+}
 
 export function useConnections(wsId: string) {
   return useQuery({
@@ -136,6 +170,20 @@ export function useDeleteConnection(wsId: string) {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: connectionsKeys.all(wsId) });
+    },
+  });
+}
+
+export function useTestConnection(wsId: string) {
+  return useMutation({
+    mutationFn: async (input: { url: string; type: string; auth_config: Connection["auth_config"] }): Promise<TestResult> => {
+      const raw = await api.testCerebroConnection(wsId, input);
+      return parseWithFallback(
+        raw,
+        TestResultSchema,
+        { reachable: false, error: "unexpected response" },
+        { endpoint: "POST /api/workspaces/:id/connections/test" },
+      ) as TestResult;
     },
   });
 }

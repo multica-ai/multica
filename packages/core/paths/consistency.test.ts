@@ -39,6 +39,8 @@ describe("paths.workspace() shape", () => {
         "permissions",
         // CEREBRO-PATCH(firtal-welcome-path): FIR-2490
         "welcome",
+        // CEREBRO-PATCH(cerebro-connections-routes): TECH-3108
+        "connectionNew",
       ]),
     );
   });
@@ -70,6 +72,8 @@ describe("paths.workspace() shape", () => {
       ["permissions", "permissions"],
       // CEREBRO-PATCH(firtal-welcome-path): FIR-2490
       ["welcome", "welcome"],
+      // CEREBRO-PATCH(cerebro-connections-routes): TECH-3108
+      ["connectionNew", "settings/connections/new"],
     ];
     const wsAsAny = ws as unknown as Record<string, () => string>;
     for (const [method, segment] of expectedSegments) {

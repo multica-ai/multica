@@ -3853,6 +3853,13 @@ export class ApiClient {
       method: "DELETE",
     });
   }
+  // CEREBRO-PATCH(cerebro-connections-test-client): TECH-3108 test connection endpoint.
+  async testCerebroConnection<T = unknown>(wsId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/connections/test`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
 
   // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (up to 5 square icon variants).
   async generateWorkspaceLogos(

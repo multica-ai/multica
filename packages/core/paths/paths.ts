@@ -55,6 +55,9 @@ function workspaceScoped(slug: string) {
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     settings: () => `${ws}/settings`,
+    // CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 full-page connection create/edit routes.
+    connectionNew: () => `${ws}/settings/connections/new`,
+    connectionEdit: (id: string) => `${ws}/settings/connections/${encode(id)}`,
     // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180 Persona permissions admin page
     permissions: () => `${ws}/permissions`,
     // CEREBRO-PATCH(firtal-welcome-path): FIR-2490 Firtal-branded welcome page

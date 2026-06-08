@@ -27,20 +27,21 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useCurrentMember } from "@multica/core/permissions";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "@multica/views/navigation";
 
 import type { Connection } from "../types";
 import { useConnections, useDeleteConnection, useToggleConnection } from "../queries";
-import { ConnectionFormDialog } from "./connection-form-dialog";
 
 export function ConnectionsSettingsTab() {
   const wsId = useWorkspaceId();
+  const router = useNavigation();
+  const wsPaths = useWorkspacePaths();
   const { role, isLoading: isMemberLoading } = useCurrentMember(wsId);
   const { data: connections = [], isLoading } = useConnections(wsId);
   const deleteConn = useDeleteConnection(wsId);
   const toggleConn = useToggleConnection(wsId);
 
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<Connection | undefined>();
   const [deleting, setDeleting] = useState<Connection | undefined>();
 
   if (!wsId || isMemberLoading) {
@@ -62,16 +63,6 @@ export function ConnectionsSettingsTab() {
         </p>
       </div>
     );
-  }
-
-  function openCreate() {
-    setEditing(undefined);
-    setFormOpen(true);
-  }
-
-  function openEdit(conn: Connection) {
-    setEditing(conn);
-    setFormOpen(true);
   }
 
   async function confirmDelete() {
@@ -96,7 +87,7 @@ export function ConnectionsSettingsTab() {
             to all runtimes in this workspace.
           </p>
         </div>
-        <Button size="sm" onClick={openCreate}>
+        <Button size="sm" onClick={() => router.push(wsPaths.connectionNew())}>
           <Plus className="mr-1 size-4" />
           New connection
         </Button>
@@ -157,7 +148,7 @@ export function ConnectionsSettingsTab() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => openEdit(conn)}
+                      onClick={() => router.push(wsPaths.connectionEdit(conn.id))}
                       aria-label="Edit"
                     >
                       <Pencil className="size-4" />
@@ -177,13 +168,6 @@ export function ConnectionsSettingsTab() {
           </TableBody>
         </Table>
       )}
-
-      <ConnectionFormDialog
-        wsId={wsId}
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        existing={editing}
-      />
 
       <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(undefined)}>
         <AlertDialogContent>

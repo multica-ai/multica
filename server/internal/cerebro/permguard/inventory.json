@@ -1057,6 +1057,10 @@
             "gate": "workspace_admin"
         },
         {
+            "id": "POST /api/workspaces/{id}/connections/test",
+            "gate": "workspace_admin"
+        },
+        {
             "id": "POST /api/workspaces/{id}/credentials",
             "gate": "workspace_member"
         },

@@ -189,6 +189,25 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, mask(c))
 }
 
+// Test — POST /api/workspaces/{id}/connections/test
+func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
+	_, ok := h.workspaceID(w, r) // auth check only; no DB access
+	if !ok {
+		return
+	}
+	var req testConnectionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.URL == "" {
+		writeError(w, http.StatusBadRequest, "url required")
+		return
+	}
+	result := doTestConnection(r.Context(), req)
+	writeJSON(w, http.StatusOK, result)
+}
+
 // Delete — DELETE /api/workspaces/{id}/connections/{connId}
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	wsID, ok := h.workspaceID(w, r)
