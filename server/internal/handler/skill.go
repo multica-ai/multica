@@ -233,6 +233,12 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
+	// CEREBRO-PATCH(skill-metadata-filter): TECH-3077 — delegate to filtered query when params present.
+	if q := r.URL.Query(); q.Get("category") != "" || q.Get("domain") != "" || q.Get("tag") != "" || q.Get("status") != "" || q.Get("data_domain") != "" {
+		h.listSkillsByMetadata(w, r, workspaceID)
+		return
+	}
+
 	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skills")
@@ -492,6 +498,10 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
+	}
+	// CEREBRO-PATCH(skill-metadata-sync-update): TECH-3077 — sync metadata on content change.
+	if req.Content != nil {
+		h.syncSkillMetadataAsync(skill.ID, skill.Content)
 	}
 
 	resp := SkillWithFilesResponse{

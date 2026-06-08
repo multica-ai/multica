@@ -90,7 +90,11 @@ export type CerebroFlagKey =
   // Interactive terminal (cerebro-terminal): per-runtime presentation mode + xterm.js panel.
   | "cerebro_interactive_terminal"
   // TECH-3108: workspace connection registry (API + MCP connections managed from settings).
-  | "cerebro_connections";
+  | "cerebro_connections"
+  // TECH-3077: skill metadata — category/domain/tag filtering, data-domain links, impact analysis.
+  | "cerebro_skill_metadata"
+  // TECH-3077: skill self-learning — observation recording, pattern extraction, auto change-requests.
+  | "cerebro_skill_learning";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -220,6 +224,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_interactive_terminal: false,
   // TECH-3108: OFF by default until QA on staging; shows Connections tab in workspace settings.
   cerebro_connections: false,
+  // TECH-3077: ON — skill metadata schema (category, domain, tags, data-domain links).
+  cerebro_skill_metadata: true,
+  // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
+  // infrastructure is in place.
+  cerebro_skill_learning: false,
 };
 
 /**
