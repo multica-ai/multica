@@ -232,32 +232,30 @@ func (q *Queries) CreateWorkflowFromTemplate(ctx context.Context, arg CreateWork
 const createWorkflowNode = `-- name: CreateWorkflowNode :one
 INSERT INTO multica_workflow_node (
     workflow_id, title, description, position_x, position_y,
-    format_schema, worker_type, worker_id, worker_instructions,
-    critic_type, critic_id, critic_instructions, critic_api_url,
+    format_schema, worker_type, worker_id,
+    critic_type, critic_id, critic_api_url,
     sort_order
 ) VALUES (
     $1, $2, $8, $3, $4,
-    $9, $5, $10, $11,
-    $6, $12, $13, $14,
+    $9, $5, $10,
+    $6, $11, $12,
     $7
-) RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, worker_instructions, critic_type, critic_id, critic_instructions, critic_api_url, sort_order, created_at, updated_at
+) RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at
 `
 
 type CreateWorkflowNodeParams struct {
-	WorkflowID         pgtype.UUID `json:"workflow_id"`
-	Title              string      `json:"title"`
-	PositionX          float64     `json:"position_x"`
-	PositionY          float64     `json:"position_y"`
-	WorkerType         string      `json:"worker_type"`
-	CriticType         string      `json:"critic_type"`
-	SortOrder          int32       `json:"sort_order"`
-	Description        pgtype.Text `json:"description"`
-	FormatSchema       []byte      `json:"format_schema"`
-	WorkerID           pgtype.UUID `json:"worker_id"`
-	WorkerInstructions pgtype.Text `json:"worker_instructions"`
-	CriticID           pgtype.UUID `json:"critic_id"`
-	CriticInstructions pgtype.Text `json:"critic_instructions"`
-	CriticApiUrl       pgtype.Text `json:"critic_api_url"`
+	WorkflowID   pgtype.UUID `json:"workflow_id"`
+	Title        string      `json:"title"`
+	PositionX    float64     `json:"position_x"`
+	PositionY    float64     `json:"position_y"`
+	WorkerType   string      `json:"worker_type"`
+	CriticType   string      `json:"critic_type"`
+	SortOrder    int32       `json:"sort_order"`
+	Description  pgtype.Text `json:"description"`
+	FormatSchema []byte      `json:"format_schema"`
+	WorkerID     pgtype.UUID `json:"worker_id"`
+	CriticID     pgtype.UUID `json:"critic_id"`
+	CriticApiUrl pgtype.Text `json:"critic_api_url"`
 }
 
 func (q *Queries) CreateWorkflowNode(ctx context.Context, arg CreateWorkflowNodeParams) (MulticaWorkflowNode, error) {
@@ -272,9 +270,7 @@ func (q *Queries) CreateWorkflowNode(ctx context.Context, arg CreateWorkflowNode
 		arg.Description,
 		arg.FormatSchema,
 		arg.WorkerID,
-		arg.WorkerInstructions,
 		arg.CriticID,
-		arg.CriticInstructions,
 		arg.CriticApiUrl,
 	)
 	var i MulticaWorkflowNode
@@ -288,10 +284,8 @@ func (q *Queries) CreateWorkflowNode(ctx context.Context, arg CreateWorkflowNode
 		&i.FormatSchema,
 		&i.WorkerType,
 		&i.WorkerID,
-		&i.WorkerInstructions,
 		&i.CriticType,
 		&i.CriticID,
-		&i.CriticInstructions,
 		&i.CriticApiUrl,
 		&i.SortOrder,
 		&i.CreatedAt,
@@ -499,7 +493,7 @@ func (q *Queries) GetWorkflowInWorkspace(ctx context.Context, arg GetWorkflowInW
 }
 
 const getWorkflowNode = `-- name: GetWorkflowNode :one
-SELECT id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, worker_instructions, critic_type, critic_id, critic_instructions, critic_api_url, sort_order, created_at, updated_at FROM multica_workflow_node
+SELECT id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at FROM multica_workflow_node
 WHERE id = $1
 `
 
@@ -516,10 +510,8 @@ func (q *Queries) GetWorkflowNode(ctx context.Context, id pgtype.UUID) (MulticaW
 		&i.FormatSchema,
 		&i.WorkerType,
 		&i.WorkerID,
-		&i.WorkerInstructions,
 		&i.CriticType,
 		&i.CriticID,
-		&i.CriticInstructions,
 		&i.CriticApiUrl,
 		&i.SortOrder,
 		&i.CreatedAt,
@@ -749,7 +741,7 @@ func (q *Queries) ListWorkflowEdgesByTarget(ctx context.Context, targetNodeID pg
 
 const listWorkflowNodes = `-- name: ListWorkflowNodes :many
 
-SELECT id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, worker_instructions, critic_type, critic_id, critic_instructions, critic_api_url, sort_order, created_at, updated_at FROM multica_workflow_node
+SELECT id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at FROM multica_workflow_node
 WHERE workflow_id = $1
 ORDER BY sort_order ASC, created_at ASC
 `
@@ -776,10 +768,8 @@ func (q *Queries) ListWorkflowNodes(ctx context.Context, workflowID pgtype.UUID)
 			&i.FormatSchema,
 			&i.WorkerType,
 			&i.WorkerID,
-			&i.WorkerInstructions,
 			&i.CriticType,
 			&i.CriticID,
-			&i.CriticInstructions,
 			&i.CriticApiUrl,
 			&i.SortOrder,
 			&i.CreatedAt,
@@ -1126,32 +1116,28 @@ UPDATE multica_workflow_node SET
     format_schema = COALESCE($6, format_schema),
     worker_type = COALESCE($7, worker_type),
     worker_id = COALESCE($8, worker_id),
-    worker_instructions = COALESCE($9, worker_instructions),
-    critic_type = COALESCE($10, critic_type),
-    critic_id = COALESCE($11, critic_id),
-    critic_instructions = COALESCE($12, critic_instructions),
-    critic_api_url = COALESCE($13, critic_api_url),
-    sort_order = COALESCE($14::int, sort_order),
+    critic_type = COALESCE($9, critic_type),
+    critic_id = COALESCE($10, critic_id),
+    critic_api_url = COALESCE($11, critic_api_url),
+    sort_order = COALESCE($12::int, sort_order),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, worker_instructions, critic_type, critic_id, critic_instructions, critic_api_url, sort_order, created_at, updated_at
+RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at
 `
 
 type UpdateWorkflowNodeParams struct {
-	ID                 pgtype.UUID   `json:"id"`
-	Title              pgtype.Text   `json:"title"`
-	Description        pgtype.Text   `json:"description"`
-	PositionX          pgtype.Float8 `json:"position_x"`
-	PositionY          pgtype.Float8 `json:"position_y"`
-	FormatSchema       []byte        `json:"format_schema"`
-	WorkerType         pgtype.Text   `json:"worker_type"`
-	WorkerID           pgtype.UUID   `json:"worker_id"`
-	WorkerInstructions pgtype.Text   `json:"worker_instructions"`
-	CriticType         pgtype.Text   `json:"critic_type"`
-	CriticID           pgtype.UUID   `json:"critic_id"`
-	CriticInstructions pgtype.Text   `json:"critic_instructions"`
-	CriticApiUrl       pgtype.Text   `json:"critic_api_url"`
-	SortOrder          pgtype.Int4   `json:"sort_order"`
+	ID           pgtype.UUID   `json:"id"`
+	Title        pgtype.Text   `json:"title"`
+	Description  pgtype.Text   `json:"description"`
+	PositionX    pgtype.Float8 `json:"position_x"`
+	PositionY    pgtype.Float8 `json:"position_y"`
+	FormatSchema []byte        `json:"format_schema"`
+	WorkerType   pgtype.Text   `json:"worker_type"`
+	WorkerID     pgtype.UUID   `json:"worker_id"`
+	CriticType   pgtype.Text   `json:"critic_type"`
+	CriticID     pgtype.UUID   `json:"critic_id"`
+	CriticApiUrl pgtype.Text   `json:"critic_api_url"`
+	SortOrder    pgtype.Int4   `json:"sort_order"`
 }
 
 func (q *Queries) UpdateWorkflowNode(ctx context.Context, arg UpdateWorkflowNodeParams) (MulticaWorkflowNode, error) {
@@ -1164,10 +1150,8 @@ func (q *Queries) UpdateWorkflowNode(ctx context.Context, arg UpdateWorkflowNode
 		arg.FormatSchema,
 		arg.WorkerType,
 		arg.WorkerID,
-		arg.WorkerInstructions,
 		arg.CriticType,
 		arg.CriticID,
-		arg.CriticInstructions,
 		arg.CriticApiUrl,
 		arg.SortOrder,
 	)
@@ -1182,10 +1166,8 @@ func (q *Queries) UpdateWorkflowNode(ctx context.Context, arg UpdateWorkflowNode
 		&i.FormatSchema,
 		&i.WorkerType,
 		&i.WorkerID,
-		&i.WorkerInstructions,
 		&i.CriticType,
 		&i.CriticID,
-		&i.CriticInstructions,
 		&i.CriticApiUrl,
 		&i.SortOrder,
 		&i.CreatedAt,

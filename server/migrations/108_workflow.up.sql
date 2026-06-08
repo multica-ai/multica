@@ -31,11 +31,9 @@ CREATE TABLE workflow_node (
     -- Worker phase config
     worker_type TEXT NOT NULL CHECK (worker_type IN ('human', 'agent', 'squad')),
     worker_id UUID DEFAULT NULL,
-    worker_instructions TEXT NOT NULL DEFAULT '',
     -- Critic phase config
     critic_type TEXT NOT NULL CHECK (critic_type IN ('human', 'agent', 'squad', 'api')),
     critic_id UUID DEFAULT NULL,
-    critic_instructions TEXT NOT NULL DEFAULT '',
     critic_api_url TEXT DEFAULT NULL,
     sort_order INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

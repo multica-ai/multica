@@ -58,13 +58,13 @@ WHERE id = $1;
 -- name: CreateWorkflowNode :one
 INSERT INTO multica_workflow_node (
     workflow_id, title, description, position_x, position_y,
-    format_schema, worker_type, worker_id, worker_instructions,
-    critic_type, critic_id, critic_instructions, critic_api_url,
+    format_schema, worker_type, worker_id,
+    critic_type, critic_id, critic_api_url,
     sort_order
 ) VALUES (
     $1, $2, sqlc.narg('description'), $3, $4,
-    sqlc.narg('format_schema'), $5, sqlc.narg('worker_id'), sqlc.narg('worker_instructions'),
-    $6, sqlc.narg('critic_id'), sqlc.narg('critic_instructions'), sqlc.narg('critic_api_url'),
+    sqlc.narg('format_schema'), $5, sqlc.narg('worker_id'),
+    $6, sqlc.narg('critic_id'), sqlc.narg('critic_api_url'),
     $7
 ) RETURNING *;
 
@@ -77,10 +77,8 @@ UPDATE multica_workflow_node SET
     format_schema = COALESCE(sqlc.narg('format_schema'), format_schema),
     worker_type = COALESCE(sqlc.narg('worker_type'), worker_type),
     worker_id = COALESCE(sqlc.narg('worker_id'), worker_id),
-    worker_instructions = COALESCE(sqlc.narg('worker_instructions'), worker_instructions),
     critic_type = COALESCE(sqlc.narg('critic_type'), critic_type),
     critic_id = COALESCE(sqlc.narg('critic_id'), critic_id),
-    critic_instructions = COALESCE(sqlc.narg('critic_instructions'), critic_instructions),
     critic_api_url = COALESCE(sqlc.narg('critic_api_url'), critic_api_url),
     sort_order = COALESCE(sqlc.narg('sort_order')::int, sort_order),
     updated_at = now()

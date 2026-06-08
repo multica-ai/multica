@@ -186,10 +186,27 @@ export function WorkflowCanvas({
 
   // Sync from props when the data layer changes, but NOT while the user
   // is actively dragging or resizing (otherwise ReactFlow resets the position/dimensions).
+  // Use a patch approach: add/remove by id, update existing nodes in-place
+  // so ReactFlow's internal selection is preserved across data-only changes.
   useEffect(() => {
-    if (!draggingRef.current && !resizingRef.current) {
-      setRfNodes(propNodes);
-    }
+    if (draggingRef.current || resizingRef.current) return;
+    setRfNodes((prev) => {
+      const prevMap = new Map(prev.map((n) => [n.id, n]));
+      const nextMap = new Map(propNodes.map((n) => [n.id, n]));
+      const result: Node<WorkflowNodeData>[] = [];
+
+      // Keep or create nodes present in propNodes
+      for (const [id, nextNode] of nextMap) {
+        const prevNode = prevMap.get(id);
+        if (prevNode) {
+          // Only update data, preserve ReactFlow-managed position state
+          result.push({ ...prevNode, data: nextNode.data });
+        } else {
+          result.push(nextNode);
+        }
+      }
+      return result;
+    });
   }, [propNodes]);
 
   // Resolve the best handle pair for each edge based on node positions.
@@ -272,23 +289,20 @@ export function WorkflowCanvas({
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      if (mode === "edit") {
-        selectNode(node.id);
-        selectEdge(null);
-      }
+      selectNode(node.id);
+      selectEdge(null);
       onNodeClick?.(node.id);
     },
-    [selectNode, selectEdge, onNodeClick, mode],
+    [selectNode, selectEdge, onNodeClick],
   );
 
   // Sync ReactFlow's internal selection to the Zustand store so batch
   // operations (move, delete) know which nodes are currently selected.
   const handleSelectionChange = useCallback(
     ({ nodes: selectedNodes }: { nodes: Node[] }) => {
-      if (mode !== "edit") return;
       setSelectedNodeIds(selectedNodes.map((n) => n.id));
     },
-    [setSelectedNodeIds, mode],
+    [setSelectedNodeIds],
   );
 
   const handleNodeDragStart = useCallback(() => {
@@ -513,7 +527,7 @@ export function WorkflowCanvas({
       connectionMode={ConnectionMode.Loose}
       nodesDraggable={mode !== "view"}
       nodesConnectable={mode !== "view"}
-      nodesFocusable={mode !== "view"}
+      nodesFocusable
       elementsSelectable
       fitView={shouldFitView}
       colorMode={canvasColorMode}

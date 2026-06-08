@@ -16,6 +16,8 @@ import {
   useDeleteWorkflow,
   useDeleteEdge,
   useDeleteNode,
+  useToggleWorkflowTemplate,
+  useWorkflowAdmins,
 } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { useNavigation } from "../../navigation";
@@ -25,6 +27,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { useT } from "../../i18n";
+import { useAuthStore } from "@multica/core/auth";
 import { ReactFlowProvider } from "@xyflow/react";
 import { DAGCanvas } from "./dag-canvas";
 import { NodeConfigPanel } from "./node-config-panel";
@@ -101,6 +104,10 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const deleteNodeMutation = useDeleteNode(wsId, id!);
   const updateWorkflowMutation = useUpdateWorkflow(wsId);
   const deleteWorkflowMutation = useDeleteWorkflow(wsId);
+  const toggleTemplate = useToggleWorkflowTemplate(wsId);
+  const { data: workflowAdmins = [] } = useWorkflowAdmins();
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const isWorkflowAdmin = userId ? workflowAdmins.some((a) => a.id === userId) : false;
 
   // Merge cached edits into nodes for instant visual feedback.
   // Memoized to keep the array reference stable across re-renders triggered
@@ -160,7 +167,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
         ? { type: "annotation" }
         : { shape: type };
       const result = await createNodeMutation.mutateAsync({
-        title: isAnnotation ? "Note" : "New Node",
+        title: isAnnotation ? t(($) => $.node.new_annotation_default) : t(($) => $.node.new_node_default),
         worker_type: "human",
         critic_type: "human",
         position_x: Math.round(x),
@@ -198,12 +205,12 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   };
 
   const handleDeleteWorkflow = async () => {
-    if (!confirm("Delete this workflow? All nodes, edges and runs will be permanently deleted.")) return;
+    if (!confirm(t(($) => $.page.delete_confirm))) return;
     try {
       await deleteWorkflowMutation.mutateAsync(id!);
       navigation.push(wsPaths.workflows());
     } catch {
-      toast.error("Failed to delete workflow");
+      toast.error(t(($) => $.detail.toast_delete_failed));
     }
   };
 
@@ -212,9 +219,9 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
     const newStatus = workflow.status === "active" ? "draft" : "active";
     try {
       await updateWorkflowMutation.mutateAsync({ id: id!, status: newStatus as WorkflowStatus });
-      toast.success(newStatus === "active" ? "Workflow activated" : "Workflow deactivated");
+      toast.success(newStatus === "active" ? t(($) => $.detail.toast_activated) : t(($) => $.detail.toast_deactivated));
     } catch (err: any) {
-      toast.error(err?.message || "Failed to update workflow status");
+      toast.error(err?.message || t(($) => $.detail.toast_activate_failed));
     }
   };
 
@@ -264,7 +271,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             onClick={async () => {
               const hasEdits = Object.keys(nodeEdits).length > 0 || deletedNodeIds.length > 0;
               if (hasEdits && mode === "edit") {
-                const save = confirm("You have unsaved changes. Save before leaving?");
+                const save = confirm(t(($) => $.detail.unsaved_changes));
                 if (save) {
                   await handleSave();
                 } else {
@@ -275,7 +282,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               useWorkflowEditorStore.getState().reset();
               navigation.push(wsPaths.workflows());
             }}
-            title="Back to workflows"
+            title={t(($) => $.detail.back_to_workflows)}
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -300,16 +307,36 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             <h1
               className="text-sm font-medium truncate cursor-pointer hover:text-primary transition-colors"
               onClick={() => { setDraftTitle(workflow?.title ?? ""); setEditingTitle(true); }}
-              title="Click to rename"
+              title={t(($) => $.detail.click_to_rename)}
             >
               {workflow.title}
             </h1>
+          )}
+          {workflow?.is_template && (
+            <Badge variant="outline" className="text-[10px] px-1.5 h-4 shrink-0">{t(($) => $.detail.template)}</Badge>
           )}
           <Badge variant="secondary" className="text-[10px] px-1.5 h-4 shrink-0">
             {t(($) => ($.status as Record<string, string>)[workflow.status as WorkflowStatus] ?? workflow.status)}
           </Badge>
         </div>
         <div className="flex items-center gap-1">
+          {isWorkflowAdmin && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                const newIsTemplate = !workflow?.is_template;
+                if (!confirm(newIsTemplate ? t(($) => $.detail.template_confirm_set) : t(($) => $.detail.template_confirm_unset))) return;
+                await toggleTemplate.mutateAsync({
+                  id: id!,
+                  isTemplate: newIsTemplate,
+                });
+              }}
+              disabled={toggleTemplate.isPending}
+            >
+              {workflow?.is_template ? t(($) => $.detail.unset_template) : t(($) => $.detail.set_as_template)}
+            </Button>
+          )}
           <Button
             variant={mode === "view" ? "outline" : "secondary"}
             size="sm"
@@ -327,16 +354,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               setMode(mode === "view" ? "edit" : "view");
             }}
           >
-            {mode === "view" ? t(($) => $.detail.toolbar.edit) : "Done"}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleAutoLayout}
-            className="gap-1"
-            title="Auto layout"
-          >
-            <Wand className="h-3.5 w-3.5" />
+            {mode === "view" ? t(($) => $.detail.toolbar.edit) : t(($) => $.detail.toolbar.done)}
           </Button>
           <Button size="sm" variant="outline" onClick={handleDeleteWorkflow} className="text-destructive hover:text-destructive">
             <Trash2 className="h-3.5 w-3.5" />
@@ -368,10 +386,19 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               <Button
                 size="sm"
                 variant="outline"
+                onClick={handleAutoLayout}
+                className="h-8 w-8 p-0"
+                title={t(($) => $.detail.toolbar.auto_layout)}
+              >
+                <Wand className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={undo}
                 disabled={undoStack.length === 0}
                 className="h-8 w-8 p-0"
-                title="Undo (Ctrl+Z)"
+                title={t(($) => $.detail.toolbar.undo)}
               >
                 <Undo2 className="h-3.5 w-3.5" />
               </Button>
@@ -381,7 +408,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
                 onClick={redo}
                 disabled={redoStack.length === 0}
                 className="h-8 w-8 p-0"
-                title="Redo (Ctrl+Shift+Z)"
+                title={t(($) => $.detail.toolbar.redo)}
               >
                 <Redo2 className="h-3.5 w-3.5" />
               </Button>
@@ -391,7 +418,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             size="sm"
             variant={workflow?.status === "active" ? "secondary" : "default"}
             onClick={handleActivateWorkflow}
-            disabled={updateWorkflowMutation.isPending}
+            disabled={updateWorkflowMutation.isPending || workflow?.is_template}
           >
             <Power className="h-3.5 w-3.5 mr-1" />
             {workflow?.status === "active" ? t(($) => $.detail.deactivate) : t(($) => $.detail.activate)}
@@ -454,6 +481,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               node={selectedNode}
               workflowId={id!}
               nodes={displayNodes}
+              disabled={mode !== "edit"}
               onClose={() => useWorkflowEditorStore.getState().selectNode(null)}
             />
           </div>

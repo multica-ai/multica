@@ -36,10 +36,8 @@ type CreateNodeRequest struct {
 	FormatSchema       json.RawMessage `json:"format_schema"`
 	WorkerType         string          `json:"worker_type"`
 	WorkerID           *string         `json:"worker_id"`
-	WorkerInstructions string          `json:"worker_instructions"`
 	CriticType         string          `json:"critic_type"`
 	CriticID           *string         `json:"critic_id"`
-	CriticInstructions string          `json:"critic_instructions"`
 	CriticApiURL       *string         `json:"critic_api_url"`
 }
 
@@ -51,10 +49,8 @@ type UpdateNodeRequest struct {
 	FormatSchema       json.RawMessage `json:"format_schema"`
 	WorkerType         *string         `json:"worker_type"`
 	WorkerID           *string         `json:"worker_id"`
-	WorkerInstructions *string         `json:"worker_instructions"`
 	CriticType         *string         `json:"critic_type"`
 	CriticID           *string         `json:"critic_id"`
-	CriticInstructions *string         `json:"critic_instructions"`
 	CriticApiURL       *string         `json:"critic_api_url"`
 	SortOrder          *int32          `json:"sort_order"`
 }
@@ -93,10 +89,8 @@ type WorkflowNodeResponse struct {
 	FormatSchema       json.RawMessage `json:"format_schema"`
 	WorkerType         string          `json:"worker_type"`
 	WorkerID           *string         `json:"worker_id"`
-	WorkerInstructions string          `json:"worker_instructions"`
 	CriticType         string          `json:"critic_type"`
 	CriticID           *string         `json:"critic_id"`
-	CriticInstructions string          `json:"critic_instructions"`
 	CriticApiURL       *string         `json:"critic_api_url"`
 	SortOrder          int32           `json:"sort_order"`
 	CreatedAt          string          `json:"created_at"`
@@ -158,10 +152,8 @@ func workflowNodeToResponse(node db.MulticaWorkflowNode) WorkflowNodeResponse {
 		FormatSchema:       node.FormatSchema,
 		WorkerType:         node.WorkerType,
 		WorkerID:           uuidToPtr(node.WorkerID),
-		WorkerInstructions: node.WorkerInstructions,
 		CriticType:         node.CriticType,
 		CriticID:           uuidToPtr(node.CriticID),
-		CriticInstructions: node.CriticInstructions,
 		CriticApiURL:       textToPtr(node.CriticApiUrl),
 		SortOrder:          node.SortOrder,
 		CreatedAt:          timestampToString(node.CreatedAt),
@@ -516,10 +508,8 @@ func (h *Handler) CreateWorkflowNode(w http.ResponseWriter, r *http.Request) {
 		FormatSchema:       req.FormatSchema,
 		WorkerType:         req.WorkerType,
 		WorkerID:           workerID,
-		WorkerInstructions: nonNullText(req.WorkerInstructions),
 		CriticType:         req.CriticType,
 		CriticID:           criticID,
-		CriticInstructions: nonNullText(req.CriticInstructions),
 		CriticApiUrl:       nonNullText(stringOrEmpty(req.CriticApiURL)),
 		SortOrder:          0,
 	})
@@ -564,10 +554,8 @@ func (h *Handler) UpdateWorkflowNode(w http.ResponseWriter, r *http.Request) {
 		FormatSchema:       req.FormatSchema,
 		WorkerType:         ptrToText(req.WorkerType),
 		WorkerID:           ptrStrToUUID(req.WorkerID),
-		WorkerInstructions: ptrToText(req.WorkerInstructions),
 		CriticType:         ptrToText(req.CriticType),
 		CriticID:           ptrStrToUUID(req.CriticID),
-		CriticInstructions: ptrToText(req.CriticInstructions),
 		CriticApiUrl:       ptrToText(req.CriticApiURL),
 		SortOrder:          int32ToInt4(req.SortOrder),
 	}

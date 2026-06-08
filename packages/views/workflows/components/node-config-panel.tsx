@@ -41,24 +41,15 @@ function toFormatSchemaString(fs: unknown): string {
   return JSON.stringify(fs, null, 2);
 }
 
-function safeParseFormatSchema(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch { /* invalid JSON */ }
-  return null;
-}
-
 interface NodeConfigPanelProps {
   node: WorkflowNode;
   workflowId: string;
   nodes?: WorkflowNode[];
+  disabled?: boolean;
   onClose: () => void;
 }
 
-export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeConfigPanelProps) {
+export function NodeConfigPanel({ node, workflowId, nodes = [], disabled = false, onClose }: NodeConfigPanelProps) {
   const { t } = useT("workflows");
   const wsId = useWorkspaceId();
   const deleteMutation = useDeleteNode(wsId, workflowId);
@@ -82,8 +73,6 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
   const [criticType, setCriticType] = useState(saved?.critic_type ?? node.critic_type);
   const [criticId, setCriticId] = useState<string | null>(saved?.critic_id ?? node.critic_id ?? null);
   const [criticApiUrl, setCriticApiUrl] = useState(saved?.critic_api_url ?? node.critic_api_url ?? "");
-  const [workerInstructions, setWorkerInstructions] = useState(saved?.worker_instructions ?? node.worker_instructions ?? "");
-  const [criticInstructions, setCriticInstructions] = useState(saved?.critic_instructions ?? node.critic_instructions ?? "");
 
   const bindableNodes = useMemo(
     () => nodes.filter((n) => {
@@ -114,9 +103,7 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
     setCriticType(s?.critic_type ?? node.critic_type);
     setCriticId(s?.critic_id ?? node.critic_id ?? null);
     setCriticApiUrl(s?.critic_api_url ?? node.critic_api_url ?? "");
-    setWorkerInstructions(s?.worker_instructions ?? node.worker_instructions ?? "");
-    setCriticInstructions(s?.critic_instructions ?? node.critic_instructions ?? "");
-  }, [node]);
+  }, [node.id]);
 
   const handleDelete = async () => {
     try {
@@ -144,7 +131,7 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
         {/* Title */}
         <div className="space-y-1.5">
           <Label className="text-sm">{t(($) => $.node.title)}</Label>
-          <Input
+          <Input disabled={disabled}
             value={title}
             onChange={(e) => { setTitle(e.target.value); cacheNodeEdits(node.id, { title: e.target.value }); }}
             placeholder={t(($) => $.node.title_placeholder)}
@@ -155,7 +142,7 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
         {/* Description */}
         <div className="space-y-1.5">
           <Label className="text-sm">{t(($) => $.node.description)}</Label>
-          <Textarea
+          <Textarea disabled={disabled}
             value={description}
             onChange={(e) => { setDescription(e.target.value); cacheNodeEdits(node.id, { description: e.target.value }); }}
             placeholder={t(($) => $.node.description_placeholder)}
@@ -167,14 +154,11 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
         {/* Format Schema */}
         <div className="space-y-1.5">
           <Label className="text-sm">{t(($) => $.node.format_schema_label)}</Label>
-          <Textarea
+          <Textarea disabled={disabled}
             value={formatSchema}
             onChange={(e) => {
               setFormatSchema(e.target.value);
-              const parsed = safeParseFormatSchema(e.target.value);
-              if (parsed) {
-                cacheNodeEdits(node.id, { format_schema: parsed });
-              }
+              cacheNodeEdits(node.id, { format_schema: e.target.value });
             }}
             placeholder="{}"
             className="min-h-[80px] text-sm font-mono"
@@ -214,7 +198,7 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
               </Button>
             </div>
           ) : (
-            <select
+            <select disabled={disabled}
               className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
               value=""
               onChange={(e) => {
@@ -250,11 +234,11 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
           </h4>
 
           <div className="space-y-1.5">
-            <Label className="text-sm">{t(($) => $.node.worker_type_label)}</Label>
+            <div className={disabled ? "pointer-events-none" : undefined} onClickCapture={disabled ? (e) => { e.preventDefault(); e.stopPropagation(); } : undefined}>
             <AssigneePicker
                 assigneeType={toAssigneeType(workerType)}
                 assigneeId={workerId}
-                onUpdate={(u) => {
+                onUpdate={disabled ? () => {} : (u) => {
                   const wt = fromAssigneeType(u.assignee_type ?? null);
                   const wid = u.assignee_id ?? null;
                   setWorkerType(wt);
@@ -264,17 +248,7 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
                 align="start"
                 skipBuiltinRuntimeSelection
               />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-sm">{t(($) => $.node.worker_instructions_label)}</Label>
-            <Textarea
-              value={workerInstructions}
-              onChange={(e) => { setWorkerInstructions(e.target.value); cacheNodeEdits(node.id, { worker_instructions: e.target.value }); }}
-              placeholder={t(($) => $.node.worker_instructions_hint)}
-              className="min-h-[60px] text-sm"
-              rows={2}
-            />
+            </div>
           </div>
 
         </div>
@@ -288,11 +262,11 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
           </h4>
 
           <div className="space-y-1.5">
-            <Label className="text-sm">{t(($) => $.node.critic_type_label)}</Label>
+              <div className={disabled ? "pointer-events-none" : undefined} onClickCapture={disabled ? (e) => { e.preventDefault(); e.stopPropagation(); } : undefined}>
               <AssigneePicker
                 assigneeType={toAssigneeType(criticType)}
                 assigneeId={criticId}
-                onUpdate={(u) => {
+                onUpdate={disabled ? () => {} : (u) => {
                   const ct = fromAssigneeTypeCritic(u.assignee_type ?? null);
                   const cid = u.assignee_id ?? null;
                   setCriticType(ct);
@@ -301,12 +275,13 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
                 }}
                 align="start"
               />
+            </div>
           </div>
 
           {criticType === "api" && (
             <div className="space-y-1.5">
               <Label className="text-sm">{t(($) => $.node.critic_api_url_label)}</Label>
-              <Input
+              <Input disabled={disabled}
                 value={criticApiUrl}
                 onChange={(e) => { setCriticApiUrl(e.target.value); cacheNodeEdits(node.id, { critic_api_url: e.target.value }); }}
                 placeholder="https://..."
@@ -316,21 +291,12 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <Label className="text-sm">{t(($) => $.node.critic_instructions_label)}</Label>
-            <Textarea
-              value={criticInstructions}
-              onChange={(e) => { setCriticInstructions(e.target.value); cacheNodeEdits(node.id, { critic_instructions: e.target.value }); }}
-              className="min-h-[60px] text-sm"
-              rows={2}
-            />
-          </div>
-
         </div>
         )}
         </div>
       </div>
 
+      {!disabled && (
       <div className="px-4 py-3 border-t shrink-0">
           <Button
             size="sm"
@@ -343,6 +309,7 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], onClose }: NodeC
             {deleteMutation.isPending ? t(($) => $.node.saving) : t(($) => $.node.delete)}
           </Button>
       </div>
+      )}
     </div>
   );
 }

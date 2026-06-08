@@ -39,7 +39,7 @@ export function computeAutoLayout(
 
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "LR", nodesep: 120, ranksep: 300, marginx: 100, marginy: 100 });
+  g.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 150, marginx: 100, marginy: 100 });
 
   for (const node of nodes) {
     const { width, height } = getNodeDimensions(node.format_schema);

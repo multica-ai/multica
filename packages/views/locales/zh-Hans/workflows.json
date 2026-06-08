@@ -12,6 +12,11 @@
     },
     "delete_confirm": "删除此工作流？所有节点、边和运行历史将被永久删除。",
     "last_run_empty": "--",
+    "template_badge": "模板",
+    "template_section": "模板",
+    "create_from_template_confirm": "从模板「{{title}}」创建工作流？",
+    "use_template": "使用此模板",
+    "creating": "创建中...",
     "empty": {
       "title": "暂无工作流",
       "description": "创建第一个工作流来编排多步骤 AI 任务。"
@@ -43,13 +48,27 @@
     "toolbar": {
       "edit": "编辑",
       "view": "查看",
-      "connect": "连线"
+      "connect": "连线",
+      "done": "完成",
+      "auto_layout": "自动布局",
+      "undo": "撤销 (Ctrl+Z)",
+      "redo": "重做 (Ctrl+Shift+Z)"
     },
+    "back_to_workflows": "返回工作流列表",
+    "click_to_rename": "点击重命名",
+    "unsaved_changes": "有未保存的更改。是否保存后再离开？",
+    "template": "模板",
+    "set_as_template": "设为模板",
+    "unset_template": "取消模板",
+    "template_confirm_set": "设为模板？",
+    "template_confirm_unset": "取消模板？",
     "toast_saved": "工作流已保存",
     "toast_save_failed": "保存工作流失败",
     "toast_deleted": "工作流已删除",
     "toast_delete_failed": "删除工作流失败",
     "toast_activated": "工作流已启用",
+    "toast_deactivated": "工作流已停用",
+    "toast_activate_failed": "更新工作流状态失败",
     "toast_run_started": "运行已启动",
     "toast_run_failed": "启动运行失败",
     "section_nodes": "节点",
@@ -95,8 +114,6 @@
     "worker_type_squad": "Squad",
     "worker_id_label": "指派人",
     "worker_id_hint": "留空表示任意工作空间成员",
-    "worker_instructions_label": "指令",
-    "worker_instructions_hint": "给执行者的提示或指令",
     "section_critic": "评审者",
     "critic_type_label": "评审者类型",
     "critic_type_human": "人工",
@@ -104,7 +121,6 @@
     "critic_type_squad": "Squad",
     "critic_type_api": "API",
     "critic_id_label": "评审指派人",
-    "critic_instructions_label": "评审指令",
     "critic_api_url_label": "API URL",
     "critic_api_url_hint": "接收执行者输出进行自动评审的 POST 端点",
     "save": "保存节点",
@@ -115,7 +131,9 @@
     "toast_deleted": "节点已删除",
     "toast_delete_failed": "删除节点失败",
     "label_color": "颜色",
-    "label_font_size": "字号"
+    "label_font_size": "字号",
+    "new_node_default": "新节点",
+    "new_annotation_default": "注释"
   },
   "edge": {
     "toast_created": "边已创建",

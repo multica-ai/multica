@@ -751,11 +751,9 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Mult
 	}
 
 	var agentID pgtype.UUID
-	var instructions string
 	switch phase {
 	case "worker":
 		agentID = node.WorkerID
-		instructions = node.WorkerInstructions
 		if node.WorkerType == "squad" && node.WorkerID.Valid {
 			if squad, err := s.Queries.GetSquad(ctx, node.WorkerID); err == nil {
 				agentID = squad.LeaderID
@@ -763,7 +761,6 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Mult
 		}
 	case "critic":
 		agentID = node.CriticID
-		instructions = node.CriticInstructions
 		if node.CriticType == "squad" && node.CriticID.Valid {
 			if squad, err := s.Queries.GetSquad(ctx, node.CriticID); err == nil {
 				agentID = squad.LeaderID
@@ -803,7 +800,6 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Mult
 		"node_title":        node.Title,
 		"node_run_id":       util.UUIDToString(nodeRun.ID),
 		"phase":             phase,
-		"instructions":      instructions,
 	}
 	contextJSON, err := json.Marshal(contextPayload)
 	if err != nil {
@@ -1162,10 +1158,8 @@ func (s *WorkflowService) CloneWorkflowFromTemplate(
 				FormatSchema:       node.FormatSchema,
 				WorkerType:         node.WorkerType,
 				WorkerID:           node.WorkerID,
-				WorkerInstructions: textToPgText(node.WorkerInstructions),
 				CriticType:         node.CriticType,
 				CriticID:           node.CriticID,
-				CriticInstructions: textToPgText(node.CriticInstructions),
 				CriticApiUrl:       node.CriticApiUrl,
 				SortOrder:          node.SortOrder,
 			})

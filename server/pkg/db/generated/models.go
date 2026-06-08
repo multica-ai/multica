@@ -671,23 +671,21 @@ type MulticaWorkflowEdge struct {
 }
 
 type MulticaWorkflowNode struct {
-	ID                 pgtype.UUID        `json:"id"`
-	WorkflowID         pgtype.UUID        `json:"workflow_id"`
-	Title              string             `json:"title"`
-	Description        string             `json:"description"`
-	PositionX          float64            `json:"position_x"`
-	PositionY          float64            `json:"position_y"`
-	FormatSchema       []byte             `json:"format_schema"`
-	WorkerType         string             `json:"worker_type"`
-	WorkerID           pgtype.UUID        `json:"worker_id"`
-	WorkerInstructions string             `json:"worker_instructions"`
-	CriticType         string             `json:"critic_type"`
-	CriticID           pgtype.UUID        `json:"critic_id"`
-	CriticInstructions string             `json:"critic_instructions"`
-	CriticApiUrl       pgtype.Text        `json:"critic_api_url"`
-	SortOrder          int32              `json:"sort_order"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkflowID   pgtype.UUID        `json:"workflow_id"`
+	Title        string             `json:"title"`
+	Description  string             `json:"description"`
+	PositionX    float64            `json:"position_x"`
+	PositionY    float64            `json:"position_y"`
+	FormatSchema []byte             `json:"format_schema"`
+	WorkerType   string             `json:"worker_type"`
+	WorkerID     pgtype.UUID        `json:"worker_id"`
+	CriticType   string             `json:"critic_type"`
+	CriticID     pgtype.UUID        `json:"critic_id"`
+	CriticApiUrl pgtype.Text        `json:"critic_api_url"`
+	SortOrder    int32              `json:"sort_order"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MulticaWorkflowNodeRun struct {

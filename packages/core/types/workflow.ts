@@ -34,6 +34,8 @@ export interface Workflow {
   created_by_type: string;
   created_by_id: string;
   node_count: number;
+  is_template: boolean;
+  source_template_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -48,10 +50,8 @@ export interface WorkflowNode {
   format_schema: unknown;
   worker_type: WorkerType;
   worker_id: string | null;
-  worker_instructions: string;
   critic_type: CriticType;
   critic_id: string | null;
-  critic_instructions: string;
   critic_api_url: string | null;
   sort_order: number;
   created_at: string;
@@ -126,10 +126,8 @@ export interface CreateNodeRequest {
   format_schema?: unknown;
   worker_type: WorkerType;
   worker_id?: string | null;
-  worker_instructions?: string;
   critic_type: CriticType;
   critic_id?: string | null;
-  critic_instructions?: string;
   critic_api_url?: string | null;
 }
 
@@ -141,10 +139,8 @@ export interface UpdateNodeRequest {
   format_schema?: unknown;
   worker_type?: WorkerType;
   worker_id?: string | null;
-  worker_instructions?: string;
   critic_type?: CriticType;
   critic_id?: string | null;
-  critic_instructions?: string;
   critic_api_url?: string | null;
   sort_order?: number;
 }
