@@ -445,6 +445,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/cerebro/exchange-rates",
+      "exempt": "pre-auth service-to-service — CEREBRO_EXCHANGE_INGEST_KEY bearer token authorises the multica-hatchet-worker's daily FX snapshot push before any user JWT exists (FIR-43)"
+    },
+    {
       "id": "POST /api/cerebro/focus-list/",
       "gate": "workspace_member"
     },

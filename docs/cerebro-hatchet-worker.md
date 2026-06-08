@@ -34,10 +34,21 @@ the cached row and surfaces `fetched_at` as the freshness signal.
 
 ## Required environment
 
-| Variable              | Source                                                     | Notes                                                                  |
-| --------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `HATCHET_CLIENT_TOKEN`| Infisical `/runs` — provision a new token for this worker  | JWT scoped to the Hatchet tenant; the SDK derives the host from it.    |
-| `DATABASE_URL`        | Multica's internal Sliplane DB URL                         | Same value the API server uses — same Postgres, same network.          |
+The worker **never holds a database credential.** It fetches rates and POSTs
+them to the backend, which is the only writer of `cerebro_exchange_rates`
+(FIR-43). So the worker needs an internal backend URL and a service key — not
+`DATABASE_URL`.
+
+| Variable                      | Source                                                     | Notes                                                                                          |
+| ----------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `HATCHET_CLIENT_TOKEN`        | Infisical `/runs/HATCHET_CLIENT_TOKEN_MULTICA`             | JWT scoped to the Hatchet tenant; the SDK derives the host from it (gRPC `runs-hatchet.internal:7077`). |
+| `CEREBRO_FX_INGEST_URL`       | Internal URL of multica-backend                            | e.g. `http://multica-backend-8nnfh2.internal:8080/api/cerebro/exchange-rates`. Internal Sliplane network, no Cloudflare. |
+| `CEREBRO_EXCHANGE_INGEST_KEY` | Shared secret (Infisical)                                  | Bearer token the worker presents. **The same value must be set on the multica-backend service** so it accepts the call. |
+
+The backend (`multica-backend`) must have the matching
+`CEREBRO_EXCHANGE_INGEST_KEY` set; when it is unset the ingest endpoint answers
+direct loopback callers only and 404s everyone else (same policy as
+`/api/cerebro/pricing`).
 
 Optional overrides (rarely needed):
 
@@ -55,15 +66,19 @@ the `ecommerce-pricing-engine` worker (a separate product) and must NOT be
 reused — workers sharing a token register under the same identity in
 Hatchet's scheduler.
 
-Provision a new token in Hatchet's dashboard for the Multica tenant, scoped
-to whatever workflow registration permissions Hatchet requires for cron
-workflows. Store the JWT in Infisical at `/runs/HATCHET_CLIENT_TOKEN_MULTICA`
-and reference it as `HATCHET_CLIENT_TOKEN` in the Sliplane service env.
+A new token is provisioned for the Multica tenant (via the Hatchet API at
+`runs.firtal.com` or the dashboard) and stored in Infisical at
+`/runs/HATCHET_CLIENT_TOKEN_MULTICA`; reference it as `HATCHET_CLIENT_TOKEN` in
+the Sliplane service env. Note Hatchet caps API tokens at 90 days, so this
+token needs periodic rotation (re-mint + overwrite the Infisical key).
 
 ## Sliplane service
 
-- **Project / environment:** same project as Multica and `runs.firtal.com`
-  (so the internal `DATABASE_URL` is reachable without leaving the network).
+- **Project / server:** the worker must run on the **same Sliplane server** as
+  `multica-backend` and `runs-hatchet` (server `Firtal Internal`). Internal
+  `.internal` networking is server-scoped, so from there the worker reaches
+  both the backend ingest URL and `runs-hatchet.internal:7077` without leaving
+  the private network. Project `Multica` is the natural home.
 - **Service name:** `multica-hatchet-worker`.
 - **Image build:** from this repo, `Dockerfile.hatchet-worker`, root context.
 - **Replicas:** 1 (Hatchet handles work assignment; horizontal scale is
@@ -71,17 +86,19 @@ and reference it as `HATCHET_CLIENT_TOKEN` in the Sliplane service env.
 - **Ports:** none. The worker is outbound-only.
 - **Resources:** 0.1 vCPU / 128 MiB is plenty.
 - **Restart policy:** always.
-- **Env:** the two required vars above. Optional overrides only when needed.
+- **Env:** the three required vars above. Optional overrides only when needed.
 
 ## Verifying the deploy
 
-1. **Container logs** show, in order: `connect database`, `starting hatchet
-   worker`, then `bootstrap fx refresh complete` within ~5 seconds of start.
+1. **Container logs** show, in order: `starting hatchet worker`, then
+   `bootstrap fx refresh complete` within ~5 seconds of start. (No database
+   connection — the worker POSTs to the backend.)
 2. **Hatchet dashboard** lists `multica-hatchet-worker` as a connected worker
    with one registered workflow (`cerebro-fetch-exchange-rates`).
 3. **Database check** — `fetched_at` on the USD→DKK and USD→EUR rows in
-   `cerebro_exchange_rates` advances to today's ECB reference date (replacing
-   the static seed from migration 9066).
+   `cerebro_exchange_rates` advances to today's ECB reference date (written by
+   the backend on the worker's POST, replacing the static seed from migration
+   9066).
 4. **Multica UI** — workspace settings → Visningsvaluta → "Kursdato" matches
    today's ECB date.
 

@@ -893,6 +893,7 @@ var excluded = map[string]string{
 	"POST /api/webhooks/github":              "pre-auth signed webhook — GitHub HMAC authorises delivery",
 	"POST /api/webhooks/stripe":              "pre-auth signed webhook — Stripe HMAC authorises delivery",
 	"POST /api/cerebro/github/pull-requests": "pre-auth service-to-service — CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push (FIR-2568)",
+	"POST /api/cerebro/exchange-rates":       "pre-auth service-to-service — CEREBRO_EXCHANGE_INGEST_KEY bearer token authorises the multica-hatchet-worker's daily FX snapshot push (FIR-43)",
 	"POST /api/contact-sales":                "pre-auth — public marketing form",
 	"POST /api/runtime-setup/exchange":       "bootstrap — exchanges a single-use setup token before a daemon has a user session",
 

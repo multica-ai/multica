@@ -8,6 +8,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { issueCommentCostsOptions } from "@multica/core/issues/queries";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
+import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 
 /**
  * FIR-39 — per-comment spend badge shown under an agent comment on an issue
@@ -39,6 +40,7 @@ export function CommentCostBadge({
   // root-level flags query via useWorkspaceId) — this badge is a leaf rendered
   // deep in the comment list and must not depend on workspace context.
   const enabled = useFlagValue("cerebro_comment_cost");
+  const { formatCents } = useCostFormatter();
   // Only agent comments carry a task — skip the network round-trip for member
   // comments. The query itself is shared per-issue so all rendered badges
   // dedupe to one fetch.
@@ -57,12 +59,12 @@ export function CommentCostBadge({
       <TooltipTrigger
         render={
           <span className="cursor-default text-xs font-medium tabular-nums text-muted-foreground">
-            cost {formatCost(cost.cost_cents)}
+            cost {formatCents(cost.cost_cents)}
           </span>
         }
       />
       <TooltipContent side="top" className="text-xs">
-        <div className="font-medium">This run: {formatCost(cost.cost_cents)}</div>
+        <div className="font-medium">This run: {formatCents(cost.cost_cents)}</div>
         <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] text-muted-foreground">
           {cost.model ? (
             <>
@@ -84,16 +86,11 @@ export function CommentCostBadge({
   );
 }
 
-// Local formatters mirror message-cost-badge.tsx — kept local on purpose so
-// this component does not pull a formatter out of @multica/views and create a
-// circular package edge (same reasoning as the chat badge's note).
-function formatCost(cents: number): string {
-  const usd = cents / 100;
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
-}
-
+// Cost formatting flows through @multica/cerebro-format-cost (via
+// useCostFormatter) so the workspace display currency is honored — matching the
+// issue sidebar and chat badges. That shared formatter is a zero-dependency leaf
+// package, so it does not recreate the @multica/views circular edge the JEH-736
+// note guarded against.
 function formatTokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;

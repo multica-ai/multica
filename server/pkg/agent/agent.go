@@ -121,7 +121,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "antigravity", "firtal-gateway".
+// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "antigravity", "firtal-gateway", "openai-eu".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -155,8 +155,11 @@ func New(agentType string, cfg Config) (Backend, error) {
 	// CEREBRO-PATCH(agent-firtal-gateway-runtime): register the managed Data Registry AI Gateway backend.
 	case firtalGatewayProvider:
 		return &firtalGatewayBackend{cfg: cfg}, nil
+	// CEREBRO-PATCH(agent-openai-eu-runtime): TECH-2989 EU-compliant OpenAI backend.
+	case openaiEUProvider:
+		return &openaiEUBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity, firtal-gateway)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity, firtal-gateway, openai-eu)", agentType)
 	}
 }
 
@@ -181,6 +184,8 @@ var launchHeaders = map[string]string{
 	"copilot":             "copilot (json)",
 	"cursor":              "cursor-agent (stream-json)",
 	firtalGatewayProvider: "Firtal Data Registry AI Gateway (HTTP)",
+	// CEREBRO-PATCH(agent-openai-eu-runtime): TECH-2989
+	openaiEUProvider: "OpenAI EU (api.eu.openai.com, HTTP)",
 	"gemini":              "gemini (stream-json)",
 	"hermes":              "hermes acp",
 	"kimi":                "kimi acp",
