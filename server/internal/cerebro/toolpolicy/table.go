@@ -206,6 +206,16 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		return nil, err
 	}
 
+	// Append the per-connection-tool rows (one per tool per enabled MCP
+	// connection). Like repo rows these are not in the capability register; they
+	// carry a non-empty ResourcePattern (the tool name) and the connection's
+	// display name as Category, so the UI groups a connection's tools under it
+	// and gates each one individually (TECH-3156).
+	out, err = s.appendConnectionToolRows(ctx, in, groupIDs, out)
+	if err != nil {
+		return nil, err
+	}
+
 	// Append the code-owned platform-capability rows (FIR-2594). Like repo rows
 	// these are not in the capability register, so the query above never emits
 	// them; they are capability-wide (empty ResourcePattern) and carry the
