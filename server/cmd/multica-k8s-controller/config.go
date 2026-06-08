@@ -19,10 +19,10 @@ type Config struct {
 	Token         string
 	Namespace     string
 
-	Workspaces      []WorkspaceConfig    `yaml:"workspaces"`
-	ImagePullSecret string               `yaml:"imagePullSecret"`
-	ClaudeBroker    ClaudeBrokerOptions  `yaml:"claudeBroker"`
-	RepoCache       RepoCacheOptions     `yaml:"repoCache"`
+	Workspaces      []WorkspaceConfig   `yaml:"workspaces"`
+	ImagePullSecret string              `yaml:"imagePullSecret"`
+	ClaudeBroker    ClaudeBrokerOptions `yaml:"claudeBroker"`
+	RepoCache       RepoCacheOptions    `yaml:"repoCache"`
 
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
@@ -39,6 +39,11 @@ type WorkspaceConfig struct {
 	RuntimeImage string `yaml:"runtimeImage"`
 	PVCSize      string `yaml:"pvcSize"`
 	StorageClass string `yaml:"storageClass"`
+	// ServiceAccountName is the K8S ServiceAccount the worker Job pod runs as.
+	// The Helm chart resolves this from runtime.workspaces[].workerProfile via
+	// the runtime.worker.profiles map. Empty = pod uses namespace `default` SA
+	// (no cluster API access) — the deliberate "agent without K8S" case.
+	ServiceAccountName string `yaml:"serviceAccountName"`
 }
 
 // ClaudeBrokerOptions controls how worker Jobs are configured to fetch

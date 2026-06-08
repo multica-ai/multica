@@ -21,6 +21,11 @@ type Registered struct {
 	Image        string
 	PVCSize      string
 	StorageClass string
+	// ServiceAccountName is set on the worker Job pod so the projected SA
+	// token at /var/run/secrets/kubernetes.io/serviceaccount/ carries the
+	// rights bound to that SA (via the chart's worker-rbac.yaml). Empty =
+	// pod uses the namespace `default` SA, i.e. no cluster API access.
+	ServiceAccountName string
 }
 
 // RegisterAll posts one Register call per workspace tuple in cfg and returns
@@ -28,15 +33,20 @@ type Registered struct {
 func RegisterAll(ctx context.Context, cli *daemon.Client, cfg *Config) ([]Registered, error) {
 	out := make([]Registered, 0, len(cfg.Workspaces))
 	for _, w := range cfg.Workspaces {
-		daemonID := stableDaemonID(cfg.DaemonIDPrefix, w.ID, w.Provider)
+		daemonID := stableDaemonID(cfg.DaemonIDPrefix, w.ID, w.Provider, w.AgentName)
 		cliVersion := cfg.CLIVersion
 		if cliVersion == "" || cliVersion == "dev" {
 			cliVersion = "v0.3.5"
 		}
+		// Pre-multi-agent installs hashed only (prefix, workspace, provider) — so
+		// upgrading from one of those would orphan the old daemon row. List the
+		// legacy hash so the server merges that row's runtime into this one
+		// instead of leaving it as a stale offline ghost. Harmless when no such
+		// row exists.
 		req := map[string]any{
 			"workspace_id":      w.ID,
 			"daemon_id":         daemonID,
-			"legacy_daemon_ids": []string{},
+			"legacy_daemon_ids": []string{legacyStableDaemonID(cfg.DaemonIDPrefix, w.ID, w.Provider)},
 			"device_name":       cfg.DeviceName,
 			"cli_version":       cliVersion,
 			"runtimes": []map[string]any{
@@ -59,22 +69,35 @@ func RegisterAll(ctx context.Context, cli *daemon.Client, cfg *Config) ([]Regist
 			return nil, fmt.Errorf("server did not return a runtime_id for ws=%s provider=%s", w.ID, w.Provider)
 		}
 		out = append(out, Registered{
-			WorkspaceID:  w.ID,
-			Provider:     w.Provider,
-			AgentName:    w.AgentName,
-			RuntimeID:    runtimeID,
-			Image:        w.RuntimeImage,
-			PVCSize:      w.PVCSize,
-			StorageClass: w.StorageClass,
+			WorkspaceID:        w.ID,
+			Provider:           w.Provider,
+			AgentName:          w.AgentName,
+			RuntimeID:          runtimeID,
+			Image:              w.RuntimeImage,
+			PVCSize:            w.PVCSize,
+			StorageClass:       w.StorageClass,
+			ServiceAccountName: w.ServiceAccountName,
 		})
 	}
 	return out, nil
 }
 
 // stableDaemonID produces a deterministic daemon_id per (prefix, workspace,
-// provider) tuple so the server merges the runtime row across controller
-// restarts instead of churning rows.
-func stableDaemonID(prefix, workspaceID, provider string) string {
+// provider, agentName) tuple so the server merges the runtime row across
+// controller restarts instead of churning rows. agentName is part of the hash
+// because the DB enforces UNIQUE (workspace_id, daemon_id, provider) on
+// agent_runtime — two agents on the same (ws, provider) with the same daemon_id
+// would upsert onto the same row, hiding all but one agent in the UI.
+func stableDaemonID(prefix, workspaceID, provider, agentName string) string {
+	h := sha1.Sum([]byte(prefix + "|" + workspaceID + "|" + provider + "|" + agentName))
+	return prefix + "-" + hex.EncodeToString(h[:8])
+}
+
+// legacyStableDaemonID returns the pre-agentName hash. Sent in legacy_daemon_ids
+// so the server merges a pre-upgrade single-agent row into the corresponding
+// post-upgrade agent on first registration after rollout. Same shape as
+// stableDaemonID minus the agentName component.
+func legacyStableDaemonID(prefix, workspaceID, provider string) string {
 	h := sha1.Sum([]byte(prefix + "|" + workspaceID + "|" + provider))
 	return prefix + "-" + hex.EncodeToString(h[:8])
 }

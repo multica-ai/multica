@@ -269,8 +269,9 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: jobLabels(r, t)},
 				Spec: corev1.PodSpec{
-					RestartPolicy:    corev1.RestartPolicyNever,
-					ImagePullSecrets: []corev1.LocalObjectReference{{Name: imagePullSecret}},
+					RestartPolicy:      corev1.RestartPolicyNever,
+					ServiceAccountName: r.ServiceAccountName,
+					ImagePullSecrets:   []corev1.LocalObjectReference{{Name: imagePullSecret}},
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot:   &nonRoot,
 						RunAsUser:      &uid,

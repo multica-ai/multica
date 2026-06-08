@@ -338,3 +338,59 @@ func TestDispatchJob_RepoCacheDisabled(t *testing.T) {
 	}
 }
 
+// TestDispatchJob_WorkerServiceAccount asserts that Registered.ServiceAccountName
+// (set per-workspace from the chart's runtime.worker.profiles lookup) is
+// propagated to PodSpec.ServiceAccountName. This is what gives the projected
+// SA token at /var/run/secrets/kubernetes.io/serviceaccount/ the rights bound
+// by the chart's worker-rbac.yaml — without it, `kubectl` / `helm` from inside
+// the pod see the namespace default SA (no permissions) and fail with 403.
+func TestDispatchJob_WorkerServiceAccount(t *testing.T) {
+	k := fake.NewSimpleClientset()
+	r := Registered{
+		WorkspaceID: "ws-sa", AgentName: "Lambda", Provider: "claude",
+		Image:              "registry/multica-runtime-claude:dev",
+		PVCSize:            "5Gi",
+		ServiceAccountName: "multica-runtime-worker-k8s-admin",
+	}
+	task := daemon.Task{
+		ID: "task-sa", IssueID: "iss-1", AgentID: "ag-1", WorkspaceID: r.WorkspaceID,
+		RuntimeID: "rt-1",
+	}
+
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, _ := k.BatchV1().Jobs("multica").Get(context.Background(), jobName, metav1.GetOptions{})
+	if got := job.Spec.Template.Spec.ServiceAccountName; got != "multica-runtime-worker-k8s-admin" {
+		t.Errorf("ServiceAccountName: got %q, want %q", got, "multica-runtime-worker-k8s-admin")
+	}
+}
+
+// TestDispatchJob_NoWorkerServiceAccount asserts that an empty
+// Registered.ServiceAccountName leaves PodSpec.ServiceAccountName empty —
+// the pod falls back to the namespace `default` SA, i.e. no cluster API access.
+// This is the deliberate "agent without K8S access" case: the workspace's
+// runtime.workspaces[].workerProfile is unset.
+func TestDispatchJob_NoWorkerServiceAccount(t *testing.T) {
+	k := fake.NewSimpleClientset()
+	r := Registered{
+		WorkspaceID: "ws-nosa", AgentName: "Lambda", Provider: "claude",
+		Image:   "registry/multica-runtime-claude:dev",
+		PVCSize: "5Gi",
+	}
+	task := daemon.Task{
+		ID: "task-nosa", IssueID: "iss-1", AgentID: "ag-1", WorkspaceID: r.WorkspaceID,
+		RuntimeID: "rt-1",
+	}
+
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, _ := k.BatchV1().Jobs("multica").Get(context.Background(), jobName, metav1.GetOptions{})
+	if got := job.Spec.Template.Spec.ServiceAccountName; got != "" {
+		t.Errorf("ServiceAccountName: got %q, want empty (default SA fallback)", got)
+	}
+}
+
