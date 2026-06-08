@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/costrictauth"
 )
 
 var authCmd = &cobra.Command{
@@ -48,12 +49,11 @@ func init() {
 }
 
 func resolveToken(cmd *cobra.Command) string {
-	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
-		return v
+	cred, _ := costrictauth.LoadCredentials()
+	if cred != nil && cred.AccessToken != "" {
+		return cred.AccessToken
 	}
-	profile := resolveProfile(cmd)
-	cfg, _ := cli.LoadCLIConfigForProfile(profile)
-	return cfg.Token
+	return ""
 }
 
 func resolveAppURL(cmd *cobra.Command) string {
