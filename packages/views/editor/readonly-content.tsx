@@ -16,7 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useState, useMemo, useRef } from "react";
+import { isValidElement, memo, useCallback, useMemo, useRef, useState } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -29,7 +29,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
-import { Check, Copy, Trash2 } from "lucide-react";
+import { Copy, Check } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
@@ -38,7 +38,6 @@ import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
-import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
@@ -58,7 +57,6 @@ const lowlight = createLowlight(common);
 // Anchored to whole class tokens so `language-htmlbars` / `language-mermaidx`
 // don't accidentally match and lose their <pre> wrapper.
 const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
-const LANGUAGE_CLASS_RE = /(^|\s)language-([^\s]+)(\s|$)/;
 
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
@@ -66,12 +64,9 @@ const LANGUAGE_CLASS_RE = /(^|\s)language-([^\s]+)(\s|$)/;
 
 const sanitizeSchema = {
   ...defaultSchema,
-  // Allow <mark> (text highlight) — emitted by highlightToHtml from `==text==`.
-  // It carries no attributes, so only the tag name needs whitelisting.
-  tagNames: [...(defaultSchema.tagNames ?? []), "mark"],
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "mention", "slash"],
+    href: [...(defaultSchema.protocols?.href ?? []), "mention"],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -100,7 +95,6 @@ const sanitizeSchema = {
 
 function urlTransform(url: string): string {
   if (url.startsWith("mention://")) return url;
-  if (url.startsWith("slash://skill/")) return url;
   return defaultUrlTransform(url);
 }
 
@@ -123,10 +117,6 @@ function ReadonlyLink({
   children?: React.ReactNode;
 }) {
   const slug = useWorkspaceSlug();
-
-  if (href?.startsWith("slash://skill/")) {
-    return <span className="slash-command">{children}</span>;
-  }
 
   if (isMentionHref(href)) {
     const match = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/);
@@ -157,72 +147,47 @@ function ReadonlyLink({
   );
 }
 
-function getTextContent(node: React.ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") {
-    return String(node);
-  }
-  if (Array.isArray(node)) {
-    return node.map(getTextContent).join("");
-  }
-  if (isValidElement(node)) {
-    const props = node.props as { children?: React.ReactNode };
-    return getTextContent(props.children);
-  }
-  return "";
-}
-
-function ReadonlyCodeBlock({ children }: { children: React.ReactNode }) {
+function CodeBlockHeader({ language, code }: { language?: string; code: string }) {
   const [copied, setCopied] = useState(false);
-  const childProps = isValidElement(children)
-    ? (children.props as { className?: string; children?: React.ReactNode })
-    : undefined;
-  const language = childProps?.className?.match(LANGUAGE_CLASS_RE)?.[2] ?? "text";
-  const code = getTextContent(childProps?.children ?? children).replace(/\n$/, "");
-
-  const handleCopy = async () => {
-    if (!code) return;
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard access can be unavailable in readonly contexts.
-    }
-  };
-
+  const handleCopy = useCallback(async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [code]);
   return (
-    <div className="code-block-wrapper group/code relative my-2">
-      <div className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100">
-        <span className="text-xs text-muted-foreground select-none">
-          {language}
-        </span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          title="Copy code"
-          aria-label="Copy code"
-        >
-          {copied ? (
-            <Check className="h-3.5 w-3.5" />
-          ) : (
-            <Copy className="h-3.5 w-3.5" />
-          )}
-        </button>
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          className="flex h-6 w-6 cursor-default items-center justify-center rounded text-muted-foreground opacity-60"
-          title="Delete"
-          aria-label="Delete"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <pre>{children}</pre>
+    <div className="code-block-header flex select-none items-center justify-between rounded-t-md border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+      <span>{language || "code"}</span>
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={handleCopy}
+        className="pointer-events-auto flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
+        title="Copy code"
+      >
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        <span>{copied ? "Copied" : "Copy"}</span>
+      </button>
     </div>
   );
+}
+
+/**
+ * Extract plain text from a react-markdown AST node's children.
+ * Used by the `code` component to ensure code block / inline code content
+ * is always rendered as plain text, even if a preprocessing or parsing
+ * layer accidentally wrapped part of it in an interactive element.
+ */
+function extractTextFromAst(node: any): string {
+  if (!node?.children) return "";
+  return (node.children as any[])
+    .map((n: any) => {
+      if (n.type === "text") return n.value as string;
+      // Recurse into element children (e.g. <a> wrapping text)
+      if (n.children) return extractTextFromAst(n);
+      return "";
+    })
+    .join("")
+    .replace(/\n$/, "");
 }
 
 function buildComponents(): Partial<Components> {
@@ -278,24 +243,28 @@ function buildComponents(): Partial<Components> {
         node?.position &&
         node.position.start.line !== node.position.end.line;
 
+      // Extract plain text from AST node to avoid rendering interactive
+      // elements (e.g. <a> links) inside code blocks/inline code.
+      const codeText = extractTextFromAst(node);
+
       if (isBlock && lang === "mermaid") {
-        return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+        return <MermaidDiagram chart={codeText} />;
       }
       if (isBlock && lang === "html") {
         // Like Mermaid, return the React element directly here and rely on
         // the `pre` renderer below to unwrap it — react-markdown otherwise
         // wraps `code` children in a `<pre>` whose monospace + overflow
         // styles would clamp the preview iframe.
-        return <HtmlBlockPreview html={String(children).replace(/\n$/, "")} />;
+        return <HtmlBlockPreview html={codeText} />;
       }
 
       if (!isBlock && !lang) {
-        // Inline code — CSS handles styling via .rich-text-editor code
-        return <code {...props}>{children}</code>;
+        // Inline code — always render as plain text, never interactive
+        return <code {...props}>{codeText || children}</code>;
       }
 
       // Block code — highlight with lowlight, output hljs classes
-      const code = String(children).replace(/\n$/, "");
+      const code = codeText || String(children).replace(/\n$/, "");
       try {
         const tree = lang
           ? lowlight.highlight(lang, code)
@@ -314,7 +283,7 @@ function buildComponents(): Partial<Components> {
       }
       return (
         <code className={cn("hljs", className)} {...props}>
-          {children}
+          {code}
         </code>
       );
     },
@@ -324,23 +293,33 @@ function buildComponents(): Partial<Components> {
     // renderer above so the outer `<pre>` does not wrap them — this is the
     // standard two-layer pattern used to escape react-markdown's default
     // `<pre><code>` envelope.
-    pre: ({ children }) => {
-      // react-markdown calls `pre` BEFORE invoking the `code` renderer —
-      // `children` is the unrendered `<code>` element from the AST. So we
-      // identify "this block was meant to be unwrapped" by inspecting the
-      // child's className (`language-mermaid`, `language-html`), not by
-      // checking `children.type === MermaidDiagram`, which never matches.
-      //
-      // Match by exact class token: a substring `includes("language-html")`
-      // would also fire on neighboring languages like `language-htmlbars`
-      // and silently strip their <pre> wrapper.
+    pre: ({ children, node }) => {
       if (isValidElement(children)) {
         const childProps = children.props as { className?: string };
         if (PRE_UNWRAP_RE.test(childProps.className ?? "")) {
           return <>{children}</>;
         }
       }
-      return <ReadonlyCodeBlock>{children}</ReadonlyCodeBlock>;
+      // Extract text content and language for header bar
+      const codeEl = (node?.children ?? []).find(
+        (child: any) => child.type === "element" && child.tagName === "code"
+      ) as any;
+      const codeText = codeEl
+        ? (codeEl.children as any[])
+            .filter((n: any) => n.type === "text")
+            .map((n: any) => n.value as string)
+            .join("")
+            .replace(/\n$/, "")
+        : "";
+      const classNames: string[] = codeEl?.properties?.className ?? [];
+      const langClass = classNames.find((cls: string) => cls.startsWith("language-"));
+      const language = langClass?.replace("language-", "");
+      return (
+        <div className="code-block-wrapper my-2 overflow-hidden rounded-md border border-border select-text">
+          {codeText && <CodeBlockHeader language={language} code={codeText} />}
+          <pre className="!mt-0 !rounded-t-none !border-0 select-text">{children}</pre>
+        </div>
+      );
     },
   };
 }
@@ -375,10 +354,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   className,
   attachments,
 }: ReadonlyContentProps) {
-  const processed = useMemo(
-    () => highlightToHtml(preprocessMarkdown(content)),
-    [content],
-  );
+  const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 

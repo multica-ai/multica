@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Linking, StyleSheet, View } from "react-native";
 import { NavigationIndependentTree } from "@react-navigation/core";
 import {
   NavigationContainer,
@@ -17,6 +17,9 @@ import type { Workspace } from "@multica/core/types";
 import { CircleUserRound, ListTodo } from "lucide-react-native";
 import { useMobileLogout } from "../auth/use-mobile-logout";
 import { Button, EmptyState, LoadingState, Screen } from "../components/ui/primitives";
+import { AutopilotDetailScreen } from "../screens/autopilots/autopilot-detail-screen";
+import { AutopilotFormScreen } from "../screens/autopilots/autopilot-form-screen";
+import { AutopilotsScreen } from "../screens/autopilots/autopilots-screen";
 import { LoginScreen } from "../screens/auth/login-screen";
 import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
 import {
@@ -35,11 +38,18 @@ import { MineScreen } from "../screens/mine/mine-screen";
 import { SettingScreen } from "../screens/mine/setting-screen";
 import { SquadsScreen } from "../screens/mine/squads-screen";
 import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
+import { ExternalWebScreen } from "../screens/web/external-web-screen";
 import { WikiDetailScreen, WikiScreen } from "../screens/wiki/wiki-screen";
 import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
+import {
+  addMobilePushNotificationUrlListener,
+  consumeMobilePushPendingNotificationUrl,
+} from "../push/mobile-push-notifications";
+import { getMobileIssueLinkBaseUrls } from "../runtime/env";
 import { colors, spacing } from "../theme/tokens";
+import { parseMobileIssueLink } from "./issue-links";
 import { linking } from "./linking";
-import { WorkspaceContext } from "./workspace-context";
+import { useMobileWorkspace, WorkspaceContext } from "./workspace-context";
 
 export type RootStackParamList = {
   Main: undefined;
@@ -57,6 +67,10 @@ export type RootStackParamList = {
   InboxDetail: { inboxItemId: string };
   Wiki: undefined;
   WikiDetail: { pageId: string };
+  Autopilots: undefined;
+  AutopilotDetail: { autopilotId: string };
+  AutopilotForm: { autopilotId?: string } | undefined;
+  ExternalWeb: { title?: string; url: string };
   Setting: undefined;
 };
 
@@ -126,7 +140,24 @@ export function RootNavigator() {
 
 function AuthenticatedNavigator() {
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+  const pendingNotificationUrlRef = useRef<string | null>(null);
+  const [navigationReady, setNavigationReady] = useState(false);
   const { data: workspaces = [], isError, isLoading } = useWorkspaceList();
+
+  useEffect(() => {
+    function openNotificationUrl(url: string) {
+      if (!navigationRef.current) {
+        pendingNotificationUrlRef.current = url;
+        return;
+      }
+      navigateToNotificationUrl(navigationRef.current, url);
+    }
+
+    void consumeMobilePushPendingNotificationUrl().then((url) => {
+      if (url) openNotificationUrl(url);
+    });
+    return addMobilePushNotificationUrlListener(openNotificationUrl);
+  }, []);
 
   if (isLoading) return <LoadingState />;
   if (isError) return <SignedInErrorScreen />;
@@ -134,8 +165,23 @@ function AuthenticatedNavigator() {
 
   return (
     <NavigationIndependentTree>
-      <NavigationContainer linking={linking} ref={navigationRef}>
+      <NavigationContainer
+        linking={linking}
+        onReady={() => {
+          setNavigationReady(true);
+          const url = pendingNotificationUrlRef.current;
+          if (!url || !navigationRef.current) return;
+          pendingNotificationUrlRef.current = null;
+          navigateToNotificationUrl(navigationRef.current, url);
+        }}
+        ref={navigationRef}
+      >
         <WorkspaceGate workspaces={workspaces}>
+          <MobileWebDeepLinkHandler
+            navigationReady={navigationReady}
+            navigationRef={navigationRef}
+            workspaces={workspaces}
+          />
           <Stack.Navigator
             screenOptions={{
               contentStyle: { backgroundColor: colors.background },
@@ -157,12 +203,124 @@ function AuthenticatedNavigator() {
             <Stack.Screen component={InboxDetailScreen} name="InboxDetail" />
             <Stack.Screen component={WikiScreen} name="Wiki" />
             <Stack.Screen component={WikiDetailScreen} name="WikiDetail" />
+            <Stack.Screen component={AutopilotsScreen} name="Autopilots" />
+            <Stack.Screen component={AutopilotDetailScreen} name="AutopilotDetail" />
+            <Stack.Screen component={AutopilotFormScreen} name="AutopilotForm" />
+            <Stack.Screen component={ExternalWebScreen} name="ExternalWeb" />
             <Stack.Screen component={SettingScreen} name="Setting" />
           </Stack.Navigator>
         </WorkspaceGate>
       </NavigationContainer>
     </NavigationIndependentTree>
   );
+}
+
+function MobileWebDeepLinkHandler({
+  navigationReady,
+  navigationRef,
+  workspaces,
+}: {
+  navigationReady: boolean;
+  navigationRef: React.RefObject<NavigationContainerRef<RootStackParamList> | null>;
+  workspaces: Workspace[];
+}) {
+  const checkedInitialUrlRef = useRef(false);
+  const { t } = useTranslation();
+  const { workspace, setWorkspace } = useMobileWorkspace();
+
+  const openIssue = useCallback((issueId: string, commentId?: string) => {
+    if (!navigationRef.current) return;
+    navigationRef.current.navigate("IssueDetail", {
+      issueId,
+      ...(commentId ? { commentId } : {}),
+    });
+  }, [navigationRef]);
+
+  const handleUrl = useCallback((url: string) => {
+    const target = parseMobileIssueLink(url, getMobileIssueLinkBaseUrls());
+    if (!target) return;
+
+    const targetWorkspace = workspaces.find((item) => item.slug === target.workspaceSlug);
+    if (!targetWorkspace) {
+      Alert.alert(
+        t("issues.link_unavailable_title"),
+        t("issues.link_workspace_unavailable"),
+      );
+      return;
+    }
+
+    if (targetWorkspace.id === workspace.id) {
+      openIssue(target.issueId, target.commentId);
+      return;
+    }
+
+    Alert.alert(
+      t("issues.switch_workspace_title"),
+      t("issues.switch_workspace_description", { name: targetWorkspace.name }),
+      [
+        { style: "cancel", text: t("common.cancel") },
+        {
+          text: t("issues.switch_workspace_confirm"),
+          onPress: () => {
+            setCurrentWorkspace(targetWorkspace.slug, targetWorkspace.id);
+            setWorkspace(targetWorkspace);
+            openIssue(target.issueId, target.commentId);
+          },
+        },
+      ],
+    );
+  }, [
+    openIssue,
+    setWorkspace,
+    t,
+    workspace.id,
+    workspaces,
+  ]);
+
+  useEffect(() => {
+    if (!navigationReady) return;
+
+    if (!checkedInitialUrlRef.current) {
+      checkedInitialUrlRef.current = true;
+      void Linking.getInitialURL().then((url) => {
+        if (url) handleUrl(url);
+      });
+    }
+
+    const subscription = Linking.addEventListener("url", (event) => {
+      handleUrl(event.url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [handleUrl, navigationReady]);
+
+  return null;
+}
+
+function navigateToNotificationUrl(
+  navigation: NavigationContainerRef<RootStackParamList>,
+  url: string,
+) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "wujieai-multicam:") return;
+
+  const path = `${parsed.hostname}${parsed.pathname}`.replace(/^\/+/, "");
+  const [route, id] = path.split("/");
+  if (route === "issues" && id) {
+    const commentId = parsed.searchParams.get("commentId") ?? undefined;
+    navigation.navigate("IssueDetail", { issueId: id, commentId });
+    return;
+  }
+  if (route === "inbox" && id) {
+    navigation.navigate("InboxDetail", { inboxItemId: id });
+  }
 }
 
 function WorkspaceGate({

@@ -34,6 +34,12 @@ export function MyIssuesPage() {
   const viewMode = useStore(myIssuesViewStore, (s) => s.viewMode);
   const statusFilters = useStore(myIssuesViewStore, (s) => s.statusFilters);
   const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
+  const assigneeFilters = useStore(myIssuesViewStore, (s) => s.assigneeFilters);
+  const includeNoAssignee = useStore(myIssuesViewStore, (s) => s.includeNoAssignee);
+  const creatorFilters = useStore(myIssuesViewStore, (s) => s.creatorFilters);
+  const projectFilters = useStore(myIssuesViewStore, (s) => s.projectFilters);
+  const includeNoProject = useStore(myIssuesViewStore, (s) => s.includeNoProject);
+  const labelFilters = useStore(myIssuesViewStore, (s) => s.labelFilters);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
   const grouping = useStore(myIssuesViewStore, (s) => s.grouping);
   const sortBy = useStore(myIssuesViewStore, (s) => s.sortBy);
@@ -104,10 +110,27 @@ export function MyIssuesPage() {
         {
           statusFilters,
           priorityFilters,
+          assigneeFilters,
+          includeNoAssignee,
+          creatorFilters,
+          projectFilters,
+          includeNoProject,
+          labelFilters,
         },
         visibleStatuses,
       ),
-    [filter, priorityFilters, statusFilters, visibleStatuses],
+    [
+      assigneeFilters,
+      creatorFilters,
+      filter,
+      includeNoAssignee,
+      includeNoProject,
+      labelFilters,
+      priorityFilters,
+      projectFilters,
+      statusFilters,
+      visibleStatuses,
+    ],
   );
 
   // For the "my" scope, use the combined query that fetches both assigned and
@@ -121,8 +144,24 @@ export function MyIssuesPage() {
       ...filter,
       statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
       priorities: priorityFilters,
+      assignee_filters: assigneeFilters,
+      include_no_assignee: includeNoAssignee,
+      creator_filters: creatorFilters,
+      project_ids: projectFilters,
+      include_no_project: includeNoProject,
+      label_ids: labelFilters,
     }),
-    [filter, priorityFilters, statusFilters],
+    [
+      assigneeFilters,
+      creatorFilters,
+      filter,
+      includeNoAssignee,
+      includeNoProject,
+      labelFilters,
+      priorityFilters,
+      projectFilters,
+      statusFilters,
+    ],
   );
   const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
     wsId,
@@ -154,22 +193,36 @@ export function MyIssuesPage() {
     ? assigneeGroupsQuery.isLoading
     : statusIssuesQuery.isLoading;
 
-  // Apply status/priority/agent-running filters from view store
+  // Mirror the global Issues page filter semantics. Most filters are
+  // already applied server-side, but keeping the client-side predicate in
+  // sync avoids view-specific gaps and protects mixed cache states.
   const issues = useMemo(
     () =>
       filterIssues(myIssues, {
         statusFilters,
         priorityFilters,
-        assigneeFilters: [],
-        includeNoAssignee: false,
-        creatorFilters: [],
-        projectFilters: [],
-        includeNoProject: false,
-        labelFilters: [],
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        projectFilters,
+        includeNoProject,
+        labelFilters,
         agentRunningFilter,
         runningIssueIds,
       }),
-    [myIssues, statusFilters, priorityFilters, agentRunningFilter, runningIssueIds],
+    [
+      assigneeFilters,
+      creatorFilters,
+      includeNoAssignee,
+      includeNoProject,
+      labelFilters,
+      myIssues,
+      priorityFilters,
+      projectFilters,
+      statusFilters,
+      agentRunningFilter,
+      runningIssueIds,
+    ],
   );
 
 

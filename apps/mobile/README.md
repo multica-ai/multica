@@ -36,7 +36,7 @@ pnpm --filter @multica/mobile ios
 | `android` | 通过 `expo run:android` 构建并安装 Android 原生开发包 |
 | `ios` | 通过 `expo run:ios` 构建并安装 iOS 原生开发包 |
 
-这个 app 使用了 `expo-secure-store`、`expo-document-picker`、Google Sign-In 等原生能力。只用 Expo Go 时可能无法覆盖全部功能；涉及原生模块、权限或 plugin 变化时，需要重新构建并安装 dev client 或原生包。
+这个 app 使用了 `expo-secure-store`、`expo-document-picker` 等原生能力。只用 Expo Go 时可能无法覆盖全部功能；涉及原生模块、权限或 plugin 变化时，需要重新构建并安装 dev client 或原生包。
 
 ## 运行时配置
 
@@ -47,8 +47,7 @@ pnpm --filter @multica/mobile ios
 | `EXPO_PUBLIC_API_BASE_URL` | API base URL | `app.json` 的 `expo.extra.apiBaseUrl` |
 | `EXPO_PUBLIC_WS_URL` | WebSocket URL | `app.json` 的 `expo.extra.wsUrl` |
 | `EXPO_PUBLIC_WEB_BASE_URL` | Web 入口 URL | 默认跟随 API base URL |
-| `GOOGLE_IOS_CLIENT_ID` | iOS Google 登录 client ID | 空字符串，EAS profile 中有默认配置 |
-| `GOOGLE_IOS_URL_SCHEME` | iOS Google 登录 URL scheme | 空字符串，EAS profile 中有默认配置 |
+| `EXPO_PUBLIC_APP_LINK_HOSTS` | Android App Links / iOS Universal Links 域名，逗号分隔 | `multica.wujieai.com` |
 
 当前 `app.json` 默认连接 Multica Cloud：
 
@@ -100,6 +99,35 @@ pnpm --filter @multica/mobile build:ios
 - iOS `buildNumber`
 
 发布前仍然需要确认 `app.json` 中的 `version` 和 `runtimeVersion` 是否符合当前 release 预期。当前项目使用 bare workflow，`runtimeVersion` 需要手动维护为固定字符串；当 native runtime 发生不兼容变化时，应随新包一起递增。
+
+### App Links / Universal Links
+
+Mobile app 会在原生配置中为 `EXPO_PUBLIC_APP_LINK_HOSTS` 声明 Android App Links 和 iOS Universal Links。Web 部署必须同时公开：
+
+- `/.well-known/assetlinks.json`：设置 `MULTICA_ANDROID_SHA256_CERT_FINGERPRINTS`，多个 Android 发布证书 SHA-256 指纹用逗号或换行分隔。
+- `/.well-known/apple-app-site-association`：设置 `MULTICA_APPLE_TEAM_ID`，或直接设置逗号分隔的 `MULTICA_IOS_APP_IDS`。
+
+Android 如果使用 Play App Signing，应使用 Play Console 中的 App signing certificate 指纹。iOS 的 app id 形态是 `<Apple Team ID>.com.wujieai.multica`。
+
+### iOS APNs 和 TestFlight
+
+iOS 远程推送使用 Go 服务端直连 APNs。移动端通过 `expo-notifications` 获取 APNs device token；APNs token auth 凭证只配置在服务端环境变量中，不提交到仓库。
+
+TestFlight 使用 production APNs。构建或提交 iOS production build 前确认：
+
+- Apple Developer 中 App ID `com.wujieai.multica` 已启用 Push Notifications capability。
+- EAS iOS credentials / provisioning profile 是在启用 Push capability 后生成或更新的。
+- `app.config.js` 已包含 `expo-notifications` config plugin；本项目不启用 background remote notifications，因为当前发送的是普通 alert push。
+- 后端已配置 APNs production token auth 环境变量：
+  - `APNS_TEAM_ID`
+  - `APNS_KEY_ID`
+  - `APNS_BUNDLE_ID=com.wujieai.multica`
+  - `APNS_AUTH_KEY_P8` 或 `APNS_AUTH_KEY_PATH`
+  - 可选：`APNS_BASE_URL` / `APNS_ENV`
+
+production/TestFlight 环境默认不设置 `APNS_BASE_URL`，也不设置 sandbox。`APNS_AUTH_KEY_P8` 应放在部署平台 Secret/Env 中；如果使用 `APNS_AUTH_KEY_PATH`，`.p8` 文件由部署环境挂载，不提交到仓库。
+
+真实验收需要安装 TestFlight 包并在真机登录。登录后服务端应看到 `provider=apns`、`platform=ios` 的 mobile push registration；模拟器不作为远程 APNs 推送验收目标。
 
 ### Android 本地正式构建
 
@@ -237,10 +265,6 @@ pnpm --filter @multica/mobile lint
 ### 文件选择器不可用
 
 如果看到文件选择器不可用的提示，通常说明当前安装包没有包含 `expo-document-picker` 对应的原生能力。重新构建并安装 mobile app。
-
-### iOS Google 登录失败
-
-确认构建时设置了 `GOOGLE_IOS_CLIENT_ID` 和 `GOOGLE_IOS_URL_SCHEME`。EAS profile 已配置默认值；本地原生构建如需 Google 登录，也要提供对应环境变量。
 
 ### EAS 构建或提交失败
 

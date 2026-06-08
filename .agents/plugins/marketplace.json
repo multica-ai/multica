@@ -1,0 +1,20 @@
+{
+  "name": "multica-local",
+  "interface": {
+    "displayName": "Multica Local"
+  },
+  "plugins": [
+    {
+      "name": "multica-codex-app",
+      "source": {
+        "source": "local",
+        "path": "./plugins/multica-codex-app"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

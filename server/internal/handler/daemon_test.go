@@ -423,6 +423,51 @@ func TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_PopulatesAgentDescription(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const agentDescription = "Runs focused runtime instruction regressions."
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Agent description claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Agent description claim agent")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET description = $1 WHERE id = $2`, agentDescription, agentID); err != nil {
+		t.Fatalf("set agent description: %v", err)
+	}
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "agent-description-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID    string `json:"id"`
+			Agent *struct {
+				Description string `json:"description"`
+			} `json:"agent"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected dispatched task %s to be claimed, got nil: %s", taskID, w.Body.String())
+	}
+	if resp.Task.Agent == nil {
+		t.Fatalf("expected task.agent in response: %s", w.Body.String())
+	}
+	if resp.Task.Agent.Description != agentDescription {
+		t.Errorf("agent.description = %q, want %q", resp.Task.Agent.Description, agentDescription)
+	}
+}
+
 func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -1156,6 +1201,127 @@ func TestListTasksByIssue_CrossWorkspace_Returns404(t *testing.T) {
 	testHandler.ListTasksByIssue(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("ListTasksByIssue with cross-workspace issueId: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestListTasksByIssue_FiltersRunsByOwner verifies that the task-runs list
+// only returns agent tasks whose agent is owned by the requesting user (or has
+// no owner) and local CLI runs owned by the requesting user.
+func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
+
+	// Create a second workspace member to simulate "other owner".
+	otherUserID := createWorkspaceMemberUser(t, "Other Owner", "other-owner-filter@test.multica.ai")
+
+	// Create an issue in the test workspace.
+	issue := createIssueWithStatusForCommentTest(t, "todo")
+
+	// -- Agent tasks --
+
+	// 1. Agent owned by testUserID → should appear.
+	ownedAgentID := createHandlerTestAgent(t, "owned-agent", nil)
+	ownedTaskID := createHandlerTestTaskForAgentOnIssue(t, ownedAgentID, issue.ID)
+
+	// 2. Agent owned by otherUserID → should NOT appear.
+	var otherAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config)
+		VALUES ($1, 'other-owner-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb, NULL)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, otherUserID).Scan(&otherAgentID); err != nil {
+		t.Fatalf("create other-owner agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, otherAgentID) })
+
+	var otherTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, started_at)
+		VALUES ($1, $2, 'running', 0, $3, now())
+		RETURNING id
+	`, otherAgentID, runtimeID, issue.ID).Scan(&otherTaskID); err != nil {
+		t.Fatalf("create other-owner task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, otherTaskID) })
+
+	// 3. Agent with NULL owner_id (workspace agent) → should appear.
+	var wsAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config)
+		VALUES ($1, 'workspace-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, NULL, '', '{}'::jsonb, '[]'::jsonb, NULL)
+		RETURNING id
+	`, testWorkspaceID, runtimeID).Scan(&wsAgentID); err != nil {
+		t.Fatalf("create workspace agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, wsAgentID) })
+
+	wsTaskID := createHandlerTestTaskForAgentOnIssue(t, wsAgentID, issue.ID)
+
+	// -- Local CLI runs --
+
+	// 4. local_cli_run owned by testUserID → should appear.
+	var ownedRunID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
+		VALUES ($1, $2, $3, 'codex', 'completed', now())
+		RETURNING id
+	`, testWorkspaceID, issue.ID, testUserID).Scan(&ownedRunID); err != nil {
+		t.Fatalf("create owned local run: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, ownedRunID) })
+
+	// 5. local_cli_run owned by otherUserID → should NOT appear.
+	var otherRunID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
+		VALUES ($1, $2, $3, 'codex', 'completed', now())
+		RETURNING id
+	`, testWorkspaceID, issue.ID, otherUserID).Scan(&otherRunID); err != nil {
+		t.Fatalf("create other-owner local run: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, otherRunID) })
+
+	// -- Call the handler as testUserID --
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issue.ID+"/task-runs", nil)
+	req = withURLParam(req, "id", issue.ID)
+
+	testHandler.ListTasksByIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	gotIDs := map[string]bool{}
+	for _, item := range result {
+		if id, ok := item["id"].(string); ok {
+			gotIDs[id] = true
+		}
+	}
+
+	// Should include: owned task, workspace agent task, owned local run
+	for _, id := range []string{ownedTaskID, wsTaskID, ownedRunID} {
+		if !gotIDs[id] {
+			t.Errorf("expected id %s in response, not found", id)
+		}
+	}
+
+	// Should NOT include: other-owner task, other-owner local run
+	for _, id := range []string{otherTaskID, otherRunID} {
+		if gotIDs[id] {
+			t.Errorf("unexpected id %s in response (should be filtered)", id)
+		}
 	}
 }
 

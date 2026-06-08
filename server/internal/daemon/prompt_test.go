@@ -315,7 +315,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 		NewCommentCount:       3,
 		NewCommentsSince:      since,
 	}
-	out := BuildPrompt(task, "claude")
+	out := BuildPrompt(task)
 
 	// Issue-wide count (reverted from the thread-scoped wording).
 	if !strings.Contains(out, "3 new comment(s) on this issue since your last run") {
@@ -356,7 +356,7 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 		NewCommentCount:       0,
 		NewCommentsSince:      "",
 	}
-	out := BuildPrompt(task, "claude")
+	out := BuildPrompt(task)
 	if strings.Contains(out, "new comment(s) since your last run") {
 		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
 	}
@@ -380,7 +380,7 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 		NewCommentCount:       0,
 		NewCommentsSince:      "",
 	}
-	out := BuildPrompt(task, "claude")
+	out := BuildPrompt(task)
 
 	for _, want := range []string{
 		"triggering comment is already included above",

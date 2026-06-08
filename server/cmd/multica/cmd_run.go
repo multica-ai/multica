@@ -127,11 +127,12 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 	usageReporter := newLocalRunUsageReporter(client, run.ID, localRunUsageDebounce)
 	stopHeartbeat := startLocalRunHeartbeat(client, run.ID, localRunHeartbeatInterval)
 	exitCode, runErr := executeLocalCLIForRun(childArgs, cwd, cliName, localCLIEnv{
-		RunID:     run.ID,
-		IssueID:   issueRef.ID,
-		ServerURL: resolveServerURL(cmd),
-		Token:     resolveToken(cmd),
-	}, localRunPrompt(issueRef.ID), reporter, usageReporter)
+		RunID:       run.ID,
+		IssueID:     issueRef.ID,
+		WorkspaceID: client.WorkspaceID,
+		ServerURL:   resolveServerURL(cmd),
+		Token:       resolveToken(cmd),
+	}, reporter, usageReporter)
 	usageReporter.Close()
 	reporter.Close()
 	stopHeartbeat()
@@ -179,28 +180,6 @@ func stringValue(v any) string {
 func supportsLocalRunAgent(cliName string) bool {
 	_, ok := localRunProviderForCLI(cliName)
 	return ok
-}
-
-func localRunPrompt(issueID string) string {
-	return fmt.Sprintf(strings.Join([]string{
-		"You are assigned to Multica issue %s.",
-		"",
-		"This local agent run is starting in bootstrap mode. Your job is to load context and then stay quiet until the user gives you more input.",
-		"",
-		"Assigned issue ID: %s",
-		"",
-		"You may use only these Multica CLI commands to read context:",
-		"",
-		"- `multica issue get %s --output json`",
-		"- `multica issue comment list %s --output json`",
-		"",
-		"Do not use any other `multica` command during bootstrap. Do not create, update, assign, change status, add comments, delete comments, rerun tasks, or list unrelated workspace data.",
-		"",
-		"Follow the same context scope as the platform agent: read the assigned issue and its comments only. Do not proactively fetch parent issues, child issues, or issues mentioned in text unless the user later explicitly asks for them.",
-		"",
-		"After loading context, produce no output. Do not summarize the issue, do not say you are ready, and do not post a final answer. Wait silently for the user's next input.",
-		"",
-	}, "\n"), issueID, issueID, issueID, issueID)
 }
 
 type localRunMessagePoster interface {
@@ -466,18 +445,19 @@ func redactInputMap(m map[string]any) map[string]any {
 }
 
 type localCLIEnv struct {
-	RunID     string
-	IssueID   string
-	ServerURL string
-	Token     string
+	RunID       string
+	IssueID     string
+	WorkspaceID string
+	ServerURL   string
+	Token       string
 }
 
-func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
+func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
 	provider, ok := localRunProviderForCLI(cliName)
 	if !ok {
 		return 1, fmt.Errorf("unsupported local CLI provider %q", cliName)
 	}
-	return provider.Run(args, cwd, env, initialPrompt, reporter, usageReporter)
+	return provider.Run(args, cwd, env, reporter, usageReporter)
 }
 
 type localRunPTYOptions struct {
@@ -551,7 +531,7 @@ func runLocalRunPTYCommand(child *exec.Cmd, initialStdin string) (int, error) {
 }
 
 func localCLIProcessEnv(base []string, env localCLIEnv) []string {
-	out := make([]string, 0, len(base)+4)
+	out := make([]string, 0, len(base)+5)
 	for _, entry := range base {
 		if strings.HasPrefix(entry, "MULTICA_WORKSPACE_ID=") || strings.HasPrefix(entry, "MULTICA_TOKEN=") {
 			continue
@@ -573,6 +553,7 @@ func localCLIProcessEnv(base []string, env localCLIEnv) []string {
 	}
 	set("MULTICA_RUN_ID", env.RunID)
 	set("MULTICA_ISSUE_ID", env.IssueID)
+	set("MULTICA_WORKSPACE_ID", env.WorkspaceID)
 	set("MULTICA_SERVER_URL", env.ServerURL)
 	token := env.Token
 	if token == "" {

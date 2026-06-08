@@ -40,13 +40,25 @@
   },
   "leaderboard": {
     "title": "리더보드",
+    "tab_agent": "에이전트 순위",
+    "tab_member": "멤버 순위",
     "caption": "에이전트 {{count}}개",
+    "caption_member": "멤버 {{count}}명",
     "header_agent": "에이전트",
+    "header_member": "멤버",
     "header_tokens": "토큰",
+    "header_processed_tokens": "처리 토큰",
+    "header_non_cached_tokens": "비캐시 토큰",
+    "header_cached_tokens": "캐시 토큰",
     "header_cost": "비용",
     "header_time": "시간",
     "header_tasks": "작업",
-    "no_data": "이 기간에는 에이전트 활동이 없습니다."
+    "no_data": "이 기간에는 에이전트 활동이 없습니다.",
+    "system_group": "시스템",
+    "breakdown_input": "입력",
+    "breakdown_output": "출력",
+    "breakdown_cache_read": "캐시 읽기",
+    "breakdown_cache_write": "캐시 쓰기"
   },
   "empty": {
     "title": "아직 사용량이 없습니다",

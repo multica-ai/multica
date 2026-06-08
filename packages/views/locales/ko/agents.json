@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "내 것",
-    "all": "전체"
+    "all": "전체",
+    "default": "기본값"
   },
   "sort": {
     "label_recent": "최근 활동",

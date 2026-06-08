@@ -63,7 +63,7 @@ function CodeBlockView({ node, deleteNode, editor }: NodeViewProps) {
     setView((v) => (v === "preview" ? "source" : "preview"));
 
   return (
-    <NodeViewWrapper className="code-block-wrapper group/code relative my-2">
+    <NodeViewWrapper className="code-block-wrapper group/code relative my-2 select-text">
       {isMermaid && debouncedChart.trim() && (
         <div
           contentEditable={false}
@@ -86,7 +86,7 @@ function CodeBlockView({ node, deleteNode, editor }: NodeViewProps) {
       )}
       <div
         contentEditable={false}
-        className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
+        className="code-block-header pointer-events-none absolute top-0 right-0 z-10 flex select-none items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
       >
         {language && (
           <span className="text-xs text-muted-foreground select-none">
@@ -96,8 +96,9 @@ function CodeBlockView({ node, deleteNode, editor }: NodeViewProps) {
         {isHtml && (
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={toggleView}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title={
               view === "preview"
                 ? t(($) => $.code_block.show_source)
@@ -118,8 +119,9 @@ function CodeBlockView({ node, deleteNode, editor }: NodeViewProps) {
         )}
         <button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title={t(($) => $.code_block.copy_code)}
         >
           {copied ? (
@@ -131,8 +133,9 @@ function CodeBlockView({ node, deleteNode, editor }: NodeViewProps) {
         {editor?.isEditable && (
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => deleteNode()}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
             title={t(($) => $.code_block.delete)}
           >
             <Trash2 className="h-3.5 w-3.5" />

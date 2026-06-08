@@ -220,6 +220,7 @@
     "clear_history_description": "这将永久删除所有评论和任务运行记录，此操作不可撤销。",
     "clear_history_cancel": "取消",
     "clear_history_confirm": "清空",
+    "clear_history_failed": "清空历史失败",
     "workdir_path_copied": "已复制本地 workdir 路径",
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
     "workdir_path_unavailable": "暂无本地 workdir — 这个 issue 还没被本地 agent 运行过"
@@ -285,6 +286,7 @@
     "update_failed": "更新评论失败",
     "send_failed": "发送评论失败",
     "send_reply_failed": "发送回复失败",
+    "login_required": "请先登录后再操作",
     "delete_failed": "删除评论失败",
     "reply_count_other": "{{count}} 条回复",
     "leave_comment_placeholder": "留下评论...",

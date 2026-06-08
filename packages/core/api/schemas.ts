@@ -3,6 +3,8 @@ import type {
   Agent,
   AgentTemplate,
   AgentTemplateSummary,
+  Autopilot,
+  AutopilotRun,
   AutoSubscribePreferenceResponse,
   Attachment,
   BillingBalance,
@@ -14,11 +16,16 @@ import type {
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
+  DiscoverImportSkillsResponse,
   GroupedIssuesResponse,
   IssueLabelsResponse,
+  GetAutopilotResponse,
+  ListAutopilotRunsResponse,
+  ListAutopilotsResponse,
   ListIssuesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
+  MobilePushRegistrationResponse,
   Squad,
   TimelineEntry,
   User,
@@ -616,6 +623,27 @@ const RuntimeUsageByHourSchema = z.object({
 
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 
+const DiscoveredImportSkillSchema = z.object({
+  name: z.string().default(""),
+  description: z.string().default(""),
+  content: z.string().default(""),
+  config: z.record(z.string(), z.unknown()).optional(),
+  files: z.array(z.object({
+    path: z.string(),
+    content: z.string(),
+  }).passthrough()).default([]),
+  source_path: z.string().default(""),
+  source_url: z.string().default(""),
+}).passthrough();
+
+export const DiscoverImportSkillsResponseSchema = z.object({
+  skills: z.array(DiscoveredImportSkillSchema).default([]),
+}).passthrough();
+
+export const EMPTY_DISCOVER_IMPORT_SKILLS_RESPONSE: DiscoverImportSkillsResponse = {
+  skills: [],
+};
+
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
 // create-from-template response. The desktop app's create-agent picker
@@ -771,6 +799,136 @@ export const SquadMemberStatusListResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
+
+// ---------------------------------------------------------------------------
+// Autopilot schemas. The desktop app can talk to older servers, so newly
+// added fields like manual_options must default instead of requiring an exact
+// response shape. Server-driven enums intentionally stay as strings and all
+// objects are loose so future values / fields degrade in UI switch defaults.
+// ---------------------------------------------------------------------------
+
+const AutopilotSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  title: z.string().default(""),
+  description: z.string().nullable().default(null),
+  project_id: z.string().nullable().optional().transform((v) => v ?? null),
+  assignee_type: z.string().default("agent"),
+  assignee_id: z.string().default(""),
+  status: z.string().default("active"),
+  execution_mode: z.string().default("create_issue"),
+  issue_title_template: z.string().nullable().default(null),
+  manual_options: z.array(z.string()).default([]),
+  created_by_type: z.string().default(""),
+  created_by_id: z.string().default(""),
+  last_run_at: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+const AutopilotTriggerSchema = z.object({
+  id: z.string().default(""),
+  autopilot_id: z.string().default(""),
+  kind: z.string().default("schedule"),
+  enabled: z.boolean().default(false),
+  cron_expression: z.string().nullable().default(null),
+  timezone: z.string().nullable().default(null),
+  next_run_at: z.string().nullable().default(null),
+  webhook_token: z.string().nullable().default(null),
+  webhook_path: z.string().nullable().optional(),
+  webhook_url: z.string().nullable().optional(),
+  label: z.string().nullable().default(null),
+  event_filters: z.array(z.object({
+    event: z.string(),
+    actions: z.array(z.string()).optional(),
+  }).loose()).nullable().optional(),
+  last_fired_at: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+const AutopilotRunSchema = z.object({
+  id: z.string().default(""),
+  autopilot_id: z.string().default(""),
+  trigger_id: z.string().nullable().default(null),
+  source: z.string().default("manual"),
+  status: z.string().default("running"),
+  issue_id: z.string().nullable().default(null),
+  task_id: z.string().nullable().default(null),
+  triggered_at: z.string().default(""),
+  completed_at: z.string().nullable().default(null),
+  failure_reason: z.string().nullable().default(null),
+  trigger_payload: z.unknown().optional().transform((v) => v ?? null),
+  result: z.unknown().optional().transform((v) => v ?? null),
+  created_at: z.string().default(""),
+}).loose();
+
+export const ListAutopilotsResponseSchema = z.object({
+  autopilots: z.array(AutopilotSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const GetAutopilotResponseSchema = z.object({
+  autopilot: AutopilotSchema,
+  triggers: z.array(AutopilotTriggerSchema).default([]),
+}).loose();
+
+export const AutopilotResponseSchema = AutopilotSchema;
+export const AutopilotRunResponseSchema = AutopilotRunSchema;
+export const ListAutopilotRunsResponseSchema = z.object({
+  runs: z.array(AutopilotRunSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_AUTOPILOT: Autopilot = {
+  id: "",
+  workspace_id: "",
+  title: "",
+  description: null,
+  project_id: null,
+  assignee_type: "agent",
+  assignee_id: "",
+  status: "active",
+  execution_mode: "create_issue",
+  issue_title_template: null,
+  manual_options: [],
+  created_by_type: "",
+  created_by_id: "",
+  last_run_at: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_AUTOPILOT_RUN: AutopilotRun = {
+  id: "",
+  autopilot_id: "",
+  trigger_id: null,
+  source: "manual",
+  status: "running",
+  issue_id: null,
+  task_id: null,
+  triggered_at: "",
+  completed_at: null,
+  failure_reason: null,
+  trigger_payload: null,
+  result: null,
+  created_at: "",
+};
+
+export const EMPTY_LIST_AUTOPILOTS_RESPONSE: ListAutopilotsResponse = {
+  autopilots: [],
+  total: 0,
+};
+
+export const EMPTY_GET_AUTOPILOT_RESPONSE: GetAutopilotResponse = {
+  autopilot: EMPTY_AUTOPILOT,
+  triggers: [],
+};
+
+export const EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE: ListAutopilotRunsResponse = {
+  runs: [],
+  total: 0,
+};
 
 // ---------------------------------------------------------------------------
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
@@ -1093,4 +1251,32 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
+};
+
+export const MobilePushRegistrationResponseSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  installation_id: z.string(),
+  platform: z.string(),
+  provider: z.string(),
+  provider_client_id: z.string(),
+  app_version: z.string().nullable().optional(),
+  enabled: z.boolean(),
+  last_seen_at: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE: MobilePushRegistrationResponse = {
+  id: "",
+  user_id: "",
+  installation_id: "",
+  platform: "android",
+  provider: "getui",
+  provider_client_id: "",
+  app_version: null,
+  enabled: false,
+  last_seen_at: "",
+  created_at: "",
+  updated_at: "",
 };

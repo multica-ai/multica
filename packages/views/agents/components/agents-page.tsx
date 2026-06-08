@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -11,12 +11,12 @@ import {
   Search,
   Sliders,
   Settings2,
+  type LucideIcon,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import type { Agent, AgentRuntime, CopyAgentRequest, CreateAgentRequest, AgentDefaultsWithUser } from "@multica/core/types";
 import {
-  type AgentAvailability,
   agentRunCounts30dOptions,
   summarizeActivityWindow,
   useWorkspaceActivityMap,
@@ -52,7 +52,11 @@ import {
 import { toast } from "sonner";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
-import { availabilityConfig, availabilityOrder } from "../presence";
+import {
+  availabilityConfig,
+  availabilityOrder,
+  workloadConfig,
+} from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { type AgentRow, createAgentColumns } from "./agent-columns";
 import {
@@ -63,21 +67,23 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import {
+  type AgentStatusFilter,
+  countAgentStatusFilters,
+  matchesAgentStatusFilter,
+} from "./agent-status-filter";
 
 // Filter axes:
 //
 //   View         = active vs archived dataset. Archived is low-frequency,
 //                  accessed through a ghost link in the toolbar.
 //   Scope        = ownership lens (All vs Mine). Layer-1 segment.
-//   Availability = "Can the agent take work right now?" — 3-state chip
-//                  group (online / unstable / offline) sourced from
-//                  AgentAvailability. The only chip filter we keep —
-//                  the previous Workload axis was dropped because its
-//                  "queued / failed / cancelled" buckets became
-//                  meaningless once Failed left the workload model.
+//   Status       = chip group that combines availability filters with the
+//                  actionable "working" workload filter. Availability still
+//                  answers "Can this agent take work right now?", while
+//                  working answers "Is a task currently running?".
 type View = "active" | "archived";
-type Scope = "all" | "mine";
-type AvailabilityFilter = "all" | AgentAvailability;
+type Scope = "all" | "mine" | "default";
 
 type SortKey = "recent" | "name" | "runs" | "created";
 const SORT_KEYS: SortKey[] = ["recent", "name", "runs", "created"];
@@ -121,8 +127,7 @@ export function AgentsPage() {
   // detail → back navigation. Default is "mine" on first visit.
   const scope = useAgentsViewStore((s) => s.scope);
   const setScope = useAgentsViewStore((s) => s.setScope);
-  const [availabilityFilter, setAvailabilityFilter] =
-    useState<AvailabilityFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<AgentStatusFilter>("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [search, setSearch] = useState("");
   const [workspaceOnly, setWorkspaceOnly] = useState(false);
@@ -142,8 +147,17 @@ export function AgentsPage() {
   const { data: allDefaults = [] } = useQuery({
     queryKey: ["workspaces", wsId, "all-agent-defaults"],
     queryFn: () => api.listAllAgentDefaults(wsId),
-    enabled: scope === "all",
+    enabled: scope === "all" || scope === "default",
   });
+
+  const filteredAllDefaults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return allDefaults;
+    return allDefaults.filter((d) =>
+      d.user_name.toLowerCase().includes(q) ||
+      matchesPinyin(d.user_name, q),
+    );
+  }, [allDefaults, search]);
 
   const handleDuplicateDefaults = async (configId: string) => {
     try {
@@ -204,14 +218,15 @@ export function AgentsPage() {
         if (a.owner_id === currentUser.id) mine += 1;
       }
     }
-    return { all: visibleInView.length, mine };
-  }, [visibleInView, currentUser]);
+    return { all: visibleInView.length, mine, defaults: allDefaults.length };
+  }, [visibleInView, currentUser, allDefaults]);
 
   const inScope = useMemo(() => {
     // Archived view ignores Mine / All — its toolbar has no scope
     // segment, so silently filtering by `scope` would hide other
     // people's archived agents without any UI to explain why.
     if (view === "archived") return visibleInView;
+    if (scope === "default") return [];
     if (scope === "all" || !currentUser) return visibleInView;
     return visibleInView.filter((a) => a.owner_id === currentUser.id);
   }, [visibleInView, scope, currentUser, view]);
@@ -227,15 +242,17 @@ export function AgentsPage() {
     return inScope;
   }, [inScope, scope, workspaceOnly, view]);
 
-  // Final cut — availability chip + search.
+  // Final cut — status chip + search.
   const filteredAgents = useMemo(() => {
     const q = search.trim().toLowerCase();
     return afterWorkspaceFilter.filter((a) => {
-      // Availability chip filter only applies to the Active view —
+      // Status chip filter only applies to the Active view —
       // archived agents have no presence to match against.
-      if (view === "active" && availabilityFilter !== "all") {
-        const detail = presenceMap.get(a.id);
-        if (detail?.availability !== availabilityFilter) return false;
+      if (
+        view === "active" &&
+        !matchesAgentStatusFilter(a.id, presenceMap, statusFilter)
+      ) {
+        return false;
       }
       if (q) {
         if (
@@ -248,25 +265,16 @@ export function AgentsPage() {
       }
       return true;
     });
-  }, [afterWorkspaceFilter, view, availabilityFilter, presenceMap, search]);
+  }, [afterWorkspaceFilter, view, presenceMap, statusFilter, search]);
 
-  // Per-availability counts for the chip badges. Computed against
-  // `afterWorkspaceFilter` (ignoring the availability filter itself) so
+  // Per-status counts for the chip badges. Computed against
+  // `afterWorkspaceFilter` (ignoring the status filter itself) so
   // the numbers reflect "if I clicked this chip, this many agents would
   // match" rather than collapsing to 0 for the unselected chips.
-  const availabilityCounts = useMemo(() => {
-    const counts: Record<AgentAvailability, number> = {
-      online: 0,
-      unstable: 0,
-      offline: 0,
-    };
-    for (const a of afterWorkspaceFilter) {
-      const detail = presenceMap.get(a.id);
-      if (!detail) continue;
-      counts[detail.availability] += 1;
-    }
-    return counts;
-  }, [afterWorkspaceFilter, presenceMap]);
+  const statusCounts = useMemo(
+    () => countAgentStatusFilters(afterWorkspaceFilter, presenceMap),
+    [afterWorkspaceFilter, presenceMap],
+  );
 
   const sortedAgents = useMemo(() => {
     const xs = [...filteredAgents];
@@ -492,12 +500,14 @@ export function AgentsPage() {
                   archivedCount={archivedCount}
                   onShowArchived={() => setView("archived")}
                 />
-                <AvailabilityFilterRow
-                  value={availabilityFilter}
-                  onChange={setAvailabilityFilter}
-                  counts={availabilityCounts}
-                  totalCount={afterWorkspaceFilter.length}
-                />
+                {scope !== "default" && (
+                  <StatusFilterRow
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    counts={statusCounts}
+                    totalCount={afterWorkspaceFilter.length}
+                  />
+                )}
               </>
             ) : (
               <ArchivedToolbarRow
@@ -517,10 +527,10 @@ export function AgentsPage() {
                   navigation.push(paths.agentDetail(row.original.agent.id))
                 }
                 prependRows={
-                  defaultsRowsVisible ? (
+                  defaultsRowsVisible && scope !== "all" ? (
                     <DefaultsInlineRows
                       scope={scope}
-                      allDefaults={allDefaults}
+                      allDefaults={filteredAllDefaults}
                       currentUserId={currentUser?.id ?? null}
                       onOpenPersonal={() => setDefaultsSheet("personal")}
                       onOpenSystem={() => setDefaultsSheet("system")}
@@ -574,7 +584,7 @@ export function AgentsPage() {
 
 // ---------------------------------------------------------------------------
 // Defaults inline rows — rendered inside the DataTable scroll container as
-// pinned pseudo-rows. Mine scope: Personal + System. All scope: System +
+// pinned pseudo-rows. Mine scope: Personal + System. Default scope: System +
 // all users' defaults (with owner marked).
 // ---------------------------------------------------------------------------
 
@@ -634,9 +644,7 @@ function DefaultsInlineRows({
     );
   }
 
-  // "All" scope: show system defaults + all users' defaults
-  if (allDefaults.length === 0) return null;
-
+  // Only "default" scope reaches here — show system + all users' defaults
   return (
     <div className="border-b">
       <button
@@ -786,7 +794,7 @@ function ActiveToolbarRow({
 }: {
   scope: Scope;
   setScope: (v: Scope) => void;
-  scopeCounts: { all: number; mine: number };
+  scopeCounts: { all: number; mine: number; defaults: number };
   workspaceOnly: boolean;
   setWorkspaceOnly: (v: boolean) => void;
   sort: SortKey;
@@ -831,10 +839,12 @@ function ActiveToolbarRow({
             {t(($) => $.page.show_archived, { count: archivedCount })}
           </button>
         )}
-        <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-          {t(($) => $.page.of_total, { visible: visibleCount, total: totalCount })}
-        </span>
-        <SortDropdown sort={sort} setSort={setSort} />
+        {scope !== "default" && (
+          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
+            {t(($) => $.page.of_total, { visible: visibleCount, total: totalCount })}
+          </span>
+        )}
+        {scope !== "default" && <SortDropdown sort={sort} setSort={setSort} />}
       </div>
     </div>
   );
@@ -847,7 +857,7 @@ function ScopeSegment({
 }: {
   scope: Scope;
   setScope: (v: Scope) => void;
-  counts: { all: number; mine: number };
+  counts: { all: number; mine: number; defaults: number };
 }) {
   const { t } = useT("agents");
   return (
@@ -863,6 +873,12 @@ function ScopeSegment({
         label={t(($) => $.scope.all)}
         count={counts.all}
         onClick={() => setScope("all")}
+      />
+      <ScopeButton
+        active={scope === "default"}
+        label={t(($) => $.scope.default)}
+        count={counts.defaults}
+        onClick={() => setScope("default")}
       />
     </div>
   );
@@ -939,22 +955,24 @@ function SortDropdown({
 }
 
 // ---------------------------------------------------------------------------
-// Availability chip row — All / Online / Unstable / Offline. Only shown
-// in the Active view; archived agents have no presence.
+// Status chip row — All / Online / Working / Unstable / Offline. Only
+// shown in the Active view; archived agents have no presence.
 // ---------------------------------------------------------------------------
 
-function AvailabilityFilterRow({
+function StatusFilterRow({
   value,
   onChange,
   counts,
   totalCount,
 }: {
-  value: AvailabilityFilter;
-  onChange: (v: AvailabilityFilter) => void;
-  counts: Record<AgentAvailability, number>;
+  value: AgentStatusFilter;
+  onChange: (v: AgentStatusFilter) => void;
+  counts: ReturnType<typeof countAgentStatusFilters>;
   totalCount: number;
 }) {
   const { t } = useT("agents");
+  const workingCfg = workloadConfig.working;
+  const WorkingIcon = workingCfg.icon;
   return (
     <div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
       <AvailabilityChip
@@ -963,17 +981,28 @@ function AvailabilityFilterRow({
         label={t(($) => $.availability.all)}
         count={totalCount}
       />
-      {availabilityOrder.map((a) => {
+      {availabilityOrder.map((a, index) => {
         const cfg = availabilityConfig[a];
         return (
-          <AvailabilityChip
-            key={a}
-            active={value === a}
-            onClick={() => onChange(a)}
-            label={t(($) => $.availability[a])}
-            count={counts[a]}
-            dotClass={cfg.dotClass}
-          />
+          <Fragment key={a}>
+            <AvailabilityChip
+              active={value === a}
+              onClick={() => onChange(a)}
+              label={t(($) => $.availability[a])}
+              count={counts.availability[a]}
+              dotClass={cfg.dotClass}
+            />
+            {index === 0 && (
+              <AvailabilityChip
+                active={value === "working"}
+                onClick={() => onChange("working")}
+                label={t(($) => $.workload.working)}
+                count={counts.working}
+                icon={WorkingIcon}
+                iconClass={workingCfg.textClass}
+              />
+            )}
+          </Fragment>
         );
       })}
     </div>
@@ -986,12 +1015,16 @@ function AvailabilityChip({
   label,
   count,
   dotClass,
+  icon: Icon,
+  iconClass,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
   count: number;
   dotClass?: string;
+  icon?: LucideIcon;
+  iconClass?: string;
 }) {
   return (
     <Button
@@ -1005,6 +1038,7 @@ function AvailabilityChip({
       }
     >
       {dotClass && <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />}
+      {Icon && <Icon className={`h-3 w-3 ${iconClass ?? ""}`} />}
       <span>{label}</span>
       <span className="font-mono tabular-nums text-muted-foreground/70">
         {count}

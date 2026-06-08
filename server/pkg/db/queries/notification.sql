@@ -60,6 +60,14 @@ SELECT * FROM notification_delivery
 WHERE status = $1
 ORDER BY created_at ASC;
 
+-- name: ListTimedOutNotificationDeliveries :many
+SELECT * FROM notification_delivery
+WHERE channel = $1
+  AND status = $2
+  AND updated_at < now() - (sqlc.arg('timeout_seconds')::int * interval '1 second')
+ORDER BY updated_at ASC
+LIMIT sqlc.arg('limit')::int;
+
 -- name: ClaimNotificationDelivery :one
 UPDATE notification_delivery
 SET status = $2,
@@ -77,6 +85,38 @@ SET status = $2,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: CompleteNotificationDeliveryIfStatus :one
+UPDATE notification_delivery
+SET status = $2,
+    last_error = $3,
+    sent_at = $4,
+    updated_at = now()
+WHERE id = $1 AND status = $5
+RETURNING *;
+
+-- name: GetNotificationDeliveryWithEvent :one
+SELECT
+    nd.id AS delivery_id,
+    nd.notification_event_id,
+    nd.channel,
+    nd.status,
+    nd.attempt_count,
+    nd.last_error,
+    nd.payload_snapshot,
+    nd.sent_at,
+    nd.created_at AS delivery_created_at,
+    nd.updated_at AS delivery_updated_at,
+    nd.target_type,
+    nd.target_id,
+    ne.workspace_id,
+    ne.recipient_user_id,
+    ne.type AS event_type,
+    ne.issue_id,
+    ne.comment_id
+FROM notification_delivery nd
+JOIN notification_event ne ON ne.id = nd.notification_event_id
+WHERE nd.id = $1;
 
 -- name: ListExternalAccountBindingsByUser :many
 SELECT * FROM external_account_binding
@@ -149,7 +189,7 @@ SELECT EXISTS (
     WHERE ne.recipient_user_id = $1
       AND ne.comment_id = $2
       AND nd.channel = 'openclaw_weixin'
-      AND nd.status IN ('pending', 'sent')
+      AND nd.status IN ('pending', 'awaiting_ack', 'sent')
 ) AS "exists";
 
 -- name: ExistsDeliveryByCommentAndChannel :one
@@ -160,5 +200,5 @@ SELECT EXISTS (
     WHERE ne.recipient_user_id = $1
       AND ne.comment_id = $2
       AND nd.channel = $3
-      AND nd.status IN ('pending', 'sent')
+      AND nd.status IN ('pending', 'awaiting_ack', 'sent')
 ) AS "exists";

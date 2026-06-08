@@ -147,7 +147,7 @@ type Daemon struct {
 	// surfaced via the server-side waiting_local_directory status while it
 	// waits. See MUL-2663.
 	localPathLocks *LocalPathLocker
-	taskProviders sync.Map // taskID (string) -> provider (string); set on task start, deleted on completion
+	taskProviders  sync.Map // taskID (string) -> provider (string); set on task start, deleted on completion
 
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
@@ -2668,9 +2668,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentID string
 	var skills []SkillData
 	var instructions string
+	var agentDescription string
 	if task.Agent != nil {
 		agentID = task.Agent.ID
 		agentName = task.Agent.Name
+		agentDescription = task.Agent.Description
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
 	}
@@ -2686,6 +2688,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		PriorSessionResumed:              task.PriorSessionID != "",
 		AgentID:                          agentID,
 		AgentName:                        agentName,
+		AgentDescription:                 agentDescription,
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
 		Repos:                            convertReposForEnv(task.Repos),
