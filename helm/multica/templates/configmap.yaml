@@ -69,8 +69,8 @@ data:
   {{- if .Values.backend.config.analyticsEnvironment }}
   ANALYTICS_ENVIRONMENT: {{ .Values.backend.config.analyticsEnvironment | quote }}
   {{- end }}
-  {{- if .Values.backend.config.localUploadDir }}
-  LOCAL_UPLOAD_DIR: {{ .Values.backend.config.localUploadDir | quote }}
+  {{- if or .Values.backend.config.localUploadDir .Values.backend.persistence.enabled }}
+  LOCAL_UPLOAD_DIR: {{ .Values.backend.config.localUploadDir | default .Values.backend.persistence.mountPath | quote }}
   {{- end }}
   {{- if .Values.backend.config.localUploadBaseUrl }}
   LOCAL_UPLOAD_BASE_URL: {{ .Values.backend.config.localUploadBaseUrl | quote }}

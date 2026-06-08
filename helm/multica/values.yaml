@@ -60,6 +60,14 @@ backend:
     cloudfrontDomain: ""
     multicaDevVerificationCode: ""
 
+  persistence:
+    enabled: false
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 10Gi
+    mountPath: /app/data/uploads
+    annotations: {}
+
   secrets:
     databaseUrl: ""
     jwtSecret: ""
