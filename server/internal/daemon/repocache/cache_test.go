@@ -1538,6 +1538,45 @@ func TestCreateSharedClone_BasicCheckout(t *testing.T) {
 	}
 }
 
+func TestCreateSharedClone_UsesAlternates(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateSharedClone(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Lambda",
+		TaskID:      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+	})
+	if err != nil {
+		t.Fatalf("CreateSharedClone failed: %v", err)
+	}
+
+	// `git clone --shared` writes the source's objects path into
+	// .git/objects/info/alternates instead of copying packs. If the source
+	// is passed as a URL (including file://), git silently ignores --shared
+	// and falls back to a full copy — no alternates file written. This test
+	// pins the behavior so that regression cannot slip back in.
+	alternatesPath := filepath.Join(result.Path, ".git", "objects", "info", "alternates")
+	data, err := os.ReadFile(alternatesPath)
+	if err != nil {
+		t.Fatalf("alternates file missing — shared-clone optimization is not in effect: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	wantAlt := filepath.Join(barePath, "objects")
+	if got := strings.TrimSpace(string(data)); got != wantAlt {
+		t.Errorf("alternates = %q, want %q", got, wantAlt)
+	}
+}
+
 func TestCreateSharedClone_MissingFromCache(t *testing.T) {
 	t.Parallel()
 	cache := New(t.TempDir(), testLogger())

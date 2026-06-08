@@ -533,11 +533,12 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 // the agent branch.
 //
 // After cloning, the remote origin URL is rewritten to the original repo URL
-// (not the file:// cache path). That way the gitconfig CM the controller
+// (not the local cache path). That way the gitconfig CM the controller
 // mounted at ~/.gitconfig — with `insteadOf` for fetch and `pushInsteadOf`
 // for push — still routes fetches to the cache and pushes to SSH origin.
-// If we left origin = file://, pushes would target the RO PVC and fail
-// because pushInsteadOf matches the original URL, not the rewritten one.
+// If we left origin pointing at the cache path, pushes would target the RO
+// PVC and fail because pushInsteadOf matches the original URL, not the
+// rewritten one.
 //
 // Concurrency: the bare is RO so we don't take c.repoLocks. Multiple
 // worker pods can read the same bare in parallel without any coordination.
@@ -580,8 +581,10 @@ func (c *Cache) CreateSharedClone(params WorktreeParams) (*WorktreeResult, error
 		return &WorktreeResult{Path: clonePath, BranchName: actualBranch}, nil
 	}
 
-	// Fresh clone via file:// (the bare is at barePath on the mounted RO
-	// PVC). --shared uses alternates so no object copy is needed.
+	// Fresh clone from the bare at barePath on the mounted RO PVC. --shared
+	// uses alternates so no object copy is needed — but git silently ignores
+	// --local/--shared when the source is given as a URL (including file://),
+	// so the source MUST be passed as a plain local path.
 	if err := gitCloneShared(barePath, clonePath); err != nil {
 		return nil, fmt.Errorf("git clone --shared: %w", err)
 	}
@@ -589,7 +592,7 @@ func (c *Cache) CreateSharedClone(params WorktreeParams) (*WorktreeResult, error
 	// Reset origin to the original URL so the gitconfig's insteadOf (for
 	// fetch) and pushInsteadOf (for push) take effect on every future
 	// operation against this clone. Without this, the stored URL would be
-	// file:///<cache> and push would try to write to the RO PVC.
+	// the local cache path and push would try to write to the RO PVC.
 	if err := gitRemoteSetURL(clonePath, "origin", params.RepoURL); err != nil {
 		return nil, fmt.Errorf("set origin url: %w", err)
 	}
@@ -612,12 +615,15 @@ func (c *Cache) CreateSharedClone(params WorktreeParams) (*WorktreeResult, error
 	return &WorktreeResult{Path: clonePath, BranchName: actualBranch}, nil
 }
 
-// gitCloneShared runs `git clone --shared file://barePath clonePath`. The
+// gitCloneShared runs `git clone --shared <barePath> <clonePath>`. The
 // --shared flag stores an alternates pointer to barePath instead of copying
 // pack data, which means the bare can stay on a read-only mount.
+//
+// barePath must be a plain local path, not a file:// URL: git silently
+// ignores --local/--shared when the source is given as any URL form, and
+// would fall back to a full object copy.
 func gitCloneShared(barePath, clonePath string) error {
-	fileURL := "file://" + barePath
-	cmd := exec.Command("git", "clone", "--shared", fileURL, clonePath)
+	cmd := exec.Command("git", "clone", "--shared", barePath, clonePath)
 	cmd.Env = gitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(clonePath)
@@ -627,8 +633,8 @@ func gitCloneShared(barePath, clonePath string) error {
 }
 
 // gitRemoteSetURL runs `git -C clonePath remote set-url <name> <url>`. Used
-// to overwrite the clone's recorded origin URL after a `git clone --shared
-// file://...`, so the gitconfig CM's insteadOf/pushInsteadOf rules apply on
+// to overwrite the clone's recorded origin URL after a shared clone from the
+// local cache, so the gitconfig CM's insteadOf/pushInsteadOf rules apply on
 // every subsequent fetch/push.
 func gitRemoteSetURL(clonePath, name, url string) error {
 	cmd := exec.Command("git", "-C", clonePath, "remote", "set-url", name, url)
