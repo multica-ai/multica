@@ -7,11 +7,13 @@ const mockGetActiveTerminalSession = vi.hoisted(() => vi.fn());
 const mockTerminalAttachUrl = vi.hoisted(() =>
   vi.fn((path: string) => `ws://test.local${path}`),
 );
+const mockGetToken = vi.hoisted(() => vi.fn(() => null));
 
 vi.mock("@multica/core/api", () => ({
   api: {
     getActiveTerminalSession: mockGetActiveTerminalSession,
     terminalAttachUrl: mockTerminalAttachUrl,
+    getToken: mockGetToken,
   },
 }));
 
@@ -64,6 +66,8 @@ describe("useTerminalSession", () => {
     vi.useFakeTimers();
     mockGetActiveTerminalSession.mockReset();
     mockTerminalAttachUrl.mockClear();
+    mockGetToken.mockReset();
+    mockGetToken.mockReturnValue(null);
     createdSockets.length = 0;
   });
 
