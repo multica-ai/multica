@@ -76,7 +76,8 @@ export type RoutingKey =
   // controlled independently of one another and of human comment traffic.
   | "agent_comment_no_tag"
   | "agent_comment_member_tag"
-  | "agent_comment_agent_tag";
+  | "agent_comment_agent_tag"
+  | "system_notification";
 
 // Per-channel default when the user has no override for a given key. Mirrors
 // `defaultChannelChoices` on the server — keep in sync.
@@ -103,6 +104,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_no_tag: "off",
     agent_comment_member_tag: "on",
     agent_comment_agent_tag: "on",
+    system_notification: "on",
   },
   notifications: {
     issue_assigned: "off",
@@ -123,6 +125,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_no_tag: "on",
     agent_comment_member_tag: "on",
     agent_comment_agent_tag: "on",
+    system_notification: "off",
   },
   mobile: {
     issue_assigned: "on",
@@ -143,6 +146,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_no_tag: "off",
     agent_comment_member_tag: "on",
     agent_comment_agent_tag: "off",
+    system_notification: "off",
   },
   desktop: {
     issue_assigned: "on",
@@ -163,6 +167,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_no_tag: "off",
     agent_comment_member_tag: "on",
     agent_comment_agent_tag: "off",
+    system_notification: "off",
   },
   // Mail is forward-compatible; no events fire by default until the
   // transport is built.
@@ -185,6 +190,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_no_tag: "off",
     agent_comment_member_tag: "off",
     agent_comment_agent_tag: "off",
+    system_notification: "off",
   },
 };
 

@@ -141,6 +141,16 @@ const ROW_GROUPS: RowGroup[] = [
       },
     ],
   },
+  {
+    title: "System",
+    rows: [
+      {
+        routingKey: "system_notification",
+        label: "System messages",
+        hint: "Platform-generated messages like auto-pauses and scheduled wakeups.",
+      },
+    ],
+  },
 ];
 
 // Date reminders fire when a date actually arrives (not when it's edited).

@@ -77,9 +77,11 @@ var defaultChannelChoices = map[string]map[string]bool{
 		// without losing real hand-offs. See cerebro_agent_comment_routing.go
 		// for the splitter; defaults follow the rule "hand-offs stay visible,
 		// chatter goes quiet."
-		"agent_comment_no_tag":      false,
-		"agent_comment_member_tag":  true,
-		"agent_comment_agent_tag":   true,
+		"agent_comment_no_tag":     false,
+		"agent_comment_member_tag": true,
+		"agent_comment_agent_tag":  true,
+		// CEREBRO-PATCH(system-notification-routing): route platform-authored notifications through the channel matrix.
+		"system_notification": true,
 	},
 	channelNotifications: {
 		"issue_assigned":              false,
@@ -104,6 +106,8 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"agent_comment_no_tag":     true,
 		"agent_comment_member_tag": true,
 		"agent_comment_agent_tag":  true,
+		// CEREBRO-PATCH(system-notification-routing): route platform-authored notifications through the channel matrix.
+		"system_notification": false,
 	},
 	channelMobile: {
 		"issue_assigned":              true,
@@ -128,6 +132,8 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"agent_comment_no_tag":     false,
 		"agent_comment_member_tag": true,
 		"agent_comment_agent_tag":  false,
+		// CEREBRO-PATCH(system-notification-routing): route platform-authored notifications through the channel matrix.
+		"system_notification": false,
 	},
 	channelDesktop: {
 		"issue_assigned":              true,
@@ -152,6 +158,8 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"agent_comment_no_tag":     false,
 		"agent_comment_member_tag": true,
 		"agent_comment_agent_tag":  false,
+		// CEREBRO-PATCH(system-notification-routing): route platform-authored notifications through the channel matrix.
+		"system_notification": false,
 	},
 	// Mail is forward-compatible; no events fire by default until the
 	// transport is built.

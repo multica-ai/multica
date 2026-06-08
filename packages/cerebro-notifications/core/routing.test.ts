@@ -17,6 +17,12 @@ describe("getChannelChoice", () => {
     );
     expect(getChannelChoice(undefined, "mobile", "new_comment")).toBe("off");
     expect(getChannelChoice(undefined, "mail", "issue_assigned")).toBe("off");
+    expect(getChannelChoice(undefined, "inbox", "system_notification")).toBe(
+      "on",
+    );
+    expect(
+      getChannelChoice(undefined, "notifications", "system_notification"),
+    ).toBe("off");
   });
 
   test("falls back to default when notifications block is missing", () => {
