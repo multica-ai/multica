@@ -37,7 +37,7 @@ import {
   OverridesPlaceholder,
 } from "@multica/cerebro-members/views";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { ToolPolicyTable } from "@multica/cerebro-tool-policy/views";
+import { ToolPolicyTabs } from "@multica/cerebro-tool-policy/views";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -292,7 +292,7 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
           </header>
           <div className="p-4">
             {/* The User layer keys on the member's user id, not the membership id. */}
-            <ToolPolicyTable wsId={wsId} view="member" subjectId={member.user_id} />
+            <ToolPolicyTabs wsId={wsId} view="member" subjectId={member.user_id} />
           </div>
         </section>
       ) : (

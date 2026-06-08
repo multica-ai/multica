@@ -44,13 +44,18 @@ type CallToolParams struct {
 // CallToolResult is the result of a tool invocation.
 type CallToolResult struct {
 	Content []Content `json:"content"`
-	IsError bool      `json:"isError,omitempty"`
+	// CEREBRO-PATCH(mcp-structured-content): preserve non-text MCP tool results.
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+	IsError           bool            `json:"isError,omitempty"`
 }
 
 // Content is a single content block in a tool result.
 type Content struct {
 	Type string `json:"type"`
-	Text string `json:"text"`
+	// CEREBRO-PATCH(mcp-structured-content): support structured/non-text content blocks.
+	Text     string          `json:"text,omitempty"`
+	Data     json.RawMessage `json:"data,omitempty"`
+	MimeType string          `json:"mimeType,omitempty"`
 }
 
 // TextResult creates a CallToolResult with a single text content block.

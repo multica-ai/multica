@@ -32,7 +32,7 @@ import type {
 } from "@multica/cerebro-types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { ToolPolicyTable } from "@multica/cerebro-tool-policy/views";
+import { ToolPolicyTabs } from "@multica/cerebro-tool-policy/views";
 import { toolPolicyKeys } from "@multica/cerebro-tool-policy/core";
 import { SandboxProfileCard } from "./sandbox-profile-card";
 import { groupListOptions } from "@multica/cerebro-groups";
@@ -321,7 +321,7 @@ export function RuntimeToolsCard({
 
       {unifiedToolPolicy ? (
         <div className="p-3">
-          <ToolPolicyTable wsId={wsId} view="runtime" subjectId={runtime.id} />
+          <ToolPolicyTabs wsId={wsId} view="runtime" subjectId={runtime.id} />
         </div>
       ) : (
         <>

@@ -9,7 +9,7 @@ import { api } from "@multica/core/api";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   SimpleToolPolicyTable,
-  ToolPolicyTable,
+  ToolPolicyTabs,
 } from "@multica/cerebro-tool-policy/views";
 import { AgentToolsCard } from "./components/agent-tools-card";
 
@@ -78,7 +78,7 @@ export function CerebroToolsTab({
     // memberships are expanded server-side from the user id (the table never
     // trusts a client-supplied group list).
     return (
-      <ToolPolicyTable
+      <ToolPolicyTabs
         wsId={wsId}
         view="agent"
         subjectId={agent.id}

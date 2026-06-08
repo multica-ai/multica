@@ -51,6 +51,12 @@ import {
   TableHeader,
   TableRow,
 } from "@multica/ui/components/ui/table";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@multica/ui/components/ui/tabs";
 import { cn } from "@multica/ui/lib/utils";
 import {
   classFacets,
@@ -109,6 +115,8 @@ export interface ToolPolicyTableProps {
    */
   tabFilter?: ToolPolicyTabFilter;
 }
+
+export type ToolPolicyTabsProps = Omit<ToolPolicyTableProps, "tabFilter">;
 
 // VIEW_EDIT_LAYER maps each surface to the chain layer it authors. The member
 // page edits the User (ceiling) layer — "member" is the page, "user" is the rung.
@@ -410,6 +418,31 @@ export function ToolPolicyTable({
         </>
       )}
     </div>
+  );
+}
+
+export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
+  return (
+    <Tabs defaultValue="multica" className="flex-col">
+      <TabsList>
+        <TabsTrigger value="multica">Multica</TabsTrigger>
+        <TabsTrigger value="runtime">Runtime</TabsTrigger>
+        <TabsTrigger value="repos">Repos</TabsTrigger>
+        <TabsTrigger value="connections">Connections</TabsTrigger>
+      </TabsList>
+      <TabsContent value="multica" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="multica" />
+      </TabsContent>
+      <TabsContent value="runtime" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="runtime" />
+      </TabsContent>
+      <TabsContent value="repos" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="repos" />
+      </TabsContent>
+      <TabsContent value="connections" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="connections" />
+      </TabsContent>
+    </Tabs>
   );
 }
 
