@@ -1323,22 +1323,23 @@ export function InboxPage() {
   );
 
   const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;
-  // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004 — find the most
-  // recent unread inbox notification for the selected channel that carries a
-  // comment_id, so ChannelDetail can auto-open the relevant thread on mount.
+  // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004 — snapshot the most
+  // recent unread inbox notification's comment_id for the selected channel, keyed
+  // on selectedKey (stable string), so ChannelDetail can auto-open the thread.
   const selectedChannelCommentId = useMemo<string | undefined>(() => {
-    if (!selectedChannel) return undefined;
+    if (!selectedKey) return undefined;
     const relevant = items
       .filter(
-        (i) => !i.read && !i.archived && i.issue_id === selectedChannel.id && i.details?.comment_id,
+        (i) => !i.read && !i.archived && i.issue_id === selectedKey && i.details?.comment_id,
       )
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     return relevant[0]?.details?.comment_id ?? undefined;
-    // items intentionally omitted: snapshot at channel-select time so the
-    // read-mark that fires immediately after doesn't clear initialCommentId
-    // before ChannelDetail's auto-open effect has a chance to run.
+    // Keyed on selectedKey, NOT selectedChannel: the channel object gets a fresh
+    // reference when its unread_count drops after the read-mark, which would
+    // recompute this against the now-read items and clear the comment id before
+    // ChannelDetail's auto-open effect runs. items is intentionally omitted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedChannel]);
+  }, [selectedKey]);
   // CEREBRO-PATCH(inbox-mobile-detail-title): Mobile detail header shows the selected message/chat/channel title next to Back (JEH-1515).
   const selectedDetailTitle = selectedChannel
     ? selectedChannel.kind === "channel"
