@@ -350,7 +350,7 @@ func (c *client) readPump() {
 		c.conn.Close()
 	}()
 
-	c.conn.SetReadLimit(4096)
+	c.conn.SetReadLimit(128 * 1024) // CEREBRO-PATCH(daemonws-term-read-limit): cerebro:term_stdout frames are base64-encoded and can exceed 4 KB; 128 KB matches the daemon flush ceiling.
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
