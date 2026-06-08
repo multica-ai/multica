@@ -22,7 +22,9 @@ type stubAPIClientWithRecorder struct {
 	configured     bool
 	bindingCalls   []BindingPromptParams
 	interactiveOut []SendCardParams
+	directCardsOut []SendDirectCardParams
 	textOut        []SendTextParams
+	reactions      []AddReactionParams
 	sendErr        error
 	textErr        error
 	bindingErr     error
@@ -38,6 +40,16 @@ func (s *stubAPIClientWithRecorder) SendInteractiveCard(ctx context.Context, p S
 	}
 	s.interactiveOut = append(s.interactiveOut, p)
 	return "lark-msg-id", nil
+}
+
+func (s *stubAPIClientWithRecorder) SendDirectInteractiveCard(ctx context.Context, p SendDirectCardParams) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sendErr != nil {
+		return "", s.sendErr
+	}
+	s.directCardsOut = append(s.directCardsOut, p)
+	return "lark-direct-card-msg-id", nil
 }
 
 func (s *stubAPIClientWithRecorder) PatchInteractiveCard(ctx context.Context, p PatchCardParams) error {

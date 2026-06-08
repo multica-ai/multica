@@ -36,6 +36,9 @@ func (f *fakeTypingAPIClient) IsConfigured() bool { return true }
 func (f *fakeTypingAPIClient) SendInteractiveCard(context.Context, SendCardParams) (string, error) {
 	return "", nil
 }
+func (f *fakeTypingAPIClient) SendDirectInteractiveCard(context.Context, SendDirectCardParams) (string, error) {
+	return "", nil
+}
 func (f *fakeTypingAPIClient) PatchInteractiveCard(context.Context, PatchCardParams) error {
 	return nil
 }

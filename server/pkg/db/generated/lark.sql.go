@@ -149,6 +149,36 @@ func (q *Queries) ClaimLarkInboundDedup(ctx context.Context, arg ClaimLarkInboun
 	return i, err
 }
 
+const claimLarkInboxNotificationDelivery = `-- name: ClaimLarkInboxNotificationDelivery :one
+WITH ins AS (
+    INSERT INTO lark_inbox_notification_delivery (
+        inbox_item_id,
+        installation_id,
+        lark_open_id
+    ) VALUES ($1, $2, $3)
+    ON CONFLICT DO NOTHING
+    RETURNING true AS claimed
+)
+SELECT COALESCE((SELECT claimed FROM ins), false)::boolean AS claimed
+`
+
+type ClaimLarkInboxNotificationDeliveryParams struct {
+	InboxItemID    pgtype.UUID `json:"inbox_item_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	LarkOpenID     string      `json:"lark_open_id"`
+}
+
+// Claims one outbound Lark inbox notification delivery. This is intentionally
+// keyed by the durable inbox_item row plus the concrete bot installation and
+// recipient open_id so repeated inbox:new events, duplicate bus subscribers,
+// or multi-replica handling cannot send duplicate DMs.
+func (q *Queries) ClaimLarkInboxNotificationDelivery(ctx context.Context, arg ClaimLarkInboxNotificationDeliveryParams) (bool, error) {
+	row := q.db.QueryRow(ctx, claimLarkInboxNotificationDelivery, arg.InboxItemID, arg.InstallationID, arg.LarkOpenID)
+	var claimed bool
+	err := row.Scan(&claimed)
+	return claimed, err
+}
+
 const consumeLarkBindingToken = `-- name: ConsumeLarkBindingToken :one
 UPDATE lark_binding_token
 SET consumed_at = now()
@@ -448,6 +478,24 @@ func (q *Queries) CreateLarkUserBinding(ctx context.Context, arg CreateLarkUserB
 	return i, err
 }
 
+const deleteLarkInboxNotificationDelivery = `-- name: DeleteLarkInboxNotificationDelivery :exec
+DELETE FROM lark_inbox_notification_delivery
+WHERE inbox_item_id = $1
+  AND installation_id = $2
+  AND lark_open_id = $3
+`
+
+type DeleteLarkInboxNotificationDeliveryParams struct {
+	InboxItemID    pgtype.UUID `json:"inbox_item_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	LarkOpenID     string      `json:"lark_open_id"`
+}
+
+func (q *Queries) DeleteLarkInboxNotificationDelivery(ctx context.Context, arg DeleteLarkInboxNotificationDeliveryParams) error {
+	_, err := q.db.Exec(ctx, deleteLarkInboxNotificationDelivery, arg.InboxItemID, arg.InstallationID, arg.LarkOpenID)
+	return err
+}
+
 const deleteLarkUserBinding = `-- name: DeleteLarkUserBinding :exec
 DELETE FROM lark_user_binding WHERE id = $1
 `
@@ -722,6 +770,73 @@ func (q *Queries) ListActiveLarkInstallations(ctx context.Context) ([]LarkInstal
 			&i.UpdatedAt,
 			&i.BotUnionID,
 			&i.Region,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveLarkUserBindingsByMember = `-- name: ListActiveLarkUserBindingsByMember :many
+SELECT lub.id, lub.workspace_id, lub.multica_user_id, lub.installation_id, lub.lark_open_id, lub.union_id, lub.bound_at, li.id, li.workspace_id, li.agent_id, li.app_id, li.app_secret_encrypted, li.tenant_key, li.bot_open_id, li.installer_user_id, li.status, li.ws_lease_token, li.ws_lease_expires_at, li.installed_at, li.created_at, li.updated_at, li.bot_union_id, li.region
+FROM lark_user_binding lub
+JOIN lark_installation li ON li.id = lub.installation_id
+WHERE lub.workspace_id = $1
+  AND lub.multica_user_id = $2
+  AND li.workspace_id = lub.workspace_id
+  AND li.status = 'active'
+ORDER BY lub.bound_at DESC
+`
+
+type ListActiveLarkUserBindingsByMemberParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+}
+
+type ListActiveLarkUserBindingsByMemberRow struct {
+	LarkUserBinding  LarkUserBinding  `json:"lark_user_binding"`
+	LarkInstallation LarkInstallation `json:"lark_installation"`
+}
+
+// Outbound notification path: find the recipient's bound Lark accounts in
+// this workspace, with the active bot installation needed for credentials.
+func (q *Queries) ListActiveLarkUserBindingsByMember(ctx context.Context, arg ListActiveLarkUserBindingsByMemberParams) ([]ListActiveLarkUserBindingsByMemberRow, error) {
+	rows, err := q.db.Query(ctx, listActiveLarkUserBindingsByMember, arg.WorkspaceID, arg.MulticaUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveLarkUserBindingsByMemberRow{}
+	for rows.Next() {
+		var i ListActiveLarkUserBindingsByMemberRow
+		if err := rows.Scan(
+			&i.LarkUserBinding.ID,
+			&i.LarkUserBinding.WorkspaceID,
+			&i.LarkUserBinding.MulticaUserID,
+			&i.LarkUserBinding.InstallationID,
+			&i.LarkUserBinding.LarkOpenID,
+			&i.LarkUserBinding.UnionID,
+			&i.LarkUserBinding.BoundAt,
+			&i.LarkInstallation.ID,
+			&i.LarkInstallation.WorkspaceID,
+			&i.LarkInstallation.AgentID,
+			&i.LarkInstallation.AppID,
+			&i.LarkInstallation.AppSecretEncrypted,
+			&i.LarkInstallation.TenantKey,
+			&i.LarkInstallation.BotOpenID,
+			&i.LarkInstallation.InstallerUserID,
+			&i.LarkInstallation.Status,
+			&i.LarkInstallation.WsLeaseToken,
+			&i.LarkInstallation.WsLeaseExpiresAt,
+			&i.LarkInstallation.InstalledAt,
+			&i.LarkInstallation.CreatedAt,
+			&i.LarkInstallation.UpdatedAt,
+			&i.LarkInstallation.BotUnionID,
+			&i.LarkInstallation.Region,
 		); err != nil {
 			return nil, err
 		}

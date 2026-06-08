@@ -92,6 +92,9 @@ func (f *fakeAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 	f.sent = append(f.sent, p)
 	return f.sendReturn, f.sendErr
 }
+func (f *fakeAPIClient) SendDirectInteractiveCard(ctx context.Context, p SendDirectCardParams) (string, error) {
+	return "", nil
+}
 func (f *fakeAPIClient) PatchInteractiveCard(ctx context.Context, p PatchCardParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
