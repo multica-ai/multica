@@ -80,7 +80,7 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 	}
 
 	client := cli.NewAPIClient(serverURL, "", token)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var workspaces []struct {

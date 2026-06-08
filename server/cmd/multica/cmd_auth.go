@@ -300,7 +300,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	// Use the JWT to create a PAT via the existing API.
 	client := cli.NewAPIClient(serverURL, "", jwtToken)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	hostname, _ := os.Hostname()
@@ -373,7 +373,7 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 	serverURL := resolveServerURL(cmd)
 	client := cli.NewAPIClient(serverURL, "", token)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var me struct {
@@ -408,7 +408,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 
 	client := cli.NewAPIClient(serverURL, "", token)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var me struct {
