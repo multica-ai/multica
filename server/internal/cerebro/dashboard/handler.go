@@ -89,9 +89,10 @@ type bucket struct {
 }
 
 type topActor struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Count int    `json:"count"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Count      int    `json:"count"`
+	SpendCents int64  `json:"spend_cents,omitempty"`
 }
 
 type messageFlowEntry struct {
@@ -519,7 +520,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		}
 		var top []topActor
 		for _, row := range rows {
-			top = append(top, topActor{ID: util.UUIDToString(row.ActorID), Name: row.Name, Count: int(row.Count)})
+			top = append(top, topActor{ID: util.UUIDToString(row.ActorID), Name: row.Name, Count: int(row.Count), SpendCents: row.SpendCents})
 		}
 		mu.Lock()
 		out.TopMessageSenders = top
@@ -762,4 +763,153 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+type actorMessage struct {
+	ID          string `json:"id"`
+	Content     string `json:"content"`
+	CreatedAt   string `json:"created_at"`
+	SenderID    string `json:"sender_id,omitempty"`
+	SenderName  string `json:"sender_name,omitempty"`
+	AgentID     string `json:"agent_id"`
+	AgentName   string `json:"agent_name"`
+	SessionID   string `json:"session_id"`
+	IssueID     string `json:"issue_id,omitempty"`
+	IssueNumber int32  `json:"issue_number,omitempty"`
+	IssueTitle  string `json:"issue_title,omitempty"`
+}
+
+type actorMessagesResponse struct {
+	ActorID  string         `json:"actor_id"`
+	Range    string         `json:"range"`
+	Messages []actorMessage `json:"messages"`
+}
+
+type allMessagesResponse struct {
+	Range    string         `json:"range"`
+	Messages []actorMessage `json:"messages"`
+}
+
+// ActorMessages returns the chat messages sent by a specific member in a time period.
+// Used by the Messages tab detail panel in the cerebro dashboard. TECH-3093.
+func (h *Handler) ActorMessages(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+
+	actorIDStr := r.URL.Query().Get("actor_id")
+	if actorIDStr == "" {
+		writeError(w, http.StatusBadRequest, "actor_id required")
+		return
+	}
+	actorUUID, err := util.ParseUUID(actorIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid actor_id")
+		return
+	}
+
+	rangeStr := r.URL.Query().Get("range")
+	spec := parseRange(rangeStr, time.Now())
+
+	rows, err := h.Cerebro.DashboardActorChatMessages(r.Context(), cerebrodb.DashboardActorChatMessagesParams{
+		WorkspaceID: wsUUID,
+		CreatorID:   actorUUID,
+		CreatedAt:   ts(spec.periodStart),
+		CreatedAt_2: ts(spec.periodEnd),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	msgs := make([]actorMessage, 0, len(rows))
+	for _, row := range rows {
+		m := actorMessage{
+			ID:        util.UUIDToString(row.ID),
+			Content:   row.Content,
+			CreatedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339),
+			AgentID:   util.UUIDToString(row.AgentID),
+			AgentName: row.AgentName,
+			SessionID: util.UUIDToString(row.SessionID),
+		}
+		if row.IssueID.Valid {
+			m.IssueID = util.UUIDToString(row.IssueID)
+		}
+		if row.IssueNumber.Valid {
+			m.IssueNumber = row.IssueNumber.Int32
+		}
+		if row.IssueTitle.Valid {
+			m.IssueTitle = row.IssueTitle.String
+		}
+		msgs = append(msgs, m)
+	}
+
+	writeJSON(w, http.StatusOK, actorMessagesResponse{
+		ActorID:  actorIDStr,
+		Range:    rangeOrDefault(rangeStr),
+		Messages: msgs,
+	})
+}
+
+// AllMessages returns all member chat messages in the workspace for a time period.
+// Used by the "all messages" data table on the Messages tab. TECH-3093.
+func (h *Handler) AllMessages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+
+	rangeStr := r.URL.Query().Get("range")
+	spec := parseRange(rangeStr, time.Now())
+
+	rows, err := h.Cerebro.DashboardAllChatMessages(r.Context(), cerebrodb.DashboardAllChatMessagesParams{
+		WorkspaceID: wsUUID,
+		CreatedAt:   ts(spec.periodStart),
+		CreatedAt_2: ts(spec.periodEnd),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	msgs := make([]actorMessage, 0, len(rows))
+	for _, row := range rows {
+		m := actorMessage{
+			ID:         util.UUIDToString(row.ID),
+			Content:    row.Content,
+			CreatedAt:  row.CreatedAt.Time.UTC().Format(time.RFC3339),
+			SenderID:   util.UUIDToString(row.SenderID),
+			SenderName: row.SenderName,
+			AgentID:    util.UUIDToString(row.AgentID),
+			AgentName:  row.AgentName,
+			SessionID:  util.UUIDToString(row.SessionID),
+		}
+		if row.IssueID.Valid {
+			m.IssueID = util.UUIDToString(row.IssueID)
+		}
+		if row.IssueNumber.Valid {
+			m.IssueNumber = row.IssueNumber.Int32
+		}
+		if row.IssueTitle.Valid {
+			m.IssueTitle = row.IssueTitle.String
+		}
+		msgs = append(msgs, m)
+	}
+
+	writeJSON(w, http.StatusOK, allMessagesResponse{
+		Range:    rangeOrDefault(rangeStr),
+		Messages: msgs,
+	})
 }

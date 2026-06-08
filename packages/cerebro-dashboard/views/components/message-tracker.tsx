@@ -16,7 +16,7 @@ interface MessageTrackerProps {
 export function MessageTracker({ data, isLoading, workspaceSlug }: MessageTrackerProps) {
   const senders = data?.top_message_senders ?? [];
   const recipients = data?.top_message_recipients ?? [];
-  const setActor = useDashboardStore((s) => s.setActor);
+  const openMessagePanel = useDashboardStore((s) => s.openMessagePanel);
   const { push } = useNavigation();
 
   return (
@@ -27,7 +27,7 @@ export function MessageTracker({ data, isLoading, workspaceSlug }: MessageTracke
         list={senders}
         isLoading={isLoading}
         emptyText="Ingen beskeder sendt i perioden."
-        onRowClick={(actor) => setActor(actor.id, actor.name || "Unknown")}
+        onRowClick={(actor) => openMessagePanel(actor.id, actor.name || "Unknown")}
       />
       <ActorList
         title="Mest beskedte agenter"
@@ -84,6 +84,11 @@ function ActorList({
   );
 }
 
+function usdFmt(cents: number): string {
+  if (cents === 0) return "$0";
+  return `$${(cents / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+}
+
 function Row({
   actor,
   maxCount,
@@ -111,9 +116,16 @@ function Row({
           <span className="truncate text-xs font-medium">
             {actor.name || "Unknown"}
           </span>
-          <span className="text-[11px] tabular-nums text-muted-foreground">
-            {actor.count.toLocaleString("da-DK")} beskeder
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {actor.spend_cents !== undefined && actor.spend_cents > 0 && (
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {usdFmt(actor.spend_cents)}
+              </span>
+            )}
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {actor.count.toLocaleString("da-DK")} beskeder
+            </span>
+          </div>
         </div>
         <div className="mt-0.5 h-1 w-full rounded bg-muted">
           <div

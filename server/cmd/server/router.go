@@ -1431,6 +1431,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard overview endpoint
 			r.Get("/api/cerebro/dashboard", cerebroDashboardHandler.Overview)
+			// CEREBRO-PATCH(cerebro-dashboard-actor-messages-route): TECH-3093 actor message history
+			r.Get("/api/cerebro/dashboard/actor-messages", cerebroDashboardHandler.ActorMessages)
+			// CEREBRO-PATCH(cerebro-dashboard-all-messages-route): TECH-3093 all messages table
+			r.Get("/api/cerebro/dashboard/all-messages", cerebroDashboardHandler.AllMessages)
 			// CEREBRO-PATCH(cerebro-duplicate-check-route): FIR-2504 "find similar at create" endpoint + adoption-event sink.
 			r.Post("/api/cerebro/issues/check-similar", h.CheckSimilarIssues)
 			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)
