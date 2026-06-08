@@ -11,6 +11,8 @@ import {
   useCerebroToolPolicySettingsTabs,
   useCerebroAgentTriggerSettingsTabs,
 } from "@multica/cerebro-tool-policy/views";
+// CEREBRO-PATCH(cerebro-connections-settings-tab): TECH-3108 workspace connections tab.
+import { useCerebroConnectionsSettingsTabs } from "@multica/cerebro-connections/views";
 
 // Assembled here, inside the client boundary, so the lucide icon components
 // carried in each tab's `icon` field are never serialized from a Server
@@ -39,9 +41,12 @@ export function SettingsPageClient({
   // FIR-40: the workspace Currency tab, present only when the
   // cerebro_display_currency flag is on (read via a hook).
   const displayCurrencyTabs = useCerebroDisplayCurrencyTabs();
+  // TECH-3108: the workspace Connections tab, present only when the
+  // cerebro_connections flag is on.
+  const connectionsTabs = useCerebroConnectionsSettingsTabs();
   const accountTabs = useMemo(
-    () => [...extraAccountTabs, ...toolPolicyTabs, ...agentTriggerTabs, ...displayCurrencyTabs],
-    [toolPolicyTabs, agentTriggerTabs, displayCurrencyTabs],
+    () => [...extraAccountTabs, ...toolPolicyTabs, ...agentTriggerTabs, ...displayCurrencyTabs, ...connectionsTabs],
+    [toolPolicyTabs, agentTriggerTabs, displayCurrencyTabs, connectionsTabs],
   );
 
   return (

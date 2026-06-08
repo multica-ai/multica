@@ -10,7 +10,10 @@ import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -74,10 +77,11 @@ interface IssueLinkPickerProps {
   onClear: () => void;
   currentIssueId: string | null;
   currentIssueTitle?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
-function IssueLinkPicker({ onSelect, onClear, currentIssueId, currentIssueTitle }: IssueLinkPickerProps) {
-  const [open, setOpen] = useState(false);
+function IssueLinkPicker({ onSelect, onClear, currentIssueId, currentIssueTitle, open, onOpenChange }: IssueLinkPickerProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<{ id: string; title: string; identifier: string }>>([]);
   const abortRef = useRef<AbortController | undefined>(undefined);
@@ -102,7 +106,7 @@ function IssueLinkPicker({ onSelect, onClear, currentIssueId, currentIssueTitle 
   useEffect(() => { search(query); }, [query, search]);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
         title={currentIssueId ? "Linked to issue — click to change" : "Link to issue"}
         className={`flex size-5 items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground ${currentIssueId ? "text-brand!" : ""}`}
@@ -121,7 +125,7 @@ function IssueLinkPicker({ onSelect, onClear, currentIssueId, currentIssueTitle 
             {currentIssueId && (
               <CommandGroup heading="Current">
                 <CommandItem
-                  onSelect={() => { onClear(); setOpen(false); setQuery(""); }}
+                  onSelect={() => { onClear(); onOpenChange(false); setQuery(""); }}
                   className="gap-2 text-muted-foreground"
                 >
                   <X className="size-3.5 shrink-0" />
@@ -141,7 +145,7 @@ function IssueLinkPicker({ onSelect, onClear, currentIssueId, currentIssueTitle 
                     value={issue.id}
                     onSelect={() => {
                       onSelect(issue.id, issue.title);
-                      setOpen(false);
+                      onOpenChange(false);
                       setQuery("");
                       setResults([]);
                     }}
@@ -185,6 +189,8 @@ function FocusListRow({
 }: FocusListRowProps) {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(item.text);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const markDone = useMarkFocusListItemDone();
   const snooze = useSnoozeFocusListItem();
   const deleteItem = useDeleteFocusListItem();
@@ -286,6 +292,7 @@ function FocusListRow({
             isDone ? "text-muted-foreground/60 line-through" : ""
           }`}
           onClick={() => setEditing(true)}
+          onContextMenu={(e) => { e.preventDefault(); setContextOpen(true); }}
           title="Click to edit"
         >
           {item.issue_id ? (
@@ -301,11 +308,13 @@ function FocusListRow({
         </button>
       )}
 
-      {/* Action buttons — visible on hover */}
+      {/* Action buttons — visible on hover (desktop) */}
       <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity">
         <IssueLinkPicker
           currentIssueId={item.issue_id}
           currentIssueTitle={issueTitle}
+          open={linkPickerOpen}
+          onOpenChange={setLinkPickerOpen}
           onSelect={(issueId) =>
             updateItem.mutate({ id: item.id, issueId }, {
               onError: () => toast.error("Could not link issue"),
@@ -347,6 +356,39 @@ function FocusListRow({
           <Trash2 className="size-3.5" />
         </button>
       </div>
+
+      {/* Long-press context menu — opens on contextmenu event (long press on mobile, right-click on desktop) */}
+      <DropdownMenu open={contextOpen} onOpenChange={setContextOpen}>
+        <DropdownMenuTrigger className="size-0 shrink-0 opacity-0 pointer-events-none" tabIndex={-1} aria-hidden="true" />
+        <DropdownMenuContent align="end" side="bottom" className="w-44">
+          <DropdownMenuItem onClick={() => { setContextOpen(false); setLinkPickerOpen(true); }}>
+            <Link2 className="size-3.5" />
+            Link issue
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Snooze</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => handleSnooze(nextLocalNineAm())}>
+              <Clock className="size-3.5" />
+              Tomorrow at 9
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleSnooze(nextLocalNineAm(3))}>
+              In 3 days
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleSnooze(nextLocalNineAm(7))}>
+              In a week
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => deleteItem.mutate(item.id, { onError: () => toast.error("Could not delete") })}
+          >
+            <Trash2 className="size-3.5" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

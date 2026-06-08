@@ -192,6 +192,9 @@ type Handler struct {
 	ApprovalGate *permgate.Gate
 	// CEREBRO-PATCH(handler-semantic-search): FIR-2604 hybrid (FTS+vector) seam.
 	SemanticSearch SemanticSearchInvoker
+	// CEREBRO-PATCH(handler-connections-injector): TECH-3108 workspace connection registry.
+	// Injects enabled MCP connections into RuntimeToolsConfig at task claim time.
+	ConnectionsInjector WorkspaceConnectionsInjector
 }
 
 // CustomStatusResolver is the upstream-side seam for the cerebro status-model
@@ -393,6 +396,16 @@ func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToStr
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
 func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
 func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
+
+// WorkspaceConnectionsInjector is the seam for injecting enabled workspace MCP
+// connections into a task's RuntimeToolsConfig at claim time (TECH-3108).
+// Returns a {"mcpServers": {...}} JSON fragment ready for daemonmcp.Merge, or
+// nil when there are no enabled MCP connections for the workspace.
+//
+// CEREBRO-PATCH(handler-connections-injector-iface): TECH-3108 seam.
+type WorkspaceConnectionsInjector interface {
+	BuildMCPConfig(ctx context.Context, workspaceID pgtype.UUID) json.RawMessage
+}
 
 // CEREBRO-PATCH(handler-bool-helpers): cerebro per-runtime sandbox toggle uses
 // nullable bool semantics (nil = inherit env-var default).

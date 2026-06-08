@@ -29,6 +29,7 @@
     "@multica/cerebro-attachments": "workspace:*",
     "@multica/cerebro-budgets": "workspace:*",
     "@multica/cerebro-chat": "workspace:*",
+    "@multica/cerebro-connections": "workspace:*",
     "@multica/cerebro-credentials": "workspace:*",
     "@multica/cerebro-dashboard": "workspace:*",
     "@multica/cerebro-display-currency": "workspace:*",
