@@ -146,6 +146,9 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverFirtalGatewayModels(ctx)
 		})
+	// CEREBRO-PATCH(agent-models-openai-eu): TECH-2989 EU-compliant OpenAI models via api.eu.openai.com.
+	case openaiEUProvider:
+		return openaiEUStaticModels(), nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}
