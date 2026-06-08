@@ -1162,8 +1162,14 @@ export class ApiClient {
   }
 
   // CEREBRO-PATCH(cerebro-dashboard-all-messages-client): TECH-3093 all messages table
-  async getCerebroDashboardAllMessages<T = unknown>(range: "24h" | "7d" | "30d"): Promise<T> {
-    return this.fetch<T>(`/api/cerebro/dashboard/all-messages?range=${range}`);
+  async getCerebroDashboardAllMessages<T = unknown>(
+    range: "24h" | "7d" | "30d",
+    filter?: { actor_type?: string; actor_id?: string | null },
+  ): Promise<T> {
+    const params = new URLSearchParams({ range });
+    if (filter?.actor_type) params.set("actor_type", filter.actor_type);
+    if (filter?.actor_id) params.set("actor_id", filter.actor_id);
+    return this.fetch<T>(`/api/cerebro/dashboard/all-messages?${params.toString()}`);
   }
 
   // CEREBRO-PATCH(cerebro-tasks-client): JEH-900 cross-agent tasks list endpoint

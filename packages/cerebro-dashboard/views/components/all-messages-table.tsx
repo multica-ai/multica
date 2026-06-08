@@ -1,6 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { ExternalLink } from "lucide-react";
+import { useNavigation } from "@multica/views/navigation";
 import { allMessagesOptions } from "../../core/queries";
 import { useDashboardStore } from "../../core/store";
 import type { ActorMessage } from "../../core/api";
@@ -18,10 +20,12 @@ function formatTime(iso: string): string {
   }
 }
 
-export function AllMessagesTable({ wsId }: { wsId: string }) {
+export function AllMessagesTable({ wsId, workspaceSlug }: { wsId: string; workspaceSlug: string }) {
   const range = useDashboardStore((s) => s.range);
+  const scope = useDashboardStore((s) => s.scope);
+  const actorId = useDashboardStore((s) => s.actorId);
   const openMessagePanel = useDashboardStore((s) => s.openMessagePanel);
-  const { data, isLoading } = useQuery(allMessagesOptions(wsId, range));
+  const { data, isLoading } = useQuery(allMessagesOptions(wsId, range, scope, actorId));
 
   const messages = data?.messages ?? [];
 
@@ -51,11 +55,12 @@ export function AllMessagesTable({ wsId }: { wsId: string }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b text-left text-[11px] text-muted-foreground">
-                <th className="px-3 py-2 font-medium">Tidspunkt</th>
-                <th className="px-3 py-2 font-medium">Fra</th>
-                <th className="px-3 py-2 font-medium">Til (agent)</th>
+                <th className="px-3 py-2 font-medium">Timestamp</th>
+                <th className="px-3 py-2 font-medium">From</th>
+                <th className="px-3 py-2 font-medium">To (agent)</th>
                 <th className="px-3 py-2 font-medium">Issue</th>
-                <th className="px-3 py-2 font-medium">Besked</th>
+                <th className="px-3 py-2 font-medium">Message</th>
+                <th className="w-8 px-2 py-2" />
               </tr>
             </thead>
             <tbody>
@@ -63,6 +68,7 @@ export function AllMessagesTable({ wsId }: { wsId: string }) {
                 <MessageRow
                   key={msg.id}
                   msg={msg}
+                  workspaceSlug={workspaceSlug}
                   onSenderClick={() => {
                     if (msg.sender_id && msg.sender_name) {
                       openMessagePanel(msg.sender_id, msg.sender_name);
@@ -80,11 +86,15 @@ export function AllMessagesTable({ wsId }: { wsId: string }) {
 
 function MessageRow({
   msg,
+  workspaceSlug,
   onSenderClick,
 }: {
   msg: ActorMessage;
+  workspaceSlug: string;
   onSenderClick: () => void;
 }) {
+  const { push } = useNavigation();
+
   return (
     <tr className="border-b last:border-0 hover:bg-accent/30 transition-colors">
       <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">
@@ -115,6 +125,16 @@ function MessageRow({
       </td>
       <td className="px-3 py-2 max-w-xs">
         <p className="line-clamp-2 text-foreground/80">{msg.content}</p>
+      </td>
+      <td className="px-2 py-2">
+        <button
+          type="button"
+          title="Open full thread"
+          onClick={() => push(`/${workspaceSlug}/inbox?chat=${msg.session_id}`)}
+          className="rounded p-1 text-muted-foreground hover:text-foreground"
+        >
+          <ExternalLink className="size-3" />
+        </button>
       </td>
     </tr>
   );

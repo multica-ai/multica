@@ -8,8 +8,8 @@ export const dashboardKeys = {
     [...dashboardKeys.all(wsId), "overview", range, scope, actorId] as const,
   actorMessages: (wsId: string, actorId: string, range: TimeRange) =>
     [...dashboardKeys.all(wsId), "actor-messages", actorId, range] as const,
-  allMessages: (wsId: string, range: TimeRange) =>
-    [...dashboardKeys.all(wsId), "all-messages", range] as const,
+  allMessages: (wsId: string, range: TimeRange, scope: ActorScope, actorId: string | null) =>
+    [...dashboardKeys.all(wsId), "all-messages", range, scope, actorId] as const,
 };
 
 export function dashboardOverviewOptions(
@@ -36,10 +36,15 @@ export function actorMessagesOptions(wsId: string, actorId: string | null, range
   });
 }
 
-export function allMessagesOptions(wsId: string, range: TimeRange) {
+export function allMessagesOptions(
+  wsId: string,
+  range: TimeRange,
+  scope: ActorScope,
+  actorId: string | null,
+) {
   return queryOptions({
-    queryKey: dashboardKeys.allMessages(wsId, range),
-    queryFn: () => fetchAllMessages(range),
+    queryKey: dashboardKeys.allMessages(wsId, range, scope, actorId),
+    queryFn: () => fetchAllMessages(range, scope, actorId),
     enabled: !!wsId,
     staleTime: 30 * 1000,
   });

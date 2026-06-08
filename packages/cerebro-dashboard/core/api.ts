@@ -20,6 +20,7 @@ export interface DayBucket {
   issues_done: number;
   tasks_completed: number;
   tasks_failed: number;
+  messages_sent?: number; // CEREBRO-PATCH(cerebro-dashboard-messages-timeline): TECH-3093
 }
 
 export interface TopActor {
@@ -138,8 +139,16 @@ export async function fetchActorMessages(
   return api.getCerebroDashboardActorMessages<ActorMessagesResponse>(actorId, range);
 }
 
-export async function fetchAllMessages(range: TimeRange): Promise<AllMessagesResponse> {
-  return api.getCerebroDashboardAllMessages<AllMessagesResponse>(range);
+export async function fetchAllMessages(
+  range: TimeRange,
+  scope?: ActorScope,
+  actorId?: string | null,
+): Promise<AllMessagesResponse> {
+  const actorType = scope ? scopeToActorType(scope) : undefined;
+  return api.getCerebroDashboardAllMessages<AllMessagesResponse>(range, {
+    actor_type: actorType,
+    actor_id: actorType ? actorId : null,
+  });
 }
 
 function scopeToActorType(scope: ActorScope): ActorType | undefined {

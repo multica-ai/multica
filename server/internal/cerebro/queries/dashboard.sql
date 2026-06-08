@@ -362,6 +362,20 @@ WHERE cs.workspace_id = $1
 ORDER BY cm.created_at DESC
 LIMIT 50;
 
+-- name: DashboardCountMessagesByDay :many
+-- Count member chat messages per day for the timeline chart. TECH-3093.
+SELECT to_char(date_trunc('day', cm.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+       COUNT(*)::int AS count
+FROM chat_message cm
+JOIN chat_session cs ON cs.id = cm.chat_session_id
+JOIN "user" u ON u.id = cs.creator_id
+WHERE cs.workspace_id = $1
+  AND cm.role = 'user'
+  AND cm.created_at >= $2 AND cm.created_at < $3
+  AND ($4::text = '' OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid)))
+GROUP BY day
+ORDER BY day;
+
 -- name: DashboardAllChatMessages :many
 -- All member chat messages in the workspace for the period, newest first. TECH-3093.
 SELECT cm.id::uuid AS id,
@@ -388,5 +402,6 @@ LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
+  AND ($4::text = '' OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid)))
 ORDER BY cm.created_at DESC
 LIMIT 200;

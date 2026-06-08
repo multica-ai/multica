@@ -81,6 +81,7 @@ type dayBucket struct {
 	IssuesDone     int    `json:"issues_done"`
 	TasksCompleted int    `json:"tasks_completed"`
 	TasksFailed    int    `json:"tasks_failed"`
+	MessagesSent   int    `json:"messages_sent"` // CEREBRO-PATCH(cerebro-dashboard-messages-timeline): TECH-3093
 }
 
 type bucket struct {
@@ -440,6 +441,15 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 				timeline.buckets[i].TasksCompleted = int(row.Count)
 			case "failed":
 				timeline.buckets[i].TasksFailed = int(row.Count)
+			}
+		}
+		// CEREBRO-PATCH(cerebro-dashboard-messages-timeline): TECH-3093 messages per day
+		msgs, _ := h.Cerebro.DashboardCountMessagesByDay(c, cerebrodb.DashboardCountMessagesByDayParams{
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), Column4: actorType.String, Column5: actorID,
+		})
+		for _, row := range msgs {
+			if i, ok := timeline.idx[row.Day]; ok {
+				timeline.buckets[i].MessagesSent = int(row.Count)
 			}
 		}
 		mu.Lock()
@@ -873,11 +883,18 @@ func (h *Handler) AllMessages(w http.ResponseWriter, r *http.Request) {
 
 	rangeStr := r.URL.Query().Get("range")
 	spec := parseRange(rangeStr, time.Now())
+	// CEREBRO-PATCH(cerebro-dashboard-all-messages-filter): TECH-3093 actor filter
+	actorType, actorID, ok := parseActorFilter(w, r)
+	if !ok {
+		return
+	}
 
 	rows, err := h.Cerebro.DashboardAllChatMessages(r.Context(), cerebrodb.DashboardAllChatMessagesParams{
 		WorkspaceID: wsUUID,
 		CreatedAt:   ts(spec.periodStart),
 		CreatedAt_2: ts(spec.periodEnd),
+		Column4:     actorType.String,
+		Column5:     actorID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed")

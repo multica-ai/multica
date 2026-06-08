@@ -1,7 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { X, MessageSquare, Bot } from "lucide-react";
+import { X, MessageSquare, Bot, ExternalLink } from "lucide-react";
+import { useNavigation } from "@multica/views/navigation";
 import { useDashboardStore } from "../../core/store";
 import { actorMessagesOptions } from "../../core/queries";
 import type { ActorMessage } from "../../core/api";
@@ -18,7 +19,7 @@ function timeAgo(iso: string): string {
   }
 }
 
-export function ActorMessagePanel({ wsId }: { wsId: string }) {
+export function ActorMessagePanel({ wsId, workspaceSlug }: { wsId: string; workspaceSlug: string }) {
   const range = useDashboardStore((s) => s.range);
   const actorId = useDashboardStore((s) => s.messagePanelActorId);
   const actorName = useDashboardStore((s) => s.messagePanelActorName);
@@ -70,7 +71,7 @@ export function ActorMessagePanel({ wsId }: { wsId: string }) {
         ) : (
           <div className="space-y-2">
             {messages.map((msg) => (
-              <MessageRow key={msg.id} message={msg} />
+              <MessageRow key={msg.id} message={msg} workspaceSlug={workspaceSlug} />
             ))}
           </div>
         )}
@@ -79,7 +80,9 @@ export function ActorMessagePanel({ wsId }: { wsId: string }) {
   );
 }
 
-function MessageRow({ message }: { message: ActorMessage }) {
+function MessageRow({ message, workspaceSlug }: { message: ActorMessage; workspaceSlug: string }) {
+  const { push } = useNavigation();
+
   return (
     <div className="rounded-lg border bg-card p-3">
       <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -93,9 +96,19 @@ function MessageRow({ message }: { message: ActorMessage }) {
             </>
           )}
         </div>
-        <span className="shrink-0 text-[11px] text-muted-foreground">
-          {timeAgo(message.created_at)}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {timeAgo(message.created_at)}
+          </span>
+          <button
+            type="button"
+            title="Open full thread"
+            onClick={() => push(`/${workspaceSlug}/inbox?chat=${message.session_id}`)}
+            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+          >
+            <ExternalLink className="size-3" />
+          </button>
+        </div>
       </div>
       <p className="line-clamp-3 text-xs text-foreground/90">{message.content}</p>
     </div>

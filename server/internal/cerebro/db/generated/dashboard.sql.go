@@ -269,6 +269,7 @@ LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
+  AND ($4::text = '' OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid)))
 ORDER BY cm.created_at DESC
 LIMIT 200
 `
@@ -277,6 +278,8 @@ type DashboardAllChatMessagesParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	Column4     string             `json:"column_4"`
+	Column5     pgtype.UUID        `json:"column_5"`
 }
 
 type DashboardAllChatMessagesRow struct {
@@ -295,7 +298,13 @@ type DashboardAllChatMessagesRow struct {
 
 // All member chat messages in the workspace for the period, newest first. TECH-3093.
 func (q *Queries) DashboardAllChatMessages(ctx context.Context, arg DashboardAllChatMessagesParams) ([]DashboardAllChatMessagesRow, error) {
-	rows, err := q.db.Query(ctx, dashboardAllChatMessages, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	rows, err := q.db.Query(ctx, dashboardAllChatMessages,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.Column4,
+		arg.Column5,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -751,6 +760,60 @@ func (q *Queries) DashboardCountIssuesCreatedInPeriod(ctx context.Context, arg D
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const dashboardCountMessagesByDay = `-- name: DashboardCountMessagesByDay :many
+SELECT to_char(date_trunc('day', cm.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+       COUNT(*)::int AS count
+FROM chat_message cm
+JOIN chat_session cs ON cs.id = cm.chat_session_id
+JOIN "user" u ON u.id = cs.creator_id
+WHERE cs.workspace_id = $1
+  AND cm.role = 'user'
+  AND cm.created_at >= $2 AND cm.created_at < $3
+  AND ($4::text = '' OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid)))
+GROUP BY day
+ORDER BY day
+`
+
+type DashboardCountMessagesByDayParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	Column4     string             `json:"column_4"`
+	Column5     pgtype.UUID        `json:"column_5"`
+}
+
+type DashboardCountMessagesByDayRow struct {
+	Day   string `json:"day"`
+	Count int32  `json:"count"`
+}
+
+// Count member chat messages per day for the timeline chart. TECH-3093.
+func (q *Queries) DashboardCountMessagesByDay(ctx context.Context, arg DashboardCountMessagesByDayParams) ([]DashboardCountMessagesByDayRow, error) {
+	rows, err := q.db.Query(ctx, dashboardCountMessagesByDay,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.Column4,
+		arg.Column5,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardCountMessagesByDayRow{}
+	for rows.Next() {
+		var i DashboardCountMessagesByDayRow
+		if err := rows.Scan(&i.Day, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const dashboardCountTasksByDay = `-- name: DashboardCountTasksByDay :many

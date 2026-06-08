@@ -103,7 +103,7 @@ export function KpiCards({ data, isLoading, wsId, workspaceSlug, filter }: KpiCa
   const visibleCards =
     filter === "messages"
       ? cards.filter((c) =>
-          c.label === "Chat messages" || c.label === "Channel messages",
+          c.label === "Chat messages" || c.label === "Channel messages" || c.label === "Spend",
         )
       : cards;
 

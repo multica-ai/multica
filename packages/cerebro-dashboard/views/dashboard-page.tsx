@@ -17,6 +17,8 @@ import { MessageTracker } from "./components/message-tracker";
 import { MessageFlow } from "./components/message-flow";
 import { ActorMessagePanel } from "./components/actor-message-panel";
 import { AllMessagesTable } from "./components/all-messages-table";
+import { MessageActivityChart } from "./components/message-activity-chart";
+import { MessageSpendTable } from "./components/message-spend-table";
 import { DashboardTabBar } from "./components/dashboard-tab-bar";
 import { useDashboardStore } from "../core/store";
 import { dashboardOverviewOptions } from "../core/queries";
@@ -25,7 +27,7 @@ import { dashboardOverviewOptions } from "../core/queries";
 // version with a single /api/cerebro/dashboard overview query that drives
 // every panel: KPIs (with prior-period delta), per-day activity chart,
 // issues-by-status/priority donuts, top actors, activity feed, recent tasks.
-// TECH-3093: two tabs — Issues (original) and Messages (senders/recipients/flow).
+// TECH-3093: two tabs — Issues (original) and Messages (senders/recipients/flow/spend/chart).
 export function DashboardPage() {
   const enabled = useFeatureFlag("cerebro_dashboard");
   const workspace = useCurrentWorkspace();
@@ -80,14 +82,14 @@ export function DashboardPage() {
         </div>
       </PageHeader>
 
-      {tab === "messages" && <ActorMessagePanel wsId={workspace.id} />}
+      {tab === "messages" && <ActorMessagePanel wsId={workspace.id} workspaceSlug={workspace.slug} />}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-col gap-6 p-6">
           {overview.isError && (
             <p className="text-xs text-destructive">
-              Kunne ikke hente dashboard:{" "}
-              {overview.error instanceof Error ? overview.error.message : "ukendt fejl"}
+              Could not load dashboard:{" "}
+              {overview.error instanceof Error ? overview.error.message : "unknown error"}
             </p>
           )}
 
@@ -146,6 +148,11 @@ export function DashboardPage() {
                 />
               </section>
 
+              <section aria-label="Message activity" className="grid gap-3 lg:grid-cols-2">
+                <MessageActivityChart data={data} isLoading={overview.isLoading} />
+                <MessageSpendTable data={data} isLoading={overview.isLoading} />
+              </section>
+
               <section aria-label="Top senders and recipients">
                 <MessageTracker
                   data={data}
@@ -163,7 +170,7 @@ export function DashboardPage() {
               </section>
 
               <section aria-label="All messages">
-                <AllMessagesTable wsId={workspace.id} />
+                <AllMessagesTable wsId={workspace.id} workspaceSlug={workspace.slug} />
               </section>
             </>
           )}
