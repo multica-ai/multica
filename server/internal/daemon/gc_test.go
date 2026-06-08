@@ -687,6 +687,90 @@ func TestPruneWorktree_RemovesOnlyStaleAgentBranches(t *testing.T) {
 	}
 }
 
+// TestPruneWorktree_IgnoresLiteralAgentBranch ensures the GC pattern is scoped
+// to the `agent/` namespace. A repo whose only `agent`-shaped ref is the
+// literal `refs/heads/agent` (no slash) must be left untouched — the
+// `for-each-ref` query is narrowed to `refs/heads/agent/` for that reason.
+func TestPruneWorktree_IgnoresLiteralAgentBranch(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+	runGitForGC(t, "", "-C", barePath, "branch", "agent", "HEAD")
+
+	d.pruneWorktree(barePath)
+
+	if !gitRefExists(t, barePath, "refs/heads/agent") {
+		t.Fatal("expected literal `agent` branch outside the daemon namespace to be preserved")
+	}
+}
+
+// TestPruneWorktree_SkipsMaintenanceWhenNothingDeleted pins the gate that
+// keeps the heavy `gc --prune` step from running on every GC tick. Uses an
+// unreachable loose blob backdated past the prune horizon as a sentinel: it
+// survives when no agent branch was deleted (no maintenance), and disappears
+// once a stale agent branch is reaped (maintenance ran).
+func TestPruneWorktree_SkipsMaintenanceWhenNothingDeleted(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+
+	// Park an active agent worktree so the scan has something to filter, and
+	// to make sure pruneWorktree exercises the full code path.
+	activeWorktree := filepath.Join(t.TempDir(), "active")
+	runGitForGC(t, "", "-C", barePath, "worktree", "add", "-b", "agent/live/12345678", activeWorktree, "HEAD")
+
+	sentinelPath := writeOldLooseBlob(t, barePath, "sentinel-content", 60*24*time.Hour)
+
+	// No stale agent branch → no deletion → no `gc --prune`. The sentinel
+	// blob must survive.
+	d.pruneWorktree(barePath)
+	if _, err := os.Stat(sentinelPath); err != nil {
+		t.Fatalf("expected sentinel blob to survive when nothing was deleted: %v", err)
+	}
+
+	// Introduce a stale agent branch → deletion happens → maintenance runs →
+	// `gc --prune=30.days` reaps the sentinel blob.
+	runGitForGC(t, "", "-C", barePath, "branch", "agent/stale/87654321", "HEAD")
+	d.pruneWorktree(barePath)
+	if _, err := os.Stat(sentinelPath); !os.IsNotExist(err) {
+		t.Fatalf("expected sentinel blob to be pruned after maintenance ran, stat err=%v", err)
+	}
+}
+
+// writeOldLooseBlob writes a dangling loose-object blob to the bare repo and
+// backdates its mtime so `git gc --prune=30.days` will consider it prunable.
+// Returns the absolute path to the loose object on disk.
+func writeOldLooseBlob(t *testing.T, barePath, content string, age time.Duration) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", barePath, "hash-object", "-w", "--stdin")
+	cmd.Stdin = strings.NewReader(content)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("hash-object failed: %v: %s", err, out)
+	}
+	sha := strings.TrimSpace(string(out))
+	if len(sha) < 4 {
+		t.Fatalf("unexpected sha output: %q", sha)
+	}
+	loose := filepath.Join(barePath, "objects", sha[:2], sha[2:])
+	if _, err := os.Stat(loose); err != nil {
+		t.Fatalf("expected loose object at %s: %v", loose, err)
+	}
+	old := time.Now().Add(-age)
+	if err := os.Chtimes(loose, old, old); err != nil {
+		t.Fatalf("chtimes failed: %v", err)
+	}
+	return loose
+}
+
 func TestPruneWorktree_SerializesWithCreateWorktree(t *testing.T) {
 	t.Parallel()
 

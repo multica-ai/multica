@@ -564,7 +564,10 @@ func dirSize(root string) int64 {
 	return total
 }
 
-const gitCmdTimeout = 30 * time.Second
+const (
+	gitCmdTimeout         = 30 * time.Second
+	gitMaintenanceTimeout = 10 * time.Minute
+)
 
 // pruneRepoWorktrees runs `git worktree prune` on all bare repos in the cache.
 func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
@@ -648,19 +651,27 @@ func (d *Daemon) pruneWorktreeLocked(barePath string) {
 		}
 		deleted++
 	}
-	if deleted > 0 {
-		d.logger.Info("gc: deleted stale agent branches", "repo", barePath, "count", deleted)
+	if deleted == 0 {
+		return
 	}
+	d.logger.Info("gc: deleted stale agent branches", "repo", barePath, "count", deleted)
 
-	for _, args := range [][]string{
-		{"gc", "--auto"},
-		{"reflog", "expire", "--expire=30.days", "--all"},
-		{"gc", "--prune=30.days"},
-	} {
-		if out, err := runGitGCCommand(barePath, args...); err != nil {
+	// Heavier maintenance only runs when we actually removed refs, so we don't
+	// turn every GC tick into a full `git gc --prune` on every cached repo. The
+	// prune step gets its own longer timeout because it can take minutes on a
+	// real bare cache; under the shared 30s budget it would be killed mid-run.
+	maintenance := []struct {
+		args    []string
+		timeout time.Duration
+	}{
+		{args: []string{"reflog", "expire", "--expire=30.days", "--all"}, timeout: gitCmdTimeout},
+		{args: []string{"gc", "--prune=30.days"}, timeout: gitMaintenanceTimeout},
+	}
+	for _, step := range maintenance {
+		if out, err := runGitCommand(barePath, step.timeout, step.args...); err != nil {
 			d.logger.Warn("gc: git maintenance failed",
 				"repo", barePath,
-				"command", strings.Join(args, " "),
+				"command", strings.Join(step.args, " "),
 				"output", out,
 				"error", err,
 			)
@@ -669,7 +680,11 @@ func (d *Daemon) pruneWorktreeLocked(barePath string) {
 }
 
 func runGitGCCommand(barePath string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
+	return runGitCommand(barePath, gitCmdTimeout, args...)
+}
+
+func runGitCommand(barePath string, timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmdArgs := append([]string{"-C", barePath}, args...)
@@ -699,7 +714,10 @@ func agentWorktreeBranches(barePath string) (map[string]struct{}, error) {
 }
 
 func listAgentBranches(barePath string) ([]string, error) {
-	out, err := runGitGCCommand(barePath, "for-each-ref", "--format=%(refname:short)", "refs/heads/agent")
+	// Trailing slash narrows the pattern to the `agent/` namespace only. Without
+	// it, `for-each-ref` would also return a branch literally named `agent`,
+	// which `agentWorktreeBranches` ignores — that branch would then be deleted.
+	out, err := runGitGCCommand(barePath, "for-each-ref", "--format=%(refname:short)", "refs/heads/agent/")
 	if err != nil {
 		return nil, err
 	}
