@@ -318,6 +318,11 @@ func textToPgText(s string) pgtype.Text {
 // CancelRun cancels all active node_runs and marks the run as cancelled.
 func (s *WorkflowService) CancelRun(ctx context.Context, runID pgtype.UUID) error {
 	return s.runInTx(ctx, func(qtx *db.Queries) error {
+		run, err := qtx.GetWorkflowRun(ctx, runID)
+		if err != nil {
+			return fmt.Errorf("get workflow run: %w", err)
+		}
+
 		nodeRuns, err := qtx.ListWorkflowNodeRunsByRun(ctx, runID)
 		if err != nil {
 			return fmt.Errorf("list node runs: %w", err)
@@ -329,6 +334,28 @@ func (s *WorkflowService) CancelRun(ctx context.Context, runID pgtype.UUID) erro
 					Status: NodeRunStatusCancelled,
 				}); err != nil {
 					return fmt.Errorf("cancel node run: %w", err)
+				}
+			}
+			// Cancel the sub-issue created for this node run.
+			subIssue, err := qtx.GetIssueByOrigin(ctx, db.GetIssueByOriginParams{
+				WorkspaceID: run.WorkspaceID,
+				OriginType:  pgtype.Text{String: "workflow", Valid: true},
+				OriginID:    nr.ID,
+			})
+			if err != nil {
+				continue // sub-issue may not exist yet; not an error
+			}
+			if subIssue.Status != "cancelled" && subIssue.Status != "done" {
+				if _, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+					ID:          subIssue.ID,
+					Status:      "cancelled",
+					WorkspaceID: run.WorkspaceID,
+				}); err != nil {
+					return fmt.Errorf("cancel sub-issue %s: %w", util.UUIDToString(subIssue.ID), err)
+				}
+				// Cancel any active agent tasks for this sub-issue.
+				if _, err := qtx.CancelAgentTasksByIssue(ctx, subIssue.ID); err != nil {
+					slog.Warn("failed to cancel agent tasks for sub-issue", "issue_id", util.UUIDToString(subIssue.ID), "error", err)
 				}
 			}
 		}

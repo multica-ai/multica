@@ -758,6 +758,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Track workflow run state from the DAG viewer (source of truth for running status).
+  const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
+
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
   // be notified directly — instead, the detail page observes its own cache
@@ -1244,7 +1247,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
-            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
+            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} isWorkflowRunning={isWorkflowRunning} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker
@@ -1840,6 +1843,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 runId={issue.workflow_run_id}
                 wsId={wsId}
                 parentIssueId={issue.id}
+                onRunningChange={setIsWorkflowRunning}
               />
             </div>
           )}

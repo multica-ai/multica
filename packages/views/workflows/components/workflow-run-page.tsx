@@ -15,6 +15,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { useT } from "../../i18n";
 import { DAGCanvas } from "./dag-canvas";
+import { ReactFlowProvider } from "@xyflow/react";
 import { NodeRunCard } from "./node-run-card";
 import type { WorkflowRunStatus, NodeRunStatus } from "@multica/core/types";
 
@@ -122,12 +123,14 @@ export function WorkflowRunPage({ workflowId, runId }: WorkflowRunPageProps) {
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 bg-muted/20">
           {nodes.length > 0 ? (
-            <DAGCanvas
-              nodes={nodes}
-              edges={edges}
-              nodeStatusColors={nodeStatusColors}
-              nodeStatuses={nodeStatuses}
-            />
+            <ReactFlowProvider>
+              <DAGCanvas
+                nodes={nodes}
+                edges={edges}
+                nodeStatusColors={nodeStatusColors}
+                nodeStatuses={nodeStatuses}
+              />
+            </ReactFlowProvider>
           ) : (
             <div className="flex items-center justify-center h-full">
               <p className="text-sm text-muted-foreground">{t(($) => $.detail.no_nodes)}</p>

@@ -387,7 +387,10 @@
       "agents_group": "Agents",
       "squads_group": "Squads",
       "workflows_group": "Workflows",
-      "builtin_label": "Built-in"
+      "builtin_label": "Built-in",
+      "template_label": "Template",
+      "no_runtime_available": "No online runtime available to execute workflow",
+      "workflow_running": "A workflow run is in progress; cannot change assignee"
     },
     "start_date": {
       "trigger_label": "Start date",

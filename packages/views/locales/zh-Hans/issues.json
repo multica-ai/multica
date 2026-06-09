@@ -377,7 +377,10 @@
       "agents_group": "智能体",
       "squads_group": "小队",
       "workflows_group": "工作流",
-      "builtin_label": "内置"
+      "builtin_label": "内置",
+      "template_label": "模板",
+      "no_runtime_available": "没有可用的在线运行时来执行工作流",
+      "workflow_running": "工作流正在运行中，无法切换负责人"
     },
     "start_date": {
       "trigger_label": "开始日期",

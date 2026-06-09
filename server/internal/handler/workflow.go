@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -689,6 +690,41 @@ func (h *Handler) DeleteWorkflowEdge(w http.ResponseWriter, r *http.Request) {
 
 // ── Template ───────────────────────────────────────────────────────────────────
 
+// validateNodeAgentIsBuiltin checks that a workflow node's worker or critic
+// agent reference is a built-in agent (globally accessible across workspaces).
+// Non-builtin agents would show as "Unknown Agent" in cloned templates.
+func (h *Handler) validateNodeAgentIsBuiltin(ctx context.Context, agentType string, agentID pgtype.UUID, nodeTitle string, role string) error {
+	switch agentType {
+	case "agent":
+		if !agentID.Valid {
+			return fmt.Errorf("node %q %s agent not set", nodeTitle, role)
+		}
+		agent, err := h.Queries.GetAgent(ctx, agentID)
+		if err != nil {
+			return fmt.Errorf("node %q %s agent not found", nodeTitle, role)
+		}
+		if !agent.IsBuiltin {
+			return fmt.Errorf("node %q %s agent %q is not a built-in agent — only built-in agents are allowed in templates", nodeTitle, role, agent.Name)
+		}
+	case "squad":
+		if !agentID.Valid {
+			return fmt.Errorf("node %q %s squad not set", nodeTitle, role)
+		}
+		squad, err := h.Queries.GetSquad(ctx, agentID)
+		if err != nil {
+			return fmt.Errorf("node %q %s squad not found", nodeTitle, role)
+		}
+		leader, err := h.Queries.GetAgent(ctx, squad.LeaderID)
+		if err != nil {
+			return fmt.Errorf("node %q %s squad leader not found", nodeTitle, role)
+		}
+		if !leader.IsBuiltin {
+			return fmt.Errorf("node %q %s squad %q leader %q is not a built-in agent — only built-in agents are allowed in templates", nodeTitle, role, squad.Name, leader.Name)
+		}
+	}
+	return nil
+}
+
 // ToggleWorkflowTemplate toggles a workflow's is_template flag.
 // Only members with can_manage_workflows can toggle.
 func (h *Handler) ToggleWorkflowTemplate(w http.ResponseWriter, r *http.Request) {
@@ -719,6 +755,27 @@ func (h *Handler) ToggleWorkflowTemplate(w http.ResponseWriter, r *http.Request)
 	if req.IsTemplate && wf.Status != "active" {
 		writeError(w, http.StatusBadRequest, "workflow must be active to set as template")
 		return
+	}
+
+	// If setting as template, validate all worker/critic agents are built-in.
+	// Non-builtin agents are workspace-scoped and would show as "Unknown Agent"
+	// when the template is cloned to another workspace.
+	if req.IsTemplate {
+		nodes, err := h.Queries.ListWorkflowNodes(r.Context(), wf.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list workflow nodes")
+			return
+		}
+		for _, node := range nodes {
+			if err := h.validateNodeAgentIsBuiltin(r.Context(), node.WorkerType, node.WorkerID, node.Title, "worker"); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if err := h.validateNodeAgentIsBuiltin(r.Context(), node.CriticType, node.CriticID, node.Title, "critic"); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 	}
 
 	updated, err := h.Queries.SetWorkflowTemplate(r.Context(), db.SetWorkflowTemplateParams{

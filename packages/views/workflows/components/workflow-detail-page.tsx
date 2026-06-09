@@ -327,14 +327,23 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               onClick={async () => {
                 const newIsTemplate = !workflow?.is_template;
                 if (!confirm(newIsTemplate ? t(($) => $.detail.template_confirm_set) : t(($) => $.detail.template_confirm_unset))) return;
-                await toggleTemplate.mutateAsync({
-                  id: id!,
-                  isTemplate: newIsTemplate,
-                });
+                try {
+                  await toggleTemplate.mutateAsync({
+                    id: id!,
+                    isTemplate: newIsTemplate,
+                  });
+                  toast.success(newIsTemplate ? t(($) => $.detail.toast_template_set) : t(($) => $.detail.toast_template_unset));
+                } catch (err: any) {
+                  toast.error(err?.message || t(($) => $.detail.toast_template_toggle_failed));
+                }
               }}
               disabled={toggleTemplate.isPending}
             >
-              {workflow?.is_template ? t(($) => $.detail.unset_template) : t(($) => $.detail.set_as_template)}
+              {toggleTemplate.isPending
+                ? "..."
+                : workflow?.is_template
+                  ? t(($) => $.detail.unset_template)
+                  : t(($) => $.detail.set_as_template)}
             </Button>
           )}
           <Button
