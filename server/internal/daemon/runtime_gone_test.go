@@ -126,6 +126,58 @@ func TestRemoveStaleRuntime_PreservesWorkspaceStatePointer(t *testing.T) {
 	}
 }
 
+func TestRegisterRuntimesForWorkspaceUsesWujieClawBrandName(t *testing.T) {
+	// Not t.Parallel: stubAgentVersion mutates package-level vars used by
+	// registerRuntimesForWorkspace.
+	var gotName string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/register" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		var req struct {
+			Runtimes []struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+			} `json:"runtimes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode register request: %v", err)
+		}
+		if len(req.Runtimes) != 1 {
+			t.Fatalf("got %d runtimes, want 1", len(req.Runtimes))
+		}
+		if req.Runtimes[0].Type != "wujieclaw" {
+			t.Fatalf("runtime type = %q, want wujieclaw", req.Runtimes[0].Type)
+		}
+		gotName = req.Runtimes[0].Name
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(RegisterResponse{
+			Runtimes: []Runtime{{ID: "rt-wujieclaw", Name: gotName, Provider: "wujieclaw", Status: "online"}},
+			Repos:    []RepoData{},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	d := freshDaemon(srv.URL)
+	d.cfg = Config{
+		DaemonID:   "daemon-wujieclaw-brand",
+		DeviceName: "qa-host",
+		Agents: map[string]AgentEntry{
+			"wujieclaw": {Path: "/usr/bin/true"},
+		},
+	}
+	t.Cleanup(stubAgentVersion(t))
+
+	if _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if gotName != "WujieClaw (qa-host)" {
+		t.Fatalf("registered name = %q, want WujieClaw (qa-host)", gotName)
+	}
+}
+
 // handleRuntimeGoneFixture wires up a Daemon against a fake server that
 // answers register/recover-orphans. registerCount is incremented exactly
 // once per /api/daemon/register call so tests can assert on coalescing.

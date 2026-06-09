@@ -31,7 +31,12 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { formatLastSeen, isSelfHealingRuntime } from "../utils";
+import {
+  formatLastSeen,
+  formatProviderName,
+  formatRuntimeName,
+  isSelfHealingRuntime,
+} from "../utils";
 import { HealthBadge, providerLabel } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
@@ -128,6 +133,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
 
   const daemonShort = shortDaemonId(runtime.daemon_id);
   const lastSeen = formatLastSeen(runtime.last_seen_at);
+  const runtimeName = formatRuntimeName(runtime.name, runtime.provider);
 
   return (
     <div className="flex h-full flex-col">
@@ -135,7 +141,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         segments={[{ href: paths.runtimes(), label: t(($) => $.page.title) }]}
         leaf={
           <span className="truncate font-mono text-xs text-foreground">
-            {runtime.name}
+            {runtimeName}
           </span>
         }
         actions={
@@ -158,6 +164,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           <div className="min-w-0 space-y-5">
             <HeroCard
               runtime={runtime}
+              runtimeName={runtimeName}
               health={health}
               lastSeen={lastSeen}
               ownerMember={ownerMember}
@@ -215,6 +222,7 @@ function parseDeviceInfo(raw: string): { hostname: string; runtime?: string } {
 
 function HeroCard({
   runtime,
+  runtimeName,
   health,
   lastSeen,
   ownerMember,
@@ -222,6 +230,7 @@ function HeroCard({
   daemonShort,
 }: {
   runtime: AgentRuntime;
+  runtimeName: string;
   health: ReturnType<typeof deriveRuntimeHealth>;
   lastSeen: string;
   ownerMember: MemberWithUser | null;
@@ -243,7 +252,7 @@ function HeroCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="truncate text-base font-semibold tracking-tight">
-              {runtime.name}
+              {runtimeName}
             </h2>
             <HealthBadge health={health} />
             <span className="text-xs text-muted-foreground">
@@ -290,7 +299,9 @@ function HeroCard({
         </Fact>
         <Fact label="Runtime">
           <span className="block truncate text-sm">
-            {device?.runtime ?? providerLabel(runtime.provider)}
+            {device?.runtime ?? (
+              <span>{formatProviderName(runtime.provider)}</span>
+            )}
           </span>
         </Fact>
       </dl>

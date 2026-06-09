@@ -482,6 +482,41 @@ func TestLoadConfigDeepseekFallsBackToLegacyWrapper(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDetectsWujieClaw(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := t.TempDir()
+	wujieclawPath := filepath.Join(binDir, "wujieclaw")
+	if err := os.WriteFile(wujieclawPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake wujieclaw: %v", err)
+	}
+
+	t.Setenv("PATH", binDir)
+	t.Setenv("SHELL", "")
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
+	t.Setenv("MULTICA_WUJECLAW_MODEL", "sub2api")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["wujieclaw"]
+	if !ok {
+		t.Fatalf("wujieclaw runtime missing from agents: %+v", cfg.Agents)
+	}
+	if entry.Path != "wujieclaw" {
+		t.Fatalf("wujieclaw path = %q, want wujieclaw", entry.Path)
+	}
+	if entry.Model != "sub2api" {
+		t.Fatalf("wujieclaw model = %q, want sub2api", entry.Model)
+	}
+}
+
 func TestLoadConfigDetectsQoderclicnFromPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell not available on Windows")
@@ -868,6 +903,7 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 		"MULTICA_CLAUDE_PATH",
 		"MULTICA_OPENCODE_PATH",
 		"MULTICA_OPENCLAW_PATH",
+		"MULTICA_WUJECLAW_PATH",
 		"MULTICA_HERMES_PATH",
 		"MULTICA_GEMINI_PATH",
 		"MULTICA_PI_PATH",

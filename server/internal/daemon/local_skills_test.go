@@ -483,6 +483,41 @@ func TestLoadRuntimeLocalSkillBundle_OpenClawPrefersWorkspaceSkills(t *testing.T
 	}
 }
 
+func TestListRuntimeLocalSkills_WujieClaw(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".wujieai", "skills"), "legacy", map[string]string{
+		"SKILL.md": "# Legacy\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".wujieai", "workspace", "skills"), "planner", map[string]string{
+		"SKILL.md": "# Planner\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("wujieclaw")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("wujieclaw should be supported")
+	}
+	if len(skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(skills))
+	}
+	sourcePaths := make(map[string]bool, len(skills))
+	for _, skill := range skills {
+		sourcePaths[skill.SourcePath] = true
+	}
+	for _, want := range []string{
+		"~/.wujieai/workspace/skills/planner",
+		"~/.wujieai/skills/legacy",
+	} {
+		if !sourcePaths[want] {
+			t.Fatalf("missing source_path %q in %+v", want, skills)
+		}
+	}
+}
+
 func TestLoadRuntimeLocalSkillBundle_Cursor(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

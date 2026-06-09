@@ -1044,6 +1044,31 @@ func TestWriteContextFilesOpenclawNativeSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesWujieClawNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "wujieclaw-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Go Conventions",
+				Content: "Follow Go conventions.",
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "wujieclaw", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "go-conventions", "SKILL.md")); err != nil {
+		t.Fatalf("wujieclaw native skill path missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error(".agent_context/skills/ MUST NOT be written for wujieclaw")
+	}
+}
+
 func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1340,7 +1365,7 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 	t.Cleanup(func() { runtimeGOOS = saved })
 
 	for _, host := range []string{"linux", "darwin", "windows"} {
-		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "gemini"} {
+		for _, provider := range []string{"claude", "opencode", "openclaw", "wujieclaw", "hermes", "kimi", "kiro", "cursor", "gemini"} {
 			t.Run(provider+"/"+host, func(t *testing.T) {
 				runtimeGOOS = host
 				dir := t.TempDir()

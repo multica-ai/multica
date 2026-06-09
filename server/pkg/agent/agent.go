@@ -1,6 +1,6 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, OpenClaw,
-// Hermes, Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek, Antigravity,
+// WujieClaw, Hermes, Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek, Antigravity,
 // qoderclicn, mmx). It mirrors the happy-cli AgentBackend pattern, translated to
 // idiomatic Go.
 package agent
@@ -168,13 +168,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, cbc, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, deepseek, agy, qoderclicn, mmx)
+	ExecutablePath string            // path to CLI binary (claude, cbc, codex, copilot, opencode, openclaw, wujieclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, deepseek, agy, qoderclicn, mmx)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity", "qoderclicn", "mmx".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "wujieclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity", "qoderclicn", "mmx".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -192,6 +192,11 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
 	case "openclaw":
+		return &openclawBackend{cfg: cfg}, nil
+	case "wujieclaw":
+		if cfg.ExecutablePath == "" {
+			cfg.ExecutablePath = "wujieclaw"
+		}
 		return &openclawBackend{cfg: cfg}, nil
 	case "hermes":
 		return &hermesBackend{cfg: cfg}, nil
@@ -214,14 +219,14 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "mmx":
 		return &mmxBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity, qoderclicn, mmx)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, wujieclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity, qoderclicn, mmx)", agentType)
 	}
 }
 
 // SupportedBackends returns the set of agent types accepted by New.
 func SupportedBackends() []string {
 	return []string{
-		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw",
+		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "wujieclaw",
 		"hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity", "qoderclicn", "mmx",
 	}
 }
@@ -255,6 +260,7 @@ var launchHeaders = map[string]string{
 	"kimi":         "kimi acp",
 	"kiro":         "kiro-cli acp",
 	"openclaw":     "openclaw agent (json)",
+	"wujieclaw":    "wujieclaw agent (json)",
 	"opencode":     "opencode run (json)",
 	"pi":           "pi (json mode)",
 	"qoderclicn":   "qoderclicn (stream-json)",

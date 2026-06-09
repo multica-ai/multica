@@ -91,6 +91,11 @@ func localSkillRootsForProvider(provider string) ([]string, bool, error) {
 			filepath.Join(home, ".openclaw", "workspace", "skills"),
 			filepath.Join(home, ".openclaw", "skills"),
 		}, true, nil
+	case "wujieclaw":
+		return []string{
+			filepath.Join(home, ".wujieai", "workspace", "skills"),
+			filepath.Join(home, ".wujieai", "skills"),
+		}, true, nil
 	case "pi":
 		return []string{filepath.Join(home, ".pi", "agent", "skills")}, true, nil
 	case "cursor":

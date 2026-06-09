@@ -56,6 +56,10 @@ var capabilityRegistry = map[string]Capability{
 		ResumeSession:    true,
 		StructuredOutput: true,
 	},
+	"wujieclaw": {
+		ResumeSession:    true,
+		StructuredOutput: true,
+	},
 	"hermes": {
 		ResumeSession:    true,
 		StructuredOutput: true,

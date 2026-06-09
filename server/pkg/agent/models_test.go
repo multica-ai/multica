@@ -471,6 +471,30 @@ func TestParseOpenclawAgentsJSONArray(t *testing.T) {
 	}
 }
 
+func TestParseOpenclawAgentsJSONUsesRequestedProvider(t *testing.T) {
+	input := []byte(`[{"id": "sub2api", "name": "Sub2API OPS", "model": "anthropic/claude-sonnet-4-6"}]`)
+	models, ok := parseOpenclawAgentsJSON(input, "wujieclaw")
+	if !ok {
+		t.Fatal("expected parseOpenclawAgentsJSON to accept array")
+	}
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want 1", len(models))
+	}
+	if models[0].Provider != "wujieclaw" {
+		t.Errorf("Provider = %q, want wujieclaw", models[0].Provider)
+	}
+}
+
+func TestParseOpenclawAgentsTextUsesRequestedProvider(t *testing.T) {
+	models := parseOpenclawAgents("deepseek-v4 deepseek-v4\n", "wujieclaw")
+	if len(models) != 1 {
+		t.Fatalf("got %d models, want 1", len(models))
+	}
+	if models[0].Provider != "wujieclaw" {
+		t.Errorf("Provider = %q, want wujieclaw", models[0].Provider)
+	}
+}
+
 func TestParseOpenclawAgentsJSONWrapped(t *testing.T) {
 	input := []byte(`{"agents": [{"name": "foo", "model": "bar"}]}`)
 	models, ok := parseOpenclawAgentsJSON(input)
