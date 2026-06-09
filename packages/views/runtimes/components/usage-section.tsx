@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { useNavigation } from "../../navigation";
 import { BarChart3, ChevronRight, AlertCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -59,7 +60,7 @@ type WhenTab = "daily" | "weekly" | "heatmap";
 // Default time range per dimension. Switching dimensions resets the period
 // to its default rather than keeping a now-invalid value.
 const DEFAULT_DAYS_BY_DIM: Record<Exclude<WhenTab, "heatmap">, TimeRange> = {
-  daily: 30,
+  daily: 7,
   weekly: 90,
 };
 
@@ -137,8 +138,77 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   const { data: usage = [], isLoading: loading } = useQuery(
     runtimeUsageOptions(runtimeId, 180, tz),
   );
-  const [dim, setDim] = useState<Exclude<WhenTab, "heatmap">>("daily");
-  const [days, setDays] = useState<TimeRange>(30);
+  const { searchParams, replace, pathname } = useNavigation();
+  const [dim, setDimState] = useState<Exclude<WhenTab, "heatmap">>("daily");
+  const [days, setDaysState] = useState<TimeRange>(7);
+
+  // Sync state from URL
+  useEffect(() => {
+    const urlRange = searchParams.get("range");
+    let nextDays: TimeRange = 7;
+    if (urlRange) {
+      const match = urlRange.match(/^(\d+)d$/);
+      if (match) {
+        const d = parseInt(match[1]!, 10);
+        const allowed = TIME_RANGES.map((r) => r.days);
+        if (allowed.includes(d as TimeRange)) {
+          nextDays = d as TimeRange;
+        }
+      }
+    }
+
+    const urlGran = searchParams.get("granularity");
+    let nextDim: Exclude<WhenTab, "heatmap"> = "daily";
+    if (urlGran === "day") {
+      nextDim = "daily";
+    } else if (urlGran === "week") {
+      nextDim = "weekly";
+    }
+
+    if (nextDays !== days) {
+      setDaysState(nextDays);
+    }
+    if (nextDim !== dim) {
+      setDimState(nextDim);
+    }
+  }, [searchParams, days, dim]);
+
+  // Fill in default URL parameters if missing
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    let changed = false;
+    if (!params.has("range")) {
+      params.set("range", "7d");
+      changed = true;
+    }
+    if (!params.has("granularity")) {
+      params.set("granularity", "day");
+      changed = true;
+    }
+    if (changed) {
+      replace(`${pathname}?${params.toString()}`);
+    }
+  }, [searchParams, pathname, replace]);
+
+  const allowedRanges = rangesForDim(dim);
+  const handleDimChange = (next: Exclude<WhenTab, "heatmap">) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("granularity", next === "daily" ? "day" : "week");
+    const stillAllowed = (rangesForDim(next) as readonly { days: number }[]).some(
+      (r) => r.days === days,
+    );
+    if (!stillAllowed) {
+      params.set("range", `${DEFAULT_DAYS_BY_DIM[next]}d`);
+    }
+    replace(`${pathname}?${params.toString()}`);
+  };
+
+  const handleDaysChange = (nextDays: TimeRange) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("range", `${nextDays}d`);
+    replace(`${pathname}?${params.toString()}`);
+  };
+
   // Subscribe so the KPI cards (which call estimateCost at render-time, not
   // through a memo) re-evaluate when the user saves a custom rate. The
   // aggregate sub-components (WhenChart, CostByBlock, ActivityHeatmap) each
@@ -155,16 +225,6 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   // boundary the backend used when bucketing rows.
   const { filtered, prevFiltered } = sliceWindow(usage, days, tz);
 
-  const allowedRanges = rangesForDim(dim);
-  const handleDimChange = (next: Exclude<WhenTab, "heatmap">) => {
-    setDim(next);
-    const stillAllowed = (rangesForDim(next) as readonly { days: number }[]).some(
-      (r) => r.days === days,
-    );
-    if (!stillAllowed) {
-      setDays(DEFAULT_DAYS_BY_DIM[next]);
-    }
-  };
   const totals = computeTotals(filtered);
   const prevTotals = computeTotals(prevFiltered);
 
@@ -204,7 +264,7 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
           </span>
           <Segmented
             value={days}
-            onChange={setDays}
+            onChange={handleDaysChange}
             options={allowedRanges.map((r) => ({
               label: r.label,
               value: r.days,
