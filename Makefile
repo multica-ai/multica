@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev dev-cli server daemon cli multica build build-cli test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-build-preview selfhost-preview-clean selfhost-stop
+.PHONY: help makehelp dev dev-cli server daemon cli multica build build-cli test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-build-preview selfhost-preview-clean selfhost-stop sync-install-scripts
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -322,3 +322,34 @@ sqlc: ## Regenerate sqlc code
 
 clean: ## Remove generated server binaries and temp files
 	rm -rf server/bin server/tmp
+
+# Install scripts sync
+##@ Install scripts
+
+EMBED_INSTALL := server/internal/handler/install_scripts/install.sh
+SCRIPTS_INSTALL := scripts/install.sh
+
+sync-install-scripts: ## Verify both install.sh files share required invariants (login flow, default server)
+	@echo "==> Checking install.sh invariants..."
+	@errors=0; \
+	for f in $(EMBED_INSTALL) $(SCRIPTS_INSTALL); do \
+		if ! grep -q 'login_and_start_daemon' "$$f"; then \
+			echo "  FAIL: $$f is missing login_and_start_daemon()"; \
+			errors=$$((errors + 1)); \
+		fi; \
+		if ! grep -q 'multica\.wujieai\.com' "$$f"; then \
+			echo "  FAIL: $$f is missing multica.wujieai.com default"; \
+			errors=$$((errors + 1)); \
+		fi; \
+	done; \
+	if grep -qE '(github\.com/multica-ai|multica-ai/tap)' $(EMBED_INSTALL); then \
+		echo "  FAIL: $(EMBED_INSTALL) must not reference official GitHub sources (multica-ai)"; \
+		echo "        The embed version must use OBS CDN for downloads, not GitHub/Homebrew"; \
+		errors=$$((errors + 1)); \
+	fi; \
+	if [ $$errors -gt 0 ]; then \
+		echo ""; \
+		echo "  $$errors invariant(s) violated. Fix the issues above."; \
+		exit 1; \
+	fi; \
+	echo "  OK: both install.sh files pass invariant checks"
