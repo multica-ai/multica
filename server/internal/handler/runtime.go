@@ -34,6 +34,8 @@ type AgentRuntimeResponse struct {
 	// 083 and canUseRuntimeForAgent.
 	Visibility string  `json:"visibility"`
 	LastSeenAt *string `json:"last_seen_at"`
+	HoldUntil  *string `json:"hold_until,omitempty"`
+	HoldReason *string `json:"hold_reason,omitempty"`
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
 }
@@ -61,6 +63,8 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		Visibility:   rt.Visibility,
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
+		HoldUntil:    timestampToPtr(rt.HoldUntil),
+		HoldReason:   textToPtr(rt.HoldReason),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
 	}
@@ -922,4 +926,54 @@ func activeAgentSetMatches(current []db.Agent, expected map[string]struct{}) boo
 		}
 	}
 	return true
+}
+
+// ResumeRuntime handles POST /api/runtimes/:runtimeId/resume. Clears any
+// active hold on the runtime so tasks can be dispatched immediately,
+// bypassing the automatic reset time.
+func (h *Handler) ResumeRuntime(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	wsID := uuidToString(rt.WorkspaceID)
+	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
+	if !ok {
+		return
+	}
+	if !canEditRuntime(member, rt) {
+		writeError(w, http.StatusForbidden, "you can only resume your own runtimes")
+		return
+	}
+
+	if h.TaskService == nil {
+		writeError(w, http.StatusServiceUnavailable, "task service unavailable")
+		return
+	}
+
+	if err := h.TaskService.ResumeRuntime(r.Context(), runtimeUUID); err != nil {
+		slog.Error("ResumeRuntime failed", "error", err, "runtime_id", runtimeID)
+		writeError(w, http.StatusInternalServerError, "failed to resume runtime")
+		return
+	}
+
+	updated, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
+	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
+		"action": "resume",
+	})
+
+	writeJSON(w, http.StatusOK, runtimeToResponse(updated))
 }

@@ -285,6 +285,24 @@ UPDATE agent_runtime
 SET legacy_daemon_id = COALESCE(legacy_daemon_id, $2)
 WHERE id = $1;
 
+-- name: SetRuntimeHold :one
+UPDATE agent_runtime
+SET hold_until = @hold_until, hold_reason = @hold_reason, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: ClearRuntimeHold :one
+UPDATE agent_runtime
+SET hold_until = NULL, hold_reason = NULL, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: ClearExpiredHolds :many
+UPDATE agent_runtime
+SET hold_until = NULL, hold_reason = NULL, updated_at = now()
+WHERE hold_until IS NOT NULL AND hold_until <= now()
+RETURNING id, workspace_id, owner_id, daemon_id, provider;
+
 -- name: DeleteStaleOfflineRuntimes :many
 -- Deletes runtimes that have been offline for longer than the TTL and have
 -- no agents bound (active or archived). The FK constraint on agent.runtime_id

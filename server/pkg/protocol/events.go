@@ -118,6 +118,10 @@ const (
 	EventDaemonRegister      = "daemon:register"
 	EventDaemonTaskAvailable = "daemon:task_available"
 
+	// Runtime hold events
+	EventRuntimeHeld    = "runtime:held"
+	EventRuntimeResumed = "runtime:resumed"
+
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"
 	EventGitHubInstallationDeleted = "github_installation:deleted"

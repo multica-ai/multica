@@ -279,6 +279,12 @@ WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
       AND NOT EXISTS (
+          SELECT 1 FROM agent_runtime ar
+          WHERE ar.id = atq.runtime_id
+            AND ar.hold_until IS NOT NULL
+            AND ar.hold_until > now()
+      )
+      AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
             AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
@@ -573,9 +579,16 @@ ORDER BY priority DESC, created_at ASC;
 -- ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 -- runtime is busy on a long-running task. Backed by the partial index
 -- idx_agent_task_queue_claim_candidates so the warm path is cheap.
-SELECT * FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+-- Skips results when the runtime is on hold (hold_until > now()).
+SELECT atq.* FROM agent_task_queue atq
+WHERE atq.runtime_id = $1 AND atq.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_runtime ar
+      WHERE ar.id = atq.runtime_id
+        AND ar.hold_until IS NOT NULL
+        AND ar.hold_until > now()
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC;
 
 -- name: ListActiveTasksByIssue :many
 -- Backs the issue-detail "agent live" banner. Includes 'queued' so the

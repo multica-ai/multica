@@ -99,7 +99,15 @@ func Classify(rawError string) Reason {
 	):
 		return ReasonAgentProviderAuthOrAccess
 
-	// 4. Quota / billing. 402 / insufficient balance / monthly usage
+	// 4. Session limit. Checked before quota because the Claude session
+	//    limit message ("You've hit your session limit · resets ...")
+	//    overlaps with the quota/billing patterns but is structurally
+	//    different: the runtime goes on hold until the reset time
+	//    rather than requiring a billing action.
+	case strings.Contains(lower, "session limit"):
+		return ReasonSessionLimit
+
+	// 5. Quota / billing. 402 / insufficient balance / monthly usage
 	//    limit / credits exhausted.
 	case containsAny(lower,
 		"402",
