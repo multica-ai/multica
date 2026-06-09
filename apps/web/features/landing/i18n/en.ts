@@ -293,6 +293,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.19",
+        date: "2026-06-09",
+        title: "More Reliable Agents, Attachments, and Issue Threads",
+        changes: [],
+        features: [
+          "Issue conversations can now resolve a specific reply, making long threads easier to close while keeping the final answer visible",
+          "Lark and Feishu conversations now show a typing reaction while Multica is preparing a reply, then clear it before the answer is sent",
+          "Agent runs now know who started each task, making handoffs, audit trails, and privacy-aware behavior more accurate",
+          "OpenClaw users can point Multica at a custom app location and data folder from their local configuration",
+        ],
+        improvements: [
+          "The active agent indicator in an Issue header is easier to read, with motion only while work is running and clearer queued wording otherwise",
+          "The CLI now gives clearer guidance around common errors, sign-in problems, and project setup values",
+        ],
+        fixes: [
+          "Newly posted attachments now use stable private download links, so images and files stay visible after temporary upload links expire",
+          "Autopilot runs started from newly created Issues now fail cleanly when the assigned task cannot complete, instead of staying stuck",
+          "Inbox deep links now scroll inside the Issue timeline without pushing the desktop window out of place",
+          "Cursor and Codex sessions now end more cleanly after terminal results, preserving completion state and final telemetry",
+          "Self-host setup now respects configured server URLs, and project creation returns clear validation errors instead of a generic failure",
+          "A previous upload hardening change was rolled back after it conflicted with attachment behavior",
+        ],
+      },
+      {
         version: "0.3.18",
         date: "2026-06-08",
         title: "Web Notifications and /note Command",
