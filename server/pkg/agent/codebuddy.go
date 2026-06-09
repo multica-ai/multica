@@ -163,6 +163,13 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			defer os.Remove(mcpConfigPath)
 		}
 
+		// Emit a status message immediately so the daemon knows the
+		// backend is alive and doesn't hit the first-turn no-progress
+		// timeout. The real session ID arrives with the first system
+		// event, but the upstream drain loop only needs any message to
+		// reset the idle watchdog.
+		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+
 		startTime := time.Now()
 		var output strings.Builder
 		var sessionID string
