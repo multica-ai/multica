@@ -1384,6 +1384,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/", h.UpdateChatSession)
 					r.Post("/convert-to-issue", h.ConvertChatSessionToIssue)
 					r.Post("/messages", h.SendChatMessage)
+					r.Post("/agent-message", h.SendAgentChatMessage) // CEREBRO-PATCH(chat-agent-reply): TECH-3183 — agent direct reply
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Post("/read", h.MarkChatSessionRead)
