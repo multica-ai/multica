@@ -3994,6 +3994,83 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	}
 }
 
+func TestUpdateCommentAddingMentionLeavesTaskQueued(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "Edit Mention Agent", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Edit mention trigger test",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "plain comment before edit",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var comment CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&comment); err != nil {
+		t.Fatalf("decode comment: %v", err)
+	}
+
+	editedContent := fmt.Sprintf("plain comment before edit\n\n[@Edit Mention Agent](mention://agent/%s) please handle this", agentID)
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/comments/"+comment.ID, map[string]any{
+		"content": editedContent,
+	})
+	req = withURLParam(req, "commentId", comment.ID)
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateComment: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var queued int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND trigger_comment_id = $3 AND status = 'queued'
+	`, issueID, agentID, comment.ID).Scan(&queued); err != nil {
+		t.Fatalf("count queued task: %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("expected 1 queued task after editing in an agent mention, got %d", queued)
+	}
+
+	var cancelled int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND trigger_comment_id = $3 AND status = 'cancelled'
+	`, issueID, agentID, comment.ID).Scan(&cancelled); err != nil {
+		t.Fatalf("count cancelled task: %v", err)
+	}
+	if cancelled != 0 {
+		t.Fatalf("expected no cancelled task for the newly added mention, got %d", cancelled)
+	}
+}
+
 func TestPlanRequestRejectsMultipleEligibleTargetAgents(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -4105,5 +4182,256 @@ func TestPlanRequestRejectsStreamDisabledTargetAgent(t *testing.T) {
 	}
 	if comments != 0 {
 		t.Fatalf("expected no persisted plan_request comment, got %d", comments)
+	}
+}
+
+// TestUpdateIssueDescriptionConflict_RejectsStaleBase verifies that a
+// description update is rejected (409) when the client's baseline is stale
+// and the server's description has been changed by another writer.
+func TestUpdateIssueDescriptionConflict_RejectsStaleBase(t *testing.T) {
+	ctx := context.Background()
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, "Desc conflict project 1").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":       "Conflict test issue",
+		"description": "original description",
+		"project_id":  projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+
+	serverUpdatedAt := created.UpdatedAt
+
+	// Another writer changes the description.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"description": "changed by another writer",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first description update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Original client tries to save with a stale baseline.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"description":                 "edited by original client",
+		"description_base_updated_at": serverUpdatedAt,
+		"description_base_value":      "original description",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	json.NewDecoder(w.Body).Decode(&body)
+	if body["error"] != "description_conflict" {
+		t.Fatalf("expected error 'description_conflict', got %v", body["error"])
+	}
+	if body["description"] != "changed by another writer" {
+		t.Fatalf("expected current server description in 409 body, got %v", body["description"])
+	}
+}
+
+func TestUpdateIssueDescriptionConflict_RejectsEmptyBaseChangedToNonEmpty(t *testing.T) {
+	ctx := context.Background()
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, "Desc conflict project empty base").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Empty base conflict test",
+		"project_id": projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+
+	serverUpdatedAt := created.UpdatedAt
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"description": "changed from empty by another writer",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first description update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"description":                 "edited by original empty-base client",
+		"description_base_updated_at": serverUpdatedAt,
+		"description_base_value":      "",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]any
+	json.NewDecoder(w.Body).Decode(&body)
+	if body["error"] != "description_conflict" {
+		t.Fatalf("expected error 'description_conflict', got %v", body["error"])
+	}
+	if body["description"] != "changed from empty by another writer" {
+		t.Fatalf("expected current server description in 409 body, got %v", body["description"])
+	}
+}
+
+// TestUpdateIssueDescriptionConflict_AllowsStaleBaseWhenDescriptionUnchanged
+// verifies that a stale updated_at baseline does NOT trigger a false-positive
+// conflict when only non-description fields (e.g. title) caused the timestamp
+// to change.
+func TestUpdateIssueDescriptionConflict_AllowsStaleBaseWhenDescriptionUnchanged(t *testing.T) {
+	ctx := context.Background()
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, "Desc conflict project 2").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":       "Non-conflict test",
+		"description": "shared description",
+		"project_id":  projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+
+	serverUpdatedAt := created.UpdatedAt
+
+	// Another writer changes only the title (description is untouched).
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"title": "renamed title",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("title update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Original client tries to save description with stale updated_at.
+	// Description is unchanged on the server, so this should be allowed.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"description":                 "shared description revised",
+		"description_base_updated_at": serverUpdatedAt,
+		"description_base_value":      "shared description",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK (description unchanged, only title changed), got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpdateIssueDescriptionConflict_NoBaselineFieldsIsBackwardCompatible
+// verifies that old clients not sending description_base_* fields can still
+// update the description without triggering conflict errors.
+func TestUpdateIssueDescriptionConflict_NoBaselineFieldsIsBackwardCompatible(t *testing.T) {
+	ctx := context.Background()
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, "Desc conflict project 3").Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":       "Backward compat test",
+		"description": "initial description",
+		"project_id":  projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+
+	// Update description without baseline fields (old client / CLI).
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"description": "updated by old client",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK (no baseline fields), got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Update description with empty baseline string (edge case).
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"description":                 "updated again",
+		"description_base_updated_at": "",
+	})
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK (empty baseline), got %d: %s", w.Code, w.Body.String())
 	}
 }

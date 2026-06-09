@@ -47,11 +47,18 @@
     "header_agent": "Agent",
     "header_member": "Member",
     "header_tokens": "Tokens",
+    "header_processed_tokens": "Processed Tokens",
+    "header_non_cached_tokens": "Non-cached Tokens",
+    "header_cached_tokens": "Cached Tokens",
     "header_cost": "Cost",
     "header_time": "Time",
     "header_tasks": "Tasks",
     "no_data": "No agent activity in this window.",
-    "system_group": "System"
+    "system_group": "System",
+    "breakdown_input": "Input",
+    "breakdown_output": "Output",
+    "breakdown_cache_read": "Cache read",
+    "breakdown_cache_write": "Cache write"
   },
   "empty": {
     "title": "No usage yet",

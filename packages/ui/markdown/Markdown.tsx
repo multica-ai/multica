@@ -263,7 +263,7 @@ function createComponents(
     return {
       ...baseComponents,
       // Inline code
-      code: ({ className, children, node, ...props }) => {
+      code: ({ className, children, node }) => {
         const match = /language-(\w+)/.exec(className || '')
         const isBlock =
           node?.position && node.position.start.line !== node.position.end.line
@@ -325,7 +325,7 @@ function createComponents(
   return {
     ...baseComponents,
     // Full code blocks with copy button
-    code: ({ className, children, node, ...props }) => {
+    code: ({ className, children, node }) => {
       const match = /language-(\w+)/.exec(className || '')
       const isBlock =
         node?.position && node.position.start.line !== node.position.end.line
