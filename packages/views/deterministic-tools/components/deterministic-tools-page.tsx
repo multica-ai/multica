@@ -26,6 +26,7 @@ const COPY = {
   testing: "Running…",
   delete: "Delete",
   empty: "No tools yet. Create one to get started.",
+  disabledTag: "off",
   nameLabel: "Name",
   namePlaceholder: "snake_case_name",
   descriptionLabel: "Description",
@@ -261,7 +262,7 @@ export function DeterministicToolsPage() {
               >
                 <span className="truncate font-mono text-xs">{t.name}</span>
                 {!t.enabled ? (
-                  <span className="shrink-0 text-[10px] text-muted-foreground">off</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">{COPY.disabledTag}</span>
                 ) : null}
               </button>
             ))
