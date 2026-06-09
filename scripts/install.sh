@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Multica installer — installs the CLI and optionally provisions a self-host server.
 #
+# SYNC NOTICE: This file shares login/daemon logic with
+# server/internal/handler/install_scripts/install.sh (the embed version served
+# at multica.wujieai.com/install.sh). Both must default APP_URL/SERVER_URL to
+# multica.wujieai.com and include login_and_start_daemon().
+# Run `make sync-install-scripts` to verify invariants.
+#
 # Install / upgrade CLI only:
 #   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 #
