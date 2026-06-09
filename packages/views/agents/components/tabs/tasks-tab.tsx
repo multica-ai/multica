@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { AlertCircle, ArrowUpRight, Clock3, ListTodo, Loader2, XCircle } from "lucide-react";
+import { AlertCircle, ArrowUpRight, Clock3, ListTodo, Loader2, Users, UserRoundCog, XCircle } from "lucide-react";
 import { toast } from "sonner";
-import type { Agent, AgentTask, UpdateIssueRequest } from "@multica/core/types";
+import type { Agent, AgentTask, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
@@ -26,11 +26,23 @@ function formatTaskTimestamp(task: AgentTask, isRunning: boolean): string {
   return `Queued ${new Date(task.created_at).toLocaleString()}`;
 }
 
+function getReviewSuccessMessage(targetType: IssueAssigneeType, count: number): string {
+  const label = targetType === "member" ? "member" : "agent";
+  return `Moved ${count} review issue${count > 1 ? "s" : ""} to ${label}`;
+}
+
+function getReviewErrorMessage(targetType: IssueAssigneeType): string {
+  return targetType === "member"
+    ? "Failed to move review issues to a member"
+    : "Failed to move review issues to an agent";
+}
+
 export function TasksTab({ agent }: { agent: Agent }) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const [reviewAssignOpen, setReviewAssignOpen] = useState(false);
+  const [reviewMemberAssignOpen, setReviewMemberAssignOpen] = useState(false);
+  const [reviewAgentAssignOpen, setReviewAgentAssignOpen] = useState(false);
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
   const batchUpdateIssues = useBatchUpdateIssues();
@@ -122,16 +134,20 @@ export function TasksTab({ agent }: { agent: Agent }) {
       ? "border-destructive/20 bg-destructive/5"
       : "border-warning/20 bg-warning/5";
 
-  const handleReviewBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
+  const handleReviewBatchUpdate = async (
+    updates: Partial<UpdateIssueRequest>,
+    targetType: IssueAssigneeType,
+  ) => {
     const ids = queueSummary.reviewIssueIds;
     if (ids.length === 0) return;
 
     try {
       await batchUpdateIssues.mutateAsync({ ids, updates });
-      toast.success(`Updated ${ids.length} review issue${ids.length > 1 ? "s" : ""}`);
-      setReviewAssignOpen(false);
+      toast.success(getReviewSuccessMessage(targetType, ids.length));
+      if (targetType === "member") setReviewMemberAssignOpen(false);
+      if (targetType === "agent") setReviewAgentAssignOpen(false);
     } catch {
-      toast.error("Failed to update review issues");
+      toast.error(getReviewErrorMessage(targetType));
     }
   };
 
@@ -233,25 +249,51 @@ export function TasksTab({ agent }: { agent: Agent }) {
 
         {hasReviewItems && (
           <div className={`rounded-md border px-3 py-3 ${reviewPanelClass}`}>
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Needs review
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Escalated tasks can be reassigned without leaving the queue view.
+                  Move escalated work directly to a member for manual handling or to another agent for a fresh run.
                 </div>
               </div>
-              <AssigneePicker
-                assigneeType={null}
-                assigneeId={null}
-                onUpdate={handleReviewBatchUpdate}
-                open={reviewAssignOpen}
-                onOpenChange={setReviewAssignOpen}
-                triggerRender={<Button variant="outline" size="sm" />}
-                trigger={`Reassign ${queueSummary.reviewIssueIds.length} issue${queueSummary.reviewIssueIds.length > 1 ? "s" : ""}`}
-                align="end"
-              />
+              <div className="flex flex-wrap justify-end gap-2">
+                <AssigneePicker
+                  assigneeType={null}
+                  assigneeId={null}
+                  onUpdate={(updates) => handleReviewBatchUpdate(updates, "member")}
+                  open={reviewMemberAssignOpen}
+                  onOpenChange={setReviewMemberAssignOpen}
+                  triggerRender={<Button variant="outline" size="sm" />}
+                  trigger={
+                    <>
+                      <Users className="h-3.5 w-3.5" />
+                      Move to member
+                    </>
+                  }
+                  align="end"
+                  allowedTypes={["member"]}
+                  searchPlaceholder="Assign to member..."
+                />
+                <AssigneePicker
+                  assigneeType={null}
+                  assigneeId={null}
+                  onUpdate={(updates) => handleReviewBatchUpdate(updates, "agent")}
+                  open={reviewAgentAssignOpen}
+                  onOpenChange={setReviewAgentAssignOpen}
+                  triggerRender={<Button variant="outline" size="sm" />}
+                  trigger={
+                    <>
+                      <UserRoundCog className="h-3.5 w-3.5" />
+                      Move to agent
+                    </>
+                  }
+                  align="end"
+                  allowedTypes={["agent"]}
+                  searchPlaceholder="Assign to agent..."
+                />
+              </div>
             </div>
             <div className="mt-3 space-y-2 text-sm">
               {queueSummary.reviewCounts.failed > 0 && (

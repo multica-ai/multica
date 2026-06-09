@@ -32,6 +32,8 @@ export function AssigneePicker({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  allowedTypes,
+  searchPlaceholder,
 }: {
   assigneeType: IssueAssigneeType | null;
   assigneeId: string | null;
@@ -41,6 +43,8 @@ export function AssigneePicker({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  allowedTypes?: IssueAssigneeType[];
+  searchPlaceholder?: string;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -56,7 +60,6 @@ export function AssigneePicker({
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
 
-  // Build a lookup map from frequency data for sorting.
   const freqMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const entry of frequency) {
@@ -82,6 +85,8 @@ export function AssigneePicker({
     assigneeType && assigneeId
       ? getActorName(assigneeType, assigneeId)
       : "Unassigned";
+  const allowMembers = !allowedTypes || allowedTypes.includes("member");
+  const allowAgents = !allowedTypes || allowedTypes.includes("agent");
 
   return (
     <PropertyPicker
@@ -93,7 +98,7 @@ export function AssigneePicker({
       width="w-52"
       align={align}
       searchable
-      searchPlaceholder="Assign to..."
+      searchPlaceholder={searchPlaceholder ?? "Assign to..."}
       onSearchChange={setFilter}
       triggerRender={triggerRender}
       trigger={
@@ -107,20 +112,20 @@ export function AssigneePicker({
         )
       }
     >
-      {/* Unassigned option */}
-      <PickerItem
-        selected={!assigneeType && !assigneeId}
-        onClick={() => {
-          onUpdate({ assignee_type: null, assignee_id: null });
-          setOpen(false);
-        }}
-      >
-        <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-muted-foreground">Unassigned</span>
-      </PickerItem>
+      {!allowedTypes && (
+        <PickerItem
+          selected={!assigneeType && !assigneeId}
+          onClick={() => {
+            onUpdate({ assignee_type: null, assignee_id: null });
+            setOpen(false);
+          }}
+        >
+          <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Unassigned</span>
+        </PickerItem>
+      )}
 
-      {/* Members */}
-      {filteredMembers.length > 0 && (
+      {allowMembers && filteredMembers.length > 0 && (
         <PickerSection label="Members">
           {filteredMembers.map((m) => (
             <PickerItem
@@ -141,8 +146,7 @@ export function AssigneePicker({
         </PickerSection>
       )}
 
-      {/* Agents */}
-      {filteredAgents.length > 0 && (
+      {allowAgents && filteredAgents.length > 0 && (
         <PickerSection label="Agents">
           {filteredAgents.map((a) => {
             const allowed = canAssignAgent(a, user?.id, memberRole);
@@ -171,9 +175,9 @@ export function AssigneePicker({
         </PickerSection>
       )}
 
-      {filteredMembers.length === 0 &&
-        filteredAgents.length === 0 &&
-        filter && <PickerEmpty />}
+      {((allowMembers ? filteredMembers.length === 0 : true) &&
+        (allowAgents ? filteredAgents.length === 0 : true) &&
+        filter) && <PickerEmpty />}
     </PropertyPicker>
   );
 }

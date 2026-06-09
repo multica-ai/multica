@@ -46,8 +46,17 @@ vi.mock("@multica/views/navigation", () => ({
 }));
 
 vi.mock("@multica/views/issues/components", () => ({
-  AssigneePicker: ({ onUpdate, trigger }: any) => (
-    <button type="button" onClick={() => onUpdate({ assignee_type: "member", assignee_id: "member-2" })}>
+  AssigneePicker: ({ onUpdate, trigger, allowedTypes }: any) => (
+    <button
+      type="button"
+      onClick={() =>
+        onUpdate(
+          allowedTypes?.[0] === "agent"
+            ? { assignee_type: "agent", assignee_id: "agent-2" }
+            : { assignee_type: "member", assignee_id: "member-2" },
+        )
+      }
+    >
       {trigger}
     </button>
   ),
@@ -126,18 +135,17 @@ describe("TasksTab", () => {
     mockBatchMutateAsync.mockResolvedValue(undefined);
   });
 
-  it("shows review items and batch reassigns reviewed issues", async () => {
+  it("shows review items and routes batch moves to member and agent flows", async () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-06-09T12:00:00.000Z"));
     const user = userEvent.setup();
 
     renderTasksTab();
 
     expect(await screen.findByText("Needs review")).toBeInTheDocument();
-    expect(screen.getByText(/1 failed/)).toBeInTheDocument();
-    expect(screen.getByText(/1 long-running/)).toBeInTheDocument();
-    expect(screen.getByText(/Long-running: Active for 1h and may need a check-in\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Move to member/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Move to agent/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Reassign 2 issues/i }));
+    await user.click(screen.getByRole("button", { name: /Move to member/i }));
 
     await waitFor(() => {
       expect(mockBatchMutateAsync).toHaveBeenCalledWith({
@@ -145,8 +153,17 @@ describe("TasksTab", () => {
         updates: { assignee_type: "member", assignee_id: "member-2" },
       });
     });
+    expect(mockToastSuccess).toHaveBeenCalledWith("Moved 2 review issues to member");
 
-    expect(mockToastSuccess).toHaveBeenCalledWith("Updated 2 review issues");
+    await user.click(screen.getByRole("button", { name: /Move to agent/i }));
+
+    await waitFor(() => {
+      expect(mockBatchMutateAsync).toHaveBeenCalledWith({
+        ids: ["issue-1", "issue-2"],
+        updates: { assignee_type: "agent", assignee_id: "agent-2" },
+      });
+    });
+    expect(mockToastSuccess).toHaveBeenCalledWith("Moved 2 review issues to agent");
     nowSpy.mockRestore();
   });
 });
