@@ -117,9 +117,11 @@ export function ConnectionsSettingsTab() {
           <TableBody>
             {connections.map((conn) => (
               <TableRow key={conn.id}>
-                <TableCell>
-                  <div className="font-medium">{conn.display_name}</div>
-                  <div className="text-xs text-muted-foreground">{conn.name}</div>
+                <TableCell className="max-w-48">
+                  <div className="truncate font-medium">{conn.display_name}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {conn.name}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Badge variant="outline">
