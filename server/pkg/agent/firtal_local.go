@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -267,10 +268,18 @@ func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig,
 }
 
 // buildToolList determines which tools to expose to the model for this task.
-// It fetches the agent's grant list from the server and returns the intersection
-// with the locally-implementable tool set. Falls back to all local tools when
-// no grants are configured or the server cannot be reached.
+// When HTTP env vars are set (server URL + task token + agent ID), it fetches
+// the full tool definitions (with JSON schemas) from the server — this gives
+// access to ALL granted tools including connections (web_fetch, firtal_registry,
+// Google Sheets, etc.). Falls back to the locally-implementable CLI tool set
+// filtered by grants, or to all CLI tools when no grants are configured.
 func (b *firtalLocalBackend) buildToolList(ctx context.Context) []firtalLocalToolDef {
+	if b.hasHTTPEnv() {
+		if tools, ok := b.fetchGrantedToolDefs(ctx); ok {
+			return tools
+		}
+	}
+	// CLI fallback: filter the 9 locally-implementable tools by grant list.
 	all := firtalLocalAllToolDefs()
 	granted, hasGrants := b.fetchGrantedTools(ctx)
 	if !hasGrants {
@@ -286,6 +295,85 @@ func (b *firtalLocalBackend) buildToolList(ctx context.Context) []firtalLocalToo
 		return all
 	}
 	return filtered
+}
+
+// hasHTTPEnv returns true when the three env vars required for server-side
+// tool invocation are present in the task config.
+func (b *firtalLocalBackend) hasHTTPEnv() bool {
+	return firstEnv(b.cfg.Env, "MULTICA_SERVER_URL") != "" &&
+		firstEnv(b.cfg.Env, "MULTICA_TOKEN") != "" &&
+		firstEnv(b.cfg.Env, "MULTICA_AGENT_ID") != ""
+}
+
+// fetchGrantedToolDefs queries GET /api/agents/{id}/tools and builds a full
+// firtalLocalToolDef list from the response (using InputSchema from the server).
+// Tools without a schema in the response are skipped — they cannot be described
+// to the model. Returns (nil, false) when the fetch fails or yields no tools.
+func (b *firtalLocalBackend) fetchGrantedToolDefs(ctx context.Context) ([]firtalLocalToolDef, bool) {
+	serverURL := strings.TrimRight(firstEnv(b.cfg.Env, "MULTICA_SERVER_URL"), "/")
+	token := firstEnv(b.cfg.Env, "MULTICA_TOKEN")
+	agentID := firstEnv(b.cfg.Env, "MULTICA_AGENT_ID")
+
+	fetchCtx, cancel := context.WithTimeout(ctx, firtalLocalGrantFetchTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, serverURL+"/api/agents/"+agentID+"/tools", nil)
+	if err != nil {
+		return nil, false
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := b.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, false
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, false
+	}
+
+	var items []struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Enabled     bool            `json:"enabled"`
+		InputSchema json.RawMessage `json:"input_schema"`
+	}
+	if err := json.Unmarshal(body, &items); err != nil {
+		return nil, false
+	}
+
+	var tools []firtalLocalToolDef
+	for _, item := range items {
+		if !item.Enabled || len(item.InputSchema) == 0 {
+			continue
+		}
+		var schema map[string]any
+		if err := json.Unmarshal(item.InputSchema, &schema); err != nil {
+			continue
+		}
+		tools = append(tools, firtalLocalToolDef{
+			Type: "function",
+			Function: firtalLocalToolFunction{
+				Name:        item.Name,
+				Description: item.Description,
+				Parameters:  schema,
+			},
+		})
+	}
+	if len(tools) == 0 {
+		return nil, false
+	}
+	return tools, true
 }
 
 // fetchGrantedTools queries GET /api/agents/{id}/tools to find which tools
@@ -420,19 +508,78 @@ func firtalLocalExtract(resp firtalLocalResponse) (string, []firtalLocalToolCall
 	return msg.Content, calls
 }
 
-// dispatch routes a tool call to the configured runner (or the real CLI runner)
-// and converts any error into a textual result the model can read and recover
-// from, rather than aborting the whole task.
+// dispatch routes a tool call to the configured runner and converts any error
+// into a textual result the model can read and recover from rather than
+// aborting the whole task.
+// Priority: injected runTool (tests) → runToolHTTP (when env vars present) → runToolCLI.
 func (b *firtalLocalBackend) dispatch(ctx context.Context, name string, args map[string]any) string {
 	runner := b.runTool
 	if runner == nil {
-		runner = b.runToolCLI
+		if b.hasHTTPEnv() {
+			runner = b.runToolHTTP
+		} else {
+			runner = b.runToolCLI
+		}
 	}
 	out, err := runner(ctx, name, args)
 	if err != nil {
 		return fmt.Sprintf("tool error: %s", err.Error())
 	}
 	return out
+}
+
+// runToolHTTP executes a tool via POST /api/agents/{id}/tools/{name}/invoke on
+// the Multica server. This is the primary execution path when the task-scoped
+// env vars (MULTICA_SERVER_URL, MULTICA_TOKEN, MULTICA_AGENT_ID) are present.
+// It gives firtal-local the same tool surface as firtal-gateway including
+// connections that require server-side credentials.
+func (b *firtalLocalBackend) runToolHTTP(ctx context.Context, name string, args map[string]any) (string, error) {
+	serverURL := strings.TrimRight(firstEnv(b.cfg.Env, "MULTICA_SERVER_URL"), "/")
+	token := firstEnv(b.cfg.Env, "MULTICA_TOKEN")
+	agentID := firstEnv(b.cfg.Env, "MULTICA_AGENT_ID")
+
+	reqBody, err := json.Marshal(map[string]any{"args": args})
+	if err != nil {
+		return "", fmt.Errorf("marshal tool args: %w", err)
+	}
+
+	endpoint := serverURL + "/api/agents/" + agentID + "/tools/" + url.PathEscape(name) + "/invoke"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("build invoke request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := b.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("invoke request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if resp.StatusCode >= 400 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		json.Unmarshal(respBody, &errResp) //nolint:errcheck
+		if errResp.Error != "" {
+			return "", fmt.Errorf("%s", errResp.Error)
+		}
+		return "", fmt.Errorf("invoke returned HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("parse invoke response: %w", err)
+	}
+	return result.Result, nil
 }
 
 // runToolCLI executes a multica tool via the authenticated `multica` CLI

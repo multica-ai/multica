@@ -292,3 +292,110 @@ func toolNames(tools []firtalLocalToolDef) []string {
 	}
 	return out
 }
+
+// TestFirtalLocalRunToolHTTP verifies that runToolHTTP posts to the invoke
+// endpoint with the correct Authorization header and returns the result field.
+func TestFirtalLocalRunToolHTTP(t *testing.T) {
+	var gotPath, gotAuth string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"result":"{\"title\":\"Hello\"}"}`)
+	}))
+	defer srv.Close()
+
+	b := &firtalLocalBackend{
+		cfg: Config{Env: map[string]string{
+			"MULTICA_SERVER_URL": srv.URL,
+			"MULTICA_TOKEN":      "tok-abc",
+			"MULTICA_AGENT_ID":   "agent-1",
+		}},
+		httpClient: srv.Client(),
+	}
+
+	result, err := b.runToolHTTP(context.Background(), "get_issue", map[string]any{"issue_id": "TECH-1"})
+	if err != nil {
+		t.Fatalf("runToolHTTP: %v", err)
+	}
+	if gotPath != "/api/agents/agent-1/tools/get_issue/invoke" {
+		t.Fatalf("unexpected path: %q", gotPath)
+	}
+	if gotAuth != "Bearer tok-abc" {
+		t.Fatalf("unexpected auth: %q", gotAuth)
+	}
+	if args, _ := gotBody["args"].(map[string]any); args["issue_id"] != "TECH-1" {
+		t.Fatalf("unexpected args: %v", gotBody)
+	}
+	if !strings.Contains(result, "Hello") {
+		t.Fatalf("unexpected result: %q", result)
+	}
+}
+
+// TestFirtalLocalDispatchPrefersHTTP verifies that dispatch uses runToolHTTP
+// when HTTP env vars are set and runTool is nil (no test override).
+func TestFirtalLocalDispatchPrefersHTTP(t *testing.T) {
+	invoked := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		invoked = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"result":"ok"}`)
+	}))
+	defer srv.Close()
+
+	b := &firtalLocalBackend{
+		cfg: Config{Env: map[string]string{
+			"MULTICA_SERVER_URL": srv.URL,
+			"MULTICA_TOKEN":      "tok",
+			"MULTICA_AGENT_ID":   "a1",
+		}},
+		httpClient: srv.Client(),
+	}
+
+	result := b.dispatch(context.Background(), "get_issue", map[string]any{"issue_id": "X"})
+	if !invoked {
+		t.Fatal("expected runToolHTTP to be called, not CLI")
+	}
+	if result != "ok" {
+		t.Fatalf("unexpected result: %q", result)
+	}
+}
+
+// TestFirtalLocalBuildToolListFromServer verifies that buildToolList returns
+// server-provided tools (with schemas) when HTTP env is set and the server
+// returns input_schema fields.
+func TestFirtalLocalBuildToolListFromServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[
+			{"name":"web_fetch","enabled":true,"description":"Fetch a URL","input_schema":{"type":"object","properties":{"url":{"type":"string"}}}},
+			{"name":"get_issue","enabled":true,"description":"Get an issue","input_schema":{"type":"object","properties":{"issue_id":{"type":"string"}}}},
+			{"name":"add_comment","enabled":false,"description":"Add comment","input_schema":{"type":"object"}}
+		]`)
+	}))
+	defer srv.Close()
+
+	b := &firtalLocalBackend{
+		cfg: Config{Env: map[string]string{
+			"MULTICA_SERVER_URL": srv.URL,
+			"MULTICA_TOKEN":      "tok",
+			"MULTICA_AGENT_ID":   "a1",
+		}},
+		httpClient: srv.Client(),
+	}
+
+	tools := b.buildToolList(context.Background())
+	// Only 2 tools enabled; add_comment disabled should be excluded.
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools (web_fetch + get_issue), got %d: %v", len(tools), toolNames(tools))
+	}
+	if tools[0].Function.Name != "web_fetch" || tools[1].Function.Name != "get_issue" {
+		t.Fatalf("unexpected tools: %v", toolNames(tools))
+	}
+	// Schema should be propagated.
+	if tools[0].Function.Parameters == nil {
+		t.Fatalf("web_fetch should have a non-nil Parameters")
+	}
+}

@@ -172,6 +172,9 @@ type Handler struct {
 	// disabled (allowlist saves still succeed; secret fetch on claim returns
 	// empty).
 	InfisicalProvisioner *cerebroinfisical.Provisioner
+	// CEREBRO-PATCH(handler-tool-executor): TECH-3226 server-side tool execution
+	// seam for external runtimes (firtal-local). nil = invoke endpoint returns 501.
+	ToolExecutor ToolExecutorInvoker
 	// CEREBRO-PATCH(handler-tool-meta): JEH-1353 — ordered list of registered
 	// tools and name→description lookup for the tool grant admin API.
 	cerebroToolItems  []CerebroToolItem

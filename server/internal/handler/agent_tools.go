@@ -16,6 +16,7 @@ type CerebroToolItem struct {
 	Name        string
 	Description string
 	Status      string // CEREBRO-PATCH(agent-tools-status): carries implemented/excluded registry state into admin API.
+	InputSchema map[string]any // CEREBRO-PATCH(handler-tool-schema): TECH-3226 JSON Schema for the tool; nil for tools not in the server registry.
 }
 
 // AgentToolResponse is the wire shape returned by GET /api/agents/{id}/tools.
@@ -26,6 +27,7 @@ type AgentToolResponse struct {
 	Description string          `json:"description"`
 	Status      string          `json:"status"` // CEREBRO-PATCH(agent-tools-status-response): let UI show explicit exclusions.
 	Enabled     bool            `json:"enabled"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"` // CEREBRO-PATCH(handler-tool-schema): TECH-3226 JSON Schema; omitted for tools not in the server registry.
 	ConfigJSON  json.RawMessage `json:"config,omitempty"`
 }
 
@@ -100,6 +102,11 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 			Name:        item.Name,
 			Description: item.Description,
 			Status:      item.Status,
+		}
+		if item.InputSchema != nil { // CEREBRO-PATCH(handler-tool-schema): include JSON Schema so external runtimes can present tools to their model.
+			if raw, err := json.Marshal(item.InputSchema); err == nil {
+				resp.InputSchema = json.RawMessage(raw)
+			}
 		}
 		if g, ok := grants[item.Name]; ok {
 			resp.Enabled = g.enabled

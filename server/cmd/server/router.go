@@ -586,11 +586,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// the admin API can return names + descriptions for every registered tool.
 	{
 		rawMeta := cerebroruntime.AllBuiltinToolMeta()
+		// CEREBRO-PATCH(router-tool-schema): TECH-3226 — populate InputSchema by
+		// creating a throwaway registry (nil queries/pool) to extract static schemas.
+		schemaReg := cerebroruntime.NewDefaultRegistry(nil, nil, cerebroruntime.ToolContext{})
+		schemas := schemaReg.AllToolSchemas()
 		items := make([]handler.CerebroToolItem, len(rawMeta))
 		for i, m := range rawMeta {
-			items[i] = handler.CerebroToolItem{Name: m.Name, Description: m.Description, Status: m.Status} // CEREBRO-PATCH(router-tool-status): expose explicit exclusion status to the tools API.
+			items[i] = handler.CerebroToolItem{Name: m.Name, Description: m.Description, Status: m.Status, InputSchema: schemas[m.Name]} // CEREBRO-PATCH(router-tool-status): expose explicit exclusion status to the tools API.
 		}
 		h.SetCerebroToolMeta(items)
+	}
+	// CEREBRO-PATCH(router-tool-executor): TECH-3226 wire server-side tool
+	// executor so POST /api/agents/{id}/tools/{name}/invoke can dispatch any
+	// granted tool including connections (web_fetch, firtal_registry, Sheets).
+	h.ToolExecutor = &cerebroruntime.ToolExecutorInvoker{
+		Queries:        queries,
+		CerebroQueries: cerebroQueries,
 	}
 	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 wire the unified
 	// runtime tool admin service (per-runtime tool inventory + group/user
@@ -815,6 +826,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			r.With(middleware.RequireUserScope).Get("/api/agents/backfill-avatars", cerebroAgentAvatarHandler.BackfillStatus) // CEREBRO-PATCH(agent-avatar-backfill): keep static GET before /api/agents/{id}.
 			r.With(middleware.AllowTaskScopeForAgent("id")).Get("/api/agents/{id}", h.GetAgent)
+			// CEREBRO-PATCH(agent-tool-task-routes): TECH-3226 — agent tools GET
+			// and invoke POST are accessible by the agent's own task token so
+			// firtal-local can fetch its grant list and execute tools server-side.
+			// Registered here (not in the user-only group) to avoid chi duplicate-
+			// route conflicts; AllowTaskScopeForAgent restricts task tokens to their
+			// own agent. User tokens pass through unchanged.
+			agentToolScope := middleware.AllowTaskScopeForAgent("id")
+			r.With(agentToolScope).Get("/api/agents/{id}/tools", h.ListAgentTools)
+			r.With(agentToolScope).Post("/api/agents/{id}/tools/{name}/invoke", h.InvokeAgentTool)
 
 			// Issue routes registered flat (not via r.Route) so they
 			// share the chi routing tree with the user-only sibling
@@ -1410,7 +1430,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/skills", h.SetAgentSkills)
 					r.Post("/skills/add", h.AddAgentSkills)
 					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
-					r.Get("/tools", h.ListAgentTools)
+					// NOTE: GET /tools and POST /tools/{name}/invoke are registered in the
+					// task-allowlist group above so agent task tokens can also reach them.
 					r.Route("/tools/{name}", func(r chi.Router) {
 						r.Put("/", h.UpsertAgentTool)
 					})

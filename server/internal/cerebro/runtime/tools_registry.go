@@ -264,6 +264,21 @@ func (r *Registry) GetGrantConfig(ctx context.Context, agentID pgtype.UUID, tool
 	return config, nil
 }
 
+// AllToolSchemas returns a name → InputSchema map for all currently registered
+// tools. Schemas are static (do not depend on ToolContext or DB queries) so
+// this can be called on a throwaway registry created with nil queries.
+//
+// CEREBRO-PATCH(handler-tool-schema): TECH-3226 expose schemas for external runtimes.
+func (r *Registry) AllToolSchemas() map[string]map[string]any {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]map[string]any, len(r.tools))
+	for name, t := range r.tools {
+		out[name] = t.InputSchema()
+	}
+	return out
+}
+
 // GrantAgentTool upserts an agent_tool_grant row. Pass nil configJSON for no
 // configuration. If the grant already exists the enabled flag and config are
 // updated.
