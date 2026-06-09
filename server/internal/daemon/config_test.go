@@ -628,7 +628,6 @@ func TestLoadConfigDetectsQoderclicnViaLoginShell(t *testing.T) {
 	}
 	if entry.Path != wantCanonical {
 		t.Fatalf("qoderclicn path = %q, want canonical %q", entry.Path, wantCanonical)
->>>>>>> origin/main
 	}
 }
 

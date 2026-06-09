@@ -9,6 +9,7 @@ import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   wujieclaw: "WujieClaw",
+  qoderclicn: "Qoder",
 };
 
 export function formatProviderName(provider: string): string {
