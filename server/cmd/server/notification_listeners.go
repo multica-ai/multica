@@ -289,14 +289,18 @@ const workspaceSettingStartedIssuesInInbox = "started_issues_in_inbox"
 func startedIssuesInInboxEnabled(ctx context.Context, queries *db.Queries, workspaceID string) bool {
 	ws, err := queries.GetWorkspace(ctx, parseUUID(workspaceID))
 	if err != nil || len(ws.Settings) == 0 {
-		return false
+		return true // CEREBRO-PATCH(started-issues-inbox-default): TECH-3001 — default on when unset
 	}
 	var settings map[string]any
 	if err := json.Unmarshal(ws.Settings, &settings); err != nil {
 		slog.Warn("workspace settings unmarshal failed", "workspace_id", workspaceID, "error", err)
-		return false
+		return true // CEREBRO-PATCH(started-issues-inbox-default): TECH-3001 — default on when unset
 	}
-	enabled, _ := settings[workspaceSettingStartedIssuesInInbox].(bool)
+	v, ok := settings[workspaceSettingStartedIssuesInInbox]
+	if !ok {
+		return true
+	}
+	enabled, _ := v.(bool)
 	return enabled
 }
 

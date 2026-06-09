@@ -277,7 +277,8 @@ export function InboxPage() {
   // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — flag gate + bucket-header labels
   const actionGroupingEnabled = useFeatureFlag("cerebro_inbox_action_grouping");
   const actionGroupLabels = useInboxActionGroupLabels();
-  const groupByStorageKey = `multica_inbox_groupby_${wsId}_${userId}`;
+  // CEREBRO-PATCH(inbox-action-grouping-v2): TECH-3001 — reset old "none" preferences so action grouping becomes the default
+  const groupByStorageKey = `multica_inbox_groupby_v2_${wsId}_${userId}`;
   const [groupBy, setGroupBy] = useState<{ primary: GroupByMode; secondary: GroupByMode }>(() => {
     if (typeof window === "undefined") return { primary: "none", secondary: "none" };
     const saved = window.localStorage.getItem(groupByStorageKey);

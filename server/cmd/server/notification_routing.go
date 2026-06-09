@@ -60,7 +60,7 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"task_failed":                 true,
 		"unassigned":                  true,
 		"reaction_added":              false,
-		"new_comment":                 false,
+		"new_comment":                 true, // CEREBRO-PATCH(new-comment-inbox-default): TECH-3001 — default to Jesper's preference
 		"assignee_changed":            false,
 		"status_changed":              false,
 		"start_date_changed.assignee": true,
@@ -116,7 +116,7 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"task_failed":                 false,
 		"unassigned":                  false,
 		"reaction_added":              false,
-		"new_comment":                 false,
+		"new_comment":                 true, // CEREBRO-PATCH(new-comment-inbox-default): TECH-3001 — default to Jesper's preference
 		"assignee_changed":            false,
 		"status_changed":              false,
 		"start_date_changed.assignee": true,

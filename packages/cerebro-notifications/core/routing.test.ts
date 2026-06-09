@@ -15,7 +15,8 @@ describe("getChannelChoice", () => {
     expect(getChannelChoice(undefined, "notifications", "issue_assigned")).toBe(
       "off",
     );
-    expect(getChannelChoice(undefined, "mobile", "new_comment")).toBe("off");
+    expect(getChannelChoice(undefined, "inbox", "new_comment")).toBe("on");
+    expect(getChannelChoice(undefined, "mobile", "new_comment")).toBe("on");
     expect(getChannelChoice(undefined, "mail", "issue_assigned")).toBe("off");
     expect(getChannelChoice(undefined, "inbox", "system_notification")).toBe(
       "on",

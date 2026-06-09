@@ -54,6 +54,33 @@ func cleanupNotificationTestWorkspace(t *testing.T, workspaceID string) {
 	testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
 }
 
+// CEREBRO-PATCH(started-issues-inbox-default-test): TECH-3001 — absent workspace setting defaults to on.
+func TestStartedIssuesInInboxEnabledDefaultsOnWhenUnset(t *testing.T) {
+	queries := db.New(testPool)
+
+	cases := []struct {
+		name     string
+		settings string
+		want     bool
+	}{
+		{name: "empty settings default on", settings: `{}`, want: true},
+		{name: "explicit false stays off", settings: `{"started_issues_in_inbox": false}`, want: false},
+		{name: "explicit true stays on", settings: `{"started_issues_in_inbox": true}`, want: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			workspaceID := createNotificationTestWorkspace(t, tc.settings)
+			t.Cleanup(func() { cleanupNotificationTestWorkspace(t, workspaceID) })
+
+			got := startedIssuesInInboxEnabled(context.Background(), queries, workspaceID)
+			if got != tc.want {
+				t.Fatalf("startedIssuesInInboxEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // addTestSubscriber manually inserts a subscriber for an issue.
 func addTestSubscriber(t *testing.T, issueID, userType, userID, reason string) {
 	t.Helper()

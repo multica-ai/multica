@@ -235,17 +235,18 @@ func TestResolveChannelChoice_DefaultsWhenNoPrefs(t *testing.T) {
 		key     string
 		want    bool
 	}{
-		// Inbox defaults: strong personal signals on, low-noise off.
+		// CEREBRO-PATCH(new-comment-inbox-default-test): TECH-3001 — comments now default into inbox and mobile.
+		// Inbox defaults: strong personal signals on.
 		{channelInbox, "issue_assigned", true},
 		{channelInbox, "mentioned", true},
-		{channelInbox, "new_comment", false},
+		{channelInbox, "new_comment", true},
 		// Notifications defaults: low-noise on, strong signals off.
 		{channelNotifications, "new_comment", true},
 		{channelNotifications, "issue_assigned", false},
-		// Mobile defaults: only conservative pushes.
+		// Mobile defaults: personal signals and comments push by default.
 		{channelMobile, "mentioned", true},
 		{channelMobile, "task_failed", false},
-		{channelMobile, "new_comment", false},
+		{channelMobile, "new_comment", true},
 		// Desktop defaults: more permissive than mobile but still focused.
 		{channelDesktop, "task_failed", true},
 		{channelDesktop, "new_comment", false},
@@ -288,15 +289,15 @@ func TestResolveChannelChoice_HonoursOverride(t *testing.T) {
 	queries := db.New(testPool)
 	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
 
-	// User flips mobile.new_comment on (default is off) and inbox.issue_assigned
+	// User flips mobile.new_comment off (default is on) and inbox.issue_assigned
 	// off (default is on).
 	setUserChannelPrefs(t, testUserID, map[string]map[string]string{
-		channelMobile: {"new_comment": "on"},
+		channelMobile: {"new_comment": "off"},
 		channelInbox:  {"issue_assigned": "off"},
 	}, nil)
 
-	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "new_comment"); !got {
-		t.Errorf("override mobile.new_comment=on: got false, want true")
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "new_comment"); got {
+		t.Errorf("override mobile.new_comment=off: got true, want false")
 	}
 	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelInbox, "issue_assigned"); got {
 		t.Errorf("override inbox.issue_assigned=off: got true, want false")
@@ -379,9 +380,9 @@ func TestResolveChannelChoice_NotifyAllMobileInbox(t *testing.T) {
 	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
 
 	// Compose a prefs blob with the master toggle ON, an inbox.new_comment
-	// override flipped on (notifications-primary, so it must not promote to
-	// mobile), an inbox.assignee_changed override flipped on (also
-	// notifications-primary), and a mobile.issue_assigned=off override that
+	// override flipped on (now inbox-primary, so it mirrors to mobile), an
+	// inbox.assignee_changed override flipped on (notifications-primary, so it
+	// must not promote to mobile), and a mobile.issue_assigned=off override that
 	// should be IGNORED while the master toggle is on for inbox-primary keys.
 	blob := map[string]any{
 		"notifications": map[string]any{
@@ -416,9 +417,8 @@ func TestResolveChannelChoice_NotifyAllMobileInbox(t *testing.T) {
 		// mobile.issue_assigned: master ON → mirrors inbox.issue_assigned (default true).
 		// User's own mobile.issue_assigned=off override is bypassed.
 		{"mobile mirrors inbox default", channelMobile, "issue_assigned", true},
-		// mobile.new_comment: master ON does not promote notifications-primary keys,
-		// even if the user manually routes that key into inbox.
-		{"mobile ignores notification-primary inbox override", channelMobile, "new_comment", false},
+		// mobile.new_comment: master ON mirrors inbox-primary keys.
+		{"mobile mirrors inbox-primary comment default", channelMobile, "new_comment", true},
 		// mobile.assignee_changed: same notifications-primary guard.
 		{"mobile ignores notification-primary override that flips default", channelMobile, "assignee_changed", false},
 		// mobile.task_failed: master ON → mirrors inbox.task_failed default (true).
@@ -446,8 +446,9 @@ func TestResolveChannelChoice_NotifyAllMobileInbox_OnlyInboxPrimary(t *testing.T
 		"notifications": map[string]any{
 			"notify_all_mobile_inbox": true,
 			"inbox": map[string]any{
-				"mentioned":   "on",
-				"new_comment": "on",
+				"mentioned":        "on",
+				"new_comment":      "on",
+				"assignee_changed": "on",
 			},
 			"mobile": map[string]any{
 				"mentioned": "off",
@@ -469,8 +470,11 @@ func TestResolveChannelChoice_NotifyAllMobileInbox_OnlyInboxPrimary(t *testing.T
 	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "mentioned"); !got {
 		t.Errorf("master on: inbox-primary mentioned should fire mobile push")
 	}
-	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "new_comment"); got {
-		t.Errorf("master on: notifications-primary new_comment should not fire mobile push")
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "new_comment"); !got {
+		t.Errorf("master on: inbox-primary new_comment should fire mobile push")
+	}
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "assignee_changed"); got {
+		t.Errorf("master on: notifications-primary assignee_changed should not fire mobile push")
 	}
 }
 
@@ -489,6 +493,7 @@ func TestResolveChannelChoice_NotifyAllMobileInboxOff(t *testing.T) {
 			},
 			"mobile": map[string]any{
 				"issue_assigned": "off", // own override should win
+				"new_comment":    "off", // own override should win
 			},
 		},
 	}
@@ -502,7 +507,7 @@ func TestResolveChannelChoice_NotifyAllMobileInboxOff(t *testing.T) {
 	}
 
 	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "new_comment"); got {
-		t.Errorf("master off: mobile.new_comment should follow mobile default (false), got true")
+		t.Errorf("master off: mobile.new_comment override (off) should win, got true")
 	}
 	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "issue_assigned"); got {
 		t.Errorf("master off: mobile.issue_assigned override (off) should win, got true")
@@ -838,8 +843,8 @@ func TestRouting_MentionBumping(t *testing.T) {
 		},
 	})
 
-	// Default routing: new_comment → notifications, mentioned → inbox. Both
-	// items should exist on their respective routes.
+	// Default routing: new_comment → inbox + notifications, mentioned → inbox.
+	// Both items should exist on their respective routes.
 	notifs := inboxItemsByRoute(t, mentionedID, routeNotifications)
 	inbox := inboxItemsByRoute(t, mentionedID, routeInbox)
 
@@ -854,6 +859,9 @@ func TestRouting_MentionBumping(t *testing.T) {
 
 	if !hasType(notifs, "new_comment") {
 		t.Errorf("expected new_comment on notifications route, got: notifs=%+v", notifs)
+	}
+	if !hasType(inbox, "new_comment") {
+		t.Errorf("expected new_comment on inbox route, got: inbox=%+v", inbox)
 	}
 	if !hasType(inbox, "mentioned") {
 		t.Errorf("expected mentioned on inbox route, got: inbox=%+v", inbox)
@@ -906,7 +914,9 @@ func TestPushDedup_MentionWinsOverNewComment(t *testing.T) {
 
 	addTestSubscriber(t, issueID, "member", mentionedID, "creator")
 	setUserChannelPrefs(t, mentionedID, map[string]map[string]string{
-		channelMobile: {"new_comment": "on", "mentioned": "on"},
+		channelInbox:         {"new_comment": "off"},
+		channelNotifications: {"new_comment": "on"},
+		channelMobile:        {"new_comment": "on", "mentioned": "on"},
 	}, nil)
 
 	pushCapture := &capturePushNotifier{}

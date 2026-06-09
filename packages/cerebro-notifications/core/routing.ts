@@ -92,7 +92,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     task_failed: "on",
     unassigned: "on",
     reaction_added: "off",
-    new_comment: "off",
+    new_comment: "on", // TECH-3001: default to Jesper's preference
     assignee_changed: "off",
     status_changed: "off",
     "due_date_changed.assignee": "on",
@@ -134,7 +134,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     task_failed: "off",
     unassigned: "off",
     reaction_added: "off",
-    new_comment: "off",
+    new_comment: "on", // TECH-3001: default to Jesper's preference
     assignee_changed: "off",
     status_changed: "off",
     "due_date_changed.assignee": "on",
