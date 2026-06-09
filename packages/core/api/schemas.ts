@@ -877,3 +877,26 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
 };
+
+// Deterministic tool plane — the Result envelope a sandboxed step returns. It
+// mirrors server/pkg/dettools.Result. `.loose()` keeps unknown future fields so
+// a newer backend that adds to the envelope never fails an older client.
+export const DeterministicToolResultSchema = z.object({
+  status: z.string().default("error"),
+  summary: z.string().default(""),
+  machine_data: z.record(z.string(), z.unknown()).optional(),
+  artifacts: z
+    .array(z.object({ type: z.string().default(""), path: z.string().default("") }).loose())
+    .optional(),
+  retryable: z.boolean().default(false),
+  error_code: z.string().optional(),
+}).loose();
+
+export type DeterministicToolResult = z.infer<typeof DeterministicToolResultSchema>;
+
+export const EMPTY_DETERMINISTIC_TOOL_RESULT: DeterministicToolResult = {
+  status: "error",
+  summary: "The server returned an unexpected response.",
+  retryable: false,
+  error_code: "INTERNAL_ERROR",
+};

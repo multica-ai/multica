@@ -180,6 +180,9 @@ import {
   CreateBillingCheckoutSessionResponseSchema,
   BillingCheckoutSessionStatusSchema,
   CreateBillingPortalSessionResponseSchema,
+  DeterministicToolResultSchema,
+  type DeterministicToolResult,
+  EMPTY_DETERMINISTIC_TOOL_RESULT,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -1486,6 +1489,22 @@ export class ApiClient {
     return this.fetch("/api/skills", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  // Deterministic tools — compile + run a user-authored Go step in the sandbox
+  // and return its Result envelope. The workspace is taken from the
+  // X-Workspace-Slug header (set by authHeaders), like the skills endpoints.
+  async testDeterministicTool(payload: {
+    source: string;
+    input?: Record<string, unknown>;
+  }): Promise<DeterministicToolResult> {
+    const raw = await this.fetch<unknown>("/api/deterministic-tools/test", {
+      method: "POST",
+      body: JSON.stringify({ source: payload.source, input: payload.input ?? {} }),
+    });
+    return parseWithFallback(raw, DeterministicToolResultSchema, EMPTY_DETERMINISTIC_TOOL_RESULT, {
+      endpoint: "POST /api/deterministic-tools/test",
     });
   }
 

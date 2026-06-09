@@ -850,6 +850,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/{slug}", h.GetAgentTemplate)
 			})
 
+			// Deterministic tools — author + immediately test user-authored Go
+			// "steps" (run sandboxed via the interpreter). Workspace context comes
+			// from the X-Workspace-Slug header like the other authenticated routes.
+			r.Post("/api/deterministic-tools/test", h.TestDeterministicTool)
+
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)
