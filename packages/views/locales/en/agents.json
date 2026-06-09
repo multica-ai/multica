@@ -133,6 +133,7 @@
     "section_skills": "Skills",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
+    "prop_service_tier": "Service tier",
     "prop_thinking": "Thinking",
     "prop_visibility": "Visibility",
     "prop_allowed_users": "Allowed users",
@@ -144,6 +145,17 @@
     "prop_updated": "Updated",
     "stream_tooltip": "Stream · {{value}}",
     "approval_tooltip": "Approval · {{value}}",
+    "service_tier_tooltip": "Codex Fast mode · {{value}}",
+    "service_tier_value": {
+      "": "Follow local Codex config",
+      "default": "Standard",
+      "fast": "Fast"
+    },
+    "service_tier_description": {
+      "": "Use the service tier configured in the local Codex CLI.",
+      "default": "Use the standard Codex service tier.",
+      "fast": "Use Codex Fast mode for faster supported runs."
+    },
     "stream_value": {
       "on": "On",
       "off": "Off"

@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import type {
   Agent,
   AgentRuntime,
+  AgentServiceTier,
   MemberWithUser,
   UpdateAgentAllowedPrincipalsRequest,
 } from "@multica/core/types";
@@ -50,6 +51,7 @@ import {
 import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
+import { ServiceTierPicker } from "./inspector/service-tier-picker";
 import { SkillAttach } from "./inspector/skill-attach";
 import {
   StreamPicker,
@@ -115,8 +117,14 @@ export function AgentDetailInspector({
   const timeAgo = useTimeAgo();
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
   const isOnline = runtime?.status === "online";
+  const isCodexRuntime = runtime?.provider === "codex";
   const approvalPolicy = resolveApprovalPolicy(agent);
   const streamMode = resolveStreamMode(agent);
+
+  const updateServiceTier = (serviceTier: AgentServiceTier) => {
+    if (!isCodexRuntime) return Promise.resolve();
+    return update({ service_tier: serviceTier });
+  };
 
   const updateRuntimeConfig = (next: {
     streamMode?: StreamMode;
@@ -174,6 +182,15 @@ export function AgentDetailInspector({
             onChange={(m) => update({ model: m })}
           />
         </PropRow>
+        {isCodexRuntime && (
+          <PropRow label={t(($) => $.inspector.prop_service_tier)} interactive={false}>
+            <ServiceTierPicker
+              value={agent.service_tier ?? ""}
+              canEdit={canEdit}
+              onChange={updateServiceTier}
+            />
+          </PropRow>
+        )}
         <ThinkingPropRow
           runtimeId={agent.runtime_id}
           runtimeOnline={!!isOnline}

@@ -4,6 +4,7 @@ export type {
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,
+  AgentServiceTier,
   AgentTask,
   LocalPreview,
   LocalPreviewLogs,

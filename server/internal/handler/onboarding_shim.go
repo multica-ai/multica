@@ -227,6 +227,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			CustomArgs:         []byte("[]"),
 			McpConfig:          nil,
 			Model:              pgtype.Text{},
+			ServiceTier:        pgtype.Text{},
 		})
 		if err != nil {
 			slog.Warn("bootstrap onboarding (shim): create assistant failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
@@ -306,7 +307,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 
 	if assistantCreated {
-		resp := agentToResponse(assistant)
+		resp := agentToResponseForProvider(assistant, runtime.Provider)
 		h.publish(protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
 		h.Analytics.Capture(analytics.AgentCreated(
 			userID, req.WorkspaceID, uuidToString(assistant.ID),
