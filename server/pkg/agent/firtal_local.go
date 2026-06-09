@@ -10,12 +10,15 @@ package agent
 // /v1/chat/completions (no gateway, no auth) and drives a real tool loop so a
 // local model (e.g. gemma on the Sara runtime) can actually solve issues.
 //
-// Tools are intentionally READ-ONLY (get_issue, list_comments). The model's
-// final text answer is returned as Result.Output, which the daemon posts as the
-// issue comment — so there is exactly one authored comment and no double-post.
-// Tool calls are executed via the authenticated `multica` CLI already present
-// on the runtime host (the same CLI every other agent uses), so no token or DB
-// plumbing is needed in the backend.
+// Tools are executed via the authenticated `multica` CLI already present on the
+// runtime host (the same CLI every other agent uses). The tool list is fetched
+// from GET /api/agents/{id}/tools at task start and filtered to the locally-
+// implementable subset — so the same grant configuration that governs cloud
+// agents governs firtal-local as well. When no grants are configured, all
+// locally-implementable tools are exposed.
+//
+// If the model calls add_comment during the loop its final text output is
+// suppressed so the daemon does not post a second comment on top.
 
 import (
 	"bytes"
@@ -24,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -39,6 +43,8 @@ const (
 	// result are fed back to the model, mirroring the gateway runtime's
 	// issue/comment caps so a huge issue cannot blow up the local context.
 	firtalLocalToolOutputCap = 24000
+	// firtalLocalGrantFetchTimeout caps the server round-trip for the grant list.
+	firtalLocalGrantFetchTimeout = 5 * time.Second
 )
 
 type firtalLocalBackend struct {
@@ -192,10 +198,10 @@ func (b *firtalLocalBackend) config(opts ExecOptions) firtalLocalConfig {
 // with tools until the model stops emitting tool_calls, then make one final
 // tool-free call to force a text answer if the round budget is exhausted.
 func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig, prompt string, opts ExecOptions, msgCh chan<- Message) (string, TokenUsage, error) {
-	tools := firtalLocalToolDefs()
+	tools := b.buildToolList(ctx)
 
 	history := []firtalLocalMessage{
-		{Role: "system", Content: firtalLocalSystemPrompt(opts.SystemPrompt)},
+		{Role: "system", Content: firtalLocalSystemPrompt(opts.SystemPrompt, tools)},
 		{Role: "user", Content: prompt},
 	}
 
@@ -207,6 +213,8 @@ func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig,
 		}
 	}
 
+	addCommentUsed := false
+
 	for round := 0; round < cfg.MaxToolRound; round++ {
 		resp, err := b.complete(ctx, cfg, history, tools)
 		if err != nil {
@@ -216,11 +224,20 @@ func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig,
 		content, calls := firtalLocalExtract(resp)
 
 		if len(calls) == 0 {
-			return strings.TrimSpace(content), usage, nil
+			output := strings.TrimSpace(content)
+			// If the model already posted via add_comment, suppress the final
+			// text so the daemon does not create a duplicate comment.
+			if addCommentUsed {
+				return "", usage, nil
+			}
+			return output, usage, nil
 		}
 
 		history = append(history, firtalLocalMessage{Role: "assistant", Content: content, ToolCalls: calls})
 		for _, call := range calls {
+			if call.Function.Name == "add_comment" {
+				addCommentUsed = true
+			}
 			args := decodeLocalToolArgs(call.Function.Arguments)
 			trySend(msgCh, Message{Type: MessageToolUse, Tool: call.Function.Name, CallID: call.ID, Input: args})
 			result := b.dispatch(ctx, call.Function.Name, args)
@@ -243,7 +260,93 @@ func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig,
 	}
 	accumulate(resp)
 	content, _ := firtalLocalExtract(resp)
+	if addCommentUsed {
+		return "", usage, nil
+	}
 	return strings.TrimSpace(content), usage, nil
+}
+
+// buildToolList determines which tools to expose to the model for this task.
+// It fetches the agent's grant list from the server and returns the intersection
+// with the locally-implementable tool set. Falls back to all local tools when
+// no grants are configured or the server cannot be reached.
+func (b *firtalLocalBackend) buildToolList(ctx context.Context) []firtalLocalToolDef {
+	all := firtalLocalAllToolDefs()
+	granted, hasGrants := b.fetchGrantedTools(ctx)
+	if !hasGrants {
+		return all
+	}
+	var filtered []firtalLocalToolDef
+	for _, t := range all {
+		if granted[t.Function.Name] {
+			filtered = append(filtered, t)
+		}
+	}
+	if len(filtered) == 0 {
+		return all
+	}
+	return filtered
+}
+
+// fetchGrantedTools queries GET /api/agents/{id}/tools to find which tools
+// are enabled for the current agent. Returns (map, true) when at least one
+// tool is enabled. Returns (nil, false) on any error or empty grant list,
+// signalling the caller to fall back to the full local tool set.
+func (b *firtalLocalBackend) fetchGrantedTools(ctx context.Context) (map[string]bool, bool) {
+	serverURL := strings.TrimRight(firstEnv(b.cfg.Env, "MULTICA_SERVER_URL"), "/")
+	token := firstEnv(b.cfg.Env, "MULTICA_TOKEN")
+	agentID := firstEnv(b.cfg.Env, "MULTICA_AGENT_ID")
+
+	if serverURL == "" || token == "" || agentID == "" {
+		return nil, false
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, firtalLocalGrantFetchTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, serverURL+"/api/agents/"+agentID+"/tools", nil)
+	if err != nil {
+		return nil, false
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := b.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, false
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, false
+	}
+
+	var items []struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal(body, &items); err != nil {
+		return nil, false
+	}
+
+	enabled := make(map[string]bool)
+	for _, it := range items {
+		if it.Enabled {
+			enabled[it.Name] = true
+		}
+	}
+	if len(enabled) == 0 {
+		return nil, false
+	}
+	return enabled, true
 }
 
 func (b *firtalLocalBackend) complete(ctx context.Context, cfg firtalLocalConfig, messages []firtalLocalMessage, tools []firtalLocalToolDef) (firtalLocalResponse, error) {
@@ -332,29 +435,122 @@ func (b *firtalLocalBackend) dispatch(ctx context.Context, name string, args map
 	return out
 }
 
-// runToolCLI executes a read-only multica tool via the authenticated `multica`
-// CLI present on the runtime host. The set is deliberately small and read-only;
-// the model's final text answer is what gets posted as the issue comment.
+// runToolCLI executes a multica tool via the authenticated `multica` CLI
+// present on the runtime host. Each tool maps to one or more multica subcommands.
 func (b *firtalLocalBackend) runToolCLI(ctx context.Context, name string, args map[string]any) (string, error) {
-	issueID := strings.TrimSpace(toolArgString(args, "issue_id"))
 	switch name {
 	case "get_issue":
+		issueID := strings.TrimSpace(toolArgString(args, "issue_id"))
 		if issueID == "" {
 			return "", fmt.Errorf("get_issue requires issue_id")
 		}
 		return b.execMultica(ctx, "issue", "get", issueID, "--output", "json")
+
 	case "list_comments":
+		issueID := strings.TrimSpace(toolArgString(args, "issue_id"))
 		if issueID == "" {
 			return "", fmt.Errorf("list_comments requires issue_id")
 		}
 		return b.execMultica(ctx, "issue", "comment", "list", issueID, "--output", "json")
+
+	case "add_comment":
+		issueID := strings.TrimSpace(toolArgString(args, "issue_id"))
+		content := strings.TrimSpace(toolArgString(args, "content"))
+		if issueID == "" {
+			return "", fmt.Errorf("add_comment requires issue_id")
+		}
+		if content == "" {
+			return "", fmt.Errorf("add_comment requires content")
+		}
+		// Use --content-stdin to safely handle multi-line content and quotes.
+		return b.execMulticaStdin(ctx, content, "issue", "comment", "add", issueID, "--content-stdin")
+
+	case "list_issues":
+		cliArgs := []string{"issue", "list", "--output", "json"}
+		if s := toolArgString(args, "status"); s != "" {
+			cliArgs = append(cliArgs, "--status", s)
+		}
+		if a := toolArgString(args, "assignee"); a != "" {
+			cliArgs = append(cliArgs, "--assignee", a)
+		}
+		if l := toolArgString(args, "limit"); l != "" {
+			cliArgs = append(cliArgs, "--limit", l)
+		}
+		return b.execMultica(ctx, cliArgs...)
+
+	case "create_issue":
+		title := strings.TrimSpace(toolArgString(args, "title"))
+		if title == "" {
+			return "", fmt.Errorf("create_issue requires title")
+		}
+		cliArgs := []string{"issue", "create", "--title", title, "--output", "json"}
+		if p := toolArgString(args, "priority"); p != "" {
+			cliArgs = append(cliArgs, "--priority", p)
+		}
+		if s := toolArgString(args, "status"); s != "" {
+			cliArgs = append(cliArgs, "--status", s)
+		}
+		if parent := toolArgString(args, "parent_id"); parent != "" {
+			cliArgs = append(cliArgs, "--parent", parent)
+		}
+		desc := strings.TrimSpace(toolArgString(args, "description"))
+		if desc != "" {
+			// Use --description-stdin so multi-line markdown is passed safely.
+			return b.execMulticaStdin(ctx, desc, append(cliArgs, "--description-stdin")...)
+		}
+		return b.execMultica(ctx, cliArgs...)
+
+	case "update_issue":
+		issueID := strings.TrimSpace(toolArgString(args, "issue_id"))
+		if issueID == "" {
+			return "", fmt.Errorf("update_issue requires issue_id")
+		}
+		cliArgs := []string{"issue", "update", issueID}
+		if t := toolArgString(args, "title"); t != "" {
+			cliArgs = append(cliArgs, "--title", t)
+		}
+		if s := toolArgString(args, "status"); s != "" {
+			cliArgs = append(cliArgs, "--status", s)
+		}
+		if p := toolArgString(args, "priority"); p != "" {
+			cliArgs = append(cliArgs, "--priority", p)
+		}
+		return b.execMultica(ctx, cliArgs...)
+
+	case "assign_issue":
+		issueID := strings.TrimSpace(toolArgString(args, "issue_id"))
+		assignee := strings.TrimSpace(toolArgString(args, "assignee"))
+		if issueID == "" {
+			return "", fmt.Errorf("assign_issue requires issue_id")
+		}
+		if assignee == "" {
+			return "", fmt.Errorf("assign_issue requires assignee")
+		}
+		return b.execMultica(ctx, "issue", "assign", issueID, "--to", assignee)
+
+	case "list_projects":
+		return b.execMultica(ctx, "project", "list", "--output", "json")
+
+	case "get_me":
+		result := map[string]any{
+			"agent_id":     firstEnv(b.cfg.Env, "MULTICA_AGENT_ID"),
+			"name":         firstEnv(b.cfg.Env, "MULTICA_AGENT_NAME"),
+			"workspace_id": firstEnv(b.cfg.Env, "MULTICA_WORKSPACE_ID"),
+		}
+		raw, _ := json.Marshal(result)
+		return string(raw), nil
+
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
 }
 
+// execMultica runs a multica CLI subcommand, merging the task-scoped env
+// (MULTICA_TOKEN, MULTICA_SERVER_URL, etc.) on top of the OS environment
+// so the right credentials are used even when the daemon has a different token.
 func (b *firtalLocalBackend) execMultica(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "multica", args...)
+	cmd.Env = b.buildCLIEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -368,9 +564,56 @@ func (b *firtalLocalBackend) execMultica(ctx context.Context, args ...string) (s
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// firtalLocalToolDefs returns the read-only tool surface offered to the local
-// model. Kept in lock-step with runToolCLI.
-func firtalLocalToolDefs() []firtalLocalToolDef {
+// execMulticaStdin runs a multica CLI subcommand with a string piped to stdin.
+// Used for commands that accept --content-stdin / --description-stdin to safely
+// pass multi-line or special-character content without shell quoting issues.
+func (b *firtalLocalBackend) execMulticaStdin(ctx context.Context, stdin string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "multica", args...)
+	cmd.Env = b.buildCLIEnv()
+	cmd.Stdin = strings.NewReader(stdin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("%s", msg)
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// buildCLIEnv merges the task-scoped env vars (MULTICA_TOKEN, MULTICA_SERVER_URL,
+// etc.) on top of the OS environment. Task-scoped vars take precedence so the
+// multica CLI uses the right credentials for this task rather than any ambient
+// daemon-level credentials that happen to be in the process environment.
+func (b *firtalLocalBackend) buildCLIEnv() []string {
+	if len(b.cfg.Env) == 0 {
+		return nil // inherit OS env unchanged
+	}
+	base := os.Environ()
+	// Build a map so we can override keys without duplicates.
+	merged := make(map[string]string, len(base)+len(b.cfg.Env))
+	for _, kv := range base {
+		if idx := strings.IndexByte(kv, '='); idx > 0 {
+			merged[kv[:idx]] = kv[idx+1:]
+		}
+	}
+	for k, v := range b.cfg.Env {
+		merged[k] = v
+	}
+	result := make([]string, 0, len(merged))
+	for k, v := range merged {
+		result = append(result, k+"="+v)
+	}
+	return result
+}
+
+// firtalLocalAllToolDefs returns the complete set of tools that firtal-local
+// can implement via the multica CLI. This list is filtered at runtime by the
+// agent's grant configuration from the server.
+func firtalLocalAllToolDefs() []firtalLocalToolDef {
 	issueIDParam := map[string]any{
 		"type":     "object",
 		"required": []string{"issue_id"},
@@ -384,7 +627,7 @@ func firtalLocalToolDefs() []firtalLocalToolDef {
 	return []firtalLocalToolDef{
 		{Type: "function", Function: firtalLocalToolFunction{
 			Name:        "get_issue",
-			Description: "Get a Multica issue's title, description, status, and comments. issue_id accepts a UUID or an identifier like TECH-123.",
+			Description: "Get a Multica issue's title, description, status, and metadata. issue_id accepts a UUID or an identifier like TECH-123.",
 			Parameters:  issueIDParam,
 		}},
 		{Type: "function", Function: firtalLocalToolFunction{
@@ -392,15 +635,133 @@ func firtalLocalToolDefs() []firtalLocalToolDef {
 			Description: "List all comments on a Multica issue in chronological order.",
 			Parameters:  issueIDParam,
 		}},
+		{Type: "function", Function: firtalLocalToolFunction{
+			Name:        "add_comment",
+			Description: "Post a new comment on a Multica issue authored by you (the calling agent).",
+			Parameters: map[string]any{
+				"type":     "object",
+				"required": []string{"issue_id", "content"},
+				"properties": map[string]any{
+					"issue_id": map[string]any{
+						"type":        "string",
+						"description": "Issue UUID or identifier (e.g. TECH-123).",
+					},
+					"content": map[string]any{
+						"type":        "string",
+						"description": "Markdown body of the comment.",
+					},
+				},
+			},
+		}},
+		{Type: "function", Function: firtalLocalToolFunction{
+			Name:        "list_issues",
+			Description: "List issues in the workspace. Optional filters: status, assignee, limit.",
+			Parameters: map[string]any{
+				"type":     "object",
+				"required": []string{},
+				"properties": map[string]any{
+					"status": map[string]any{
+						"type":        "string",
+						"description": "Filter by status: todo, in_progress, in_review, done, blocked, backlog, cancelled.",
+					},
+					"assignee": map[string]any{
+						"type":        "string",
+						"description": "Filter by assignee name or agent name.",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Max issues to return (default 50).",
+					},
+				},
+			},
+		}},
+		{Type: "function", Function: firtalLocalToolFunction{
+			Name:        "create_issue",
+			Description: "Create a new Multica issue.",
+			Parameters: map[string]any{
+				"type":     "object",
+				"required": []string{"title"},
+				"properties": map[string]any{
+					"title":       map[string]any{"type": "string", "description": "Issue title."},
+					"description": map[string]any{"type": "string", "description": "Issue description in markdown."},
+					"priority":    map[string]any{"type": "string", "description": "none, low, medium, high, urgent."},
+					"status":      map[string]any{"type": "string", "description": "todo, in_progress, in_review, done, blocked, backlog, cancelled."},
+					"parent_id":   map[string]any{"type": "string", "description": "Parent issue UUID or identifier for sub-issues."},
+				},
+			},
+		}},
+		{Type: "function", Function: firtalLocalToolFunction{
+			Name:        "update_issue",
+			Description: "Update fields on an existing Multica issue.",
+			Parameters: map[string]any{
+				"type":     "object",
+				"required": []string{"issue_id"},
+				"properties": map[string]any{
+					"issue_id": map[string]any{"type": "string", "description": "Issue UUID or identifier (e.g. TECH-123)."},
+					"title":    map[string]any{"type": "string", "description": "New title."},
+					"status":   map[string]any{"type": "string", "description": "New status."},
+					"priority": map[string]any{"type": "string", "description": "New priority."},
+				},
+			},
+		}},
+		{Type: "function", Function: firtalLocalToolFunction{
+			Name:        "assign_issue",
+			Description: "Assign a Multica issue to a member or agent by name.",
+			Parameters: map[string]any{
+				"type":     "object",
+				"required": []string{"issue_id", "assignee"},
+				"properties": map[string]any{
+					"issue_id": map[string]any{"type": "string", "description": "Issue UUID or identifier."},
+					"assignee": map[string]any{"type": "string", "description": "Name of the member or agent to assign to."},
+				},
+			},
+		}},
+		{Type: "function", Function: firtalLocalToolFunction{
+			Name:        "list_projects",
+			Description: "List all projects in the workspace.",
+			Parameters: map[string]any{
+				"type":     "object",
+				"required": []string{},
+				"properties": map[string]any{},
+			},
+		}},
+		{Type: "function", Function: firtalLocalToolFunction{
+			Name:        "get_me",
+			Description: "Return your own agent ID, name, and workspace context.",
+			Parameters: map[string]any{
+				"type":     "object",
+				"required": []string{},
+				"properties": map[string]any{},
+			},
+		}},
 	}
 }
 
-func firtalLocalSystemPrompt(daemonPrompt string) string {
+// firtalLocalSystemPrompt builds the system prompt for the model.
+// The tool list is injected so the prompt accurately describes what is available.
+func firtalLocalSystemPrompt(daemonPrompt string, tools []firtalLocalToolDef) string {
+	hasAddComment := false
+	for _, t := range tools {
+		if t.Function.Name == "add_comment" {
+			hasAddComment = true
+			break
+		}
+	}
+
+	var replyInstruction string
+	if hasAddComment {
+		replyInstruction = "To reply on the issue: use add_comment with the issue_id and your full answer. After calling add_comment, do not also write a plain-text final answer — that would create a duplicate comment."
+	} else {
+		replyInstruction = "To reply on the issue: write your complete answer as your final plain-text message. That message is posted as your comment, so make it self-contained."
+	}
+
 	base := strings.Join([]string{
-		"You are a Multica agent running on a local model. You drive Multica through the provided FUNCTION TOOLS (get_issue, list_comments) — you cannot run shell commands or a `multica` CLI yourself, so ignore any instruction telling you to run CLI commands and call the matching tool instead.",
-		"To handle an issue: first call get_issue (and list_comments if you need the discussion) to read the real content, then write your complete answer to the user as your final plain-text message. That final message is what gets posted as your comment on the issue, so make it self-contained — do not say you will do something later.",
+		"You are a Multica agent running on a local model. Use the provided FUNCTION TOOLS for all Multica operations — reading issues, posting comments, managing tasks. Do not try to run shell commands or the `multica` CLI directly; the tools handle all platform access.",
+		"To handle an issue: first call get_issue (and list_comments for the discussion thread) to read the real content. Then act on what you find.",
+		replyInstruction,
 		"Always pass the issue id exactly as it appears in the task (a UUID or an identifier like TECH-123).",
 	}, "\n\n")
+
 	if p := strings.TrimSpace(daemonPrompt); p != "" {
 		return base + "\n\n---\n\n" + p
 	}

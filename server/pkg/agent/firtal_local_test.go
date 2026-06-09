@@ -198,3 +198,97 @@ func TestFirtalLocalNewBackend(t *testing.T) {
 		t.Fatalf("New returned %T, want *firtalLocalBackend", be)
 	}
 }
+
+// TestFirtalLocalAddCommentSuppressesFinalOutput verifies that when the model
+// uses add_comment during the tool loop, the final plain-text output is
+// suppressed so the daemon does not post a second comment.
+func TestFirtalLocalAddCommentSuppressesFinalOutput(t *testing.T) {
+	rec := &localChatRecorder{responses: []string{
+		toolCallResponse("add_comment", `{"issue_id":"TECH-1","content":"My reply."}`),
+		textResponse("Done, I posted the reply."),
+	}}
+	srv := httptest.NewServer(rec.handler())
+	defer srv.Close()
+
+	b := &firtalLocalBackend{
+		cfg:        Config{Env: map[string]string{"FIRTAL_LOCAL_OLLAMA_URL": srv.URL}},
+		httpClient: srv.Client(),
+		runTool: func(_ context.Context, _ string, _ map[string]any) (string, error) {
+			return `{"id":"c1","issue_id":"TECH-1"}`, nil
+		},
+	}
+	res := runLocalBackend(t, b, "Handle TECH-1", ExecOptions{})
+	if res.Status != "completed" {
+		t.Fatalf("status = %q (err=%q)", res.Status, res.Error)
+	}
+	// Output must be empty — daemon should NOT post a second comment.
+	if res.Output != "" {
+		t.Fatalf("expected empty output after add_comment, got %q", res.Output)
+	}
+}
+
+// TestFirtalLocalFetchGrantedToolsFilters verifies that buildToolList only
+// exposes tools that are enabled in the grant list returned by the server.
+func TestFirtalLocalFetchGrantedToolsFilters(t *testing.T) {
+	// Fake /api/agents/{id}/tools endpoint returning only get_issue + list_comments enabled.
+	grantSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[
+			{"name":"get_issue","enabled":true},
+			{"name":"list_comments","enabled":true},
+			{"name":"add_comment","enabled":false},
+			{"name":"list_issues","enabled":false}
+		]`)
+	}))
+	defer grantSrv.Close()
+
+	b := &firtalLocalBackend{
+		cfg: Config{Env: map[string]string{
+			"MULTICA_SERVER_URL": grantSrv.URL,
+			"MULTICA_TOKEN":      "test-token",
+			"MULTICA_AGENT_ID":   "agent-uuid",
+		}},
+		httpClient: grantSrv.Client(),
+	}
+
+	tools := b.buildToolList(context.Background())
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools (get_issue + list_comments), got %d: %v", len(tools), toolNames(tools))
+	}
+	if tools[0].Function.Name != "get_issue" || tools[1].Function.Name != "list_comments" {
+		t.Fatalf("unexpected tools: %v", toolNames(tools))
+	}
+}
+
+// TestFirtalLocalFetchGrantedToolsFallback verifies that when the grant server
+// returns no enabled tools (empty config), all local tools are exposed.
+func TestFirtalLocalFetchGrantedToolsFallback(t *testing.T) {
+	grantSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// All disabled — no grants configured yet.
+		_, _ = io.WriteString(w, `[{"name":"get_issue","enabled":false}]`)
+	}))
+	defer grantSrv.Close()
+
+	b := &firtalLocalBackend{
+		cfg: Config{Env: map[string]string{
+			"MULTICA_SERVER_URL": grantSrv.URL,
+			"MULTICA_TOKEN":      "test-token",
+			"MULTICA_AGENT_ID":   "agent-uuid",
+		}},
+		httpClient: grantSrv.Client(),
+	}
+
+	tools := b.buildToolList(context.Background())
+	if len(tools) != len(firtalLocalAllToolDefs()) {
+		t.Fatalf("expected all %d tools, got %d", len(firtalLocalAllToolDefs()), len(tools))
+	}
+}
+
+func toolNames(tools []firtalLocalToolDef) []string {
+	out := make([]string, len(tools))
+	for i, t := range tools {
+		out[i] = t.Function.Name
+	}
+	return out
+}
