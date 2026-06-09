@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/costrictauth"
 	"github.com/multica-ai/multica/server/internal/daemon"
 )
 
@@ -188,7 +189,7 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	token := resolveToken(cmd)
 
 	if serverURL == "" {
-		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
+		return nil, fmt.Errorf("server URL not set: set COSTRICT_BASE_URL env var, use --server-url flag, MULTICA_SERVER_URL env, or run 'multica config set server_url <url>'")
 	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
@@ -202,11 +203,55 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	return client, nil
 }
 
+// resolveCoStrictBaseURL returns the base URL of the costrict-web instance.
+// Priority: COSTRICT_BASE_URL env var > auth.json base_url.
+func resolveCoStrictBaseURL() string {
+	if v := strings.TrimSpace(os.Getenv("COSTRICT_BASE_URL")); v != "" {
+		return normalizeAPIBaseURL(v)
+	}
+	cred, _ := costrictauth.LoadCredentials()
+	if cred != nil && cred.BaseURL != "" {
+		return normalizeAPIBaseURL(cred.BaseURL)
+	}
+	return ""
+}
+
+// resolveAuthBaseURL returns the URL for costrict-web auth endpoints
+// (/api/me, /api/tokens). Falls back to legacy resolveServerURL when no
+// costrict configuration is available.
+func resolveAuthBaseURL(cmd *cobra.Command) string {
+	if base := resolveCoStrictBaseURL(); base != "" {
+		return base
+	}
+	return resolveServerURL(cmd)
+}
+
+// resolveServerURL returns the multica service API base URL.
+// Priority:
+//  1. --server-url flag / MULTICA_SERVER_URL env (explicit override)
+//  2. COSTRICT_BASE_URL + MULTICA_SERVER_PREFIX (default /multica-backend)
+//  3. auth.json base_url + MULTICA_SERVER_PREFIX
+//  4. Legacy ~/.multica/config.json server_url
 func resolveServerURL(cmd *cobra.Command) string {
+	// Explicit override always wins.
 	val := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
 	if val != "" {
 		return normalizeAPIBaseURL(val)
 	}
+
+	// Derive from costrict base URL + prefix.
+	if base := resolveCoStrictBaseURL(); base != "" {
+		prefix := strings.TrimSpace(os.Getenv("MULTICA_SERVER_PREFIX"))
+		if prefix == "" {
+			prefix = "/multica-backend"
+		}
+		if !strings.HasPrefix(prefix, "/") {
+			prefix = "/" + prefix
+		}
+		return base + prefix
+	}
+
+	// Legacy fallback.
 	profile := resolveProfile(cmd)
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err == nil && cfg.ServerURL != "" {

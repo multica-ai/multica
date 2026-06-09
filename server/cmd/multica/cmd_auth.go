@@ -203,11 +203,12 @@ func detectOutboundIP(serverURL string) net.IP {
 }
 
 func runAuthLoginBrowser(cmd *cobra.Command) error {
-	serverURL := resolveServerURL(cmd)
+	authURL := resolveAuthBaseURL(cmd)
+	serviceURL := resolveServerURL(cmd)
 	appURL := resolveAppURL(cmd)
 
 	flagHost, _ := cmd.Flags().GetString(callbackHostFlag)
-	callbackHost, bindAddr := resolveCallbackBinding(flagHost, serverURL, appURL, detectOutboundIP)
+	callbackHost, bindAddr := resolveCallbackBinding(flagHost, authURL, appURL, detectOutboundIP)
 
 	// Pin to "tcp4" — a bare "tcp" on macOS can produce an IPv6-only socket
 	// that IPv4 clients (including browsers resolving localhost → 127.0.0.1)
@@ -278,7 +279,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	}
 
 	// Use the JWT to create a PAT via the existing API.
-	client := cli.NewAPIClient(serverURL, "", jwtToken)
+	client := cli.NewAPIClient(authURL, "", jwtToken)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -302,7 +303,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	}
 
 	// Verify the PAT works.
-	patClient := cli.NewAPIClient(serverURL, "", patResp.Token)
+	patClient := cli.NewAPIClient(authURL, "", patResp.Token)
 	var me struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`
@@ -317,7 +318,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	cfg.WorkspaceID = ""
 	cfg.Token = patResp.Token
-	cfg.ServerURL = serverURL
+	cfg.ServerURL = serviceURL
 	cfg.AppURL = appURL
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
@@ -350,8 +351,8 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		return fmt.Errorf("invalid token format: must start with mul_")
 	}
 
-	serverURL := resolveServerURL(cmd)
-	client := cli.NewAPIClient(serverURL, "", token)
+	authURL := resolveAuthBaseURL(cmd)
+	client := cli.NewAPIClient(authURL, "", token)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -364,11 +365,12 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		return fmt.Errorf("invalid token: %w", err)
 	}
 
+	serviceURL := resolveServerURL(cmd)
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	cfg.WorkspaceID = ""
 	cfg.Token = token
-	cfg.ServerURL = serverURL
+	cfg.ServerURL = serviceURL
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
@@ -379,14 +381,14 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 
 func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	token := resolveToken(cmd)
-	serverURL := resolveServerURL(cmd)
+	authURL := resolveAuthBaseURL(cmd)
 
 	if token == "" {
 		fmt.Fprintln(os.Stderr, "Not authenticated. Run 'multica login' to authenticate.")
 		return nil
 	}
 
-	client := cli.NewAPIClient(serverURL, "", token)
+	client := cli.NewAPIClient(authURL, "", token)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -405,7 +407,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		prefix = prefix[:12] + "..."
 	}
 
-	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", serverURL, me.Name, me.Email, prefix)
+	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", authURL, me.Name, me.Email, prefix)
 	return nil
 }
 
