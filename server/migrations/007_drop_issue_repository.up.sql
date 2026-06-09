@@ -1,1 +1,0 @@
-ALTER TABLE issue DROP COLUMN IF EXISTS repository;

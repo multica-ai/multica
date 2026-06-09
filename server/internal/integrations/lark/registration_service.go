@@ -563,6 +563,26 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	defer tx.Rollback(ctx)
 	qtx := s.queries.WithTx(tx)
 
+	// If the same Lark app was previously bound to a different agent,
+	// revoke the old installation before upserting the new one.
+	// Without this, the UNIQUE(app_id) constraint blocks the insert
+	// and the user sees "duplicate key value" (#3950).
+	existing, err := qtx.GetLarkInstallationByAppID(ctx, res.ClientID)
+	if err == nil && existing.AgentID != sess.agentID {
+		s.cfg.Logger.Info("lark registration: revoking previous app_id binding",
+			"session_id", sess.id,
+			"app_id", res.ClientID,
+			"old_agent_id", existing.AgentID,
+			"new_agent_id", sess.agentID)
+		if revokeErr := qtx.SetLarkInstallationStatus(ctx, db.SetLarkInstallationStatusParams{
+			ID:     existing.ID,
+			Status: "revoked",
+		}); revokeErr != nil {
+			s.cfg.Logger.Warn("lark registration: revoke old installation",
+				"session_id", sess.id, "err", revokeErr)
+		}
+	}
+
 	inst, err := qtx.UpsertLarkInstallation(ctx, db.UpsertLarkInstallationParams{
 		WorkspaceID:        sess.workspaceID,
 		AgentID:            sess.agentID,

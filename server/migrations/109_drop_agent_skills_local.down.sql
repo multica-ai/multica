@@ -1,3 +1,0 @@
--- Intentionally empty. The local skill toggle was reverted before release, so
--- rolling this cleanup back should only remove the schema_migrations row; it
--- should not recreate an unused column or invent values for it.
