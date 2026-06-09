@@ -25,6 +25,8 @@ export type TaskQueueDisplay = {
   detail: string | null;
 };
 
+export type TaskQueueBucket = "blocked" | "queued" | "running" | "failed" | "completed" | "cancelled";
+
 export const taskStatusConfig: Record<string, { label: string; icon: LucideIcon; color: string }> = {
   queued: { label: "Queued", icon: Clock, color: "text-muted-foreground" },
   dispatched: { label: "Dispatched", icon: Play, color: "text-info" },
@@ -34,13 +36,26 @@ export const taskStatusConfig: Record<string, { label: string; icon: LucideIcon;
   cancelled: { label: "Cancelled", icon: XCircle, color: "text-muted-foreground" },
 };
 
+export function getTaskQueueBucket(
+  task: Pick<AgentTask, "status">,
+  issue?: Pick<Issue, "blocked_by_count">,
+): TaskQueueBucket {
+  if (task.status === "queued" && (issue?.blocked_by_count ?? 0) > 0) return "blocked";
+  if (task.status === "queued") return "queued";
+  if (task.status === "dispatched" || task.status === "running") return "running";
+  if (task.status === "failed") return "failed";
+  if (task.status === "completed") return "completed";
+  return "cancelled";
+}
+
 export function getTaskQueueDisplay(
   task: Pick<AgentTask, "status">,
   issue?: Pick<Issue, "blocked_by_count">,
 ): TaskQueueDisplay {
   const blockerCount = issue?.blocked_by_count ?? 0;
+  const bucket = getTaskQueueBucket(task, issue);
 
-  if (task.status === "queued" && blockerCount > 0) {
+  if (bucket === "blocked") {
     return {
       label: "Blocked",
       icon: AlertCircle,
@@ -59,11 +74,9 @@ export function getTaskQueueDisplay(
     icon: config.icon,
     color: config.color,
     tone:
-      task.status === "running"
-        ? ("running" as const)
-        : task.status === "dispatched"
-          ? ("dispatched" as const)
-          : ("default" as const),
+      bucket === "running"
+        ? (task.status === "dispatched" ? ("dispatched" as const) : ("running" as const))
+        : ("default" as const),
     detail: null,
   };
 }

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { getTaskQueueDisplay } from "./config";
+import { getTaskQueueBucket, getTaskQueueDisplay } from "./config";
 
 describe("getTaskQueueDisplay", () => {
+  it("classifies non-blocked queued tasks separately from running work", () => {
+    expect(getTaskQueueBucket({ status: "queued" } as any, { blocked_by_count: 0 } as any)).toBe("queued");
+    expect(getTaskQueueBucket({ status: "dispatched" } as any, { blocked_by_count: 0 } as any)).toBe("running");
+    expect(getTaskQueueBucket({ status: "failed" } as any, { blocked_by_count: 0 } as any)).toBe("failed");
+  });
+
   it("marks queued tasks with unresolved blockers as blocked", () => {
     const display = getTaskQueueDisplay({ status: "queued" } as any, { blocked_by_count: 2 } as any);
 
