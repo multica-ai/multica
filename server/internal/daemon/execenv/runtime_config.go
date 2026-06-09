@@ -538,10 +538,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// Inject project-scoped context (resources attached to the issue's project).
 	// The full structured payload is also available at .multica/project/resources.json
 	// so skills can consume it programmatically.
-	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
+	projectDescription := strings.TrimSpace(ctx.ProjectDescription)
+	if ctx.ProjectID != "" || projectDescription != "" || len(ctx.ProjectResources) > 0 {
 		b.WriteString("## Project Context\n\n")
 		if ctx.ProjectTitle != "" {
 			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+		}
+		if projectDescription != "" {
+			b.WriteString("Project description:\n\n")
+			b.WriteString(projectDescription)
+			b.WriteString("\n\n")
 		}
 		if len(ctx.ProjectResources) > 0 {
 			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")

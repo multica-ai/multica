@@ -1734,9 +1734,10 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	// Project + project_resource(github_repo) with a URL that is NOT in the
 	// workspace's repos list.
 	var projectID string
+	const projectDescription = "Project-level prompt: focus on ops dashboards and alerting."
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
-	`, testWorkspaceID, "Claim project repo override").Scan(&projectID); err != nil {
+		INSERT INTO project (workspace_id, title, description) VALUES ($1, $2, $3) RETURNING id
+	`, testWorkspaceID, "Claim project repo override", projectDescription).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
@@ -1791,9 +1792,11 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 
 	var resp struct {
 		Task *struct {
-			Repos            []RepoData            `json:"repos"`
-			ProjectID        string                `json:"project_id"`
-			ProjectResources []ProjectResourceData `json:"project_resources"`
+			Repos              []RepoData            `json:"repos"`
+			ProjectID          string                `json:"project_id"`
+			ProjectTitle       string                `json:"project_title"`
+			ProjectDescription string                `json:"project_description"`
+			ProjectResources   []ProjectResourceData `json:"project_resources"`
 		} `json:"task"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -1804,6 +1807,12 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	}
 	if resp.Task.ProjectID != projectID {
 		t.Errorf("project_id = %q, want %q", resp.Task.ProjectID, projectID)
+	}
+	if resp.Task.ProjectTitle != "Claim project repo override" {
+		t.Errorf("project_title = %q, want %q", resp.Task.ProjectTitle, "Claim project repo override")
+	}
+	if resp.Task.ProjectDescription != projectDescription {
+		t.Errorf("project_description = %q, want %q", resp.Task.ProjectDescription, projectDescription)
 	}
 	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != projectRepoURL {
 		t.Fatalf("expected resp.Repos to contain only the project repo URL, got %+v", resp.Task.Repos)
