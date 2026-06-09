@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { isDaemonExternallyManaged, normalizeHostOS } from "./daemon-os";
+import {
+  daemonLifecycleUnreachable,
+  isDaemonExternallyManaged,
+  normalizeHostOS,
+} from "./daemon-os";
 
 describe("normalizeHostOS", () => {
   it("maps win32 to the GOOS spelling 'windows'", () => {
@@ -45,5 +49,32 @@ describe("isDaemonExternallyManaged", () => {
   it("fails safe to false when the daemon reports no OS", () => {
     expect(isDaemonExternallyManaged(undefined, "windows")).toBe(false);
     expect(isDaemonExternallyManaged("", "windows")).toBe(false);
+  });
+});
+
+// The stop/restart lifecycle boundary funnels through this. It must read the
+// daemon's LIVE OS (not a cached poll value), so a restart on a path that
+// didn't just poll — e.g. user-switch — still can't shell out at a WSL2 daemon.
+describe("daemonLifecycleUnreachable", () => {
+  it("consults the live OS reader and blocks a foreign-OS (WSL2) daemon", async () => {
+    const readDaemonOS = vi.fn().mockResolvedValue("linux");
+    expect(await daemonLifecycleUnreachable(readDaemonOS, "windows")).toBe(true);
+    // Proves the decision came from a fresh read, not a stale cache.
+    expect(readDaemonOS).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a native daemon whose live OS matches the host", async () => {
+    expect(
+      await daemonLifecycleUnreachable(async () => "windows", "windows"),
+    ).toBe(false);
+    expect(
+      await daemonLifecycleUnreachable(async () => "darwin", "darwin"),
+    ).toBe(false);
+  });
+
+  it("fails safe to false when the live OS is unknown (older daemon / none running)", async () => {
+    expect(
+      await daemonLifecycleUnreachable(async () => undefined, "windows"),
+    ).toBe(false);
   });
 });

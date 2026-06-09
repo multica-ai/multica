@@ -45,3 +45,23 @@ export function isDaemonExternallyManaged(
   if (typeof daemonOS !== "string" || daemonOS.length === 0) return false;
   return daemonOS !== hostOS;
 }
+
+/**
+ * Boundary preflight for daemon lifecycle ops (stop / restart): resolve the
+ * daemon's CURRENT OS via `readDaemonOS` and return true when it's running
+ * somewhere the app can't drive.
+ *
+ * `readDaemonOS` is a live `/health` read performed at the call site — never a
+ * cached poll value. That is the whole point: a stale "manageable" cache would
+ * let a lifecycle op shell out to a native CLI that can't reach a WSL2 daemon
+ * (the PID lives in another namespace), which is exactly the bug. Taking the
+ * reader as a parameter keeps this unit-testable without the electron-coupled
+ * daemon-manager module, and lets the test prove the live value — not a cache —
+ * drives the decision. See #3916.
+ */
+export async function daemonLifecycleUnreachable(
+  readDaemonOS: () => Promise<string | undefined>,
+  hostOS: string,
+): Promise<boolean> {
+  return isDaemonExternallyManaged(await readDaemonOS(), hostOS);
+}
