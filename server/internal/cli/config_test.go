@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -206,16 +207,7 @@ func TestCLIConfig_UnknownFieldsArePreserved(t *testing.T) {
 
 	// After round-trip, future_backend_xyz should still be in the file.
 	data, _ := os.ReadFile(filepath.Join(cfgDir, "config.json"))
-	if !contains(string(data), "future_backend_xyz") {
+	if !strings.Contains(string(data), "future_backend_xyz") {
 		t.Error("unknown field future_backend_xyz was dropped on round-trip")
 	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

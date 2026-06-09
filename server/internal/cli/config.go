@@ -26,11 +26,11 @@ type CLIConfig struct {
 }
 
 // BackendOverrides holds per-backend configuration overrides. Each field is
-// optional; nil means "no override for this backend". New fields here MUST be
-// purely additive — older daemons must round-trip the JSON without dropping
-// unknown keys (Go's json package does this by default for map-typed fields,
-// but struct fields with no json tag get silently dropped, so always add
-// `json:",omitempty"`).
+// optional; nil means "no override for this backend". Keep new fields additive
+// and tagged with `json:",omitempty"` so empty values do not change the saved
+// config shape. Unknown-key preservation is a separate forward-compat concern:
+// Go's encoding/json drops fields that are not represented in this struct on
+// load/save round-trip (see TestCLIConfig_UnknownFieldsArePreserved).
 type BackendOverrides struct {
 	OpenClaw *OpenClawOverride `json:"openclaw,omitempty"`
 }

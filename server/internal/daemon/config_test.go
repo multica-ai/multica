@@ -1,12 +1,12 @@
 package daemon
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -854,17 +854,6 @@ func agentKeys(m map[string]AgentEntry) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	// crude sort to keep test output deterministic
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[j] < keys[i] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
+	sort.Strings(keys)
 	return keys
 }
-
-// Marker reference to encoding/json keeps it in scope for future tests
-// that need to inspect serialization round-trips here too.
-var _ = json.Marshal
