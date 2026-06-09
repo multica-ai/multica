@@ -334,6 +334,7 @@ export function myIssueListOptions(
         ? fetchAllMyFirstPages(userId, filter, sort)
         : fetchFirstPages(filter, sort),
     select: flattenIssueBuckets,
+    placeholderData: keepPreviousData,
   });
 }
 
