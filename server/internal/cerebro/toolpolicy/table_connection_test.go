@@ -61,6 +61,185 @@ func TestDeniedConnectionTools_AgentDenyProducesToken(t *testing.T) {
 	}
 }
 
+// TestDeniedConnectionTools_ConnectionWideDenyScopedPerRuntimeAndAgent is the
+// TECH-3180 regression. Before the fix, denying the WHOLE connection (the
+// connection-wide row, resource_pattern '') at the runtime or agent layer was
+// display-only: it produced no --disallowedTools tokens, so the tools stayed
+// callable. The connection-wide chain must now cascade to every tool on the
+// connection, and the deny must be scoped to exactly the runtime/agent it was set
+// on — a different runtime/agent keeps full access.
+func TestDeniedConnectionTools_ConnectionWideDenyScopedPerRuntimeAndAgent(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	deniedRuntime, otherRuntime := uuidByte(41), uuidByte(42)
+	deniedAgent, otherAgent := uuidByte(43), uuidByte(44)
+	const conn = "customer-service"
+	const connKey = "connection:" + conn
+
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, tools, enabled)
+		VALUES ($1, $2, $3, 'mcp_http', 'http://internal:3000',
+		        '[{"name":"draft_reply"},{"name":"lookup_order"}]'::jsonb, true)
+	`, tpTestWorkspaceID, conn, "Customer Service MCP"); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping connection-wide deny test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1`, tpTestWorkspaceID)
+	})
+
+	// The connection-wide capability row, exactly as connections.SyncCapability
+	// writes it — this is the row whose chain now cascades to the tools.
+	addCap(t, s, connKey, "Customer Service MCP", "Connections", "connection")
+
+	wantBoth := []string{
+		"mcp__customer-service__draft_reply",
+		"mcp__customer-service__lookup_order",
+	}
+
+	// --- Runtime layer: deny the whole connection for deniedRuntime only. ---
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     connKey,
+		Layer:       LayerRuntime,
+		SubjectID:   deniedRuntime,
+		Setting:     SettingDeny,
+	}); err != nil {
+		t.Fatalf("set runtime-wide deny: %v", err)
+	}
+
+	tokens, err := s.DeniedConnectionTools(ctx, TableQuery{
+		WorkspaceID: tpTestWorkspaceID, RuntimeID: deniedRuntime,
+	})
+	if err != nil {
+		t.Fatalf("denied (denied runtime): %v", err)
+	}
+	assertSameTokens(t, "denied runtime", tokens, wantBoth)
+
+	tokens, err = s.DeniedConnectionTools(ctx, TableQuery{
+		WorkspaceID: tpTestWorkspaceID, RuntimeID: otherRuntime,
+	})
+	if err != nil {
+		t.Fatalf("denied (other runtime): %v", err)
+	}
+	if len(tokens) != 0 {
+		t.Fatalf("connection-wide runtime deny leaked to another runtime: got %v", tokens)
+	}
+
+	// Clear the runtime deny; assert nothing is denied anymore (proves the cascade
+	// is driven by the layer, not a sticky side effect).
+	if err := s.Clear(ctx, tpTestWorkspaceID, connKey, LayerRuntime, deniedRuntime, ""); err != nil {
+		t.Fatalf("clear runtime deny: %v", err)
+	}
+
+	// --- Agent layer: deny the whole connection for deniedAgent only. ---
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     connKey,
+		Layer:       LayerAgent,
+		SubjectID:   deniedAgent,
+		Setting:     SettingDeny,
+	}); err != nil {
+		t.Fatalf("set agent-wide deny: %v", err)
+	}
+
+	tokens, err = s.DeniedConnectionTools(ctx, TableQuery{
+		WorkspaceID: tpTestWorkspaceID, AgentID: deniedAgent,
+	})
+	if err != nil {
+		t.Fatalf("denied (denied agent): %v", err)
+	}
+	assertSameTokens(t, "denied agent", tokens, wantBoth)
+
+	tokens, err = s.DeniedConnectionTools(ctx, TableQuery{
+		WorkspaceID: tpTestWorkspaceID, AgentID: otherAgent,
+	})
+	if err != nil {
+		t.Fatalf("denied (other agent): %v", err)
+	}
+	if len(tokens) != 0 {
+		t.Fatalf("connection-wide agent deny leaked to another agent: got %v", tokens)
+	}
+}
+
+// TestDeniedConnectionTools_PerToolTightensConnectionWideAllow proves the cascade
+// only tightens: a connection-wide Allow with a single per-tool Deny at the
+// runtime layer denies exactly that one tool, not the whole connection.
+func TestDeniedConnectionTools_PerToolTightensConnectionWideAllow(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	runtime := uuidByte(45)
+	const conn = "customer-service"
+	const connKey = "connection:" + conn
+
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, tools, enabled)
+		VALUES ($1, $2, $3, 'mcp_http', 'http://internal:3000',
+		        '[{"name":"draft_reply"},{"name":"lookup_order"}]'::jsonb, true)
+	`, tpTestWorkspaceID, conn, "Customer Service MCP"); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping cascade test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1`, tpTestWorkspaceID)
+	})
+	addCap(t, s, connKey, "Customer Service MCP", "Connections", "connection")
+
+	// Connection-wide Allow at runtime, one tool Deny at runtime.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: connKey,
+		Layer: LayerRuntime, SubjectID: runtime, Setting: SettingAllow,
+	}); err != nil {
+		t.Fatalf("set runtime-wide allow: %v", err)
+	}
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: connKey,
+		Layer: LayerRuntime, SubjectID: runtime, Setting: SettingDeny,
+		ResourcePattern: "draft_reply",
+	}); err != nil {
+		t.Fatalf("set per-tool runtime deny: %v", err)
+	}
+
+	tokens, err := s.DeniedConnectionTools(ctx, TableQuery{
+		WorkspaceID: tpTestWorkspaceID, RuntimeID: runtime,
+	})
+	if err != nil {
+		t.Fatalf("denied connection tools: %v", err)
+	}
+	assertSameTokens(t, "per-tool tighten", tokens, []string{"mcp__customer-service__draft_reply"})
+}
+
+// assertSameTokens compares two token sets order-independently.
+func assertSameTokens(t *testing.T, label string, got, want []string) {
+	t.Helper()
+	gotSet := map[string]bool{}
+	for _, g := range got {
+		gotSet[g] = true
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%s: got %v, want %v", label, got, want)
+	}
+	for _, w := range want {
+		if !gotSet[w] {
+			t.Fatalf("%s: missing %q in %v", label, w, got)
+		}
+	}
+}
+
 // TestTable_ConnectionRowSurvivesRuntimeFilter proves the connection-wide row
 // (source "connection") — the row the Connections tab groups its tools under —
 // stays visible on a runtime-scoped view even though connections are never

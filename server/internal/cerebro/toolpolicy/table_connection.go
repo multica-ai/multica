@@ -118,9 +118,23 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 		return nil, err
 	}
 
+	// The connection-wide row (source 'connection', resource_pattern '') is the
+	// control for the WHOLE connection — its Deny/Ask must cascade to every tool
+	// on that connection so "deny the connection for this runtime/agent" actually
+	// blocks the tools, not just the (display-only) wide row (TECH-3180). The
+	// connection-wide rows were already resolved into `out` by Table(); reuse each
+	// one's Effective setting as the BASE for its per-tool resolution so a per-tool
+	// choice can only tighten the connection-wide one, never loosen it. Absent (no
+	// capability row) falls back to the query's workspace Base.
+	connWideBase := connectionWideBases(out)
+
 	for _, conn := range conns {
 		toolKey := connectionToolKeyPrefix + conn.name
 		source := sourceForKind(conn.kind)
+		base := in.Base
+		if w, ok := connWideBase[toolKey]; ok && rank(w) >= 0 {
+			base = w
+		}
 		for _, t := range conn.tools {
 			row := TableRow{
 				ToolKey:         toolKey,
@@ -138,11 +152,28 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+			row.Effective = Resolve(Input{Settings: row.Layers, Base: base})
 			out = append(out, row)
 		}
 	}
 	return out, nil
+}
+
+// connectionWideBases maps each connection's policy key to the resolved Effective
+// setting of its connection-wide row (source 'connection', empty resource
+// pattern) already present in out. It is the per-connection floor every per-tool
+// row inherits from: the connection-wide chain (Workspace › Runtime › Agent ›
+// Group › User) decides the connection default, and per-tool rows tighten under
+// it. A connection with no capability-wide row contributes nothing (callers fall
+// back to the workspace Base).
+func connectionWideBases(out []TableRow) map[string]Setting {
+	bases := map[string]Setting{}
+	for _, r := range out {
+		if r.Source == "connection" && r.ResourcePattern == "" {
+			bases[r.ToolKey] = r.Effective.Setting
+		}
+	}
+	return bases
 }
 
 // discoverConnectionTools returns each enabled connection in the workspace with
