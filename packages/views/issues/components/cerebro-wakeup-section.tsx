@@ -1,9 +1,8 @@
 // CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3144 — show pending wakeups in the issue sidebar with cancel action.
 "use client";
 
-import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlarmClock, ChevronRight, X } from "lucide-react";
+import { AlarmClock, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
@@ -33,13 +32,12 @@ function triggerLabel(triggerType: string, fireAt?: string, watchStatus?: string
 }
 
 export function CerebroWakeupSection({ issueId }: { issueId: string }) {
-  const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  // Always load pending wakeups — no toggle needed to see whether any exist.
+  const { data } = useQuery({
     queryKey: WAKEUP_QUERY_KEY(issueId),
     queryFn: () => api.listIssueWakeups(issueId),
-    enabled: open,
     staleTime: 30_000,
   });
 
@@ -54,63 +52,49 @@ export function CerebroWakeupSection({ issueId }: { issueId: string }) {
     }
   }
 
+  // Hide the section entirely when there is nothing pending, so it never adds
+  // empty clutter — but when wakeups exist they are visible at a glance.
+  if (wakeups.length === 0) return null;
+
   return (
     <div>
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
-        onClick={() => setOpen(!open)}
-      >
+      <div className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-muted-foreground mb-1">
         <AlarmClock className="!size-3 shrink-0" />
         <span className="flex-1 text-left">Planlagte wakeups</span>
-        {!open && wakeups.length === 0 && null}
-        {!open && (
-          <ChevronRight className="!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform" />
-        )}
-        {open && (
-          <ChevronRight className="!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform rotate-90" />
-        )}
-      </button>
+        <span className="tabular-nums">{wakeups.length}</span>
+      </div>
 
-      {open && (
-        <div className="pl-2 space-y-1">
-          {isLoading && (
-            <p className="text-xs text-muted-foreground px-1">Henter…</p>
-          )}
-          {!isLoading && wakeups.length === 0 && (
-            <p className="text-xs text-muted-foreground px-1">Ingen planlagte wakeups.</p>
-          )}
-          {wakeups.map((w) => (
-            <div
-              key={w.id}
-              className="flex items-start gap-1 rounded-md px-1 py-1 text-xs hover:bg-accent/50 group"
-            >
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-foreground truncate">
-                  {triggerLabel(w.trigger_type, w.fire_at, w.watch_status)}
-                </p>
-                <p className="text-muted-foreground truncate">{w.prompt}</p>
-              </div>
-              <Tooltip>
-                {/* CEREBRO-PATCH(wakeup-cancel-tooltip-render): Use Base UI render prop; TooltipTrigger does not accept button props directly. */}
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="shrink-0 mt-0.5 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
-                      onClick={() => handleCancel(w.id)}
-                      aria-label="Annuller wakeup"
-                    />
-                  }
-                >
-                  <X className="!size-3" />
-                </TooltipTrigger>
-                <TooltipContent side="left">Annuller</TooltipContent>
-              </Tooltip>
+      <div className="pl-2 space-y-1">
+        {wakeups.map((w) => (
+          <div
+            key={w.id}
+            className="flex items-start gap-1 rounded-md px-1 py-1 text-xs hover:bg-accent/50 group"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-foreground truncate">
+                {triggerLabel(w.trigger_type, w.fire_at, w.watch_status)}
+              </p>
+              <p className="text-muted-foreground truncate">{w.prompt}</p>
             </div>
-          ))}
-        </div>
-      )}
+            <Tooltip>
+              {/* CEREBRO-PATCH(wakeup-cancel-tooltip-render): Use Base UI render prop; TooltipTrigger does not accept button props directly. */}
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    className="shrink-0 mt-0.5 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
+                    onClick={() => handleCancel(w.id)}
+                    aria-label="Annuller wakeup"
+                  />
+                }
+              >
+                <X className="!size-3" />
+              </TooltipTrigger>
+              <TooltipContent side="left">Annuller</TooltipContent>
+            </Tooltip>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
