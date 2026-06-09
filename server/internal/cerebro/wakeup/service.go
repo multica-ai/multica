@@ -89,6 +89,13 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("unsupported trigger_type %q", req.TriggerType)
 	}
 
+	// TECH-3176: refuse to create a wakeup whose trigger type is disabled for
+	// this workspace, so the agent gets immediate, clear feedback instead of a
+	// pending row that never fires.
+	if !s.triggerTypeEnabled(ctx, workspaceID, req.TriggerType) {
+		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("wakeup trigger_type %q is disabled for this workspace", req.TriggerType)
+	}
+
 	return s.Cerebro.CreateCerebroAgentWakeup(ctx, cerebrodb.CreateCerebroAgentWakeupParams{
 		WorkspaceID:  workspaceID,
 		AgentID:      req.AgentID,
@@ -167,6 +174,15 @@ func (s *Service) ClaimGithubCI(ctx context.Context, issueIDs []pgtype.UUID, lim
 }
 
 func (s *Service) Dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup) {
+	// TECH-3176: if the trigger type was disabled for this workspace after the
+	// wakeup was claimed, do not fire. Release it back to pending so it resumes
+	// the moment the type is re-enabled.
+	if !s.triggerTypeEnabled(ctx, row.WorkspaceID, row.TriggerType) {
+		if err := s.Cerebro.ReleaseWakeupToPending(context.Background(), row.ID); err != nil {
+			slog.Error("cerebro wakeup release-on-disabled failed", "wakeup_id", util.UUIDToString(row.ID), "error", err)
+		}
+		return
+	}
 	if err := s.dispatch(ctx, row); err != nil {
 		slog.Error("cerebro wakeup dispatch failed", "wakeup_id", util.UUIDToString(row.ID), "error", err)
 		_ = s.Cerebro.MarkWakeupFailed(context.Background(), cerebrodb.MarkWakeupFailedParams{

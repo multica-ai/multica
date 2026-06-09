@@ -1,4 +1,6 @@
-// CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3144 — show pending wakeups in the issue sidebar with cancel action.
+// CEREBRO: TECH-3176 — show pending wakeups in the issue sidebar with cancel
+// action. Relocated from packages/views/issues/components/cerebro-wakeup-section.tsx
+// (was TECH-3144) into the cerebro-wakeup extension package.
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -77,7 +79,7 @@ export function CerebroWakeupSection({ issueId }: { issueId: string }) {
               <p className="text-muted-foreground truncate">{w.prompt}</p>
             </div>
             <Tooltip>
-              {/* CEREBRO-PATCH(wakeup-cancel-tooltip-render): Use Base UI render prop; TooltipTrigger does not accept button props directly. */}
+              {/* Base UI render prop; TooltipTrigger does not accept button props directly. */}
               <TooltipTrigger
                 render={
                   <button

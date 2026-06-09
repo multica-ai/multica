@@ -98,8 +98,8 @@ import { PriorityIcon } from "./priority-icon";
 import { StatusIcon } from "./status-icon";
 // CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related sidebar section.
 import { DependenciesSection } from "./dependencies-section";
-// CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3144 — wakeup list + cancel in issue sidebar.
-import { CerebroWakeupSection } from "./cerebro-wakeup-section";
+// CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3176 — wakeup list + cancel, now from the cerebro-wakeup extension package.
+import { CerebroWakeupSection } from "@multica/cerebro-wakeup";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
 // CEREBRO-PATCH(issue-detail-status-model): FIR-1550 provide the issue's project status-model presentation to status surfaces
 import { CerebroStatusModelProvider } from "@multica/cerebro-status-models/views";

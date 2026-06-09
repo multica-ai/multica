@@ -442,3 +442,19 @@ func (q *Queries) MarkWakeupFailed(ctx context.Context, arg MarkWakeupFailedPara
 	_, err := q.db.Exec(ctx, markWakeupFailed, arg.ID, arg.Failure)
 	return err
 }
+
+const releaseWakeupToPending = `-- name: ReleaseWakeupToPending :exec
+UPDATE cerebro_agent_wakeup
+SET state = 'pending',
+    claimed_at = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND state = 'claimed'
+`
+
+// TECH-3176: a claimed wakeup whose trigger type is disabled for its workspace
+// is released back to pending so it resumes firing once the type is re-enabled.
+func (q *Queries) ReleaseWakeupToPending(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, releaseWakeupToPending, id)
+	return err
+}

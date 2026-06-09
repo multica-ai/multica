@@ -106,6 +106,16 @@ SET state = 'dispatched',
     updated_at = now()
 WHERE id = $1;
 
+-- name: ReleaseWakeupToPending :exec
+-- TECH-3176: a claimed wakeup whose trigger type is disabled for its workspace
+-- is released back to pending so it resumes firing once the type is re-enabled.
+UPDATE cerebro_agent_wakeup
+SET state = 'pending',
+    claimed_at = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND state = 'claimed';
+
 -- name: MarkWakeupFailed :exec
 UPDATE cerebro_agent_wakeup
 SET state = 'failed',

@@ -109,6 +109,12 @@ export type CerebroFlagKey =
   // an inbox ask or a deny — even when CEREBRO_APPROVAL_GATE_ENABLED is true on
   // the server. Defaults ON so existing workspaces keep their current behaviour.
   | "cerebro_approval_gate"
+  // TECH-3176: per-type on/off for agent wakeup scheduling. Each trigger type
+  // is independently gated at create-time and at fire/dispatch-time so an admin
+  // can disable a wakeup kind without touching the others.
+  | "cerebro_wakeup_time"
+  | "cerebro_wakeup_issue_status"
+  | "cerebro_wakeup_github_ci"
   // TECH-3173: staged rollout of per-tool enforcement on LOCAL CLI runtimes
   // (Claude/Codex/Cursor/Gemini). Master on/off; when on the daemon resolves each
   // tool call through the same tool-policy chain + approval inbox as the gateway.
@@ -269,6 +275,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // disable enforcement for their workspace without a server restart. Off = all
   // tool calls are allowed through for this workspace regardless of policy rows.
   cerebro_approval_gate: true,
+  // TECH-3176: agent wakeup trigger types. All default ON — wakeup scheduling
+  // ships enabled; an admin turns a type off to stop new creates and any
+  // pending fires of that type for the workspace.
+  cerebro_wakeup_time: true,
+  cerebro_wakeup_issue_status: true,
+  cerebro_wakeup_github_ci: true,
   // TECH-3173: OFF by default — local-runtime per-tool enforcement stays dormant
   // until an admin opts in from Settings, so a deploy never changes behaviour.
   cerebro_local_tool_policy: false,
@@ -767,6 +779,28 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "When on, the server enforces the per-tool Allow / Ask / Block policy for every agent tool call — tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off lets all tool calls through for this workspace without an inbox ask, even when the server gate is active. Requires the server's CEREBRO_APPROVAL_GATE_ENABLED flag to have any effect. FIR-2563.",
+  },
+  // TECH-3176: agent wakeup scheduling — one toggle per trigger type.
+  {
+    key: "cerebro_wakeup_time",
+    label: "Wakeup: time-based",
+    group: "agents",
+    description:
+      "Let agents schedule a time-based wakeup (fire at a specific moment) so they re-enter an issue later. Off blocks new time wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
+  },
+  {
+    key: "cerebro_wakeup_issue_status",
+    label: "Wakeup: on issue status",
+    group: "agents",
+    description:
+      "Let agents schedule a wakeup that fires when a watched issue reaches a chosen status. Off blocks new status wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
+  },
+  {
+    key: "cerebro_wakeup_github_ci",
+    label: "Wakeup: on GitHub CI",
+    group: "agents",
+    description:
+      "Let agents schedule a wakeup that fires on a GitHub pull-request / CI update for a watched issue. Off blocks new CI wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
   },
   // TECH-3173: local-runtime per-tool enforcement, staged from settings.
   {

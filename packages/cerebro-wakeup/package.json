@@ -1,0 +1,29 @@
+{
+  "name": "@multica/cerebro-wakeup",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "sonner": "^2.0.7"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
