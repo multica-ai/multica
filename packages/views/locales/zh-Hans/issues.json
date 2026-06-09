@@ -4,7 +4,9 @@
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有 issue",
     "empty_hint": "创建一个 issue 开始使用。",
-    "move_failed": "移动 issue 失败"
+    "move_failed": "移动 issue 失败",
+    "show_archived": "显示已归档",
+    "hide_archived": "隐藏已归档"
   },
   "status": {
     "backlog": "待规划",
@@ -415,7 +417,9 @@
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",
     "add_sub_issue": "添加子 issue...",
-    "delete_issue": "删除 issue"
+    "delete_issue": "删除 issue",
+    "archive_issue": "归档 Issue",
+    "unarchive_issue": "取消归档 Issue"
   },
   "pickers": {
     "filter_options_aria": "筛选选项",

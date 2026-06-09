@@ -334,6 +334,7 @@ func main() {
 	go runDBStatsLogger(sweepCtx, pool)
 	go uploadCleanupHandler.RunAttachmentUploadCleanup(sweepCtx, 0)
 	go runUsageHourlyRollup(sweepCtx, pool)
+	go runIssueAutoArchive(sweepCtx, queries, bus)
 
 	if metricsServer != nil {
 		go func() {

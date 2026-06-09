@@ -76,6 +76,7 @@ export interface IssueViewState {
   // running state changes second-to-second, a persisted toggle would let
   // users return to an empty list with no obvious cause.
   agentRunningFilter: boolean;
+  showArchived: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
@@ -104,6 +105,7 @@ export interface IssueViewState {
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
   toggleAgentRunningFilter: () => void;
+  toggleShowArchived: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
@@ -130,6 +132,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   includeNoProject: false,
   labelFilters: [],
   agentRunningFilter: false,
+  showArchived: false,
   sortBy: "position",
   sortDirection: "asc",
   cardProperties: {
@@ -210,6 +213,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     })),
   toggleAgentRunningFilter: () =>
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
+  toggleShowArchived: () =>
+    set((state) => ({ showArchived: !state.showArchived })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one

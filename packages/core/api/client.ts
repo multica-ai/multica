@@ -782,6 +782,8 @@ export class ApiClient {
     if (params?.scheduled) search.set("scheduled", "true");
     if (params?.sort_by) search.set("sort", params.sort_by);
     if (params?.sort_direction) search.set("direction", params.sort_direction);
+    if (params?.archived) search.set("archived", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
@@ -825,11 +827,12 @@ export class ApiClient {
     });
   }
 
-  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
+  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; include_archived?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     return this.fetch(`/api/issues/search?${search}`, params.signal ? { signal: params.signal } : undefined);
   }
 
@@ -909,6 +912,14 @@ export class ApiClient {
 
   async deleteIssue(id: string): Promise<void> {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
+  }
+
+  async archiveIssue(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/archive`, { method: "PATCH" });
+  }
+
+  async unarchiveIssue(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/unarchive`, { method: "PATCH" });
   }
 
   async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {

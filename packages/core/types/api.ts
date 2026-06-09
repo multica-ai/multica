@@ -84,6 +84,10 @@ export interface ListIssuesParams {
   scheduled?: boolean;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
+  /** When true, only return archived issues. Default: false (excludes archived). */
+  archived?: boolean;
+  /** When true, include archived issues alongside non-archived ones (no archived_at filter). */
+  include_archived?: boolean;
 }
 
 export interface IssueActorRef {

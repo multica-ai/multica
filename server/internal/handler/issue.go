@@ -46,8 +46,10 @@ type IssueResponse struct {
 	Position      float64 `json:"position"`
 	StartDate     *string `json:"start_date"`
 	DueDate       *string `json:"due_date"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
+	ArchivedAt   *string `json:"archived_at"`
+	ArchivedBy   *string `json:"archived_by"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -85,6 +87,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		ArchivedAt:    timestampToPtr(i.ArchivedAt),
+		ArchivedBy:    uuidToPtr(i.ArchivedBy),
 		Metadata:      parseIssueMetadata(i.Metadata),
 	}
 }
@@ -112,6 +116,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		ArchivedAt:    timestampToPtr(i.ArchivedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
 	}
 }
@@ -360,7 +365,7 @@ type searchResult struct {
 // It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, includeArchived bool) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -429,6 +434,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	if !includeClosed {
 		whereClause += " AND i.status NOT IN ('done', 'cancelled')"
+	}
+	if !includeArchived {
+		whereClause += " AND i.archived_at IS NULL"
 	}
 
 	// --- ORDER BY clause ---
@@ -600,6 +608,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
@@ -608,7 +617,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	terms := splitSearchTerms(q)
 	queryNum, hasNum := parseQueryNumber(q)
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, includeArchived)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -1033,6 +1042,17 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
+
+		// Archived filter: default excludes archived issues.
+		// include_archived=true → no filter (show all issues regardless of archive status).
+		// archived=true → only archived issues.
+		if r.URL.Query().Get("include_archived") == "true" {
+			// No filter — show both archived and non-archived.
+		} else if r.URL.Query().Get("archived") == "true" {
+			where = append(where, "i.archived_at IS NOT NULL")
+		} else {
+			where = append(where, "i.archived_at IS NULL")
+		}
 	if involvesUserFilter.Valid {
 		ref := addArg(involvesUserFilter)
 		where = append(where, fmt.Sprintf(`(
@@ -1086,7 +1106,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-	       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+	       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.archived_at, i.number, i.project_id, i.metadata
 	FROM issue i
 	WHERE %s
 	ORDER BY %s
@@ -1120,6 +1140,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			&row.DueDate,
 			&row.CreatedAt,
 			&row.UpdatedAt,
+			&row.ArchivedAt,
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
@@ -3619,4 +3640,91 @@ func (h *Handler) actorDisplayName(ctx context.Context, actorType, actorID, user
 		return user.Name
 	}
 	return "Member"
+}
+
+// ---------------------------------------------------------------------------
+// Issue Archive/Unarchive
+// ---------------------------------------------------------------------------
+
+// ArchiveIssue archives an issue (soft delete)
+func (h *Handler) ArchiveIssue(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	// Check if the issue is already archived
+	if issue.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "issue is already archived")
+		return
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+	userID := requestUserID(r)
+
+	// Update the issue to archive it
+	archivedIssue, err := h.Queries.ArchiveIssue(r.Context(), db.ArchiveIssueParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		ArchivedBy:  parseUUID(userID),
+	})
+	if err != nil {
+		slog.Warn("archive issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to archive issue")
+		return
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), archivedIssue.WorkspaceID)
+	resp := issueToResponse(archivedIssue, prefix)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	slog.Info("issue archived", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
+	h.publish(protocol.EventIssueArchived, workspaceID, actorType, actorID, map[string]any{
+		"issue":      resp,
+		"app_origin": requestAppOrigin(r),
+	})
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// UnarchiveIssue unarchives an issue
+func (h *Handler) UnarchiveIssue(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	// Check if the issue is not archived
+	if !issue.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "issue is not archived")
+		return
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+	userID := requestUserID(r)
+
+	// Update the issue to unarchive it
+	unarchivedIssue, err := h.Queries.UnarchiveIssue(r.Context(), db.UnarchiveIssueParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("unarchive issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to unarchive issue")
+		return
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), unarchivedIssue.WorkspaceID)
+	resp := issueToResponse(unarchivedIssue, prefix)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	slog.Info("issue unarchived", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
+	h.publish(protocol.EventIssueUnarchived, workspaceID, actorType, actorID, map[string]any{
+		"issue":      resp,
+		"app_origin": requestAppOrigin(r),
+	})
+
+	writeJSON(w, http.StatusOK, resp)
 }

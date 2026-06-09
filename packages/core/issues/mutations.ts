@@ -413,6 +413,90 @@ export function useDeleteIssue() {
   });
 }
 
+export function useArchiveIssue() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.archiveIssue(id),
+    onMutate: (id) => {
+      qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      const archivedAt = new Date().toISOString();
+      // Patch ALL detail queries for this issue (may be keyed by UUID or identifier).
+      const allDetails = qc.getQueriesData<Issue>({ queryKey: [...issueKeys.all(wsId), "detail"] });
+      const prevDetails: Array<[readonly unknown[], Issue]> = [];
+      for (const [key, cached] of allDetails) {
+        if (cached && cached.id === id) {
+          prevDetails.push([key, cached]);
+          qc.cancelQueries({ queryKey: key });
+          qc.setQueryData<Issue>(key, { ...cached, archived_at: archivedAt });
+        }
+      }
+      for (const [key, cached] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, { archived_at: archivedAt }));
+      }
+      return { prevDetails, id };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prevDetails) {
+        for (const [key, prev] of ctx.prevDetails) {
+          qc.setQueryData(key, prev);
+        }
+      }
+    },
+    onSettled: (_data, _err, vars) => {
+      // Invalidate all detail queries that might hold this issue.
+      const allDetails = qc.getQueriesData<Issue>({ queryKey: [...issueKeys.all(wsId), "detail"] });
+      for (const [key, cached] of allDetails) {
+        if (cached && cached.id === vars) qc.invalidateQueries({ queryKey: key });
+      }
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+    },
+  });
+}
+
+export function useUnarchiveIssue() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.unarchiveIssue(id),
+    onMutate: (id) => {
+      qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      // Patch ALL detail queries for this issue (may be keyed by UUID or identifier).
+      const allDetails = qc.getQueriesData<Issue>({ queryKey: [...issueKeys.all(wsId), "detail"] });
+      const prevDetails: Array<[readonly unknown[], Issue]> = [];
+      for (const [key, cached] of allDetails) {
+        if (cached && cached.id === id) {
+          prevDetails.push([key, cached]);
+          qc.cancelQueries({ queryKey: key });
+          qc.setQueryData<Issue>(key, { ...cached, archived_at: null, archived_by: null });
+        }
+      }
+      for (const [key, cached] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, { archived_at: null, archived_by: null }));
+      }
+      return { prevDetails, id };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prevDetails) {
+        for (const [key, prev] of ctx.prevDetails) {
+          qc.setQueryData(key, prev);
+        }
+      }
+    },
+    onSettled: (_data, _err, vars) => {
+      const allDetails = qc.getQueriesData<Issue>({ queryKey: [...issueKeys.all(wsId), "detail"] });
+      for (const [key, cached] of allDetails) {
+        if (cached && cached.id === vars) qc.invalidateQueries({ queryKey: key });
+      }
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+    },
+  });
+}
+
 export function useBatchUpdateIssues() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
