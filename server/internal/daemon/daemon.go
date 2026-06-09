@@ -2851,9 +2851,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	// Pi reaches the deterministic tool plane through pi-mcp-adapter (opt-in,
-	// experimental). Writes a per-task adapter config and points Pi at it via
-	// env. No-op for every other provider and when the Pi adapter is disabled.
-	d.preparePiToolPlane(provider, env.RootDir, env.WorkDir, agentMcpConfig, agentRuntimeConfig, agentEnv, d.logger)
+	// experimental): the daemon writes a project-local .pi/mcp.json the adapter
+	// auto-discovers. No-op for every other provider and when disabled. The
+	// cleanup restores the user's file on local_directory tasks.
+	piCleanup := d.preparePiToolPlane(provider, env.WorkDir, env.LocalDirectory, agentMcpConfig, agentRuntimeConfig, agentEnv, d.logger)
+	defer piCleanup()
 
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,

@@ -224,24 +224,39 @@ different tools.
 Injection is **additive**: user-defined MCP servers are preserved alongside
 `multica-tools`.
 
-### 6.1 Pi (Phase 3, gated on external validation)
+### 6.1 Pi (Phase 3, validated against pi-mcp-adapter)
 
-Pi has no native MCP and the `pi-mcp-adapter` package is **not** in the repo, so
-the entire Pi path rests on external assumptions about that package's interface.
-**Validate `pi-mcp-adapter`'s real install command, config path, and proxy-tool
-model before implementing.**
+Pi has no native MCP and reaches the plane through `pi-mcp-adapter`
+(github.com/nicobailon/pi-mcp-adapter). Validated facts from that repo:
 
-Design constraint that overrides the original proposal: **do not write a global
-`~/.pi/agent/mcp.json` with backup/restore.** With up to 20 concurrent tasks,
-two Pi tasks would race that file and corrupt each other. Instead, follow the
-per-task isolation pattern Codex already uses (per-task `CODEX_HOME`):
+- **Install:** `pi install npm:pi-mcp-adapter` (requires a Pi restart). The
+  adapter exposes a single `mcp` proxy tool with lazy, on-demand discovery.
+- **Config schema:** `{ "settings": {...}, "mcpServers": { "<name>": {command,
+  args, env, cwd, url, headers, ...} } }` — Claude-style `mcpServers`, exactly
+  what our merge emits.
+- **Discovery (precedence):** `~/.config/mcp/mcp.json` → `<Pi agent
+  dir>/mcp.json` (`~/.pi/agent`) → `.mcp.json` → **`.pi/mcp.json`** (project
+  override, highest precedence), each read relative to the agent cwd.
 
-1. Detect provider == `pi`.
-2. Ensure `pi-mcp-adapter` is installed/healthy; if not, mark the tool plane
-   unavailable for Pi and surface a remediation message (do not fake MCP).
-3. Write the adapter's MCP config into a **per-task** location (task-scoped dir
-   or a per-task env override the adapter honors), never a shared global file.
-4. Launch Pi; the adapter exposes the proxy tool that reaches `multica-tools`.
+This makes the **global-file race a non-issue without any env override**: the
+daemon writes the project-local **`.pi/mcp.json`** into the per-task work dir
+(which is the agent's cwd), so each task gets its own config by construction.
+
+Implemented flow (`daemon/dettools_pi.go`, opt-in via
+`MULTICA_DETTOOLS_PI_ADAPTER`, fail-open):
+
+1. Detect provider == `pi` (and the plane is enabled).
+2. Compute the per-agent effective tool allowlist (§9 policy).
+3. Merge `multica-tools` into the work dir's `.pi/mcp.json`, preserving any
+   existing user servers and top-level `settings`.
+4. On `local_directory` tasks (the user's own repo), restore the original file
+   after the run so no daemon state is left behind; ephemeral work dirs are GC'd.
+5. Launch Pi; the installed adapter discovers `.pi/mcp.json` and reaches
+   `multica-tools` through its `mcp` proxy tool.
+
+Note `pi install` needs a restart to take effect, so a task-time install can't
+help the current run — operators install the adapter once;
+`MULTICA_DETTOOLS_PI_INSTALL_CMD` is an optional best-effort hook, off by default.
 
 ## 7. Security model
 
@@ -278,7 +293,7 @@ runtimes. Frontend signal builds on `providerSupportsMcpConfig()` in
 |---|---|---|
 | 1 ✅ | Go MCP server subcommand + 2 read-only tools (`repo_facts`, `policy_check`); merge helper; inject for **claude** only | End-to-end tool plane on Claude Code — **implemented** (`server/pkg/dettools/`, `multica mcp-tools serve`, `daemon/dettools_inject.go`) |
 | 2 ✅ | Add codex injection; full tool catalog (`build_probe`, `test_gate`, `diff_summarize`, `artifact_emit`); artifact writing + audit logging | **Implemented** — codex added to `dettoolsExecOptionsProviders` (same Claude-style shape renders into its `config.toml`); six-tool catalog; `artifact_emit` writes path-scoped artifacts; per-invocation audit log records tool, outcome, duration, input size, and artifact paths |
-| 3 ✅ | Extend to opencode/hermes/kimi/kiro (ExecOptions) + openclaw (execenv); capability reporting; Pi via `pi-mcp-adapter` | **Implemented** — all six native-MCP providers receive the tool server; `mcpSupportKind`/`toolPlaneSupported` classify native/adapter/none (pi → adapter). **Pi adapter implemented to the plan's assumed spec** (`daemon/dettools_pi.go`): opt-in (`MULTICA_DETTOOLS_PI_ADAPTER`), per-task config file (no global-file race), pinned-workdir, optional install command, fail-open. The adapter's interface knobs are isolated/overridable (`MULTICA_DETTOOLS_PI_CONFIG_ENV`, `MULTICA_DETTOOLS_PI_INSTALL_CMD`) and **need validation against the real `pi-mcp-adapter`**. |
+| 3 ✅ | Extend to opencode/hermes/kimi/kiro (ExecOptions) + openclaw (execenv); capability reporting; Pi via `pi-mcp-adapter` | **Implemented & validated** — all six native-MCP providers receive the tool server; `mcpSupportKind`/`toolPlaneSupported` classify native/adapter/none (pi → adapter). **Pi adapter validated against the real `pi-mcp-adapter`** (github.com/nicobailon/pi-mcp-adapter): config schema is `{settings, mcpServers}` (Claude-style, matches our output), discovered via the project-local `.pi/mcp.json` (highest-precedence, read relative to the agent cwd). `daemon/dettools_pi.go` writes/merges `.pi/mcp.json` into the task work dir — per-task by construction, no global-file race — preserving any existing user servers/`settings`, and restores the original on `local_directory` tasks. Opt-in (`MULTICA_DETTOOLS_PI_ADAPTER`), fail-open; knobs `MULTICA_DETTOOLS_PI_CONFIG_PATH` and `MULTICA_DETTOOLS_PI_INSTALL_CMD`. |
 | 4 ✅ | Policy controls + per-agent tool profiles + capability reporting | **Implemented** — per-agent `deterministic_tools.{allowed_tools,denied_tools}` read from `runtime_config` (plumbed daemon-side, no migration); daemon-wide `MULTICA_DETTOOLS_DENIED` denylist; agents can only narrow the daemon allowlist. Richer invocation-log UI deferred (needs an invocation data model — daemon currently audit-logs only). |
 
 ## 10. Failure handling

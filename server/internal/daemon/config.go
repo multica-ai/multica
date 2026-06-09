@@ -59,11 +59,11 @@ const (
 	DefaultAutoUpdateCheckInterval = 6 * time.Hour    // how often the daemon polls GitHub for a newer CLI release
 	DefaultDetToolsTimeout         = 90 * time.Second // per-invocation cap for a deterministic tool
 	DefaultDetToolsArtifactDir     = ".multica/artifacts"
-	// DefaultPiConfigEnvVar is the environment variable the daemon sets on the
-	// Pi process to point pi-mcp-adapter at the per-task MCP config file. The
-	// exact name is an assumption (the adapter's interface is validated
-	// separately); override with MULTICA_DETTOOLS_PI_CONFIG_ENV when confirmed.
-	DefaultPiConfigEnvVar = "PI_MCP_CONFIG"
+	// DefaultPiConfigRelPath is where the daemon writes the pi-mcp-adapter config,
+	// relative to the task work dir. pi-mcp-adapter discovers `.pi/mcp.json` as
+	// its highest-precedence project-local override (read relative to the agent's
+	// cwd), giving per-task isolation with no shared global file.
+	DefaultPiConfigRelPath = ".pi/mcp.json"
 )
 
 // DefaultDetToolsAllowed is the deterministic tool allowlist applied when
@@ -133,11 +133,11 @@ type DetToolsConfig struct {
 	ArtifactDir  string
 
 	// Pi adapter integration (experimental). Pi has no native MCP; it reaches
-	// the tool plane through pi-mcp-adapter. These knobs are isolated and
-	// overridable because the adapter's exact interface is validated separately
-	// from this codebase. The whole path is opt-in via PiAdapterEnabled.
+	// the tool plane through pi-mcp-adapter, which auto-discovers a project-local
+	// `.pi/mcp.json` (relative to the agent's cwd). The whole path is opt-in via
+	// PiAdapterEnabled.
 	PiAdapterEnabled bool   // MULTICA_DETTOOLS_PI_ADAPTER (default false)
-	PiConfigEnvVar   string // env var the daemon sets to point Pi/adapter at the per-task config (default PI_MCP_CONFIG)
+	PiConfigRelPath  string // adapter config path, relative to the task work dir (default .pi/mcp.json)
 	PiInstallCmd     string // optional command run to ensure the adapter is installed (default empty = do not auto-install)
 }
 
@@ -485,7 +485,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		ArtifactDir:  envOrDefault("MULTICA_DETTOOLS_ARTIFACT_DIR", DefaultDetToolsArtifactDir),
 
 		PiAdapterEnabled: boolEnvSet("MULTICA_DETTOOLS_PI_ADAPTER"),
-		PiConfigEnvVar:   envOrDefault("MULTICA_DETTOOLS_PI_CONFIG_ENV", DefaultPiConfigEnvVar),
+		PiConfigRelPath:  envOrDefault("MULTICA_DETTOOLS_PI_CONFIG_PATH", DefaultPiConfigRelPath),
 		PiInstallCmd:     strings.TrimSpace(os.Getenv("MULTICA_DETTOOLS_PI_INSTALL_CMD")),
 	}
 
