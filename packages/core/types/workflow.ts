@@ -174,3 +174,10 @@ export interface MyWorkflowTaskResponse {
   node_runs: WorkflowNodeRun[];
   total: number;
 }
+
+export interface WorkflowAdmin {
+  id: string;
+  name: string;
+  email: string;
+  can_manage_workflows: boolean;
+}

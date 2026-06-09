@@ -2,12 +2,12 @@ import dagre from "@dagrejs/dagre";
 import type { WorkflowNode, WorkflowEdge } from "@multica/core/types";
 import { parseNodeShape } from "@multica/core/types";
 
-const SHAPE_DEFAULTS: Record<string, { width: number; height: number }> = {
+const SHAPE_DEFAULTS = {
   rectangle: { width: 150, height: 70 },
   pill: { width: 150, height: 70 },
   diamond: { width: 180, height: 180 },
   hexagon: { width: 200, height: 200 },
-};
+} as const;
 
 interface LayoutResult {
   nodeId: string;
@@ -17,10 +17,10 @@ interface LayoutResult {
 
 function getNodeDimensions(formatSchema: unknown): { width: number; height: number } {
   const shape = parseNodeShape(formatSchema);
-  const defaults = SHAPE_DEFAULTS[shape] ?? SHAPE_DEFAULTS.rectangle;
+  const shapeDefaults = SHAPE_DEFAULTS[shape];
 
-  let width = defaults.width;
-  let height = defaults.height;
+  let width: number = shapeDefaults?.width ?? SHAPE_DEFAULTS.rectangle.width;
+  let height: number = shapeDefaults?.height ?? SHAPE_DEFAULTS.rectangle.height;
 
   if (formatSchema && typeof formatSchema === "object" && formatSchema !== null) {
     const obj = formatSchema as Record<string, unknown>;
