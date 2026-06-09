@@ -1450,6 +1450,14 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		return
 	}
 
+	// For external runtime extensions, use the static model list from
+	// the manifest if available. This avoids calling agent.ListModels()
+	// which only knows about built-in providers.
+	if entry.IsExternal && len(entry.Models) > 0 {
+		d.reportExternalModels(ctx, rt, requestID, entry.Models)
+		return
+	}
+
 	models, err := agent.ListModels(ctx, rt.Provider, entry.Path)
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
@@ -1508,6 +1516,54 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
+	})
+}
+
+// reportExternalModels converts AgentModel entries from a runtime.json
+// manifest into the wire format and reports them to the server. This is
+// used for external runtime extensions that declare static model lists
+// instead of using CLI-based discovery.
+func (d *Daemon) reportExternalModels(ctx context.Context, rt Runtime, requestID string, agentModels []AgentModel) {
+	type thinkingLevelWire struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description,omitempty"`
+	}
+	type modelThinkingWire struct {
+		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
+		DefaultLevel    string              `json:"default_level,omitempty"`
+	}
+	type modelWire struct {
+		ID       string             `json:"id"`
+		Label    string             `json:"label"`
+		Provider string             `json:"provider,omitempty"`
+		Default  bool               `json:"default,omitempty"`
+		Thinking *modelThinkingWire `json:"thinking,omitempty"`
+	}
+	wire := make([]modelWire, 0, len(agentModels))
+	for _, m := range agentModels {
+		entry := modelWire{
+			ID:       m.ID,
+			Label:    m.Label,
+			Provider: rt.Provider,
+			Default:  m.Default,
+		}
+		if len(m.Thinking) > 0 {
+			levels := make([]thinkingLevelWire, 0, len(m.Thinking))
+			for _, lvl := range m.Thinking {
+				levels = append(levels, thinkingLevelWire{Value: lvl, Label: lvl})
+			}
+			entry.Thinking = &modelThinkingWire{
+				SupportedLevels: levels,
+				DefaultLevel:    m.Thinking[0],
+			}
+		}
+		wire = append(wire, entry)
+	}
+	d.reportModelListResult(ctx, rt, requestID, map[string]any{
+		"status":    "completed",
+		"models":    wire,
+		"supported": true,
 	})
 }
 
