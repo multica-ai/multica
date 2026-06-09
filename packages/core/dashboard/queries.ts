@@ -15,6 +15,12 @@ export const dashboardKeys = {
     projectId: string | null,
     tz: string,
   ) => [...dashboardKeys.all(wsId), "by-agent", days, projectId, tz] as const,
+  byModel: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "by-model", days, projectId, tz] as const,
   agentRuntime: (
     wsId: string,
     days: number,
@@ -40,6 +46,12 @@ export const dashboardKeys = {
     tz: string,
   ) =>
     [...dashboardKeys.all(wsId), "failures-by-agent", days, projectId, tz] as const,
+  runtimeRunTime: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "runtime-runtime", days, projectId, tz] as const,
 };
 
 // The server materializes these rollups on a 5-minute cadence, so a mounted
@@ -215,5 +227,43 @@ export function dashboardFailuresByAgentOptions(
       isSameDashboardScope(previousQuery?.queryKey, queryKey)
         ? keepPreviousData(previousData)
         : undefined,
+  });
+}
+
+export function dashboardUsageByModelOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.byModel(wsId, days, projectId, tz),
+    queryFn: () =>
+      api.getDashboardUsageByModel({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardRuntimeRunTimeOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.runtimeRunTime(wsId, days, projectId, tz),
+    queryFn: () =>
+      api.getDashboardRuntimeRunTime({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
   });
 }

@@ -21,9 +21,12 @@ import {
   dashboardUsageByAgentOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
+  dashboardUsageByModelOptions,
+  dashboardRuntimeRunTimeOptions,
   dashboardFailuresDailyOptions,
   dashboardFailuresByAgentOptions,
 } from "@multica/core/dashboard";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PAGE_GUTTER } from "../../layout/page-header";
@@ -74,8 +77,10 @@ import { cn } from "@multica/ui/lib/utils";
 // reference-equality dep check and trips the exhaustive-deps lint rule.
 const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
+const EMPTY_BY_MODEL: import("@multica/core/types").DashboardUsageByModel[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
+const EMPTY_RUNTIME_RUNTIME: import("@multica/core/types").DashboardRuntimeRunTime[] = [];
 const EMPTY_FAILURE_DAILY: import("@multica/core/types").DashboardFailureDaily[] = [];
 const EMPTY_FAILURE_BY_AGENT: import("@multica/core/types").DashboardFailureByAgent[] =
   [];
@@ -178,6 +183,9 @@ export function DashboardPage() {
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const agentsQuery = useQuery(agentListOptions(wsId));
   const agents = agentsQuery.data ?? EMPTY_AGENTS;
+  // Runtime names for the Leaderboard's Runtime scope. The dashboard has never
+  // needed the runtime catalog before, so this fetch is new work on the page.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
@@ -230,11 +238,21 @@ export function DashboardPage() {
   const failuresByAgentQuery = useQuery(
     dashboardFailuresByAgentOptions(wsId, days, projectId, viewTZ),
   );
+  // Leaderboard Model / Runtime scopes. Same `days` window as the other
+  // per-agent rollups, so a scope switch never widens or narrows the ranking.
+  const byModelQuery = useQuery(
+    dashboardUsageByModelOptions(wsId, days, projectId, viewTZ),
+  );
+  const runtimeRunTimeQuery = useQuery(
+    dashboardRuntimeRunTimeOptions(wsId, days, projectId, viewTZ),
+  );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
+  const byModelUsage = byModelQuery.data ?? EMPTY_BY_MODEL;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
+  const runtimeRunTime = runtimeRunTimeQuery.data ?? EMPTY_RUNTIME_RUNTIME;
   const failureDailyRows = failuresDailyQuery.data ?? EMPTY_FAILURE_DAILY;
   const failureByAgentRows = failuresByAgentQuery.data ?? EMPTY_FAILURE_BY_AGENT;
 
@@ -247,6 +265,8 @@ export function DashboardPage() {
     byAgentQuery.isFetching ||
     runTimeQuery.isFetching ||
     runTimeDailyQuery.isFetching ||
+    byModelQuery.isFetching ||
+    runtimeRunTimeQuery.isFetching ||
     failuresDailyQuery.isFetching ||
     failuresByAgentQuery.isFetching;
   const handleRefresh = () => {
@@ -259,6 +279,8 @@ export function DashboardPage() {
       byAgentQuery.dataUpdatedAt,
       runTimeQuery.dataUpdatedAt,
       runTimeDailyQuery.dataUpdatedAt,
+      byModelQuery.dataUpdatedAt,
+      runtimeRunTimeQuery.dataUpdatedAt,
       failuresDailyQuery.dataUpdatedAt,
       failuresByAgentQuery.dataUpdatedAt,
     ],
@@ -296,7 +318,9 @@ export function DashboardPage() {
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
     runTimeQuery.isLoading ||
-    runTimeDailyQuery.isLoading;
+    runTimeDailyQuery.isLoading ||
+    byModelQuery.isLoading ||
+    runtimeRunTimeQuery.isLoading;
   const errorsLoading =
     failuresDailyQuery.isLoading || failuresByAgentQuery.isLoading;
 
@@ -304,8 +328,10 @@ export function DashboardPage() {
     !usageLoading &&
     dailyUsage.length === 0 &&
     byAgentUsage.length === 0 &&
+    byModelUsage.length === 0 &&
     runTimeRows.length === 0 &&
-    runTimeDailyRows.length === 0;
+    runTimeDailyRows.length === 0 &&
+    runtimeRunTime.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
   const totals = useMemo(
@@ -607,9 +633,12 @@ export function DashboardPage() {
                 />
 
                 <Leaderboard
-                  rows={visibleAgentRows}
+                  agentRows={visibleAgentRows}
                   agents={agents}
                   deletedAgentCount={deletedAgentCount}
+                  byModelUsage={byModelUsage}
+                  runtimeRunTime={runtimeRunTime}
+                  runtimes={runtimes}
                   lessThanMinuteLabel={lessThanMinuteLabel}
                 />
               </>
