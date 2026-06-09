@@ -162,6 +162,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `attachment-cli-text` | server/cmd/multica/cmd_attachment.go | 25 | JEH-1816 — adds `multica attachment text <id>` so agents and CLI users can print extracted attachment text directly, including text-based PDFs through `/api/attachments/{id}/content`. |
 | `cli-attachment-text` | server/internal/cli/client.go | 25 | JEH-1816 — shared authenticated `GetText` helper for CLI commands that need plain-text API responses instead of JSON. |
 | `attachment-list-cerebro` | packages/views/issues/components/attachment-list.tsx | 119 | Attachment list view |
+| `chat-attachment-list` | packages/views/chat/components/chat-message-list.tsx | 6 | TECH-3183 — render files linked to a chat message (`attachment.chat_message_id`) on user + assistant bubbles via the shared `ChatAttachmentList` (open-in-new-tab + download). |
 | `auth-handler-auth` | server/internal/handler/auth.go | 19 | Auth additions (master-code, JWT) |
 | `auth-jwt` | server/internal/auth/jwt.go | 45 | Auth additions (master-code, JWT) |
 | `auth-jwt-test` | server/internal/auth/jwt_test.go | 65 | Auth additions (master-code, JWT) |

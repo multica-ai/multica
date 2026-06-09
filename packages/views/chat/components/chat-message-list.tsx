@@ -29,7 +29,7 @@ import type { AgentAvailability } from "@multica/core/agents";
 import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 // CEREBRO-PATCH(chat-message-list-cerebro): import from cerebro-chat after Phase 6 relocation
-import { getToolSummary, MessageCostBadge } from "@multica/cerebro-chat/views";
+import { getToolSummary, MessageCostBadge, ChatAttachmentList } from "@multica/cerebro-chat/views";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
@@ -174,7 +174,8 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
     // conversation).
     const waiting = message.responded_at == null;
     return (
-      <div className="flex justify-end">
+      // CEREBRO-PATCH(chat-attachment-list): TECH-3183 — flex-col so attachment cards stack under the bubble, right-aligned.
+      <div className="flex flex-col items-end gap-1">
         {/* CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — min-w-0 lets the flex item shrink below intrinsic content width so the bubble respects max-w-[80%] when a single unbreakable token (long URL) lives inside. */}
         <div
           className={cn(
@@ -201,6 +202,8 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
             />
           )}
         </div>
+        {/* CEREBRO-PATCH(chat-attachment-list): TECH-3183 — files attached to a user message. */}
+        <ChatAttachmentList attachments={message.attachments} className="max-w-[80%]" />
       </div>
     );
   }
@@ -258,6 +261,8 @@ function AssistantMessage({
         timeline={timeline}
         isPending={isPending}
       />
+      {/* CEREBRO-PATCH(chat-attachment-list): TECH-3183 — files the agent attached to its reply. */}
+      <ChatAttachmentList attachments={message.attachments} className="max-w-[70ch]" />
     </div>
   );
 }

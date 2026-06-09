@@ -1401,6 +1401,9 @@ importers:
 
   packages/cerebro-chat:
     dependencies:
+      '@multica/cerebro-attachments':
+        specifier: workspace:*
+        version: link:../cerebro-attachments
       '@multica/cerebro-display-currency':
         specifier: workspace:*
         version: link:../cerebro-display-currency
