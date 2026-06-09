@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/pkg/detsteps"
 )
 
 var (
@@ -93,6 +94,10 @@ func init() {
 }
 
 func main() {
+	// If re-exec'd as a deterministic-step sandbox, run the one-shot step and
+	// exit before any CLI/cobra setup. Must be first.
+	detsteps.MaybeRunStepChild()
+
 	cli.CleanupStaleUpdateArtifacts()
 	if err := rootCmd.Execute(); err != nil {
 		if err != errSilent {

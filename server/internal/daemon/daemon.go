@@ -2688,7 +2688,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// OpenClaw materializes mcp.servers from this config during execenv.Prepare,
 	// so the deterministic tool server must be merged in before Prepare/Reuse.
 	// No-op for every other provider.
-	agentMcpConfig = d.injectExecenvTools(agentMcpConfig, provider, agentRuntimeConfig, d.logger)
+	agentMcpConfig = d.injectExecenvTools(agentMcpConfig, provider, agentRuntimeConfig, task.DeterministicTools, d.logger)
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:      task.PriorWorkDir,
@@ -2854,7 +2854,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// experimental): the daemon writes a project-local .pi/mcp.json the adapter
 	// auto-discovers. No-op for every other provider and when disabled. The
 	// cleanup restores the user's file on local_directory tasks.
-	piCleanup := d.preparePiToolPlane(provider, env.WorkDir, env.LocalDirectory, agentMcpConfig, agentRuntimeConfig, agentEnv, d.logger)
+	piCleanup := d.preparePiToolPlane(provider, env.WorkDir, env.LocalDirectory, agentMcpConfig, agentRuntimeConfig, task.DeterministicTools, agentEnv, d.logger)
 	defer piCleanup()
 
 	backend, err := agent.New(provider, agent.Config{
@@ -2893,7 +2893,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		execAgentRuntimeConfig = task.Agent.RuntimeConfig
 	}
-	mcpConfig = d.injectExecOptionsTools(mcpConfig, provider, env.WorkDir, execAgentRuntimeConfig, taskLog)
+	mcpConfig = d.injectExecOptionsTools(mcpConfig, provider, env.WorkDir, execAgentRuntimeConfig, task.DeterministicTools, taskLog)
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
 	// both are empty we deliberately pass "" through — each

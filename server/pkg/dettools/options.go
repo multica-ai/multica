@@ -23,6 +23,10 @@ type Options struct {
 	Timeout      time.Duration
 	AllowNetwork bool
 	ArtifactDir  string
+	// StepsFile is the path to a JSON array of workspace-authored steps the
+	// daemon wrote for this task (MULTICA_DETTOOLS_STEPS_FILE). Empty when the
+	// workspace has no authored tools.
+	StepsFile string
 }
 
 // OptionsFromEnv builds Options from the MULTICA_DETTOOLS_* environment. Missing
@@ -63,6 +67,7 @@ func OptionsFromEnv() Options {
 		Timeout:      timeout,
 		AllowNetwork: boolEnv("MULTICA_DETTOOLS_ALLOW_NETWORK"),
 		ArtifactDir:  artifactDir,
+		StepsFile:    strings.TrimSpace(os.Getenv("MULTICA_DETTOOLS_STEPS_FILE")),
 	}
 }
 

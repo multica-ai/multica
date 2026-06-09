@@ -37,7 +37,7 @@ func parseServers(t *testing.T, raw json.RawMessage) map[string]json.RawMessage 
 }
 
 func TestBuildEffectiveMcpConfig_EmptyInput(t *testing.T) {
-	out, err := buildEffectiveMcpConfig(nil, "/usr/local/bin/multica", "/work/dir", testDetToolsCfg(), testAllowed())
+	out, err := buildEffectiveMcpConfig(nil, "/usr/local/bin/multica", "/work/dir", "", testDetToolsCfg(), testAllowed())
 	if err != nil {
 		t.Fatalf("buildEffectiveMcpConfig: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestBuildEffectiveMcpConfig_EmptyInput(t *testing.T) {
 }
 
 func TestBuildEffectiveMcpConfig_OmitsWorkdirWhenEmpty(t *testing.T) {
-	out, err := buildEffectiveMcpConfig(nil, "/bin/multica", "", testDetToolsCfg(), testAllowed())
+	out, err := buildEffectiveMcpConfig(nil, "/bin/multica", "", "", testDetToolsCfg(), testAllowed())
 	if err != nil {
 		t.Fatalf("buildEffectiveMcpConfig: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestBuildEffectiveMcpConfig_OmitsWorkdirWhenEmpty(t *testing.T) {
 
 func TestBuildEffectiveMcpConfig_AdditivePreservesUserServers(t *testing.T) {
 	user := json.RawMessage(`{"mcpServers":{"github":{"command":"gh-mcp","args":["serve"]}}}`)
-	out, err := buildEffectiveMcpConfig(user, "/bin/multica", "/w", testDetToolsCfg(), testAllowed())
+	out, err := buildEffectiveMcpConfig(user, "/bin/multica", "/w", "", testDetToolsCfg(), testAllowed())
 	if err != nil {
 		t.Fatalf("buildEffectiveMcpConfig: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestBuildEffectiveMcpConfig_AdditivePreservesUserServers(t *testing.T) {
 
 func TestBuildEffectiveMcpConfig_DoesNotOverrideUserNameCollision(t *testing.T) {
 	user := json.RawMessage(`{"mcpServers":{"multica-tools":{"command":"custom"}}}`)
-	out, err := buildEffectiveMcpConfig(user, "/bin/multica", "/w", testDetToolsCfg(), testAllowed())
+	out, err := buildEffectiveMcpConfig(user, "/bin/multica", "/w", "", testDetToolsCfg(), testAllowed())
 	if err != nil {
 		t.Fatalf("buildEffectiveMcpConfig: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestBuildEffectiveMcpConfig_DoesNotOverrideUserNameCollision(t *testing.T) 
 
 func TestBuildEffectiveMcpConfig_PreservesOtherTopLevelKeys(t *testing.T) {
 	user := json.RawMessage(`{"mcpServers":{},"someOtherKey":{"a":1}}`)
-	out, err := buildEffectiveMcpConfig(user, "/bin/multica", "/w", testDetToolsCfg(), testAllowed())
+	out, err := buildEffectiveMcpConfig(user, "/bin/multica", "/w", "", testDetToolsCfg(), testAllowed())
 	if err != nil {
 		t.Fatalf("buildEffectiveMcpConfig: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestBuildEffectiveMcpConfig_PreservesOtherTopLevelKeys(t *testing.T) {
 }
 
 func TestBuildEffectiveMcpConfig_InvalidJSON(t *testing.T) {
-	_, err := buildEffectiveMcpConfig(json.RawMessage(`{not json`), "/bin/multica", "/w", testDetToolsCfg(), testAllowed())
+	_, err := buildEffectiveMcpConfig(json.RawMessage(`{not json`), "/bin/multica", "/w", "", testDetToolsCfg(), testAllowed())
 	if err == nil {
 		t.Fatal("expected error on malformed config")
 	}
@@ -190,20 +190,20 @@ func TestInjectExecOptionsTools_Gating(t *testing.T) {
 
 	// Disabled → returns original untouched.
 	dDisabled := &Daemon{cfg: Config{DetTools: DetToolsConfig{Enabled: false}}}
-	if got := dDisabled.injectExecOptionsTools(orig, "claude", "/w", nil, logger); string(got) != string(orig) {
+	if got := dDisabled.injectExecOptionsTools(orig, "claude", "/w", nil, nil, logger); string(got) != string(orig) {
 		t.Errorf("disabled: config changed: %s", got)
 	}
 
 	dEnabled := &Daemon{cfg: Config{DetTools: testDetToolsCfg()}}
 
 	// Non-MCP provider → untouched.
-	if got := dEnabled.injectExecOptionsTools(orig, "gemini", "/w", nil, logger); string(got) != string(orig) {
+	if got := dEnabled.injectExecOptionsTools(orig, "gemini", "/w", nil, nil, logger); string(got) != string(orig) {
 		t.Errorf("non-injecting provider: config changed: %s", got)
 	}
 
 	// Every ExecOptions MCP provider gets the server injected.
 	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "kimi", "kiro"} {
-		got := dEnabled.injectExecOptionsTools(orig, provider, "/w", nil, logger)
+		got := dEnabled.injectExecOptionsTools(orig, provider, "/w", nil, nil, logger)
 		if _, ok := parseServers(t, got)[dettoolsServerName]; !ok {
 			t.Errorf("%s: deterministic server not injected", provider)
 		}
@@ -211,7 +211,7 @@ func TestInjectExecOptionsTools_Gating(t *testing.T) {
 
 	// An agent profile that allows no daemon tool → injection skipped.
 	rc := json.RawMessage(`{"deterministic_tools":{"allowed_tools":["nonexistent"]}}`)
-	if got := dEnabled.injectExecOptionsTools(orig, "claude", "/w", rc, logger); string(got) != string(orig) {
+	if got := dEnabled.injectExecOptionsTools(orig, "claude", "/w", rc, nil, logger); string(got) != string(orig) {
 		t.Errorf("empty effective allowlist should skip injection, got %s", got)
 	}
 }
@@ -222,11 +222,11 @@ func TestInjectExecenvTools_OpenclawOnly(t *testing.T) {
 	dEnabled := &Daemon{cfg: Config{DetTools: testDetToolsCfg()}}
 
 	// openclaw gets injected through the execenv path.
-	if _, ok := parseServers(t, dEnabled.injectExecenvTools(orig, "openclaw", nil, logger))[dettoolsServerName]; !ok {
+	if _, ok := parseServers(t, dEnabled.injectExecenvTools(orig, "openclaw", nil, nil, logger))[dettoolsServerName]; !ok {
 		t.Error("openclaw: deterministic server not injected via execenv path")
 	}
 	// claude does NOT go through the execenv path (it uses ExecOptions).
-	if got := dEnabled.injectExecenvTools(orig, "claude", nil, logger); string(got) != string(orig) {
+	if got := dEnabled.injectExecenvTools(orig, "claude", nil, nil, logger); string(got) != string(orig) {
 		t.Errorf("claude should not be injected via execenv path, got %s", got)
 	}
 }

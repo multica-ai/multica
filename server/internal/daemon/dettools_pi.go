@@ -27,7 +27,7 @@ const piInstallTimeout = 60 * time.Second
 // caller must defer — a no-op except when the work dir is the user's own
 // repository (local_directory), where it restores the original `.pi/mcp.json`
 // so the daemon never leaves state in a user-owned checkout.
-func (d *Daemon) preparePiToolPlane(provider, workDir string, localDirectory bool, agentMcpConfig, runtimeConfig json.RawMessage, agentEnv map[string]string, logger *slog.Logger) func() {
+func (d *Daemon) preparePiToolPlane(provider, workDir string, localDirectory bool, agentMcpConfig, runtimeConfig json.RawMessage, steps []DeterministicToolData, agentEnv map[string]string, logger *slog.Logger) func() {
 	noop := func() {}
 	if !d.cfg.DetTools.Enabled || !d.cfg.DetTools.PiAdapterEnabled || provider != "pi" {
 		return noop
@@ -38,7 +38,9 @@ func (d *Daemon) preparePiToolPlane(provider, workDir string, localDirectory boo
 	}
 
 	effective := computeEffectiveAllowed(d.cfg.DetTools, runtimeConfig)
-	if len(effective) == 0 {
+	profile := parseAgentDetToolsProfile(runtimeConfig)
+	allowedSteps := filterStepsByProfile(steps, profile, d.cfg.DetTools.DeniedTools)
+	if len(effective) == 0 && len(allowedSteps) == 0 {
 		logger.Info("dettools(pi): no tools enabled for this agent after policy; skipping adapter setup")
 		return noop
 	}
@@ -66,7 +68,16 @@ func (d *Daemon) preparePiToolPlane(provider, workDir string, localDirectory boo
 	if hadOriginal {
 		base = original
 	}
-	merged, err := buildEffectiveMcpConfig(base, selfBin, workDir, d.cfg.DetTools, effective)
+	stepsFile := ""
+	if len(allowedSteps) > 0 {
+		if f, werr := writeStepsFile(workDir, allowedSteps); werr != nil {
+			logger.Warn("dettools(pi): failed to write authored steps; serving built-ins only", "error", werr)
+		} else {
+			stepsFile = f
+		}
+	}
+
+	merged, err := buildEffectiveMcpConfig(base, selfBin, workDir, stepsFile, d.cfg.DetTools, effective)
 	if err != nil {
 		logger.Warn("dettools(pi): build adapter config failed; launching without tool plane", "error", err)
 		return noop
@@ -100,6 +111,11 @@ func (d *Daemon) preparePiToolPlane(provider, workDir string, localDirectory boo
 		return noop
 	}
 	return func() {
+		// Never leave the authored-steps file in a user-owned checkout.
+		if stepsFile != "" {
+			_ = os.Remove(stepsFile)
+			_ = os.Remove(filepath.Dir(stepsFile)) // .multica/dettools, if now empty
+		}
 		if hadOriginal {
 			if err := os.WriteFile(cfgPath, original, 0o600); err != nil {
 				logger.Warn("dettools(pi): restore original config failed", "path", cfgPath, "error", err)

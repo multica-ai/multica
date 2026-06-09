@@ -23,7 +23,7 @@ func TestPreparePiToolPlane_WritesProjectLocalConfig(t *testing.T) {
 	workDir := t.TempDir()
 	d := piTestDaemon(true)
 
-	cleanup := d.preparePiToolPlane("pi", workDir, false, nil, nil, map[string]string{}, discardLogger())
+	cleanup := d.preparePiToolPlane("pi", workDir, false, nil, nil, nil, map[string]string{}, discardLogger())
 	defer cleanup()
 
 	cfgPath := filepath.Join(workDir, ".pi", "mcp.json")
@@ -51,7 +51,7 @@ func TestPreparePiToolPlane_MergesAndPreservesExisting(t *testing.T) {
 
 	d := piTestDaemon(true)
 	// local_directory=true so cleanup restores the original.
-	cleanup := d.preparePiToolPlane("pi", workDir, true, nil, nil, map[string]string{}, discardLogger())
+	cleanup := d.preparePiToolPlane("pi", workDir, true, nil, nil, nil, map[string]string{}, discardLogger())
 
 	data, _ := os.ReadFile(cfgPath)
 	var merged map[string]json.RawMessage
@@ -80,7 +80,7 @@ func TestPreparePiToolPlane_MergesAndPreservesExisting(t *testing.T) {
 func TestPreparePiToolPlane_CleanupRemovesCreatedFileOnLocalDir(t *testing.T) {
 	workDir := t.TempDir()
 	d := piTestDaemon(true)
-	cleanup := d.preparePiToolPlane("pi", workDir, true, nil, nil, map[string]string{}, discardLogger())
+	cleanup := d.preparePiToolPlane("pi", workDir, true, nil, nil, nil, map[string]string{}, discardLogger())
 
 	cfgPath := filepath.Join(workDir, ".pi", "mcp.json")
 	if _, err := os.Stat(cfgPath); err != nil {
@@ -97,14 +97,14 @@ func TestPreparePiToolPlane_NoopWhenDisabledOrNotPi(t *testing.T) {
 
 	dOff := piTestDaemon(false)
 	wd := t.TempDir()
-	dOff.preparePiToolPlane("pi", wd, false, nil, nil, map[string]string{}, logger)()
+	dOff.preparePiToolPlane("pi", wd, false, nil, nil, nil, map[string]string{}, logger)()
 	if _, err := os.Stat(filepath.Join(wd, ".pi", "mcp.json")); !os.IsNotExist(err) {
 		t.Error("disabled: no config should be written")
 	}
 
 	dOn := piTestDaemon(true)
 	wd2 := t.TempDir()
-	dOn.preparePiToolPlane("claude", wd2, false, nil, nil, map[string]string{}, logger)()
+	dOn.preparePiToolPlane("claude", wd2, false, nil, nil, nil, map[string]string{}, logger)()
 	if _, err := os.Stat(filepath.Join(wd2, ".pi", "mcp.json")); !os.IsNotExist(err) {
 		t.Error("non-pi provider: no config should be written")
 	}
@@ -114,7 +114,7 @@ func TestPreparePiToolPlane_SkipsWhenNoToolsAllowed(t *testing.T) {
 	wd := t.TempDir()
 	d := piTestDaemon(true)
 	rc := json.RawMessage(`{"deterministic_tools":{"allowed_tools":["nonexistent"]}}`)
-	d.preparePiToolPlane("pi", wd, false, nil, rc, map[string]string{}, discardLogger())()
+	d.preparePiToolPlane("pi", wd, false, nil, rc, nil, map[string]string{}, discardLogger())()
 	if _, err := os.Stat(filepath.Join(wd, ".pi", "mcp.json")); !os.IsNotExist(err) {
 		t.Error("empty effective allowlist: no config should be written")
 	}

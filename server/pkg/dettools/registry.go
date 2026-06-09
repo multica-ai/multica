@@ -30,6 +30,18 @@ type Tool struct {
 	Handler     Handler
 }
 
+// AllToolNames returns the names of every built-in tool, in registration order.
+// Exposed so other packages (e.g. the workspace tool CRUD) can reason about the
+// built-in catalog without depending on internals.
+func AllToolNames() []string {
+	tools := allTools()
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+	return names
+}
+
 // allTools returns every implemented tool. Add new tools here.
 func allTools() []Tool {
 	return []Tool{
@@ -66,6 +78,20 @@ func NewRegistry(allowed []string) *Registry {
 		r.order = append(r.order, t.Name)
 	}
 	return r
+}
+
+// Add registers an extra tool (e.g. a workspace-authored step) unconditionally,
+// bypassing the allowlist filter. The daemon is the policy authority for these —
+// it only delivers ones already enabled and permitted for the agent — so the
+// registry serves what it is given. A built-in tool of the same name always
+// wins: the collision is ignored rather than shadowing the compiled handler.
+func (r *Registry) Add(t Tool) bool {
+	if _, exists := r.tools[t.Name]; exists {
+		return false
+	}
+	r.tools[t.Name] = t
+	r.order = append(r.order, t.Name)
+	return true
 }
 
 // Lookup returns the tool with the given name, if exposed.

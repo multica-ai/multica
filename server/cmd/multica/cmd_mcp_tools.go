@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/pkg/detsteps"
 	"github.com/multica-ai/multica/server/pkg/dettools"
 )
 
@@ -31,6 +32,23 @@ var mcpToolsServeCmd = &cobra.Command{
 
 		opts := dettools.OptionsFromEnv()
 		reg := dettools.NewRegistry(opts.AllowedTools)
+
+		// Register workspace-authored steps the daemon delivered for this task,
+		// alongside the built-in catalog. Fail-open: a bad steps file logs and the
+		// server still serves the built-ins.
+		if steps, err := detsteps.LoadStepsFile(opts.StepsFile); err != nil {
+			logger.Warn("dettools: failed to load workspace steps; serving built-ins only", "error", err)
+		} else {
+			for _, t := range detsteps.Tools(detsteps.SelfBin(), steps) {
+				if !reg.Add(t) {
+					logger.Warn("dettools: workspace step shadows a built-in tool; skipping", "name", t.Name)
+				}
+			}
+			if len(steps) > 0 {
+				logger.Info("dettools: registered workspace steps", "count", len(steps))
+			}
+		}
+
 		env := dettools.ToolEnv{
 			WorkDir:      opts.WorkDir,
 			AllowNetwork: opts.AllowNetwork,

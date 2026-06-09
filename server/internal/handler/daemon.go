@@ -1688,6 +1688,25 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		resp.AuthToken = tokenStr
 	}
 
+	// Attach the workspace's enabled deterministic tools so the daemon can expose
+	// them to the agent's tool plane alongside the built-ins. Best-effort: a query
+	// error logs and the task still runs (with built-in tools only).
+	if resp.WorkspaceID != "" {
+		if wsUUID, err := util.ParseUUID(resp.WorkspaceID); err == nil {
+			if tools, terr := h.Queries.ListEnabledDeterministicToolsByWorkspace(r.Context(), wsUUID); terr != nil {
+				slog.Warn("task claim: failed to load deterministic tools", "workspace_id", resp.WorkspaceID, "error", terr)
+			} else {
+				for _, t := range tools {
+					resp.DeterministicTools = append(resp.DeterministicTools, DeterministicToolData{
+						Name:        t.Name,
+						Description: t.Description,
+						Source:      t.Source,
+					})
+				}
+			}
+		}
+	}
+
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
 }

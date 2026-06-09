@@ -10,6 +10,7 @@
     "usage": "사용량",
     "runtimes": "런타임",
     "skills": "스킬",
+    "deterministic_tools": "도구",
     "settings": "설정"
   },
   "help": {

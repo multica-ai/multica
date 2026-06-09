@@ -10,6 +10,15 @@ import (
 	"strings"
 )
 
+// detToolsStepFile is the JSON shape the daemon writes for the MCP server to
+// load (matches detsteps.StepDef). Kept local so the daemon doesn't import the
+// dettools execution packages.
+type detToolsStepFile struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source"`
+}
+
 // dettoolsServerName is the MCP server key the daemon injects. A user-defined
 // server with the same name is left untouched (the merge stays additive).
 const dettoolsServerName = "multica-tools"
@@ -42,12 +51,13 @@ type agentDetToolsProfile struct {
 
 // injectExecOptionsTools merges the deterministic tool server into agentCfg for
 // providers that consume MCP via ExecOptions.McpConfig. workDir is the known
-// task working directory, pinned into the server env.
-func (d *Daemon) injectExecOptionsTools(agentCfg json.RawMessage, provider, workDir string, runtimeConfig json.RawMessage, logger *slog.Logger) json.RawMessage {
+// task working directory, pinned into the server env. steps are the workspace's
+// authored tools to expose alongside the built-ins.
+func (d *Daemon) injectExecOptionsTools(agentCfg json.RawMessage, provider, workDir string, runtimeConfig json.RawMessage, steps []DeterministicToolData, logger *slog.Logger) json.RawMessage {
 	if !d.cfg.DetTools.Enabled || !dettoolsExecOptionsProviders[provider] {
 		return agentCfg
 	}
-	return d.mergeDetTools(agentCfg, provider, workDir, runtimeConfig, logger)
+	return d.mergeDetTools(agentCfg, provider, workDir, runtimeConfig, steps, logger)
 }
 
 // injectExecenvTools merges the deterministic tool server into agentCfg for
@@ -55,19 +65,21 @@ func (d *Daemon) injectExecOptionsTools(agentCfg json.RawMessage, provider, work
 // execenv.Prepare (before the work dir exists). The work dir is therefore left
 // empty: the tool server falls back to the cwd OpenClaw spawns it with, which is
 // the pinned task workspace.
-func (d *Daemon) injectExecenvTools(agentCfg json.RawMessage, provider string, runtimeConfig json.RawMessage, logger *slog.Logger) json.RawMessage {
+func (d *Daemon) injectExecenvTools(agentCfg json.RawMessage, provider string, runtimeConfig json.RawMessage, steps []DeterministicToolData, logger *slog.Logger) json.RawMessage {
 	if !d.cfg.DetTools.Enabled || provider != "openclaw" {
 		return agentCfg
 	}
-	return d.mergeDetTools(agentCfg, provider, "", runtimeConfig, logger)
+	return d.mergeDetTools(agentCfg, provider, "", runtimeConfig, steps, logger)
 }
 
 // mergeDetTools computes the effective tool allowlist for the agent and merges
 // the deterministic server into agentCfg. Fail-open: any error logs and returns
 // the original config so a tool-plane problem never blocks a task launch.
-func (d *Daemon) mergeDetTools(agentCfg json.RawMessage, provider, workDir string, runtimeConfig json.RawMessage, logger *slog.Logger) json.RawMessage {
+func (d *Daemon) mergeDetTools(agentCfg json.RawMessage, provider, workDir string, runtimeConfig json.RawMessage, steps []DeterministicToolData, logger *slog.Logger) json.RawMessage {
 	effective := computeEffectiveAllowed(d.cfg.DetTools, runtimeConfig)
-	if len(effective) == 0 {
+	profile := parseAgentDetToolsProfile(runtimeConfig)
+	allowedSteps := filterStepsByProfile(steps, profile, d.cfg.DetTools.DeniedTools)
+	if len(effective) == 0 && len(allowedSteps) == 0 {
 		logger.Info("dettools: no tools enabled for this agent after policy; skipping injection", "provider", provider)
 		return agentCfg
 	}
@@ -79,13 +91,86 @@ func (d *Daemon) mergeDetTools(agentCfg json.RawMessage, provider, workDir strin
 	if resolved, rerr := filepath.EvalSymlinks(selfBin); rerr == nil {
 		selfBin = resolved
 	}
-	merged, err := buildEffectiveMcpConfig(agentCfg, selfBin, workDir, d.cfg.DetTools, effective)
+
+	// Persist the agent's authored steps where the MCP server can load them.
+	// Fail-open: a write error drops authored tools but still serves built-ins.
+	stepsFile := ""
+	if len(allowedSteps) > 0 {
+		if f, werr := writeStepsFile(workDir, allowedSteps); werr != nil {
+			logger.Warn("dettools: failed to write authored steps; serving built-ins only", "error", werr)
+		} else {
+			stepsFile = f
+		}
+	}
+
+	merged, err := buildEffectiveMcpConfig(agentCfg, selfBin, workDir, stepsFile, d.cfg.DetTools, effective)
 	if err != nil {
 		logger.Warn("dettools: merge failed; launching without tool plane", "error", err)
 		return agentCfg
 	}
-	logger.Info("dettools: injected deterministic tool server", "provider", provider, "tools", effective)
+	logger.Info("dettools: injected deterministic tool server", "provider", provider, "tools", effective, "authored_steps", len(allowedSteps))
 	return merged
+}
+
+// filterStepsByProfile narrows the workspace's authored steps to those the agent
+// may use: when the agent sets allowed_tools, keep only named steps; always drop
+// anything in the agent or daemon denylist. Mirrors computeEffectiveAllowed for
+// the built-in catalog so policy is uniform across both.
+func filterStepsByProfile(steps []DeterministicToolData, profile agentDetToolsProfile, daemonDenied []string) []DeterministicToolData {
+	if len(steps) == 0 {
+		return nil
+	}
+	allowed := toSet(profile.AllowedTools)
+	denied := toSet(profile.DeniedTools)
+	for _, t := range daemonDenied {
+		denied[t] = true
+	}
+	out := make([]DeterministicToolData, 0, len(steps))
+	for _, s := range steps {
+		if len(allowed) > 0 && !allowed[s.Name] {
+			continue
+		}
+		if denied[s.Name] {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// writeStepsFile serializes the authored steps as JSON for the MCP server to
+// load. When workDir is known it writes under the task's .multica/dettools dir
+// (GC'd with the work dir); otherwise (OpenClaw, before the work dir exists) it
+// falls back to a temp file. Returns the absolute path.
+func writeStepsFile(workDir string, steps []DeterministicToolData) (string, error) {
+	payload := make([]detToolsStepFile, len(steps))
+	for i, s := range steps {
+		payload[i] = detToolsStepFile{Name: s.Name, Description: s.Description, Source: s.Source}
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	if workDir != "" {
+		dir := filepath.Join(workDir, ".multica", "dettools")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", err
+		}
+		path := filepath.Join(dir, "steps.json")
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+	f, err := os.CreateTemp("", "multica-dettools-steps-*.json")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // computeEffectiveAllowed resolves the tool allowlist for one agent: start from
@@ -142,7 +227,7 @@ func filterSlice(items []string, keep func(string) bool) []string {
 // and user-defined servers; if a server already named dettoolsServerName exists,
 // the original config is returned unchanged so user intent always wins. allowed
 // is the per-agent effective tool list passed to the server.
-func buildEffectiveMcpConfig(agentCfg json.RawMessage, selfBin, workDir string, cfg DetToolsConfig, allowed []string) (json.RawMessage, error) {
+func buildEffectiveMcpConfig(agentCfg json.RawMessage, selfBin, workDir, stepsFile string, cfg DetToolsConfig, allowed []string) (json.RawMessage, error) {
 	root := map[string]json.RawMessage{}
 	if len(strings.TrimSpace(string(agentCfg))) > 0 {
 		if err := json.Unmarshal(agentCfg, &root); err != nil {
@@ -163,7 +248,7 @@ func buildEffectiveMcpConfig(agentCfg json.RawMessage, selfBin, workDir string, 
 	entry := map[string]any{
 		"command": selfBin,
 		"args":    []string{"mcp-tools", "serve"},
-		"env":     dettoolsServerEnv(workDir, cfg, allowed),
+		"env":     dettoolsServerEnv(workDir, stepsFile, cfg, allowed),
 	}
 	entryRaw, err := json.Marshal(entry)
 	if err != nil {
@@ -183,7 +268,7 @@ func buildEffectiveMcpConfig(agentCfg json.RawMessage, selfBin, workDir string, 
 // passes to the spawned MCP server process. workDir is pinned explicitly when
 // known; when empty (OpenClaw path) it is omitted so the server falls back to
 // its spawned cwd. allowed is the resolved per-agent tool list.
-func dettoolsServerEnv(workDir string, cfg DetToolsConfig, allowed []string) map[string]string {
+func dettoolsServerEnv(workDir, stepsFile string, cfg DetToolsConfig, allowed []string) map[string]string {
 	env := map[string]string{
 		"MULTICA_DETTOOLS_TIMEOUT":       cfg.Timeout.String(),
 		"MULTICA_DETTOOLS_ALLOW_NETWORK": strconv.FormatBool(cfg.AllowNetwork),
@@ -192,6 +277,9 @@ func dettoolsServerEnv(workDir string, cfg DetToolsConfig, allowed []string) map
 	}
 	if workDir != "" {
 		env["MULTICA_DETTOOLS_WORKDIR"] = workDir
+	}
+	if stepsFile != "" {
+		env["MULTICA_DETTOOLS_STEPS_FILE"] = stepsFile
 	}
 	return env
 }
