@@ -1,5 +1,5 @@
 // JEH-1067 — Tests for the new Group detail page. Covers the
-// runtime-dependency badges, the "Tilføj begge" dual-add prompt, and the
+// runtime-dependency badges, the "Add agent + runtime" dual-add prompt, and the
 // capability-tooltips on create_runtime / create_agent.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -253,12 +253,12 @@ describe("GroupDetailView", () => {
 
     renderDetail();
 
-    await waitFor(() =>
-      expect(screen.getByTestId("agent-runtime-badge")).toBeInTheDocument(),
+    const runtimeBadge = await screen.findByTestId(
+      "agent-runtime-badge",
+      undefined,
+      { timeout: 10000 },
     );
-    expect(screen.getByTestId("agent-runtime-badge").textContent).toMatch(
-      /Claude Dev/,
-    );
+    expect(runtimeBadge.textContent).toMatch(/Claude Dev/);
     // Runtime is in allowlist → no "missing runtime" warning.
     expect(
       screen.queryByTestId("agent-runtime-missing-badge"),

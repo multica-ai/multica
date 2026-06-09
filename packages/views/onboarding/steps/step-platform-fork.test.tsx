@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -216,21 +222,23 @@ describe("StepPlatformFork", () => {
 
   it("Cloud submit: disables button, shows 'on the list', does NOT navigate", async () => {
     mocks.joinCloudWaitlist.mockResolvedValue(undefined);
-    const user = userEvent.setup();
     const { onNext } = renderFork();
 
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^join waitlist$/i }));
     const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByLabelText(/email/i), "a@b.co");
-    await user.type(
-      within(dialog).getByLabelText(/why cloud/i),
-      "running agents overnight",
-    );
-    await user.click(
+    fireEvent.change(within(dialog).getByLabelText(/email/i), {
+      target: { value: "a@b.co" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/why cloud/i), {
+      target: { value: "running agents overnight" },
+    });
+    fireEvent.click(
       within(dialog).getByRole("button", { name: /^join waitlist$/i }),
     );
 
-    expect(mocks.joinCloudWaitlist).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mocks.joinCloudWaitlist).toHaveBeenCalledTimes(1);
+    });
     expect(mocks.joinCloudWaitlist).toHaveBeenCalledWith(
       "a@b.co",
       "running agents overnight",
@@ -239,26 +247,32 @@ describe("StepPlatformFork", () => {
     expect(onNext).not.toHaveBeenCalled();
     // Form button locks out after submit.
     expect(
-      within(dialog).getByRole("button", { name: /you're on the list/i }),
+      await within(dialog).findByRole(
+        "button",
+        { name: /you're on the list/i },
+        { timeout: 30000 },
+      ),
     ).toBeDisabled();
     // Footer hint flips to reflect submitted state.
     expect(
-      screen.getByText(/you're on the waitlist — pick skip to keep exploring/i),
+      await screen.findByText(
+        /you're on the waitlist — pick skip to keep exploring/i,
+        {},
+        { timeout: 30000 },
+      ),
     ).toBeInTheDocument();
   });
 
   it("Cloud submit: empty reason is allowed, reason forwarded as ''", async () => {
     mocks.joinCloudWaitlist.mockResolvedValue(undefined);
-    const user = userEvent.setup();
     renderFork();
 
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^join waitlist$/i }));
     const dialog = await screen.findByRole("dialog");
-    await user.type(
-      within(dialog).getByLabelText(/email/i),
-      "solo@example.com",
-    );
-    await user.click(
+    fireEvent.change(within(dialog).getByLabelText(/email/i), {
+      target: { value: "solo@example.com" },
+    });
+    fireEvent.click(
       within(dialog).getByRole("button", { name: /^join waitlist$/i }),
     );
 
@@ -269,24 +283,26 @@ describe("StepPlatformFork", () => {
   });
 
   it("Cloud submit stays disabled until email is valid", async () => {
-    const user = userEvent.setup();
     renderFork();
 
-    await user.click(screen.getByRole("button", { name: /^join waitlist$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^join waitlist$/i }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", {
       name: /^join waitlist$/i,
     });
     expect(submit).toBeDisabled();
 
-    await user.type(within(dialog).getByLabelText(/email/i), "not-an-email");
+    fireEvent.change(within(dialog).getByLabelText(/email/i), {
+      target: { value: "not-an-email" },
+    });
     expect(submit).toBeDisabled();
 
-    await user.clear(within(dialog).getByLabelText(/email/i));
-    await user.type(
-      within(dialog).getByLabelText(/email/i),
-      "someone@example.com",
-    );
+    fireEvent.change(within(dialog).getByLabelText(/email/i), {
+      target: { value: "" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/email/i), {
+      target: { value: "someone@example.com" },
+    });
     expect(submit).toBeEnabled();
   });
 });

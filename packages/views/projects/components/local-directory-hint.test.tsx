@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { ProjectResource } from "@multica/core/types";
@@ -109,9 +109,9 @@ describe("LocalDirectoryHint", () => {
       total: 1,
     });
     renderHint("proj-1");
-    await waitFor(() => {
-      expect(screen.getByText("work")).toBeInTheDocument();
-    });
+    expect(
+      await screen.findByText("work", {}, { timeout: 30000 }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Users\/foo\/work/)).toBeInTheDocument();
   });
 

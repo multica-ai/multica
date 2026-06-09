@@ -21,7 +21,7 @@
     "ios:mobile:device:prod:release": "pnpm -C apps/mobile ios:device:prod:release",
     "build": "turbo build --filter=!@multica/mobile",
     "typecheck": "turbo typecheck --filter=!@multica/mobile",
-    "test": "turbo test --filter=!@multica/mobile",
+    "test": "turbo test --concurrency=4 --filter=!@multica/mobile",
     "lint": "turbo lint --filter=!@multica/mobile",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",

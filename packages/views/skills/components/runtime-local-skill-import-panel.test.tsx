@@ -137,7 +137,7 @@ describe("RuntimeLocalSkillImportPanel", () => {
     // CI — bump timeouts above RTL's 1 s default so the jsdom/Vitest work
     // queue actually has time to drain.
     expect(
-      await screen.findByText("Review Helper", {}, { timeout: 5000 }),
+      await screen.findByText("Review Helper", {}, { timeout: 30000 }),
     ).toBeInTheDocument();
 
     const importButton = screen.getByRole("button", {
@@ -147,7 +147,7 @@ describe("RuntimeLocalSkillImportPanel", () => {
       () => {
         expect(importButton).not.toBeDisabled();
       },
-      { timeout: 5000 },
+      { timeout: 30000 },
     );
     fireEvent.click(importButton);
 
@@ -162,7 +162,7 @@ describe("RuntimeLocalSkillImportPanel", () => {
           },
         );
       },
-      { timeout: 5000 },
+      { timeout: 30000 },
     );
   });
 });

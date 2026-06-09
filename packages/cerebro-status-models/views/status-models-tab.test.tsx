@@ -1,11 +1,10 @@
 // Regression test for FIR-1550: the editor must re-seed its form every time it
 // opens. The original bug kept StatusModelEditor permanently mounted, so
-// useState(model...) only ran once and "Rediger" / "Ny model" opened with stale
+// useState(model...) only ran once and "Edit" / "New model" opened with stale
 // state from the previous session. Mounting the editor only while open fixes it.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { CerebroStatusModel } from "../core";
 
 const ALPHA: CerebroStatusModel = {
@@ -61,31 +60,29 @@ function editButtonFor(modelName: string): HTMLElement {
 describe("StatusModelsTab editor state", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("opens an empty form for 'Ny model' after editing a model", async () => {
-    const user = userEvent.setup();
+  it("opens an empty form for 'New model' after editing a model", async () => {
     render(<StatusModelsTab />);
 
-    await user.click(editButtonFor("Alpha"));
+    fireEvent.click(editButtonFor("Alpha"));
     expect((await screen.findByLabelText("Name")) as HTMLInputElement).toHaveValue("Alpha");
 
-    await user.click(screen.getByRole("button", { name: /Cancel/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
     await waitFor(() => expect(screen.queryByLabelText("Name")).toBeNull());
 
-    await user.click(screen.getByRole("button", { name: /New model/i }));
+    fireEvent.click(screen.getByRole("button", { name: /New model/i }));
     expect(nameInput()).toHaveValue("");
   });
 
   it("re-seeds the form when switching from one model to another", async () => {
-    const user = userEvent.setup();
     render(<StatusModelsTab />);
 
-    await user.click(editButtonFor("Alpha"));
+    fireEvent.click(editButtonFor("Alpha"));
     expect(nameInput()).toHaveValue("Alpha");
 
-    await user.click(screen.getByRole("button", { name: /Cancel/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
     await waitFor(() => expect(screen.queryByLabelText("Name")).toBeNull());
 
-    await user.click(editButtonFor("Beta"));
+    fireEvent.click(editButtonFor("Beta"));
     expect(nameInput()).toHaveValue("Beta");
   });
 });

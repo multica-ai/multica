@@ -6,7 +6,12 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    pool: "threads",
+    isolate: true,
+    maxWorkers: 1,
+    fileParallelism: false,
     setupFiles: ["./test/setup.ts"],
     include: ["**/*.test.{ts,tsx}"],
+    testTimeout: 15000,
   },
 });

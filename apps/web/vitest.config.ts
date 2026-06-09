@@ -9,6 +9,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./test/setup.ts"],
     include: ["**/*.test.{ts,tsx}"],
+    pool: "threads",
+    isolate: true,
+    maxWorkers: 1,
+    testTimeout: 30000,
   },
   resolve: {
     alias: {

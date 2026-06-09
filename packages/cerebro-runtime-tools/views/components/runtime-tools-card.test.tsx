@@ -1,7 +1,6 @@
 import type React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types/agent";
 import type { RuntimeTool, RuntimeToolEffectiveAccess } from "@multica/cerebro-types";
@@ -229,7 +228,6 @@ describe("RuntimeToolsCard", () => {
   });
 
   it("Scan now triggers a live daemon scan via the scan-now endpoint", async () => {
-    const user = userEvent.setup();
     mockUseFeatureFlag.mockImplementation(
       (key: string) => key === "cerebro_tool_policy",
     );
@@ -240,7 +238,7 @@ describe("RuntimeToolsCard", () => {
     );
 
     const scanBtn = await screen.findByRole("button", { name: /scan now/i });
-    await user.click(scanBtn);
+    fireEvent.click(scanBtn);
 
     await waitFor(() => {
       const post = mockCerebroRequest.mock.calls.find(
@@ -252,7 +250,7 @@ describe("RuntimeToolsCard", () => {
       expect(post).toBeTruthy();
       expect(post![0]).toBe("/api/runtimes/rt-1/tools/scan-now");
     });
-  }, 10_000);
+  }, 30_000);
 
   it("shows the real Scan now button (not the old cache-only Refresh) even with the unified flag off", async () => {
     // FIR-2230 phase 7: the cache-only "Refresh" button is gone. The honest

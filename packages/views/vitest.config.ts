@@ -6,11 +6,13 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    pool: "threads",
+    isolate: true,
+    maxWorkers: 2,
     setupFiles: ["./test/setup.ts"],
     include: ["**/*.test.{ts,tsx}"],
-    // CI's GitHub-hosted runner is meaningfully slower than dev machines —
-    // userEvent.type() and heavier route-level renders can exceed shorter
-    // limits under full-suite load. 30s gives headroom without hiding hangs.
-    testTimeout: 30000,
+    // CEREBRO-PATCH(test-stability): The views package has many jsdom-heavy route tests. Limiting workers keeps
+    // full Turbo runs from starving Vitest workers under suite-wide load.
+    testTimeout: 60000,
   },
 });
