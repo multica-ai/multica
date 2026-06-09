@@ -39,6 +39,11 @@ jobs:
     # triggers CI; fall back to the built-in GITHUB_TOKEN otherwise.
     env:
       GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+      # Pin gh to this fork. Without this, gh's fork detection (amplified by the
+      # 'upstream' remote added below) defaults the PR base repository to the
+      # parent (UPSTREAM_REPO), so createPullRequest targets the upstream repo
+      # and 403s because the PAT has no write access there.
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Checkout fork
         uses: actions/checkout@v4
