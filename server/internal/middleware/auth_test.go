@@ -265,3 +265,23 @@ func TestAuth_PATCacheHit(t *testing.T) {
 		t.Fatalf("expected cached X-User-ID, got %q", gotUserID)
 	}
 }
+
+// TestAuth_CasdoorAlreadyAuthenticated verifies that when an upstream
+// middleware (e.g. CasdoorAuth) has already set X-User-ID, the Auth
+// middleware skips its own token validation and lets the request through.
+// This is the iframe-SSO path: the browser sends the zgsmAdminToken cookie,
+// CasdoorAuth validates it and sets X-User-ID, and Auth must not 401.
+func TestAuth_CasdoorAlreadyAuthenticated(t *testing.T) {
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.Header.Set("X-User-ID", "casdoor-user-123")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 when X-User-ID is already set, got %d", w.Code)
+	}
+}
