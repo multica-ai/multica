@@ -418,6 +418,8 @@ make check
 
 By default, bump the patch version each release (e.g. `v0.1.12` → `v0.1.13`), unless the user specifies a specific version.
 
+**Automatic releases (this fork):** `auto-release.yml` cuts a release on every merge to `main` once **CI passes** — it picks the next version, tags the commit, runs GoReleaser to publish a GitHub Release (CLI binaries for every OS/arch), and calls the reusable `docker-images.yml` to build + push the backend/web images to GHCR (`ghcr.io/<owner>/multica-backend`, `-web`, multi-arch). The version bump defaults to **patch**; label the merged PR `minor` or `major` to bump that segment instead, or run the workflow manually (`workflow_dispatch`) with an explicit `version`. The tag is pushed with the default `GITHUB_TOKEN`, which deliberately does not re-trigger `release.yml`, so there is no double release. Use a `[skip release]` marker in the merge commit to opt out. Homebrew publishing requires the `HOMEBREW_TAP_GITHUB_TOKEN` secret; without it that step is skipped and the GitHub Release still ships.
+
 ## Multi-tenancy
 
 All queries filter by `workspace_id`. Membership checks gate access. `X-Workspace-ID` header routes requests to the correct workspace.
