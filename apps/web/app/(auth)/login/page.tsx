@@ -63,6 +63,7 @@ function LoginPageContent() {
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
 
+  const appEnv = useConfigStore((state) => state.appEnv);
   const casdoorEnabled = useConfigStore((state) => state.casdoorEnabled);
   const casdoorLoginUrl = useConfigStore((state) => state.casdoorLoginUrl) || "/auth/casdoor/login";
 
@@ -206,6 +207,7 @@ function LoginPageContent() {
           : undefined
       }
       onTokenObtained={setLoggedInCookie}
+      appEnv={appEnv}
       casdoorEnabled={casdoorEnabled}
       casdoorLoginUrl={casdoorLoginUrl}
       extra={

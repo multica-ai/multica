@@ -15,10 +15,16 @@ type AppConfig struct {
 	AllowSignup    bool   `json:"allow_signup"`
 	GoogleClientID string `json:"google_client_id,omitempty"`
 
+	// AppEnv reflects the APP_ENV environment variable (production, staging,
+	// development, etc.). The frontend uses it to decide login UI behaviour
+	// — e.g. production shows SSO-only when Casdoor is enabled, while
+	// non-production also keeps the email verification path.
+	AppEnv string `json:"app_env,omitempty"`
+
 	// Casdoor SSO config. Returned at runtime so the frontend can render the
 	// "Sign in with SSO" button without requiring a rebuild when operators
 	// enable/disable Casdoor.
-	CasdoorEnabled bool   `json:"casdoor_enabled"`
+	CasdoorEnabled  bool   `json:"casdoor_enabled"`
 	CasdoorLoginUrl string `json:"casdoor_login_url,omitempty"`
 
 	// ServerURL is the public HTTP(S) address of this backend. Returned so
@@ -43,10 +49,14 @@ type AppConfig struct {
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
-		AllowSignup:      os.Getenv("ALLOW_SIGNUP") != "false",
-		GoogleClientID:   os.Getenv("GOOGLE_CLIENT_ID"),
-		CasdoorEnabled:   os.Getenv("NEXT_PUBLIC_CASDOOR_ENABLED") == "true",
-		CasdoorLoginUrl:  os.Getenv("NEXT_PUBLIC_CASDOOR_LOGIN_URL"),
+		AllowSignup:     os.Getenv("ALLOW_SIGNUP") != "false",
+		GoogleClientID:  os.Getenv("GOOGLE_CLIENT_ID"),
+		AppEnv:          os.Getenv("APP_ENV"),
+		CasdoorEnabled:  h.cfg.CasdoorEndpoint != "",
+		CasdoorLoginUrl: os.Getenv("NEXT_PUBLIC_CASDOOR_LOGIN_URL"),
+	}
+	if config.CasdoorLoginUrl == "" && config.CasdoorEnabled {
+		config.CasdoorLoginUrl = "/auth/casdoor/login"
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()

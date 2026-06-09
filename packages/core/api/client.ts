@@ -1210,6 +1210,7 @@ export class ApiClient {
     cdn_domain: string;
     allow_signup: boolean;
     google_client_id?: string;
+    app_env?: string;
     casdoor_enabled?: boolean;
     casdoor_login_url?: string;
     server_url?: string;

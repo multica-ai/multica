@@ -60,8 +60,13 @@ interface LoginPageProps {
    *  app?" prompt; desktop omits it (a download prompt inside the app
    *  would be absurd). */
   extra?: ReactNode;
-  /** Enable Casdoor SSO mode. When true (with casdoorLoginUrl), replaces
-   *  the email/code login with a single "Sign in with SSO" button. */
+  /** App environment (production, staging, development, etc.). When
+   *  "production" and casdoorEnabled is true, shows SSO-only login.
+   *  Non-production keeps both SSO and email verification. */
+  appEnv?: string;
+  /** Enable Casdoor SSO mode. When true (with casdoorLoginUrl), renders
+   *  a "Sign in with SSO" button. On production this replaces the email
+   *  form; on non-production it appears alongside it. */
   casdoorEnabled?: boolean;
   /** URL the SSO button navigates to (e.g. "/auth/casdoor/login"). */
   casdoorLoginUrl?: string;
@@ -109,9 +114,11 @@ export function LoginPage({
   onTokenObtained,
   onGoogleLogin,
   extra,
+  appEnv,
   casdoorEnabled,
   casdoorLoginUrl,
 }: LoginPageProps) {
+  const isProduction = appEnv?.toLowerCase().trim() === "production";
   const { t } = useT("auth");
   const qc = useQueryClient();
   const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
@@ -291,10 +298,10 @@ export function LoginPage({
   };
 
   // -------------------------------------------------------------------------
-  // Casdoor SSO mode — simplified single-button login
+  // Casdoor SSO mode — simplified single-button login (production only)
   // -------------------------------------------------------------------------
 
-  if (casdoorEnabled && casdoorLoginUrl) {
+  if (casdoorEnabled && casdoorLoginUrl && isProduction) {
     return (
       <div className="flex min-h-svh items-center justify-center">
         <Card className="w-full max-w-sm">
@@ -461,7 +468,27 @@ export function LoginPage({
             {t(($) => $.signin.description)}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
+          {casdoorEnabled && casdoorLoginUrl && !isProduction && (
+            <>
+              <a
+                href={casdoorLoginUrl}
+                className={`${buttonVariants({ size: "lg" })} w-full`}
+              >
+                Sign in with SSO
+              </a>
+              <div className="relative w-full">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">
+                    {t(($) => $.signin.divider)}
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
           <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>

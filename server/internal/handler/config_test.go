@@ -17,6 +17,7 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	t.Setenv("SERVER_URL", "https://api.example.com")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
+	t.Setenv("APP_ENV", "development")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -51,5 +52,8 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if cfg.AnalyticsEnvironment != "dev" {
 		t.Fatalf("analytics_environment: want dev, got %q", cfg.AnalyticsEnvironment)
+	}
+	if cfg.AppEnv != "development" {
+		t.Fatalf("app_env: want development, got %q", cfg.AppEnv)
 	}
 }

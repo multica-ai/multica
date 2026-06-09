@@ -53,6 +53,7 @@ export function AuthInitializer({
         configStore.getState().setAuthConfig({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
+          appEnv: cfg.app_env,
           casdoorEnabled: cfg.casdoor_enabled,
           casdoorLoginUrl: cfg.casdoor_login_url,
         });
