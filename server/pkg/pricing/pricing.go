@@ -144,6 +144,10 @@ func Known(model string) bool {
 // `claude-opus-4-7-20251030` resolves to the `claude-opus-4-7` row.
 func lookup(model string) (Pricing, bool) {
 	key := strings.ToLower(strings.TrimSpace(model))
+	// CEREBRO-PATCH(pricing-local-free): local Ollama models (gemma family, e.g. "gemma4:12b-it-qat") run on our own hardware — price at zero instead of the worst-case Opus fallback that would book free runs as the priciest tier.
+	if strings.HasPrefix(key, "gemma") {
+		return Pricing{}, true
+	}
 	if p, ok := modelPricing[key]; ok {
 		return p, true
 	}

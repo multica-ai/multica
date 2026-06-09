@@ -131,6 +131,26 @@ func TestComputeCents_UnknownModelUsesWorstCase(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(pricing-local-free-test): local Gemma models run on our own
+// hardware and must price at zero — never the worst-case Opus 4.1 fallback that
+// would inflate cost dashboards and trip budget caps on free runs.
+func TestComputeCents_LocalGemmaIsFree(t *testing.T) {
+	usage := Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+	for _, model := range []string{
+		"gemma4:12b-it-qat",
+		"gemma4:26b-a4b-it-qat",
+		"gemma3:12b",
+		"  Gemma4:E2B-IT-QAT  ", // case + whitespace normalized
+	} {
+		if got := ComputeCents(model, usage); got != 0 {
+			t.Errorf("ComputeCents(%q) = %d, want 0 (local model is free)", model, got)
+		}
+		if !Known(model) {
+			t.Errorf("Known(%q) = false, want true (priced explicitly as free, not unknown-fallback)", model)
+		}
+	}
+}
+
 func TestKnown(t *testing.T) {
 	if !Known("claude-opus-4-7") {
 		t.Error("expected claude-opus-4-7 to be known")
