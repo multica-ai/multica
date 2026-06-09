@@ -324,6 +324,128 @@ func TestIssueDependencies(t *testing.T) {
 	}
 }
 
+func TestDependencyBlockedIssuesExposeSummaryAndStayQueuedUntilResolved(t *testing.T) {
+	ctx := context.Background()
+
+	createIssue := func(title string, extra map[string]any) IssueResponse {
+		t.Helper()
+		body := map[string]any{"title": title}
+		for k, v := range extra {
+			body[k] = v
+		}
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, body)
+		testHandler.CreateIssue(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var issue IssueResponse
+		json.NewDecoder(w.Body).Decode(&issue)
+		return issue
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 AND name = $2 LIMIT 1`, testWorkspaceID, "Handler Test Agent").Scan(&agentID); err != nil {
+		t.Fatalf("load handler test agent: %v", err)
+	}
+
+	prereq := createIssue("Dependency prerequisite", map[string]any{"status": "in_progress"})
+	blocked := createIssue("Dependency blocked queued issue", map[string]any{
+		"status":        "todo",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = ANY($1::uuid[])`, []string{prereq.ID, blocked.ID})
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+blocked.ID+"/dependencies", map[string]any{
+		"depends_on_issue_id": prereq.ID,
+		"type":                "blocked_by",
+	})
+	req = withURLParam(req, "id", blocked.ID)
+	testHandler.CreateIssueDependency(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssueDependency: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var listResp struct {
+		Issues []IssueResponse `json:"issues"`
+		Total  int             `json:"total"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	var listBlocked *IssueResponse
+	for i := range listResp.Issues {
+		if listResp.Issues[i].ID == blocked.ID {
+			listBlocked = &listResp.Issues[i]
+			break
+		}
+	}
+	if listBlocked == nil {
+		t.Fatalf("ListIssues: blocked issue %s not found", blocked.ID)
+	}
+	if listBlocked.BlockedByCount != 1 {
+		t.Fatalf("ListIssues dependency summary: expected blocked_by_count 1, got %d", listBlocked.BlockedByCount)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+blocked.ID, nil)
+	req = withURLParam(req, "id", blocked.ID)
+	testHandler.GetIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var fetched IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&fetched); err != nil {
+		t.Fatalf("decode issue response: %v", err)
+	}
+	if fetched.BlockedByCount != 1 {
+		t.Fatalf("GetIssue dependency summary: expected blocked_by_count 1, got %d", fetched.BlockedByCount)
+	}
+
+	dbIssue, err := testHandler.Queries.GetIssue(ctx, parseUUID(blocked.ID))
+	if err != nil {
+		t.Fatalf("load blocked issue: %v", err)
+	}
+	if _, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, dbIssue); err != nil {
+		t.Fatalf("enqueue blocked issue task: %v", err)
+	}
+	claimed, err := testHandler.TaskService.ClaimTask(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("claim blocked issue task: %v", err)
+	}
+	if claimed != nil {
+		t.Fatalf("expected blocked issue task to remain queued, got claimed task %s", uuidToString(claimed.ID))
+	}
+
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET status = 'done', updated_at = now() WHERE id = $1`, prereq.ID); err != nil {
+		t.Fatalf("mark prereq done: %v", err)
+	}
+
+	claimed, err = testHandler.TaskService.ClaimTask(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("claim unblocked issue task: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected task to be claimable after prerequisite was resolved")
+	}
+	if uuidToString(claimed.IssueID) != blocked.ID {
+		t.Fatalf("expected claimed task for issue %s, got %s", blocked.ID, uuidToString(claimed.IssueID))
+	}
+	if _, err := testHandler.Queries.CancelAgentTask(ctx, claimed.ID); err != nil {
+		t.Fatalf("cleanup claimed task: %v", err)
+	}
+}
+
 func TestCommentCRUD(t *testing.T) {
 	// Create an issue first
 	w := httptest.NewRecorder()

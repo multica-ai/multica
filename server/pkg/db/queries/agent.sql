@@ -94,6 +94,13 @@ WHERE id = (
               OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
             )
       )
+      AND NOT EXISTS (
+          SELECT 1 FROM issue_dependency dep
+          JOIN issue depends_on ON depends_on.id = dep.depends_on_issue_id
+          WHERE dep.issue_id = atq.issue_id
+            AND dep.type = 'blocked_by'
+            AND depends_on.status NOT IN ('done', 'cancelled')
+      )
     ORDER BY atq.priority DESC, atq.created_at ASC
     LIMIT 1
     FOR UPDATE SKIP LOCKED

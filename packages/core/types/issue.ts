@@ -46,6 +46,7 @@ export interface Issue {
   project_id: string | null;
   position: number;
   due_date: string | null;
+  blocked_by_count?: number;
   reactions?: IssueReaction[];
   created_at: string;
   updated_at: string;

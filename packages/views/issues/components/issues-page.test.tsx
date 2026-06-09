@@ -262,6 +262,7 @@ const issueDefaults = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  blocked_by_count: 0,
 };
 
 const mockIssues: Issue[] = [
@@ -427,5 +428,23 @@ describe("IssuesPage (shared)", () => {
     await screen.findByText("All");
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
+  });
+
+  it("shows blocked dependency badges in list view", async () => {
+    mockViewState.viewMode = "list";
+    const issuesWithBlockedDependency = mockIssues.map((issue) =>
+      issue.id === "issue-1" ? { ...issue, blocked_by_count: 2 } : issue,
+    );
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve(
+        params?.open_only
+          ? { issues: issuesWithBlockedDependency, total: issuesWithBlockedDependency.length }
+          : { issues: [], total: 0 },
+      ),
+    );
+
+    renderWithQuery(<IssuesPage />);
+
+    expect(await screen.findByText("Blocked by 2")).toBeInTheDocument();
   });
 });

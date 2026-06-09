@@ -16,6 +16,7 @@ import { PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { ProgressRing } from "./progress-ring";
 import type { ChildProgress } from "./list-row";
+import { DependencyBlockBadge } from "./dependency-block-badge";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleDateString("en-US", {
@@ -76,14 +77,19 @@ export const BoardCardContent = memo(function BoardCardContent({
       </p>
 
       {/* Sub-issue progress */}
-      {childProgress && (
-        <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
-          <ProgressRing done={childProgress.done} total={childProgress.total} size={14} />
-          <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
-            {childProgress.done}/{childProgress.total}
-          </span>
-        </div>
-      )}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        {!!issue.blocked_by_count && issue.blocked_by_count > 0 && (
+          <DependencyBlockBadge count={issue.blocked_by_count} />
+        )}
+        {childProgress && (
+          <div className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
+            <ProgressRing done={childProgress.done} total={childProgress.total} size={14} />
+            <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+              {childProgress.done}/{childProgress.total}
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* Description */}
       {showDescription && (

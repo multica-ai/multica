@@ -101,6 +101,32 @@ INSERT INTO issue_dependency (
     $1, $2, $3
 ) RETURNING *;
 
+-- name: CountUnresolvedBlockedByDependencies :one
+SELECT COUNT(*)::int AS blocked_by_count
+FROM issue_dependency dep
+JOIN issue depends_on ON depends_on.id = dep.depends_on_issue_id
+WHERE dep.issue_id = $1
+  AND dep.type = 'blocked_by'
+  AND depends_on.status NOT IN ('done', 'cancelled');
+
+-- name: ListUnresolvedBlockedByCounts :many
+SELECT dep.issue_id, COUNT(*)::int AS blocked_by_count
+FROM issue_dependency dep
+JOIN issue blocked ON blocked.id = dep.issue_id
+JOIN issue depends_on ON depends_on.id = dep.depends_on_issue_id
+WHERE blocked.workspace_id = $1
+  AND dep.type = 'blocked_by'
+  AND depends_on.status NOT IN ('done', 'cancelled')
+GROUP BY dep.issue_id;
+
+-- name: ListIssuesBlockedByIssue :many
+SELECT blocked.*
+FROM issue_dependency dep
+JOIN issue blocked ON blocked.id = dep.issue_id
+WHERE dep.depends_on_issue_id = $1
+  AND dep.type = 'blocked_by'
+ORDER BY blocked.created_at DESC;
+
 -- name: CountCreatedIssueAssignees :many
 -- Count assignees on issues created by a specific user.
 SELECT

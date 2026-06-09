@@ -22,49 +22,51 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID            string                  `json:"id"`
-	WorkspaceID   string                  `json:"workspace_id"`
-	Number        int32                   `json:"number"`
-	Identifier    string                  `json:"identifier"`
-	Title         string                  `json:"title"`
-	Description   *string                 `json:"description"`
-	Status        string                  `json:"status"`
-	Priority      string                  `json:"priority"`
-	AssigneeType  *string                 `json:"assignee_type"`
-	AssigneeID    *string                 `json:"assignee_id"`
-	CreatorType   string                  `json:"creator_type"`
-	CreatorID     string                  `json:"creator_id"`
-	ParentIssueID *string                 `json:"parent_issue_id"`
-	ProjectID     *string                 `json:"project_id"`
-	Position      float64                 `json:"position"`
-	DueDate       *string                 `json:"due_date"`
-	CreatedAt     string                  `json:"created_at"`
-	UpdatedAt     string                  `json:"updated_at"`
-	Reactions     []IssueReactionResponse `json:"reactions,omitempty"`
-	Attachments   []AttachmentResponse    `json:"attachments,omitempty"`
+	ID             string                  `json:"id"`
+	WorkspaceID    string                  `json:"workspace_id"`
+	Number         int32                   `json:"number"`
+	Identifier     string                  `json:"identifier"`
+	Title          string                  `json:"title"`
+	Description    *string                 `json:"description"`
+	Status         string                  `json:"status"`
+	Priority       string                  `json:"priority"`
+	AssigneeType   *string                 `json:"assignee_type"`
+	AssigneeID     *string                 `json:"assignee_id"`
+	CreatorType    string                  `json:"creator_type"`
+	CreatorID      string                  `json:"creator_id"`
+	ParentIssueID  *string                 `json:"parent_issue_id"`
+	ProjectID      *string                 `json:"project_id"`
+	Position       float64                 `json:"position"`
+	DueDate        *string                 `json:"due_date"`
+	BlockedByCount int32                   `json:"blocked_by_count"`
+	CreatedAt      string                  `json:"created_at"`
+	UpdatedAt      string                  `json:"updated_at"`
+	Reactions      []IssueReactionResponse `json:"reactions,omitempty"`
+	Attachments    []AttachmentResponse    `json:"attachments,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:            uuidToString(i.ID),
-		WorkspaceID:   uuidToString(i.WorkspaceID),
-		Number:        i.Number,
-		Identifier:    identifier,
-		Title:         i.Title,
-		Description:   textToPtr(i.Description),
-		Status:        i.Status,
-		Priority:      i.Priority,
-		AssigneeType:  textToPtr(i.AssigneeType),
-		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
-		CreatorID:     uuidToString(i.CreatorID),
-		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		ProjectID:     uuidToPtr(i.ProjectID),
-		Position:      i.Position,
-		DueDate:       timestampToPtr(i.DueDate),
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
+		ID:             uuidToString(i.ID),
+		WorkspaceID:    uuidToString(i.WorkspaceID),
+		Number:         i.Number,
+		Identifier:     identifier,
+		Title:          i.Title,
+		Description:    textToPtr(i.Description),
+		Status:         i.Status,
+		Priority:       i.Priority,
+		AssigneeType:   textToPtr(i.AssigneeType),
+		AssigneeID:     uuidToPtr(i.AssigneeID),
+		CreatorType:    i.CreatorType,
+		CreatorID:      uuidToString(i.CreatorID),
+		ParentIssueID:  uuidToPtr(i.ParentIssueID),
+		ProjectID:      uuidToPtr(i.ProjectID),
+		Position:       i.Position,
+		DueDate:        timestampToPtr(i.DueDate),
+		BlockedByCount: 0,
+		CreatedAt:      timestampToString(i.CreatedAt),
+		UpdatedAt:      timestampToString(i.UpdatedAt),
 	}
 }
 
@@ -72,46 +74,48 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:            uuidToString(i.ID),
-		WorkspaceID:   uuidToString(i.WorkspaceID),
-		Number:        i.Number,
-		Identifier:    identifier,
-		Title:         i.Title,
-		Status:        i.Status,
-		Priority:      i.Priority,
-		AssigneeType:  textToPtr(i.AssigneeType),
-		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
-		CreatorID:     uuidToString(i.CreatorID),
-		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		ProjectID:     uuidToPtr(i.ProjectID),
-		Position:      i.Position,
-		DueDate:       timestampToPtr(i.DueDate),
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
+		ID:             uuidToString(i.ID),
+		WorkspaceID:    uuidToString(i.WorkspaceID),
+		Number:         i.Number,
+		Identifier:     identifier,
+		Title:          i.Title,
+		Status:         i.Status,
+		Priority:       i.Priority,
+		AssigneeType:   textToPtr(i.AssigneeType),
+		AssigneeID:     uuidToPtr(i.AssigneeID),
+		CreatorType:    i.CreatorType,
+		CreatorID:      uuidToString(i.CreatorID),
+		ParentIssueID:  uuidToPtr(i.ParentIssueID),
+		ProjectID:      uuidToPtr(i.ProjectID),
+		Position:       i.Position,
+		DueDate:        timestampToPtr(i.DueDate),
+		BlockedByCount: 0,
+		CreatedAt:      timestampToString(i.CreatedAt),
+		UpdatedAt:      timestampToString(i.UpdatedAt),
 	}
 }
 
 func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:            uuidToString(i.ID),
-		WorkspaceID:   uuidToString(i.WorkspaceID),
-		Number:        i.Number,
-		Identifier:    identifier,
-		Title:         i.Title,
-		Status:        i.Status,
-		Priority:      i.Priority,
-		AssigneeType:  textToPtr(i.AssigneeType),
-		AssigneeID:    uuidToPtr(i.AssigneeID),
-		CreatorType:   i.CreatorType,
-		CreatorID:     uuidToString(i.CreatorID),
-		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		ProjectID:     uuidToPtr(i.ProjectID),
-		Position:      i.Position,
-		DueDate:       timestampToPtr(i.DueDate),
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
+		ID:             uuidToString(i.ID),
+		WorkspaceID:    uuidToString(i.WorkspaceID),
+		Number:         i.Number,
+		Identifier:     identifier,
+		Title:          i.Title,
+		Status:         i.Status,
+		Priority:       i.Priority,
+		AssigneeType:   textToPtr(i.AssigneeType),
+		AssigneeID:     uuidToPtr(i.AssigneeID),
+		CreatorType:    i.CreatorType,
+		CreatorID:      uuidToString(i.CreatorID),
+		ParentIssueID:  uuidToPtr(i.ParentIssueID),
+		ProjectID:      uuidToPtr(i.ProjectID),
+		Position:       i.Position,
+		DueDate:        timestampToPtr(i.DueDate),
+		BlockedByCount: 0,
+		CreatedAt:      timestampToString(i.CreatedAt),
+		UpdatedAt:      timestampToString(i.UpdatedAt),
 	}
 }
 
@@ -137,6 +141,36 @@ func issueDependencyToResponse(dep db.IssueDependency) IssueDependencyResponse {
 		DependsOnIssueID: uuidToString(dep.DependsOnIssueID),
 		Type:             dep.Type,
 	}
+}
+
+func (h *Handler) unresolvedBlockedByCounts(ctx context.Context, workspaceID pgtype.UUID) map[string]int32 {
+	rows, err := h.Queries.ListUnresolvedBlockedByCounts(ctx, workspaceID)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	counts := make(map[string]int32, len(rows))
+	for _, row := range rows {
+		counts[uuidToString(row.IssueID)] = row.BlockedByCount
+	}
+	return counts
+}
+
+func (h *Handler) applyUnresolvedBlockedByCounts(ctx context.Context, workspaceID pgtype.UUID, issues []IssueResponse) {
+	counts := h.unresolvedBlockedByCounts(ctx, workspaceID)
+	if len(counts) == 0 {
+		return
+	}
+	for i := range issues {
+		issues[i].BlockedByCount = counts[issues[i].ID]
+	}
+}
+
+func (h *Handler) unresolvedBlockedByCount(ctx context.Context, issueID pgtype.UUID) int32 {
+	count, err := h.Queries.CountUnresolvedBlockedByDependencies(ctx, issueID)
+	if err != nil {
+		return 0
+	}
+	return count
 }
 
 // extractSnippet extracts a snippet of text around the first occurrence of query.
@@ -550,6 +584,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
+	counts := h.unresolvedBlockedByCounts(ctx, wsUUID)
 	resp := make([]SearchIssueResponse, len(results))
 	for i, sr := range results {
 		sir := SearchIssueResponse{
@@ -559,6 +594,9 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		if sr.matchSource == "comment" && sr.matchedCommentContent != "" {
 			snippet := extractSnippet(sr.matchedCommentContent, q)
 			sir.MatchedSnippet = &snippet
+		}
+		if counts != nil {
+			sir.BlockedByCount = counts[sir.ID]
 		}
 		resp[i] = sir
 	}
@@ -622,6 +660,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		for i, issue := range issues {
 			resp[i] = openIssueRowToResponse(issue, prefix)
 		}
+		h.applyUnresolvedBlockedByCounts(ctx, wsUUID, resp)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"issues": resp,
@@ -683,6 +722,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	for i, issue := range issues {
 		resp[i] = issueListRowToResponse(issue, prefix)
 	}
+	h.applyUnresolvedBlockedByCounts(ctx, wsUUID, resp)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -698,6 +738,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	resp.BlockedByCount = h.unresolvedBlockedByCount(r.Context(), issue.ID)
 
 	// Fetch issue reactions.
 	reactions, err := h.Queries.ListIssueReactions(r.Context(), issue.ID)
@@ -748,6 +789,7 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
 	}
+	h.applyUnresolvedBlockedByCounts(r.Context(), issue.WorkspaceID, resp)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
 	})
@@ -983,6 +1025,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	resp.BlockedByCount = h.unresolvedBlockedByCount(r.Context(), issue.ID)
 
 	// Fetch linked attachments so they appear in the response.
 	if len(req.AttachmentIDs) > 0 {
@@ -1162,6 +1205,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	resp.BlockedByCount = h.unresolvedBlockedByCount(r.Context(), issue.ID)
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&

@@ -7,6 +7,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
+import { DependencyBlockBadge } from "./dependency-block-badge";
 
 export interface ChildProgress {
   done: number;
@@ -59,6 +60,9 @@ export const ListRow = memo(function ListRow({
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="truncate">{issue.title}</span>
+          {!!issue.blocked_by_count && issue.blocked_by_count > 0 && (
+            <DependencyBlockBadge count={issue.blocked_by_count} />
+          )}
           {childProgress && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
               <ProgressRing done={childProgress.done} total={childProgress.total} size={14} />
