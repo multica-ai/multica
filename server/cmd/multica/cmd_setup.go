@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -46,6 +48,10 @@ var setupSelfHostCmd = &cobra.Command{
 By default, connects to http://localhost:8080 (backend) and http://localhost:3000 (frontend).
 Use --server-url and --app-url to specify a custom server (e.g. an on-premise deployment).
 
+If you run this command from a different machine than the server, also pass
+--callback-host <FQDN-or-IP-the-browser-can-reach-back-to-this-machine-on> so
+the OAuth login flow can return the token to the CLI.
+
 Examples:
   multica setup self-host
   multica setup self-host --server-url https://api.internal.co --app-url https://app.internal.co
@@ -54,10 +60,11 @@ Examples:
 }
 
 func init() {
-	setupSelfHostCmd.Flags().String("server-url", "", "Backend server URL (e.g. https://api.internal.co)")
-	setupSelfHostCmd.Flags().String("app-url", "", "Frontend app URL (e.g. https://app.internal.co)")
+	setupSelfHostCmd.Flags().String("server-url", "", "Backend server URL (e.g. https://api.internal.co) (env: MULTICA_SERVER_URL)")
+	setupSelfHostCmd.Flags().String("app-url", "", "Frontend app URL (e.g. https://app.internal.co) (env: MULTICA_APP_URL)")
 	setupSelfHostCmd.Flags().Int("port", 8080, "Backend server port (used when --server-url is not set)")
 	setupSelfHostCmd.Flags().Int("frontend-port", 3000, "Frontend port (used when --app-url is not set)")
+	setupSelfHostCmd.Flags().String(callbackHostFlag, "", "Host the OAuth callback URL points at (auto-detected when empty). Use this for reverse-proxy / FQDN setups.")
 
 	setupCmd.AddCommand(setupCloudCmd)
 	setupCmd.AddCommand(setupSelfHostCmd)
@@ -155,38 +162,53 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	serverURL, _ := cmd.Flags().GetString("server-url")
-	appURL, _ := cmd.Flags().GetString("app-url")
-	port, _ := cmd.Flags().GetInt("port")
+	// Honor MULTICA_SERVER_URL / MULTICA_APP_URL when the matching flag is not
+	// set — consistent with the rest of the CLI (resolveServerURL) and with the
+	// env vars documented on the root --server-url flag and in `multica --help`.
+	// Before this, setup self-host read only the flags, so a self-hoster who set
+	// MULTICA_SERVER_URL still got the localhost default and an "unreachable"
+	// error (GitHub #3912).
+	serverURL, userProvidedServerURL := resolveSelfHostServerURL(cmd)
+	appURL := cli.FlagOrEnv(cmd, "app-url", "MULTICA_APP_URL", "")
 	frontendPort, _ := cmd.Flags().GetInt("frontend-port")
 
-	// If custom URLs provided, use them; otherwise default to localhost with ports.
-	if serverURL == "" {
-		serverURL = fmt.Sprintf("http://localhost:%d", port)
-	}
 	if appURL == "" {
-		appURL = fmt.Sprintf("http://localhost:%d", frontendPort)
+		if userProvidedServerURL && !serverHostIsLocal(serverURL) {
+			// We can't guess the frontend URL for a remote server: api.x.co
+			// and app.x.co, or an https-fronted deployment, would silently
+			// produce a broken login URL. Ask the user instead.
+			entered, err := promptAppURL(serverURL)
+			if err != nil {
+				return err
+			}
+			if entered == "" {
+				return fmt.Errorf("--app-url is required when --server-url points at a remote host (e.g. --app-url https://app.internal.co)")
+			}
+			appURL = entered
+		} else {
+			appURL = fmt.Sprintf("http://localhost:%d", frontendPort)
+		}
 	}
 
-	cfg := cli.CLIConfig{
-		ServerURL: serverURL,
-		AppURL:    appURL,
-	}
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+	// Probe before persisting anything. A failed setup must never overwrite a
+	// working config or wipe the saved token: persistSelfHostConfigIfReachable
+	// writes only when the server answers, so an unreachable host leaves the
+	// existing config untouched and the user stays logged in.
+	reachable, err := persistSelfHostConfigIfReachable(serverURL, appURL, profile, probeServer)
+	if err != nil {
 		return fmt.Errorf("save config: %w", err)
+	}
+	if !reachable {
+		fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
+		fmt.Fprintln(os.Stderr, "  Your existing configuration was left unchanged.")
+		fmt.Fprintln(os.Stderr, "  Verify the URL, then re-run 'multica setup self-host' once it's reachable.")
+		return nil
 	}
 
 	fmt.Fprintln(os.Stderr, "Configured for self-hosted server.")
-	fmt.Fprintf(os.Stderr, "  server_url: %s\n", cfg.ServerURL)
-	fmt.Fprintf(os.Stderr, "  app_url:    %s\n", cfg.AppURL)
+	fmt.Fprintf(os.Stderr, "  server_url: %s\n", serverURL)
+	fmt.Fprintf(os.Stderr, "  app_url:    %s\n", appURL)
 	printConfigLocation(profile)
-
-	// Check if the server is reachable.
-	if !probeServer(serverURL) {
-		fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
-		fmt.Fprintln(os.Stderr, "  Make sure the server is running, then run 'multica login'.")
-		return nil
-	}
 
 	// Authenticate.
 	fmt.Fprintln(os.Stderr, "")
@@ -201,6 +223,80 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 
 	return nil
+}
+
+// persistSelfHostConfigIfReachable probes serverURL and, only when it answers,
+// overwrites the profile config with the given self-host URLs. When the server
+// is unreachable it leaves any existing config — and its auth token — untouched
+// and returns false, so a failed `setup self-host` never logs the user out or
+// clobbers a working config (the original ordering saved first, then probed,
+// then bailed — wiping the token on every failed probe). The prober is injected
+// so tests can exercise both branches without real network I/O.
+func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, probe func(string) bool) (bool, error) {
+	if !probe(serverURL) {
+		return false, nil
+	}
+	cfg := cli.CLIConfig{
+		ServerURL: serverURL,
+		AppURL:    appURL,
+	}
+	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// resolveSelfHostServerURL picks the backend URL for `setup self-host`: the
+// --server-url flag wins, then the MULTICA_SERVER_URL env var (consistent with
+// the rest of the CLI and the env var documented on the root flag), then the
+// localhost default built from --port. userProvided is true when the URL came
+// from the user (flag or env) rather than the localhost fallback — the caller
+// uses it to decide whether a remote host needs an explicit app_url.
+//
+// A user-supplied URL is run through normalizeAPIBaseURL, the same path
+// resolveServerURL uses: MULTICA_SERVER_URL is documented as a ws:// daemon
+// address (e.g. ws://localhost:8080/ws), so the ws/wss form and a trailing /ws
+// are accepted and converted to the http(s) base that the reachability probe
+// and the stored server_url expect.
+func resolveSelfHostServerURL(cmd *cobra.Command) (serverURL string, userProvided bool) {
+	if v := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", ""); v != "" {
+		return normalizeAPIBaseURL(v), true
+	}
+	port, _ := cmd.Flags().GetInt("port")
+	return fmt.Sprintf("http://localhost:%d", port), false
+}
+
+// serverHostIsLocal reports whether serverURL points at the same machine as
+// the CLI (loopback literal or "localhost"). Used to decide whether to infer
+// app_url from server_url or fall back to the local-dev default.
+func serverHostIsLocal(serverURL string) bool {
+	parsed, err := url.Parse(serverURL)
+	if err != nil {
+		return false
+	}
+	h := parsed.Hostname()
+	if h == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// promptAppURL asks the user for the frontend URL interactively. We can't
+// derive it from a remote server_url — api.example.com ≠ app.example.com in
+// most production setups — so guessing would just defer the failure to the
+// browser login step. Returns an empty string if the user hits enter.
+func promptAppURL(serverURL string) (string, error) {
+	fmt.Fprintf(os.Stderr, "No --app-url provided, and --server-url (%s) is remote.\n", serverURL)
+	fmt.Fprint(os.Stderr, "Enter the frontend app URL (e.g. https://app.internal.co): ")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return "", nil
+	}
+	return strings.TrimRight(strings.TrimSpace(line), "/"), nil
 }
 
 // probeServer checks whether a Multica backend is reachable at the given URL.

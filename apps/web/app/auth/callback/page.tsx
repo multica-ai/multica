@@ -3,9 +3,9 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceStore } from "@multica/core/workspace";
+import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import {
   Card,
@@ -22,7 +22,6 @@ function CallbackContent() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
-  const hydrateWorkspace = useWorkspaceStore((s) => s.hydrateWorkspace);
   const [error, setError] = useState("");
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
 
@@ -43,7 +42,9 @@ function CallbackContent() {
     const stateParts = state.split(",");
     const isDesktop = stateParts.includes("platform:desktop");
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
-    const nextUrl = nextPart ? nextPart.slice(5) : null; // strip "next:" prefix
+    // Strip "next:" prefix, then drop anything that isn't a safe relative path
+    // so an attacker-controlled `state=next:https://evil` cannot redirect here.
+    const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
 
     const redirectUri = `${window.location.origin}/auth/callback`;
 
@@ -61,20 +62,55 @@ function CallbackContent() {
     } else {
       // Normal web flow
       loginWithGoogle(code, redirectUri)
-        .then(async () => {
+        .then(async (loggedInUser) => {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
-          const lastWsId = localStorage.getItem("multica_workspace_id");
-          const ws = await hydrateWorkspace(wsList, lastWsId);
-          // Honor the ?next= redirect if present (e.g. /invite/{id})
-          const defaultDest = ws ? "/issues" : "/onboarding";
-          router.push(nextUrl || defaultDest);
+          const onboarded = loggedInUser.onboarded_at != null;
+
+          // 1. nextUrl wins: a `next=/invite/<id>` always survives the OAuth
+          //    round-trip — the user clicked a specific link and we should
+          //    honor exactly that destination.
+          if (nextUrl) {
+            router.push(nextUrl);
+            return;
+          }
+
+          // 2. Un-onboarded users may have pending invitations on their
+          //    email even when no `next=` was carried (came from a fresh
+          //    login on app.multica.ai instead of clicking the email link,
+          //    or `state` was lost across the round-trip). Look them up by
+          //    email and route to the batch /invitations page if any.
+          //    Already-onboarded users skip this lookup — their new invites
+          //    surface in the sidebar dropdown, not as a forced wall.
+          if (!onboarded) {
+            try {
+              const invites = await api.listMyInvitations();
+              if (invites.length > 0) {
+                qc.setQueryData(workspaceKeys.myInvitations(), invites);
+                router.push(paths.invitations());
+                return;
+              }
+            } catch {
+              // Network blip on the invite lookup is non-fatal — fall through
+              // to the normal post-auth destination so the user isn't stuck
+              // on a blank callback screen. Worst case they land on
+              // /onboarding and the sidebar will surface invites later.
+            }
+          }
+
+          // 3. Default: hand off to the resolver (onboarding for first-timers,
+          //    first workspace for returning users, /workspaces/new for
+          //    onboarded users with zero workspaces). Source-attribution
+          //    backfill for onboarded users with no recorded source is
+          //    handled by `<SourceBackfillModal />` inside the dashboard
+          //    shell — not a route detour, so we route straight to dest.
+          router.push(resolvePostAuthDestination(wsList, onboarded));
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");
         });
     }
-  }, [searchParams, loginWithGoogle, hydrateWorkspace, router, qc]);
+  }, [searchParams, loginWithGoogle, router, qc]);
 
   if (desktopToken) {
     return (
@@ -111,7 +147,7 @@ function CallbackContent() {
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
-            <a href="/login" className="text-primary underline-offset-4 hover:underline">
+            <a href={paths.login()} className="text-primary underline-offset-4 hover:underline">
               Back to login
             </a>
           </CardContent>

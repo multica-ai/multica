@@ -1,6 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement, ReactNode } from "react";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import enAuth from "../locales/en/auth.json";
+import enSettings from "../locales/en/settings.json";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, auth: enAuth, settings: enSettings },
+};
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+function renderWithI18n(ui: ReactElement) {
+  return render(ui, { wrapper: I18nWrapper });
+}
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks
@@ -8,7 +29,6 @@ import userEvent from "@testing-library/user-event";
 
 const mockSendCode = vi.hoisted(() => vi.fn());
 const mockVerifyCode = vi.hoisted(() => vi.fn());
-const mockHydrateWorkspace = vi.hoisted(() => vi.fn());
 const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
 const mockApiVerifyCode = vi.hoisted(() => vi.fn());
 const mockApiSetToken = vi.hoisted(() => vi.fn());
@@ -34,20 +54,6 @@ vi.mock("@multica/core/auth", () => ({
       getState: () => ({
         sendCode: mockSendCode,
         verifyCode: mockVerifyCode,
-      }),
-    },
-  ),
-}));
-
-vi.mock("@multica/core/workspace", () => ({
-  useWorkspaceStore: Object.assign(
-    (selector?: (s: unknown) => unknown) => {
-      const state = { hydrateWorkspace: mockHydrateWorkspace };
-      return selector ? selector(state) : state;
-    },
-    {
-      getState: () => ({
-        hydrateWorkspace: mockHydrateWorkspace,
       }),
     },
   ),
@@ -109,7 +115,7 @@ describe("LoginPage", () => {
   // -------------------------------------------------------------------------
 
   it("renders email form with 'Sign in to Multica' title", () => {
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
     expect(
       screen.getByText(/sign in to multica/i),
     ).toBeInTheDocument();
@@ -127,7 +133,7 @@ describe("LoginPage", () => {
   // -------------------------------------------------------------------------
 
   it("shows error when submitting with empty email", async () => {
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     // The Continue button is disabled when email is empty, so we submit the
     // form programmatically the same way the component does — via form submit.
@@ -155,7 +161,7 @@ describe("LoginPage", () => {
 
   it("calls sendCode on form submit with email", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -167,7 +173,7 @@ describe("LoginPage", () => {
   it("shows 'Sending code...' while submitting", async () => {
     // Never resolve so loading stays true
     mockSendCode.mockReturnValueOnce(new Promise(() => {}));
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -178,7 +184,7 @@ describe("LoginPage", () => {
 
   it("transitions to code step after successful sendCode", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -194,7 +200,7 @@ describe("LoginPage", () => {
 
   it("shows error when sendCode fails", async () => {
     mockSendCode.mockRejectedValueOnce(new Error("Rate limited"));
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -207,7 +213,7 @@ describe("LoginPage", () => {
 
   it("shows generic error when sendCode throws non-Error", async () => {
     mockSendCode.mockRejectedValueOnce("boom");
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -224,13 +230,12 @@ describe("LoginPage", () => {
   // Code verification
   // -------------------------------------------------------------------------
 
-  it("calls verifyCode, listWorkspaces, hydrateWorkspace, then onSuccess", async () => {
+  it("calls verifyCode, seeds workspace list cache, then onSuccess", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     mockVerifyCode.mockResolvedValueOnce(undefined);
     mockApiListWorkspaces.mockResolvedValueOnce([{ id: "ws-1" }]);
-    mockHydrateWorkspace.mockReturnValueOnce({ id: "ws-1" });
 
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     // Step 1: email
@@ -253,9 +258,11 @@ describe("LoginPage", () => {
         "123456",
       );
       expect(mockApiListWorkspaces).toHaveBeenCalled();
-      expect(mockHydrateWorkspace).toHaveBeenCalledWith(
+      // The workspace list is seeded into React Query so onSuccess can read
+      // it synchronously to compute a destination URL.
+      expect(mockSetQueryData).toHaveBeenCalledWith(
+        expect.arrayContaining(["workspaces", "list"]),
         [{ id: "ws-1" }],
-        undefined,
       );
       expect(onSuccess).toHaveBeenCalled();
     });
@@ -265,7 +272,7 @@ describe("LoginPage", () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     mockVerifyCode.mockRejectedValueOnce(new Error("Invalid code"));
 
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -292,7 +299,7 @@ describe("LoginPage", () => {
 
   it("disables resend button during cooldown", async () => {
     mockSendCode.mockResolvedValue(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -312,7 +319,7 @@ describe("LoginPage", () => {
   it("shows resend button with cooldown text after sending code", async () => {
     mockSendCode.mockResolvedValue(undefined);
     const user = userEvent.setup();
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
     await user.click(screen.getByRole("button", { name: /continue/i }));
@@ -327,7 +334,7 @@ describe("LoginPage", () => {
 
   it("calls sendCode again when resend is clicked after cooldown", async () => {
     mockSendCode.mockResolvedValue(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -376,7 +383,7 @@ describe("LoginPage", () => {
   });
 
   it("hides Google OAuth button when google prop omitted", () => {
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
     expect(
       screen.queryByRole("button", { name: /continue with google/i }),
     ).not.toBeInTheDocument();
@@ -608,7 +615,7 @@ describe("LoginPage", () => {
   });
 
   it("does not render logo placeholder when omitted", () => {
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
     expect(screen.queryByTestId("custom-logo")).not.toBeInTheDocument();
   });
 
@@ -620,7 +627,6 @@ describe("LoginPage", () => {
     mockSendCode.mockResolvedValueOnce(undefined);
     mockVerifyCode.mockResolvedValueOnce(undefined);
     mockApiListWorkspaces.mockResolvedValueOnce([{ id: "ws-1" }]);
-    mockHydrateWorkspace.mockReturnValueOnce({ id: "ws-1" });
     const onTokenObtained = vi.fn();
 
     render(
@@ -655,7 +661,7 @@ describe("LoginPage", () => {
 
   it("back button returns to email step", async () => {
     mockSendCode.mockResolvedValueOnce(undefined);
-    render(<LoginPage onSuccess={onSuccess} />);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/email/i), "test@example.com");
@@ -674,43 +680,6 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
-  // -------------------------------------------------------------------------
-  // lastWorkspaceId
-  // -------------------------------------------------------------------------
-
-  it("passes lastWorkspaceId to hydrateWorkspace", async () => {
-    mockSendCode.mockResolvedValueOnce(undefined);
-    mockVerifyCode.mockResolvedValueOnce(undefined);
-    mockApiListWorkspaces.mockResolvedValueOnce([
-      { id: "ws-1" },
-      { id: "ws-2" },
-    ]);
-    mockHydrateWorkspace.mockReturnValueOnce({ id: "ws-2" });
-
-    render(
-      <LoginPage onSuccess={onSuccess} lastWorkspaceId="ws-2" />,
-    );
-
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText(/email/i), "test@example.com");
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(/check your email/i),
-      ).toBeInTheDocument();
-    });
-
-    const otpInput = getOTPInput();
-    await user.type(otpInput, "123456");
-
-    await waitFor(() => {
-      expect(mockHydrateWorkspace).toHaveBeenCalledWith(
-        [{ id: "ws-1" }, { id: "ws-2" }],
-        "ws-2",
-      );
-    });
-  });
 });
 
 // ---------------------------------------------------------------------------

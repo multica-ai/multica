@@ -1,6 +1,9 @@
 export type CommentType = "comment" | "status_change" | "progress_update" | "system";
 
-export type CommentAuthorType = "member" | "agent";
+// `system` is used by platform-generated rows (e.g. the parent-issue
+// child-done notification, MUL-2538). System rows carry a zero UUID for
+// author_id; render paths should branch on author_type rather than the UUID.
+export type CommentAuthorType = "member" | "agent" | "system";
 
 export interface Reaction {
   id: string;
@@ -23,4 +26,7 @@ export interface Comment {
   attachments: import("./attachment").Attachment[];
   created_at: string;
   updated_at: string;
+  resolved_at: string | null;
+  resolved_by_type: CommentAuthorType | null;
+  resolved_by_id: string | null;
 }

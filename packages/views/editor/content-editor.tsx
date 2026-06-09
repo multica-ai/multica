@@ -1,14 +1,19 @@
 "use client";
 
 /**
- * ContentEditor — the single rich-text editor for the entire application.
+ * ContentEditor — the rich-text editor used wherever the user TYPES content.
  *
  * Architecture decisions (April 2026 refactor):
  *
- * 1. ONE COMPONENT for both editing and readonly display. The `editable` prop
- *    controls the mode. Previously we had RichTextEditor + ReadonlyEditor as
- *    separate components with duplicated extension configs — this caused
- *    visual inconsistency between edit and display modes.
+ * 1. EDITING ONLY. Read-only display is handled by `ReadonlyContent` (a
+ *    react-markdown renderer), not this component. There used to be an
+ *    `editable` prop here that toggled between modes, but every readonly
+ *    callsite migrated to ReadonlyContent and the prop only invited
+ *    misuse — Tiptap's `useEditor` reads `editable` at mount, so toggling
+ *    the prop later silently failed (mounted-as-readonly editors stayed
+ *    unfocusable forever). To express "currently disabled", wrap this
+ *    component in a layout that sets `pointer-events-none` / `aria-disabled`
+ *    — don't reach into the editor.
  *
  * 2. ONE MARKDOWN PIPELINE via @tiptap/markdown. Content is loaded with
  *    `contentType: 'markdown'` and saved with `editor.getMarkdown()`.
@@ -35,14 +40,24 @@ import {
 import { useEditor, EditorContent } from "@tiptap/react";
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
+import type { Attachment } from "@multica/core/types";
+import {
+  parseMarkdownChunked,
+  MARKDOWN_CHUNK_THRESHOLD,
+  type MarkdownManagerLike,
+} from "./utils/parse-markdown-chunked";
+import type { MentionItem } from "./extensions/mention-suggestion";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
-import "./content-editor.css";
+import { AttachmentDownloadProvider } from "./attachment-download-context";
+import "katex/dist/katex.min.css";
+import "./styles/index.css";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,7 +79,6 @@ interface ContentEditorProps {
   defaultValue?: string;
   onUpdate?: (markdown: string) => void;
   placeholder?: string;
-  editable?: boolean;
   className?: string;
   debounceMs?: number;
   onSubmit?: () => void;
@@ -74,12 +88,50 @@ interface ContentEditorProps {
   showBubbleMenu?: boolean;
   /** When true, bare Enter submits (chat-style). Mod-Enter always submits. */
   submitOnEnter?: boolean;
+  /**
+   * ID of the issue this editor belongs to. When set, the bubble menu exposes
+   * a "Create sub-issue from selection" action that parents the new issue
+   * under this ID and replaces the selection with a mention link.
+   */
+  currentIssueId?: string;
+  /**
+   * When true, the `@` suggestion picker is disabled but the mention node
+   * type remains in the schema, so existing mentions pasted in from other
+   * Multica editors still render as the normal pill. Use for editors where
+   * *creating* a new mention has no business meaning (e.g. agent system
+   * prompts) but *preserving* an existing one still matters.
+   */
+  disableMentions?: boolean;
+  /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
+  mentionMode?: "default" | "context";
+  mentionContextItems?: MentionItem[];
+  /** Enable the `/` command picker. Defaults false. */
+  enableSlashCommands?: boolean;
+  /**
+   * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
+   * lists the active agent's skills (chat); "command" shows the fixed built-in
+   * command menu (issue comments), e.g. /note.
+   */
+  slashCommandMode?: "skill" | "command";
+  /**
+   * Attachments referenced by this content. The download buttons on file
+   * cards and images inside the editor look up an attachment by `url` and
+   * fetch a fresh CloudFront signature at click time, so a stale URL
+   * persisted in markdown never opens. Pass `issue.attachments` /
+   * `comment.attachments` etc.; omit when no attachment context is
+   * available (NodeView buttons fall back to opening the raw URL).
+   */
+  attachments?: Attachment[];
 }
 
 interface ContentEditorRef {
   getMarkdown: () => string;
   clearContent: () => void;
   focus: () => void;
+  /** Drop focus from the editor — used by chat after send so the caret
+   *  stops competing with the StatusPill / streaming reply for the user's
+   *  attention. */
+  blur: () => void;
   uploadFile: (file: File) => void;
   /** True when file uploads are still in progress. */
   hasActiveUploads: () => boolean;
@@ -95,7 +147,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       defaultValue = "",
       onUpdate,
       placeholder: placeholderText = "",
-      editable = true,
       className,
       debounceMs = 300,
       onSubmit,
@@ -103,6 +154,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       onUploadFile,
       showBubbleMenu = true,
       submitOnEnter = false,
+      currentIssueId,
+      disableMentions = false,
+      mentionMode = "default",
+      mentionContextItems,
+      enableSlashCommands = false,
+      slashCommandMode = "skill",
+      attachments,
     },
     ref,
   ) {
@@ -111,37 +169,82 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onUploadFileRef = useRef(onUploadFile);
-    const prevContentRef = useRef(defaultValue);
+    const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
+    const lastEmittedRef = useRef<string | null>(null);
+
+    // Current workspace slug kept in a ref so the click handler always sees the
+    // latest value without recreating the editor. Used by openLink to prefix
+    // legacy /issues/... style paths that lack a workspace slug.
+    const workspaceSlug = useWorkspaceSlug();
+    const workspaceSlugRef = useRef(workspaceSlug);
+    workspaceSlugRef.current = workspaceSlug;
 
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
     onUploadFileRef.current = onUploadFile;
+    mentionContextItemsRef.current = mentionContextItems ?? [];
 
     const queryClient = useQueryClient();
+
+    const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
+    // parseMarkdownChunked). Small docs stay on the single-parse fast path.
+    const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
 
     const editor = useEditor({
       immediatelyRender: false,
       // Note: in v3.22.1 the default is already false/undefined (same behavior).
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
-      editable,
-      content: defaultValue ? preprocessMarkdown(defaultValue) : "",
-      contentType: defaultValue ? "markdown" : undefined,
+      onCreate: ({ editor: ed }) => {
+        // For large docs we mount empty (below) and parse in chunks here, so the
+        // O(n²) marked tokenizer never sees the whole document at once.
+        if (mountChunked) {
+          const manager = (
+            ed.storage as { markdown?: { manager?: MarkdownManagerLike } }
+          ).markdown?.manager;
+          if (manager) {
+            ed.commands.setContent(
+              parseMarkdownChunked(manager, initialContent),
+              { emitUpdate: false },
+            );
+          } else {
+            ed.commands.setContent(initialContent, {
+              emitUpdate: false,
+              contentType: "markdown",
+            });
+          }
+        }
+        lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
+      },
+      content: mountChunked ? "" : initialContent,
+      contentType: mountChunked
+        ? undefined
+        : defaultValue
+          ? "markdown"
+          : undefined,
       extensions: createEditorExtensions({
-        editable,
         placeholder: placeholderText,
         queryClient,
         onSubmitRef,
         onUploadFileRef,
         submitOnEnter,
+        disableMentions,
+        mentionMode,
+        getMentionContextItems: () => mentionContextItemsRef.current,
+        enableSlashCommands,
+        slashCommandMode,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
-          onUpdateRef.current?.(stripBlobUrls(ed.getMarkdown()));
+          const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
+          if (md === lastEmittedRef.current) return;
+          lastEmittedRef.current = md;
+          onUpdateRef.current?.(md);
         }, debounceMs);
       },
       onBlur: () => {
@@ -159,16 +262,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
 
             event.preventDefault();
-            openLink(href);
+            openLink(href, workspaceSlugRef.current);
             return true;
           },
         },
         attributes: {
-          class: cn(
-            "rich-text-editor text-sm outline-none",
-            !editable && "readonly",
-            className,
-          ),
+          class: cn("flex-1 rich-text-editor text-sm outline-none", className),
         },
       },
     });
@@ -180,19 +279,70 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       };
     }, []);
 
-    // Readonly content update: when defaultValue changes and editor is readonly,
-    // re-set the content (e.g. after editing a comment, the readonly view updates)
+    // Sync external `defaultValue` changes into the editor.
+    // Tiptap v3 `useEditor` reads `content` only at mount (ueberdosis/tiptap#5831);
+    // without this effect, a WS-driven description update keeps the editor
+    // showing stale content until the issue is closed and reopened.
     useEffect(() => {
-      if (!editor || editable) return;
-      if (defaultValue === prevContentRef.current) return;
-      prevContentRef.current = defaultValue;
-      const processed = defaultValue ? preprocessMarkdown(defaultValue) : "";
-      if (processed) {
-        editor.commands.setContent(processed, { contentType: "markdown" });
+      if (!editor || editor.isDestroyed) return;
+
+      const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+      // "Dirty" = user has local edits not yet flushed through the debounced
+      // `onUpdate`. `lastEmittedRef` is advanced only after a debounce fire,
+      // so a divergence means the editor holds unsaved bytes.
+      const isDirty =
+        lastEmittedRef.current !== null && current !== lastEmittedRef.current;
+
+      // Guard 1: focused AND dirty — protect bytes the user is actively
+      // typing. Focused-but-clean falls through: applying setContent is safe
+      // (no user input to lose) and necessary, because onBlur has no replay
+      // mechanism and a focused clean editor would otherwise drop this sync
+      // permanently.
+      if (editor.isFocused && isDirty) return;
+
+      // Guard 2: unfocused-but-dirty — blur happened but the debounce window
+      // (debounceMs, 1500ms for description) hasn't flushed yet. The pending
+      // onUpdate will reach the server and the cache will reconcile; skipping
+      // here avoids overwriting unsaved local edits.
+      if (isDirty) return;
+
+      const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
+      const incomingNormalized = stripBlobUrls(incoming).trimEnd();
+      // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
+      // when the cache reflects a write this same editor just emitted.
+      if (incomingNormalized === current) return;
+
+      // Guard 4: `emitUpdate: false`. Tiptap v3's setContent defaults to
+      // `emitUpdate: true`; without this we would re-trigger onUpdate →
+      // server save → self-write loop.
+      const { from, to } = editor.state.selection;
+      // Same chunked path on WS-driven re-parse of a large description.
+      const manager =
+        incoming.length > MARKDOWN_CHUNK_THRESHOLD
+          ? (editor.storage as { markdown?: { manager?: MarkdownManagerLike } })
+              .markdown?.manager
+          : undefined;
+      if (manager) {
+        editor.commands.setContent(parseMarkdownChunked(manager, incoming), {
+          emitUpdate: false,
+        });
       } else {
-        editor.commands.clearContent();
+        editor.commands.setContent(incoming, {
+          emitUpdate: false,
+          contentType: "markdown",
+        });
       }
-    }, [editor, editable, defaultValue]);
+
+      // Clamp prior selection to the new doc size so the caret doesn't snap
+      // to position 0 after ProseMirror replaces the document.
+      const docSize = editor.state.doc.content.size;
+      editor.commands.setTextSelection({
+        from: Math.min(from, docSize),
+        to: Math.min(to, docSize),
+      });
+
+      lastEmittedRef.current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+    }, [defaultValue, editor]);
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
@@ -201,6 +351,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
       focus: () => {
         editor?.commands.focus();
+      },
+      blur: () => {
+        editor?.commands.blur();
       },
       uploadFile: (file: File) => {
         if (!editor || !onUploadFileRef.current) return;
@@ -224,7 +377,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const hover = useLinkHover(wrapperRef, hoverDisabled);
 
     const handleContainerMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
-      if (!editable || !editor) return;
+      if (!editor) return;
 
       const target = event.target as HTMLElement;
       if (target.closest(".ProseMirror")) return;
@@ -237,15 +390,19 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     if (!editor) return null;
 
     return (
-      <div
-        ref={wrapperRef}
-        className="relative flex min-h-full flex-col"
-        onMouseDown={handleContainerMouseDown}
-      >
-        <EditorContent className="flex-1 min-h-full" editor={editor} />
-        {editable && showBubbleMenu && <EditorBubbleMenu editor={editor} />}
-        <LinkHoverCard {...hover} />
-      </div>
+      <AttachmentDownloadProvider attachments={attachments}>
+        <div
+          ref={wrapperRef}
+          className="relative flex flex-1 min-h-full flex-col"
+          onMouseDown={handleContainerMouseDown}
+        >
+          <EditorContent className="flex flex-1 flex-col" editor={editor} />
+          {showBubbleMenu && (
+            <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
+          )}
+          <LinkHoverCard {...hover} />
+        </div>
+      </AttachmentDownloadProvider>
     );
   },
 );

@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,31 +15,85 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// SignupError represents signup restriction errors
+type SignupError struct {
+	Message string
+}
+
+func (e SignupError) Error() string {
+	return e.Message
+}
+
+var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
+var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
+
+const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
+
+// supportedLanguages mirrors `SUPPORTED_LOCALES` in packages/core/i18n/types.ts.
+// Keep both lists in sync when adding a locale — the user-controlled `language`
+// field round-trips through GetMe back into i18n.changeLanguage(), so without
+// validation an arbitrary string would persist and echo to every device.
+var supportedLanguages = map[string]struct{}{
+	"en":      {},
+	"zh-Hans": {},
+	"ko":      {},
+	"ja":      {},
+}
 
 type UserResponse struct {
 	ID        string  `json:"id"`
 	Name      string  `json:"name"`
 	Email     string  `json:"email"`
 	AvatarURL *string `json:"avatar_url"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	Language  *string `json:"language"`
+	// Pinned IANA tz; nil = no preference (use browser-detected tz).
+	Timezone                *string         `json:"timezone"`
+	OnboardedAt             *string         `json:"onboarded_at"`
+	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
+	StarterContentState     *string         `json:"starter_content_state"`
+	ProfileDescription      string          `json:"profile_description"`
+	CreatedAt               string          `json:"created_at"`
+	UpdatedAt               string          `json:"updated_at"`
 }
 
+// MaxProfileDescriptionLen caps the user-supplied profile_description body.
+// Picked at 2000 chars per MUL-2406: enough room for role / stack / a few
+// preferences, short enough that injecting it into every agent brief
+// doesn't move the needle on prompt cost.
+const MaxProfileDescriptionLen = 2000
+
 func userToResponse(u db.User) UserResponse {
+	// JSONB column is []byte with DEFAULT '{}', so it's never nil at the DB
+	// level. Defensive coalesce just in case a future ALTER makes the column
+	// nullable and some row comes back with no default applied.
+	q := u.OnboardingQuestionnaire
+	if len(q) == 0 {
+		q = []byte("{}")
+	}
 	return UserResponse{
-		ID:        uuidToString(u.ID),
-		Name:      u.Name,
-		Email:     u.Email,
-		AvatarURL: textToPtr(u.AvatarUrl),
-		CreatedAt: timestampToString(u.CreatedAt),
-		UpdatedAt: timestampToString(u.UpdatedAt),
+		ID:                      uuidToString(u.ID),
+		Name:                    u.Name,
+		Email:                   u.Email,
+		AvatarURL:               textToPtr(u.AvatarUrl),
+		Language:                textToPtr(u.Language),
+		Timezone:                textToPtr(u.Timezone),
+		OnboardedAt:             timestampToPtr(u.OnboardedAt),
+		OnboardingQuestionnaire: json.RawMessage(q),
+		StarterContentState:     textToPtr(u.StarterContentState),
+		ProfileDescription:      u.ProfileDescription,
+		CreatedAt:               timestampToString(u.CreatedAt),
+		UpdatedAt:               timestampToString(u.UpdatedAt),
 	}
 }
 
@@ -65,36 +120,149 @@ func generateCode() (string, error) {
 	return fmt.Sprintf("%06d", n), nil
 }
 
+func isDevVerificationCode(code string) bool {
+	if isProductionEnv() {
+		return false
+	}
+
+	devCode := strings.TrimSpace(os.Getenv(devVerificationCodeEnv))
+	if !isSixDigitCode(devCode) {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(code), []byte(devCode)) == 1
+}
+
+func isProductionEnv() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+}
+
+func isSixDigitCode(code string) bool {
+	if len(code) != 6 {
+		return false
+	}
+	for _, ch := range code {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func (h *Handler) issueJWT(user db.User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":   uuidToString(user.ID),
 		"email": user.Email,
 		"name":  user.Name,
-		"exp":   time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"exp":   time.Now().Add(auth.AuthTokenTTL()).Unix(),
 		"iat":   time.Now().Unix(),
 	})
 	return token.SignedString(auth.JWTSecret())
 }
 
-func (h *Handler) findOrCreateUser(ctx context.Context, email string) (db.User, error) {
-	user, err := h.Queries.GetUserByEmail(ctx, email)
+// findOrCreateUser returns the existing user for an email, or creates one if
+// none exists. isNew reports whether this call created the user — the signup
+// event fires on that edge, covering both the verification-code and Google
+// OAuth entry points.
+func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, err error) {
+	user, err = h.Queries.GetUserByEmail(ctx, email)
+	isNew = isNotFound(err)
+	if err != nil && !isNew {
+		return db.User{}, false, err
+	}
+
+	if err := h.checkSignupAllowed(email, isNew); err != nil {
+		return db.User{}, false, err
+	}
+
+	if !isNew {
+		return user, false, nil
+	}
+
+	name := email
+	if at := strings.Index(email, "@"); at > 0 {
+		name = email[:at]
+	}
+	created, err := h.Queries.CreateUser(ctx, db.CreateUserParams{
+		Name:  name,
+		Email: email,
+	})
 	if err != nil {
-		if !isNotFound(err) {
-			return db.User{}, err
-		}
-		name := email
-		if at := strings.Index(email, "@"); at > 0 {
-			name = email[:at]
-		}
-		user, err = h.Queries.CreateUser(ctx, db.CreateUserParams{
-			Name:  name,
-			Email: email,
-		})
-		if err != nil {
-			return db.User{}, err
+		return db.User{}, false, err
+	}
+	return created, true, nil
+}
+
+// signupSourceFromRequest reads the attribution cookie the web frontend
+// sets on the first pageview (UTM + referrer bundle). The frontend writes
+// a JSON string URL-encoded into the cookie value — Go does not
+// auto-decode Cookie.Value, so we have to unescape here before the string
+// lands in PostHog. Missing cookie / decode failures collapse to the
+// empty string; that simply omits signup_source from the event rather
+// than sending percent-encoded garbage. Never fall back to r.Referer() —
+// the frontend has already sanitised attribution and a raw referer can
+// leak OAuth code/state from the callback URL.
+//
+// The cap is the server-side defence against a client that manages to set
+// an oversize cookie; it matches SIGNUP_SOURCE_MAX_LEN on the frontend.
+const signupSourceMaxLen = 512
+
+func signupSourceFromRequest(r *http.Request) string {
+	c, err := r.Cookie("multica_signup_source")
+	if err != nil || c == nil {
+		return ""
+	}
+	decoded, err := url.QueryUnescape(c.Value)
+	if err != nil {
+		return ""
+	}
+	if len(decoded) > signupSourceMaxLen {
+		return ""
+	}
+	return decoded
+}
+
+func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
+	if !isNewUser {
+		return nil // existing users always allowed to log in
+	}
+
+	email = strings.ToLower(email)
+	domain := ""
+	if at := strings.Index(email, "@"); at > 0 {
+		domain = email[at+1:]
+	}
+
+	// 1. explicit email whitelist always wins
+	if len(h.cfg.AllowedEmails) > 0 && contains(h.cfg.AllowedEmails, email) {
+		return nil
+	}
+
+	// 2. domain whitelist always wins
+	if len(h.cfg.AllowedEmailDomains) > 0 && contains(h.cfg.AllowedEmailDomains, domain) {
+		return nil
+	}
+
+	// 3. general signup flag
+	if !h.cfg.AllowSignup {
+		return ErrSignupProhibited
+	}
+
+	// 4. if allowlists are set but didn't match, block
+	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
+		return ErrSignupProhibited
+	}
+
+	return nil
+}
+
+func contains(slice []string, s string) bool {
+	for _, item := range slice {
+		if strings.EqualFold(item, s) {
+			return true
 		}
 	}
-	return user, nil
+	return false
 }
 
 func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +276,40 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	if email == "" {
 		writeError(w, http.StatusBadRequest, "email is required")
 		return
+	}
+
+	// Check signup restrictions before sending magic link
+	_, err := h.Queries.GetUserByEmail(r.Context(), email)
+	if err != nil {
+		if !isNotFound(err) {
+			// Real database/query error → return 500
+			writeError(w, http.StatusInternalServerError, "failed to lookup user")
+			return
+		}
+		// User does not exist → treat as new user
+		isNewUser := true
+		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+			var signupErr SignupError
+			if errors.As(err, &signupErr) {
+				writeError(w, http.StatusForbidden, signupErr.Error())
+			} else {
+				writeError(w, http.StatusForbidden, "user registration is disabled")
+			}
+			return
+		}
+	} else {
+		// User already exists → always allowed to login
+		isNewUser := false
+		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
+			// This should rarely happen, but handle it anyway
+			var signupErr SignupError
+			if errors.As(err, &signupErr) {
+				writeError(w, http.StatusForbidden, signupErr.Error())
+			} else {
+				writeError(w, http.StatusForbidden, "user registration is disabled")
+			}
+			return
+		}
 	}
 
 	// Rate limit: max 1 code per 60 seconds per email
@@ -166,8 +368,8 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMasterCode := code == "888888" && os.Getenv("APP_ENV") != "production"
-	if !isMasterCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
+	isDevCode := isDevVerificationCode(code)
+	if !isDevCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
 		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
 		return
@@ -178,10 +380,18 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.findOrCreateUser(r.Context(), email)
+	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		var signupErr SignupError
+		if errors.As(err, &signupErr) {
+			writeError(w, http.StatusForbidden, signupErr.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
+	}
+	if isNew {
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
 	}
 
 	tokenString, err := h.issueJWT(user)
@@ -198,7 +408,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	// Set CloudFront signed cookies for CDN access.
 	if h.CFSigner != nil {
-		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(30 * 24 * time.Hour)) {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(auth.AuthTokenTTL())) {
 			http.SetCookie(w, cookie)
 		}
 	}
@@ -226,8 +436,12 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateMeRequest struct {
-	Name      *string `json:"name"`
-	AvatarURL *string `json:"avatar_url"`
+	Name               *string `json:"name"`
+	AvatarURL          *string `json:"avatar_url"`
+	Language           *string `json:"language"`
+	ProfileDescription *string `json:"profile_description"`
+	// IANA tz to pin; "" clears back to NULL; nil leaves untouched.
+	Timezone *string `json:"timezone"`
 }
 
 type GoogleLoginRequest struct {
@@ -334,10 +548,20 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	email := strings.ToLower(strings.TrimSpace(gUser.Email))
 
-	user, err := h.findOrCreateUser(r.Context(), email)
+	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		var signupErr SignupError
+		if errors.As(err, &signupErr) {
+			writeError(w, http.StatusForbidden, signupErr.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
+	}
+	if isNew {
+		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
+		evt.Properties["auth_method"] = "google"
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, evt)
 	}
 
 	// Update name and avatar from Google profile if the user was just created
@@ -453,6 +677,39 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AvatarURL != nil {
 		params.AvatarUrl = pgtype.Text{String: strings.TrimSpace(*req.AvatarURL), Valid: true}
+	}
+	if req.Language != nil {
+		lang := strings.TrimSpace(*req.Language)
+		if _, ok := supportedLanguages[lang]; !ok {
+			writeError(w, http.StatusBadRequest, "unsupported language")
+			return
+		}
+		params.Language = pgtype.Text{String: lang, Valid: true}
+	}
+	if req.ProfileDescription != nil {
+		// Count runes, not bytes: 2000 chars of Chinese must not be rejected
+		// as ~6000 bytes. utf8.RuneCountInString handles invalid UTF-8 by
+		// counting each bad byte as one rune, which still bounds the column.
+		desc := strings.TrimSpace(*req.ProfileDescription)
+		if utf8.RuneCountInString(desc) > MaxProfileDescriptionLen {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("profile_description exceeds %d characters", MaxProfileDescriptionLen))
+			return
+		}
+		params.ProfileDescription = pgtype.Text{String: desc, Valid: true}
+	}
+
+	if req.Timezone != nil {
+		// Valid=false → column untouched; Valid=true + "" → clear to
+		// NULL; Valid=true + IANA → set. Three-way semantics enforced
+		// in the UpdateUser SQL CASE.
+		tz := strings.TrimSpace(*req.Timezone)
+		if tz != "" {
+			if loc, err := time.LoadLocation(tz); err != nil || loc == nil {
+				writeError(w, http.StatusBadRequest, "invalid timezone")
+				return
+			}
+		}
+		params.Timezone = pgtype.Text{String: tz, Valid: true}
 	}
 
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)

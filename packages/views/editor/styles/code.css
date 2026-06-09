@@ -1,0 +1,113 @@
+/*
+ * Code typography and lowlight highlighting.
+ *
+ * The literal-code rules intentionally disable font ligatures for both inline
+ * code and code blocks. Command flags such as `--extra` must render as the
+ * exact characters the user can copy.
+ */
+
+/* Inline code */
+.rich-text-editor code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0;
+  font-size: 0.875rem;
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 5%, transparent);
+  color: color-mix(in srgb, var(--foreground) 75%, transparent);
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-sm);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  line-height: 2;
+}
+
+/* Code blocks */
+.rich-text-editor pre,
+pre.rich-text-editor {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0;
+  background: var(--muted);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+}
+
+.rich-text-editor pre code,
+pre.rich-text-editor code {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0;
+  background: none;
+  border: none;
+  color: var(--foreground);
+  padding: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+/* Syntax highlighting — lowlight (hljs) */
+.rich-text-editor .hljs-keyword,
+.rich-text-editor .hljs-selector-tag,
+.rich-text-editor .hljs-built_in { color: oklch(0.55 0.16 255); }
+
+.rich-text-editor .hljs-string,
+.rich-text-editor .hljs-addition { color: oklch(0.55 0.14 155); }
+
+.rich-text-editor .hljs-comment,
+.rich-text-editor .hljs-quote { color: var(--muted-foreground); font-style: italic; }
+
+.rich-text-editor .hljs-number,
+.rich-text-editor .hljs-literal { color: oklch(0.58 0.16 30); }
+
+.rich-text-editor .hljs-title,
+.rich-text-editor .hljs-section,
+.rich-text-editor .hljs-title\.function_ { color: oklch(0.55 0.14 280); }
+
+.rich-text-editor .hljs-attr,
+.rich-text-editor .hljs-attribute { color: oklch(0.58 0.12 60); }
+
+.rich-text-editor .hljs-variable,
+.rich-text-editor .hljs-template-variable { color: oklch(0.58 0.14 20); }
+
+.rich-text-editor .hljs-type,
+.rich-text-editor .hljs-title\.class_ { color: oklch(0.55 0.14 200); }
+
+.rich-text-editor .hljs-deletion { color: oklch(0.55 0.2 25); }
+
+.rich-text-editor .hljs-meta { color: var(--muted-foreground); }
+
+/* XML / HTML — lowlight emits .hljs-tag for `<` `>` brackets and .hljs-name
+   for the element name. Without these rules, HTML source renders mostly in
+   the default text color and looks unhighlighted. */
+.rich-text-editor .hljs-tag { color: var(--muted-foreground); }
+.rich-text-editor .hljs-name { color: oklch(0.55 0.16 255); }
+
+/* Dark mode overrides */
+.dark .rich-text-editor .hljs-keyword,
+.dark .rich-text-editor .hljs-selector-tag,
+.dark .rich-text-editor .hljs-built_in { color: oklch(0.7 0.14 255); }
+
+.dark .rich-text-editor .hljs-string,
+.dark .rich-text-editor .hljs-addition { color: oklch(0.7 0.14 155); }
+
+.dark .rich-text-editor .hljs-number,
+.dark .rich-text-editor .hljs-literal { color: oklch(0.72 0.14 30); }
+
+.dark .rich-text-editor .hljs-title,
+.dark .rich-text-editor .hljs-section,
+.dark .rich-text-editor .hljs-title\.function_ { color: oklch(0.72 0.12 280); }
+
+.dark .rich-text-editor .hljs-attr,
+.dark .rich-text-editor .hljs-attribute { color: oklch(0.72 0.1 60); }
+
+.dark .rich-text-editor .hljs-variable,
+.dark .rich-text-editor .hljs-template-variable { color: oklch(0.72 0.12 20); }
+
+.dark .rich-text-editor .hljs-type,
+.dark .rich-text-editor .hljs-title\.class_ { color: oklch(0.72 0.12 200); }
+
+.dark .rich-text-editor .hljs-deletion { color: oklch(0.7 0.18 25); }
+
+.dark .rich-text-editor .hljs-name { color: oklch(0.72 0.14 255); }

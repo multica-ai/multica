@@ -1,0 +1,127 @@
+---
+title: AI コーディングツール対応表
+description: Multica は 12 個の AI コーディングツールをサポートしています。すべて同じインターフェースを実装していますが、機能の詳細は大きく異なります。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica は **12 個の AI コーディングツール**を標準でサポートしています。これらはすべて同じインターフェース（キューへの投入、ディスパッチ、実行、結果の返却）を実装しているため、同じ Multica ボードからどれでも動かすことができます。**しかし機能の詳細は大きく異なります**: セッション再開が実際に動作するか、MCP をサポートするか、スキルファイルがどこに置かれるか、モデルをどう選択するか。このページがその完全な対応表です。
+
+エージェントを作成するときにツールを選ぶ際のガイダンスは、[エージェントの作成と構成](/agents-create)を参照してください。
+
+## 機能対応マトリクス
+
+| ツール | ベンダー | セッション再開 | MCP | スキル注入パス | モデル選択 |
+|---|---|---|---|---|---|
+| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | 動的探索（`agy models`） |
+| **Claude Code** | Anthropic | ✅ | **✅（実際に使用する唯一のツール）** | `.claude/skills/` | 静的 + flag |
+| **Codex** | OpenAI | ⚠️ コードは存在するが到達不可 | ❌ | `$CODEX_HOME/skills/` | 静的 |
+| **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静的（アカウントの権限で決定） |
+| **Cursor** | Anysphere | ⚠️ コードは存在するが使用不可 | ❌ | `.cursor/skills/` | 動的探索 |
+| **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | 静的 |
+| **Hermes** | Nous Research | ✅ | ❌ | `.agent_context/skills/`（フォールバック） | 動的探索 |
+| **Kimi** | Moonshot | ✅ | ❌ | `.kimi/skills/` | 動的探索 |
+| **Kiro CLI** | Amazon | ✅ | ❌ | `.kiro/skills/` | 動的探索 |
+| **OpenCode** | SST | ✅ | ❌ | `.opencode/skills/` | 動的探索 |
+| **OpenClaw** | オープンソース | ✅ | ❌ | `.agent_context/skills/`（フォールバック） | エージェントにバインドされ、タスクごとに切り替え不可 |
+| **Pi** | Inflection AI | ✅（セッションがファイルパス） | ❌ | `.pi/skills/` | 動的探索 |
+
+## 各ツールの用途
+
+### Antigravity
+
+Google が提供します。CLI バイナリ名は `agy` です。Google の Antigravity サービスと連携し、Gemini ベースのデフォルトモデルが付属しています。**セッション再開が動作します** — `--conversation <id>` を通じて行われ、stdout が構造化されたイベントストリームではなくプレーンテキストであるため、デーモンが CLI のログファイルから conversation UUID をキャプチャします。**モデル選択が動作します** — `--model` flag（agy 1.0.6 で追加）を通じて行われ、デーモンが `agy models` でカタログを列挙し、選択された値をそのまま渡します。これらは `provider/model` slug ではなく `Claude Opus 4.6 (Thinking)` のような人間が読める表示名である点に注意してください。また agy は認識できない値を渡すと黙って空実行するため、手入力ではなく検出されたリストから選ぶことをおすすめします。スキルは `.agents/skills/` に配置されます（CLI が Gemini CLI のワークスペーススキルレイアウトをそのまま継承します — [Antigravity 移行ドキュメント](https://antigravity.google/docs/gcli-migration)を参照）。
+
+### Claude Code
+
+Anthropic が提供します。**新規ユーザーにとって第一の選択肢**であり、最も完成度の高い機能セットを備えています: セッション再開が実際に動作し、**11 個の中で MCP 構成を本当に読み取る唯一のツール**であり、`--max-turns` や `--append-system-prompt` のような細かな調整 flag をサポートします。Anthropic API キーが必要です。
+
+### Codex
+
+OpenAI が提供します。JSON-RPC 2.0 を使用し、ステートフルな能力がより強く、よりきめ細かい承認メカニズム（`exec_command` および `patch_apply` に対する手動承認）を備えています。**セッション再開のコードは存在しますが、現在は到達できません** — 再開が必要なら、Claude Code または ACP 系のいずれかを選んでください。
+
+### Copilot
+
+GitHub が提供します。モデルルーティングは GitHub アカウントの権限を経由します — ツールが直接モデルを選択するのではなく、GitHub がどのモデルを提供するかを決定します。`.github/skills/` にスキルを置くのは GitHub CLI のネイティブな探索メカニズムです。
+
+### Cursor
+
+Anysphere が提供し、Cursor エディターに対応する CLI です。**セッション再開のコードは存在しますが、実際には動作しません** — Cursor CLI のイベントストリームがセッション ID を返さないため、渡す再開値は常に無効です。再開が必要なら、別のものを選んでください。
+
+### Gemini
+
+Google が提供し、Gemini 2.5 および 3 シリーズをサポートします。**セッション再開も MCP もサポートしません** — 長いコンテキストの記憶が不要なワンショットタスクに適しています。
+
+### Hermes
+
+Nous Research が提供します。ACP プロトコルを使用します（Kimi とトランスポート層を共有します）。セッション再開が動作します。しかし**スキル注入パスは専用のものではなく汎用のフォールバック**（`.agent_context/skills/`）です — Hermes CLI 自体がこのパスを読み取らない場合、スキルが適用されないことがあります。テストで確認してください。
+
+### Kimi
+
+Moonshot が提供し、中国市場を対象としています。Hermes と ACP プロトコルを共有しますが、スキルパス `.kimi/skills/` は Kimi CLI のネイティブな探索メカニズムであり、Hermes のフォールバックとは異なります。
+
+### Kiro CLI
+
+Amazon が提供します。`kiro-cli acp` を通じて stdio 上で ACP を使用します。セッション再開は ACP `session/load` で動作し、モデル選択は `session/set_model` で動作し、スキルはプロジェクトレベルのネイティブ探索のために `.kiro/skills/` にコピーされます。
+
+### OpenCode
+
+SST が提供するオープンソースです。利用可能なモデルを動的に探索します（CLI の構成ファイルをスキャン）。セッション再開が動作します。**自分のモデルカタログをカスタマイズしたい、いじるのが好きなユーザーに適しています。**
+
+### OpenClaw
+
+オープンソースプロジェクトであり、CLI エージェントオーケストレーターです。**モデルはエージェント層にバインドされます**（`openclaw agents add --model`） — タスクごとに上書きできません。構成は厳格に制御されます: ユーザーは `--model` や `--system-prompt` を渡せず、エージェント登録時の構成が決定します。
+
+### Pi
+
+Inflection AI が提供し、ミニマルです。**セッション再開の方式が独特です** — セッション ID が文字列 ID ではなく、ディスク上のファイルパス（`~/.pi/...`）です。他のツールでは再開 id は CLI が返す文字列ですが、Pi では再開 id はセッションファイルそのものです。
+
+## セッション再開: 実際にサポートするツール
+
+セッション再開のメカニズムは[タスク](/tasks#can-a-task-continue-from-the-previous-context)で扱います。以下はツールごとの**正確な現在の状態**です。
+
+| 状態 | ツール | 意味 |
+|---|---|---|
+| ✅ 実際に動作 | Antigravity, Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | 再開 id を渡すと以前のコンテキストから続行します |
+| ⚠️ コードは存在するが到達不可 | Codex, Cursor | コードに再開パスがありますが、実際には到達しません（Codex は静かにフォールバックし、Cursor はセッション id を返しません） — **未サポートとみなしてください** |
+| ❌ なし | Gemini | CLI に再開メカニズムがありません |
+
+**意思決定のために**: ワークフローでエージェントがタスク間でコンテキストを保持する必要がある場合（失敗時のリトライ、手動の再実行、対話的な反復）、✅ の行にあるツールだけを選んでください。
+
+## MCP 構成: Claude Code だけが実際に読み取る
+
+**12 個のツールのうち、`mcp_config` を実際に消費するのは Claude Code だけです**。残りの 11 個はこのフィールドを受け取りますが、**完全に無視します** — エラーも警告もなく、構成はただ効果を発揮しません。
+
+<Callout type="warning">
+エージェント構成で `mcp_config` を設定しても、Claude Code 以外のツールを選んだ場合、MCP サーバーはそのエージェントに**何の効果**も及ぼしません。現在、MCP 連携は Claude Code のみをカバーしています。
+</Callout>
+
+## スキルファイルが置かれる場所
+
+各ツールは**それぞれ独自の**スキル探索パスを使用します。タスクが実行される前に、Multica デーモンがワークスペースのスキルファイルを対応するパスにコピーします。
+
+| ツール | パス | ネイティブ探索か |
+|---|---|---|
+| Claude Code | `.claude/skills/` | ✅ ネイティブ |
+| Codex | `$CODEX_HOME/skills/` | ✅ ネイティブ |
+| Copilot | `.github/skills/` | ✅ ネイティブ |
+| Cursor | `.cursor/skills/` | ✅ ネイティブ |
+| Kimi | `.kimi/skills/` | ✅ ネイティブ |
+| Kiro CLI | `.kiro/skills/` | ✅ ネイティブ |
+| OpenCode | `.opencode/skills/` | ✅ ネイティブ |
+| Pi | `.pi/skills/` | ✅ ネイティブ |
+| Antigravity | `.agents/skills/` | ✅ ネイティブ（Gemini CLI のワークスペースレイアウトを継承 — [Antigravity ドキュメント](https://antigravity.google/docs/gcli-migration)を参照） |
+| Gemini | `.agent_context/skills/` | ⚠️ 汎用フォールバック |
+| Hermes | `.agent_context/skills/` | ⚠️ 汎用フォールバック |
+| OpenClaw | `.agent_context/skills/` | ⚠️ 汎用フォールバック |
+
+フォールバックパスを使うツールが実際にこのディレクトリを読み取るかどうかは、そのツール自体のドキュメントによって異なり、保証されません。Gemini / Hermes / OpenClaw でスキルが適用されない場合は、まずこの点を確認してください。
+
+スキルの作成と使用については、[スキル](/skills)を参照してください。
+
+## 次へ
+
+- [エージェントの作成と構成](/agents-create) — エージェントに使うツールを選ぶ
+- [タスク](/tasks) — タスクのライフサイクルとセッション再開のメカニズム
+- [デーモンとランタイム](/daemon-runtimes) — ツールが実行される場所と Multica への接続方法
+- [エージェントランタイムのインストール](/install-agent-runtime) — サポートされる 12 個のツールそれぞれのインストールと認証

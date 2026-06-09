@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
+import { captureDownloadIntent } from "@multica/core/analytics";
 import { useLocale } from "../i18n";
 import {
   ClaudeCodeLogo,
@@ -11,8 +12,6 @@ import {
   GeminiCliLogo,
   OpenClawLogo,
   OpenCodeLogo,
-  GitHubMark,
-  githubUrl,
   heroButtonClassName,
 } from "./shared";
 
@@ -41,28 +40,35 @@ export function LandingHero() {
             </p>
 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Link href={user ? "/issues" : "/login"} className={heroButtonClassName("solid")}>
+              <Link href={user ? "/" : "/login"} className={heroButtonClassName("solid")}>
                 {user ? t.header.dashboard : t.hero.cta}
               </Link>
               <Link
-                href={githubUrl}
-                target="_blank"
-                rel="noreferrer"
+                href="/download"
                 className={heroButtonClassName("ghost")}
+                onClick={() => captureDownloadIntent("landing_hero")}
               >
-                <GitHubMark className="size-4" />
-                GitHub
+                <Download className="size-4" aria-hidden />
+                {t.hero.downloadDesktop}
+              </Link>
+              <Link
+                href="/contact-sales"
+                className="group inline-flex items-center justify-center gap-1.5 rounded-[12px] px-3 py-3 text-[14px] font-semibold text-white/80 transition-colors hover:text-white"
+              >
+                {t.hero.talkToSales}
+                <ArrowRight
+                  className="size-4 transition-transform group-hover:translate-x-0.5"
+                  aria-hidden
+                />
               </Link>
             </div>
-
-            <InstallCommand />
           </div>
 
-          <div className="mt-10 flex items-center justify-center gap-8">
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
             <span className="text-[15px] text-white/50">
               {t.hero.worksWith}
             </span>
-            <div className="flex items-center gap-6">
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
               <div className="flex items-center gap-2.5 text-white/80">
                 <ClaudeCodeLogo className="size-5" />
                 <span className="text-[15px] font-medium">Claude Code</span>
@@ -95,64 +101,6 @@ export function LandingHero() {
   );
 }
 
-const INSTALL_COMMAND =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
-
-function InstallCommand() {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(INSTALL_COMMAND);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  return (
-    <div className="mx-auto mt-6 max-w-fit">
-      <button
-        type="button"
-        onClick={handleCopy}
-        className="group flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 font-mono text-[13px] text-white/70 backdrop-blur-sm transition-colors hover:border-white/20 hover:bg-white/8 hover:text-white/90"
-      >
-        <span className="text-white/40">$</span>
-        <span className="select-all">{INSTALL_COMMAND}</span>
-        <span className="ml-1 flex size-5 shrink-0 items-center justify-center text-white/40 transition-colors group-hover:text-white/70">
-          {copied ? (
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="size-3.5 text-green-400"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          ) : (
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="size-3.5"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          )}
-        </span>
-      </button>
-    </div>
-  );
-}
-
 function LandingBackdrop() {
   return (
     <div className="pointer-events-none absolute inset-0">
@@ -160,7 +108,6 @@ function LandingBackdrop() {
         src="/images/landing-bg.jpg"
         alt=""
         fill
-        priority
         className="object-cover object-center"
       />
     </div>
@@ -176,6 +123,7 @@ function ProductImage({ alt }: { alt: string }) {
           alt={alt}
           width={3532}
           height={2382}
+          priority
           className="block h-auto w-full"
           sizes="(max-width: 1320px) 100vw, 1320px"
           quality={85}

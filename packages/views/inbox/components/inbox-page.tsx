@@ -1,12 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useModalStore } from "@multica/core/modals";
+import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
   deduplicateInboxItems,
+  useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import {
   useMarkInboxRead,
@@ -16,7 +20,9 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
+
 import { IssueDetail } from "../../issues/components";
+import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useNavigation } from "../../navigation";
 import { toast } from "sonner";
 import {
@@ -45,12 +51,16 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
-import { InboxListItem, timeAgo } from "./inbox-list-item";
-import { typeLabels } from "./inbox-detail-label";
+import { InboxListItem, useTimeAgo } from "./inbox-list-item";
+import { useTypeLabels } from "./inbox-detail-label";
+import { getInboxDisplayTitle } from "./inbox-display";
+import { useT } from "../../i18n";
 
 export function InboxPage() {
+  const { t } = useT("inbox");
   const { searchParams, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
+  const wsPaths = useWorkspacePaths();
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
 
@@ -59,23 +69,51 @@ export function InboxPage() {
     setSelectedKeyState(urlIssue);
   }, [urlIssue]);
 
-  const setSelectedKey = useCallback((key: string) => {
-    setSelectedKeyState(key);
-    const url = key ? `/inbox?issue=${key}` : "/inbox";
-    replace(url);
-  }, [replace]);
-
   const wsId = useWorkspaceId();
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
+
+  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+
+  // Track the last key we actually resolved against the inbox list. Lets the
+  // fallback effect distinguish "shared-link to a notification not in our
+  // inbox" (never resolved → redirect to the issue page) from "item was in
+  // our inbox and just got removed" (was resolved → stay on /inbox).
+  const lastResolvedKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (selected) lastResolvedKeyRef.current = selectedKey;
+  }, [selected, selectedKey]);
+
+  const setSelectedKey = useCallback((key: string) => {
+    setSelectedKeyState(key);
+    const inboxPath = wsPaths.inbox();
+    const url = key ? `${inboxPath}?issue=${key}` : inboxPath;
+    replace(url);
+  }, [replace, wsPaths]);
+
+  // Shared inbox links (?issue=<id>) may point to notifications not in this
+  // user's inbox (archived, or never received). Fall back to the issue page
+  // so the URL still resolves to something meaningful. But if the key was
+  // previously resolvable (e.g. the issue was just deleted in another tab
+  // and `onInboxIssueDeleted` pruned the cache), the issue detail would 404
+  // too — clear the selection and stay on /inbox instead.
+  useEffect(() => {
+    if (loading) return;
+    if (!selectedKey) return;
+    if (selected) return;
+    if (lastResolvedKeyRef.current === selectedKey) {
+      setSelectedKey("");
+      return;
+    }
+    replace(wsPaths.issueDetail(selectedKey));
+  }, [loading, selectedKey, selected, replace, wsPaths, setSelectedKey]);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
   });
 
   const isMobile = useIsMobile();
-  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
-  const unreadCount = items.filter((i) => !i.read).length;
+  const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
   const archiveMutation = useArchiveInbox();
@@ -83,36 +121,77 @@ export function InboxPage() {
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
   const archiveCompletedMutation = useArchiveCompletedInbox();
+  const timeAgo = useTimeAgo();
+  const typeLabels = useTypeLabels();
 
-  // Click-to-read: select + auto-mark-read
+
+  // Auto-mark-read whenever a selected item is unread — covers both click-
+  // to-select and URL-param-select (e.g. OS notification click on desktop).
+  // The mutation flips `read: true` optimistically, so this effect settles
+  // in one pass and can't loop. Kept in a `useEffect` rather than inlined
+  // in handleSelect so URL-driven selection triggers it too.
+  const markReadMutate = markReadMutation.mutate;
+  const selectedId = selected?.id;
+  const selectedRead = selected?.read;
+  useEffect(() => {
+    if (!selectedId || selectedRead) return;
+    markReadMutate(selectedId, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_read_failed),
+        ),
+    });
+  }, [selectedId, selectedRead, markReadMutate, t]);
+
   const handleSelect = (item: InboxItem) => {
     setSelectedKey(item.issue_id ?? item.id);
-    if (!item.read) {
-      markReadMutation.mutate(item.id, {
-        onError: () => toast.error("Failed to mark as read"),
-      });
-    }
   };
 
   const handleArchive = (id: string) => {
-    const archived = items.find((i) => i.id === id);
-    if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey("");
+    const idx = items.findIndex((i) => i.id === id);
+    const archived = idx >= 0 ? items[idx] : null;
+    const wasSelected =
+      !!archived && (archived.issue_id ?? archived.id) === selectedKey;
+    if (wasSelected) {
+      // List is sorted newest-first; prefer the next (older) item, fall back
+      // to the previous (newer) one when archiving at the bottom, and only
+      // clear the selection when nothing else is left.
+      const next = items[idx + 1] ?? items[idx - 1] ?? null;
+      setSelectedKey(next ? (next.issue_id ?? next.id) : "");
+    }
     archiveMutation.mutate(id, {
-      onError: () => toast.error("Failed to archive"),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_failed),
+        ),
     });
   };
 
   // Batch operations
   const handleMarkAllRead = () => {
     markAllReadMutation.mutate(undefined, {
-      onError: () => toast.error("Failed to mark all as read"),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.mark_all_read_failed),
+        ),
     });
   };
 
   const handleArchiveAll = () => {
     setSelectedKey("");
     archiveAllMutation.mutate(undefined, {
-      onError: () => toast.error("Failed to archive all"),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_all_failed),
+        ),
     });
   };
 
@@ -120,14 +199,24 @@ export function InboxPage() {
     const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
     if (readKeys.includes(selectedKey)) setSelectedKey("");
     archiveAllReadMutation.mutate(undefined, {
-      onError: () => toast.error("Failed to archive read items"),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_all_read_failed),
+        ),
     });
   };
 
   const handleArchiveCompleted = () => {
     setSelectedKey("");
     archiveCompletedMutation.mutate(undefined, {
-      onError: () => toast.error("Failed to archive completed"),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.archive_completed_failed),
+        ),
     });
   };
 
@@ -136,7 +225,7 @@ export function InboxPage() {
   const listHeader = (
     <PageHeader className="justify-between">
       <div className="flex items-center gap-2">
-        <h1 className="text-sm font-semibold">Inbox</h1>
+        <h1 className="text-sm font-semibold">{t(($) => $.page.title)}</h1>
         {unreadCount > 0 && (
           <span className="text-xs text-muted-foreground">
             {unreadCount}
@@ -158,20 +247,20 @@ export function InboxPage() {
         <DropdownMenuContent align="end" className="w-auto">
           <DropdownMenuItem onClick={handleMarkAllRead}>
             <CheckCheck className="h-4 w-4" />
-            Mark all as read
+            {t(($) => $.menu.mark_all_read)}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleArchiveAll}>
             <Archive className="h-4 w-4" />
-            Archive all
+            {t(($) => $.menu.archive_all)}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={handleArchiveAllRead}>
             <BookCheck className="h-4 w-4" />
-            Archive all read
+            {t(($) => $.menu.archive_all_read)}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={handleArchiveCompleted}>
             <ListChecks className="h-4 w-4" />
-            Archive completed
+            {t(($) => $.menu.archive_completed)}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -181,7 +270,7 @@ export function InboxPage() {
   const listBody = items.length === 0 ? (
     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
       <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-      <p className="text-sm">No notifications</p>
+      <p className="text-sm">{t(($) => $.list.empty)}</p>
     </div>
   ) : (
     <div>
@@ -198,19 +287,32 @@ export function InboxPage() {
   );
 
   const detailContent = selected?.issue_id ? (
-    <IssueDetail
-      key={selected.id}
-      issueId={selected.issue_id}
-      defaultSidebarOpen={false}
-      layoutId="multica_inbox_issue_detail_layout"
-      highlightCommentId={selected.details?.comment_id ?? undefined}
-      onDelete={() => {
-        handleArchive(selected.id);
-      }}
-    />
+    // Key by issue_id (not inbox-item id): a new comment/reaction generates a
+    // new inbox notification for the same issue, and the dedup helper picks the
+    // newest one — keying on its id would remount IssueDetail on every event,
+    // wiping the comment composer draft and resetting scroll position.
+    <ErrorBoundary resetKeys={[selected.issue_id]}>
+      <IssueDetail
+        key={selected.issue_id}
+        issueId={selected.issue_id}
+        defaultSidebarOpen={false}
+        layoutId="multica_inbox_issue_detail_layout"
+        highlightCommentId={selected.details?.comment_id ?? undefined}
+        onDelete={() => {
+          // Issue deletion CASCADE-deletes the inbox item server-side, and the
+          // issue:deleted WS event prunes it from the inbox cache. Just clear
+          // the selection — calling archive here would 404 on a row that no
+          // longer exists.
+          setSelectedKey("");
+        }}
+        onDone={() => {
+          handleArchive(selected.id);
+        }}
+      />
+    </ErrorBoundary>
   ) : selected ? (
     <div className="p-6">
-      <h2 className="text-lg font-semibold">{selected.title}</h2>
+      <h2 className="text-lg font-semibold">{getInboxDisplayTitle(selected)}</h2>
       <p className="mt-1 text-sm text-muted-foreground">
         {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
       </p>
@@ -219,14 +321,44 @@ export function InboxPage() {
           {selected.body}
         </div>
       )}
-      <div className="mt-4">
+      {selected.type === "quick_create_failed" && selected.details?.original_prompt && (
+        <div className="mt-4 rounded-md border bg-muted/40 p-3">
+          <p className="text-xs font-medium text-muted-foreground">
+            {t(($) => $.detail.original_input)}
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-sm">{selected.details.original_prompt}</p>
+        </div>
+      )}
+      <div className="mt-4 flex gap-2">
+        {selected.type === "quick_create_failed" && (
+          <Button
+            size="sm"
+            onClick={() => {
+              // Seed the legacy advanced form with the original prompt so the
+              // user can recover their input in the full editor instead of
+              // retyping. The agent picker hint becomes the assignee
+              // candidate (still editable).
+              const prompt = selected.details?.original_prompt ?? "";
+              const agentId = selected.details?.agent_id;
+              useIssueDraftStore.getState().setDraft({
+                description: prompt,
+                ...(agentId
+                  ? { assigneeType: "agent" as const, assigneeId: agentId }
+                  : {}),
+              });
+              useModalStore.getState().open("create-issue");
+            }}
+          >
+            {t(($) => $.detail.edit_advanced)}
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"
           onClick={() => handleArchive(selected.id)}
         >
           <Archive className="mr-1.5 h-3.5 w-3.5" />
-          Archive
+          {t(($) => $.detail.archive)}
         </Button>
       </div>
     </div>
@@ -268,7 +400,7 @@ export function InboxPage() {
               className="gap-1.5 text-muted-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
-              Inbox
+              {t(($) => $.page.back)}
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
@@ -341,8 +473,8 @@ export function InboxPage() {
             <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
             <p className="text-sm">
               {items.length === 0
-                ? "Your inbox is empty"
-                : "Select a notification to view details"}
+                ? t(($) => $.detail.empty)
+                : t(($) => $.detail.select_prompt)}
             </p>
           </div>
         )}

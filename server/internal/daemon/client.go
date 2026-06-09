@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
@@ -36,18 +39,107 @@ func isWorkspaceNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "workspace not found")
 }
 
+// isTaskNotFoundError returns true if the error is a 404 with "task not found"
+// body. The daemon uses this to detect that a task was deleted server-side
+// (issue removed, agent reassigned, ...) while the local agent was still
+// running, so it can interrupt the agent rather than letting it keep
+// emitting tool calls against a dead task.
+func isTaskNotFoundError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	if reqErr.StatusCode != http.StatusNotFound {
+		return false
+	}
+	return strings.Contains(strings.ToLower(reqErr.Body), "task not found")
+}
+
+// isUnauthorizedError returns true if the error is a 401 from the server.
+// Used by the token-renewal loop to surface a clear "re-login required"
+// message instead of a generic transport-level retry.
+func isUnauthorizedError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.StatusCode == http.StatusUnauthorized
+}
+
+// isRuntimeNotFoundError returns true if the error is a 404 with "runtime not
+// found" body. The daemon uses this to detect that the runtime row was deleted
+// server-side (UI Delete, 7-day offline GC) while the daemon was still
+// heartbeating against the dead UUID, so it can prune the stale runtime from
+// its local state and re-register instead of looping on the dead ID forever.
+//
+// Server-side, this body is paired with pgx.ErrNoRows specifically (other DB
+// errors return 500), so a transient DB hiccup cannot make the daemon
+// self-cleanup.
+func isRuntimeNotFoundError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	if reqErr.StatusCode != http.StatusNotFound {
+		return false
+	}
+	return strings.Contains(strings.ToLower(reqErr.Body), "runtime not found")
+}
+
 // Client handles HTTP communication with the Multica server daemon API.
 type Client struct {
 	baseURL string
 	token   string
 	client  *http.Client
+
+	// Identity headers sent on every request as X-Client-*. Populated by
+	// SetIdentity(); empty values are simply omitted.
+	platform string
+	version  string
+	os       string
 }
 
 // NewClient creates a new daemon API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
-		baseURL: baseURL,
-		client:  &http.Client{Timeout: 30 * time.Second},
+		baseURL:  baseURL,
+		client:   &http.Client{Timeout: 30 * time.Second},
+		platform: "daemon",
+		os:       normalizeGOOS(runtime.GOOS),
+	}
+}
+
+// normalizeGOOS maps Go's runtime.GOOS values to the protocol vocabulary
+// used by X-Client-OS / client_os ("macos" / "windows" / "linux").
+func normalizeGOOS(goos string) string {
+	switch goos {
+	case "darwin":
+		return "macos"
+	case "windows":
+		return "windows"
+	case "linux":
+		return "linux"
+	default:
+		return goos
+	}
+}
+
+// SetVersion records the daemon's CLI version, sent as X-Client-Version.
+// Called by Daemon.Run after config is loaded.
+func (c *Client) SetVersion(v string) {
+	c.version = v
+}
+
+// setIdentityHeaders attaches X-Client-Platform/Version/OS to req when set.
+func (c *Client) setIdentityHeaders(req *http.Request) {
+	if c.platform != "" {
+		req.Header.Set("X-Client-Platform", c.platform)
+	}
+	if c.version != "" {
+		req.Header.Set("X-Client-Version", c.version)
+	}
+	if c.os != "" {
+		req.Header.Set("X-Client-OS", c.os)
 	}
 }
 
@@ -73,6 +165,21 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
+}
+
+// MarkTaskWaitingLocalDirectory parks a freshly-dispatched task in the
+// waiting_local_directory state on the server. The daemon calls this after
+// it has claimed a task whose project carries a local_directory resource
+// but the path mutex is held by another in-flight task. reason is a short
+// human-readable hint (e.g. "<path>") surfaced by the UI alongside the
+// status. Idempotent on the daemon's side — calling twice with the same
+// reason is a no-op once the row is already waiting_local_directory (the
+// underlying SQL filters on status='dispatched', so the second call is a
+// 400 the daemon swallows and proceeds to wait).
+func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reason string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/wait-local-directory", taskID), map[string]any{
+		"reason": reason,
+	}, nil)
 }
 
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
@@ -110,7 +217,7 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	if workDir != "" {
 		body["work_dir"] = workDir
 	}
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil)
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
 func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
@@ -122,14 +229,46 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
-func (c *Client) FailTask(ctx context.Context, taskID, errMsg string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), map[string]any{
-		"error": errMsg,
-	}, nil)
+func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string) error {
+	body := map[string]any{"error": errMsg}
+	if sessionID != "" {
+		body["session_id"] = sessionID
+	}
+	if workDir != "" {
+		body["work_dir"] = workDir
+	}
+	if failureReason != "" {
+		body["failure_reason"] = failureReason
+	}
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil, defaultTerminalRetrySchedule)
+}
+
+// PinTaskSession persists the agent's session_id and work_dir on the task
+// row mid-flight so a daemon crash doesn't lose the resume pointer.
+func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir string) error {
+	if sessionID == "" && workDir == "" {
+		return nil
+	}
+	body := map[string]any{}
+	if sessionID != "" {
+		body["session_id"] = sessionID
+	}
+	if workDir != "" {
+		body["work_dir"] = workDir
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/session", taskID), body, nil)
+}
+
+// RecoverOrphans tells the server to fail any dispatched/running tasks the
+// previous daemon process for this runtime left behind. The server will
+// auto-retry eligible tasks.
+func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID), map[string]any{}, nil)
 }
 
 // GetTaskStatus returns the current status of a task. Used by the daemon to
-// detect if a task was cancelled while it was executing.
+// detect terminal/interruption signals (cancelled, failed, completed, or a
+// 404 task-not-found) while a task is executing.
 func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, error) {
 	var resp struct {
 		Status string `json:"status"`
@@ -140,42 +279,26 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 	return resp.Status, nil
 }
 
-func (c *Client) ReportUsage(ctx context.Context, runtimeID string, entries []map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/usage", runtimeID), map[string]any{
-		"entries": entries,
-	}, nil)
-}
-
-// HeartbeatResponse contains the server's response to a heartbeat, including any pending actions.
-type HeartbeatResponse struct {
-	Status        string         `json:"status"`
-	PendingPing   *PendingPing   `json:"pending_ping,omitempty"`
-	PendingUpdate *PendingUpdate `json:"pending_update,omitempty"`
-}
-
-// PendingPing represents a ping test request from the server.
-type PendingPing struct {
-	ID string `json:"id"`
-}
-
-// PendingUpdate represents a CLI update request from the server.
-type PendingUpdate struct {
-	ID            string `json:"id"`
-	TargetVersion string `json:"target_version"`
-}
+// HeartbeatResponse, PendingUpdate, etc. alias the wire types so HTTP and WS
+// heartbeat paths share a single type and a single decoder shape. Aliases
+// (rather than wrappers) keep call sites unchanged.
+type (
+	HeartbeatResponse       = protocol.DaemonHeartbeatAckPayload
+	PendingUpdate           = protocol.DaemonHeartbeatPendingUpdate
+	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
+	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
+	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
+)
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
-	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]string{
-		"runtime_id": runtimeID,
+	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id":             runtimeID,
+		"supports_batch_import":  true,
 	}, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
-}
-
-func (c *Client) ReportPingResult(ctx context.Context, runtimeID, pingID string, result map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/ping/%s/result", runtimeID, pingID), result, nil)
 }
 
 // ReportUpdateResult sends the CLI update result back to the server.
@@ -183,10 +306,46 @@ func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID str
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
 }
 
+// ReportModelListResult sends the model-discovery result back to the server.
+func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
+}
+
+// ReportLocalSkillListResult sends the runtime-local-skill inventory back to the server.
+func (c *Client) ReportLocalSkillListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/%s/result", runtimeID, requestID), result, nil)
+}
+
+// ReportLocalSkillImportResult sends a runtime-local-skill bundle back to the server.
+func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
+}
+
 // WorkspaceInfo holds minimal workspace metadata returned by the API.
 type WorkspaceInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// RenewTokenResponse mirrors handler.RenewPATResponse — kept loose (string +
+// bool) because the daemon never parses the timestamp itself; it just logs it
+// for operator visibility.
+type RenewTokenResponse struct {
+	ExpiresAt string `json:"expires_at"`
+	Renewed   bool   `json:"renewed"`
+}
+
+// RenewToken asks the server to extend the daemon's current PAT in place when
+// it's within the server-side renewal window. The server is authoritative on
+// the threshold — the daemon doesn't know the token's expires_at locally —
+// so this is safe to call on any cadence; the only thing extra calls cost is
+// one round trip and one cheap SELECT.
+func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
+	var resp RenewTokenResponse
+	if err := c.postJSON(ctx, "/api/tokens/current/renew", map[string]any{}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // ListWorkspaces fetches all workspaces the authenticated user belongs to.
@@ -213,6 +372,59 @@ func (c *Client) GetIssueGCCheck(ctx context.Context, issueID string) (*IssueGCS
 	return &resp, nil
 }
 
+// ChatSessionGCStatus mirrors IssueGCStatus for chat sessions.
+type ChatSessionGCStatus struct {
+	Status    string    `json:"status"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GetChatSessionGCCheck returns the status of a chat session for GC decisions.
+// A 404 from this endpoint indicates the session row was hard-deleted (the
+// user explicitly removed it), which the caller treats as an immediate-clean
+// signal.
+func (c *Client) GetChatSessionGCCheck(ctx context.Context, sessionID string) (*ChatSessionGCStatus, error) {
+	var resp ChatSessionGCStatus
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/chat-sessions/%s/gc-check", sessionID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// AutopilotRunGCStatus carries the status of an autopilot run. CompletedAt
+// is the run's terminal timestamp (zero for non-terminal runs); the GC loop
+// uses it as the TTL anchor instead of UpdatedAt because autopilot_run rows
+// have no updated_at column.
+type AutopilotRunGCStatus struct {
+	Status      string    `json:"status"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+// GetAutopilotRunGCCheck returns the status of an autopilot run for GC decisions.
+func (c *Client) GetAutopilotRunGCCheck(ctx context.Context, runID string) (*AutopilotRunGCStatus, error) {
+	var resp AutopilotRunGCStatus
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/autopilot-runs/%s/gc-check", runID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// TaskGCStatus carries the agent_task_queue status for quick-create cleanup.
+// Quick-create tasks have no separate parent record, so GC keys directly on
+// the task itself.
+type TaskGCStatus struct {
+	Status      string    `json:"status"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+// GetTaskGCCheck returns the status of an agent task for GC decisions.
+func (c *Client) GetTaskGCCheck(ctx context.Context, taskID string) (*TaskGCStatus, error) {
+	var resp TaskGCStatus
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/gc-check", taskID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
 	return c.postJSON(ctx, "/api/daemon/deregister", map[string]any{
 		"runtime_ids": runtimeIDs,
@@ -221,9 +433,10 @@ func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
 
 // RegisterResponse holds the server's response to a daemon registration.
 type RegisterResponse struct {
-	Runtimes     []Runtime  `json:"runtimes"`
-	Repos        []RepoData `json:"repos"`
-	ReposVersion string     `json:"repos_version"`
+	Runtimes     []Runtime       `json:"runtimes"`
+	Repos        []RepoData      `json:"repos"`
+	ReposVersion string          `json:"repos_version"`
+	Settings     json.RawMessage `json:"settings,omitempty"`
 }
 
 func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterResponse, error) {
@@ -235,9 +448,10 @@ func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterRes
 }
 
 type WorkspaceReposResponse struct {
-	WorkspaceID  string     `json:"workspace_id"`
-	Repos        []RepoData `json:"repos"`
-	ReposVersion string     `json:"repos_version"`
+	WorkspaceID  string          `json:"workspace_id"`
+	Repos        []RepoData      `json:"repos"`
+	ReposVersion string          `json:"repos_version"`
+	Settings     json.RawMessage `json:"settings,omitempty"`
 }
 
 func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*WorkspaceReposResponse, error) {
@@ -246,6 +460,103 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// defaultTerminalRetrySchedule is the backoff used by postJSONWithRetry for
+// terminal task callbacks (CompleteTask / FailTask). N entries → N+1 attempts
+// in the worst case (one immediate + N retries). Five backoffs totalling
+// 124s is wide enough to ride out the short upstream blips we've seen
+// (MUL-2780) without leaving the task stuck if the outage outlives the
+// window.
+var defaultTerminalRetrySchedule = []time.Duration{
+	4 * time.Second,
+	8 * time.Second,
+	16 * time.Second,
+	32 * time.Second,
+	64 * time.Second,
+}
+
+// retrySleep is the sleep used between retry attempts. Pulled into a package
+// variable so tests can swap in an instant sleep without rewriting the
+// caller's schedule.
+var retrySleep = func(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// isTransientError reports whether err looks like a hiccup that's likely to
+// resolve on retry: connection / TLS / I/O errors at the transport layer
+// (including client timeouts surfacing as context.DeadlineExceeded inside
+// http.Client.Do), 5xx server responses, and 408/429 rate-limit-style 4xx
+// codes. Other 4xx codes are treated as permanent — retrying a 400 (bad
+// body) or 404 (task not found) only burns time.
+//
+// The caller is responsible for separately bailing on parent-context
+// cancellation; this predicate cannot distinguish "the daemon is shutting
+// down" from "the HTTP client timed out a single attempt" because both
+// reach here as context errors wrapped by net/http.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var reqErr *requestError
+	if errors.As(err, &reqErr) {
+		if reqErr.StatusCode >= 500 {
+			return true
+		}
+		if reqErr.StatusCode == http.StatusRequestTimeout || reqErr.StatusCode == http.StatusTooManyRequests {
+			return true
+		}
+		return false
+	}
+	return true
+}
+
+// postJSONWithRetry posts a JSON body with bounded exponential backoff,
+// intended for "must reach the server" terminal callbacks (CompleteTask /
+// FailTask). It retries transient errors per isTransientError and stops
+// immediately on permanent 4xx responses so we don't burn the schedule on
+// requests the server has already rejected.
+//
+// schedule controls the sleeps between attempts. With N entries the helper
+// performs N+1 attempts in the worst case (one initial + N retries). The
+// returned error is the last response from the server, so callers can still
+// inspect it with isTransientError to decide whether to fall back to a
+// different terminal call (e.g. complete → fail on permanent error only).
+//
+// The server-side CompleteTask / FailTask treat "already terminal" as an
+// idempotent success (see service/task.go), so a duplicate replay from a
+// retry is safe even if the server's prior response was lost in transit.
+func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any, respBody any, schedule []time.Duration) error {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			if lastErr != nil {
+				return lastErr
+			}
+			return err
+		}
+		err := c.postJSON(ctx, path, reqBody, respBody)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTransientError(err) {
+			return err
+		}
+		if attempt >= len(schedule) {
+			return err
+		}
+		if sleepErr := retrySleep(ctx, schedule[attempt]); sleepErr != nil {
+			return err
+		}
+	}
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
@@ -266,6 +577,7 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+	c.setIdentityHeaders(req)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -292,6 +604,7 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+	c.setIdentityHeaders(req)
 
 	resp, err := c.client.Do(req)
 	if err != nil {

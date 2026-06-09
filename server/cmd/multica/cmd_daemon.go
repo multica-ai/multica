@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 var daemonCmd = &cobra.Command{
@@ -44,10 +46,28 @@ var daemonStatusCmd = &cobra.Command{
 	RunE:  runDaemonStatus,
 }
 
+var daemonRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the running daemon (stop + start)",
+	RunE:  runDaemonRestart,
+}
+
 var daemonLogsCmd = &cobra.Command{
 	Use:   "logs",
 	Short: "Show daemon logs",
 	RunE:  runDaemonLogs,
+}
+
+var daemonDiskUsageCmd = &cobra.Command{
+	Use:   "disk-usage",
+	Short: "Show daemon workspace disk usage by task or workspace",
+	Long: "Walks the daemon's workspaces root and reports per-task or per-workspace disk usage.\n" +
+		"Default view is per-task, sorted by size descending. --by-workspace switches to a per-workspace summary;\n" +
+		"--top N keeps only the largest N entries.\n\n" +
+		"Bytes are split into total and the artifact-cleanable subset (node_modules, .next, .turbo by default,\n" +
+		"overridable via MULTICA_GC_ARTIFACT_PATTERNS) so the report stays in sync with what the GC reclaims.\n" +
+		"The walk skips .git and never follows symlinks. The daemon does not need to be running.",
+	RunE: runDaemonDiskUsage,
 }
 
 func init() {
@@ -58,18 +78,44 @@ func init() {
 	f.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
 	f.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
-	f.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	f.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
+	f.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
+	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
+	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
 
 	daemonStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
+	// restart shares all the same flags as start
+	rf := daemonRestartCmd.Flags()
+	rf.Bool("foreground", false, "Run in the foreground instead of background")
+	rf.String("daemon-id", "", "Unique daemon identifier (env: MULTICA_DAEMON_ID)")
+	rf.String("device-name", "", "Human-readable device name (env: MULTICA_DAEMON_DEVICE_NAME)")
+	rf.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
+	rf.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
+	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
+	rf.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
+	rf.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
+	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
+	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
+	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
+
+	df := daemonDiskUsageCmd.Flags()
+	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
+	df.Bool("by-task", false, "Per-task view (default; mutually exclusive with --by-workspace)")
+	df.Int("top", 0, "Keep only the largest N entries (across all workspaces)")
+	df.String("output", "table", "Output format: table or json")
+	df.String("workspaces-root", "", "Override the workspaces root path (default: same as the daemon)")
+
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
+	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
+	daemonCmd.AddCommand(daemonDiskUsageCmd)
 }
 
 // daemonDirForProfile returns the state directory for the given profile.
@@ -123,12 +169,13 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if health["status"] == "running" {
+	if daemonAlive(health) {
 		label := "daemon"
 		if profile != "" {
 			label = fmt.Sprintf("daemon [%s]", profile)
 		}
-		return fmt.Errorf("%s is already running (pid %v)", label, health["pid"])
+		pid, _ := health["pid"].(float64)
+		return fmt.Errorf("%s is already running (pid %v). Use 'daemon restart' to restart it", label, int(pid))
 	}
 
 	// Resolve current executable.
@@ -155,11 +202,29 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
 	child.Stderr = logFile
-	child.SysProcAttr = daemonSysProcAttr()
+	// On Windows we want to break the child out of the parent shell's Job
+	// Object so the daemon survives parent-shell exit. If the parent's Job
+	// has not granted BREAKAWAY_OK, CreateProcess returns
+	// ERROR_ACCESS_DENIED — fall back to spawning without breakaway, which
+	// matches the pre-fix behaviour. On Unix the bool is a no-op.
+	child.SysProcAttr = daemonSysProcAttr(true)
 
 	if err := child.Start(); err != nil {
-		logFile.Close()
-		return fmt.Errorf("start daemon: %w", err)
+		if isAccessDeniedSpawnErr(err) {
+			// Retry without breakaway. Reset the cmd state — exec.Cmd is
+			// not safe to Start() twice, so build a fresh one.
+			child = exec.Command(exePath, args...)
+			child.Stdout = logFile
+			child.Stderr = logFile
+			child.SysProcAttr = daemonSysProcAttr(false)
+			if err := child.Start(); err != nil {
+				logFile.Close()
+				return fmt.Errorf("start daemon (no breakaway): %w", err)
+			}
+		} else {
+			logFile.Close()
+			return fmt.Errorf("start daemon: %w", err)
+		}
 	}
 	logFile.Close()
 	pid := child.Process.Pid
@@ -173,21 +238,33 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
-	// Poll health endpoint until the daemon is ready or timeout.
-	deadline := time.Now().Add(15 * time.Second)
+	// Poll the health endpoint until the daemon reports ready ("running") or we
+	// time out. The daemon binds the health port almost immediately but reports
+	// status:"starting" until preflight finishes (PAT renew + initial workspace
+	// sync, which exec's every configured agent for version detection and can
+	// take ~20s on a cold cache). Wait long enough to cover that so a healthy
+	// cold start is not misreported as a failure.
+	const startupTimeout = 45 * time.Second
+	deadline := time.Now().Add(startupTimeout)
 	started := false
+	lastStatus := ""
 	for time.Now().Before(deadline) {
 		time.Sleep(500 * time.Millisecond)
 		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
 		health = checkDaemonHealthOnPort(hctx, healthPort)
 		hcancel()
-		if health["status"] == "running" {
+		lastStatus, _ = health["status"].(string)
+		if lastStatus == "running" {
 			started = true
 			break
 		}
 	}
 	if !started {
-		fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
+		if lastStatus == "starting" {
+			fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logPath)
+		} else {
+			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
+		}
 		return nil
 	}
 
@@ -219,11 +296,23 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("heartbeat-interval"); d > 0 {
 		args = append(args, "--heartbeat-interval", d.String())
 	}
-	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
+	// Forward agent-timeout when explicitly set, including an explicit 0
+	// (= no cap), so it can override an environment MULTICA_AGENT_TIMEOUT.
+	if cmd.Flags().Changed("agent-timeout") {
+		d, _ := cmd.Flags().GetDuration("agent-timeout")
 		args = append(args, "--agent-timeout", d.String())
+	}
+	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
+		args = append(args, "--codex-semantic-inactivity-timeout", d.String())
 	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		args = append(args, "--max-concurrent-tasks", strconv.Itoa(n))
+	}
+	if b, _ := cmd.Flags().GetBool("no-auto-update"); b {
+		args = append(args, "--no-auto-update")
+	}
+	if d, _ := cmd.Flags().GetDuration("auto-update-interval"); d > 0 {
+		args = append(args, "--auto-update-interval", d.String())
 	}
 
 	// Forward global persistent flags.
@@ -238,6 +327,8 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 }
 
 func runDaemonForeground(cmd *cobra.Command) error {
+	util.EnsureHiddenConsole()
+
 	profile := resolveProfile(cmd)
 
 	serverURL := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
@@ -260,11 +351,23 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if d, _ := cmd.Flags().GetDuration("heartbeat-interval"); d > 0 {
 		overrides.HeartbeatInterval = d
 	}
-	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
-		overrides.AgentTimeout = d
+	// Distinguish "flag not passed" from an explicit `--agent-timeout 0` so a
+	// user can turn off an env-configured cap from the CLI.
+	if cmd.Flags().Changed("agent-timeout") {
+		d, _ := cmd.Flags().GetDuration("agent-timeout")
+		overrides.AgentTimeout = &d
+	}
+	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
+		overrides.CodexSemanticInactivityTimeout = d
 	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		overrides.MaxConcurrentTasks = n
+	}
+	if b, _ := cmd.Flags().GetBool("no-auto-update"); b {
+		overrides.DisableAutoUpdate = true
+	}
+	if d, _ := cmd.Flags().GetDuration("auto-update-interval"); d > 0 {
+		overrides.AutoUpdateCheckInterval = d
 	}
 
 	cfg, err := daemon.LoadConfig(overrides)
@@ -304,16 +407,36 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			logger.Error("failed to open log file for restart", "error", err)
-			return nil
+			// Runtimes were already deregistered by triggerRestart() before handoff.
+			// The supervisor-spawned successor re-registers on startup; do not
+			// duplicate cleanup here.
+			return fmt.Errorf("failed to open daemon log file %s for restart: %w", logPath, err)
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile
-		child.SysProcAttr = daemonSysProcAttr()
+		// Break out of the parent's Job Object on Windows; see the
+		// runDaemonBackground call site for rationale.
+		child.SysProcAttr = daemonSysProcAttr(true)
 
 		if err := child.Start(); err != nil {
-			logFile.Close()
-			logger.Error("failed to start new daemon", "error", err)
-			return nil
+			// Runtimes were already deregistered by triggerRestart() before handoff.
+			// The supervisor-spawned successor re-registers on startup; do not
+			// duplicate cleanup here.
+			if isAccessDeniedSpawnErr(err) {
+				child = exec.Command(restartBin, args...)
+				child.Stdout = logFile
+				child.Stderr = logFile
+				child.SysProcAttr = daemonSysProcAttr(false)
+				if err := child.Start(); err != nil {
+					logFile.Close()
+					logger.Error("failed to start new daemon (no breakaway)", "error", err)
+					return fmt.Errorf("failed to start new daemon at %s without breakaway: %w", restartBin, err)
+				}
+			} else {
+				logFile.Close()
+				logger.Error("failed to start new daemon", "error", err)
+				return fmt.Errorf("failed to start new daemon at %s: %w", restartBin, err)
+			}
 		}
 		logFile.Close()
 		child.Process.Release()
@@ -328,6 +451,43 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	return nil
 }
 
+// --- daemon restart ---
+
+func runDaemonRestart(cmd *cobra.Command, args []string) error {
+	profile := resolveProfile(cmd)
+	healthPort := healthPortForProfile(profile)
+
+	// Stop if running.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if daemonAlive(health) {
+		pid, _ := health["pid"].(float64)
+		if pid > 0 {
+			fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
+			if err := requestDaemonShutdown(healthPort); err != nil {
+				if p, perr := os.FindProcess(int(pid)); perr == nil {
+					_ = p.Kill()
+				}
+			}
+			// Wait until the port is fully released (not merely past "running"),
+			// otherwise the fresh start below races the old daemon's listener.
+			for i := 0; i < 10; i++ {
+				time.Sleep(500 * time.Millisecond)
+				sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
+				h := checkDaemonHealthOnPort(sctx, healthPort)
+				scancel()
+				if !daemonAlive(h) {
+					break
+				}
+			}
+		}
+	}
+
+	// Start fresh.
+	return runDaemonStart(cmd, args)
+}
+
 // --- daemon stop ---
 
 func runDaemonStop(cmd *cobra.Command, _ []string) error {
@@ -338,7 +498,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if health["status"] != "running" {
+	if !daemonAlive(health) {
 		label := "Daemon"
 		if profile != "" {
 			label = fmt.Sprintf("Daemon [%s]", profile)
@@ -357,8 +517,17 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("find process %d: %w", int(pid), err)
 	}
 
-	if err := stopDaemonProcess(process); err != nil {
-		return fmt.Errorf("stop daemon (pid %d): %w", int(pid), err)
+	// Request graceful shutdown via the daemon's HTTP /shutdown endpoint
+	// rather than an OS signal. On Windows the daemon is spawned with
+	// DETACHED_PROCESS so it shares no console with us, which means
+	// GenerateConsoleCtrlEvent can't reach it; HTTP works on both
+	// platforms and triggers the same context-cancel path the daemon
+	// already uses for self-restart.
+	if err := requestDaemonShutdown(healthPort); err != nil {
+		fmt.Fprintf(os.Stderr, "Graceful shutdown request failed: %v — falling back to forced kill.\n", err)
+		if kerr := process.Kill(); kerr != nil {
+			return fmt.Errorf("kill daemon (pid %d): %w", int(pid), kerr)
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
@@ -369,7 +538,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		ctx2, cancel2 := context.WithTimeout(context.Background(), 1*time.Second)
 		h := checkDaemonHealthOnPort(ctx2, healthPort)
 		cancel2()
-		if h["status"] != "running" {
+		if !daemonAlive(h) {
 			os.Remove(daemonPIDPathForProfile(profile))
 			fmt.Fprintln(os.Stderr, "Daemon stopped.")
 			return nil
@@ -377,6 +546,27 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Fprintln(os.Stderr, "Daemon is still stopping. It may be finishing a running task.")
+	return nil
+}
+
+// requestDaemonShutdown POSTs to the daemon's /shutdown endpoint to ask it
+// to exit gracefully. Returns an error if the request could not be delivered
+// (network error, non-2xx status, or the endpoint predates this change).
+func requestDaemonShutdown(healthPort int) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d/shutdown", healthPort)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
 	return nil
 }
 
@@ -401,23 +591,48 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		label = fmt.Sprintf("Daemon [%s]", profile)
 	}
 
-	if health["status"] != "running" {
+	switch health["status"] {
+	case "running":
+		printDaemonStatusReport(os.Stdout, label, health)
+	case "starting":
+		fmt.Fprintf(os.Stdout, "%s: starting (pid %v)\n", label, health["pid"])
+	default:
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
-		return nil
 	}
+	return nil
+}
 
-	fmt.Fprintf(os.Stdout, "%s:      running (pid %v, uptime %v)\n", label, health["pid"], health["uptime"])
+// printDaemonStatusReport renders a key/value summary of the daemon health
+// response. The value column is aligned to the widest label so the dynamic
+// "Daemon [profile]" row stays in step with the static rows below it.
+func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
+	type row struct{ key, value string }
+	rows := []row{
+		{label, fmt.Sprintf("running (pid %v, uptime %v)", health["pid"], health["uptime"])},
+	}
+	if version, ok := health["cli_version"].(string); ok && version != "" {
+		rows = append(rows, row{"Version", version})
+	}
 	if agents, ok := health["agents"].([]any); ok && len(agents) > 0 {
 		parts := make([]string, len(agents))
 		for i, a := range agents {
 			parts[i] = fmt.Sprint(a)
 		}
-		fmt.Fprintf(os.Stdout, "Agents:      %s\n", strings.Join(parts, ", "))
+		rows = append(rows, row{"Agents", strings.Join(parts, ", ")})
 	}
 	if ws, ok := health["workspaces"].([]any); ok {
-		fmt.Fprintf(os.Stdout, "Workspaces:  %d\n", len(ws))
+		rows = append(rows, row{"Workspaces", strconv.Itoa(len(ws))})
 	}
-	return nil
+
+	keyWidth := 0
+	for _, r := range rows {
+		if n := len(r.key); n > keyWidth {
+			keyWidth = n
+		}
+	}
+	for _, r := range rows {
+		fmt.Fprintf(w, "%-*s  %s\n", keyWidth+1, r.key+":", r.value)
+	}
 }
 
 // --- daemon logs ---
@@ -433,6 +648,20 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	lines, _ := cmd.Flags().GetInt("lines")
 
 	return tailLogFile(logPath, lines, follow)
+}
+
+// daemonAlive reports whether a health response indicates a live daemon
+// process on the port — either fully "running" (ready) or still "starting"
+// (port bound, preflight in progress). Lifecycle commands that only need to
+// know "is a daemon there" (already-running guard, restart, stop) use this,
+// whereas `daemon start`'s readiness wait gates on the stricter "running".
+func daemonAlive(health map[string]any) bool {
+	switch health["status"] {
+	case "running", "starting":
+		return true
+	default:
+		return false
+	}
 }
 
 // checkDaemonHealthOnPort calls the daemon's local health endpoint on the given port.
@@ -461,4 +690,180 @@ func checkDaemonHealthOnPort(ctx context.Context, port int) map[string]any {
 func flagString(cmd *cobra.Command, name string) string {
 	val, _ := cmd.Flags().GetString(name)
 	return val
+}
+
+// --- daemon disk-usage ---
+
+func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
+	profile := resolveProfile(cmd)
+	rootOverride, _ := cmd.Flags().GetString("workspaces-root")
+	byWorkspace, _ := cmd.Flags().GetBool("by-workspace")
+	byTask, _ := cmd.Flags().GetBool("by-task")
+	top, _ := cmd.Flags().GetInt("top")
+	output, _ := cmd.Flags().GetString("output")
+
+	if byWorkspace && byTask {
+		return fmt.Errorf("--by-workspace and --by-task are mutually exclusive")
+	}
+	if top < 0 {
+		return fmt.Errorf("--top must be a non-negative integer")
+	}
+
+	workspacesRoot, err := daemon.ResolveWorkspacesRoot(profile, rootOverride)
+	if err != nil {
+		return fmt.Errorf("resolve workspaces root: %w", err)
+	}
+
+	report, err := daemon.ScanDiskUsage(workspacesRoot, daemon.ArtifactPatternsFromEnv())
+	if err != nil {
+		return err
+	}
+
+	if top > 0 {
+		if byWorkspace {
+			if top < len(report.Workspaces) {
+				report.Workspaces = report.Workspaces[:top]
+			}
+		} else if top < len(report.Tasks) {
+			report.Tasks = report.Tasks[:top]
+		}
+	}
+
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, report)
+	}
+
+	if byWorkspace {
+		printDiskUsageWorkspaceTable(os.Stdout, report)
+		return nil
+	}
+	printDiskUsageTaskTable(os.Stdout, report)
+	return nil
+}
+
+func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
+	fmt.Fprintf(w, "Workspaces root: %s\n", report.WorkspacesRoot)
+	if report.TotalTaskCount == 0 {
+		fmt.Fprintln(w, "(no task directories)")
+		return
+	}
+	rows := make([][]string, 0, len(report.Tasks))
+	var displayedSize, displayedArtifact int64
+	for _, task := range report.Tasks {
+		displayedSize += task.SizeBytes
+		displayedArtifact += task.ArtifactSizeBytes
+		rows = append(rows, []string{
+			task.WorkspaceShort + "/" + task.TaskShort,
+			task.Kind,
+			emptyDash(task.ParentStatus),
+			formatAge(task.AgeSeconds),
+			formatBytes(task.SizeBytes),
+			formatBytes(task.ArtifactSizeBytes),
+		})
+	}
+	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS"}, rows)
+
+	if len(report.Tasks) < report.TotalTaskCount {
+		// Report-wide totals stay anchored to the full scan; the displayed
+		// row is what the user is currently looking at. Calling these out
+		// separately keeps `--top N` from misleading at-a-glance triage.
+		fmt.Fprintf(w, "\nShowing top %d of %d task(s). Displayed: %s (%s artifacts). Scan total: %s (%s artifacts, %.1f%% reclaimable).\n",
+			len(report.Tasks), report.TotalTaskCount,
+			formatBytes(displayedSize), formatBytes(displayedArtifact),
+			formatBytes(report.TotalSizeBytes), formatBytes(report.TotalArtifactSizeBytes),
+			report.TotalArtifactRatio*100)
+		return
+	}
+	fmt.Fprintf(w, "\nTotal: %s across %d task(s); %s reclaimable as artifacts (%.1f%%).\n",
+		formatBytes(report.TotalSizeBytes), report.TotalTaskCount,
+		formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
+}
+
+func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
+	fmt.Fprintf(w, "Workspaces root: %s\n", report.WorkspacesRoot)
+	if report.TotalWorkspaceCount == 0 {
+		fmt.Fprintln(w, "(no workspaces)")
+		return
+	}
+	rows := make([][]string, 0, len(report.Workspaces))
+	var displayedSize, displayedArtifact int64
+	for _, ws := range report.Workspaces {
+		displayedSize += ws.SizeBytes
+		displayedArtifact += ws.ArtifactSizeBytes
+		rows = append(rows, []string{
+			ws.WorkspaceShort,
+			strconv.Itoa(ws.TaskCount),
+			formatBytes(ws.SizeBytes),
+			formatBytes(ws.ArtifactSizeBytes),
+			formatRatio(ws.ArtifactRatio),
+			formatAge(ws.OldestAgeSeconds),
+		})
+	}
+	cli.PrintTable(w, []string{"WORKSPACE", "TASKS", "SIZE", "ARTIFACTS", "ARTIFACT %", "OLDEST"}, rows)
+
+	if len(report.Workspaces) < report.TotalWorkspaceCount {
+		fmt.Fprintf(w, "\nShowing top %d of %d workspace(s). Displayed: %s (%s artifacts). Scan total: %s (%s artifacts, %.1f%% reclaimable).\n",
+			len(report.Workspaces), report.TotalWorkspaceCount,
+			formatBytes(displayedSize), formatBytes(displayedArtifact),
+			formatBytes(report.TotalSizeBytes), formatBytes(report.TotalArtifactSizeBytes),
+			report.TotalArtifactRatio*100)
+		return
+	}
+	fmt.Fprintf(w, "\nTotal: %s across %d workspace(s); %s reclaimable as artifacts (%.1f%%).\n",
+		formatBytes(report.TotalSizeBytes), report.TotalWorkspaceCount,
+		formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
+}
+
+// formatRatio renders a 0..1 fraction as a percentage to one decimal. A
+// non-finite or negative input collapses to "0.0%" — total=0 workspaces
+// shouldn't surface "NaN%".
+func formatRatio(r float64) string {
+	if r != r || r < 0 { // NaN check via inequality
+		return "0.0%"
+	}
+	return fmt.Sprintf("%.1f%%", r*100)
+}
+
+func emptyDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// formatBytes renders a byte count in IEC units (KiB/MiB/GiB) with one decimal
+// place above 1 KiB. Kept intentionally compact so the table view stays
+// scannable at terminal widths.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	prefix := "KMGTPE"[exp]
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), prefix)
+}
+
+// formatAge renders an age in the most human-friendly unit that still keeps
+// the value above 1. "0s" stands for "less than a second" — matches what the
+// GC log lines look like.
+func formatAge(seconds int64) string {
+	if seconds <= 0 {
+		return "0s"
+	}
+	d := time.Duration(seconds) * time.Second
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd %dh", int(d/(24*time.Hour)), int((d%(24*time.Hour))/time.Hour))
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh %dm", int(d/time.Hour), int((d%time.Hour)/time.Minute))
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm %ds", int(d/time.Minute), int((d%time.Minute)/time.Second))
+	default:
+		return fmt.Sprintf("%ds", seconds)
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -215,6 +216,53 @@ func TestIsReplyToMemberThread(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// shouldInheritParentMentions
+// -------------------------------------------------------------------
+
+func TestShouldInheritParentMentions(t *testing.T) {
+	memberParent := &db.Comment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "thread starter"}
+	agentParent := &db.Comment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
+	someMention := []util.Mention{{Type: "agent", ID: otherAgentID}}
+
+	tests := []struct {
+		name            string
+		parent          *db.Comment
+		replyMentions   []util.Mention
+		replyAuthorType string
+		want            bool
+	}{
+		{"nil parent → false", nil, nil, "member", false},
+		{"reply has explicit mentions → false", memberParent, someMention, "member", false},
+		{"agent-authored reply, member parent → false (loop guard)", memberParent, nil, "agent", false},
+		{"member reply, agent parent → false (parent author guard)", agentParent, nil, "member", false},
+		{"member reply, member parent, no mentions → true (intended use)", memberParent, nil, "member", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldInheritParentMentions(tt.parent, tt.replyMentions, tt.replyAuthorType)
+			if got != tt.want {
+				t.Errorf("shouldInheritParentMentions() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Regression for the case from MUL-1535: J posts a PR completion comment
+// that @mentions GPT-Boy for review; later a member posts a plain follow-up
+// reply asking the assignee a question. GPT-Boy must NOT be re-triggered.
+func TestShouldInheritParentMentions_AgentReviewDelegationDoesNotLeak(t *testing.T) {
+	jPRCompletion := &db.Comment{
+		AuthorType: "agent",
+		AuthorID:   testUUID(agentAssigneeID),
+		Content:    fmt.Sprintf("PR ready. [@GPT-Boy](mention://agent/%s) please review this.", otherAgentID),
+	}
+	if got := shouldInheritParentMentions(jPRCompletion, nil, "member"); got {
+		t.Fatal("member follow-up to an agent's PR-review delegation must not inherit the @reviewer mention")
+	}
+}
+
+// -------------------------------------------------------------------
 // Combined trigger decision (simulates the full on_comment check)
 // -------------------------------------------------------------------
 
@@ -268,3 +316,54 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 	}
 }
 
+// -------------------------------------------------------------------
+// isNoteComment — the /note opt-out prefix
+// -------------------------------------------------------------------
+
+func TestIsNoteComment(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"plain comment triggers", "just a plain comment", false},
+		{"note prefix skips", "/note check the API expiry", true},
+		{"bare note skips", "/note", true},
+		{"uppercase note skips (case-insensitive)", "/NOTE shout", true},
+		{"mixed case note skips", "/Note mixed", true},
+		{"leading whitespace tolerated", "   /note leading space", true},
+		{"note followed by newline skips", "/note\nmultiline body", true},
+		{"plural notes does not match (word boundary)", "/notes are plural", false},
+		{"noteworthy does not match", "/noteworthy idea", false},
+		{"slash space note does not match", "/ note has a space", false},
+		{"mid-sentence note does not match", "see foo/note here", false},
+		{"note as second token does not match", "fyi /note", false},
+		{"empty content does not match", "", false},
+		{"whitespace-only content does not match", "   ", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isNoteComment(tt.content); got != tt.want {
+				t.Errorf("isNoteComment(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTriggerTasksForComment_NoteShortCircuits proves a /note comment returns
+// before any of the three enqueue paths run. shouldEnqueueOnComment,
+// shouldEnqueueSquadLeaderOnComment, and enqueueMentionedAgentTasks all
+// dereference h.Queries, so a nil-Queries Handler would panic if the /note
+// guard were missing or moved below them. The comment also @mentions an agent
+// to exercise the mention path specifically.
+func TestTriggerTasksForComment_NoteShortCircuits(t *testing.T) {
+	h := &Handler{} // nil Queries / TaskService on purpose
+	issue := issueWithAgentAssignee()
+	comment := db.Comment{
+		Content: fmt.Sprintf("/note cc [@Other](mention://agent/%s) just an fyi", otherAgentID),
+	}
+
+	// Must not panic — the guard short-circuits before any DB access.
+	h.triggerTasksForComment(context.Background(), issue, comment, nil, "member", memberID)
+}

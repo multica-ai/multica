@@ -4,7 +4,11 @@ export type DaemonState =
   | "starting"
   | "stopping"
   | "installing_cli"
-  | "cli_not_found";
+  | "cli_not_found"
+  // The daemon can't start because the server rejected its credentials (the
+  // cached PAT expired / was revoked, or the session token is dead). Without
+  // this, an auth failure silently sticks at "starting" forever — see #3512.
+  | "auth_expired";
 
 export interface DaemonStatus {
   state: DaemonState;
@@ -32,6 +36,7 @@ export const DAEMON_STATE_COLORS: Record<DaemonState, string> = {
   stopping: "bg-amber-500 animate-pulse",
   installing_cli: "bg-sky-500 animate-pulse",
   cli_not_found: "bg-red-500",
+  auth_expired: "bg-red-500",
 };
 
 export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
@@ -41,6 +46,7 @@ export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
   stopping: "Stopping…",
   installing_cli: "Setting up…",
   cli_not_found: "Setup Failed",
+  auth_expired: "Sign-in required",
 };
 
 export function formatUptime(uptime?: string): string {
@@ -50,4 +56,51 @@ export function formatUptime(uptime?: string): string {
   const h = match[1] ? `${match[1]}h ` : "";
   const m = match[2] ? `${match[2]}m` : "";
   return `${h}${m}`.trim() || uptime;
+}
+
+/**
+ * Whether a raw daemon `/health` `status` value means a live daemon is on the
+ * port — either fully "running" (ready) or still "starting" (port bound,
+ * preflight in progress). Mirrors the Go `daemonAlive()` in
+ * server/cmd/multica/cmd_daemon.go so the Desktop lifecycle agrees with the
+ * CLI: a "starting" daemon is already there and must not be spawned over (the
+ * CLI rejects that as "already running"). This is liveness, not readiness —
+ * version-restart decisions still gate on the stricter "running".
+ */
+export function daemonStatusAlive(status: string | undefined): boolean {
+  return status === "running" || status === "starting";
+}
+
+/**
+ * User-facing description for the local daemon's current state. Replaces the
+ * raw state label ("Running" / "Stopped") with a sentence that answers
+ * "what does this mean for me?" — i.e. whether tasks can run on this device.
+ *
+ * `runtimeCount` is the number of runtimes the local daemon has registered
+ * (claude / codex / gemini / ... — one per detected CLI). It's only consulted
+ * when state === "running".
+ */
+export function daemonStateDescription(state: DaemonState, runtimeCount: number): string {
+  switch (state) {
+    case "running":
+      if (runtimeCount === 0) {
+        return "Running, but no runtimes have registered yet.";
+      }
+      if (runtimeCount === 1) {
+        return "Running here · 1 runtime available for tasks.";
+      }
+      return `Running here · ${runtimeCount} runtimes available for tasks.`;
+    case "stopped":
+      return "Not running · this device can't take new tasks.";
+    case "starting":
+      return "Starting up the local daemon…";
+    case "stopping":
+      return "Shutting down the local daemon…";
+    case "installing_cli":
+      return "Setting up the runtime for the first time. Only happens once.";
+    case "cli_not_found":
+      return "Setup failed · couldn't download the runtime. Check your network.";
+    case "auth_expired":
+      return "Sign-in expired · sign in again to bring this device back online.";
+  }
 }

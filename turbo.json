@@ -8,17 +8,23 @@
     "NEXT_PUBLIC_API_URL",
     "NEXT_PUBLIC_WS_URL",
     "MULTICA_SERVER_URL",
+    "DOCS_URL",
     "COMPOSE_PROJECT_NAME",
     "POSTGRES_DB",
-    "POSTGRES_PORT"
+    "POSTGRES_PORT",
+    "DESKTOP_RENDERER_PORT"
   ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["src/**", "app/**", "**/*.ts", "**/*.tsx", "**/*.css"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+      "outputs": [".next/**", "!.next/cache/**", "dist/**", "out/**"]
     },
     "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "dev:staging": {
       "cache": false,
       "persistent": true
     },

@@ -1,0 +1,53 @@
+{
+  "header": {
+    "back": "戻る",
+    "log_out": "ログアウト"
+  },
+  "not_found": {
+    "title": "招待が見つかりません",
+    "description": "この招待は期限切れか取り消されたか、お使いのアカウントに属していない可能性があります。",
+    "go_to_dashboard": "ダッシュボードへ移動"
+  },
+  "accepted": {
+    "title": "{{workspace_name}}に参加しました！",
+    "redirecting": "ワークスペースへ移動中..."
+  },
+  "declined": {
+    "title": "招待を辞退しました",
+    "description": "このワークスペースには追加されません。",
+    "go_to_dashboard": "ダッシュボードへ移動"
+  },
+  "main": {
+    "join_title": "{{workspace_name}}に参加",
+    "fallback_workspace_name": "ワークスペース",
+    "invited_role_admin": "さんがあなたをadminとして招待しました。",
+    "invited_role_member": "さんがあなたをmemberとして招待しました。",
+    "already_handled_accepted": "この招待はすでに承認されています。",
+    "already_handled_declined": "この招待はすでに辞退されています。",
+    "expired": "この招待は期限切れです。",
+    "decline": "辞退",
+    "declining": "辞退中...",
+    "accept": "承認して参加",
+    "joining": "参加中..."
+  },
+  "errors": {
+    "accept_failed": "招待を承認できませんでした",
+    "decline_failed": "招待を辞退できませんでした"
+  },
+  "batch": {
+    "log_out": "ログアウト",
+    "empty_title": "保留中の招待はありません",
+    "empty_hint": "続けて自分のワークスペースを設定しましょう。",
+    "empty_continue": "セットアップを続ける",
+    "title": "招待を受け取りました",
+    "subtitle": "参加するワークスペースを選択してください。残りはいつでもサイドバーから処理できます。",
+    "submit_skip": "スキップして自分のワークスペースを設定",
+    "submit_join_other": "{{count}} 件のワークスペースに参加",
+    "joining": "参加中...",
+    "error_generic": "招待を処理できませんでした。もう一度お試しください。",
+    "row_workspace_fallback": "ワークスペース",
+    "row_inviter_fallback": "誰か",
+    "row_invited_admin": "{{inviter}}さんがあなたをadminとして招待しました",
+    "row_invited_member": "{{inviter}}さんがあなたをmemberとして招待しました"
+  }
+}

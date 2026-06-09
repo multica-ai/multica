@@ -2,17 +2,26 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cloudruntime"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -20,6 +29,14 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// randomID returns a random 16-byte hex string used as a request ID for
+// in-memory stores (model list, local skills, CLI update, etc.).
+func randomID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 type txStarter interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
@@ -31,41 +48,169 @@ type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-type Handler struct {
-	Queries          *db.Queries
-	DB               dbExecutor
-	TxStarter        txStarter
-	Hub              *realtime.Hub
-	Bus              *events.Bus
-	TaskService      *service.TaskService
-	AutopilotService *service.AutopilotService
-	EmailService     *service.EmailService
-	PingStore        *PingStore
-	UpdateStore      *UpdateStore
-	Storage          storage.Storage
-	CFSigner         *auth.CloudFrontSigner
+type Config struct {
+	AllowSignup         bool
+	AllowedEmails       []string
+	AllowedEmailDomains []string
+	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
+	// 403 for every caller. There is no role/owner exception because the repo
+	// has no platform-admin concept; operators bootstrap the workspace with
+	// the flag off, then flip it on and restart so subsequent users join via
+	// invitation only. The public /api/config endpoint mirrors this flag so
+	// the UI can hide every "Create workspace" affordance — see #3433.
+	DisableWorkspaceCreation bool
+	// PublicURL is the absolute base URL the API is reachable at from the
+	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
+	// Used only to build webhook_url responses for autopilot webhook triggers
+	// — never for auth, routing, or workspace resolution. Empty when unset,
+	// in which case clients fall back to webhook_path + their own origin.
+	// Reading the public host from request headers (Host / X-Forwarded-Host)
+	// is intentionally avoided so a misconfigured reverse proxy cannot trick
+	// the server into minting webhook URLs pointing at an attacker-controlled
+	// host.
+	PublicURL string
+	// TrustedProxies are CIDRs whose source IP we trust to set
+	// X-Forwarded-For / X-Real-IP. Empty means "trust nothing": the rate
+	// limiter uses r.RemoteAddr exclusively. Populated via the
+	// MULTICA_TRUSTED_PROXIES env var (comma-separated CIDRs, e.g.
+	// "10.0.0.0/8,127.0.0.1/32"). This is specifically to keep the per-IP
+	// webhook limiter from being bypassed by a spoofed XFF on deployments
+	// without a header-stripping reverse proxy in front.
+	TrustedProxies []netip.Prefix
+	// CloudRuntimeFleetURL enables the SaaS-only remote Fleet adapter when set.
+	// Empty keeps self-hosted deployments explicit: cloud runtime endpoints
+	// return 503 instead of attempting to dial a hard-coded private service.
+	CloudRuntimeFleetURL     string
+	CloudRuntimeFleetTimeout time.Duration
+	AttachmentDownloadMode   string
+	AttachmentDownloadURLTTL time.Duration
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
+type cloudRuntimeProxy interface {
+	Enabled() bool
+	Do(ctx context.Context, req cloudruntime.Request) (*cloudruntime.Response, error)
+}
+
+type Handler struct {
+	Queries               *db.Queries
+	DB                    dbExecutor
+	TxStarter             txStarter
+	Hub                   *realtime.Hub
+	DaemonHub             *daemonws.Hub
+	Bus                   *events.Bus
+	TaskService           *service.TaskService
+	IssueService          *service.IssueService
+	AutopilotService      *service.AutopilotService
+	EmailService          *service.EmailService
+	UpdateStore           UpdateStore
+	ModelListStore        ModelListStore
+	LocalSkillListStore   LocalSkillListStore
+	LocalSkillImportStore LocalSkillImportStore
+	LivenessStore         LivenessStore
+	HeartbeatScheduler    HeartbeatScheduler
+	Storage               storage.Storage
+	CFSigner              *auth.CloudFrontSigner
+	Analytics             analytics.Client
+	// Metrics is the shared business-metrics collector built by main.go.
+	// May be nil in tests / self-hosted with the metrics listener disabled;
+	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
+	// nil Metrics as "PostHog only".
+	Metrics              *obsmetrics.BusinessMetrics
+	PATCache             *auth.PATCache
+	DaemonTokenCache     *auth.DaemonTokenCache
+	MembershipCache      *auth.MembershipCache
+	WebhookRateLimiter   WebhookRateLimiter
+	WebhookIPRateLimiter WebhookRateLimiter
+	CloudRuntime         cloudRuntimeProxy
+	// Lark integration. All three are nil when the Lark master key
+	// (MULTICA_LARK_SECRET_KEY) is unset; the corresponding HTTP
+	// handlers return 503 in that case so a misconfigured self-host
+	// deployment surfaces a clear error instead of silently using a
+	// zero key. Wired in cmd/server/router.go after handler.New.
+	LarkInstallations *lark.InstallationService
+	LarkBindingTokens *lark.BindingTokenService
+	// LarkRegistration owns the device-flow install lifecycle: begin
+	// a registration session against accounts.feishu.cn, poll, and
+	// on success write lark_installation + the installer's
+	// lark_user_binding in one DB transaction. Nil when the at-rest
+	// key is unset or the RegistrationService failed to construct at
+	// boot.
+	LarkRegistration *lark.RegistrationService
+	// LarkAPIClient is the live transport that backs SendInteractiveCard,
+	// PatchInteractiveCard, SendBindingPromptCard, GetBotInfo. The
+	// router wires the real Lark HTTP client whenever
+	// MULTICA_LARK_SECRET_KEY is set; tests that need a no-op
+	// behaviour can swap in `lark.NewStubAPIClient(...)` directly. The
+	// UI consults IsConfigured() to decide whether to surface install
+	// entry points.
+	LarkAPIClient lark.APIClient
+	// LarkHub owns the per-installation supervisor goroutines that
+	// hold the §4.4 WS lease and run the EventConnector. Nil only
+	// when the master at-rest key (MULTICA_LARK_SECRET_KEY) is unset.
+	// The router constructs the Hub but does NOT call Run on it; the
+	// process owner (main.go) starts it under a long-running context
+	// and joins via WaitWithTimeout (bounded wait, fenced by
+	// ShutdownTimeout) during graceful shutdown so the lease renewer
+	// can yield cleanly when the DB is healthy without blocking
+	// process exit indefinitely if the pool is frozen — at worst the
+	// next replica waits the full TTL.
+	LarkHub *lark.Hub
+	cfg     Config
+}
+
+func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
 	}
 
-	taskSvc := service.NewTaskService(queries, hub, bus)
+	if analyticsClient == nil {
+		analyticsClient = analytics.NoopClient{}
+	}
+	if mode, ok := normalizeAttachmentDownloadMode(cfg.AttachmentDownloadMode); ok {
+		cfg.AttachmentDownloadMode = string(mode)
+	} else {
+		slog.Warn("invalid ATTACHMENT_DOWNLOAD_MODE, using auto", "value", cfg.AttachmentDownloadMode)
+		cfg.AttachmentDownloadMode = string(attachmentDownloadModeAuto)
+	}
+	if cfg.AttachmentDownloadURLTTL <= 0 {
+		cfg.AttachmentDownloadURLTTL = defaultAttachmentDownloadURLTTL
+	}
+
+	var daemonHub *daemonws.Hub
+	if len(daemonHubs) > 0 {
+		daemonHub = daemonHubs[0]
+	}
+
+	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
+	taskSvc.Analytics = analyticsClient
 	return &Handler{
-		Queries:          queries,
-		DB:               executor,
-		TxStarter:        txStarter,
-		Hub:              hub,
-		Bus:              bus,
-		TaskService:      taskSvc,
-		AutopilotService: service.NewAutopilotService(queries, txStarter, bus, taskSvc),
-		EmailService:     emailService,
-		PingStore:        NewPingStore(),
-		UpdateStore:      NewUpdateStore(),
-		Storage:          store,
-		CFSigner:         cfSigner,
+		Queries:               queries,
+		DB:                    executor,
+		TxStarter:             txStarter,
+		Hub:                   hub,
+		DaemonHub:             daemonHub,
+		Bus:                   bus,
+		TaskService:           taskSvc,
+		IssueService:          service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
+		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		EmailService:          emailService,
+		UpdateStore:           NewInMemoryUpdateStore(),
+		ModelListStore:        NewInMemoryModelListStore(),
+		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),
+		LocalSkillImportStore: NewInMemoryLocalSkillImportStore(),
+		LivenessStore:         NewNoopLivenessStore(),
+		HeartbeatScheduler:    NewPassthroughHeartbeatScheduler(queries),
+		Storage:               store,
+		CFSigner:              cfSigner,
+		Analytics:             analyticsClient,
+		WebhookRateLimiter:    NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
+		WebhookIPRateLimiter:  NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
+		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
+			BaseURL: cfg.CloudRuntimeFleetURL,
+			Timeout: cfg.CloudRuntimeFleetTimeout,
+		}),
+		cfg: cfg,
 	}
 }
 
@@ -79,15 +224,57 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// Thin wrappers around util functions (preserve existing handler code unchanged).
-func parseUUID(s string) pgtype.UUID                { return util.ParseUUID(s) }
+// Thin wrappers around util functions.
+//
+// parseUUID is intentionally the panicking variant: any handler call site
+// reachable here is expected to feed a UUID that is either (a) a sqlc round-trip
+// of a DB-sourced value, or (b) a raw request input that has already been
+// validated upstream. A panic here means an unguarded user-input string slipped
+// in — that is a real bug we want surfaced loudly (chi's middleware.Recoverer
+// converts it to a 500) instead of silently corrupting data via a zero UUID.
+//
+// For unvalidated user input at request boundaries, use parseUUIDOrBadRequest
+// (writes 400) — never feed raw chi.URLParam / request-body strings into
+// parseUUID directly when the call writes to the database.
+func parseUUID(s string) pgtype.UUID                { return util.MustParseUUID(s) }
 func uuidToString(u pgtype.UUID) string             { return util.UUIDToString(u) }
 func textToPtr(t pgtype.Text) *string               { return util.TextToPtr(t) }
 func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
 func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
+func dateToPtr(d pgtype.Date) *string               { return util.DateToPtr(d) }
 func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
+func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
+
+// parseUUIDOrBadRequest validates a UUID string sourced from user input
+// (URL params, request body, headers). On invalid input it writes a 400
+// response and returns ok=false; callers must return immediately.
+//
+// Use this anywhere a malformed UUID would otherwise reach a write query
+// (DELETE / UPDATE) — the silent zero-UUID behavior of the old ParseUUID
+// caused real silent-data-loss bugs (#1661).
+func parseUUIDOrBadRequest(w http.ResponseWriter, s, fieldName string) (pgtype.UUID, bool) {
+	u, err := util.ParseUUID(s)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid "+fieldName)
+		return pgtype.UUID{}, false
+	}
+	return u, true
+}
+
+func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName string) ([]pgtype.UUID, bool) {
+	uuids := make([]pgtype.UUID, len(ids))
+	for i, id := range ids {
+		u, err := util.ParseUUID(id)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid "+fieldName)
+			return nil, false
+		}
+		uuids[i] = u
+	}
+	return uuids, true
+}
 
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
@@ -100,6 +287,32 @@ func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, pay
 	})
 }
 
+// publishTask is publish() plus a TaskID hint so the realtime layer can route
+// the event to the per-task scope rather than the whole workspace.
+func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID string, payload any) {
+	h.Bus.Publish(events.Event{
+		Type:        eventType,
+		WorkspaceID: workspaceID,
+		ActorType:   actorType,
+		ActorID:     actorID,
+		TaskID:      taskID,
+		Payload:     payload,
+	})
+}
+
+// publishChat is publish() plus a ChatSessionID hint so the realtime layer
+// can route the event to the per-chat-session scope.
+func (h *Handler) publishChat(eventType, workspaceID, actorType, actorID, chatSessionID string, payload any) {
+	h.Bus.Publish(events.Event{
+		Type:          eventType,
+		WorkspaceID:   workspaceID,
+		ActorType:     actorType,
+		ActorID:       actorID,
+		ChatSessionID: chatSessionID,
+		Payload:       payload,
+	})
+}
+
 func isNotFound(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
@@ -109,35 +322,75 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// isCheckViolation reports whether err is a PostgreSQL CHECK constraint
+// violation (SQLSTATE 23514). Used to translate column-level CHECK failures
+// into a 4xx instead of a generic 500.
+func isCheckViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23514"
+}
+
 func requestUserID(r *http.Request) string {
 	return r.Header.Get("X-User-ID")
 }
 
 // resolveActor determines whether the request is from an agent or a human member.
-// If X-Agent-ID and X-Task-ID headers are both set, validates that the task
-// belongs to the claimed agent (defense-in-depth against manual header spoofing).
-// If only X-Agent-ID is set, validates that the agent belongs to the workspace.
+//
+// First-class signal: X-Actor-Source set to "task_token" means the request
+// authenticated via an `mat_` task-scoped token. The auth middleware sets
+// that header (and stripped any client-supplied value first), so it is
+// authoritative — the bound (agent_id, task_id) cannot be forged or
+// stripped by the agent process. This is the path MUL-2600 relies on to
+// reject agent-process traffic on owner-only endpoints.
+//
+// Fallback signal (legacy CLI / member-token paths): the request MUST
+// carry both X-Agent-ID and a valid X-Task-ID, and the task must belong
+// to the claimed agent. Otherwise we fall back to "member".
+//
+// X-Agent-ID alone is not trusted: any workspace member can guess or observe
+// an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
+// member impersonate the agent and bypass the private-agent gate (#2359
+// review). The daemon always pairs the two headers, so requiring both has
+// no effect on legitimate agent callers but closes the impersonation path.
+//
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		// Server-set header — auth middleware also forced X-Agent-ID
+		// from the token row. Trust it directly without re-querying.
+		return "agent", r.Header.Get("X-Agent-ID")
+	}
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
 		return "member", userID
 	}
+	taskID := r.Header.Get("X-Task-ID")
+	if taskID == "" {
+		slog.Debug("resolveActor: X-Agent-ID present but X-Task-ID missing, refusing to trust agent identity", "agent_id", agentID)
+		return "member", userID
+	}
 
+	agentUUID, err := util.ParseUUID(agentID)
+	if err != nil {
+		slog.Debug("resolveActor: X-Agent-ID is not a valid UUID, falling back to member", "agent_id", agentID)
+		return "member", userID
+	}
 	// Validate the agent exists in the target workspace.
-	agent, err := h.Queries.GetAgent(r.Context(), parseUUID(agentID))
+	agent, err := h.Queries.GetAgent(r.Context(), agentUUID)
 	if err != nil || uuidToString(agent.WorkspaceID) != workspaceID {
 		slog.Debug("resolveActor: X-Agent-ID rejected, agent not found or workspace mismatch", "agent_id", agentID, "workspace_id", workspaceID)
 		return "member", userID
 	}
 
-	// When X-Task-ID is provided, cross-check that the task belongs to this agent.
-	if taskID := r.Header.Get("X-Task-ID"); taskID != "" {
-		task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
-		if err != nil || uuidToString(task.AgentID) != agentID {
-			slog.Debug("resolveActor: X-Task-ID rejected, task not found or agent mismatch", "agent_id", agentID, "task_id", taskID)
-			return "member", userID
-		}
+	taskUUID, err := util.ParseUUID(taskID)
+	if err != nil {
+		slog.Debug("resolveActor: X-Task-ID is not a valid UUID, falling back to member", "task_id", taskID)
+		return "member", userID
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	if err != nil || uuidToString(task.AgentID) != agentID {
+		slog.Debug("resolveActor: X-Task-ID rejected, task not found or agent mismatch", "agent_id", agentID, "task_id", taskID)
+		return "member", userID
 	}
 
 	return "agent", agentID
@@ -152,16 +405,15 @@ func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return userID, true
 }
 
-func resolveWorkspaceID(r *http.Request) string {
-	// Prefer context value set by workspace middleware.
-	if id := middleware.WorkspaceIDFromContext(r.Context()); id != "" {
-		return id
-	}
-	workspaceID := r.URL.Query().Get("workspace_id")
-	if workspaceID != "" {
-		return workspaceID
-	}
-	return r.Header.Get("X-Workspace-ID")
+// resolveWorkspaceID returns the workspace UUID for this request. Delegates
+// to middleware.ResolveWorkspaceIDFromRequest so middleware-protected routes
+// and middleware-less routes (e.g. /api/upload-file) share identical
+// resolution behavior — including slug → UUID translation via the DB.
+//
+// Returns "" when no workspace identifier was provided or a slug was provided
+// but doesn't match any workspace.
+func (h *Handler) resolveWorkspaceID(r *http.Request) string {
+	return middleware.ResolveWorkspaceIDFromRequest(r, h.Queries)
 }
 
 // ctxMember returns the workspace member from context (set by workspace middleware).
@@ -211,9 +463,17 @@ func countOwners(members []db.Member) int {
 }
 
 func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.Member, error) {
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		return db.Member{}, err
+	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return db.Member{}, err
+	}
 	return h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      parseUUID(userID),
-		WorkspaceID: parseUUID(workspaceID),
+		UserID:      userUUID,
+		WorkspaceID: wsUUID,
 	})
 }
 
@@ -257,9 +517,17 @@ func (h *Handler) isWorkspaceEntity(ctx context.Context, userType, userID, works
 		_, err := h.getWorkspaceMember(ctx, userID, workspaceID)
 		return err == nil
 	case "agent":
-		_, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-			ID:          parseUUID(userID),
-			WorkspaceID: parseUUID(workspaceID),
+		userUUID, err := util.ParseUUID(userID)
+		if err != nil {
+			return false
+		}
+		wsUUID, err := util.ParseUUID(workspaceID)
+		if err != nil {
+			return false
+		}
+		_, err = h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          userUUID,
+			WorkspaceID: wsUUID,
 		})
 		return err == nil
 	default:
@@ -272,20 +540,34 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 		return db.Issue{}, false
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return db.Issue{}, false
 	}
 
-	// Try identifier format first (e.g., "JIA-42").
+	// Try identifier format first (e.g., "JIA-42"). resolveIssueByIdentifier
+	// silently returns false for non-identifier strings, falling through to
+	// the UUID path below.
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
 		return issue, true
 	}
 
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		// Not a valid UUID and didn't match identifier format → 404 (consistent
+		// with previous silent-zero behavior, which would also have produced 404).
+		writeError(w, http.StatusNotFound, "issue not found")
+		return db.Issue{}, false
+	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace_id")
+		return db.Issue{}, false
+	}
 	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-		ID:          parseUUID(issueID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          issueUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
@@ -303,8 +585,12 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	if workspaceID == "" {
 		return db.Issue{}, false
 	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return db.Issue{}, false
+	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		Number:      parts.number,
 	})
 	if err != nil {
@@ -362,15 +648,24 @@ func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agent
 		return db.Agent{}, false
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return db.Agent{}, false
 	}
 
+	agentUUID, ok := parseUUIDOrBadRequest(w, agentID, "agent id")
+	if !ok {
+		return db.Agent{}, false
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return db.Agent{}, false
+	}
+
 	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          parseUUID(agentID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          agentUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "agent not found")
@@ -385,15 +680,24 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 		return db.InboxItem{}, false
 	}
 
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return db.InboxItem{}, false
 	}
 
+	itemUUID, ok := parseUUIDOrBadRequest(w, itemID, "inbox item id")
+	if !ok {
+		return db.InboxItem{}, false
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return db.InboxItem{}, false
+	}
+
 	item, err := h.Queries.GetInboxItemInWorkspace(r.Context(), db.GetInboxItemInWorkspaceParams{
-		ID:          parseUUID(itemID),
-		WorkspaceID: parseUUID(workspaceID),
+		ID:          itemUUID,
+		WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "inbox item not found")

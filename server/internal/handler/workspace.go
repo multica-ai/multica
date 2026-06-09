@@ -9,7 +9,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -40,6 +42,7 @@ type WorkspaceResponse struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix string  `json:"issue_prefix"`
+	AvatarURL   *string `json:"avatar_url"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
@@ -68,6 +71,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Settings:    settings,
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
+		AvatarURL:   textToPtr(w.AvatarUrl),
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
 	}
@@ -113,8 +117,12 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	id := workspaceIDFromURL(r, "id")
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "workspace id")
+	if !ok {
+		return
+	}
 
-	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(id))
+	ws, err := h.Queries.GetWorkspace(r.Context(), idUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
@@ -136,6 +144,16 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Self-host gate (#3433): when the operator has set
+	// DISABLE_WORKSPACE_CREATION=true, no caller — including existing
+	// workspace owners — may create additional workspaces. The frontend
+	// hides every "Create workspace" affordance via /api/config, but the
+	// 403 here is the only authoritative check.
+	if h.cfg.DisableWorkspaceCreation {
+		writeError(w, http.StatusForbidden, "workspace creation is disabled for this instance")
+		return
+	}
+
 	var req CreateWorkspaceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -150,6 +168,10 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if !workspaceSlugPattern.MatchString(req.Slug) {
 		writeError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, and hyphens")
+		return
+	}
+	if isReservedSlug(req.Slug) {
+		writeError(w, http.StatusBadRequest, "slug is reserved")
 		return
 	}
 
@@ -192,12 +214,28 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// NOTE: CreateWorkspace deliberately does NOT mark the user as
+	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
+	// (Step 3 of the flow) and by AcceptInvitation (invitee joining an
+	// existing workspace). This decouples "the user has a workspace"
+	// from "the user has finished setup"; the workspace-layer route
+	// gate (web layout / desktop App.tsx overlay) redirects un-onboarded
+	// users back to /onboarding instead.
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
 		return
 	}
 
-	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", uuidToString(ws.ID), "name", ws.Name, "slug", ws.Slug)...)
+	wsID := uuidToString(ws.ID)
+
+	// "Is this the user's first workspace?" is derived in PostHog by looking
+	// at whether they have a prior workspace_created event, not stamped at
+	// emit time. Stamping here would race under concurrent creates without
+	// a schema change, and the event stream answers the question exactly.
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.WorkspaceCreated(userID, wsID))
+
+	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", wsID, "name", ws.Name, "slug", ws.Slug)...)
 	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
 }
 
@@ -208,10 +246,15 @@ type UpdateWorkspaceRequest struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix *string `json:"issue_prefix"`
+	AvatarURL   *string `json:"avatar_url"`
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	id := workspaceIDFromURL(r, "id")
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "workspace id")
+	if !ok {
+		return
+	}
 
 	var req UpdateWorkspaceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -220,7 +263,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := db.UpdateWorkspaceParams{
-		ID: parseUUID(id),
+		ID: idUUID,
 	}
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
@@ -250,6 +293,9 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
 	}
+	if req.AvatarURL != nil {
+		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
+	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)
 	if err != nil {
@@ -260,18 +306,19 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
-	h.publish(protocol.EventWorkspaceUpdated, id, "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
+	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
 
 	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
 }
 
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "id")
-	if _, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found"); !ok {
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
+	if !ok {
 		return
 	}
 
-	members, err := h.Queries.ListMembers(r.Context(), parseUUID(workspaceID))
+	members, err := h.Queries.ListMembers(r.Context(), member.WorkspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list members")
 		return
@@ -298,8 +345,12 @@ type MemberWithUserResponse struct {
 
 func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 
-	members, err := h.Queries.ListMembersWithUser(r.Context(), parseUUID(workspaceID))
+	members, err := h.Queries.ListMembersWithUser(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list members")
 		return
@@ -402,7 +453,7 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	member, err := h.Queries.CreateMember(r.Context(), db.CreateMemberParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: requester.WorkspaceID,
 		UserID:      user.ID,
 		Role:        role,
 	})
@@ -419,10 +470,10 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
 	userID := requestUserID(r)
 	eventPayload := map[string]any{"member": memberWithUserResponse(member, user)}
-	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err == nil {
+	if ws, err := h.Queries.GetWorkspace(r.Context(), requester.WorkspaceID); err == nil {
 		eventPayload["workspace_name"] = ws.Name
 	}
-	h.publish(protocol.EventMemberAdded, workspaceID, "member", userID, eventPayload)
+	h.publish(protocol.EventMemberAdded, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
 
 	writeJSON(w, http.StatusCreated, memberWithUserResponse(member, user))
 }
@@ -439,8 +490,12 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	memberID := chi.URLParam(r, "memberId")
-	target, err := h.Queries.GetMember(r.Context(), parseUUID(memberID))
-	if err != nil || uuidToString(target.WorkspaceID) != workspaceID {
+	memberUUID, ok := parseUUIDOrBadRequest(w, memberID, "member id")
+	if !ok {
+		return
+	}
+	target, err := h.Queries.GetMember(r.Context(), memberUUID)
+	if err != nil || uuidToString(target.WorkspaceID) != uuidToString(requester.WorkspaceID) {
 		writeError(w, http.StatusNotFound, "member not found")
 		return
 	}
@@ -487,6 +542,8 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.MembershipCache.Invalidate(r.Context(), uuidToString(target.UserID), workspaceID)
+
 	user, err := h.Queries.GetUser(r.Context(), updatedMember.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load member")
@@ -494,7 +551,7 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := requestUserID(r)
-	h.publish(protocol.EventMemberUpdated, workspaceID, "member", userID, map[string]any{
+	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
 		"member": memberWithUserResponse(updatedMember, user),
 	})
 
@@ -509,8 +566,12 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	memberID := chi.URLParam(r, "memberId")
-	target, err := h.Queries.GetMember(r.Context(), parseUUID(memberID))
-	if err != nil || uuidToString(target.WorkspaceID) != workspaceID {
+	memberUUID, ok := parseUUIDOrBadRequest(w, memberID, "member id")
+	if !ok {
+		return
+	}
+	target, err := h.Queries.GetMember(r.Context(), memberUUID)
+	if err != nil || uuidToString(target.WorkspaceID) != uuidToString(requester.WorkspaceID) {
 		writeError(w, http.StatusNotFound, "member not found")
 		return
 	}
@@ -532,17 +593,24 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.Queries.DeleteMember(r.Context(), target.ID); err != nil {
+	requesterUserID := requestUserID(r)
+	result, err := h.revokeAndRemoveMember(r.Context(), target.WorkspaceID, target.UserID, target.ID, parseUUID(requesterUserID))
+	if err != nil {
 		slog.Warn("delete member failed", append(logger.RequestAttrs(r), "error", err, "member_id", memberID, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete member")
 		return
 	}
 
+	h.MembershipCache.Invalidate(r.Context(), uuidToString(target.UserID), workspaceID)
+
+	wsIDStr := uuidToString(requester.WorkspaceID)
+	logRevocation(result, wsIDStr, uuidToString(target.UserID))
+	h.publishRevocation(r.Context(), result, wsIDStr, "member", requesterUserID)
+
 	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(target.ID), "workspace_id", workspaceID, "user_id", uuidToString(target.UserID))...)
-	userID := requestUserID(r)
-	h.publish(protocol.EventMemberRemoved, workspaceID, "member", userID, map[string]any{
+	h.publish(protocol.EventMemberRemoved, wsIDStr, "member", requesterUserID, map[string]any{
 		"member_id":    uuidToString(target.ID),
-		"workspace_id": workspaceID,
+		"workspace_id": wsIDStr,
 		"user_id":      uuidToString(target.UserID),
 	})
 
@@ -568,14 +636,20 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.Queries.DeleteMember(r.Context(), member.ID); err != nil {
+	result, err := h.revokeAndRemoveMember(r.Context(), member.WorkspaceID, member.UserID, member.ID, member.UserID)
+	if err != nil {
 		slog.Warn("leave workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to leave workspace")
 		return
 	}
 
-	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "user_id", uuidToString(member.UserID))...)
+	h.MembershipCache.Invalidate(r.Context(), uuidToString(member.UserID), workspaceID)
+
 	userID := requestUserID(r)
+	logRevocation(result, workspaceID, uuidToString(member.UserID))
+	h.publishRevocation(r.Context(), result, workspaceID, "member", userID)
+
+	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "user_id", uuidToString(member.UserID))...)
 	h.publish(protocol.EventMemberRemoved, workspaceID, "member", userID, map[string]any{
 		"member_id":    uuidToString(member.ID),
 		"workspace_id": workspaceID,
@@ -588,7 +662,32 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 
-	if err := h.Queries.DeleteWorkspace(r.Context(), parseUUID(workspaceID)); err != nil {
+	// Defense in depth: the route is already gated by the
+	// RequireWorkspaceRoleFromURL("owner") middleware, but we re-check here
+	// so that the handler is safe regardless of how it gets wired up
+	// (direct calls in tests, future router refactors, etc.).
+	requester, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if requester.Role != "owner" {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	// Invalidate membership cache for all workspace members before deletion.
+	// After CASCADE deletes the member rows, cache entries become harmless
+	// orphans (downstream lookups for the deleted workspace will fail), but
+	// proactive invalidation prevents any stale-access window up to TTL.
+	if members, err := h.Queries.ListMembers(r.Context(), requester.WorkspaceID); err == nil {
+		for _, m := range members {
+			h.MembershipCache.Invalidate(r.Context(), uuidToString(m.UserID), workspaceID)
+		}
+	}
+
+	// At this point workspaceMember has resolved → workspaceID is a valid UUID
+	// (the lookup would have errored otherwise), so reuse the resolved value.
+	if err := h.Queries.DeleteWorkspace(r.Context(), requester.WorkspaceID); err != nil {
 		slog.Warn("delete workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return

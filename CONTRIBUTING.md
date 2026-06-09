@@ -373,7 +373,8 @@ done
 
 #### 2. Create a test user and token (automated auth)
 
-In non-production environments the verification code is fixed at `888888`:
+For deterministic local automation, set `MULTICA_DEV_VERIFICATION_CODE=888888`
+in your env file before starting the backend:
 
 ```bash
 curl -s -X POST "$SERVER/auth/send-code" \
@@ -476,7 +477,9 @@ This automatically:
 3. Starts and manages its own daemon instance
 4. Connects to the local backend
 
-Login in the Desktop UI with `dev@localhost` and code `888888`.
+Login in the Desktop UI with `dev@localhost` and the generated code from the
+backend logs. If you set `MULTICA_DEV_VERIFICATION_CODE=888888` before starting
+the backend, you can use `888888` instead.
 
 If the backend runs on a non-default port (worktree), create
 `apps/desktop/.env.development.local`:
@@ -591,6 +594,19 @@ If you want to stop PostgreSQL and keep your local databases:
 ```bash
 make db-down
 ```
+
+If you want a fresh database for the current checkout only (drops the
+database named in `POSTGRES_DB`, recreates it, and runs all migrations):
+
+```bash
+make stop        # stop backend/frontend first
+make db-reset
+make start
+```
+
+- only affects the current env's database; other worktree databases are untouched
+- refuses to run if `DATABASE_URL` points at a remote host
+- pass `ENV_FILE=.env.worktree` to target a specific worktree
 
 If you want to wipe all local PostgreSQL data for this repo:
 

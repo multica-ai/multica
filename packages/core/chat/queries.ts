@@ -1,19 +1,20 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
 // NOTE on workspace scoping:
 // `wsId` is used only as part of queryKey for cache isolation per workspace.
-// The actual workspace context comes from ApiClient's X-Workspace-ID header,
-// which is set by useWorkspaceStore.switchWorkspace(). Callers must ensure the
-// header is in sync with the wsId they pass here — otherwise cache writes will
-// be misattributed during a workspace switch race window.
+// The actual workspace context comes from ApiClient's X-Workspace-Slug header,
+// which is set by the URL-driven [workspaceSlug] layout. Callers must ensure
+// the header is in sync with the wsId they pass here — otherwise cache writes
+// will be misattributed during a workspace switch race window.
 
 export const chatKeys = {
   all: (wsId: string) => ["chat", wsId] as const,
+  /** Full sessions list (active + archived); the dropdown splits locally. */
   sessions: (wsId: string) => [...chatKeys.all(wsId), "sessions"] as const,
-  allSessions: (wsId: string) => [...chatKeys.all(wsId), "sessions", "all"] as const,
   session: (wsId: string, id: string) => [...chatKeys.all(wsId), "session", id] as const,
   messages: (sessionId: string) => ["chat", "messages", sessionId] as const,
+  messagesPage: (sessionId: string) => ["chat", "messages-page", sessionId] as const,
   pendingTask: (sessionId: string) => ["chat", "pending-task", sessionId] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
@@ -21,17 +22,15 @@ export const chatKeys = {
   taskMessages: (taskId: string) => ["task-messages", taskId] as const,
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isTaskMessageTaskId(taskId: string | null | undefined): taskId is string {
+  return typeof taskId === "string" && UUID_PATTERN.test(taskId);
+}
+
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),
-    queryFn: () => api.listChatSessions(),
-    staleTime: Infinity,
-  });
-}
-
-export function allChatSessionsOptions(wsId: string) {
-  return queryOptions({
-    queryKey: chatKeys.allSessions(wsId),
     queryFn: () => api.listChatSessions({ status: "all" }),
     staleTime: Infinity,
   });
@@ -50,6 +49,19 @@ export function chatMessagesOptions(sessionId: string) {
   return queryOptions({
     queryKey: chatKeys.messages(sessionId),
     queryFn: () => api.listChatMessages(sessionId),
+    enabled: !!sessionId,
+    staleTime: Infinity,
+  });
+}
+
+export function chatMessagesPageOptions(sessionId: string, limit = 50) {
+  return infiniteQueryOptions({
+    queryKey: chatKeys.messagesPage(sessionId),
+    queryFn: ({ pageParam }) =>
+      api.listChatMessagesPage(sessionId, { before: pageParam, limit }),
+    initialPageParam: null as { created_at: string; id: string } | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
     enabled: !!sessionId,
     staleTime: Infinity,
   });
@@ -78,7 +90,7 @@ export function taskMessagesOptions(taskId: string) {
   return queryOptions({
     queryKey: chatKeys.taskMessages(taskId),
     queryFn: () => api.listTaskMessages(taskId),
-    enabled: !!taskId,
+    enabled: isTaskMessageTaskId(taskId),
     staleTime: Infinity,
   });
 }

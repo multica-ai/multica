@@ -1,3 +1,4 @@
-export { OnboardingWizard } from "./onboarding-wizard";
-export type { OnboardingWizardProps } from "./onboarding-wizard";
-export { StepWorkspace } from "./step-workspace";
+export { OnboardingFlow, type OnboardingStep } from "./onboarding-flow";
+export { CliInstallInstructions } from "./steps/cli-install-instructions";
+export { CloudWaitlistExpand } from "./components/cloud-waitlist-expand";
+export { SourceBackfillModal } from "./source-backfill-modal";

@@ -36,13 +36,6 @@ var runtimeActivityCmd = &cobra.Command{
 	RunE:  runRuntimeActivity,
 }
 
-var runtimePingCmd = &cobra.Command{
-	Use:   "ping <runtime-id>",
-	Short: "Ping a runtime to check connectivity",
-	Args:  exactArgs(1),
-	RunE:  runRuntimePing,
-}
-
 var runtimeUpdateCmd = &cobra.Command{
 	Use:   "update <runtime-id>",
 	Short: "Initiate a CLI update on a runtime",
@@ -54,7 +47,6 @@ func init() {
 	runtimeCmd.AddCommand(runtimeListCmd)
 	runtimeCmd.AddCommand(runtimeUsageCmd)
 	runtimeCmd.AddCommand(runtimeActivityCmd)
-	runtimeCmd.AddCommand(runtimePingCmd)
 	runtimeCmd.AddCommand(runtimeUpdateCmd)
 
 	// runtime list
@@ -66,10 +58,6 @@ func init() {
 
 	// runtime activity
 	runtimeActivityCmd.Flags().String("output", "table", "Output format: table or json")
-
-	// runtime ping
-	runtimePingCmd.Flags().String("output", "json", "Output format: table or json")
-	runtimePingCmd.Flags().Bool("wait", false, "Wait for ping to complete (poll until done)")
 
 	// runtime update
 	runtimeUpdateCmd.Flags().String("target-version", "", "Target version to update to (required)")
@@ -87,7 +75,7 @@ func runRuntimeList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var runtimes []map[string]any
@@ -127,7 +115,7 @@ func runRuntimeUsage(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--days must be between 1 and 365")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var usage []map[string]any
@@ -164,7 +152,7 @@ func runRuntimeActivity(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var activity []map[string]any
@@ -189,60 +177,6 @@ func runRuntimeActivity(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runRuntimePing(cmd *cobra.Command, args []string) error {
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	// Initiate ping.
-	var ping map[string]any
-	if err := client.PostJSON(ctx, "/api/runtimes/"+args[0]+"/ping", nil, &ping); err != nil {
-		return fmt.Errorf("initiate ping: %w", err)
-	}
-
-	wait, _ := cmd.Flags().GetBool("wait")
-	if !wait {
-		output, _ := cmd.Flags().GetString("output")
-		if output == "json" {
-			return cli.PrintJSON(os.Stdout, ping)
-		}
-		fmt.Printf("Ping initiated: %s (status: %s)\n", strVal(ping, "id"), strVal(ping, "status"))
-		return nil
-	}
-
-	// Poll until completed/failed/timeout.
-	pingID := strVal(ping, "id")
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timed out waiting for ping (last status: %s)", strVal(ping, "status"))
-		case <-time.After(1 * time.Second):
-		}
-
-		if err := client.GetJSON(ctx, "/api/runtimes/"+args[0]+"/ping/"+pingID, &ping); err != nil {
-			return fmt.Errorf("get ping status: %w", err)
-		}
-
-		status := strVal(ping, "status")
-		if status == "completed" || status == "failed" || status == "timeout" {
-			output, _ := cmd.Flags().GetString("output")
-			if output == "json" {
-				return cli.PrintJSON(os.Stdout, ping)
-			}
-			if status == "completed" {
-				fmt.Printf("Ping completed in %sms\n", strVal(ping, "duration_ms"))
-			} else {
-				fmt.Printf("Ping %s: %s\n", status, strVal(ping, "error"))
-			}
-			return nil
-		}
-	}
-}
-
 func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -254,7 +188,7 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--target-version is required")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(150*time.Second))
 	defer cancel()
 
 	body := map[string]any{

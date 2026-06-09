@@ -5,59 +5,22 @@ import { Pencil, Eye } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import {
+  parseFrontmatter,
+  type SkillFrontmatter,
+} from "@multica/core/skills/frontmatter";
 import { Markdown } from "../../common/markdown";
+import { useT } from "../../i18n";
 
 function isMarkdown(path: string) {
   return path.endsWith(".md") || path.endsWith(".mdx");
 }
 
 // ---------------------------------------------------------------------------
-// YAML frontmatter parsing
-// ---------------------------------------------------------------------------
-
-interface Frontmatter {
-  [key: string]: string;
-}
-
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
-
-function parseFrontmatter(raw: string): {
-  frontmatter: Frontmatter | null;
-  body: string;
-} {
-  const match = FRONTMATTER_RE.exec(raw);
-  if (!match) return { frontmatter: null, body: raw };
-
-  const yamlBlock = match[1]!;
-  const body = raw.slice(match[0].length);
-  const frontmatter: Frontmatter = {};
-
-  for (const line of yamlBlock.split("\n")) {
-    const idx = line.indexOf(":");
-    if (idx === -1) continue;
-    const key = line.slice(0, idx).trim();
-    let value = line.slice(idx + 1).trim();
-    // Strip surrounding quotes
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (key) frontmatter[key] = value;
-  }
-
-  return {
-    frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : null,
-    body,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Frontmatter display
 // ---------------------------------------------------------------------------
 
-function FrontmatterCard({ data }: { data: Frontmatter }) {
+function FrontmatterCard({ data }: { data: SkillFrontmatter }) {
   return (
     <div className="mb-4 rounded-lg border bg-muted/30 px-4 py-3">
       <div className="grid gap-1.5">
@@ -66,7 +29,9 @@ function FrontmatterCard({ data }: { data: Frontmatter }) {
             <span className="shrink-0 font-medium text-muted-foreground min-w-[80px]">
               {key}
             </span>
-            <span className="text-foreground">{value}</span>
+            <span className="text-foreground whitespace-pre-wrap break-words">
+              {value.trimEnd()}
+            </span>
           </div>
         ))}
       </div>
@@ -87,6 +52,7 @@ export function FileViewer({
   content: string;
   onChange: (content: string) => void;
 }) {
+  const { t } = useT("skills");
   const [editing, setEditing] = useState(false);
   const isMd = isMarkdown(path);
 
@@ -98,7 +64,7 @@ export function FileViewer({
   return (
     <div className="flex h-full flex-col">
       {/* File header */}
-      <div className="flex h-10 items-center justify-between border-b px-4">
+      <div className="flex h-10 items-center justify-between gap-3 border-b px-4">
         <span className="text-xs font-mono text-muted-foreground truncate">
           {path}
         </span>
@@ -122,7 +88,9 @@ export function FileViewer({
                 }
               />
               <TooltipContent>
-                {editing ? "Preview" : "Edit"}
+                {editing
+                  ? t(($) => $.file_viewer.preview_tooltip)
+                  : t(($) => $.file_viewer.edit_tooltip)}
               </TooltipContent>
             </Tooltip>
           )}
@@ -132,10 +100,10 @@ export function FileViewer({
       {/* File content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {isMd && !editing ? (
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {frontmatter && <FrontmatterCard data={frontmatter} />}
             <Markdown mode="full">
-              {body || "*No content yet*"}
+              {body || t(($) => $.file_viewer.no_content)}
             </Markdown>
           </div>
         ) : (
@@ -144,8 +112,8 @@ export function FileViewer({
             onChange={(e) => onChange(e.target.value)}
             placeholder={
               isMd
-                ? "Write markdown content..."
-                : "File content..."
+                ? t(($) => $.file_viewer.markdown_placeholder)
+                : t(($) => $.file_viewer.raw_placeholder)
             }
             className="h-full min-h-full resize-none rounded-none border-0 font-mono text-sm leading-relaxed focus-visible:ring-0"
           />

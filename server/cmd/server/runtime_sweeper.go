@@ -6,7 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/handler"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -15,9 +19,16 @@ import (
 const (
 	// sweepInterval is how often we check for stale runtimes and tasks.
 	sweepInterval = 30 * time.Second
-	// staleThresholdSeconds marks runtimes offline if no heartbeat for this long.
-	// The daemon heartbeat interval is 15s, so 45s = 3 missed heartbeats.
-	staleThresholdSeconds = 45.0
+	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
+	// long. Must be strictly greater than runtimeHeartbeatDBFlushInterval
+	// (60s in handler/daemon.go) plus one daemon heartbeat cycle (~15s)
+	// plus the BatchedHeartbeatScheduler tick interval (~30s) so the DB
+	// stale window never trips on an alive-but-DB-lagging runtime when the
+	// sweeper's Redis check errors and we fall back to the DB.
+	// 150s leaves a 45s buffer above the 105s worst-case DB age, and keeps
+	// detection latency for a genuinely-dead runtime under staleThreshold +
+	// sweepInterval = 180s (~3 minutes).
+	staleThresholdSeconds = 150.0
 	// offlineRuntimeTTLSeconds deletes offline runtimes with no active agents
 	// after this duration. 7 days gives users plenty of time to restart daemons.
 	offlineRuntimeTTLSeconds = 7 * 24 * 3600.0
@@ -25,16 +36,44 @@ const (
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this.
-	// The default agent timeout is 2h, so 2.5h gives a generous buffer.
+	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
+	// coarse server-side backstop keyed on started_at (it does NOT look at task
+	// activity) — mainly for runs whose daemon died without reporting. The
+	// daemon itself decides stuck-vs-long-running by activity (idle/tool
+	// watchdog), so this only needs to sit generously above any realistic single
+	// run rather than track a per-run wall-clock cap (MUL-3064).
 	runningTimeoutSeconds = 9000.0
+	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
+	// for longer than this without ever being claimed. This is the cleanup
+	// arm of the MUL-1899 backlog fix: even with the dispatch-time
+	// admission gate that blocks new enqueues against offline runtimes,
+	// tasks already on the queue when a runtime drops off (or that lost
+	// the race against a runtime that went offline mid-tick) need a
+	// time-bounded exit. 2 hours is conservatively above any reasonable
+	// "queued behind a long-running task" window for an online runtime, so we
+	// don't expire legitimately-pending work, while still draining the historical
+	// 87k autopilot backlog within ~24h once enabled.
+	queuedTTLSeconds = 2 * 3600.0
+	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
+	// transitions to failed. Keeps the sweep transaction short even when
+	// the historical backlog is large (~89k at MUL-1899 baseline). At 30s
+	// ticks and 500 rows/tick we drain 60k rows/hour worst case — plenty
+	// of headroom for the documented backlog without monopolising DB CPU.
+	queuedExpireBatchSize = 500
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
 // last_seen_at exceeds the stale threshold, and fails orphaned tasks.
 // This handles cases where the daemon crashes, is killed without calling
 // the deregister endpoint, or leaves tasks in a non-terminal state.
-func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+//
+// liveness is consulted before flipping any candidate to offline: when the
+// LivenessStore is available and reports the runtime as alive, we skip the
+// row even though its DB last_seen_at is old (Redis is the authority on the
+// hot heartbeat path; the DB is allowed to lag up to runtimeHeartbeatDBFlushInterval).
+// When liveness is unavailable or errors, we fall back to trusting the DB
+// stale window — that is the original behavior.
+func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 
@@ -43,8 +82,9 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sweepStaleRuntimes(ctx, queries, bus)
-			sweepStaleTasks(ctx, queries, bus)
+			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
+			sweepStaleTasks(ctx, queries, taskSvc, bus)
+			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -52,14 +92,44 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus
 
 // sweepStaleRuntimes marks runtimes offline if they haven't heartbeated,
 // then fails any tasks belonging to those offline runtimes.
-func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
-	staleRows, err := queries.MarkStaleRuntimesOffline(ctx, staleThresholdSeconds)
+func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
+	candidates, err := queries.SelectStaleOnlineRuntimes(ctx, staleThresholdSeconds)
+	if err != nil {
+		slog.Warn("runtime sweeper: failed to list stale online runtimes", "error", err)
+		return
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	toOffline := filterStaleRuntimesByLiveness(ctx, candidates, liveness)
+	if len(toOffline) == 0 {
+		return
+	}
+
+	staleRows, err := queries.MarkRuntimesOfflineByIDs(ctx, db.MarkRuntimesOfflineByIDsParams{
+		Ids:          toOffline,
+		StaleSeconds: staleThresholdSeconds,
+	})
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to mark stale runtimes offline", "error", err)
 		return
 	}
 	if len(staleRows) == 0 {
+		// All filtered candidates raced into a non-online state between the
+		// SELECT and the UPDATE. Nothing to broadcast.
 		return
+	}
+	if taskSvc != nil && taskSvc.Analytics != nil {
+		for _, row := range staleRows {
+			obsmetrics.RecordEvent(taskSvc.Analytics, taskSvc.Metrics, analytics.RuntimeOffline(
+				util.UUIDToString(row.OwnerID),
+				util.UUIDToString(row.WorkspaceID),
+				util.UUIDToString(row.ID),
+				row.DaemonID.String,
+				row.Provider,
+			))
+		}
 	}
 
 	// Collect unique workspace IDs to notify.
@@ -67,6 +137,15 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bu
 	for _, row := range staleRows {
 		wsID := util.UUIDToString(row.WorkspaceID)
 		workspaces[wsID] = true
+	}
+
+	// Drop liveness records for confirmed-offline runtimes so a future
+	// MGET sweep doesn't see a stray key keep them "alive". TTLs would
+	// reap these eventually, but explicit cleanup is cheap and clearer.
+	if liveness.Available() {
+		for _, row := range staleRows {
+			liveness.Forget(ctx, util.UUIDToString(row.ID))
+		}
 	}
 
 	slog.Info("runtime sweeper: marked stale runtimes offline", "count", len(staleRows), "workspaces", len(workspaces))
@@ -77,7 +156,7 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bu
 		slog.Warn("runtime sweeper: failed to clean up stale tasks", "error", err)
 	} else if len(failedTasks) > 0 {
 		slog.Info("runtime sweeper: failed orphaned tasks", "count", len(failedTasks))
-		broadcastFailedTasks(ctx, queries, bus, failedTasks)
+		taskSvc.HandleFailedTasks(ctx, failedTasks)
 	}
 
 	// Notify frontend clients so they re-fetch runtime list.
@@ -91,6 +170,40 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bu
 			},
 		})
 	}
+}
+
+// filterStaleRuntimesByLiveness narrows a SELECT-of-stale-candidates down to
+// the set that should actually be flipped offline. When liveness is available
+// and reports a candidate as alive, we skip it (DB is just lagging). When the
+// store is unavailable or errors, we trust the DB stale window — i.e. every
+// candidate flips, matching the legacy MarkStaleRuntimesOffline behavior.
+func filterStaleRuntimesByLiveness(ctx context.Context, candidates []db.SelectStaleOnlineRuntimesRow, liveness handler.LivenessStore) []pgtype.UUID {
+	ids := make([]pgtype.UUID, 0, len(candidates))
+	if !liveness.Available() {
+		for _, c := range candidates {
+			ids = append(ids, c.ID)
+		}
+		return ids
+	}
+	idStrs := make([]string, len(candidates))
+	for i, c := range candidates {
+		idStrs[i] = util.UUIDToString(c.ID)
+	}
+	alive, ok := liveness.IsAliveBatch(ctx, idStrs)
+	if !ok {
+		// Store hiccup: degrade to DB-only behavior for this tick.
+		for _, c := range candidates {
+			ids = append(ids, c.ID)
+		}
+		return ids
+	}
+	for i, c := range candidates {
+		if alive[idStrs[i]] {
+			continue
+		}
+		ids = append(ids, c.ID)
+	}
+	return ids
 }
 
 // gcRuntimes deletes offline runtimes that have exceeded the TTL and have
@@ -130,7 +243,7 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 // - The agent process hangs and the daemon is still heartbeating
 // - The daemon failed to report task completion/failure
 // - A server restart left tasks in a non-terminal state
-func sweepStaleTasks(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: dispatchTimeoutSeconds,
 		RunningTimeoutSecs:  runningTimeoutSeconds,
@@ -144,100 +257,88 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, bus *events.Bus) 
 	}
 
 	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
-	broadcastFailedTasks(ctx, queries, bus, failedTasks)
+	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
+	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 
-// failedTask is a common interface for both sweeper result types.
-type failedTask struct {
-	ID      pgtype.UUID
-	AgentID pgtype.UUID
-	IssueID pgtype.UUID
-}
-
-// broadcastFailedTasks publishes task:failed events with the correct WorkspaceID
-// and reconciles agent status for all affected agents.
-func broadcastFailedTasks(ctx context.Context, queries *db.Queries, bus *events.Bus, tasks any) {
-	var items []failedTask
-	switch ts := tasks.(type) {
-	case []db.FailStaleTasksRow:
-		for _, t := range ts {
-			items = append(items, failedTask{ID: t.ID, AgentID: t.AgentID, IssueID: t.IssueID})
-		}
-	case []db.FailTasksForOfflineRuntimesRow:
-		for _, t := range ts {
-			items = append(items, failedTask{ID: t.ID, AgentID: t.AgentID, IssueID: t.IssueID})
-		}
+// sweepExpiredQueuedTasks fails tasks that have been sitting in 'queued' for
+// longer than the TTL. Companion to the dispatch-time admission gate added
+// in MUL-1899: that gate prevents new doomed enqueues; this gate drains the
+// historical backlog and catches the race where a runtime goes offline AFTER
+// a task is already queued. Capped to queuedExpireBatchSize per tick so a
+// big backlog can't monopolise the DB.
+func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
+	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		TtlSecs:    queuedTTLSeconds,
+		MaxPerTick: queuedExpireBatchSize,
+	})
+	if err != nil {
+		slog.Warn("task sweeper: failed to expire stale queued tasks", "error", err)
+		return
+	}
+	if len(failedTasks) == 0 {
+		return
 	}
 
-	affectedAgents := make(map[string]pgtype.UUID)
-	processedIssues := make(map[string]bool)
+	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
+	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
+	taskSvc.HandleFailedTasks(ctx, failedTasks)
+}
 
-	for _, ft := range items {
-		// Look up workspace ID from the issue so the event reaches the right WS room.
+// broadcastFailedTasks is preserved as a thin shim for the integration tests
+// in this package. New call sites should use TaskService.HandleFailedTasks
+// directly so the side effects (event broadcast, agent reconcile, issue
+// rollback, auto-retry) are guaranteed in one place.
+func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus, tasks []db.AgentTaskQueue) {
+	if taskSvc != nil {
+		taskSvc.HandleFailedTasks(ctx, tasks)
+		return
+	}
+	// Fallback path used by tests that don't construct a TaskService:
+	// publish task:failed events with workspace IDs and reset stuck issues.
+	processedIssues := make(map[string]bool)
+	affectedAgents := make(map[string]pgtype.UUID)
+	for _, t := range tasks {
+		failureReason := "agent_error"
+		if t.FailureReason.Valid && t.FailureReason.String != "" {
+			failureReason = t.FailureReason.String
+		}
 		workspaceID := ""
-		if issue, err := queries.GetIssue(ctx, ft.IssueID); err == nil {
-			workspaceID = util.UUIDToString(issue.WorkspaceID)
-			// If the issue is still in_progress and no other active tasks remain,
-			// reset it back to todo so the daemon can pick it up again.
-			issueKey := util.UUIDToString(ft.IssueID)
-			if issue.Status == "in_progress" && !processedIssues[issueKey] {
-				processedIssues[issueKey] = true
-				hasActive, checkErr := queries.HasActiveTaskForIssue(ctx, ft.IssueID)
-				if checkErr != nil {
-					slog.Warn("runtime sweeper: failed to check active tasks for issue",
-						"issue_id", issueKey,
-						"error", checkErr,
-					)
-				} else if !hasActive {
-					if _, updateErr := queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-						ID:     ft.IssueID,
-						Status: "todo",
-					}); updateErr != nil {
-						slog.Warn("runtime sweeper: failed to reset stuck issue to todo",
-							"issue_id", issueKey,
-							"error", updateErr,
-						)
+		if t.IssueID.Valid {
+			if issue, err := queries.GetIssue(ctx, t.IssueID); err == nil {
+				workspaceID = util.UUIDToString(issue.WorkspaceID)
+				issueKey := util.UUIDToString(t.IssueID)
+				if issue.Status == "in_progress" && !processedIssues[issueKey] {
+					processedIssues[issueKey] = true
+					if hasActive, herr := queries.HasActiveTaskForIssue(ctx, t.IssueID); herr == nil && !hasActive {
+						queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: t.IssueID, Status: "todo", WorkspaceID: issue.WorkspaceID})
 					}
 				}
 			}
 		}
-
 		bus.Publish(events.Event{
 			Type:        protocol.EventTaskFailed,
 			WorkspaceID: workspaceID,
 			ActorType:   "system",
 			Payload: map[string]any{
-				"task_id":  util.UUIDToString(ft.ID),
-				"agent_id": util.UUIDToString(ft.AgentID),
-				"issue_id": util.UUIDToString(ft.IssueID),
-				"status":   "failed",
+				"task_id":        util.UUIDToString(t.ID),
+				"agent_id":       util.UUIDToString(t.AgentID),
+				"issue_id":       util.UUIDToString(t.IssueID),
+				"status":         "failed",
+				"failure_reason": failureReason,
 			},
 		})
-
-		agentKey := util.UUIDToString(ft.AgentID)
-		affectedAgents[agentKey] = ft.AgentID
+		affectedAgents[util.UUIDToString(t.AgentID)] = t.AgentID
 	}
-
-	// Reconcile status for each affected agent.
 	for _, agentID := range affectedAgents {
 		reconcileAgentStatus(ctx, queries, bus, agentID)
 	}
 }
 
-// reconcileAgentStatus checks running task count and updates agent status.
+// reconcileAgentStatus refreshes agent status from the current active task set.
+// Used only by the test-fallback path of broadcastFailedTasks above.
 func reconcileAgentStatus(ctx context.Context, queries *db.Queries, bus *events.Bus, agentID pgtype.UUID) {
-	running, err := queries.CountRunningTasks(ctx, agentID)
-	if err != nil {
-		return
-	}
-	newStatus := "idle"
-	if running > 0 {
-		newStatus = "working"
-	}
-	agent, err := queries.UpdateAgentStatus(ctx, db.UpdateAgentStatusParams{
-		ID:     agentID,
-		Status: newStatus,
-	})
+	agent, err := queries.RefreshAgentStatusFromTasks(ctx, agentID)
 	if err != nil {
 		return
 	}

@@ -11,6 +11,7 @@ interface IssueDraft {
   priority: IssuePriority;
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;
+  startDate: string | null;
   dueDate: string | null;
 }
 
@@ -21,13 +22,20 @@ const EMPTY_DRAFT: IssueDraft = {
   priority: "none",
   assigneeType: undefined,
   assigneeId: undefined,
+  startDate: null,
   dueDate: null,
 };
 
 interface IssueDraftStore {
   draft: IssueDraft;
+  // Last assignee picked at submit time. Persisted across drafts so the
+  // create-issue modal can prefill the picker with the user's most recent
+  // choice instead of always opening with no assignee.
+  lastAssigneeType?: IssueAssigneeType;
+  lastAssigneeId?: string;
   setDraft: (patch: Partial<IssueDraft>) => void;
   clearDraft: () => void;
+  setLastAssignee: (type?: IssueAssigneeType, id?: string) => void;
   hasDraft: () => boolean;
 }
 
@@ -35,9 +43,20 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
   persist(
     (set, get) => ({
       draft: { ...EMPTY_DRAFT },
+      lastAssigneeType: undefined,
+      lastAssigneeId: undefined,
       setDraft: (patch) =>
         set((s) => ({ draft: { ...s.draft, ...patch } })),
-      clearDraft: () => set({ draft: { ...EMPTY_DRAFT } }),
+      clearDraft: () =>
+        set((s) => ({
+          draft: {
+            ...EMPTY_DRAFT,
+            assigneeType: s.lastAssigneeType,
+            assigneeId: s.lastAssigneeId,
+          },
+        })),
+      setLastAssignee: (type, id) =>
+        set({ lastAssigneeType: type, lastAssigneeId: id }),
       hasDraft: () => {
         const { draft } = get();
         return !!(draft.title || draft.description);

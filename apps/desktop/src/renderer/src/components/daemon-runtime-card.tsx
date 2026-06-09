@@ -1,22 +1,66 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
+  AlertCircle,
   Play,
   Square,
   RotateCw,
-  Server,
   Activity,
+  ScrollText,
+  LogIn,
 } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
+import { useQuery } from "@tanstack/react-query";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { runtimeListOptions } from "@multica/core/runtimes";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { toast } from "sonner";
 import { DaemonPanel } from "./daemon-panel";
+import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonStatus } from "../../../shared/daemon-types";
-import { DAEMON_STATE_COLORS, DAEMON_STATE_LABELS, formatUptime } from "../../../shared/daemon-types";
+import { DAEMON_STATE_LABELS } from "../../../shared/daemon-types";
 
-export function DaemonRuntimeCard() {
+/**
+ * Desktop-only controls for the daemon embedded in this Electron app. The
+ * shared runtimes page renders this inside the selected local machine header.
+ */
+export function DaemonRuntimeActions() {
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
   const [panelOpen, setPanelOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [confirmStop, setConfirmStop] = useState(false);
+
+  const wsId = useWorkspaceId();
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+
+  const localRuntimeIds = useMemo(() => {
+    if (!status.daemonId) return new Set<string>();
+    return new Set(
+      runtimes
+        .filter((r) => r.daemon_id === status.daemonId)
+        .map((r) => r.id),
+    );
+  }, [runtimes, status.daemonId]);
+
+  const runtimeCount = localRuntimeIds.size;
+
+  const affectedTasks = useMemo(
+    () =>
+      snapshot.filter(
+        (t) =>
+          localRuntimeIds.has(t.runtime_id) &&
+          (t.status === "running" || t.status === "dispatched"),
+      ),
+    [snapshot, localRuntimeIds],
+  );
 
   useEffect(() => {
     window.daemonAPI.getStatus().then((s) => setStatus(s));
@@ -36,7 +80,7 @@ export function DaemonRuntimeCard() {
     }
   }, []);
 
-  const handleStop = useCallback(async () => {
+  const performStop = useCallback(async () => {
     setActionLoading(true);
     const result = await window.daemonAPI.stop();
     if (!result.success) {
@@ -44,112 +88,193 @@ export function DaemonRuntimeCard() {
     }
   }, []);
 
+  const handleStopClick = useCallback(() => {
+    if (affectedTasks.length === 0) {
+      void performStop();
+    } else {
+      setConfirmStop(true);
+    }
+  }, [affectedTasks.length, performStop]);
+
   const handleRestart = useCallback(async () => {
     setActionLoading(true);
     const result = await window.daemonAPI.restart();
     if (!result.success) {
       toast.error("Failed to restart daemon", { description: result.error });
+      return;
+    }
+    toast.success("Restarting daemon", {
+      description: "Runtimes will be back online in a few seconds.",
+    });
+  }, []);
+
+  const handleRetryInstall = useCallback(async () => {
+    setActionLoading(true);
+    try {
+      await window.daemonAPI.retryInstall();
+    } finally {
+      setActionLoading(false);
     }
   }, []);
 
-  const isTransitioning = status.state === "starting" || status.state === "stopping";
-  const isRunning = status.state === "running";
-  const isStopped = status.state === "stopped" || status.state === "cli_not_found";
+  const handleReauth = useCallback(async () => {
+    setActionLoading(true);
+    await reauthenticateDaemon();
+    // onStatusChange resets actionLoading on the next status push; reset here
+    // too in case reauth logged out (unmount) or produced no status change.
+    setActionLoading(false);
+  }, []);
 
-  const stopPropagation = (e: React.MouseEvent) => e.stopPropagation();
+  const isRunning = status.state === "running";
+  const isStopped = status.state === "stopped";
+  const isCliMissing = status.state === "cli_not_found";
+  const isAuthExpired = status.state === "auth_expired";
+  const isTransitioning =
+    status.state === "starting" || status.state === "stopping";
+  const isInstalling = status.state === "installing_cli";
 
   return (
     <>
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setPanelOpen(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setPanelOpen(true);
-          }
-        }}
-        className="border-b px-4 py-3 cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:bg-muted/40"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-muted">
-              <Server className="size-4 text-muted-foreground" />
-            </div>
-            <div>
-              <h3 className="text-sm font-medium">Local Daemon</h3>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className={cn("size-1.5 rounded-full", DAEMON_STATE_COLORS[status.state])} />
-                <span className="text-xs text-muted-foreground">{DAEMON_STATE_LABELS[status.state]}</span>
-                {isRunning && status.uptime && (
-                  <>
-                    <span className="text-xs text-muted-foreground">·</span>
-                    <span className="text-xs text-muted-foreground">{formatUptime(status.uptime)}</span>
-                  </>
-                )}
-                {isRunning && status.agents && status.agents.length > 0 && (
-                  <>
-                    <span className="text-xs text-muted-foreground">·</span>
-                    <span className="text-xs text-muted-foreground">{status.agents.join(", ")}</span>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        {isRunning && (
+          <>
+            <Button size="sm" variant="ghost" onClick={() => setPanelOpen(true)}>
+              <ScrollText className="size-3.5 mr-1.5" />
+              View logs
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRestart}
+              disabled={actionLoading}
+            >
+              <RotateCw className="size-3.5 mr-1.5" />
+              Restart
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleStopClick}
+              disabled={actionLoading}
+            >
+              <Square className="size-3.5 mr-1.5" />
+              Stop
+            </Button>
+          </>
+        )}
 
-          <div
-            className="flex items-center gap-1.5 shrink-0"
-            onClick={stopPropagation}
+        {isStopped && (
+          <Button size="sm" onClick={handleStart} disabled={actionLoading}>
+            {actionLoading ? (
+              <Activity className="size-3.5 mr-1.5 animate-pulse" />
+            ) : (
+              <Play className="size-3.5 mr-1.5" />
+            )}
+            Start
+          </Button>
+        )}
+
+        {isCliMissing && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRetryInstall}
+            disabled={actionLoading}
           >
-            {isStopped && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleStart}
-                disabled={actionLoading || status.state === "cli_not_found"}
-              >
-                {actionLoading ? (
-                  <Activity className="size-3.5 mr-1.5 animate-pulse" />
-                ) : (
-                  <Play className="size-3.5 mr-1.5" />
-                )}
-                Start
-              </Button>
-            )}
-            {isRunning && (
-              <>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={handleRestart}
-                  disabled={actionLoading}
-                >
-                  <RotateCw className="size-3.5 mr-1.5" />
-                  Restart
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleStop}
-                  disabled={actionLoading}
-                >
-                  <Square className="size-3.5 mr-1.5" />
-                  Stop
-                </Button>
-              </>
-            )}
-            {isTransitioning && (
-              <Button size="sm" variant="outline" disabled>
+            <RotateCw className="size-3.5 mr-1.5" />
+            Retry setup
+          </Button>
+        )}
+
+        {isAuthExpired && (
+          <>
+            <span className="inline-flex items-center gap-1.5 text-xs text-destructive">
+              <AlertCircle className="size-3.5 shrink-0" />
+              Sign-in expired
+            </span>
+            <Button size="sm" onClick={handleReauth} disabled={actionLoading}>
+              {actionLoading ? (
                 <Activity className="size-3.5 mr-1.5 animate-pulse" />
-                {DAEMON_STATE_LABELS[status.state]}
-              </Button>
-            )}
-          </div>
-        </div>
+              ) : (
+                <LogIn className="size-3.5 mr-1.5" />
+              )}
+              Sign in again
+            </Button>
+          </>
+        )}
+
+        {(isTransitioning || isInstalling) && (
+          <Button size="sm" variant="outline" disabled>
+            <Activity className="size-3.5 mr-1.5 animate-pulse" />
+            {DAEMON_STATE_LABELS[status.state]}
+          </Button>
+        )}
       </div>
 
-      <DaemonPanel open={panelOpen} onOpenChange={setPanelOpen} status={status} />
+      <DaemonPanel
+        open={panelOpen}
+        onOpenChange={setPanelOpen}
+        status={status}
+        runtimeCount={runtimeCount}
+      />
+
+      <StopConfirmDialog
+        open={confirmStop}
+        onOpenChange={setConfirmStop}
+        affectedCount={affectedTasks.length}
+        onConfirm={() => {
+          setConfirmStop(false);
+          void performStop();
+        }}
+      />
     </>
+  );
+}
+
+// ---------- Sub-components ----------
+
+function StopConfirmDialog({
+  open,
+  onOpenChange,
+  affectedCount,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  affectedCount: number;
+  onConfirm: () => void;
+}) {
+  const plural = affectedCount === 1 ? "" : "s";
+  const verb = affectedCount === 1 ? "is" : "are";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm" showCloseButton={false}>
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+          </div>
+          <DialogHeader className="flex-1 gap-1">
+            <DialogTitle className="text-sm font-semibold">
+              Stop daemon with {affectedCount} active task{plural}?
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-relaxed">
+              {affectedCount} task{plural} {verb} currently running on this
+              device. Stopping now will interrupt {affectedCount === 1 ? "it" : "them"}{" "}
+              — affected tasks get marked <strong>failed</strong> once the
+              timeout hits. The daemon won&apos;t auto-restart.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
+            Stop daemon
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -30,6 +31,11 @@ type ProjectResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 	IssueCount  int64   `json:"issue_count"`
 	DoneCount   int64   `json:"done_count"`
+	// ResourceCount is a breadcrumb pointing at the sub-collection at
+	// /api/projects/{id}/resources. Resources themselves stay out of this
+	// payload to keep parent metadata and child collections separate; clients
+	// that need the list call ListProjectResources directly.
+	ResourceCount int64 `json:"resource_count"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -56,14 +62,33 @@ func (h *Handler) loadProjectIssueStats(ctx context.Context, projectID pgtype.UU
 	return stats[0].TotalCount, stats[0].DoneCount
 }
 
+func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype.UUID) int64 {
+	rows, err := h.Queries.GetProjectResourceCounts(ctx, []pgtype.UUID{projectID})
+	if err != nil || len(rows) == 0 {
+		return 0
+	}
+	return rows[0].ResourceCount
+}
+
 type CreateProjectRequest struct {
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title       string                                `json:"title"`
+	Description *string                               `json:"description"`
+	Icon        *string                               `json:"icon"`
+	Status      string                                `json:"status"`
+	Priority    string                                `json:"priority"`
+	LeadType    *string                               `json:"lead_type"`
+	LeadID      *string                               `json:"lead_id"`
+	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+}
+
+// CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
+// is embedded inside the project create payload. Kept as a separate type so a
+// future change to the standalone request can't silently break this surface.
+type CreateProjectResourceRequestPayload struct {
+	ResourceType string          `json:"resource_type"`
+	ResourceRef  json.RawMessage `json:"resource_ref"`
+	Label        *string         `json:"label"`
+	Position     *int32          `json:"position"`
 }
 
 type UpdateProjectRequest struct {
@@ -77,7 +102,11 @@ type UpdateProjectRequest struct {
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 	var statusFilter pgtype.Text
 	if s := r.URL.Query().Get("status"); s != "" {
 		statusFilter = pgtype.Text{String: s, Valid: true}
@@ -87,7 +116,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
 	}
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 	})
@@ -96,8 +125,9 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Batch-fetch issue stats for all projects
+	// Batch-fetch issue stats and resource counts for all projects
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	resourceCountMap := make(map[string]int64)
 	if len(projects) > 0 {
 		projectIDs := make([]pgtype.UUID, len(projects))
 		for i, p := range projects {
@@ -109,6 +139,12 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 				statsMap[uuidToString(s.ProjectID)] = s
 			}
 		}
+		counts, err := h.Queries.GetProjectResourceCounts(r.Context(), projectIDs)
+		if err == nil {
+			for _, c := range counts {
+				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
+			}
+		}
 	}
 
 	resp := make([]ProjectResponse, len(projects))
@@ -118,15 +154,24 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			resp[i].IssueCount = s.TotalCount
 			resp[i].DoneCount = s.DoneCount
 		}
+		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }
 
 func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
+		ID: idUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
@@ -134,7 +179,43 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
+	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// validProjectStatuses / validProjectPriorities mirror the CHECK constraints on
+// the project table (migrations 034, 035). CreateProject / UpdateProject
+// pre-validate against these so an unknown enum value returns a clean 400 with
+// the allowed list instead of surfacing the DB CHECK violation as a 500 — the
+// exact mismatch reported in #3925 (`--status active`).
+var validProjectStatuses = []string{"planned", "in_progress", "paused", "completed", "cancelled"}
+var validProjectPriorities = []string{"urgent", "high", "medium", "low", "none"}
+
+// validateProjectEnum writes a 400 and returns false when value is not in
+// allowed; the caller returns immediately on false.
+func validateProjectEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
+	for _, a := range allowed {
+		if value == a {
+			return true
+		}
+	}
+	writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid %s %q; valid values: %s", field, value, strings.Join(allowed, ", ")))
+	return false
+}
+
+// writeProjectWriteError maps a failed project INSERT/UPDATE to an HTTP
+// response. A CHECK constraint violation is a client error (400) — pre-validation
+// already covers status/priority, so this backstops any other constrained column
+// (e.g. lead_type). Anything else is a genuine server fault: log the underlying
+// error so transient DB failures are diagnosable (#3925 had no server-side
+// signal) and return 500.
+func (h *Handler) writeProjectWriteError(w http.ResponseWriter, r *http.Request, err error, action string) {
+	if isCheckViolation(err) {
+		writeError(w, http.StatusBadRequest, "project "+action+" rejected: a field value failed a database constraint")
+		return
+	}
+	slog.Error("project "+action+" failed", append(logger.RequestAttrs(r), "error", err)...)
+	writeError(w, http.StatusInternalServerError, "failed to "+action+" project")
 }
 
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +228,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
 	}
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -156,9 +237,15 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if status == "" {
 		status = "planned"
 	}
+	if !validateProjectEnum(w, "status", status, validProjectStatuses) {
+		return
+	}
 	priority := req.Priority
 	if priority == "" {
 		priority = "none"
+	}
+	if !validateProjectEnum(w, "priority", priority, validProjectPriorities) {
+		return
 	}
 	var leadType pgtype.Text
 	var leadID pgtype.UUID
@@ -166,10 +253,55 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		leadType = pgtype.Text{String: *req.LeadType, Valid: true}
 	}
 	if req.LeadID != nil {
-		leadID = parseUUID(*req.LeadID)
+		id, ok := parseUUIDOrBadRequest(w, *req.LeadID, "lead_id")
+		if !ok {
+			return
+		}
+		leadID = id
 	}
-	project, err := h.Queries.CreateProject(r.Context(), db.CreateProjectParams{
-		WorkspaceID: parseUUID(workspaceID),
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	// Pre-validate every resource payload before opening a transaction so an
+	// invalid ref produces a clean 400 with no DB work. For local_directory we
+	// also enforce one row per daemon_id within the batch — the daemon-side
+	// resolver picks the first match by daemon_id, so two rows on the same
+	// daemon would silently route the agent into whichever sorts first.
+	// The standalone POST/PUT paths run the same check via
+	// findLocalDirectoryConflict; this loop just covers the bundled-create
+	// surface, where there is no existing row to compare against yet.
+	normalizedRefs := make([]json.RawMessage, len(req.Resources))
+	localDirSeen := map[string]int{}
+	for i, res := range req.Resources {
+		res.ResourceType = strings.TrimSpace(res.ResourceType)
+		if res.ResourceType == "" {
+			writeError(w, http.StatusBadRequest, "resources[].resource_type is required")
+			return
+		}
+		ref, err := validateAndNormalizeResourceRef(res.ResourceType, res.ResourceRef)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+err.Error())
+			return
+		}
+		normalizedRefs[i] = ref
+		if res.ResourceType == "local_directory" {
+			var ld localDirectoryRef
+			if err := json.Unmarshal(ref, &ld); err != nil {
+				writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+err.Error())
+				return
+			}
+			if prev, ok := localDirSeen[ld.DaemonID]; ok {
+				writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: duplicate local_directory for daemon (already at index "+strconv.Itoa(prev)+"); each daemon may attach at most one local_directory per project")
+				return
+			}
+			localDirSeen[ld.DaemonID] = i
+		}
+	}
+
+	createParams := db.CreateProjectParams{
+		WorkspaceID: wsUUID,
 		Title:       req.Title,
 		Description: ptrToText(req.Description),
 		Icon:        ptrToText(req.Icon),
@@ -177,21 +309,109 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		LeadType:    leadType,
 		LeadID:      leadID,
 		Priority:    priority,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create project")
+	}
+
+	// Without resources, keep the simple non-tx path.
+	if len(req.Resources) == 0 {
+		project, err := h.Queries.CreateProject(r.Context(), createParams)
+		if err != nil {
+			h.writeProjectWriteError(w, r, err, "create")
+			return
+		}
+		resp := projectToResponse(project)
+		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
+		writeJSON(w, http.StatusCreated, resp)
 		return
 	}
+
+	// Transactional path: project + all resources are atomic.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	project, err := qtx.CreateProject(r.Context(), createParams)
+	if err != nil {
+		h.writeProjectWriteError(w, r, err, "create")
+		return
+	}
+
+	creator, _ := h.parseUserUUIDOrZero(userID)
+	resourceRows := make([]db.ProjectResource, 0, len(req.Resources))
+	for i, res := range req.Resources {
+		var label pgtype.Text
+		if res.Label != nil && strings.TrimSpace(*res.Label) != "" {
+			label = pgtype.Text{String: strings.TrimSpace(*res.Label), Valid: true}
+		}
+		var position int32 = int32(i)
+		if res.Position != nil {
+			position = *res.Position
+		}
+		row, err := qtx.CreateProjectResource(r.Context(), db.CreateProjectResourceParams{
+			ProjectID:    project.ID,
+			WorkspaceID:  project.WorkspaceID,
+			ResourceType: res.ResourceType,
+			ResourceRef:  normalizedRefs[i],
+			Label:        label,
+			Position:     position,
+			CreatedBy:    creator,
+		})
+		if err != nil {
+			if isUniqueViolation(err) {
+				writeError(w, http.StatusConflict, "resources["+strconv.Itoa(i)+"]: this resource is already attached")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to attach resource at index "+strconv.Itoa(i))
+			return
+		}
+		resourceRows = append(resourceRows, row)
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit project create")
+		return
+	}
+
+	resourceResp := make([]ProjectResourceResponse, len(resourceRows))
+	for i, row := range resourceRows {
+		resourceResp[i] = projectResourceToResponse(row)
+	}
 	resp := projectToResponse(project)
+	resp.ResourceCount = int64(len(resourceResp))
 	h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
-	writeJSON(w, http.StatusCreated, resp)
+	for _, rr := range resourceResp {
+		h.publish(protocol.EventProjectResourceCreated, workspaceID, "member", userID, map[string]any{
+			"resource":   rr,
+			"project_id": resp.ID,
+		})
+	}
+	// One-shot create echo: the parent ProjectResponse fields plus the just-
+	// created resources. This is a transient creation echo, not a contract for
+	// reads — GET /projects/{id} stays metadata-only with resource_count.
+	writeJSON(w, http.StatusCreated, struct {
+		ProjectResponse
+		Resources []ProjectResourceResponse `json:"resources"`
+	}{
+		ProjectResponse: resp,
+		Resources:       resourceResp,
+	})
 }
 
 func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	prevProject, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
+		ID: idUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
@@ -225,9 +445,15 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
 	if req.Status != nil {
+		if !validateProjectEnum(w, "status", *req.Status, validProjectStatuses) {
+			return
+		}
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
 	if req.Priority != nil {
+		if !validateProjectEnum(w, "priority", *req.Priority, validProjectPriorities) {
+			return
+		}
 		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
 	}
 	if _, ok := rawFields["description"]; ok {
@@ -253,27 +479,42 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["lead_id"]; ok {
 		if req.LeadID != nil {
-			params.LeadID = parseUUID(*req.LeadID)
+			leadUUID, ok := parseUUIDOrBadRequest(w, *req.LeadID, "lead_id")
+			if !ok {
+				return
+			}
+			params.LeadID = leadUUID
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
 		}
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update project")
+		h.writeProjectWriteError(w, r, err, "update")
 		return
 	}
 	resp := projectToResponse(project)
+	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
+	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	workspaceID := resolveWorkspaceID(r)
-	if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-		ID: parseUUID(id), WorkspaceID: parseUUID(workspaceID),
-	}); err != nil {
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
@@ -281,11 +522,14 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.Queries.DeleteProject(r.Context(), parseUUID(id)); err != nil {
+	if err := h.Queries.DeleteProject(r.Context(), db.DeleteProjectParams{
+		ID:          project.ID,
+		WorkspaceID: project.WorkspaceID,
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
 		return
 	}
-	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": id})
+	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": uuidToString(project.ID)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -427,7 +671,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 
 func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	workspaceID := resolveWorkspaceID(r)
+	workspaceID := h.resolveWorkspaceID(r)
 
 	q := r.URL.Query().Get("q")
 	if q == "" {
@@ -453,7 +697,10 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
 
-	wsUUID := parseUUID(workspaceID)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 	terms := splitSearchTerms(q)
 
 	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed)
@@ -510,8 +757,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		total = results[0].totalCount
 	}
 
-	// Batch-fetch issue stats
+	// Batch-fetch issue stats and resource counts
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	resourceCountMap := make(map[string]int64)
 	if len(results) > 0 {
 		projectIDs := make([]pgtype.UUID, len(results))
 		for i, r := range results {
@@ -523,6 +771,12 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 				statsMap[uuidToString(s.ProjectID)] = s
 			}
 		}
+		counts, err := h.Queries.GetProjectResourceCounts(ctx, projectIDs)
+		if err == nil {
+			for _, c := range counts {
+				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
+			}
+		}
 	}
 
 	resp := make([]SearchProjectResponse, len(results))
@@ -532,6 +786,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			pr.IssueCount = s.TotalCount
 			pr.DoneCount = s.DoneCount
 		}
+		pr.ResourceCount = resourceCountMap[pr.ID]
 		spr := SearchProjectResponse{
 			ProjectResponse: pr,
 			MatchSource:     row.matchSource,

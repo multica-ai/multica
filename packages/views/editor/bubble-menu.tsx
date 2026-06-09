@@ -3,20 +3,39 @@
 /**
  * EditorBubbleMenu — floating formatting toolbar for text selection.
  *
- * Uses Tiptap's native <BubbleMenu> component which has battle-tested
- * focus management (preventHide flag, relatedTarget checks, mousedown
- * capture). We only add scroll-container visibility detection on top,
- * because the plugin's hide middleware can't detect nested scroll
- * container clipping (virtual element has no contextElement).
+ * Positioned with @floating-ui/dom (computePosition + autoUpdate) and
+ * portaled to document.body via createPortal. This escapes ALL overflow
+ * containers in the ancestor chain (Card overflow:hidden, scrollable
+ * containers, etc.) while autoUpdate monitors every ancestor scroll
+ * container to keep the menu anchored to the selection.
+ *
+ * Key design decisions:
+ * - contextElement on the virtual reference tells Floating UI where to
+ *   find scroll ancestors, enabling the hide middleware to detect
+ *   nested scroll container clipping.
+ * - visibility:hidden (not display:none) keeps the element measurable
+ *   so computePosition can size it correctly on first show.
+ * - onMouseDown preventDefault on the portal root prevents all clicks
+ *   inside the menu from stealing focus from the editor.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { BubbleMenu } from "@tiptap/react/menus";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  computePosition,
+  offset,
+  flip,
+  shift,
+  hide,
+  autoUpdate,
+} from "@floating-ui/dom";
 import { useEditorState } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
+import { posToDOMRect } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
-import type { EditorState } from "@tiptap/pm/state";
-import type { EditorView } from "@tiptap/pm/view";
+import { toast } from "sonner";
+import { useCreateIssue } from "@multica/core/issues/mutations";
+import { useT } from "../i18n";
+import { modKey } from "@multica/core/platform";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {
@@ -37,9 +56,11 @@ import {
   Italic,
   Strikethrough,
   Code,
+  Highlighter,
   Link2,
   List,
   ListOrdered,
+  ListTodo,
   Quote,
   ChevronDown,
   Check,
@@ -49,62 +70,38 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  FilePlus,
+  Loader2,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function shouldShowBubbleMenu({
-  editor,
-  view,
-  state,
-  from,
-  to,
-}: {
-  editor: Editor;
-  view: EditorView;
-  state: EditorState;
-  oldState?: EditorState;
-  from: number;
-  to: number;
-}) {
+function shouldShowBubbleMenu(editor: Editor): boolean {
   if (!editor.isEditable) return false;
-  if (state.selection.empty) return false;
-  if (!state.doc.textBetween(from, to).trim().length) return false;
-  if (state.selection instanceof NodeSelection) return false;
-  if (!view.hasFocus()) return false;
-  const $from = state.doc.resolve(from);
+  const { selection } = editor.state;
+  if (selection.empty) return false;
+  const { from, to } = selection;
+  if (!editor.state.doc.textBetween(from, to).trim().length) return false;
+  if (selection instanceof NodeSelection) return false;
+  const $from = editor.state.doc.resolve(from);
   if ($from.parent.type.name === "codeBlock") return false;
   return true;
-}
-
-const isMac =
-  typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
-const mod = isMac ? "\u2318" : "Ctrl";
-
-/** Walk up from `el` to find the nearest ancestor with overflow: auto/scroll. */
-function getScrollParent(el: HTMLElement): HTMLElement | Window {
-  let parent = el.parentElement;
-  while (parent) {
-    const style = getComputedStyle(parent);
-    if (/(auto|scroll)/.test(style.overflow + style.overflowY)) return parent;
-    parent = parent.parentElement;
-  }
-  return window;
 }
 
 // ---------------------------------------------------------------------------
 // Mark Toggle Button
 // ---------------------------------------------------------------------------
 
-type InlineMark = "bold" | "italic" | "strike" | "code";
+type InlineMark = "bold" | "italic" | "strike" | "code" | "highlight";
 
 const toggleMarkActions: Record<InlineMark, (editor: Editor) => void> = {
   bold: (e) => e.chain().focus().toggleBold().run(),
   italic: (e) => e.chain().focus().toggleItalic().run(),
   strike: (e) => e.chain().focus().toggleStrike().run(),
   code: (e) => e.chain().focus().toggleCode().run(),
+  highlight: (e) => e.chain().focus().toggleHighlight().run(),
 };
 
 function MarkButton({
@@ -185,6 +182,7 @@ function LinkEditBar({
   editor: Editor;
   onClose: () => void;
 }) {
+  const { t } = useT("editor");
   const existingHref = editor.getAttributes("link").href as string | undefined;
   const [url, setUrl] = useState(existingHref ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -216,7 +214,7 @@ function LinkEditBar({
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https://..."
-        aria-label="URL"
+        aria-label={t(($) => $.bubble_menu.url_aria_label)}
         className="h-7 flex-1 text-xs"
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); apply(); }
@@ -243,13 +241,14 @@ function LinkEditBar({
 // ---------------------------------------------------------------------------
 
 function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor; onOpenChange: (open: boolean) => void; activeLevel: number | undefined }) {
+  const { t } = useT("editor");
   const [open, setOpen] = useState(false);
-  const label = activeLevel ? `H${activeLevel}` : "Text";
+  const label = activeLevel ? `H${activeLevel}` : t(($) => $.bubble_menu.heading_dropdown.text);
   const items = [
-    { label: "Normal Text", icon: Type, active: !activeLevel, action: () => editor.chain().focus().setParagraph().run() },
-    { label: "Heading 1", icon: Heading1, active: activeLevel === 1, action: () => editor.chain().focus().toggleHeading({ level: 1 }).run() },
-    { label: "Heading 2", icon: Heading2, active: activeLevel === 2, action: () => editor.chain().focus().toggleHeading({ level: 2 }).run() },
-    { label: "Heading 3", icon: Heading3, active: activeLevel === 3, action: () => editor.chain().focus().toggleHeading({ level: 3 }).run() },
+    { label: t(($) => $.bubble_menu.heading_dropdown.normal_text), icon: Type, active: !activeLevel, action: () => editor.chain().focus().setParagraph().run() },
+    { label: t(($) => $.bubble_menu.heading_dropdown.heading_1), icon: Heading1, active: activeLevel === 1, action: () => editor.chain().focus().toggleHeading({ level: 1 }).run() },
+    { label: t(($) => $.bubble_menu.heading_dropdown.heading_2), icon: Heading2, active: activeLevel === 2, action: () => editor.chain().focus().toggleHeading({ level: 2 }).run() },
+    { label: t(($) => $.bubble_menu.heading_dropdown.heading_3), icon: Heading3, active: activeLevel === 3, action: () => editor.chain().focus().toggleHeading({ level: 3 }).run() },
   ];
 
   const handleOpenChange = useCallback((next: boolean) => {
@@ -276,6 +275,7 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
       >
         {items.map((item) => (
           <button
+            type="button"
             key={item.label}
             className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
             onMouseDown={(e) => {
@@ -298,7 +298,8 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
 // List Dropdown
 // ---------------------------------------------------------------------------
 
-function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: Editor; onOpenChange: (open: boolean) => void; isBullet: boolean; isOrdered: boolean }) {
+function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { editor: Editor; onOpenChange: (open: boolean) => void; isBullet: boolean; isOrdered: boolean; isTask: boolean }) {
+  const { t } = useT("editor");
   const [open, setOpen] = useState(false);
 
   const handleOpenChange = useCallback((next: boolean) => {
@@ -310,12 +311,12 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
     <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger render={
-          <PopoverTrigger className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted aria-pressed:bg-muted" aria-pressed={isBullet || isOrdered} onMouseDown={(e) => e.preventDefault()} />
+          <PopoverTrigger className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted aria-pressed:bg-muted" aria-pressed={isBullet || isOrdered || isTask} onMouseDown={(e) => e.preventDefault()} />
         }>
           <List className="size-3.5" />
           <ChevronDown className="size-3" />
         </TooltipTrigger>
-        <TooltipContent side="top" sideOffset={8}>List</TooltipContent>
+        <TooltipContent side="top" sideOffset={8}>{t(($) => $.bubble_menu.list)}</TooltipContent>
       </Tooltip>
       <PopoverContent
         side="bottom"
@@ -326,6 +327,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
         finalFocus={false}
       >
         <button
+          type="button"
           className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
           onMouseDown={(e) => {
             e.preventDefault();
@@ -333,10 +335,11 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
             handleOpenChange(false);
           }}
         >
-          <List className="size-3.5" /> Bullet List
+          <List className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.bullet_list)}
           {isBullet && <Check className="ml-auto size-3.5" />}
         </button>
         <button
+          type="button"
           className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
           onMouseDown={(e) => {
             e.preventDefault();
@@ -344,8 +347,20 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
             handleOpenChange(false);
           }}
         >
-          <ListOrdered className="size-3.5" /> Ordered List
+          <ListOrdered className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.ordered_list)}
           {isOrdered && <Check className="ml-auto size-3.5" />}
+        </button>
+        <button
+          type="button"
+          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            editor.chain().focus().toggleTaskList().run();
+            handleOpenChange(false);
+          }}
+        >
+          <ListTodo className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.task_list)}
+          {isTask && <Check className="ml-auto size-3.5" />}
         </button>
       </PopoverContent>
     </Popover>
@@ -353,17 +368,117 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
 }
 
 // ---------------------------------------------------------------------------
-// Main Bubble Menu — native Tiptap <BubbleMenu>
+// Create Sub-Issue Button
 // ---------------------------------------------------------------------------
 
-function EditorBubbleMenu({ editor }: { editor: Editor }) {
+/**
+ * Turns the current selection into a sub-issue of `parentIssueId` and replaces
+ * the selection with a mention link to the new issue. Title is the selected
+ * text (trimmed, collapsed whitespace, capped). Only rendered when a parent
+ * issue is in scope; otherwise there's no meaningful "sub-issue of" target.
+ */
+function CreateSubIssueButton({
+  editor,
+  parentIssueId,
+}: {
+  editor: Editor;
+  parentIssueId: string;
+}) {
+  const { t } = useT("editor");
+  const createIssue = useCreateIssue();
+  const [pending, setPending] = useState(false);
+
+  const handleClick = useCallback(async () => {
+    if (pending) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) return;
+
+    // Title from selection: collapse whitespace, cap length. The full selection
+    // still becomes the link text — only the issue title is capped.
+    const rawTitle = editor.state.doc.textBetween(from, to, " ", " ").trim();
+    const title = rawTitle.replace(/\s+/g, " ").slice(0, 200);
+    if (!title) return;
+
+    setPending(true);
+    try {
+      const newIssue = await createIssue.mutateAsync({
+        title,
+        parent_issue_id: parentIssueId,
+      });
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(
+          { from, to },
+          [
+            {
+              type: "mention",
+              attrs: {
+                id: newIssue.id,
+                label: newIssue.identifier,
+                type: "issue",
+              },
+            },
+            { type: "text", text: " " },
+          ],
+        )
+        .run();
+      toast.success(t(($) => $.bubble_menu.sub_issue.created, { identifier: newIssue.identifier }));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.bubble_menu.sub_issue.create_failed),
+      );
+    } finally {
+      setPending(false);
+    }
+  }, [editor, parentIssueId, createIssue, pending, t]);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Toggle
+            size="sm"
+            pressed={false}
+            disabled={pending}
+            onPressedChange={handleClick}
+            onMouseDown={(e) => e.preventDefault()}
+          />
+        }
+      >
+        {pending ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          <FilePlus className="size-3.5" />
+        )}
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={8}>
+        {t(($) => $.bubble_menu.sub_issue.tooltip)}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main Bubble Menu — @floating-ui/dom + portal to body
+// ---------------------------------------------------------------------------
+
+function EditorBubbleMenu({
+  editor,
+  currentIssueId,
+}: {
+  editor: Editor;
+  currentIssueId?: string;
+}) {
+  const { t } = useT("editor");
+  const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState<"toolbar" | "link-edit">("toolbar");
-  const [scrollTarget, setScrollTarget] = useState<HTMLElement | Window>(window);
-  const menuElRef = useRef<HTMLDivElement>(null);
+  const floatingRef = useRef<HTMLDivElement>(null);
 
   // Precise subscription to formatting state — only re-renders when these
-  // values actually change, replacing direct editor.isActive() calls that
-  // relied on the parent re-rendering on every transaction.
+  // values actually change, not on every transaction.
   const fmt = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -371,130 +486,129 @@ function EditorBubbleMenu({ editor }: { editor: Editor }) {
       italic: e.isActive("italic"),
       strike: e.isActive("strike"),
       code: e.isActive("code"),
+      highlight: e.isActive("highlight"),
       link: e.isActive("link"),
       blockquote: e.isActive("blockquote"),
       bulletList: e.isActive("bulletList"),
       orderedList: e.isActive("orderedList"),
+      taskList: e.isActive("taskList"),
       heading1: e.isActive("heading", { level: 1 }),
       heading2: e.isActive("heading", { level: 2 }),
       heading3: e.isActive("heading", { level: 3 }),
     }),
   });
 
-  // Find the real scroll container once the editor view is ready.
-  // editor.view.dom throws if the view hasn't been mounted yet or has been
-  // destroyed — the Proxy only stubs state/isDestroyed, everything else throws.
-  // This race happens on fast page transitions in Desktop (Inbox switching)
-  // because useEditor delays destruction via setTimeout(..., 1) for StrictMode
-  // survival (TipTap issue #7346).
+  // Virtual reference that tracks the text selection.
+  // contextElement tells autoUpdate/hide where to find scroll ancestors.
+  const virtualRef = useMemo(
+    () => ({
+      getBoundingClientRect: () => {
+        if (editor.isDestroyed) return new DOMRect();
+        const { from, to } = editor.state.selection;
+        return posToDOMRect(editor.view, from, to);
+      },
+      contextElement: editor.view.dom,
+    }),
+    [editor],
+  );
+
+  // Show/hide based on selection state
   useEffect(() => {
-    const detect = () => {
-      if (!editor.isInitialized) return; // view not ready yet
-      setScrollTarget(getScrollParent(editor.view.dom));
+    const onTransaction = () => {
+      if (!editor.isInitialized) return;
+      setVisible(shouldShowBubbleMenu(editor));
     };
-    detect();
-    editor.on("create", detect);
-    return () => { editor.off("create", detect); };
+    editor.on("transaction", onTransaction);
+    return () => { editor.off("transaction", onTransaction); };
   }, [editor]);
 
-  // Hide when the selection scrolls outside the scroll container's
-  // visible area. The plugin's hide middleware can't detect this because
-  // its virtual reference element has no contextElement — Floating UI
-  // only checks viewport bounds. We use `display` (not managed by the
-  // plugin) as an additive visibility layer.
-  const scrollHiddenRef = useRef(false);
-  const [, forceRender] = useState(0);
+  // Hide on blur — debounced to allow focus to settle (e.g. clicking menu)
   useEffect(() => {
-    if (scrollTarget === window) return;
-    const el = scrollTarget as HTMLElement;
+    const onBlur = () => {
+      setTimeout(() => {
+        if (editor.isDestroyed) return;
+        const el = floatingRef.current;
+        if (el && el.contains(document.activeElement)) return;
+        if (editor.view.hasFocus()) return;
+        setVisible(false);
+      }, 0);
+    };
+    editor.on("blur", onBlur);
+    return () => { editor.off("blur", onBlur); };
+  }, [editor]);
 
-    const onScroll = () => {
-      if (editor.state.selection.empty) {
-        if (scrollHiddenRef.current) {
-          scrollHiddenRef.current = false;
-          forceRender((n) => n + 1);
-        }
-        return;
-      }
-      // editor.view.coordsAtPos throws if the view has been destroyed
-      // during a fast unmount race (same Proxy guard as view.dom above).
-      let coords: { top: number };
-      try {
-        coords = editor.view.coordsAtPos(editor.state.selection.from);
-      } catch {
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      const visible = coords.top >= rect.top && coords.top <= rect.bottom;
-      if (scrollHiddenRef.current !== !visible) {
-        scrollHiddenRef.current = !visible;
-        forceRender((n) => n + 1);
-      }
+  // Position the floating element with autoUpdate when visible
+  useEffect(() => {
+    const el = floatingRef.current;
+    if (!visible || !el || !editor.isInitialized) return;
+
+    const updatePosition = () => {
+      computePosition(virtualRef, el, {
+        strategy: "fixed",
+        placement: "top",
+        middleware: [offset(8), flip(), shift({ padding: 8 }), hide()],
+      }).then(({ x, y, middlewareData }) => {
+        if (!el.isConnected) return;
+        const hidden = middlewareData.hide?.referenceHidden;
+        el.style.visibility = hidden ? "hidden" : "visible";
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+      });
     };
 
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [editor, scrollTarget]);
+    // autoUpdate monitors all scroll ancestors (via contextElement),
+    // resize, and animation frames — no manual scroll listener needed.
+    const cleanup = autoUpdate(virtualRef, el, updatePosition);
+    return cleanup;
+  }, [visible, editor, virtualRef]);
 
-  // Reset scroll-hidden and mode when selection changes
+  // Close on outside click
   useEffect(() => {
-    const handler = () => {
-      setMode("toolbar");
-      if (scrollHiddenRef.current) {
-        scrollHiddenRef.current = false;
-        forceRender((n) => n + 1);
-      }
+    if (!visible) return;
+    const handle = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (editor.view.dom.contains(target)) return;
+      if (floatingRef.current?.contains(target)) return;
+      setVisible(false);
     };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [visible, editor]);
+
+  // Reset mode on selection change
+  useEffect(() => {
+    const handler = () => setMode("toolbar");
     editor.on("selectionUpdate", handler);
     return () => { editor.off("selectionUpdate", handler); };
   }, [editor]);
 
-  // Refocus editor when Base UI dropdown closes
+  // Refocus editor when Popover closes
   const handleMenuOpenChange = useCallback(
     (open: boolean) => { if (!open) editor.commands.focus(); },
     [editor],
   );
 
   return (
-    <BubbleMenu
-      ref={menuElRef}
-      editor={editor}
-      shouldShow={shouldShowBubbleMenu}
-      updateDelay={0}
+    <div
+      ref={floatingRef}
       style={{
+        position: "fixed",
         zIndex: 50,
-        display: scrollHiddenRef.current ? "none" : undefined,
+        width: "max-content",
+        visibility: visible ? "visible" : "hidden",
       }}
-      options={{
-        strategy: "fixed",
-        placement: "top",
-        offset: 8,
-        flip: true,
-        shift: { padding: 8 },
-        hide: true,
-        scrollTarget,
-        // Tiptap's React wrapper initialises the menu element with
-        // position:absolute, but computePosition (called right after
-        // show()) needs position:fixed so that getOffsetParent returns
-        // the viewport instead of a positioned ancestor. Without this,
-        // the first positioning computes coordinates relative to the
-        // wrong containing block and the menu flies off-screen.
-        onShow: () => {
-          if (menuElRef.current) {
-            menuElRef.current.style.position = "fixed";
-          }
-        },
-      }}
+      onMouseDown={(e) => e.preventDefault()}
     >
       {mode === "link-edit" ? (
         <LinkEditBar editor={editor} onClose={() => { setMode("toolbar"); editor.commands.focus(); }} />
       ) : (
         <TooltipProvider delay={300}>
           <div className="bubble-menu">
-            <MarkButton editor={editor} mark="bold" icon={Bold} label="Bold" shortcut={`${mod}+B`} isActive={fmt.bold} />
-            <MarkButton editor={editor} mark="italic" icon={Italic} label="Italic" shortcut={`${mod}+I`} isActive={fmt.italic} />
-            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label="Strikethrough" shortcut={`${mod}+Shift+S`} isActive={fmt.strike} />
-            <MarkButton editor={editor} mark="code" icon={Code} label="Code" shortcut={`${mod}+E`} isActive={fmt.code} />
+            <MarkButton editor={editor} mark="bold" icon={Bold} label={t(($) => $.bubble_menu.bold)} shortcut={`${modKey}+B`} isActive={fmt.bold} />
+            <MarkButton editor={editor} mark="italic" icon={Italic} label={t(($) => $.bubble_menu.italic)} shortcut={`${modKey}+I`} isActive={fmt.italic} />
+            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label={t(($) => $.bubble_menu.strikethrough)} shortcut={`${modKey}+Shift+S`} isActive={fmt.strike} />
+            <MarkButton editor={editor} mark="code" icon={Code} label={t(($) => $.bubble_menu.code)} shortcut={`${modKey}+E`} isActive={fmt.code} />
+            <MarkButton editor={editor} mark="highlight" icon={Highlighter} label={t(($) => $.bubble_menu.highlight)} shortcut={`${modKey}+Shift+H`} isActive={fmt.highlight} />
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <Tooltip>
               <TooltipTrigger render={
@@ -502,23 +616,29 @@ function EditorBubbleMenu({ editor }: { editor: Editor }) {
               }>
                 <Link2 className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={8}>Link</TooltipContent>
+              <TooltipContent side="top" sideOffset={8}>{t(($) => $.bubble_menu.link)}</TooltipContent>
             </Tooltip>
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <HeadingDropdown editor={editor} onOpenChange={handleMenuOpenChange} activeLevel={fmt.heading1 ? 1 : fmt.heading2 ? 2 : fmt.heading3 ? 3 : undefined} />
-            <ListDropdown editor={editor} onOpenChange={handleMenuOpenChange} isBullet={fmt.bulletList} isOrdered={fmt.orderedList} />
+            <ListDropdown editor={editor} onOpenChange={handleMenuOpenChange} isBullet={fmt.bulletList} isOrdered={fmt.orderedList} isTask={fmt.taskList} />
             <Tooltip>
               <TooltipTrigger render={
                 <Toggle size="sm" pressed={fmt.blockquote} onPressedChange={() => editor.chain().focus().toggleBlockquote().run()} onMouseDown={(e) => e.preventDefault()} />
               }>
                 <Quote className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={8}>Quote</TooltipContent>
+              <TooltipContent side="top" sideOffset={8}>{t(($) => $.bubble_menu.quote)}</TooltipContent>
             </Tooltip>
+            {currentIssueId && (
+              <>
+                <Separator orientation="vertical" className="mx-0.5 h-5" />
+                <CreateSubIssueButton editor={editor} parentIssueId={currentIssueId} />
+              </>
+            )}
           </div>
         </TooltipProvider>
       )}
-    </BubbleMenu>
+    </div>
   );
 }
 

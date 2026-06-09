@@ -5,6 +5,16 @@ SELECT * FROM skill
 WHERE workspace_id = $1
 ORDER BY name ASC;
 
+-- name: ListSkillSummariesByWorkspace :many
+-- Same as ListSkillsByWorkspace but omits the SKILL.md `content` column. Used
+-- by list endpoints (CLI table, web list page) where the body is never read;
+-- shipping it everywhere blew up payload size on workspaces with many skills
+-- and caused 15s CLI timeouts from high-latency regions (GH multica-ai/multica#2174).
+SELECT id, workspace_id, name, description, config, created_by, created_at, updated_at
+FROM skill
+WHERE workspace_id = $1
+ORDER BY name ASC;
+
 -- name: GetSkill :one
 SELECT * FROM skill
 WHERE id = $1;
@@ -12,6 +22,14 @@ WHERE id = $1;
 -- name: GetSkillInWorkspace :one
 SELECT * FROM skill
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: GetSkillByWorkspaceAndName :one
+-- Used by agent-template materialization to implement find-or-create: when a
+-- template references a skill by name that already exists in the workspace,
+-- reuse the existing skill_id rather than INSERT (which would fail the
+-- UNIQUE(workspace_id, name) constraint from migration 008).
+SELECT * FROM skill
+WHERE workspace_id = $1 AND name = $2;
 
 -- name: CreateSkill :one
 INSERT INTO skill (workspace_id, name, description, content, config, created_by)
@@ -29,7 +47,8 @@ WHERE id = $1
 RETURNING *;
 
 -- name: DeleteSkill :exec
-DELETE FROM skill WHERE id = $1;
+-- Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
+DELETE FROM skill WHERE id = $1 AND workspace_id = $2;
 
 -- Skill File CRUD
 
@@ -60,6 +79,15 @@ DELETE FROM skill_file WHERE skill_id = $1;
 
 -- name: ListAgentSkills :many
 SELECT s.* FROM skill s
+JOIN agent_skill ask ON ask.skill_id = s.id
+WHERE ask.agent_id = $1
+ORDER BY s.name ASC;
+
+-- name: ListAgentSkillSummaries :many
+-- Summary variant for the agent skills list endpoint — omits `content` for
+-- the same reason as ListSkillSummariesByWorkspace.
+SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at
+FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
 ORDER BY s.name ASC;

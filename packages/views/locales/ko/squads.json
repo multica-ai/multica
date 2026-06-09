@@ -1,0 +1,76 @@
+{
+  "page": {
+    "title": "스쿼드",
+    "new_button": "새 스쿼드",
+    "empty_no_squads": "아직 스쿼드가 없습니다. 하나 만들어 시작하세요.",
+    "empty_no_match": "필터와 일치하는 스쿼드가 없습니다."
+  },
+  "inspector": {
+    "details_section": "세부 정보",
+    "archive_button": "보관"
+  },
+  "archive_dialog": {
+    "title": "이 스쿼드를 보관할까요?",
+    "description": "\"{{name}}\"이(가) 보관됩니다. 현재 이 스쿼드에 할당된 이슈는 리더에게 이전됩니다. 이 작업은 되돌릴 수 없습니다. 라우팅을 다시 쓰려면 새 스쿼드를 만드세요.",
+    "cancel": "취소",
+    "confirm": "보관",
+    "archiving": "보관하는 중..."
+  },
+  "name_editor": {
+    "cancel": "취소"
+  },
+  "add_member_dialog": {
+    "title": "멤버 추가",
+    "description": "워크스페이스 멤버 또는 에이전트를 이 스쿼드에 추가합니다.",
+    "label_member": "멤버",
+    "label_role": "역할",
+    "label_optional": "(선택 사항)",
+    "placeholder_role_inline": "역할 추가...",
+    "cancel": "취소"
+  },
+  "description_dialog": {
+    "title": "설명 수정",
+    "placeholder_empty": "설명 추가",
+    "cancel": "취소"
+  },
+  "discard_changes_dialog": {
+    "title": "저장하지 않은 변경사항을 버릴까요?",
+    "description": "이 탭에 저장하지 않은 변경사항이 있습니다. 탭을 전환하면 변경사항이 사라집니다.",
+    "keep_editing": "계속 편집",
+    "discard_button": "버리기"
+  },
+  "members_tab": {
+    "section_title": "멤버",
+    "section_count_one": "이 스쿼드의 멤버 {{count}}명",
+    "section_count_other": "이 스쿼드의 멤버 {{count}}명",
+    "add_member_button": "멤버 추가",
+    "create_agent_button": "에이전트 만들기",
+    "leader_chip": "리더",
+    "view_agent_tooltip": "에이전트 상세 열기",
+    "make_leader_tooltip": "스쿼드 리더로 지정",
+    "remove_member_tooltip": "스쿼드에서 제거",
+    "status_working": "작업 중",
+    "status_idle": "유휴",
+    "status_offline": "오프라인",
+    "status_unstable": "불안정",
+    "status_archived": "보관됨",
+    "issue_status_blocked": "막힘",
+    "active_issue_more": "외 {{count}}개",
+    "last_active_label": "마지막 활동 {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "스쿼드를 사용할 수 없습니다",
+    "detail_link": "자세히 →",
+    "archived": "보관됨",
+    "member_count_one": "멤버 {{count}}명",
+    "member_count_other": "멤버 {{count}}명",
+    "members_section": "멤버",
+    "more_members_one": "+{{count}}명 더 보기",
+    "more_members_other": "+{{count}}명 더 보기"
+  },
+  "instructions_tab": {
+    "description": "스쿼드에 할당된 이슈를 리더 에이전트가 처리할 때마다 스쿼드 지침이 리더 프롬프트에 포함됩니다. 스쿼드 전체의 방향, 작업 합의, 매 작업마다 따라야 할 맥락을 리더에게 전달할 때 사용하세요.",
+    "unsaved_changes": "저장하지 않은 변경사항",
+    "save_button": "저장"
+  }
+}

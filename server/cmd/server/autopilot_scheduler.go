@@ -48,7 +48,7 @@ func recoverLostTriggers(ctx context.Context, queries *db.Queries) {
 		if !t.CronExpression.Valid || t.CronExpression.String == "" {
 			continue
 		}
-		tz := "UTC"
+		tz := service.DefaultAutopilotTriggerTimezone
 		if t.Timezone.Valid && t.Timezone.String != "" {
 			tz = t.Timezone.String
 		}
@@ -112,7 +112,7 @@ func advanceNextRun(ctx context.Context, queries *db.Queries, t db.ClaimDueSched
 		return
 	}
 
-	tz := "UTC"
+	tz := service.DefaultAutopilotTriggerTimezone
 	if t.Timezone.Valid && t.Timezone.String != "" {
 		tz = t.Timezone.String
 	}

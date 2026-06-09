@@ -1,25 +1,17 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { useCurrentWorkspace } from "./paths/hooks";
 
-const WorkspaceIdContext = createContext<string | null>(null);
-
-export function WorkspaceIdProvider({
-  wsId,
-  children,
-}: {
-  wsId: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <WorkspaceIdContext.Provider value={wsId}>
-      {children}
-    </WorkspaceIdContext.Provider>
-  );
-}
-
+/**
+ * Returns the current workspace UUID. Throws if called outside a workspace route.
+ *
+ * Implementation: derives from useCurrentWorkspace() (URL slug + React Query list).
+ * No longer backed by a React Context — the WorkspaceIdProvider has been removed
+ * as part of the slug-first refactor. The throw semantics are preserved so existing
+ * callers that depend on non-null don't need guard code.
+ */
 export function useWorkspaceId(): string {
-  const wsId = useContext(WorkspaceIdContext);
-  if (!wsId) throw new Error("useWorkspaceId: no workspace selected — wrap in WorkspaceIdProvider");
-  return wsId;
+  const ws = useCurrentWorkspace();
+  if (!ws) throw new Error("useWorkspaceId: no workspace selected — ensure component renders inside a workspace route");
+  return ws.id;
 }

@@ -16,8 +16,9 @@ test.describe("Comments", () => {
   });
 
   test("can add a comment on an issue", async ({ page }) => {
-    // Wait for issues to load and click first one
-    const issueLink = page.locator('a[href^="/issues/"]').first();
+    // Wait for issues to load and click first one. `*=` matches both legacy
+    // `/issues/{id}` and URL-refactored `/{slug}/issues/{id}` hrefs.
+    const issueLink = page.locator('a[href*="/issues/"]').first();
     await expect(issueLink).toBeVisible({ timeout: 5000 });
     await issueLink.click();
     await page.waitForURL(/\/issues\/[\w-]+/);
@@ -42,7 +43,7 @@ test.describe("Comments", () => {
   });
 
   test("comment submit button is disabled when empty", async ({ page }) => {
-    const issueLink = page.locator('a[href^="/issues/"]').first();
+    const issueLink = page.locator('a[href*="/issues/"]').first();
     await expect(issueLink).toBeVisible({ timeout: 5000 });
     await issueLink.click();
     await page.waitForURL(/\/issues\/[\w-]+/);

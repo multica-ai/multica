@@ -1,610 +1,170 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
+import { useMemo, useState } from "react";
 import {
-  Sparkles,
-  Plus,
-  Trash2,
-  Save,
   AlertCircle,
-  Download,
+  AlertTriangle,
+  BookOpen,
+  Plus,
+  Search,
 } from "lucide-react";
-import type { Skill, CreateSkillRequest, UpdateSkillRequest } from "@multica/core/types";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@multica/ui/components/ui/dialog";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@multica/ui/components/ui/resizable";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { Badge } from "@multica/ui/components/ui/badge";
-import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
-import { toast } from "sonner";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { api } from "@multica/core/api";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type {
+  AgentRuntime,
+  MemberWithUser,
+  Skill,
+  SkillSummary,
+} from "@multica/core/types";
+import { useQuery } from "@tanstack/react-query";
+import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { skillListOptions, workspaceKeys } from "@multica/core/workspace/queries";
-
+import { useWorkspacePaths } from "@multica/core/paths";
+import {
+  agentListOptions,
+  memberListOptions,
+  selectSkillAssignments,
+  skillListOptions,
+} from "@multica/core/workspace/queries";
+import { runtimeListOptions } from "@multica/core/runtimes";
+import { Button } from "@multica/ui/components/ui/button";
+import { DataTable } from "@multica/ui/components/ui/data-table";
+import { Input } from "@multica/ui/components/ui/input";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
+import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
-import { FileTree } from "./file-tree";
-import { FileViewer } from "./file-viewer";
+import { canEditSkill } from "../hooks/use-can-edit-skill";
+import { readOrigin } from "../lib/origin";
+import { CreateSkillDialog } from "./create-skill-dialog";
+import { type SkillRow, useSkillColumns } from "./skill-columns";
+import { useT } from "../../i18n";
+
+type FilterKey = "all" | "used" | "unused" | "mine";
+
+const SCOPE_KEYS: FilterKey[] = ["all", "used", "unused", "mine"];
 
 // ---------------------------------------------------------------------------
-// Create Skill Dialog
+// Page header bar — uses shared PageHeader so the mobile sidebar trigger and
+// h-12 chrome stay consistent with every other dashboard list page.
 // ---------------------------------------------------------------------------
 
-function CreateSkillDialog({
-  onClose,
+function PageHeaderBar({
+  totalCount,
   onCreate,
-  onImport,
 }: {
-  onClose: () => void;
-  onCreate: (data: CreateSkillRequest) => Promise<void>;
-  onImport: (url: string) => Promise<void>;
+  totalCount: number;
+  onCreate: () => void;
 }) {
-  const [tab, setTab] = useState<"create" | "import">("create");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [importUrl, setImportUrl] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [importError, setImportError] = useState("");
-
-  const detectedSource = (() => {
-    const url = importUrl.trim().toLowerCase();
-    if (url.includes("clawhub.ai")) return "clawhub" as const;
-    if (url.includes("skills.sh")) return "skills.sh" as const;
-    return null;
-  })();
-
-  const handleCreate = async () => {
-    if (!name.trim()) return;
-    setLoading(true);
-    try {
-      await onCreate({ name: name.trim(), description: description.trim() });
-      onClose();
-    } catch {
-      setLoading(false);
-    }
-  };
-
-  const handleImport = async () => {
-    if (!importUrl.trim()) return;
-    setLoading(true);
-    setImportError("");
-    try {
-      await onImport(importUrl.trim());
-      onClose();
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Import failed");
-      setLoading(false);
-    }
-  };
-
+  const { t } = useT("skills");
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add Workspace Skill</DialogTitle>
-          <DialogDescription>
-            Create a new skill or import from ClawHub / Skills.sh. Workspace skills are shared with your team and automatically injected into agent runs.
-          </DialogDescription>
-        </DialogHeader>
-
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "create" | "import")}>
-          <TabsList className="w-full">
-            <TabsTrigger value="create" className="flex-1">
-              <Plus className="mr-1.5 h-3 w-3" />
-              Create
-            </TabsTrigger>
-            <TabsTrigger value="import" className="flex-1">
-              <Download className="mr-1.5 h-3 w-3" />
-              Import
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="create" className="space-y-4 mt-4 min-h-[180px]">
-            <div>
-              <Label className="text-xs text-muted-foreground">Name</Label>
-              <Input
-                autoFocus
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Code Review, Bug Triage"
-                className="mt-1"
-                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              />
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Description</Label>
-              <Input
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Brief description of what this skill does"
-                className="mt-1"
-              />
-            </div>
-          </TabsContent>
-
-          <TabsContent value="import" className="space-y-4 mt-4 min-h-[180px]">
-            <div>
-              <Label className="text-xs text-muted-foreground">Skill URL</Label>
-              <Input
-                autoFocus
-                type="text"
-                value={importUrl}
-                onChange={(e) => { setImportUrl(e.target.value); setImportError(""); }}
-                placeholder="Paste a skill URL..."
-                className="mt-1"
-                onKeyDown={(e) => e.key === "Enter" && handleImport()}
-              />
-            </div>
-
-            {/* Supported sources — highlight on detection */}
-            <div>
-              <p className="text-xs text-muted-foreground mb-2">Supported sources</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
-                  detectedSource === "clawhub"
-                    ? "border-primary bg-primary/5"
-                    : ""
-                }`}>
-                  <div className="text-xs font-medium">ClawHub</div>
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground font-mono">
-                    clawhub.ai/owner/skill
-                  </div>
-                </div>
-                <div className={`rounded-lg border px-3 py-2.5 transition-colors ${
-                  detectedSource === "skills.sh"
-                    ? "border-primary bg-primary/5"
-                    : ""
-                }`}>
-                  <div className="text-xs font-medium">Skills.sh</div>
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground font-mono">
-                    skills.sh/owner/repo/skill
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {importError && (
-              <div className="flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                {importError}
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          {tab === "create" ? (
-            <Button onClick={handleCreate} disabled={loading || !name.trim()}>
-              {loading ? "Creating..." : "Create"}
-            </Button>
-          ) : (
-            <Button onClick={handleImport} disabled={loading || !importUrl.trim()}>
-              {loading ? (
-                detectedSource === "clawhub"
-                  ? "Importing from ClawHub..."
-                  : detectedSource === "skills.sh"
-                    ? "Importing from Skills.sh..."
-                    : "Importing..."
-              ) : (
-                <>
-                  <Download className="mr-1.5 h-3 w-3" />
-                  Import
-                </>
-              )}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Skill List Item
-// ---------------------------------------------------------------------------
-
-function SkillListItem({
-  skill,
-  isSelected,
-  onClick,
-}: {
-  skill: Skill;
-  isSelected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-        isSelected ? "bg-accent" : "hover:bg-accent/50"
-      }`}
-    >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Sparkles className="h-4 w-4 text-muted-foreground" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{skill.name}</div>
-        {skill.description && (
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">
-            {skill.description}
-          </div>
+    <PageHeader className="justify-between px-5">
+      <div className="flex items-center gap-2">
+        <BookOpen className="h-4 w-4 text-muted-foreground" />
+        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
+        {totalCount > 0 && (
+          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
+            {totalCount}
+          </span>
         )}
-      </div>
-      {(skill.files?.length ?? 0) > 0 && (
-        <Badge variant="secondary">
-          {skill.files.length} file{skill.files.length !== 1 ? "s" : ""}
-        </Badge>
-      )}
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Helpers: virtual file list for the tree
-// ---------------------------------------------------------------------------
-
-const SKILL_MD = "SKILL.md";
-
-/** Merge skill.content (as SKILL.md) + skill.files into a single map */
-function buildFileMap(
-  content: string,
-  files: { path: string; content: string }[],
-): Map<string, string> {
-  const map = new Map<string, string>();
-  map.set(SKILL_MD, content);
-  for (const f of files) {
-    if (f.path.trim()) map.set(f.path, f.content);
-  }
-  return map;
-}
-
-// ---------------------------------------------------------------------------
-// Add File Dialog
-// ---------------------------------------------------------------------------
-
-function AddFileDialog({
-  existingPaths,
-  onClose,
-  onAdd,
-}: {
-  existingPaths: string[];
-  onClose: () => void;
-  onAdd: (path: string) => void;
-}) {
-  const [path, setPath] = useState("");
-  const duplicate = existingPaths.includes(path.trim());
-
-  return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-sm" showCloseButton={false}>
-        <DialogHeader>
-          <DialogTitle className="text-sm font-semibold">Add File</DialogTitle>
-          <DialogDescription className="text-xs">
-            Add a supporting file to this skill.
-          </DialogDescription>
-        </DialogHeader>
-        <div>
-          <Label className="text-xs text-muted-foreground">File Path</Label>
-          <Input
-            autoFocus
-            type="text"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="e.g. templates/review.md"
-            className="mt-1 font-mono text-sm"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && path.trim() && !duplicate) {
-                onAdd(path.trim());
-                onClose();
-              }
-            }}
-          />
-          {duplicate && (
-            <p className="mt-1 text-xs text-destructive">File already exists</p>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button
-            disabled={!path.trim() || duplicate}
-            onClick={() => { onAdd(path.trim()); onClose(); }}
+        <p className="ml-2 hidden text-xs text-muted-foreground md:block">
+          {t(($) => $.page.tagline)}{" "}
+          <a
+            href="https://multica.ai/docs/skills"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
           >
-            Add
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            {t(($) => $.page.learn_more)}
+          </a>
+        </p>
+      </div>
+      <Button type="button" size="sm" onClick={onCreate}>
+        <Plus className="h-3 w-3" />
+        {t(($) => $.page.new_skill)}
+      </Button>
+    </PageHeader>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Skill Detail — file-browser layout
+// Card toolbar — search + scope filters
 // ---------------------------------------------------------------------------
 
-function SkillDetail({
-  skill,
-  onUpdate,
-  onDelete,
+function CardToolbar({
+  search,
+  setSearch,
+  filter,
+  setFilter,
 }: {
-  skill: Skill;
-  onUpdate: (id: string, data: UpdateSkillRequest) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  search: string;
+  setSearch: (v: string) => void;
+  filter: FilterKey;
+  setFilter: (v: FilterKey) => void;
 }) {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  const [name, setName] = useState(skill.name);
-  const [description, setDescription] = useState(skill.description);
-  const [content, setContent] = useState(skill.content);
-  const [files, setFiles] = useState<{ path: string; content: string }[]>(
-    (skill.files ?? []).map((f) => ({ path: f.path, content: f.content })),
-  );
-  const [selectedPath, setSelectedPath] = useState(SKILL_MD);
-  const [saving, setSaving] = useState(false);
-  const [loadingFiles, setLoadingFiles] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [showAddFile, setShowAddFile] = useState(false);
-
-  // Sync basic fields from store updates
-  useEffect(() => {
-    setName(skill.name);
-    setDescription(skill.description);
-    setContent(skill.content);
-  }, [skill.id, skill.name, skill.description, skill.content]);
-
-  // Fetch full skill (with files) on selection change
-  useEffect(() => {
-    setSelectedPath(SKILL_MD);
-    setLoadingFiles(true);
-    api.getSkill(skill.id).then((full) => {
-      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      setFiles((full.files ?? []).map((f) => ({ path: f.path, content: f.content })));
-    }).catch((e) => {
-      toast.error(e instanceof Error ? e.message : "Failed to load skill files");
-    }).finally(() => setLoadingFiles(false));
-  }, [skill.id, qc, wsId]);
-
-  // Build the virtual file map
-  const fileMap = useMemo(() => buildFileMap(content, files), [content, files]);
-  const filePaths = useMemo(() => Array.from(fileMap.keys()), [fileMap]);
-  const selectedContent = fileMap.get(selectedPath) ?? "";
-
-  const isDirty =
-    name !== skill.name ||
-    description !== skill.description ||
-    content !== skill.content ||
-    JSON.stringify(files) !==
-      JSON.stringify((skill.files ?? []).map((f) => ({ path: f.path, content: f.content })));
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await onUpdate(skill.id, {
-        name: name.trim(),
-        description: description.trim(),
-        content,
-        files: files.filter((f) => f.path.trim()),
-      });
-    } catch {
-      // toast handled by parent
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleFileContentChange = (newContent: string) => {
-    if (selectedPath === SKILL_MD) {
-      setContent(newContent);
-    } else {
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.path === selectedPath ? { ...f, content: newContent } : f,
-        ),
-      );
-    }
-  };
-
-  const handleAddFile = (path: string) => {
-    setFiles((prev) => [...prev, { path, content: "" }]);
-    setSelectedPath(path);
-  };
-
-  const handleDeleteFile = () => {
-    if (selectedPath === SKILL_MD) return;
-    setFiles((prev) => prev.filter((f) => f.path !== selectedPath));
-    setSelectedPath(SKILL_MD);
-  };
-
+  const { t } = useT("skills");
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-            <Sparkles className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="grid grid-cols-2 gap-3 flex-1 min-w-0">
-            <Input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="h-8 text-sm font-medium"
-              placeholder="Skill name"
-            />
-            <Input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="h-8 text-sm"
-              placeholder="Description"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2 ml-3">
-          {isDirty && (
-            <Button onClick={handleSave} disabled={saving || !name.trim()} size="xs">
-              <Save className="h-3 w-3" />
-              {saving ? "Saving..." : "Save"}
-            </Button>
-          )}
-          <Tooltip>
+    <div className="flex h-auto shrink-0 flex-col gap-2 border-b px-3 py-3 sm:h-12 sm:flex-row sm:items-center sm:px-4 sm:py-0">
+      <div className="relative w-full sm:w-auto">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t(($) => $.page.search_placeholder)}
+          className="h-8 w-full pl-8 text-sm sm:w-64"
+        />
+      </div>
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0">
+        {SCOPE_KEYS.map((scope) => (
+          <Tooltip key={scope}>
             <TooltipTrigger
               render={
                 <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => setConfirmDelete(true)}
-                  className="text-muted-foreground hover:text-destructive"
+                  variant="outline"
+                  size="sm"
+                  className={
+                    filter === scope
+                      ? "shrink-0 bg-accent text-accent-foreground hover:bg-accent/80"
+                      : "shrink-0 text-muted-foreground"
+                  }
+                  onClick={() => setFilter(scope)}
                 >
-                  <Trash2 className="h-3 w-3" />
+                  {t(($) => $.page.scopes[scope].label)}
                 </Button>
               }
             />
-            <TooltipContent>Delete skill</TooltipContent>
+            <TooltipContent side="bottom">
+              {t(($) => $.page.scopes[scope].description)}
+            </TooltipContent>
           </Tooltip>
-        </div>
+        ))}
       </div>
+    </div>
+  );
+}
 
-      {/* File browser: tree + viewer */}
-      <div className="flex flex-1 min-h-0">
-        {/* File tree */}
-        <div className="w-52 shrink-0 border-r flex flex-col">
-          <div className="flex h-10 items-center justify-between border-b px-3">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Files
-            </span>
-            <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setShowAddFile(true)}
-                      className="text-muted-foreground"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>Add file</TooltipContent>
-              </Tooltip>
-              {selectedPath !== SKILL_MD && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={handleDeleteFile}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Delete file</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {loadingFiles ? (
-              <div className="p-3 space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-4 w-1/2" />
-              </div>
-            ) : (
-              <FileTree
-                filePaths={filePaths}
-                selectedPath={selectedPath}
-                onSelect={setSelectedPath}
-              />
-            )}
-          </div>
-        </div>
+// ---------------------------------------------------------------------------
+// Empty state
+// ---------------------------------------------------------------------------
 
-        {/* File viewer */}
-        <div className="flex-1 min-w-0">
-          {loadingFiles ? (
-            <div className="p-4 space-y-3">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-4/6" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
-            </div>
-          ) : (
-          <FileViewer
-            key={selectedPath}
-            path={selectedPath}
-            content={selectedContent}
-            onChange={handleFileContentChange}
-          />
-          )}
-        </div>
+function EmptyState({ onCreate }: { onCreate: () => void }) {
+  const { t } = useT("skills");
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+        <BookOpen className="h-6 w-6 text-muted-foreground" />
       </div>
-
-      {/* Add file dialog */}
-      {showAddFile && (
-        <AddFileDialog
-          existingPaths={filePaths}
-          onClose={() => setShowAddFile(false)}
-          onAdd={handleAddFile}
-        />
-      )}
-
-      {/* Delete Confirmation */}
-      {confirmDelete && (
-        <Dialog open onOpenChange={(v) => { if (!v) setConfirmDelete(false); }}>
-          <DialogContent className="max-w-sm" showCloseButton={false}>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
-                <AlertCircle className="h-5 w-5 text-destructive" />
-              </div>
-              <DialogHeader className="flex-1 gap-1">
-                <DialogTitle className="text-sm font-semibold">Delete skill?</DialogTitle>
-                <DialogDescription className="text-xs">
-                  This will permanently delete &quot;{skill.name}&quot; and remove it from all agents.
-                </DialogDescription>
-              </DialogHeader>
-            </div>
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  setConfirmDelete(false);
-                  onDelete(skill.id);
-                }}
-              >
-                Delete
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+      <h2 className="mt-4 text-base font-semibold">{t(($) => $.page.empty.title)}</h2>
+      <p className="mt-1 max-w-md text-sm text-muted-foreground">
+        {t(($) => $.page.empty.description)}
+      </p>
+      <Button type="button" onClick={onCreate} size="sm" className="mt-5">
+        <Plus className="h-3 w-3" />
+        {t(($) => $.page.new_skill)}
+      </Button>
     </div>
   );
 }
@@ -614,100 +174,135 @@ function SkillDetail({
 // ---------------------------------------------------------------------------
 
 export default function SkillsPage() {
-  const isLoading = useAuthStore((s) => s.isLoading);
-  const qc = useQueryClient();
+  const { t } = useT("skills");
   const wsId = useWorkspaceId();
-  const { data: skills = [] } = useQuery(skillListOptions(wsId));
-  const [selectedId, setSelectedId] = useState<string>("");
-  const [showCreate, setShowCreate] = useState(false);
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_skills_layout",
+  const paths = useWorkspacePaths();
+  const navigation = useNavigation();
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+
+  const {
+    data: skills = [],
+    isLoading,
+    error: listError,
+    refetch: refetchList,
+  } = useQuery(skillListOptions(wsId));
+  const { data: agents = [], error: agentsError } = useQuery(
+    agentListOptions(wsId),
+  );
+  const { data: members = [], error: membersError } = useQuery(
+    memberListOptions(wsId),
+  );
+  const { data: runtimes = [], error: runtimesError } = useQuery(
+    runtimeListOptions(wsId),
+  );
+
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const assignments = useMemo(
+    () => selectSkillAssignments(agents),
+    [agents],
+  );
+
+  const membersById = useMemo(() => {
+    const map = new Map<string, MemberWithUser>();
+    for (const m of members) map.set(m.user_id, m);
+    return map;
+  }, [members]);
+
+  const runtimesById = useMemo(() => {
+    const map = new Map<string, AgentRuntime>();
+    for (const r of runtimes) map.set(r.id, r);
+    return map;
+  }, [runtimes]);
+
+  const myRole =
+    members.find((m) => m.user_id === currentUserId)?.role ?? null;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const byAssignment = (s: SkillSummary) =>
+      (assignments.get(s.id)?.length ?? 0) > 0;
+
+    return skills.filter((s) => {
+      if (
+        q &&
+        !s.name.toLowerCase().includes(q) &&
+        !s.description.toLowerCase().includes(q)
+      ) {
+        return false;
+      }
+      if (filter === "used" && !byAssignment(s)) return false;
+      if (filter === "unused" && byAssignment(s)) return false;
+      if (filter === "mine" && s.created_by !== currentUserId) return false;
+      return true;
+    });
+  }, [skills, assignments, search, filter, currentUserId]);
+
+  const handleCreated = (skill: Skill) => {
+    navigation.push(paths.skillDetail(skill.id));
+  };
+
+  const skillRows = useMemo<SkillRow[]>(() => {
+    return filtered.map((skill) => {
+      const origin = readOrigin(skill);
+      const runtime =
+        origin.type === "runtime_local" && origin.runtime_id
+          ? runtimesById.get(origin.runtime_id) ?? null
+          : null;
+      return {
+        skill,
+        agents: assignments.get(skill.id) ?? [],
+        creator: skill.created_by
+          ? membersById.get(skill.created_by) ?? null
+          : null,
+        runtime,
+        canEdit: canEditSkill(skill, {
+          userId: currentUserId,
+          role: myRole,
+        }),
+      };
+    });
+  }, [
+    filtered,
+    assignments,
+    membersById,
+    runtimesById,
+    currentUserId,
+    myRole,
+  ]);
+
+  const columns = useSkillColumns();
+
+  const table = useReactTable({
+    data: skillRows,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    enableColumnResizing: true,
   });
 
-  useEffect(() => {
-    if (skills.length > 0 && !selectedId) {
-      setSelectedId(skills[0]!.id);
-    }
-  }, [skills, selectedId]);
-
-  const handleCreate = async (data: CreateSkillRequest) => {
-    const skill = await api.createSkill(data);
-    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-    setSelectedId(skill.id);
-    toast.success("Skill created");
-  };
-
-  const handleImport = async (url: string) => {
-    const skill = await api.importSkill({ url });
-    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-    setSelectedId(skill.id);
-    toast.success("Skill imported");
-  };
-
-  const handleUpdate = async (id: string, data: UpdateSkillRequest) => {
-    try {
-      await api.updateSkill(id, data);
-      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      toast.success("Skill saved");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save skill");
-      throw e;
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await api.deleteSkill(id);
-      if (selectedId === id) {
-        const remaining = skills.filter((s) => s.id !== id);
-        setSelectedId(remaining[0]?.id ?? "");
-      }
-      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      toast.success("Skill deleted");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete skill");
-    }
-  };
-
-  const selected = skills.find((s) => s.id === selectedId) ?? null;
-
+  // --- Loading ---
   if (isLoading) {
     return (
-      <div className="flex flex-1 min-h-0">
-        {/* List skeleton */}
-        <div className="w-72 border-r">
-          <div className="flex h-12 items-center justify-between border-b px-4">
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-6 w-6 rounded" />
+      <div className="flex flex-1 min-h-0 flex-col">
+        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
+        <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
+          <div className="space-y-3 pl-4">
+            <Skeleton className="h-5 w-full max-w-2xl rounded-md" />
+            <Skeleton className="h-14 w-full max-w-3xl rounded-md" />
           </div>
-          <div className="divide-y">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3">
-                <Skeleton className="h-8 w-8 rounded-lg" />
-                <div className="flex-1 space-y-1.5">
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="h-3 w-40" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        {/* Detail skeleton */}
-        <div className="flex-1 flex flex-col">
-          <div className="flex items-center gap-3 border-b px-4 py-3">
-            <Skeleton className="h-8 w-8 rounded-lg" />
-            <Skeleton className="h-8 w-40" />
-            <Skeleton className="h-8 w-56" />
-          </div>
-          <div className="flex flex-1 min-h-0">
-            <div className="w-48 border-r p-3 space-y-2">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-3/4" />
+          <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border">
+            <div className="flex h-auto shrink-0 flex-col gap-2 border-b px-3 py-3 sm:h-12 sm:flex-row sm:items-center sm:px-4 sm:py-0">
+              <Skeleton className="h-8 w-full rounded-md sm:w-64" />
+              <Skeleton className="h-7 w-12 rounded-md" />
+              <Skeleton className="h-7 w-14 rounded-md" />
+              <Skeleton className="h-7 w-16 rounded-md" />
             </div>
-            <div className="flex-1 p-4 space-y-2">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-2/3" />
+            <div className="space-y-2 p-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-14 w-full rounded-md" />
+              ))}
             </div>
           </div>
         </div>
@@ -715,103 +310,117 @@ export default function SkillsPage() {
     );
   }
 
+  // --- List request error ---
+  if (listError) {
+    return (
+      <div className="flex flex-1 min-h-0 flex-col">
+        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+          <AlertCircle className="h-8 w-8 text-destructive" />
+          <div>
+            <p className="text-sm font-medium">
+              {t(($) => $.page.list_error.title)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {listError instanceof Error
+                ? listError.message
+                : t(($) => $.page.list_error.fallback)}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => refetchList()}
+          >
+            {t(($) => $.page.list_error.retry)}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const totalCount = skills.length;
+  const showEmpty = totalCount === 0;
+  const supportingQueryDown =
+    !!agentsError || !!membersError || !!runtimesError;
+
   return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="flex-1 min-h-0"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={onLayoutChanged}
-    >
-      <ResizablePanel id="list" defaultSize={280} minSize={240} maxSize={400} groupResizeBehavior="preserve-pixel-size">
-        {/* Left column — skill list */}
-        <div className="overflow-y-auto h-full border-r">
-          <PageHeader className="justify-between">
-            <h1 className="text-sm font-semibold">Skills</h1>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setShowCreate(true)}
-                  >
-                    <Plus className="h-4 w-4 text-muted-foreground" />
-                  </Button>
+    <div className="flex flex-1 min-h-0 flex-col">
+      <PageHeaderBar
+        totalCount={totalCount}
+        onCreate={() => setCreateOpen(true)}
+      />
+
+      {supportingQueryDown && (
+        <div
+          role="status"
+          className="flex shrink-0 items-start gap-2 border-b bg-warning/10 px-6 py-2 text-xs text-muted-foreground"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+          <span>{t(($) => $.page.supporting_data_warning)}</span>
+        </div>
+      )}
+
+      <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
+        {!showEmpty && (
+          <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {t(($) => $.page.intro_banner.title)}
+            </span>{" "}
+            {t(($) => $.page.intro_banner.body)}{" "}
+            <span className="font-semibold text-brand">
+              {t(($) => $.page.intro_banner.highlight)}
+            </span>
+          </div>
+        )}
+        {showEmpty ? (
+          <div className="flex flex-1 items-center justify-center">
+            <EmptyState onCreate={() => setCreateOpen(true)} />
+          </div>
+        ) : (
+          <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+            <CardToolbar
+              search={search}
+              setSearch={setSearch}
+              filter={filter}
+              setFilter={setFilter}
+            />
+            {filtered.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
+                <Search className="h-8 w-8 text-muted-foreground/40" />
+                <p className="text-sm">{t(($) => $.page.no_matches.title)}</p>
+                <p className="max-w-xs text-xs">
+                  {search
+                    ? t(($) => $.page.no_matches.with_query, {
+                        query: search,
+                        filterSuffix:
+                          filter !== "all"
+                            ? t(($) => $.page.no_matches.with_query_filter_suffix)
+                            : "",
+                      })
+                    : t(($) => $.page.no_matches.filter_only)}
+                  {t(($) => $.page.no_matches.try_different)}
+                </p>
+              </div>
+            ) : (
+              <DataTable
+                table={table}
+                onRowClick={(row) =>
+                  navigation.push(paths.skillDetail(row.original.skill.id))
                 }
               />
-              <TooltipContent side="bottom">Create skill</TooltipContent>
-            </Tooltip>
-          </PageHeader>
-          {skills.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-12">
-              <Sparkles className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">No workspace skills yet</p>
-              <p className="mt-1 text-xs text-muted-foreground text-center max-w-[280px]">
-                Workspace skills are shared across your team and injected into agent runs. Skills already installed in your local runtime are used automatically.
-              </p>
-              <Button
-                onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
-              >
-                <Plus className="h-3 w-3" />
-                Create Skill
-              </Button>
-            </div>
-          ) : (
-            <div className="divide-y">
-              {skills.map((skill) => (
-                <SkillListItem
-                  key={skill.id}
-                  skill={skill}
-                  isSelected={skill.id === selectedId}
-                  onClick={() => setSelectedId(skill.id)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </ResizablePanel>
+            )}
+          </div>
+        )}
+      </div>
 
-      <ResizableHandle />
-
-      <ResizablePanel id="detail" minSize="50%">
-        {/* Right column — skill detail */}
-        <div className="flex-1 overflow-hidden h-full">
-          {selected ? (
-            <SkillDetail
-              key={selected.id}
-              skill={selected}
-              onUpdate={handleUpdate}
-              onDelete={handleDelete}
-            />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-              <Sparkles className="h-10 w-10 text-muted-foreground/30" />
-              <p className="mt-3 text-sm">Select a skill to view details</p>
-              <p className="mt-1 text-xs text-center max-w-[260px]">
-                Workspace skills supplement your local skills and are shared across the team.
-              </p>
-              <Button
-                onClick={() => setShowCreate(true)}
-                size="xs"
-                className="mt-3"
-              >
-                <Plus className="h-3 w-3" />
-                Create Skill
-              </Button>
-            </div>
-          )}
-        </div>
-      </ResizablePanel>
-
-      {showCreate && (
+      {createOpen && (
         <CreateSkillDialog
-          onClose={() => setShowCreate(false)}
-          onCreate={handleCreate}
-          onImport={handleImport}
+          onClose={() => setCreateOpen(false)}
+          onCreated={handleCreated}
         />
       )}
-    </ResizablePanelGroup>
+    </div>
   );
 }

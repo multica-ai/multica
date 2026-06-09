@@ -29,8 +29,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build, type check, and test
-        run: pnpm build && pnpm typecheck && pnpm test
+      - name: Test self-host env derivation
+        run: bash scripts/selfhost-config.test.sh
+
+      - name: Verify reserved-slugs.ts is up to date
+        # Re-runs the generator and fails on any drift from the
+        # checked-in TypeScript output. The Go side embeds the JSON
+        # source directly, so a passing diff here proves both sides
+        # share one source of truth.
+        run: |
+          pnpm generate:reserved-slugs
+          git diff --exit-code -- packages/core/paths/reserved-slugs.ts
+
+      - name: Build, type check, lint, and test
+        # Mobile lives in a parallel mobile-verify workflow (path-filtered
+        # to apps/mobile/** + packages/core/types/**) so it doesn't add
+        # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
+        # filter in sync with the root package.json scripts, which also
+        # exclude @multica/mobile.
+        run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs' --filter='!@multica/mobile'
 
   backend:
     runs-on: ubuntu-latest
@@ -48,8 +65,22 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      # Wires up the RedisLocalSkill*_test.go suite. Distinct from REDIS_URL
+      # (which would flip the server binary itself onto the Redis-backed
+      # realtime relay + request stores); the tests talk to this Redis
+      # directly so they run alongside the Postgres-backed suite.
+      REDIS_TEST_URL: redis://localhost:6379/1
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -68,3 +99,20 @@ jobs:
 
       - name: Test
         run: cd server && go test ./...
+
+  installer:
+    # Stub-driven shell tests for scripts/install.sh. Kept off the heavy
+    # backend job so installer regressions surface independently, and
+    # exercised on macOS too because the installer targets macOS/Homebrew
+    # and `tar` / `sed` / `mktemp` differ between BSD and GNU userlands.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test shell installers
+        run: bash scripts/install.test.sh

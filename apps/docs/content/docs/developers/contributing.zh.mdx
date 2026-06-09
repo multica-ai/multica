@@ -1,0 +1,188 @@
+---
+title: Contributing
+description: Local development workflow for contributors working on the Multica codebase.
+---
+
+## Development Model
+
+Local development uses one shared PostgreSQL container and one database per checkout.
+
+- The main checkout usually uses `.env` and `POSTGRES_DB=multica`
+- Each Git worktree uses its own `.env.worktree`
+- Every checkout connects to the same PostgreSQL host: `localhost:5432`
+- Isolation happens at the database level, not by starting a separate Docker Compose project
+- Backend and frontend ports are still unique per worktree
+
+## Prerequisites
+
+- Node.js `v20+`
+- `pnpm` `v10.28+`
+- Go `v1.26+`
+- Docker
+
+## First-Time Setup
+
+### Main Checkout
+
+```bash
+cp .env.example .env
+make setup-main
+```
+
+What `make setup-main` does:
+
+- Installs JavaScript dependencies with `pnpm install`
+- Ensures the shared PostgreSQL container is running
+- Creates the application database if it does not exist
+- Runs all migrations against that database
+
+Start the app:
+
+```bash
+make start-main
+```
+
+### Worktree
+
+From the worktree directory:
+
+```bash
+make worktree-env
+make setup-worktree
+```
+
+Start the worktree app:
+
+```bash
+make start-worktree
+```
+
+## Daily Workflow
+
+### Main Checkout
+
+```bash
+make start-main
+make stop-main
+make check-main
+```
+
+### Feature Worktree
+
+```bash
+git worktree add ../multica-feature -b feat/my-change main
+cd ../multica-feature
+make worktree-env
+make setup-worktree
+make start-worktree
+```
+
+Day-to-day:
+
+```bash
+make start-worktree
+make stop-worktree
+make check-worktree
+```
+
+## Running Main and Worktree Simultaneously
+
+This is a first-class workflow. Both checkouts use the same PostgreSQL container but different databases and ports:
+
+| | Main | Worktree |
+|---|---|---|
+| Database | `multica` | `multica_my_feature_702` |
+| Backend port | `8080` | generated (e.g. `18782`) |
+| Frontend port | `3000` | generated (e.g. `13702`) |
+
+## Commands
+
+```bash
+# Frontend (all commands go through Turborepo)
+pnpm install
+pnpm dev:web          # Next.js dev server (port 3000)
+pnpm dev:desktop      # Electron dev (electron-vite, HMR)
+pnpm build            # Build all frontend apps
+pnpm typecheck        # TypeScript check
+pnpm lint             # ESLint
+pnpm test             # TS tests (Vitest)
+
+# Backend (Go)
+make dev              # Run Go server (port 8080)
+make daemon           # Run local daemon
+make build            # Build server + CLI binaries
+make test             # Go tests
+make sqlc             # Regenerate sqlc code
+make migrate-up       # Run database migrations
+make migrate-down     # Rollback migrations
+```
+
+## Testing
+
+Run all local checks:
+
+```bash
+make check
+```
+
+This runs:
+
+1. TypeScript typecheck
+2. TypeScript unit tests
+3. Go tests
+4. Playwright E2E tests
+
+## Troubleshooting
+
+### Missing Env File
+
+Create the expected env file:
+
+```bash
+# Main checkout
+cp .env.example .env
+
+# Worktree
+make worktree-env
+```
+
+### Check Which Database a Checkout Uses
+
+```bash
+cat .env           # or .env.worktree
+```
+
+Look for `POSTGRES_DB`, `DATABASE_URL`, `PORT`, `FRONTEND_PORT`.
+
+### List All Local Databases
+
+```bash
+docker compose exec -T postgres psql -U multica -d postgres \
+  -At -c "select datname from pg_database order by datname;"
+```
+
+### Destructive Reset
+
+Stop PostgreSQL and keep local databases:
+
+```bash
+make db-down
+```
+
+Reset only the current checkout's database (drops `POSTGRES_DB`, recreates it, re-runs all migrations). Other worktree databases are untouched.
+
+```bash
+make stop
+make db-reset
+make start
+```
+
+> `make db-reset` refuses to run if `DATABASE_URL` points at a remote host.
+
+Wipe all local PostgreSQL data:
+
+```bash
+docker compose down -v
+```
+
+> **Warning:** This deletes the shared Docker volume and all databases. After that you must run `make setup-main` or `make setup-worktree` again.

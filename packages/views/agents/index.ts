@@ -1,1 +1,1 @@
-export { AgentsPage } from "./components";
+export { AgentsPage, AgentDetailPage } from "./components";

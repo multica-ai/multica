@@ -2,10 +2,15 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClaudeHandleAssistantText(t *testing.T) {
@@ -205,6 +210,7 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
+		"--disallowedTools", "AskUserQuestion",
 	}
 
 	if len(args) != len(expected) {
@@ -221,9 +227,9 @@ func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	t.Parallel()
 
 	blocked := map[string]blockedArgMode{
-		"--output-format":  blockedWithValue,
+		"--output-format":   blockedWithValue,
 		"--permission-mode": blockedWithValue,
-		"-p":               blockedStandalone,
+		"-p":                blockedStandalone,
 	}
 	logger := slog.Default()
 
@@ -261,6 +267,57 @@ func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	result = filterCustomArgs(nil, blocked, logger)
 	if result != nil {
 		t.Fatalf("expected nil for nil input, got %v", result)
+	}
+}
+
+func TestFilterCustomArgsStripsShellQuotes(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.Default()
+
+	// Single-quoted inline value: --deny-tool='write' → --deny-tool=write
+	result := filterCustomArgs([]string{"--deny-tool='write'"}, nil, logger)
+	if len(result) != 1 || result[0] != "--deny-tool=write" {
+		t.Fatalf("expected [--deny-tool=write], got %v", result)
+	}
+
+	// Double-quoted inline value: --deny-tool="write" → --deny-tool=write
+	result = filterCustomArgs([]string{`--deny-tool="write"`}, nil, logger)
+	if len(result) != 1 || result[0] != "--deny-tool=write" {
+		t.Fatalf("expected [--deny-tool=write], got %v", result)
+	}
+
+	// Standalone quoted value: 'write' → write
+	result = filterCustomArgs([]string{"'write'"}, nil, logger)
+	if len(result) != 1 || result[0] != "write" {
+		t.Fatalf("expected [write], got %v", result)
+	}
+
+	// Non-flag assignments may use quotes semantically (for example Codex
+	// `-c model="o3"`), so they must survive unchanged.
+	result = filterCustomArgs([]string{`model="o3"`}, nil, logger)
+	if len(result) != 1 || result[0] != `model="o3"` {
+		t.Fatalf("expected [model=\"o3\"], got %v", result)
+	}
+
+	// Unquoted arg passes through unchanged
+	result = filterCustomArgs([]string{"--deny-tool=write"}, nil, logger)
+	if len(result) != 1 || result[0] != "--deny-tool=write" {
+		t.Fatalf("expected [--deny-tool=write], got %v", result)
+	}
+
+	// Mismatched quotes are not stripped
+	result = filterCustomArgs([]string{"--flag='val\""}, nil, logger)
+	if len(result) != 1 || result[0] != "--flag='val\"" {
+		t.Fatalf("mismatched quotes should not be stripped, got %v", result)
+	}
+
+	// Blocked flag with quoted value: the blocking still fires, the unquoted
+	// form passes the flag-match, and the arg is dropped.
+	blocked := map[string]blockedArgMode{"--output-format": blockedWithValue}
+	result = filterCustomArgs([]string{"--output-format='json'", "--verbose"}, blocked, logger)
+	if len(result) != 1 || result[0] != "--verbose" {
+		t.Fatalf("quoted blocked flag should still be dropped, got %v", result)
 	}
 }
 
@@ -360,12 +417,29 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 		"PATH=/usr/bin",
 		"CLAUDECODE=1",
 		"CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDE_CODE_EXECPATH=/opt/claude",
+		"CLAUDE_CODE_SESSION_ID=abc123",
+		"CLAUDE_CODE_SSE_PORT=9999",
 		"CLAUDECODEX=keep-me",
+		"CLAUDE_CODE_GIT_BASH_PATH=C:\\Program Files\\Git\\bin\\bash.exe",
+		"CLAUDE_CODE_USE_BEDROCK=1",
+		"CLAUDE_CODE_TMPDIR=/custom/tmp",
 	}, map[string]string{"FOO": "bar"})
 
+	// Internal runtime/session markers must be stripped so the child does not
+	// inherit the parent's identity or transport.
+	filteredOut := []string{
+		"CLAUDECODE=1",
+		"CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDE_CODE_EXECPATH=/opt/claude",
+		"CLAUDE_CODE_SESSION_ID=abc123",
+		"CLAUDE_CODE_SSE_PORT=9999",
+	}
 	for _, entry := range env {
-		if entry == "CLAUDECODE=1" || entry == "CLAUDE_CODE_ENTRYPOINT=cli" {
-			t.Fatalf("expected CLAUDECODE vars to be filtered, got %v", env)
+		for _, banned := range filteredOut {
+			if entry == banned {
+				t.Fatalf("expected internal Claude Code marker %q to be filtered, got %v", banned, env)
+			}
 		}
 	}
 
@@ -379,6 +453,19 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 	}
 	if !found["CLAUDECODEX=keep-me"] {
 		t.Fatalf("expected unrelated env vars to be preserved, got %v", env)
+	}
+	// User-facing CLAUDE_CODE_* config must reach the child — stripping
+	// CLAUDE_CODE_GIT_BASH_PATH is what broke Claude Code on Windows (#3671).
+	if !found["CLAUDE_CODE_GIT_BASH_PATH=C:\\Program Files\\Git\\bin\\bash.exe"] {
+		t.Fatalf("expected CLAUDE_CODE_GIT_BASH_PATH to be preserved, got %v", env)
+	}
+	if !found["CLAUDE_CODE_USE_BEDROCK=1"] {
+		t.Fatalf("expected CLAUDE_CODE_USE_BEDROCK to be preserved, got %v", env)
+	}
+	// CLAUDE_CODE_TMPDIR is a documented user-configurable temp-dir override, not
+	// an internal per-session marker, so it must reach the child.
+	if !found["CLAUDE_CODE_TMPDIR=/custom/tmp"] {
+		t.Fatalf("expected CLAUDE_CODE_TMPDIR to be preserved, got %v", env)
 	}
 	if !found["FOO=bar"] {
 		t.Fatalf("expected extra env var to be appended, got %v", env)
@@ -409,6 +496,233 @@ func TestBuildEnvNilExtras(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
+	t.Parallel()
+
+	// --mcp-config is hardcoded by the daemon — it must not be overridable via custom_args.
+	args := buildClaudeArgs(ExecOptions{
+		CustomArgs: []string{"--mcp-config", "/tmp/evil.json", "--model", "o3"},
+	}, slog.Default())
+
+	for i, a := range args {
+		if a == "--mcp-config" {
+			t.Fatalf("--mcp-config should be blocked from custom_args, found at index %d: %v", i, args)
+		}
+		if a == "/tmp/evil.json" {
+			t.Fatalf("--mcp-config value should be consumed when blocking, but found it at index %d: %v", i, args)
+		}
+	}
+
+	// Non-blocked args should still pass through.
+	foundModel := false
+	for i, a := range args {
+		if a == "--model" && i+1 < len(args) && args[i+1] == "o3" {
+			foundModel = true
+		}
+	}
+	if !foundModel {
+		t.Fatalf("expected --model o3 in args after blocking --mcp-config: %v", args)
+	}
+}
+
+func TestWriteMcpConfigToTemp(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{"mcpServers":{"test":{"command":"echo","args":["hello"]}}}`)
+	path, err := writeMcpConfigToTemp(raw)
+	if err != nil {
+		t.Fatalf("writeMcpConfigToTemp: %v", err)
+	}
+
+	// File should exist and contain exactly the raw JSON.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read temp file %s: %v", path, err)
+	}
+	if !bytes.Equal(data, []byte(raw)) {
+		t.Fatalf("expected %s, got %s", raw, data)
+	}
+
+	// Cleanup should remove the file.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove temp file: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected temp file to be removed, but it still exists")
+	}
+}
+
+func TestResolveSessionID(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		requested string
+		emitted   string
+		failed    bool
+		want      string
+	}{
+		{
+			name:      "no resume requested propagates emitted",
+			requested: "",
+			emitted:   "fresh-abc",
+			failed:    false,
+			want:      "fresh-abc",
+		},
+		{
+			name:      "resume succeeded keeps matching id",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    false,
+			want:      "sess-old",
+		},
+		{
+			name:      "resume succeeded but run failed mid-turn keeps id for later retry",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			want:      "sess-old",
+		},
+		{
+			name:      "resume did not land and run failed clears id so daemon fallback fires",
+			requested: "sess-dead",
+			emitted:   "fresh-new",
+			failed:    true,
+			want:      "",
+		},
+		{
+			name:      "resume did not land but run succeeded keeps fresh id (defensive)",
+			requested: "sess-dead",
+			emitted:   "fresh-new",
+			failed:    false,
+			want:      "fresh-new",
+		},
+		{
+			name:      "no emitted id leaves result empty",
+			requested: "sess-old",
+			emitted:   "",
+			failed:    true,
+			want:      "",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolveSessionID(tc.requested, tc.emitted, tc.failed)
+			if got != tc.want {
+				t.Fatalf("resolveSessionID(%q, %q, %v) = %q, want %q",
+					tc.requested, tc.emitted, tc.failed, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Fake claude binary: reads the initial stdin frame so writeClaudeInput
+	// succeeds, writes a canonical V8-abort line to stderr, then exits
+	// non-zero before emitting any stream-json to stdout. This is the exact
+	// failure mode that motivated PR #1674 — without sampling stderrBuf.Tail()
+	// after cmd.Wait() returns, Result.Error would be a useless
+	// "exit status 3".
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		"echo \"FATAL ERROR: V8 abort: assertion failed\" >&2\n" +
+		"exit 3\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// Drain message stream so the lifecycle goroutine can progress.
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "claude exited with error") {
+			t.Fatalf("expected error to mention exit, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "V8 abort: assertion failed") {
+			t.Fatalf("expected error to include stderr hint, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "claude stderr:") {
+			t.Fatalf("expected stderr label in error, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-result-usage\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-result-usage\",\"result\":\"done\",\"modelUsage\":{\"zhipu/coding-plan\":{\"inputTokens\":123,\"outputTokens\":45,\"cacheReadInputTokens\":7,\"cacheCreationInputTokens\":11,\"costUSD\":0.01}}}'\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		usage, ok := result.Usage["zhipu/coding-plan"]
+		if !ok {
+			t.Fatalf("expected usage for zhipu/coding-plan, got %#v", result.Usage)
+		}
+		if usage.InputTokens != 123 || usage.OutputTokens != 45 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 11 {
+			t.Fatalf("unexpected usage: %+v", usage)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 func mustMarshal(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(v)
@@ -416,4 +730,27 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 	return data
+}
+
+func TestBuildClaudeArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
+	args := buildClaudeArgs(ExecOptions{
+		ExtraArgs:  []string{"--output-format", "text", "--max-budget-usd", "1.00"},
+		CustomArgs: []string{"--max-budget-usd", "2.00", "--permission-mode", "plan"},
+	}, slog.Default())
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--output-format text") || strings.Contains(joined, "--permission-mode plan") {
+		t.Fatalf("blocked args should be filtered from both layers: %v", args)
+	}
+	extraIdx, customIdx := -1, -1
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--max-budget-usd" && args[i+1] == "1.00" {
+			extraIdx = i
+		}
+		if args[i] == "--max-budget-usd" && args[i+1] == "2.00" {
+			customIdx = i
+		}
+	}
+	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
+		t.Fatalf("expected extra args before custom args, got %v", args)
+	}
 }

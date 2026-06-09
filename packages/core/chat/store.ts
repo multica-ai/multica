@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { StorageAdapter } from "../types";
-import { getCurrentWorkspaceId, registerForWorkspaceRehydration } from "../platform/workspace-storage";
+import { getCurrentSlug, registerForWorkspaceRehydration } from "../platform/workspace-storage";
 import { createLogger } from "../logger";
 
 const logger = createLogger("chat.store");
@@ -14,6 +14,14 @@ export const DRAFT_NEW_SESSION = "__new__";
 const CHAT_WIDTH_KEY = "multica:chat:width";
 const CHAT_HEIGHT_KEY = "multica:chat:height";
 const CHAT_EXPANDED_KEY = "multica:chat:expanded";
+/**
+ * Open/closed preference, persisted globally (not per-workspace) — most users
+ * have one habitual chat-panel preference across workspaces. Missing key =
+ * new user (or cleared storage); default to OPEN so the chat is discoverable.
+ * Once the user toggles even once, their explicit choice is respected on
+ * every subsequent reload.
+ */
+const OPEN_KEY = "multica:chat:isOpen";
 
 function readDrafts(storage: StorageAdapter, key: string): Record<string, string> {
   const raw = storage.getItem(key);
@@ -41,7 +49,7 @@ function writeDrafts(storage: StorageAdapter, key: string, drafts: Record<string
 
 export const CHAT_MIN_W = 360;
 export const CHAT_MIN_H = 480;
-export const CHAT_DEFAULT_W = 420;
+export const CHAT_DEFAULT_W = 380;
 export const CHAT_DEFAULT_H = 600;
 
 /**
@@ -56,13 +64,13 @@ export interface ChatTimelineItem {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  created_at?: string;
 }
 
 export interface ChatState {
   isOpen: boolean;
   activeSessionId: string | null;
   selectedAgentId: string | null;
-  showHistory: boolean;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
   /** Raw user-chosen size — no clamp applied. UI layer clamps at render time. */
@@ -73,7 +81,6 @@ export interface ChatState {
   toggle: () => void;
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
-  setShowHistory: (show: boolean) => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
   clearInputDraft: (sessionId: string) => void;
@@ -90,26 +97,33 @@ export function createChatStore(options: ChatStoreOptions) {
   const { storage } = options;
 
   const wsKey = (base: string) => {
-    const wsId = getCurrentWorkspaceId();
-    return wsId ? `${base}:${wsId}` : base;
+    const slug = getCurrentSlug();
+    return slug ? `${base}:${slug}` : base;
   };
 
+  // Resolve initial isOpen from storage. The three-state read (null /
+  // "true" / "false") is what enables the "new user → open" default while
+  // still honouring an explicit "I closed it" choice on every reload.
+  const storedOpen = storage.getItem(OPEN_KEY);
+  const initialIsOpen = storedOpen === null ? true : storedOpen === "true";
+
   const store = create<ChatState>((set, get) => ({
-    isOpen: false,
+    isOpen: initialIsOpen,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
-    showHistory: false,
     inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
     chatWidth: Number(storage.getItem(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W,
     chatHeight: Number(storage.getItem(CHAT_HEIGHT_KEY)) || CHAT_DEFAULT_H,
     isExpanded: storage.getItem(wsKey(CHAT_EXPANDED_KEY)) === "true",
     setOpen: (open) => {
       logger.debug("setOpen", { from: get().isOpen, to: open });
+      storage.setItem(OPEN_KEY, String(open));
       set({ isOpen: open });
     },
     toggle: () => {
       const next = !get().isOpen;
       logger.debug("toggle", { to: next });
+      storage.setItem(OPEN_KEY, String(next));
       set({ isOpen: next });
     },
     setActiveSession: (id) => {
@@ -125,10 +139,6 @@ export function createChatStore(options: ChatStoreOptions) {
       logger.info("setSelectedAgentId", { from: get().selectedAgentId, to: id });
       storage.setItem(wsKey(AGENT_STORAGE_KEY), id);
       set({ selectedAgentId: id });
-    },
-    setShowHistory: (show) => {
-      logger.debug("setShowHistory", { to: show });
-      set({ showHistory: show });
     },
     setInputDraft: (sessionId, draft) => {
       // Debug level — onUpdate fires on every keystroke.

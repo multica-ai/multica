@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Monitor } from "lucide-react";
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
@@ -73,6 +74,124 @@ function HermesLogo({ className }: { className: string }) {
   );
 }
 
+// Pi (pi.dev) — official pixel-art "pi" wordmark, sourced from pi.dev/logo.svg
+function PiLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 800 800" fill="none" className={className}>
+      <rect width="800" height="800" rx="150" fill="#09090b" />
+      <path
+        fill="#fff"
+        fillRule="evenodd"
+        d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
+      />
+      <path fill="#fff" d="M517.36 400H634.72V634.72H517.36Z" />
+    </svg>
+  );
+}
+
+// GitHub Copilot — GitHub mark (Invertocat)
+function CopilotLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 1C5.9225 1 1 5.9225 1 12C1 16.8675 4.14875 20.9787 8.52125 22.4362C9.07125 22.5325 9.2775 22.2025 9.2775 21.9137C9.2775 21.6525 9.26375 20.7862 9.26375 19.865C6.5 20.3737 5.785 19.1912 5.565 18.5725C5.44125 18.2562 4.905 17.28 4.4375 17.0187C4.0525 16.8125 3.5025 16.3037 4.42375 16.29C5.29 16.2762 5.90875 17.0875 6.115 17.4175C7.105 19.0812 8.68625 18.6137 9.31875 18.325C9.415 17.61 9.70375 17.1287 10.02 16.8537C7.5725 16.5787 5.015 15.63 5.015 11.4225C5.015 10.2262 5.44125 9.23625 6.1425 8.46625C6.0325 8.19125 5.6475 7.06375 6.2525 5.55125C6.2525 5.55125 7.17375 5.2625 9.2775 6.67875C10.1575 6.43125 11.0925 6.3075 12.0275 6.3075C12.9625 6.3075 13.8975 6.43125 14.7775 6.67875C16.8813 5.24875 17.8025 5.55125 17.8025 5.55125C18.4075 7.06375 18.0225 8.19125 17.9125 8.46625C18.6138 9.23625 19.04 10.2125 19.04 11.4225C19.04 15.6437 16.4688 16.5787 14.0213 16.8537C14.42 17.1975 14.7638 17.8575 14.7638 18.8887C14.7638 20.36 14.75 21.5425 14.75 21.9137C14.75 22.2025 14.9563 22.5462 15.5063 22.4362C19.8513 20.9787 23 16.8537 23 12C23 5.9225 18.0775 1 12 1Z" />
+    </svg>
+  );
+}
+
+// Cursor — official brand logo from Cursor brand assets
+function CursorLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="600 300 400 400" fill="none" className={className}>
+      <path fill="#14120B" d="M999.994 554.294C999.994 559.859 999.994 565.419 999.962 570.984C999.935 575.67 999.882 580.357 999.753 585.038C999.475 595.247 998.875 605.542 997.059 615.639C995.217 625.88 992.212 635.409 987.477 644.718C982.822 653.861 976.738 662.233 969.485 669.491C962.227 676.748 953.861 682.828 944.712 687.482C935.409 692.217 925.875 695.222 915.633 697.065C905.537 698.88 895.242 699.48 885.033 699.759C880.346 699.887 875.665 699.941 870.978 699.968C865.413 700.005 859.853 700 854.288 700H745.695C740.13 700 734.571 700 729.005 699.968C724.319 699.941 719.632 699.887 714.951 699.759C704.742 699.48 694.447 698.88 684.35 697.065C674.109 695.222 664.58 692.217 655.271 687.482C646.128 682.828 637.756 676.743 630.499 669.491C623.241 662.233 617.161 653.866 612.507 644.718C607.772 635.414 604.767 625.88 602.925 615.639C601.109 605.542 600.509 595.247 600.23 585.038C600.102 580.352 600.048 575.67 600.021 570.984C600 565.419 600 559.859 600 554.294V445.701C600 440.136 600 434.576 600.032 429.011C600.059 424.324 600.112 419.637 600.241 414.956C600.52 404.747 601.119 394.452 602.935 384.356C604.778 374.115 607.783 364.586 612.518 355.277C617.172 346.133 623.257 337.762 630.509 330.504C637.767 323.246 646.133 317.167 655.282 312.512C664.586 307.777 674.12 304.772 684.361 302.93C694.458 301.114 704.752 300.514 714.961 300.236C719.648 300.107 724.329 300.054 729.016 300.027C734.576 300 740.136 300 745.701 300H854.294C859.859 300 865.419 300 870.984 300.032C875.67 300.059 880.357 300.112 885.038 300.241C895.247 300.52 905.542 301.119 915.639 302.935C925.88 304.778 935.409 307.783 944.718 312.518C953.861 317.172 962.233 323.257 969.491 330.509C976.748 337.767 982.828 346.133 987.482 355.282C992.217 364.586 995.222 374.12 997.065 384.361C998.88 394.458 999.48 404.752 999.759 414.961C999.887 419.648 999.941 424.329 999.968 429.016C1000.01 434.581 1000 440.141 1000 445.706V554.299L999.994 554.294Z"/>
+      <path fill="#72716D" d="M800.004 500L923.821 571.486C923.061 572.804 921.957 573.929 920.591 574.716L804.863 641.531C801.858 643.266 798.151 643.266 795.146 641.531L679.417 574.716C678.052 573.929 676.948 572.804 676.188 571.486L800.004 500Z"/>
+      <path fill="#55544F" d="M800.005 357.168V500L676.188 571.486C675.427 570.168 675.004 568.647 675.004 567.072V432.928C675.004 429.774 676.686 426.865 679.418 425.285L795.141 358.47C796.646 357.602 798.323 357.168 799.999 357.168H800.005Z"/>
+      <path fill="#43413C" d="M923.815 428.515C923.055 427.197 921.951 426.072 920.586 425.285L804.857 358.47C803.357 357.602 801.68 357.168 800.004 357.168V500L923.821 571.486C924.581 570.168 925.005 568.647 925.005 567.072V432.928C925.005 431.348 924.587 429.838 923.821 428.515H923.815Z"/>
+      <path fill="#D6D5D2" d="M915.156 433.518C915.857 434.728 915.954 436.281 915.156 437.663L802.764 632.323C802.008 633.641 800 633.1 800 631.584V503.311C800 502.287 799.727 501.302 799.229 500.44L915.15 433.512H915.156V433.518Z"/>
+      <path fill="white" d="M915.155 433.518L799.233 500.445C798.741 499.588 798.023 498.86 797.134 498.345L686.049 434.209C684.731 433.453 685.272 431.445 686.788 431.445H911.566C913.162 431.445 914.459 432.307 915.155 433.518Z"/>
+    </svg>
+  );
+}
+
+// Kimi (Moonshot AI) — wordmark "K" mark in Moonshot brand purple, simple
+// rounded-square logotype suitable for small icon sizes.
+function KimiLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#1F1147" />
+      <path
+        d="M7.2 6h2.4v5.1l4.3-5.1h2.9l-4.4 5.1L17 18h-2.9l-3.2-5.2-1.3 1.5V18H7.2V6z"
+        fill="#FFFFFF"
+      />
+    </svg>
+  );
+}
+
+// Gemini (Google) — official "Google Gemini" mark from Simple Icons
+// (simpleicons.org/icons/googlegemini.svg, CC0 1.0). Rendered in the
+// Simple Icons brand color (#8E75B2), matching the pattern used by the
+// other provider marks in this file.
+function GeminiLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="#8E75B2" className={className}>
+      <path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
+    </svg>
+  );
+}
+
+// Antigravity (Google) — official mark, shipped as a PNG asset next to
+// this file. Different bundlers type the PNG import differently — Next.js
+// gives a StaticImageData object (.src), electron-vite + plain vite give
+// a string. Normalise via unknown so neither side's narrower type wins
+// and breaks the other's typecheck.
+import antigravityLogo from "./antigravity-logo.png";
+const antigravityLogoSrc: string = (() => {
+  const asset = antigravityLogo as unknown;
+  return typeof asset === "string" ? asset : (asset as { src: string }).src;
+})();
+
+function AntigravityLogo({ className }: { className: string }) {
+  return <img src={antigravityLogoSrc} alt="Antigravity" className={className} />;
+}
+
+// Kiro CLI — official icon sourced from kiro.dev/icon.svg.
+function KiroLogo({ className }: { className: string }) {
+  const maskId = `kiro-logo-mask-${useId().replace(/:/g, "")}`;
+
+  return (
+    <svg viewBox="0 0 1200 1200" fill="none" className={className}>
+      <rect width="1200" height="1200" rx="260" fill="#9046FF" />
+      <mask
+        id={maskId}
+        style={{ maskType: "luminance" }}
+        maskUnits="userSpaceOnUse"
+        x="272"
+        y="202"
+        width="655"
+        height="796"
+      >
+        <path
+          d="M926.578 202.793H272.637V997.857H926.578V202.793Z"
+          fill="white"
+        />
+      </mask>
+      <g mask={`url(#${maskId})`}>
+        <path
+          d="M398.554 818.914C316.315 1001.03 491.477 1046.74 620.672 940.156C658.687 1059.66 801.052 970.473 852.234 877.795C964.787 673.567 919.318 465.357 907.64 422.374C827.637 129.443 427.623 128.946 358.8 423.865C342.651 475.544 342.402 534.18 333.458 595.051C328.986 625.86 325.507 645.488 313.83 677.785C306.873 696.424 297.68 712.819 282.773 740.645C259.915 783.881 269.604 867.113 387.87 823.883L399.051 818.914H398.554Z"
+          fill="white"
+        />
+        <path
+          d="M636.123 549.353C603.328 549.353 598.359 510.097 598.359 486.742C598.359 465.623 602.086 448.977 609.293 438.293C615.504 428.852 624.697 424.131 636.123 424.131C647.555 424.131 657.492 428.852 664.447 438.541C672.398 449.474 676.623 466.12 676.623 486.742C676.623 525.998 661.471 549.353 636.375 549.353H636.123Z"
+          fill="black"
+        />
+        <path
+          d="M771.24 549.353C738.445 549.353 733.477 510.097 733.477 486.742C733.477 465.623 737.203 448.977 744.41 438.293C750.621 428.852 759.814 424.131 771.24 424.131C782.672 424.131 792.609 428.852 799.564 438.541C807.516 449.474 811.74 466.12 811.74 486.742C811.74 525.998 796.588 549.353 771.492 549.353H771.24Z"
+          fill="black"
+        />
+      </g>
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -91,6 +210,20 @@ export function ProviderLogo({
       return <OpenClawLogo className={className} />;
     case "hermes":
       return <HermesLogo className={className} />;
+    case "pi":
+      return <PiLogo className={className} />;
+    case "copilot":
+      return <CopilotLogo className={className} />;
+    case "cursor":
+      return <CursorLogo className={className} />;
+    case "kimi":
+      return <KimiLogo className={className} />;
+    case "kiro":
+      return <KiroLogo className={className} />;
+    case "gemini":
+      return <GeminiLogo className={className} />;
+    case "antigravity":
+      return <AntigravityLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

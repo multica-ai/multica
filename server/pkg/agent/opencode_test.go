@@ -1,11 +1,16 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewReturnsOpencodeBackend(t *testing.T) {
@@ -708,4 +713,482 @@ func TestOpencodeProcessEventsErrorDoesNotRevertToCompleted(t *testing.T) {
 	}
 
 	close(ch)
+}
+
+// ── Windows native-binary resolution tests ──
+
+// fakeStat returns a statFn that reports any path in `present` as existing
+// and every other path as not-found. The returned os.FileInfo is a stub
+// because resolveOpenCodeNativeFromShim only inspects the error.
+func fakeStat(present ...string) func(string) (os.FileInfo, error) {
+	set := make(map[string]struct{}, len(present))
+	for _, p := range present {
+		set[p] = struct{}{}
+	}
+	return func(path string) (os.FileInfo, error) {
+		if _, ok := set[path]; ok {
+			return nil, nil
+		}
+		return nil, errors.New("not found")
+	}
+}
+
+func TestResolveOpenCodeNativeFromShimResolvesNpmShim(t *testing.T) {
+	t.Parallel()
+
+	// Reporter's exact layout from multica#1717.
+	shim := filepath.Join("C:\\nvm4w", "nodejs", "opencode.cmd")
+	native := filepath.Join("C:\\nvm4w", "nodejs", "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64", "bin", "opencode.exe")
+
+	got := resolveOpenCodeNativeFromShim(shim, fakeStat(native))
+	if got != native {
+		t.Errorf("got %q, want %q", got, native)
+	}
+}
+
+func TestResolveOpenCodeNativeFromShimReturnsEmptyWhenNativeMissing(t *testing.T) {
+	t.Parallel()
+
+	// Shim ends in .cmd but the bundled native binary isn't present (e.g.
+	// platform package didn't install or layout changed). Caller must keep
+	// the original shim path so PATH lookup still wins.
+	shim := filepath.Join("C:\\nvm4w", "nodejs", "opencode.cmd")
+
+	got := resolveOpenCodeNativeFromShim(shim, fakeStat())
+	if got != "" {
+		t.Errorf("got %q, want empty (missing native binary)", got)
+	}
+}
+
+func TestResolveOpenCodeNativeFromShimSkipsNonCmdPath(t *testing.T) {
+	t.Parallel()
+
+	// On macOS/Linux the path returned by exec.LookPath is the native
+	// binary itself, with no .cmd extension. Helper should signal "no
+	// rewrite needed" by returning empty.
+	cases := []string{
+		"/usr/local/bin/opencode",
+		"C:\\nvm4w\\nodejs\\opencode.exe",
+		"",
+	}
+	for _, p := range cases {
+		if got := resolveOpenCodeNativeFromShim(p, fakeStat("anything")); got != "" {
+			t.Errorf("path %q: got %q, want empty", p, got)
+		}
+	}
+}
+
+func TestResolveOpenCodeNativeFromShimAcceptsUppercaseExtension(t *testing.T) {
+	t.Parallel()
+
+	// Windows is case-insensitive on filesystem extensions. PATHEXT tokens
+	// are commonly uppercase, and exec.LookPath can return either case.
+	shim := filepath.Join("C:\\nvm4w", "nodejs", "opencode.CMD")
+	native := filepath.Join("C:\\nvm4w", "nodejs", "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64", "bin", "opencode.exe")
+
+	got := resolveOpenCodeNativeFromShim(shim, fakeStat(native))
+	if got != native {
+		t.Errorf("got %q, want %q", got, native)
+	}
+}
+
+func TestResolveOpenCodeNativeFromShimFallsBackToBaseline(t *testing.T) {
+	t.Parallel()
+
+	// Older CPUs without AVX2 get `opencode-windows-x64-baseline` instead of
+	// the default x64 build. Resolver should fall through and find it when
+	// the primary x64 package isn't installed.
+	shim := filepath.Join("C:\\nvm4w", "nodejs", "opencode.cmd")
+	baseline := filepath.Join("C:\\nvm4w", "nodejs", "node_modules", "opencode-ai", "node_modules", "opencode-windows-x64-baseline", "bin", "opencode.exe")
+
+	got := resolveOpenCodeNativeFromShim(shim, fakeStat(baseline))
+	if got != baseline {
+		t.Errorf("got %q, want %q", got, baseline)
+	}
+}
+
+func TestOpencodeWindowsPackageCandidatesArm64(t *testing.T) {
+	t.Parallel()
+
+	// ARM64 hosts (Surface, Copilot+ PC) should try arm64 first so the
+	// resolver doesn't accidentally pick up a leftover x64 install when
+	// the matching arm64 package is present.
+	got := opencodeWindowsPackageCandidates("arm64")
+	want := []string{"opencode-windows-arm64", "opencode-windows-x64", "opencode-windows-x64-baseline"}
+	if !equalStringSlice(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestOpencodeWindowsPackageCandidatesAmd64(t *testing.T) {
+	t.Parallel()
+
+	// amd64 (and any non-arm64) hosts try x64 → baseline → arm64. The arm64
+	// fallback at the end covers the unusual case where only the arm64
+	// package is installed; resolution still succeeds.
+	got := opencodeWindowsPackageCandidates("amd64")
+	want := []string{"opencode-windows-x64", "opencode-windows-x64-baseline", "opencode-windows-arm64"}
+	if !equalStringSlice(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// fakeOpencodeScript returns a POSIX-sh script that impersonates `opencode`
+// for argv / env capture. It writes the argv (one per line) to
+// $OPENCODE_ARGS_FILE, the resolved PWD to $OPENCODE_PWD_FILE, and the
+// permission config to $OPENCODE_PERMISSION_FILE. It emits a minimal completed
+// step on stdout so the daemon's event loop terminates, then exits.
+func fakeOpencodeScript() string {
+	return `#!/bin/sh
+if [ -n "$OPENCODE_ARGS_FILE" ]; then
+  for arg in "$@"; do
+    printf '%s\n' "$arg" >> "$OPENCODE_ARGS_FILE"
+  done
+fi
+if [ -n "$OPENCODE_PWD_FILE" ]; then
+  printf '%s\n' "$PWD" > "$OPENCODE_PWD_FILE"
+fi
+if [ -n "$OPENCODE_PERMISSION_FILE" ]; then
+  printf '%s\n' "$OPENCODE_PERMISSION" > "$OPENCODE_PERMISSION_FILE"
+fi
+if [ -f "$PWD/opencode.json" ] && grep -Eq '"question"[[:space:]]*:[[:space:]]*"allow"' "$PWD/opencode.json"; then
+  if [ "$OPENCODE_PERMISSION" = '{"*":"allow","question":"deny"}' ]; then
+    printf '{"type":"error","timestamp":1,"sessionID":"ses_fake","error":{"name":"PermissionBypass","data":{"message":"question permission bypassed by env wildcard order"}}}\n'
+    exit 0
+  fi
+fi
+printf '{"type":"step_start","timestamp":1,"sessionID":"ses_fake","part":{"type":"step-start"}}\n'
+printf '{"type":"text","timestamp":2,"sessionID":"ses_fake","part":{"type":"text","text":"ok"}}\n'
+printf '{"type":"step_finish","timestamp":3,"sessionID":"ses_fake","part":{"type":"step-finish"}}\n'
+`
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestOpencodeBackendAnchorsDirAndPWD pins the discovery-root fix from
+// MUL-2416: OpenCode resolves its AGENTS.md walk-up and .opencode/skills
+// project config scan from `--dir` and PWD. cmd.Dir alone is not enough
+// because OpenCode reads PWD (inherited from the daemon) before falling
+// back to process.cwd(). Without this anchor, skills written into the
+// task workdir are silently invisible and the agent runs against the
+// daemon's shell working directory.
+func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	pwdFile := filepath.Join(tempDir, "pwd.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	workDir := t.TempDir()
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_ARGS_FILE": argsFile,
+			"OPENCODE_PWD_FILE":  pwdFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     workDir,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	// argv should include `--dir <workDir>` immediately after the `run` /
+	// `--format json` prefix and nowhere else.
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(args) < 2 || args[0] != "run" {
+		t.Fatalf("expected first arg to be 'run', got %q", args)
+	}
+	dirIdx := -1
+	for i, a := range args {
+		if a == "--dir" {
+			dirIdx = i
+			break
+		}
+	}
+	if dirIdx == -1 {
+		t.Fatalf("expected --dir flag in argv, got %q", args)
+	}
+	if dirIdx+1 >= len(args) || args[dirIdx+1] != workDir {
+		t.Fatalf("expected --dir %q, got args=%q", workDir, args)
+	}
+
+	// PWD inside the child process must resolve to the task workdir,
+	// otherwise OpenCode's project discovery walk starts in the wrong
+	// directory and silently misses .opencode/skills + AGENTS.md.
+	gotPWD, err := os.ReadFile(pwdFile)
+	if err != nil {
+		t.Fatalf("read PWD file: %v", err)
+	}
+	if got := strings.TrimSpace(string(gotPWD)); got != workDir {
+		t.Errorf("child PWD = %q, want %q", got, workDir)
+	}
+}
+
+func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_ARGS_FILE": argsFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Model:         "opencode/deepseek-v4",
+		ThinkingLevel: "max",
+		CustomArgs:    []string{"--variant", "low", "--keep-me"},
+		Timeout:       5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := splitNonEmptyLines(string(raw))
+	if !containsAdjacent(args, "--model", "opencode/deepseek-v4") {
+		t.Fatalf("expected --model opencode/deepseek-v4 in args: %v", args)
+	}
+	if !containsAdjacent(args, "--variant", "max") {
+		t.Fatalf("expected daemon-injected --variant max in args: %v", args)
+	}
+	if argIndexOf(args, "--model") > argIndexOf(args, "--variant") {
+		t.Errorf("expected --variant after --model for readability: %v", args)
+	}
+	count := 0
+	for _, arg := range args {
+		if arg == "--variant" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one --variant, got %d: %v", count, args)
+	}
+	if argIndexOf(args, "low") >= 0 {
+		t.Errorf("filtered user --variant value still appears: %v", args)
+	}
+	if argIndexOf(args, "--keep-me") < 0 {
+		t.Errorf("non-blocked custom arg was dropped: %v", args)
+	}
+}
+
+func TestOpencodeBackendDoesNotUsePermissionEnvOverride(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	permissionFile := filepath.Join(tempDir, "permission.json")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_PERMISSION_FILE": permissionFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(permissionFile)
+	if err != nil {
+		t.Fatalf("read permission file: %v", err)
+	}
+	if got := strings.TrimSpace(string(raw)); got != "" {
+		t.Fatalf("OPENCODE_PERMISSION = %q, want empty env override", got)
+	}
+}
+
+func TestOpencodeBackendQuestionDenySurvivesUserConfig(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	workDir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(workDir, "opencode.json"),
+		[]byte(`{"permission":{"question":"allow"}}`),
+		0o644,
+	); err != nil {
+		t.Fatalf("write opencode config: %v", err)
+	}
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_ARGS_FILE": argsFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     workDir,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("result status = %q, error = %q; want completed", result.Status, result.Error)
+	}
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if !containsString(args, "--dangerously-skip-permissions") {
+		t.Fatalf("expected daemon-mode argv to include --dangerously-skip-permissions, got %q", args)
+	}
+}
+
+// TestOpencodeBackendBlocksDirOverride ensures user-supplied custom args
+// cannot replace the daemon-managed `--dir` anchor. Letting custom args
+// override it would re-introduce the MUL-2416 regression.
+func TestOpencodeBackendBlocksDirOverride(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	workDir := t.TempDir()
+	bogusDir := t.TempDir()
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_ARGS_FILE": argsFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:        workDir,
+		Timeout:    5 * time.Second,
+		CustomArgs: []string{"--dir", bogusDir},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	for i, a := range args {
+		if a == "--dir" {
+			if i+1 >= len(args) || args[i+1] != workDir {
+				t.Errorf("--dir was overridden by custom args: got %q", args)
+			}
+		}
+		if a == bogusDir {
+			t.Errorf("custom --dir value %q leaked into argv: %q", bogusDir, args)
+		}
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
