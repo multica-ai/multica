@@ -464,13 +464,24 @@ export function ToolPolicyTable({
 
 export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
   return (
-    // TECH-3156 Mangel 3: no flex-col → the tab row renders horizontal, not stacked.
-    <Tabs defaultValue="multica">
-      <TabsList>
-        <TabsTrigger value="multica">Multica</TabsTrigger>
-        <TabsTrigger value="runtime">Runtime</TabsTrigger>
-        <TabsTrigger value="repos">Repos</TabsTrigger>
-        <TabsTrigger value="connections">Connections</TabsTrigger>
+    // TECH-3156 Mangel 3: force the tab row horizontal. The shared Tabs primitive
+    // renders its list vertically by default, so — like cost-optimization-tabs —
+    // we override the list to !flex-row and each trigger to !w-auto so the four
+    // tabs sit on one horizontal row instead of stacked.
+    <Tabs defaultValue="multica" orientation="horizontal">
+      <TabsList className="!h-auto w-full !flex-row flex-wrap justify-start gap-1">
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="multica">
+          Multica
+        </TabsTrigger>
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="runtime">
+          Runtime
+        </TabsTrigger>
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="repos">
+          Repos
+        </TabsTrigger>
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="connections">
+          Connections
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="multica" className="mt-4">
         <ToolPolicyTable {...props} tabFilter="multica" />
