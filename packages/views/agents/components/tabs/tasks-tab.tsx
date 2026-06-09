@@ -1,18 +1,30 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { AlertCircle, Clock3, ListTodo, Loader2, XCircle } from "lucide-react";
+import { AlertCircle, ArrowUpRight, Clock3, ListTodo, Loader2, XCircle } from "lucide-react";
 import type { Agent, AgentTask } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions } from "@multica/core/issues/queries";
 import { useQuery } from "@tanstack/react-query";
-import { getTaskQueueBucket, getTaskQueueDisplay } from "../../config";
+import { LONG_RUNNING_TASK_MS, getTaskQueueBucket, getTaskQueueDisplay, getTaskReviewFlag } from "../../config";
+
+const REVIEW_ITEM_LIMIT = 3;
+const SUMMARY_REFRESH_INTERVAL_MS = 60_000;
+
+function formatTaskTimestamp(task: AgentTask, isRunning: boolean): string {
+  if (isRunning && task.started_at) return `Started ${new Date(task.started_at).toLocaleString()}`;
+  if (task.status === "dispatched" && task.dispatched_at) return `Dispatched ${new Date(task.dispatched_at).toLocaleString()}`;
+  if (task.status === "completed" && task.completed_at) return `Completed ${new Date(task.completed_at).toLocaleString()}`;
+  if (task.status === "failed" && task.completed_at) return `Failed ${new Date(task.completed_at).toLocaleString()}`;
+  return `Queued ${new Date(task.created_at).toLocaleString()}`;
+}
 
 export function TasksTab({ agent }: { agent: Agent }) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
 
@@ -24,6 +36,11 @@ export function TasksTab({ agent }: { agent: Agent }) {
       .catch(() => setTasks([]))
       .finally(() => setLoading(false));
   }, [agent.id]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setCurrentTime(Date.now()), SUMMARY_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, []);
 
   if (loading) {
     return (
@@ -42,7 +59,6 @@ export function TasksTab({ agent }: { agent: Agent }) {
     );
   }
 
-  // Sort: active tasks (running > dispatched > queued) first, then completed/failed by date
   const activeStatuses = ["running", "dispatched", "queued"];
   const sortedTasks = [...tasks].sort((a, b) => {
     const aActive = activeStatuses.indexOf(a.status);
@@ -55,11 +71,13 @@ export function TasksTab({ agent }: { agent: Agent }) {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
-  const issueMap = new Map(issues.map((i) => [i.id, i]));
+  const issueMap = new Map(issues.map((issue) => [issue.id, issue]));
 
   const queueSummary = useMemo(() => {
     const counts = { blocked: 0, queued: 0, running: 0, failed: 0 };
-    const blockedItems: { id: string; title: string; blockers: number }[] = [];
+    const blockedItems: { issueId: string; id: string; title: string; blockers: number }[] = [];
+    const reviewItems: { issueId: string; id: string; title: string; label: string; detail: string }[] = [];
+    const reviewCounts = { failed: 0, longRunning: 0 };
 
     for (const task of tasks) {
       const issue = issueMap.get(task.issue_id);
@@ -68,30 +86,48 @@ export function TasksTab({ agent }: { agent: Agent }) {
       if (bucket === "blocked") {
         counts.blocked += 1;
         blockedItems.push({
+          issueId: task.issue_id,
           id: issue?.identifier ?? task.issue_id.slice(0, 8),
           title: issue?.title ?? "Blocked task",
           blockers: issue?.blocked_by_count ?? 0,
         });
-        continue;
-      }
-
-      if (bucket === "queued") {
+      } else if (bucket === "queued") {
         counts.queued += 1;
-        continue;
-      }
-
-      if (bucket === "running") {
+      } else if (bucket === "running") {
         counts.running += 1;
-        continue;
-      }
-
-      if (bucket === "failed") {
+      } else if (bucket === "failed") {
         counts.failed += 1;
       }
+
+      const reviewFlag = getTaskReviewFlag(task, currentTime);
+      if (!reviewFlag) continue;
+
+      if (reviewFlag.tone === "failed") reviewCounts.failed += 1;
+      if (reviewFlag.tone === "long-running") reviewCounts.longRunning += 1;
+
+      reviewItems.push({
+        issueId: task.issue_id,
+        id: issue?.identifier ?? task.issue_id.slice(0, 8),
+        title: issue?.title ?? "Assigned issue",
+        label: reviewFlag.label,
+        detail: reviewFlag.detail,
+      });
     }
 
-    return { counts, blockedItems: blockedItems.slice(0, 3) };
-  }, [tasks, issueMap]);
+    return {
+      counts,
+      blockedItems: blockedItems.slice(0, REVIEW_ITEM_LIMIT),
+      reviewItems: reviewItems.slice(0, REVIEW_ITEM_LIMIT),
+      reviewCounts,
+    };
+  }, [currentTime, issueMap, tasks]);
+
+  const reviewThresholdMinutes = Math.floor(LONG_RUNNING_TASK_MS / 60_000);
+  const hasReviewItems = queueSummary.reviewCounts.failed > 0 || queueSummary.reviewCounts.longRunning > 0;
+  const reviewPanelClass =
+    queueSummary.reviewCounts.failed > 0
+      ? "border-destructive/20 bg-destructive/5"
+      : "border-warning/20 bg-warning/5";
 
   return (
     <div className="space-y-4">
@@ -149,11 +185,16 @@ export function TasksTab({ agent }: { agent: Agent }) {
               {queueSummary.blockedItems.length > 0 && (
                 <div className="space-y-1 text-xs text-muted-foreground">
                   {queueSummary.blockedItems.map((item) => (
-                    <div key={`${item.id}-${item.title}`} className="flex items-start gap-2">
+                    <a
+                      key={`${item.issueId}-${item.id}`}
+                      href={`/issues/${item.issueId}`}
+                      className="flex items-start gap-2 rounded-sm px-1 py-1 transition-colors hover:bg-background/60"
+                    >
                       <span className="font-mono text-[11px] text-foreground">{item.id}</span>
-                      <span className="truncate">{item.title}</span>
-                      <span className="ml-auto shrink-0">{item.blockers} blocker{item.blockers === 1 ? "" : "s"}</span>
-                    </div>
+                      <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                      <span className="shrink-0">{item.blockers} blocker{item.blockers === 1 ? "" : "s"}</span>
+                      <ArrowUpRight className="mt-0.5 h-3 w-3 shrink-0 opacity-50" />
+                    </a>
                   ))}
                 </div>
               )}
@@ -163,6 +204,44 @@ export function TasksTab({ agent }: { agent: Agent }) {
                   <span className="text-muted-foreground">waiting for runtime capacity or an earlier run for the same issue to finish.</span>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {hasReviewItems && (
+          <div className={`rounded-md border px-3 py-3 ${reviewPanelClass}`}>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Needs review
+            </div>
+            <div className="mt-2 space-y-2 text-sm">
+              {queueSummary.reviewCounts.failed > 0 && (
+                <div>
+                  <span className="font-medium text-foreground">{queueSummary.reviewCounts.failed} failed</span>{" "}
+                  <span className="text-muted-foreground">should be checked before retrying or reassigning the issue.</span>
+                </div>
+              )}
+              {queueSummary.reviewCounts.longRunning > 0 && (
+                <div>
+                  <span className="font-medium text-foreground">{queueSummary.reviewCounts.longRunning} long-running</span>{" "}
+                  <span className="text-muted-foreground">have been active for {reviewThresholdMinutes}m+ and may need a manual check-in.</span>
+                </div>
+              )}
+              <div className="space-y-1.5 text-xs text-muted-foreground">
+                {queueSummary.reviewItems.map((item) => (
+                  <a
+                    key={`${item.issueId}-${item.label}`}
+                    href={`/issues/${item.issueId}`}
+                    className="flex items-start gap-2 rounded-sm px-1 py-1 transition-colors hover:bg-background/60"
+                  >
+                    <span className="font-mono text-[11px] text-foreground">{item.id}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-foreground">{item.title}</div>
+                      <div className="truncate">{item.label}: {item.detail}</div>
+                    </div>
+                    <ArrowUpRight className="mt-0.5 h-3 w-3 shrink-0 opacity-50" />
+                  </a>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -181,11 +260,13 @@ export function TasksTab({ agent }: { agent: Agent }) {
           {sortedTasks.map((task) => {
             const issue = issueMap.get(task.issue_id);
             const display = getTaskQueueDisplay(task, issue);
+            const reviewFlag = getTaskReviewFlag(task, currentTime);
             const Icon = display.icon;
             const isRunning = task.status === "running";
             const isActive = task.status === "running" || task.status === "dispatched";
+            const isFailed = task.status === "failed";
             const isDependencyBlocked = display.tone === "blocked";
-            const isHighlighted = isActive || isDependencyBlocked;
+            const isHighlighted = isActive || isDependencyBlocked || isFailed;
 
             return (
               <div
@@ -195,9 +276,11 @@ export function TasksTab({ agent }: { agent: Agent }) {
                     ? "border-success/40 bg-success/5"
                     : task.status === "dispatched"
                       ? "border-info/40 bg-info/5"
-                      : isDependencyBlocked
-                        ? "border-warning/40 bg-warning/5"
-                        : ""
+                      : isFailed
+                        ? "border-destructive/40 bg-destructive/5"
+                        : isDependencyBlocked
+                          ? "border-warning/40 bg-warning/5"
+                          : ""
                 }`}
               >
                 <Icon
@@ -212,23 +295,26 @@ export function TasksTab({ agent }: { agent: Agent }) {
                         {issue.identifier}
                       </span>
                     )}
-                    <span className={`text-sm truncate ${isHighlighted ? "font-medium" : ""}`}>
+                    <a
+                      href={`/issues/${task.issue_id}`}
+                      className={`min-w-0 truncate text-sm hover:underline ${isHighlighted ? "font-medium" : ""}`}
+                    >
                       {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
-                    </span>
+                    </a>
                   </div>
                   <div className={`mt-0.5 text-xs ${isDependencyBlocked ? "text-warning" : "text-muted-foreground"}`}>
-                    {display.detail ?? (
-                      isRunning && task.started_at
-                        ? `Started ${new Date(task.started_at).toLocaleString()}`
-                        : task.status === "dispatched" && task.dispatched_at
-                          ? `Dispatched ${new Date(task.dispatched_at).toLocaleString()}`
-                          : task.status === "completed" && task.completed_at
-                            ? `Completed ${new Date(task.completed_at).toLocaleString()}`
-                            : task.status === "failed" && task.completed_at
-                              ? `Failed ${new Date(task.completed_at).toLocaleString()}`
-                              : `Queued ${new Date(task.created_at).toLocaleString()}`
-                    )}
+                    {display.detail ?? formatTaskTimestamp(task, isRunning)}
                   </div>
+                  {reviewFlag?.tone === "failed" && (
+                    <div className="mt-1 line-clamp-2 text-[11px] text-destructive">
+                      {reviewFlag.detail}
+                    </div>
+                  )}
+                  {reviewFlag?.tone === "long-running" && (
+                    <div className="mt-1 text-[11px] text-warning">
+                      {reviewFlag.detail}
+                    </div>
+                  )}
                 </div>
                 <span className={`shrink-0 text-xs font-medium ${display.color}`}>
                   {display.label}

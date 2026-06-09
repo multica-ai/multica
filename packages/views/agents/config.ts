@@ -26,6 +26,14 @@ export type TaskQueueDisplay = {
 };
 
 export type TaskQueueBucket = "blocked" | "queued" | "running" | "failed" | "completed" | "cancelled";
+export type TaskReviewTone = "failed" | "long-running";
+export type TaskReviewFlag = {
+  tone: TaskReviewTone;
+  label: string;
+  detail: string;
+};
+
+export const LONG_RUNNING_TASK_MS = 30 * 60 * 1000;
 
 export const taskStatusConfig: Record<string, { label: string; icon: LucideIcon; color: string }> = {
   queued: { label: "Queued", icon: Clock, color: "text-muted-foreground" },
@@ -35,6 +43,21 @@ export const taskStatusConfig: Record<string, { label: string; icon: LucideIcon;
   failed: { label: "Failed", icon: XCircle, color: "text-destructive" },
   cancelled: { label: "Cancelled", icon: XCircle, color: "text-muted-foreground" },
 };
+
+function formatElapsedForReview(ms: number): string {
+  const totalMinutes = Math.floor(ms / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+function summarizeTaskError(error: string | null | undefined): string {
+  const normalized = error?.replace(/\s+/g, " ").trim() ?? "";
+  if (!normalized) return "Latest run failed and should be checked before retrying.";
+  return normalized.length > 140 ? `${normalized.slice(0, 137)}...` : normalized;
+}
 
 export function getTaskQueueBucket(
   task: Pick<AgentTask, "status">,
@@ -46,6 +69,33 @@ export function getTaskQueueBucket(
   if (task.status === "failed") return "failed";
   if (task.status === "completed") return "completed";
   return "cancelled";
+}
+
+export function getTaskReviewFlag(
+  task: Pick<AgentTask, "status" | "error" | "started_at" | "dispatched_at">,
+  now = Date.now(),
+): TaskReviewFlag | null {
+  if (task.status === "failed") {
+    return {
+      tone: "failed",
+      label: "Failed",
+      detail: summarizeTaskError(task.error),
+    };
+  }
+
+  if (task.status !== "running" && task.status !== "dispatched") return null;
+
+  const activeSince = task.started_at ?? task.dispatched_at;
+  if (!activeSince) return null;
+
+  const elapsedMs = now - new Date(activeSince).getTime();
+  if (!Number.isFinite(elapsedMs) || elapsedMs < LONG_RUNNING_TASK_MS) return null;
+
+  return {
+    tone: "long-running",
+    label: "Long-running",
+    detail: `Active for ${formatElapsedForReview(elapsedMs)} and may need a check-in.`,
+  };
 }
 
 export function getTaskQueueDisplay(
