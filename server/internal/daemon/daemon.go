@@ -2960,8 +2960,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		model = entry.Model
 	}
 	thinkingLevel := ""
+	serviceTier := ""
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
+		if provider == "codex" {
+			serviceTier = task.Agent.ServiceTier
+		}
 	}
 	// Per-model guard: the server validates the literal token against the
 	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
@@ -3000,6 +3004,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
+		ServiceTier:               serviceTier,
 	}
 	if capability.ResumeSession {
 		execOpts.ResumeSessionID = task.PriorSessionID

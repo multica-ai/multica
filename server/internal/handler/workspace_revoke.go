@@ -166,7 +166,7 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 
 	for _, agent := range result.ArchivedAgents {
 		h.publish(protocol.EventAgentArchived, workspaceIDStr, actorType, actorIDStr, map[string]any{
-			"agent": agentToResponse(agent),
+			"agent": h.agentToResponseForRuntime(ctx, agent),
 		})
 	}
 

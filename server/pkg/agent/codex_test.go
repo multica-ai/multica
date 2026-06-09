@@ -1111,6 +1111,80 @@ func TestCodexStartOrResumeThreadPromptPassesPolicyOnResume(t *testing.T) {
 	}
 }
 
+func TestCodexStartOrResumeThreadPassesServiceTier(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_fast"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["service_tier"] != "fast" {
+					t.Errorf("thread/start service_tier = %v, want fast", params["service_tier"])
+				}
+				if cfg, ok := params["config"].(map[string]any); ok {
+					if _, leaked := cfg["service_tier"]; leaked {
+						t.Errorf("service_tier must be top-level, leaked into config: %+v", cfg)
+					}
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(context.Background(), ExecOptions{Cwd: "/work", ServiceTier: "fast"}, slog.Default())
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_fast" {
+		t.Errorf("threadID = %q, want thr_fast", threadID)
+	}
+	if resumed {
+		t.Error("resumed should be false")
+	}
+}
+
+func TestCodexStartOrResumeThreadPassesServiceTierOnResume(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/resume",
+			result: json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["service_tier"] != "default" {
+					t.Errorf("thread/resume service_tier = %v, want default", params["service_tier"])
+				}
+				if cfg, ok := params["config"].(map[string]any); ok {
+					if _, leaked := cfg["service_tier"]; leaked {
+						t.Errorf("service_tier must be top-level, leaked into config: %+v", cfg)
+					}
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior", ServiceTier: "default"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_prior" {
+		t.Errorf("threadID = %q, want thr_prior", threadID)
+	}
+	if !resumed {
+		t.Error("expected resumed=true")
+	}
+}
+
 func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 	t.Parallel()
 

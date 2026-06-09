@@ -448,6 +448,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		CustomArgs:         ca,
 		McpConfig:          nil,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		ServiceTier:        pgtype.Text{},
 	})
 	if err != nil {
 		// Mirror handler/agent.go:CreateAgent: when the duplicate is the
@@ -541,7 +542,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		agent, _ = h.Queries.GetAgent(r.Context(), agent.ID)
 	}
 
-	resp := agentToResponse(agent)
+	resp := agentToResponseForProvider(agent, runtime.Provider)
 	// Templates attach skills via AddAgentSkill above, so the freshly built
 	// AgentResponse must reload them — otherwise the create response (and
 	// the agent:created broadcast) would tell clients the agent has no

@@ -31,6 +31,11 @@ import (
 // char_length and the front-end's String.prototype.length-with-counter UX.
 const maxAgentDescriptionLength = 255
 
+const (
+	agentServiceTierFast    = "fast"
+	agentServiceTierDefault = "default"
+)
+
 type AgentResponse struct {
 	ID            string          `json:"id"`
 	WorkspaceID   string          `json:"workspace_id"`
@@ -61,6 +66,7 @@ type AgentResponse struct {
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
 	ThinkingLevel          string              `json:"thinking_level"`
+	ServiceTier            *string             `json:"service_tier,omitempty"`
 	OwnerID                *string             `json:"owner_id"`
 	AllowedUserIDs         []string            `json:"allowed_user_ids"`
 	Skills                 []AgentSkillSummary `json:"skills"`
@@ -94,6 +100,10 @@ func agentAllowedPrincipalToResponse(row db.ListAgentAllowedPrincipalsRow) Agent
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
+	return agentToResponseForProvider(a, "")
+}
+
+func agentToResponseForProvider(a db.Agent, provider string) AgentResponse {
 	var rc any
 	if a.RuntimeConfig != nil {
 		json.Unmarshal(a.RuntimeConfig, &rc)
@@ -131,7 +141,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		mcpConfig = json.RawMessage(a.McpConfig)
 	}
 
-	return AgentResponse{
+	resp := AgentResponse{
 		ID:                     uuidToString(a.ID),
 		WorkspaceID:            uuidToString(a.WorkspaceID),
 		RuntimeID:              uuidToString(a.RuntimeID),
@@ -159,6 +169,16 @@ func agentToResponse(a db.Agent) AgentResponse {
 		ArchivedBy:             uuidToPtr(a.ArchivedBy),
 		CustomEnvCopiedPending: a.CustomEnvCopiedPending,
 	}
+	if provider == "codex" {
+		serviceTier := a.ServiceTier.String
+		resp.ServiceTier = &serviceTier
+	}
+	return resp
+}
+
+func (h *Handler) agentToResponseForRuntime(ctx context.Context, a db.Agent) AgentResponse {
+	provider, _ := h.resolveAgentProvider(ctx, a.WorkspaceID, a.RuntimeID)
+	return agentToResponseForProvider(a, provider)
 }
 
 // stripCustomEnvValuesForCopy keeps env keys from the source but clears all values.
@@ -328,6 +348,7 @@ type TaskAgentData struct {
 	Model         string                   `json:"model,omitempty"`
 	RuntimeConfig json.RawMessage          `json:"runtime_config,omitempty"`
 	ThinkingLevel string                   `json:"thinking_level,omitempty"`
+	ServiceTier   string                   `json:"service_tier,omitempty"`
 }
 
 // taskToSlimResponse builds a response without the heavy Context and Result
@@ -626,14 +647,27 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	// to preserve A2A collaboration; members must be allowed to see private
 	// agents by ownership, workspace role, or the explicit allowlist.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent runtimes")
+		return
+	}
 	visible := make([]AgentResponse, 0, len(agents))
+	runtimesByID := map[string]db.AgentRuntime{}
+	for _, rt := range runtimes {
+		runtimesByID[uuidToString(rt.ID)] = rt
+	}
 	for _, a := range agents {
 		if a.Visibility == "private" && actorType == "member" {
 			if !memberAllowedForPrivateAgentWithAllowlist(a, actorID, member.Role, allowedUserMap[uuidToString(a.ID)]) {
 				continue
 			}
 		}
-		resp := agentToResponse(a)
+		provider := ""
+		if rt, ok := runtimesByID[uuidToString(a.RuntimeID)]; ok {
+			provider = rt.Provider
+		}
+		resp := agentToResponseForProvider(a, provider)
 		if slim {
 			resp.Instructions = ""
 			resp.RuntimeConfig = nil
@@ -675,7 +709,8 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
-	resp := agentToResponse(agent)
+	provider, _ := h.resolveAgentProvider(r.Context(), agent.WorkspaceID, agent.RuntimeID)
+	resp := agentToResponseForProvider(agent, provider)
 	// Use the summary query (no `content` column) — the embedded
 	// AgentSkillSummary only needs id/name/description, and reading large
 	// SKILL.md bodies just to discard them is the exact regression we fixed
@@ -730,6 +765,7 @@ type CreateAgentRequest struct {
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
 	ThinkingLevel      string            `json:"thinking_level"`
+	ServiceTier        string            `json:"service_tier"`
 	// Template records which template slug was used to seed this agent
 	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
 	// the caller didn't come from a template picker — the `agent_created`
@@ -828,6 +864,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
 		return
 	}
+	serviceTier := ""
+	if runtime.Provider == "codex" {
+		if !isKnownAgentServiceTier(req.ServiceTier) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised Codex service tier", req.ServiceTier))
+			return
+		}
+		serviceTier = req.ServiceTier
+	}
 
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal.
@@ -873,6 +917,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:              mc,
 		Model:                  pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:          pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		ServiceTier:            pgtype.Text{String: serviceTier, Valid: serviceTier != ""},
 		CustomEnvCopiedPending: false,
 	})
 	if err != nil {
@@ -894,7 +939,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
 
-	resp := agentToResponse(created)
+	resp := agentToResponseForProvider(created, runtime.Provider)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
@@ -1008,6 +1053,11 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	if len(sourceAgent.McpConfig) > 0 {
 		mc = append([]byte(nil), sourceAgent.McpConfig...)
 	}
+	sourceProvider, _ := h.resolveAgentProvider(r.Context(), sourceAgent.WorkspaceID, sourceAgent.RuntimeID)
+	serviceTier := pgtype.Text{}
+	if sourceProvider == "codex" {
+		serviceTier = sourceAgent.ServiceTier
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -1035,6 +1085,7 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:              mc,
 		Model:                  sourceAgent.Model,
 		ThinkingLevel:          sourceAgent.ThinkingLevel,
+		ServiceTier:            serviceTier,
 		CustomEnvCopiedPending: envCopiedPending,
 	})
 	if err != nil {
@@ -1075,7 +1126,7 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 		newAgent, _ = h.Queries.GetAgent(r.Context(), newAgent.ID)
 	}
 
-	resp := agentToResponse(newAgent)
+	resp := h.agentToResponseForRuntime(r.Context(), newAgent)
 	skillRows, err := h.Queries.ListAgentSkillSummaries(r.Context(), newAgent.ID)
 	if err == nil && len(skillRows) > 0 {
 		resp.Skills = make([]AgentSkillSummary, len(skillRows))
@@ -1122,6 +1173,13 @@ type UpdateAgentRequest struct {
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
 	ThinkingLevel *string `json:"thinking_level"`
+	// ServiceTier is Codex-only Fast mode state:
+	//   - omitted → no change
+	//   - "" → clear (follow local Codex config/default)
+	//   - "fast" → enable Fast mode
+	//   - "default" → explicitly use standard tier
+	// Non-Codex runtimes ignore the field and clear any hidden persisted value.
+	ServiceTier *string `json:"service_tier"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -1145,6 +1203,15 @@ func workspaceAlwaysRedactSecrets(settings []byte) bool {
 		return false
 	}
 	return s.AlwaysRedactEnv
+}
+
+func isKnownAgentServiceTier(value string) bool {
+	switch value {
+	case "", agentServiceTierFast, agentServiceTierDefault:
+		return true
+	default:
+		return false
+	}
 }
 
 // canViewAgentSecrets checks whether the requesting user is allowed to
@@ -1304,6 +1371,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// request doesn't move the agent, we still need to load the *current*
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
+	targetRuntimeProvider := ""
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -1340,6 +1408,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
+		targetRuntimeProvider = runtime.Provider
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
@@ -1352,6 +1421,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
+	}
+
+	targetProvider := func() (string, bool) {
+		if targetRuntimeProvider != "" {
+			return targetRuntimeProvider, true
+		}
+		provider, ok := h.resolveAgentProvider(r.Context(), existing.WorkspaceID, targetRuntimeID)
+		if ok {
+			targetRuntimeProvider = provider
+		}
+		return provider, ok
 	}
 
 	// thinking_level handling (MUL-2339). Tri-state semantics:
@@ -1375,7 +1455,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			// Need the target runtime's provider to validate. Re-fetch only when
 			// we haven't already loaded it above (i.e. the request didn't change
 			// runtime_id), to keep the no-change path one DB roundtrip.
-			provider, ok := h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			provider, ok := targetProvider()
 			if !ok {
 				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
 				return
@@ -1394,7 +1474,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		// literal-invalid, never silently coerce. The caller can either
 		// pass `thinking_level: ""` to clear or pick a value valid for the
 		// new runtime.
-		provider, ok := h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+		provider, ok := targetProvider()
 		if !ok {
 			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
 			return
@@ -1408,6 +1488,39 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// service_tier handling (OPE-2421). Codex-only; non-Codex runtimes ignore
+	// incoming values and clear any persisted tier so hidden config cannot
+	// survive a runtime switch.
+	shouldClearServiceTier := false
+	if req.ServiceTier != nil {
+		value := *req.ServiceTier
+		provider, ok := targetProvider()
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for service_tier validation")
+			return
+		}
+		if provider != "codex" {
+			shouldClearServiceTier = existing.ServiceTier.Valid
+		} else if value == "" {
+			shouldClearServiceTier = true
+		} else {
+			if !isKnownAgentServiceTier(value) {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised Codex service tier", value))
+				return
+			}
+			params.ServiceTier = pgtype.Text{String: value, Valid: true}
+		}
+	} else if req.RuntimeID != nil {
+		provider, ok := targetProvider()
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for service_tier validation")
+			return
+		}
+		if provider != "codex" && existing.ServiceTier.Valid {
+			shouldClearServiceTier = true
+		}
+	}
+
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
@@ -1415,7 +1528,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// mcp_config / thinking_level: null/empty in the request means explicitly
+	// mcp_config / thinking_level / service_tier: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL,
 	// so we use dedicated clear queries.
 	if shouldClearMcpConfig {
@@ -1434,8 +1547,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if shouldClearServiceTier {
+		updated, err = h.Queries.ClearAgentServiceTier(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear service_tier: "+err.Error())
+			return
+		}
+	}
 
-	resp := agentToResponse(updated)
+	provider, _ := targetProvider()
+	resp := agentToResponseForProvider(updated, provider)
 	// agentToResponse always initialises Skills as []; junction-table rows
 	// are untouched by the SQL update, so we reload them here to keep the
 	// response (and the broadcast that mirrors it) in sync with reality.
@@ -1656,8 +1778,8 @@ func (h *Handler) attachAgentSkills(ctx context.Context, resp *AgentResponse, ag
 // will own this agent after the in-flight update applies. Used by the
 // thinking_level validator so a runtime/model swap and a level swap
 // validated in the same request both consult the same provider.
-func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID, runtimeID pgtype.UUID) (string, bool) {
-	rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+func (h *Handler) resolveAgentProvider(ctx context.Context, workspaceID pgtype.UUID, runtimeID pgtype.UUID) (string, bool) {
+	rt, err := h.Queries.GetAgentRuntimeForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
 		ID:          runtimeID,
 		WorkspaceID: workspaceID,
 	})
@@ -1704,7 +1826,7 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 
 	wsID := uuidToString(archived.WorkspaceID)
 	slog.Info("agent archived", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
-	resp := agentToResponse(archived)
+	resp := h.agentToResponseForRuntime(r.Context(), archived)
 	if err := h.attachAgentSkills(r.Context(), &resp, archived.ID); err != nil {
 		slog.Warn("load agent skills after archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
@@ -1739,7 +1861,7 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 
 	wsID := uuidToString(restored.WorkspaceID)
 	slog.Info("agent restored", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
-	resp := agentToResponse(restored)
+	resp := h.agentToResponseForRuntime(r.Context(), restored)
 	if err := h.attachAgentSkills(r.Context(), &resp, restored.ID); err != nil {
 		slog.Warn("load agent skills after restore failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")

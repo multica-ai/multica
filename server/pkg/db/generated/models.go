@@ -46,6 +46,7 @@ type Agent struct {
 	// True when env vars were copied without secret values; user must fill values before use.
 	CustomEnvCopiedPending bool        `json:"custom_env_copied_pending"`
 	ThinkingLevel          pgtype.Text `json:"thinking_level"`
+	ServiceTier            pgtype.Text `json:"service_tier"`
 }
 
 type AgentAllowedPrincipal struct {

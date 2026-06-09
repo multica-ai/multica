@@ -106,6 +106,11 @@ type ExecOptions struct {
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	// ServiceTier is a Codex-only service tier override. Empty means "do not
+	// override; let the local Codex config/default decide". The Codex backend
+	// passes non-empty values through to app-server as service_tier; other
+	// backends intentionally ignore it.
+	ServiceTier string
 }
 
 // Session represents a running agent execution.

@@ -1176,6 +1176,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			allSkills = append(allSkills, extra...)
 		}
 
+		serviceTier := ""
+		if runtime.Provider == "codex" {
+			serviceTier = agent.ServiceTier.String
+		}
 		resp.Agent = &TaskAgentData{
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
@@ -1189,6 +1193,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			McpConfig:     mcpConfig,
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
+			ServiceTier:   serviceTier,
 			RuntimeConfig: agent.RuntimeConfig,
 		}
 
