@@ -3459,6 +3459,9 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.6
         version: 1.7.6
+      '@multica/cerebro-access':
+        specifier: workspace:*
+        version: link:../cerebro-access
       '@multica/cerebro-agent-tools':
         specifier: workspace:*
         version: link:../cerebro-agent-tools

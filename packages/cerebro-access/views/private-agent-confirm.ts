@@ -6,6 +6,12 @@ import type { Agent, MemberRole } from "@multica/core/types";
 import { canTriggerPrivateAgentMention } from "./agent-trigger";
 
 const MENTION_AGENT_RE = /(?<!\\)\[@(?:\\.|[^\]])+\]\(mention:\/\/agent\/([^)]+)\)/g;
+// Non-agent targets a draft can address instead of the assignee. These mirror
+// the mention types the backend counts in commentMentionsOthersButNotAssignee
+// (server/internal/util/mention.go): a tagged person, a squad, or @all.
+const HAS_MEMBER_MENTION_RE = /(?<!\\)\[@(?:\\.|[^\]])+\]\(mention:\/\/member\/[^)]+\)/;
+const HAS_SQUAD_MENTION_RE = /(?<!\\)\[@(?:\\.|[^\]])+\]\(mention:\/\/squad\/[^)]+\)/;
+const HAS_ALL_MENTION_RE = /(?<!\\)\[@?(?:\\.|[^\]])+\]\(mention:\/\/all\/all\)/;
 
 /** Agent ids explicitly @mentioned in the draft, in order, de-duplicated. */
 export function extractMentionedAgentIds(markdown: string): string[] {
@@ -18,6 +24,42 @@ export function extractMentionedAgentIds(markdown: string): string[] {
     ids.push(id);
   }
   return ids;
+}
+
+/**
+ * resolveCommentTriggerAgentIds — the agent ids a member's comment will actually
+ * wake, mirroring the backend trigger logic so the composer's indicator and the
+ * send confirm reflect who really receives the comment (TECH-3194).
+ *
+ * Backend rule (server/internal/handler/comment.go):
+ *  - explicit @agent mentions are triggered via `enqueueMentionedAgentTasks`;
+ *  - otherwise the issue assignee (`triggerAgentId`) is woken via the on_comment
+ *    fallback — UNLESS the draft addresses someone else instead (a tagged
+ *    person, a squad, or @all) without tagging the assignee. That suppression
+ *    is `commentMentionsOthersButNotAssignee`, and when it fires nothing is
+ *    woken, so there is no trigger target.
+ */
+export function resolveCommentTriggerAgentIds({
+  markdown,
+  triggerAgentId,
+}: {
+  markdown: string;
+  triggerAgentId?: string;
+}): string[] {
+  const mentioned = extractMentionedAgentIds(markdown);
+  if (mentioned.length > 0) return mentioned;
+  if (!triggerAgentId) return [];
+  // No @agent mention: the assignee only fires when the draft is not addressed
+  // to someone else. Tagging a person / squad / @all means "talking to others,
+  // not the assignee" → the assignee is not woken.
+  if (
+    HAS_ALL_MENTION_RE.test(markdown) ||
+    HAS_MEMBER_MENTION_RE.test(markdown) ||
+    HAS_SQUAD_MENTION_RE.test(markdown)
+  ) {
+    return [];
+  }
+  return [triggerAgentId];
 }
 
 /**
@@ -44,9 +86,7 @@ export function pickAgentNeedingConfirm({
   userId: string | null;
   role: MemberRole | null;
 }): Agent | null {
-  const mentioned = extractMentionedAgentIds(markdown);
-  const ids =
-    mentioned.length > 0 ? mentioned : triggerAgentId ? [triggerAgentId] : [];
+  const ids = resolveCommentTriggerAgentIds({ markdown, triggerAgentId });
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
   for (const id of ids) {
     const agent = byId.get(id);

@@ -3,6 +3,7 @@ import type { Agent } from "@multica/core/types";
 import {
   extractMentionedAgentIds,
   pickAgentNeedingConfirm,
+  resolveCommentTriggerAgentIds,
 } from "./private-agent-confirm";
 
 const ME = "user-me";
@@ -67,6 +68,65 @@ describe("extractMentionedAgentIds", () => {
   });
 });
 
+describe("resolveCommentTriggerAgentIds", () => {
+  it("falls back to the assignee when the draft has no mentions", () => {
+    expect(
+      resolveCommentTriggerAgentIds({
+        markdown: "plain reply",
+        triggerAgentId: "agt_assignee",
+      }),
+    ).toEqual(["agt_assignee"]);
+  });
+
+  it("returns explicit @agent mentions instead of the assignee", () => {
+    expect(
+      resolveCommentTriggerAgentIds({
+        markdown: "[@A](mention://agent/agt_a)",
+        triggerAgentId: "agt_assignee",
+      }),
+    ).toEqual(["agt_a"]);
+  });
+
+  it("suppresses the assignee when a person is tagged instead", () => {
+    // The reported TECH-3194 case: tagging a member (and not the assignee
+    // agent) means the comment is for that person, so the assignee is not woken.
+    expect(
+      resolveCommentTriggerAgentIds({
+        markdown: "[@Bob](mention://member/user-bob) what do you think?",
+        triggerAgentId: "agt_assignee",
+      }),
+    ).toEqual([]);
+  });
+
+  it("suppresses the assignee on an @all broadcast", () => {
+    expect(
+      resolveCommentTriggerAgentIds({
+        markdown: "[@All](mention://all/all) heads up",
+        triggerAgentId: "agt_assignee",
+      }),
+    ).toEqual([]);
+  });
+
+  it("still triggers the assignee when it is tagged alongside a person", () => {
+    expect(
+      resolveCommentTriggerAgentIds({
+        markdown:
+          "[@Bob](mention://member/user-bob) and [@Assignee](mention://agent/agt_assignee)",
+        triggerAgentId: "agt_assignee",
+      }),
+    ).toEqual(["agt_assignee"]);
+  });
+
+  it("returns nothing when there is no assignee and only a person is tagged", () => {
+    expect(
+      resolveCommentTriggerAgentIds({
+        markdown: "[@Bob](mention://member/user-bob)",
+        triggerAgentId: undefined,
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe("pickAgentNeedingConfirm", () => {
   const agents = [foreignPrivate, myPrivate, workspaceAgent];
   const base = { agents, userId: ME, role: "member" as const };
@@ -115,6 +175,18 @@ describe("pickAgentNeedingConfirm", () => {
         ...base,
         markdown: "just a note",
         triggerAgentId: undefined,
+      }),
+    ).toBeNull();
+  });
+
+  it("does NOT confirm when a person is tagged instead of the assignee agent", () => {
+    // TECH-3194: the issue is assigned to a foreign private agent, but the user
+    // tags a person — so the agent will not be woken and no confirm should show.
+    expect(
+      pickAgentNeedingConfirm({
+        ...base,
+        markdown: "[@Bob](mention://member/user-bob) thoughts?",
+        triggerAgentId: foreignPrivate.id,
       }),
     ).toBeNull();
   });

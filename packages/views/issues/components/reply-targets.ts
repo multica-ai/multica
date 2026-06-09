@@ -3,6 +3,11 @@
 // behavior is cheap to unit-test.
 
 import type { Agent, MemberWithUser } from "@multica/core/types";
+// CEREBRO-PATCH(reply-target-mention-suppression): TECH-3194 — resolve the bar's
+// targets through the shared backend-mirroring resolver so the indicator only
+// shows agents that will actually receive the comment. Tagging a person / squad
+// / @all now suppresses the assignee fallback, exactly like the backend.
+import { resolveCommentTriggerAgentIds } from "@multica/cerebro-access/views";
 
 export function getReplyTargetAgents({
   markdown,
@@ -13,10 +18,7 @@ export function getReplyTargetAgents({
   triggerAgentId?: string;
   agents: Agent[];
 }): Agent[] {
-  const mentionedAgentIds = extractMentionedAgentIds(markdown);
-  const ids = mentionedAgentIds.length > 0
-    ? mentionedAgentIds
-    : triggerAgentId ? [triggerAgentId] : [];
+  const ids = resolveCommentTriggerAgentIds({ markdown, triggerAgentId });
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
   return ids
     .map((id) => byId.get(id))

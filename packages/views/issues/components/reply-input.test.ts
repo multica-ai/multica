@@ -56,6 +56,20 @@ describe("ReplyInput target resolution", () => {
     ).toEqual([tagged.id]);
   });
 
+  it("drops the assignee target when a person is tagged instead", () => {
+    // TECH-3194: tagging a person (and not the assignee agent) means the
+    // backend will not wake the assignee, so the bar must not show it.
+    const assignee = makeAgent("agent-assignee", "Assignee Agent");
+
+    expect(
+      getReplyTargetAgents({
+        markdown: "[@Bob](mention://member/user-bob) what do you think?",
+        triggerAgentId: assignee.id,
+        agents: [assignee],
+      }),
+    ).toEqual([]);
+  });
+
   it("deduplicates agent tags in draft order", () => {
     expect(
       extractMentionedAgentIds(
