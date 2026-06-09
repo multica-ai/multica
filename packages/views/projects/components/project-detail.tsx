@@ -305,6 +305,7 @@ export function ProjectIssuesSurface({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const showArchived = useViewStore((s) => s.showArchived);
   // `projectViewStore` is shared between Project Detail routes. Keep the
   // selected labels inside the current Project's visible Global + Project scope
   // before those ids hit server filters.
@@ -322,9 +323,11 @@ export function ProjectIssuesSurface({
     return BOARD_STATUSES;
   }, [statusFilters]);
   const serverFilter = useMemo<IssueListFilter>(
-    () =>
-      buildIssueListServerFilter(
-        filter,
+    () => {
+      const base: IssueListFilter = { ...filter };
+      if (showArchived) base.include_archived = true;
+      return buildIssueListServerFilter(
+        base,
         {
           statusFilters,
           priorityFilters,
@@ -334,7 +337,8 @@ export function ProjectIssuesSurface({
           labelFilters: scopedLabelFilters,
         },
         visibleStatuses,
-      ),
+      );
+    },
     [
       assigneeFilters,
       creatorFilters,
@@ -342,6 +346,7 @@ export function ProjectIssuesSurface({
       includeNoAssignee,
       scopedLabelFilters,
       priorityFilters,
+      showArchived,
       statusFilters,
       visibleStatuses,
     ],
