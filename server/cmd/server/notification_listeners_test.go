@@ -341,6 +341,7 @@ func TestNotification_IssueCreated_AssigneeNotified(t *testing.T) {
 		t.Fatalf("expected severity 'action_required', got %q", items[0].Severity)
 	}
 
+	// CEREBRO-PATCH(started-issues-inbox-default-test): TECH-3001 — default started issues now appear in the creator inbox.
 	// Creator (actor) should get only the default started-issue inbox item,
 	// not an assignment notification.
 	creatorItems := inboxItemsForRecipient(t, queries, testUserID)
