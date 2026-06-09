@@ -26,6 +26,7 @@ const (
 	DaemonAuthPathDaemonToken = "daemon_token"
 	DaemonAuthPathPAT         = "pat"
 	DaemonAuthPathJWT         = "jwt"
+	DaemonAuthPathCasdoor     = "casdoor"
 )
 
 // DaemonWorkspaceIDFromContext returns the workspace ID set by DaemonAuth middleware.
@@ -69,7 +70,7 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 //     and a daemon converges on one DB round-trip per AuthCacheTTL window.
 //
 // Cache misses fall back to the original DB-backed behavior.
-func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache) func(http.Handler) http.Handler {
+func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, jwks *auth.JWKSProvider, resolver SubjectResolver) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
@@ -168,32 +169,43 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				return
 			}
 
-			// Fallback: JWT tokens.
+			// Fallback: multica JWT tokens (HS256).
 			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 					return nil, jwt.ErrSignatureInvalid
 				}
 				return auth.JWTSecret(), nil
 			})
-			if err != nil || !token.Valid {
-				slog.Warn("daemon_auth: invalid token", "path", r.URL.Path, "error", err)
-				writeError(w, http.StatusUnauthorized, "invalid token")
-				return
+			if err == nil && token.Valid {
+				claims, ok := token.Claims.(jwt.MapClaims)
+				if ok {
+					sub, ok := claims["sub"].(string)
+					if ok && strings.TrimSpace(sub) != "" {
+						r.Header.Set("X-User-ID", sub)
+						ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathJWT)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+				}
 			}
 
-			claims, ok := token.Claims.(jwt.MapClaims)
-			if !ok {
-				writeError(w, http.StatusUnauthorized, "invalid claims")
-				return
+			// Fallback: Casdoor RS256 JWT.
+			if jwks != nil && resolver != nil {
+				userInfo, err := auth.ParseCasdoorJWT(tokenString, jwks)
+				if err == nil {
+					multicaUserID, err := resolver(r.Context(), userInfo.SubjectID)
+					if err == nil && multicaUserID != "" {
+						r.Header.Set("X-User-ID", multicaUserID)
+						r.Header.Set("X-Subject-ID", userInfo.SubjectID)
+						ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathCasdoor)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+				}
 			}
-			sub, ok := claims["sub"].(string)
-			if !ok || strings.TrimSpace(sub) == "" {
-				writeError(w, http.StatusUnauthorized, "invalid claims")
-				return
-			}
-			r.Header.Set("X-User-ID", sub)
-			ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathJWT)
-			next.ServeHTTP(w, r.WithContext(ctx))
+
+			slog.Warn("daemon_auth: invalid token", "path", r.URL.Path)
+			writeError(w, http.StatusUnauthorized, "invalid token")
 		})
 	}
 }

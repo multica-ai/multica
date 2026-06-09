@@ -49,6 +49,14 @@ func init() {
 }
 
 func resolveToken(cmd *cobra.Command) string {
+	// 1. Prefer explicit multica CLI config (test-environment PAT, legacy token).
+	profile := resolveProfile(cmd)
+	cfg, _ := cli.LoadCLIConfigForProfile(profile)
+	if cfg.Token != "" {
+		return cfg.Token
+	}
+
+	// 2. Fall back to costrict auth.json (csc auth login).
 	cred, _ := costrictauth.LoadCredentials()
 	if cred != nil && cred.AccessToken != "" {
 		return cred.AccessToken
@@ -103,7 +111,16 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 		}
 		return runAuthLoginToken(cmd, tokenFlag)
 	}
-	return runAuthLoginBrowser(cmd)
+	// Browser login is deprecated — costrict auth is the canonical path.
+	fmt.Fprintln(os.Stderr, "Multica no longer has a standalone browser login flow.")
+	fmt.Fprintln(os.Stderr, "Authenticate through costrict instead:")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "  csc auth login")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Or provide a personal access token:")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "  multica login --token mul_xxx")
+	return fmt.Errorf("not authenticated")
 }
 
 // resolveCallbackBinding picks the host that goes into the `cli_callback`
@@ -384,7 +401,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	authURL := resolveAuthBaseURL(cmd)
 
 	if token == "" {
-		fmt.Fprintln(os.Stderr, "Not authenticated. Run 'multica login' to authenticate.")
+		fmt.Fprintln(os.Stderr, "Not authenticated. Run 'csc auth login' to authenticate.")
 		return nil
 	}
 
@@ -398,7 +415,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		Email string `json:"email"`
 	}
 	if err := client.GetJSON(ctx, "/api/auth/me", &me); err != nil {
-		fmt.Fprintf(os.Stderr, "Token is invalid or expired: %v\nRun 'multica login' to re-authenticate.\n", err)
+		fmt.Fprintf(os.Stderr, "Token is invalid or expired: %v\nRun 'csc auth login' to re-authenticate.\n", err)
 		return nil
 	}
 
@@ -453,16 +470,26 @@ const callbackSuccessHTML = `<!DOCTYPE html>
 func runAuthLogout(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
-	if cfg.Token == "" {
+	hadCLIToken := cfg.Token != ""
+
+	if hadCLIToken {
+		cfg.Token = ""
+		if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+	}
+
+	// Notify about costrict auth.json which we do not own.
+	cred, _ := costrictauth.LoadCredentials()
+	if cred != nil && cred.AccessToken != "" {
+		fmt.Fprintln(os.Stderr, "Note: costrict auth.json still contains a token.")
+		fmt.Fprintln(os.Stderr, "Run 'csc auth logout' to fully clear costrict authentication.")
+	}
+
+	if hadCLIToken {
+		fmt.Fprintln(os.Stderr, "Token removed. You are now logged out.")
+	} else if cred == nil || cred.AccessToken == "" {
 		fmt.Fprintln(os.Stderr, "Not authenticated.")
-		return nil
 	}
-
-	cfg.Token = ""
-	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
-
-	fmt.Fprintln(os.Stderr, "Token removed. You are now logged out.")
 	return nil
 }
