@@ -443,10 +443,26 @@ FROM issue i
 JOIN agent_task_queue atq ON atq.id = i.origin_id
 JOIN "user" u ON u.id = atq.original_user_id
 WHERE i.workspace_id = $1 AND i.kind = 'issue' AND i.origin_type = 'agent_task'
+  AND i.created_at >= $2 AND i.created_at < $3
+  AND (
+    $4::text IS NULL
+    OR (
+      $4::text = 'member'
+      AND ($5::uuid IS NULL OR u.id = $5::uuid)
+    )
+  )
 GROUP BY u.id, u.name
 ORDER BY COUNT(*) DESC
 LIMIT 20
 `
+
+type DashboardCountIssuesByOnBehalfOfParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+}
 
 type DashboardCountIssuesByOnBehalfOfRow struct {
 	UserID pgtype.UUID `json:"user_id"`
@@ -457,8 +473,19 @@ type DashboardCountIssuesByOnBehalfOfRow struct {
 // Distribution of agent-created issues grouped by the human they were created
 // on behalf of: issue.origin_type='agent_task' → agent_task_queue.original_user_id
 // → user. Lets the dashboard show who is generating agent work (MUL-2553).
-func (q *Queries) DashboardCountIssuesByOnBehalfOf(ctx context.Context, workspaceID pgtype.UUID) ([]DashboardCountIssuesByOnBehalfOfRow, error) {
-	rows, err := q.db.Query(ctx, dashboardCountIssuesByOnBehalfOf, workspaceID)
+//
+// Filters by issue.created_at in the dashboard period and by actor scope so
+// the chart moves with the toolbar. The actor filter only applies when scope
+// targets members (an "agents" scope cannot match on-behalf-of, since
+// on-behalf-of is always a user — the chart correctly empties in that case).
+func (q *Queries) DashboardCountIssuesByOnBehalfOf(ctx context.Context, arg DashboardCountIssuesByOnBehalfOfParams) ([]DashboardCountIssuesByOnBehalfOfRow, error) {
+	rows, err := q.db.Query(ctx, dashboardCountIssuesByOnBehalfOf,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -482,23 +509,33 @@ SELECT i.priority, COUNT(*)::int AS count
 FROM issue i
 WHERE i.workspace_id = $1 AND i.kind = 'issue'
   AND (
-    $2::text IS NULL
-    OR (i.creator_type = $2::text AND ($3::uuid IS NULL OR i.creator_id = $3::uuid))
-    OR (i.assignee_type = $2::text AND ($3::uuid IS NULL OR i.assignee_id = $3::uuid))
+    (i.updated_at >= $2 AND i.updated_at < $3)
     OR EXISTS (
       SELECT 1 FROM activity_log al
       WHERE al.issue_id = i.id
-        AND al.actor_type = $2::text
-        AND ($3::uuid IS NULL OR al.actor_id = $3::uuid)
+        AND al.created_at >= $2 AND al.created_at < $3
+    )
+  )
+  AND (
+    $4::text IS NULL
+    OR (i.creator_type = $4::text AND ($5::uuid IS NULL OR i.creator_id = $5::uuid))
+    OR (i.assignee_type = $4::text AND ($5::uuid IS NULL OR i.assignee_id = $5::uuid))
+    OR EXISTS (
+      SELECT 1 FROM activity_log al
+      WHERE al.issue_id = i.id
+        AND al.actor_type = $4::text
+        AND ($5::uuid IS NULL OR al.actor_id = $5::uuid)
     )
   )
 GROUP BY i.priority
 `
 
 type DashboardCountIssuesByPriorityParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ActorType   pgtype.Text `json:"actor_type"`
-	ActorID     pgtype.UUID `json:"actor_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UpdatedAt_2 pgtype.Timestamptz `json:"updated_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardCountIssuesByPriorityRow struct {
@@ -506,8 +543,15 @@ type DashboardCountIssuesByPriorityRow struct {
 	Count    int32  `json:"count"`
 }
 
+// Same period + actor scoping as DashboardCountIssuesByStatus.
 func (q *Queries) DashboardCountIssuesByPriority(ctx context.Context, arg DashboardCountIssuesByPriorityParams) ([]DashboardCountIssuesByPriorityRow, error) {
-	rows, err := q.db.Query(ctx, dashboardCountIssuesByPriority, arg.WorkspaceID, arg.ActorType, arg.ActorID)
+	rows, err := q.db.Query(ctx, dashboardCountIssuesByPriority,
+		arg.WorkspaceID,
+		arg.UpdatedAt,
+		arg.UpdatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -531,23 +575,33 @@ SELECT i.status, COUNT(*)::int AS count
 FROM issue i
 WHERE i.workspace_id = $1 AND i.kind = 'issue'
   AND (
-    $2::text IS NULL
-    OR (i.creator_type = $2::text AND ($3::uuid IS NULL OR i.creator_id = $3::uuid))
-    OR (i.assignee_type = $2::text AND ($3::uuid IS NULL OR i.assignee_id = $3::uuid))
+    (i.updated_at >= $2 AND i.updated_at < $3)
     OR EXISTS (
       SELECT 1 FROM activity_log al
       WHERE al.issue_id = i.id
-        AND al.actor_type = $2::text
-        AND ($3::uuid IS NULL OR al.actor_id = $3::uuid)
+        AND al.created_at >= $2 AND al.created_at < $3
+    )
+  )
+  AND (
+    $4::text IS NULL
+    OR (i.creator_type = $4::text AND ($5::uuid IS NULL OR i.creator_id = $5::uuid))
+    OR (i.assignee_type = $4::text AND ($5::uuid IS NULL OR i.assignee_id = $5::uuid))
+    OR EXISTS (
+      SELECT 1 FROM activity_log al
+      WHERE al.issue_id = i.id
+        AND al.actor_type = $4::text
+        AND ($5::uuid IS NULL OR al.actor_id = $5::uuid)
     )
   )
 GROUP BY i.status
 `
 
 type DashboardCountIssuesByStatusParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ActorType   pgtype.Text `json:"actor_type"`
-	ActorID     pgtype.UUID `json:"actor_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UpdatedAt_2 pgtype.Timestamptz `json:"updated_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardCountIssuesByStatusRow struct {
@@ -555,8 +609,17 @@ type DashboardCountIssuesByStatusRow struct {
 	Count  int32  `json:"count"`
 }
 
+// Issues with any activity inside the selected period (created, updated, or
+// an activity_log entry) grouped by current status. Period and actor filters
+// mirror the rest of the dashboard so the donut moves with the toolbar.
 func (q *Queries) DashboardCountIssuesByStatus(ctx context.Context, arg DashboardCountIssuesByStatusParams) ([]DashboardCountIssuesByStatusRow, error) {
-	rows, err := q.db.Query(ctx, dashboardCountIssuesByStatus, arg.WorkspaceID, arg.ActorType, arg.ActorID)
+	rows, err := q.db.Query(ctx, dashboardCountIssuesByStatus,
+		arg.WorkspaceID,
+		arg.UpdatedAt,
+		arg.UpdatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -939,6 +1002,11 @@ JOIN agent a ON a.id = cs.agent_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid))
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR a.id = $5::uuid))
+  )
 GROUP BY u.id, u.name, u.email, a.id, a.name
 ORDER BY COUNT(*) DESC
 LIMIT 30
@@ -948,6 +1016,8 @@ type DashboardMessageFlowInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardMessageFlowInPeriodRow struct {
@@ -959,8 +1029,15 @@ type DashboardMessageFlowInPeriodRow struct {
 }
 
 // Sender→recipient pairs with message counts for the period. TECH-3093.
+// Honors actor scope identically to TopMessageRecipients.
 func (q *Queries) DashboardMessageFlowInPeriod(ctx context.Context, arg DashboardMessageFlowInPeriodParams) ([]DashboardMessageFlowInPeriodRow, error) {
-	rows, err := q.db.Query(ctx, dashboardMessageFlowInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	rows, err := q.db.Query(ctx, dashboardMessageFlowInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -995,19 +1072,23 @@ FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
+  AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $2
+  AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) < $3
   AND (
-    $3::text IS NULL
-    OR ($3::text = 'agent' AND ($4::uuid IS NULL OR a.id = $4::uuid))
+    $5::text IS NULL
+    OR ($5::text = 'agent' AND ($6::uuid IS NULL OR a.id = $6::uuid))
   )
 ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC
-LIMIT $2
+LIMIT $4
 `
 
 type DashboardRecentTasksParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Limit       int32       `json:"limit"`
-	ActorType   pgtype.Text `json:"actor_type"`
-	ActorID     pgtype.UUID `json:"actor_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+	CompletedAt_2 pgtype.Timestamptz `json:"completed_at_2"`
+	Limit         int32              `json:"limit"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardRecentTasksRow struct {
@@ -1027,9 +1108,15 @@ type DashboardRecentTasksRow struct {
 	IssueNumber    pgtype.Int4        `json:"issue_number"`
 }
 
+// Most recent agent tasks whose terminal/started/dispatched/created timestamp
+// lands in the dashboard period. Filtered by actor scope so member-only views
+// collapse to zero rows (tasks are always tied to an agent) rather than
+// showing all-time tasks.
 func (q *Queries) DashboardRecentTasks(ctx context.Context, arg DashboardRecentTasksParams) ([]DashboardRecentTasksRow, error) {
 	rows, err := q.db.Query(ctx, dashboardRecentTasks,
 		arg.WorkspaceID,
+		arg.CompletedAt,
+		arg.CompletedAt_2,
 		arg.Limit,
 		arg.ActorType,
 		arg.ActorID,
@@ -1195,6 +1282,52 @@ func (q *Queries) DashboardSessionMessages(ctx context.Context, arg DashboardSes
 	return items, nil
 }
 
+const dashboardSpendCentsInPeriod = `-- name: DashboardSpendCentsInPeriod :one
+SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cents
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= $2 AND tu.created_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR atq.agent_id = $5::uuid))
+    OR ($4::text = 'member' AND atq.original_user_id IS NOT NULL AND ($5::uuid IS NULL OR atq.original_user_id = $5::uuid))
+  )
+`
+
+type DashboardSpendCentsInPeriodParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+}
+
+// Sum of task_usage.cost_cents for tasks billed in the dashboard period,
+// restricted to the workspace and optionally the actor scope. Replaces the
+// previous GetWorkspaceUsageSummary path which (a) ignored the actor scope
+// entirely, (b) had no upper time bound, and (c) returned 0 for the prior
+// period because the handler bailed out whenever `end` was not "near now".
+//
+// Scope semantics:
+//   - actor_type IS NULL → whole workspace
+//   - 'agent'            → spend attributed to the agent that ran the task
+//   - 'member'           → spend attributed to the human that originated the
+//     task via agent_task_queue.original_user_id
+func (q *Queries) DashboardSpendCentsInPeriod(ctx context.Context, arg DashboardSpendCentsInPeriodParams) (int64, error) {
+	row := q.db.QueryRow(ctx, dashboardSpendCentsInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
+	var cents int64
+	err := row.Scan(&cents)
+	return cents, err
+}
+
 const dashboardTopAgentsByActivityInPeriod = `-- name: DashboardTopAgentsByActivityInPeriod :many
 SELECT a.id::uuid AS actor_id, a.name, COUNT(*)::int AS activity_count
 FROM agent_task_queue atq
@@ -1316,6 +1449,11 @@ JOIN agent a ON a.id = cs.agent_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'member' AND ($5::uuid IS NULL OR cs.creator_id = $5::uuid))
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR a.id = $5::uuid))
+  )
 GROUP BY a.id, a.name
 ORDER BY COUNT(*) DESC
 LIMIT 10
@@ -1325,6 +1463,8 @@ type DashboardTopMessageRecipientsInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardTopMessageRecipientsInPeriodRow struct {
@@ -1334,8 +1474,16 @@ type DashboardTopMessageRecipientsInPeriodRow struct {
 }
 
 // Top agents by chat messages received from members in the period. TECH-3093.
+// Honors actor scope: members → restrict to the matching sender, agents →
+// restrict to the matching recipient agent.
 func (q *Queries) DashboardTopMessageRecipientsInPeriod(ctx context.Context, arg DashboardTopMessageRecipientsInPeriodParams) ([]DashboardTopMessageRecipientsInPeriodRow, error) {
-	rows, err := q.db.Query(ctx, dashboardTopMessageRecipientsInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	rows, err := q.db.Query(ctx, dashboardTopMessageRecipientsInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1366,6 +1514,11 @@ FROM (
   WHERE cs.workspace_id = $1
     AND cm.role = 'user'
     AND cm.created_at >= $2 AND cm.created_at < $3
+    AND (
+      $4::text IS NULL
+      OR ($4::text = 'member' AND ($5::uuid IS NULL OR cs.creator_id = $5::uuid))
+      OR ($4::text = 'agent' AND ($5::uuid IS NULL OR cs.agent_id = $5::uuid))
+    )
 
   UNION ALL
 
@@ -1376,6 +1529,10 @@ FROM (
     AND i.kind IN ('channel', 'dm')
     AND c.author_type = 'member'
     AND c.created_at >= $2 AND c.created_at < $3
+    AND (
+      $4::text IS NULL
+      OR ($4::text = 'member' AND ($5::uuid IS NULL OR c.author_id = $5::uuid))
+    )
 ) sub
 JOIN "user" u ON u.id = sub.user_id
 LEFT JOIN (
@@ -1386,6 +1543,11 @@ LEFT JOIN (
   WHERE a.workspace_id = $1
     AND tu.created_at >= $2 AND tu.created_at < $3
     AND atq.original_user_id IS NOT NULL
+    AND (
+      $4::text IS NULL
+      OR ($4::text = 'member' AND ($5::uuid IS NULL OR atq.original_user_id = $5::uuid))
+      OR ($4::text = 'agent' AND ($5::uuid IS NULL OR atq.agent_id = $5::uuid))
+    )
   GROUP BY atq.original_user_id
 ) spend ON spend.original_user_id = u.id
 GROUP BY u.id, u.name, u.email, spend.spend_cents
@@ -1397,6 +1559,8 @@ type DashboardTopMessageSendersInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardTopMessageSendersInPeriodRow struct {
@@ -1409,8 +1573,19 @@ type DashboardTopMessageSendersInPeriodRow struct {
 // Top members by messages sent in the period: combines chat messages (user role)
 // with member comments on channel/DM issues. Includes spend attributed to each
 // member via agent_task_queue.original_user_id → task_usage.cost_cents. TECH-3093.
+//
+// Honors the dashboard actor scope: members → restrict to the matching user,
+// agents → restrict the sender's flows to the matching agent recipient (the
+// chat_session.agent_id). Comments collapse to zero under the agents scope
+// since they have no recipient agent.
 func (q *Queries) DashboardTopMessageSendersInPeriod(ctx context.Context, arg DashboardTopMessageSendersInPeriodParams) ([]DashboardTopMessageSendersInPeriodRow, error) {
-	rows, err := q.db.Query(ctx, dashboardTopMessageSendersInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	rows, err := q.db.Query(ctx, dashboardTopMessageSendersInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}

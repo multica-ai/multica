@@ -4,8 +4,7 @@
 //
 // All queries that this package needs live in
 // server/internal/cerebro/queries/dashboard.sql and are generated into the
-// cerebrodb package. The handler also reads from the upstream `db` package
-// for resources like agent run-counts and workspace usage.
+// cerebrodb package.
 package dashboard
 
 import (
@@ -24,9 +23,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/pricing"
 )
 
-// Handler exposes the cerebro dashboard HTTP endpoint. Holds both the
-// cerebro and upstream sqlc query packages because the overview pulls from
-// both (cerebro: dashboard aggregates, upstream: workspace usage + budget).
+// Handler exposes the cerebro dashboard HTTP endpoint. Holds the cerebro
+// sqlc query package; the constructor still accepts the upstream Queries
+// pointer (kept on the struct as Upstream) so router wiring stays stable
+// even though every dashboard aggregate now lives in the cerebro package.
 type Handler struct {
 	Cerebro  *cerebrodb.Queries
 	Upstream *db.Queries
@@ -348,20 +348,20 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	// --- Spend (current + prior) using upstream usage summary + pricing pkg ---
+	// --- Spend (current + prior) from task_usage.cost_cents, period- and actor-scoped ---
 	runOne(func(c context.Context) error {
-		cur := h.spendCents(c, wsUUID, spec.periodStart, spec.periodEnd)
-		prior := h.spendCents(c, wsUUID, spec.priorStart, spec.priorEnd)
+		cur := h.spendCents(c, wsUUID, spec.periodStart, spec.periodEnd, actorType, actorID)
+		prior := h.spendCents(c, wsUUID, spec.priorStart, spec.priorEnd, actorType, actorID)
 		mu.Lock()
 		out.SpendCents = kpi{Value: cur, Prior: prior}
 		mu.Unlock()
 		return nil
 	})
 
-	// --- Issues by status / priority (totals, not period-scoped) ---
+	// --- Issues by status / priority (scoped to the dashboard period + actor) ---
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardCountIssuesByStatus(c, cerebrodb.DashboardCountIssuesByStatusParams{
-			WorkspaceID: wsUUID, ActorType: actorType, ActorID: actorID,
+			WorkspaceID: wsUUID, UpdatedAt: ts(spec.periodStart), UpdatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -375,7 +375,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardCountIssuesByPriority(c, cerebrodb.DashboardCountIssuesByPriorityParams{
-			WorkspaceID: wsUUID, ActorType: actorType, ActorID: actorID,
+			WorkspaceID: wsUUID, UpdatedAt: ts(spec.periodStart), UpdatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -390,7 +390,9 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 
 	// --- Issues by "on behalf of" member (MUL-2553): who is generating agent work ---
 	runOne(func(c context.Context) error {
-		rows, err := h.Cerebro.DashboardCountIssuesByOnBehalfOf(c, wsUUID)
+		rows, err := h.Cerebro.DashboardCountIssuesByOnBehalfOf(c, cerebrodb.DashboardCountIssuesByOnBehalfOfParams{
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
+		})
 		if err != nil {
 			return err
 		}
@@ -499,7 +501,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	// --- Message flow: sender→recipient pairs (TECH-3093) ---
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardMessageFlowInPeriod(c, cerebrodb.DashboardMessageFlowInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -523,7 +525,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	// --- Top message senders / recipients (TECH-3093) ---
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardTopMessageSendersInPeriod(c, cerebrodb.DashboardTopMessageSendersInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -539,7 +541,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardTopMessageRecipientsInPeriod(c, cerebrodb.DashboardTopMessageRecipientsInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -599,10 +601,10 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	// --- Recent tasks (workspace-wide, limit 12) ---
+	// --- Recent tasks (workspace-wide, limit 12, scoped to dashboard period) ---
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardRecentTasks(c, cerebrodb.DashboardRecentTasksParams{
-			WorkspaceID: wsUUID, Limit: 12, ActorType: actorType, ActorID: actorID,
+			WorkspaceID: wsUUID, CompletedAt: ts(spec.periodStart), CompletedAt_2: ts(spec.periodEnd), Limit: 12, ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -652,35 +654,20 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// spendCents sums USD cents across the workspace for [start, end) using the
-// upstream GetWorkspaceUsageSummary query (aggregates token usage by model)
-// combined with the pricing.ComputeCents lookup.
-func (h *Handler) spendCents(ctx context.Context, wsID pgtype.UUID, start, end time.Time) int {
-	rows, err := h.Upstream.GetWorkspaceUsageSummary(ctx, db.GetWorkspaceUsageSummaryParams{
+// spendCents sums task_usage.cost_cents for the workspace in [start, end),
+// optionally restricted to a single actor scope (agent-id or member-id).
+// The query honors the upper bound, so the prior period reports its real
+// total instead of being silently zeroed out.
+func (h *Handler) spendCents(ctx context.Context, wsID pgtype.UUID, start, end time.Time, actorType pgtype.Text, actorID pgtype.UUID) int {
+	cents, err := h.Cerebro.DashboardSpendCentsInPeriod(ctx, cerebrodb.DashboardSpendCentsInPeriodParams{
 		WorkspaceID: wsID,
 		CreatedAt:   ts(start),
+		CreatedAt_2: ts(end),
+		ActorType:   actorType,
+		ActorID:     actorID,
 	})
 	if err != nil {
 		return 0
-	}
-	var cents int64
-	for _, row := range rows {
-		// GetWorkspaceUsageSummary aggregates from `since` forward. Subtract
-		// the period beyond `end` if the query returned data past it. Token
-		// usage doesn't expose row timestamps in the summary view, so for
-		// MVP we treat `since=start` and accept that the count includes
-		// usage produced after `end` (rare since `end` ~= now in dashboard
-		// usage). Refine with a since/until variant in JEH-704 follow-up.
-		if !end.After(time.Now().Add(-30 * time.Second)) {
-			// User picked an older window — skip spend (avoid overstating).
-			continue
-		}
-		cents += pricing.ComputeCents(row.Model, pricing.Usage{
-			InputTokens:      row.TotalInputTokens,
-			OutputTokens:     row.TotalOutputTokens,
-			CacheReadTokens:  row.TotalCacheReadTokens,
-			CacheWriteTokens: row.TotalCacheWriteTokens,
-		})
 	}
 	return int(cents)
 }

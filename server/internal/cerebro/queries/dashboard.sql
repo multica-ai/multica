@@ -1,7 +1,18 @@
 -- name: DashboardCountIssuesByStatus :many
+-- Issues with any activity inside the selected period (created, updated, or
+-- an activity_log entry) grouped by current status. Period and actor filters
+-- mirror the rest of the dashboard so the donut moves with the toolbar.
 SELECT i.status, COUNT(*)::int AS count
 FROM issue i
 WHERE i.workspace_id = $1 AND i.kind = 'issue'
+  AND (
+    (i.updated_at >= $2 AND i.updated_at < $3)
+    OR EXISTS (
+      SELECT 1 FROM activity_log al
+      WHERE al.issue_id = i.id
+        AND al.created_at >= $2 AND al.created_at < $3
+    )
+  )
   AND (
     sqlc.narg('actor_type')::text IS NULL
     OR (i.creator_type = sqlc.narg('actor_type')::text AND (sqlc.narg('actor_id')::uuid IS NULL OR i.creator_id = sqlc.narg('actor_id')::uuid))
@@ -16,9 +27,18 @@ WHERE i.workspace_id = $1 AND i.kind = 'issue'
 GROUP BY i.status;
 
 -- name: DashboardCountIssuesByPriority :many
+-- Same period + actor scoping as DashboardCountIssuesByStatus.
 SELECT i.priority, COUNT(*)::int AS count
 FROM issue i
 WHERE i.workspace_id = $1 AND i.kind = 'issue'
+  AND (
+    (i.updated_at >= $2 AND i.updated_at < $3)
+    OR EXISTS (
+      SELECT 1 FROM activity_log al
+      WHERE al.issue_id = i.id
+        AND al.created_at >= $2 AND al.created_at < $3
+    )
+  )
   AND (
     sqlc.narg('actor_type')::text IS NULL
     OR (i.creator_type = sqlc.narg('actor_type')::text AND (sqlc.narg('actor_id')::uuid IS NULL OR i.creator_id = sqlc.narg('actor_id')::uuid))
@@ -232,6 +252,10 @@ ORDER BY al.created_at DESC
 LIMIT $4;
 
 -- name: DashboardRecentTasks :many
+-- Most recent agent tasks whose terminal/started/dispatched/created timestamp
+-- lands in the dashboard period. Filtered by actor scope so member-only views
+-- collapse to zero rows (tasks are always tied to an agent) rather than
+-- showing all-time tasks.
 SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
        atq.dispatched_at, atq.started_at, atq.completed_at, atq.created_at,
        atq.chat_session_id, atq.title AS task_title,
@@ -241,22 +265,37 @@ FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
+  AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $2
+  AND COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) < $3
   AND (
     sqlc.narg('actor_type')::text IS NULL
     OR (sqlc.narg('actor_type')::text = 'agent' AND (sqlc.narg('actor_id')::uuid IS NULL OR a.id = sqlc.narg('actor_id')::uuid))
   )
 ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC
-LIMIT $2;
+LIMIT $4;
 
 -- name: DashboardCountIssuesByOnBehalfOf :many
 -- Distribution of agent-created issues grouped by the human they were created
 -- on behalf of: issue.origin_type='agent_task' → agent_task_queue.original_user_id
 -- → user. Lets the dashboard show who is generating agent work (MUL-2553).
+--
+-- Filters by issue.created_at in the dashboard period and by actor scope so
+-- the chart moves with the toolbar. The actor filter only applies when scope
+-- targets members (an "agents" scope cannot match on-behalf-of, since
+-- on-behalf-of is always a user — the chart correctly empties in that case).
 SELECT u.id::uuid AS user_id, u.name AS name, COUNT(*)::int AS count
 FROM issue i
 JOIN agent_task_queue atq ON atq.id = i.origin_id
 JOIN "user" u ON u.id = atq.original_user_id
 WHERE i.workspace_id = $1 AND i.kind = 'issue' AND i.origin_type = 'agent_task'
+  AND i.created_at >= $2 AND i.created_at < $3
+  AND (
+    sqlc.narg('actor_type')::text IS NULL
+    OR (
+      sqlc.narg('actor_type')::text = 'member'
+      AND (sqlc.narg('actor_id')::uuid IS NULL OR u.id = sqlc.narg('actor_id')::uuid)
+    )
+  )
 GROUP BY u.id, u.name
 ORDER BY COUNT(*) DESC
 LIMIT 20;
@@ -265,6 +304,11 @@ LIMIT 20;
 -- Top members by messages sent in the period: combines chat messages (user role)
 -- with member comments on channel/DM issues. Includes spend attributed to each
 -- member via agent_task_queue.original_user_id → task_usage.cost_cents. TECH-3093.
+--
+-- Honors the dashboard actor scope: members → restrict to the matching user,
+-- agents → restrict the sender's flows to the matching agent recipient (the
+-- chat_session.agent_id). Comments collapse to zero under the agents scope
+-- since they have no recipient agent.
 SELECT u.id::uuid AS actor_id,
        COALESCE(u.name, u.email, 'Unknown') AS name,
        COUNT(*)::int AS count,
@@ -276,6 +320,11 @@ FROM (
   WHERE cs.workspace_id = $1
     AND cm.role = 'user'
     AND cm.created_at >= $2 AND cm.created_at < $3
+    AND (
+      sqlc.narg('actor_type')::text IS NULL
+      OR (sqlc.narg('actor_type')::text = 'member' AND (sqlc.narg('actor_id')::uuid IS NULL OR cs.creator_id = sqlc.narg('actor_id')::uuid))
+      OR (sqlc.narg('actor_type')::text = 'agent' AND (sqlc.narg('actor_id')::uuid IS NULL OR cs.agent_id = sqlc.narg('actor_id')::uuid))
+    )
 
   UNION ALL
 
@@ -286,6 +335,10 @@ FROM (
     AND i.kind IN ('channel', 'dm')
     AND c.author_type = 'member'
     AND c.created_at >= $2 AND c.created_at < $3
+    AND (
+      sqlc.narg('actor_type')::text IS NULL
+      OR (sqlc.narg('actor_type')::text = 'member' AND (sqlc.narg('actor_id')::uuid IS NULL OR c.author_id = sqlc.narg('actor_id')::uuid))
+    )
 ) sub
 JOIN "user" u ON u.id = sub.user_id
 LEFT JOIN (
@@ -296,6 +349,11 @@ LEFT JOIN (
   WHERE a.workspace_id = $1
     AND tu.created_at >= $2 AND tu.created_at < $3
     AND atq.original_user_id IS NOT NULL
+    AND (
+      sqlc.narg('actor_type')::text IS NULL
+      OR (sqlc.narg('actor_type')::text = 'member' AND (sqlc.narg('actor_id')::uuid IS NULL OR atq.original_user_id = sqlc.narg('actor_id')::uuid))
+      OR (sqlc.narg('actor_type')::text = 'agent' AND (sqlc.narg('actor_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('actor_id')::uuid))
+    )
   GROUP BY atq.original_user_id
 ) spend ON spend.original_user_id = u.id
 GROUP BY u.id, u.name, u.email, spend.spend_cents
@@ -304,6 +362,8 @@ LIMIT 10;
 
 -- name: DashboardTopMessageRecipientsInPeriod :many
 -- Top agents by chat messages received from members in the period. TECH-3093.
+-- Honors actor scope: members → restrict to the matching sender, agents →
+-- restrict to the matching recipient agent.
 SELECT a.id::uuid AS actor_id,
        a.name,
        COUNT(*)::int AS count
@@ -313,12 +373,18 @@ JOIN agent a ON a.id = cs.agent_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
+  AND (
+    sqlc.narg('actor_type')::text IS NULL
+    OR (sqlc.narg('actor_type')::text = 'member' AND (sqlc.narg('actor_id')::uuid IS NULL OR cs.creator_id = sqlc.narg('actor_id')::uuid))
+    OR (sqlc.narg('actor_type')::text = 'agent' AND (sqlc.narg('actor_id')::uuid IS NULL OR a.id = sqlc.narg('actor_id')::uuid))
+  )
 GROUP BY a.id, a.name
 ORDER BY COUNT(*) DESC
 LIMIT 10;
 
 -- name: DashboardMessageFlowInPeriod :many
 -- Sender→recipient pairs with message counts for the period. TECH-3093.
+-- Honors actor scope identically to TopMessageRecipients.
 SELECT u.id::uuid AS sender_id,
        COALESCE(u.name, u.email, 'Unknown') AS sender_name,
        a.id::uuid AS recipient_id,
@@ -331,6 +397,11 @@ JOIN agent a ON a.id = cs.agent_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
+  AND (
+    sqlc.narg('actor_type')::text IS NULL
+    OR (sqlc.narg('actor_type')::text = 'member' AND (sqlc.narg('actor_id')::uuid IS NULL OR u.id = sqlc.narg('actor_id')::uuid))
+    OR (sqlc.narg('actor_type')::text = 'agent' AND (sqlc.narg('actor_id')::uuid IS NULL OR a.id = sqlc.narg('actor_id')::uuid))
+  )
 GROUP BY u.id, u.name, u.email, a.id, a.name
 ORDER BY COUNT(*) DESC
 LIMIT 30;
@@ -445,3 +516,27 @@ JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
   AND cs.id = $2
 GROUP BY tu.model;
+
+-- name: DashboardSpendCentsInPeriod :one
+-- Sum of task_usage.cost_cents for tasks billed in the dashboard period,
+-- restricted to the workspace and optionally the actor scope. Replaces the
+-- previous GetWorkspaceUsageSummary path which (a) ignored the actor scope
+-- entirely, (b) had no upper time bound, and (c) returned 0 for the prior
+-- period because the handler bailed out whenever `end` was not "near now".
+--
+-- Scope semantics:
+--   - actor_type IS NULL → whole workspace
+--   - 'agent'            → spend attributed to the agent that ran the task
+--   - 'member'           → spend attributed to the human that originated the
+--                          task via agent_task_queue.original_user_id
+SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cents
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= $2 AND tu.created_at < $3
+  AND (
+    sqlc.narg('actor_type')::text IS NULL
+    OR (sqlc.narg('actor_type')::text = 'agent' AND (sqlc.narg('actor_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('actor_id')::uuid))
+    OR (sqlc.narg('actor_type')::text = 'member' AND atq.original_user_id IS NOT NULL AND (sqlc.narg('actor_id')::uuid IS NULL OR atq.original_user_id = sqlc.narg('actor_id')::uuid))
+  );
