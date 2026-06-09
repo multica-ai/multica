@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -15,8 +16,15 @@ import (
 
 // HealthResponse is returned by the daemon's local health endpoint.
 type HealthResponse struct {
-	Status          string            `json:"status"`
-	PID             int               `json:"pid"`
+	Status string `json:"status"`
+	PID    int    `json:"pid"`
+	// OS is the daemon's runtime.GOOS. The desktop app compares it against its
+	// own host OS to detect a daemon it cannot manage — e.g. a Windows desktop
+	// reaching a Linux daemon inside WSL2 over localhost forwarding. The
+	// lifecycle CLI (`daemon start/stop`) acts on the host process namespace,
+	// so a foreign-OS daemon can't be started/stopped by the app even though
+	// /health is reachable. See #3916.
+	OS              string            `json:"os"`
 	Uptime          string            `json:"uptime"`
 	DaemonID        string            `json:"daemon_id"`
 	DeviceName      string            `json:"device_name"`
@@ -86,6 +94,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		resp := HealthResponse{
 			Status:          status,
 			PID:             os.Getpid(),
+			OS:              runtime.GOOS,
 			Uptime:          time.Since(startedAt).Truncate(time.Second).String(),
 			DaemonID:        d.cfg.DaemonID,
 			DeviceName:      d.cfg.DeviceName,
