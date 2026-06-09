@@ -20,6 +20,7 @@ import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
 import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
+import { isDaemonExternallyManaged, normalizeHostOS } from "./daemon-os";
 import {
   classifyAuthProbe,
   isAuthStatusError,
@@ -65,6 +66,11 @@ let cachedCliBinaryVersion: string | null | undefined = undefined;
 let pendingVersionRestart = false;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
+// Mirrors the latest health poll's `externallyManaged` so the before-quit
+// handler can decide synchronously whether an auto-stop would be a no-op
+// (daemon lives in WSL etc.). Only ever true while such a daemon is running;
+// resets to false on stop, so a native daemon's auto-stop is never skipped.
+let lastExternallyManaged = false;
 
 // Auth-probe state for the current start attempt. When a start fails to reach
 // "running", we probe the daemon's token once (after AUTH_PROBE_GRACE_MS) to
@@ -161,6 +167,8 @@ function sendStatus(status: DaemonStatus): void {
 interface HealthPayload {
   status?: string;
   pid?: number;
+  /** Daemon's runtime.GOOS. Absent on daemons older than the #3916 fix. */
+  os?: string;
   uptime?: string;
   daemon_id?: string;
   device_name?: string;
@@ -295,6 +303,10 @@ function invalidateActiveProfile(): void {
 }
 
 async function fetchHealth(): Promise<DaemonStatus> {
+  // Default to "manageable" every tick; only a confirmed running foreign-OS
+  // daemon (below) flips this on. Resetting here means a stop / restart / state
+  // change clears it, so the before-quit guard never skips a native auto-stop.
+  lastExternallyManaged = false;
   // While the CLI is being downloaded or has permanently failed, short-circuit
   // polling — there's nothing to probe yet and /health calls would just return
   // "stopped", which would overwrite the correct setup state in the UI.
@@ -347,6 +359,17 @@ async function fetchHealth(): Promise<DaemonStatus> {
   authExpired = false;
   startingSince = null;
 
+  // A running daemon whose OS differs from this host's is one we can't drive
+  // via the native lifecycle CLI (e.g. Linux-in-WSL2 behind a Windows desktop,
+  // reachable only over localhost forwarding). Surface it so the UI disables
+  // the auto-start/auto-stop toggles instead of letting them silently no-op,
+  // and so before-quit skips a stop that would never land. See #3916.
+  const externallyManaged = isDaemonExternallyManaged(
+    data.os,
+    normalizeHostOS(process.platform),
+  );
+  lastExternallyManaged = externallyManaged;
+
   // Safety: if we have a target URL and the daemon on our port reports a
   // different server_url, it's not "our" daemon — drop it and re-resolve.
   if (
@@ -370,6 +393,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
       : 0,
     profile: active.name,
     serverUrl: data.server_url,
+    externallyManaged,
   };
 }
 
@@ -1062,6 +1086,13 @@ export function setupDaemonManager(
     const bin = await resolveCliBinary();
     if (!bin) return;
     const health = await fetchHealth();
+    if (health.externallyManaged) {
+      // The daemon runs in an environment we can't drive (e.g. WSL2). Don't
+      // try to start, restart, or version-match it — the lifecycle CLI can't
+      // reach its process, and a restart would only spawn a stray native
+      // daemon alongside it. The user manages it from that environment. #3916.
+      return;
+    }
     if (health.state === "running") {
       // Daemon is up but may be running an older CLI than the one we just
       // bundled. Restart it so the new binary actually takes effect.
@@ -1107,7 +1138,12 @@ export function setupDaemonManager(
     stopLogTail();
 
     loadPrefs().then(async (prefs) => {
-      if (prefs.autoStop) {
+      // Skip auto-stop for a daemon we can't control (e.g. WSL2): stopDaemon
+      // would no-op against the host process namespace yet still hold up the
+      // quit on the CLI's shutdown poll. The user stops it from its own
+      // environment. lastExternallyManaged is only ever true for such a
+      // running daemon, so a native daemon's auto-stop is unaffected. #3916.
+      if (prefs.autoStop && !lastExternallyManaged) {
         isQuitting = true;
         event.preventDefault();
         try {
