@@ -99,14 +99,25 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	// only capabilities tied to the queried runtime. Without a runtime in scope
 	// (Valid=false → $2 is NULL, which the EXISTS never matches) we fall back to
 	// the full workspace universe rather than returning nothing.
+	//
+	// Connection capabilities (source 'connection') are the exception: they are
+	// workspace-level resources, never runtime-reported, so they have no
+	// cerebro_capability_subject row and the EXISTS would hide them on every
+	// runtime/agent view. But connection access is authored at all five layers
+	// (the per-tool rows in table_connection.go already bypass this filter for
+	// the same reason), so the admin must see the connection-wide row — the one
+	// the Connections tab groups its tools under — everywhere too. Keep it.
 	runtimeFilter := ""
 	if in.RuntimeID.Valid {
 		runtimeFilter = `
-		 AND EXISTS (
-		   SELECT 1 FROM cerebro_capability_subject sub
-		   WHERE sub.capability_id = c.id
-		     AND sub.subject_type = 'runtime'
-		     AND sub.subject_id = $2
+		 AND (
+		   c.source = 'connection'
+		   OR EXISTS (
+		     SELECT 1 FROM cerebro_capability_subject sub
+		     WHERE sub.capability_id = c.id
+		       AND sub.subject_type = 'runtime'
+		       AND sub.subject_id = $2
+		   )
 		 )`
 	}
 

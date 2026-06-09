@@ -61,6 +61,49 @@ func TestDeniedConnectionTools_AgentDenyProducesToken(t *testing.T) {
 	}
 }
 
+// TestTable_ConnectionRowSurvivesRuntimeFilter proves the connection-wide row
+// (source "connection") — the row the Connections tab groups its tools under —
+// stays visible on a runtime-scoped view even though connections are never
+// runtime-reported and so carry no cerebro_capability_subject row. This is the
+// TECH-3108 regression: before the fix the runtime EXISTS filter hid every
+// connection on the runtime and agent permission pages, so the Connections tab
+// rendered empty there while workspace/group/member showed it.
+func TestTable_ConnectionRowSurvivesRuntimeFilter(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	runtime, otherRuntime := uuidByte(31), uuidByte(32)
+	const conn = "customer-service"
+	const connKey = "connection:" + conn
+
+	// The connection-wide capability row, exactly as connections.SyncCapability
+	// writes it (source "connection", category "Connections"). No cap subject —
+	// connections are not runtime-reported.
+	addCap(t, s, connKey, "Customer Service MCP", "Connections", "connection")
+	// A genuinely runtime-reported tool owned by a DIFFERENT runtime, to prove the
+	// runtime filter still scopes ordinary tools.
+	addCap(t, s, "bash", "Bash", "tools", "runtime_report")
+	addCapSubject(t, s, "bash", "runtime", otherRuntime, "reporter")
+
+	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, RuntimeID: runtime})
+	if err != nil {
+		t.Fatalf("table runtime view: %v", err)
+	}
+
+	row, ok := findRow(rows, connKey)
+	if !ok {
+		t.Fatal("connection-wide row missing on runtime-scoped view (TECH-3108 regression)")
+	}
+	if row.Source != "connection" {
+		t.Fatalf("connection row source = %q, want %q", row.Source, "connection")
+	}
+	if _, leaked := findRow(rows, "bash"); leaked {
+		t.Fatal("other runtime's tool leaked onto this runtime's view")
+	}
+}
+
 // TestApiConnection_EndpointRowsNotRuntimeDenied seeds an API connection with
 // endpoint+method permissions, denies one method at the agent layer, and asserts
 // the endpoint surfaces in the table (so the CRUD-control sheet can edit it) but
