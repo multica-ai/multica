@@ -31,7 +31,7 @@ import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
-import { AgentsPage } from "@multica/views/agents";
+import { DesktopAgentsPage } from "./components/desktop-agents-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { NotificationsPage } from "@multica/cerebro-notifications/views";
@@ -45,11 +45,11 @@ import { TasksPage } from "@multica/cerebro-tasks";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { SearchPage } from "@multica/views/search";
 import { useT } from "@multica/views/i18n";
-import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
+import { DesktopRouteErrorPage } from "./components/route-error-page";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
 import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
@@ -160,6 +160,7 @@ function ReferenceReverseLookupRoute() {
 export const appRoutes: RouteObject[] = [
   {
     element: <PageShell />,
+    errorElement: <DesktopRouteErrorPage />,
     children: [
       { index: true, element: null },
       {
@@ -169,11 +170,7 @@ export const appRoutes: RouteObject[] = [
           { index: true, element: <Navigate to="issues" replace /> },
           {
             path: "issues",
-            element: (
-              <ErrorBoundary>
-                <IssuesRoute />
-              </ErrorBoundary>
-            ),
+            element: <IssuesRoute />,
             handle: { title: "Issues" },
           },
           {
@@ -267,7 +264,7 @@ export const appRoutes: RouteObject[] = [
             element: <SkillDetailPage />,
             handle: { title: "Skill" },
           },
-          { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
+          { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
           {
             path: "agents/:id",
             element: <AgentDetailPage />,

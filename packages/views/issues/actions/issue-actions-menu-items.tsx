@@ -19,6 +19,7 @@ import {
   UserMinus,
 } from "lucide-react"; // CEREBRO-PATCH(cerebro-inbox-add-issue): Inbox icon for "Add to inbox" menu action.
 import type { AgentTask, Issue } from "@multica/core/types";
+import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
 import { api } from "@multica/core/api";
 import {
   PRIORITY_ORDER,
@@ -45,6 +46,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSeparator,
 } from "@multica/ui/components/ui/context-menu";
+import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
 import { useT } from "../../i18n";
 
@@ -110,13 +112,6 @@ export function IssueActionsMenuItems({
     openDeleteConfirm,
   } = actions;
 
-  const now = () => new Date();
-  const inDays = (days: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() + days);
-    return d.toISOString();
-  };
-
   // Subscribe to the issue's task list so the cache is warm by the time the
   // user clicks "Copy local workdir path". The query only fires while the
   // menu is open (Base UI portals the menu content lazily) — list views
@@ -148,10 +143,10 @@ export function IssueActionsMenuItems({
       toast.error(t(($) => $.detail.workdir_path_unavailable));
       return;
     }
-    navigator.clipboard.writeText(latestWorkDir).then(
-      () => toast.success(t(($) => $.detail.workdir_path_copied)),
-      () => toast.error(t(($) => $.detail.workdir_path_copy_failed)),
-    );
+    void copyText(latestWorkDir).then((ok) => {
+      if (ok) toast.success(t(($) => $.detail.workdir_path_copied));
+      else toast.error(t(($) => $.detail.workdir_path_copy_failed));
+    });
   }, [tasks, t]);
 
   return (
@@ -233,13 +228,13 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.start_date)}
         </P.SubTrigger>
         <P.SubContent>
-          <P.Item onClick={() => updateField({ start_date: now().toISOString() })}>
+          <P.Item onClick={() => updateField({ start_date: todayDateOnly() })}>
             {t(($) => $.actions.start_today)}
           </P.Item>
-          <P.Item onClick={() => updateField({ start_date: inDays(1) })}>
+          <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(1) })}>
             {t(($) => $.actions.start_tomorrow)}
           </P.Item>
-          <P.Item onClick={() => updateField({ start_date: inDays(7) })}>
+          <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(7) })}>
             {t(($) => $.actions.start_next_week)}
           </P.Item>
           {issue.start_date && (
@@ -260,13 +255,13 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.due_date)}
         </P.SubTrigger>
         <P.SubContent>
-          <P.Item onClick={() => updateField({ due_date: now().toISOString() })}>
+          <P.Item onClick={() => updateField({ due_date: todayDateOnly() })}>
             {t(($) => $.actions.due_today)}
           </P.Item>
-          <P.Item onClick={() => updateField({ due_date: inDays(1) })}>
+          <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(1) })}>
             {t(($) => $.actions.due_tomorrow)}
           </P.Item>
-          <P.Item onClick={() => updateField({ due_date: inDays(7) })}>
+          <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(7) })}>
             {t(($) => $.actions.due_next_week)}
           </P.Item>
           {issue.due_date && (

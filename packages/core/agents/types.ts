@@ -32,11 +32,20 @@
 // presence dots so users (and agents reading the agent list) know that
 // work won't move until the runtime is resumed. NOT folded into "offline"
 // because pause is intentional / time-bounded; offline is involuntary.
+//
+// `archived` is the one non-runtime value: it reflects the agent's lifecycle
+// (agent.archived_at is set), not its runtime. It is the top-priority state —
+// derived BEFORE runtime health in deriveAgentPresenceDetail — so a retired
+// agent with a leftover online runtime row never reads as live. Every dot /
+// label that maps from this union (availabilityConfig) renders it for free;
+// it is intentionally NOT in availabilityOrder (archived agents have their
+// own list view, not an availability filter chip).
 export type AgentAvailability =
   | "online" // 🟢 runtime online and reachable
   | "paused" // ◐ runtime paused (manual or auto) — work gated until resumed
   | "unstable" // 🟡 runtime recently_lost (< 5 min) — transient
-  | "offline"; // ⚫ runtime long offline / missing / never registered
+  | "offline" // ⚫ runtime long offline / missing / never registered
+  | "archived"; // ⚫ agent.archived_at set — retired, wins over runtime health
 
 // Current task load on this agent. Three states — never historical,
 // never an error predictor (Inbox + Recent Work handle that):

@@ -580,7 +580,7 @@ export function ChatWindow() {
  * different agent = switch agent + start a fresh chat (session=null).
  * The current agent is marked with a check and not clickable.
  */
-function AgentDropdown({
+export function AgentDropdown({
   agents,
   activeAgent,
   userId,

@@ -1,4 +1,5 @@
 import en from "./en.json";
+import ja from "./ja.json";
 import ko from "./ko.json";
 import zhHans from "./zh-Hans.json";
 
@@ -9,6 +10,7 @@ import zhHans from "./zh-Hans.json";
 // `packages/views/i18n/resources-types.ts`.
 export const CEREBRO_AGENT_AVATAR_RESOURCES = {
   en,
+  ja,
   ko,
   "zh-Hans": zhHans,
 } as const;

@@ -4,6 +4,7 @@
     "italic": "Italic",
     "strikethrough": "Strikethrough",
     "code": "Code",
+    "highlight": "Highlight",
     "link": "Link",
     "list": "List",
     "quote": "Quote",
@@ -62,10 +63,20 @@
     "no_project_access": "No access to this project",
     "no_trigger_private": "Locked — tagging sends a run-request to {{owner}}, who runs this personal agent",
     "no_trigger_private_unknown_owner": "Locked — tagging sends a run-request to the owner, who runs this personal agent",
-    "run_request_owner_suffix": "{{owner}} approves"
+    "run_request_owner_suffix": "{{owner}} approves",
+    "group_current": "Current page",
+    "group_recent": "Recently viewed",
+    "group_search": "Search results"
+  },
+  "slash_command": {
+    "no_skills_configured": "No skills configured",
+    "no_results": "No matching skills"
   },
   "code_block": {
-    "copy_code": "Copy code"
+    "copy_code": "Copy code",
+    "show_preview": "Show preview",
+    "show_source": "Show source",
+    "fullscreen": "Fullscreen"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"

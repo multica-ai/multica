@@ -12,12 +12,11 @@
 // submit and scrolls back to the originating thread.
 
 import { useCallback, useId, useRef, useState } from "react";
-import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
+import { ArrowUp, Loader2 } from "lucide-react";
 import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
 import { FileDropOverlay } from "../../editor/file-drop-overlay";
 import { useFileDropZone } from "../../editor/use-file-drop-zone";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -71,7 +70,6 @@ function ReplyInput({
   const submitOnEnter = useSubmitOnEnter();
   const [isEmpty, setIsEmpty] = useState(true);
   const [markdown, setMarkdown] = useState("");
-  const [isExpanded, setIsExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
@@ -192,9 +190,6 @@ function ReplyInput({
               }}
               className={cn(
                 "relative min-w-0 flex flex-col rounded-md bg-card min-h-20",
-                isExpanded
-                  ? "h-[60vh]"
-                  : size === "sm" ? "max-h-40" : "max-h-56",
               )}
             >
               <div className="flex-1 min-h-0 overflow-y-auto">
@@ -229,24 +224,6 @@ function ReplyInput({
                       unpinLabel={t(($) => $.reply.unpin_tooltip)}
                     />
                   )}
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsExpanded((v) => !v);
-                            editorRef.current?.focus();
-                          }}
-                          aria-label={isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}
-                          className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                        >
-                          {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-                        </button>
-                      }
-                    />
-                    <TooltipContent side="top">{isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}</TooltipContent>
-                  </Tooltip>
                   <button
                     type="button"
                     disabled={isEmpty || submitting}

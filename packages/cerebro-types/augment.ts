@@ -26,19 +26,13 @@ declare module "@multica/core/types/agent" {
   }
 }
 
-// FIR-2580: per-workspace logo. Server adds the column via
-// 9055_cerebro_workspace_avatar and surfaces it on WorkspaceResponse
-// (ListWorkspaces projection + GetWorkspace/UpdateWorkspace). Nullable
-// end-to-end — older servers omit it and every consumer falls back to the
-// letter avatar / default favicon when it is null/empty.
+// FIR-2580: per-workspace logo. avatar_url is now in the upstream Workspace
+// interface — no augmentation needed for that field.
+// TECH-3002: workspace accent color. Stored in workspace.settings so the
+// existing PATCH /workspaces/:id endpoint handles it — no schema migration.
+// Two fields let auto-extraction and manual override coexist without
+// either silently overwriting the other.
 declare module "@multica/core/types/workspace" {
-  interface Workspace {
-    avatar_url?: string | null;
-  }
-  // TECH-3002: workspace accent color. Stored in workspace.settings so the
-  // existing PATCH /workspaces/:id endpoint handles it — no schema migration.
-  // Two fields let auto-extraction and manual override coexist without
-  // either silently overwriting the other.
   interface WorkspaceSettings {
     accent_color_auto?: string;   // hex extracted from logo (set on logo save)
     accent_color_manual?: string; // user's explicit override from color picker

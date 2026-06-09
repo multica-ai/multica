@@ -43,4 +43,14 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
     cardReadMore: "읽기 →",
     tableOfContents: "이 페이지에서",
   },
+  ja: {
+    indexTitle: "ユースケース",
+    indexSubtitle:
+      "チームが Multica で人とエージェントをどう組み合わせて動かしているかをご覧ください。",
+    indexMetadataTitle: "ユースケース",
+    indexMetadataDescription:
+      "チームが Multica で人とエージェントを一緒に働かせる方法をご覧ください。",
+    cardReadMore: "続きを読む →",
+    tableOfContents: "このページの内容",
+  },
 };

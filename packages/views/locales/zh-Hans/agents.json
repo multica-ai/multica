@@ -27,7 +27,8 @@
     "online": "在线",
     "paused": "已暂停",
     "unstable": "不稳定",
-    "offline": "离线"
+    "offline": "离线",
+    "archived": "已归档"
   },
   "avatar_backfill": {
     "_comment": "CEREBRO-PATCH(agent-avatar-backfill): admin action for missing avatars + regenerate-all (FIR-2321).",
@@ -66,7 +67,18 @@
     "no_archived": "还没有已归档智能体。",
     "search_active": "没有智能体匹配\"{{query}}\"。",
     "search_active_filtered": "在该筛选下没有智能体匹配\"{{query}}\"。",
-    "no_filter_match": "该筛选下没有匹配的智能体。"
+    "no_filter_match": "该筛选下没有匹配的智能体。",
+    "search_runtime_filtered": "\"{{machine}}\"上没有匹配\"{{query}}\"的智能体。",
+    "runtime_filtered": "\"{{machine}}\"上还没有智能体。"
+  },
+  "runtime_filter": {
+    "all": "全部运行时",
+    "section_local": "本机",
+    "section_remote": "远程",
+    "section_cloud": "云端",
+    "agent_count_other": "{{count}} 个智能体",
+    "empty": "还没有机器",
+    "agent_count_one": "{{count}} agent"
   },
   "columns": {
     "agent": "智能体",
@@ -90,7 +102,9 @@
     "last_7_days": "近 7 天",
     "no_activity": "无活动",
     "runs_other": "{{count}} 次运行",
-    "failed_suffix": " · {{count}} 次失败（{{percent}}%）"
+    "failed_suffix": " · {{count}} 次失败（{{percent}}%）",
+    "created_days_ago_one": "Created {{count}} day ago",
+    "runs_one": "{{count}} run"
   },
   "row_actions": {
     "cancel_all_tasks": "取消全部 task",
@@ -116,7 +130,9 @@
     "archive_dialog_title": "归档\"{{name}}\"？",
     "archive_dialog_description": "归档后这个智能体将无法被分配或提及，进行中的 task 会被取消。所有历史会被保留，可以稍后恢复。",
     "archive_dialog_cancel": "取消",
-    "archive_dialog_confirm": "归档"
+    "archive_dialog_confirm": "归档",
+    "cancelled_tasks_toast_one": "Cancelled {{count}} task",
+    "cancel_dialog_impact_one": "This will cancel {{summary}} task."
   },
   "detail": {
     "back_to_agents": "智能体",
@@ -146,6 +162,7 @@
     "section_properties": "属性",
     "section_details": "详情",
     "section_skills": "Skills",
+    "section_integrations": "外部集成",
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_thinking": "思考",
@@ -218,6 +235,7 @@
     "tools": "工具",
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "mcp_config": "MCP",
+    "integrations": "集成",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
@@ -264,7 +282,8 @@
       "list_loading": "加载中…",
       "list_empty_default": "暂无 skill。",
       "list_no_match": "没有匹配的 skill。",
-      "search_placeholder": "搜索 skill…"
+      "search_placeholder": "搜索 skill…",
+      "selected_one": "{{count}} selected — click to edit"
     },
     "avatar": {
       "change_aria": "更换头像",
@@ -304,7 +323,8 @@
       "reveal_action": "解锁并编辑",
       "revealing": "正在解锁…",
       "reveal_failed_toast": "加载环境变量值失败",
-      "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。"
+      "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。",
+      "not_revealed_title_one": "{{count}} variable configured"
     },
     "infisical": {
       "_comment": "CEREBRO-PATCH(agent-infisical-secrets): infisical folder grants tab strings",
@@ -359,7 +379,7 @@
       "url_allowlist_label": "URL 允许列表（逗号分隔）"
     },
     "mcp_config": {
-      "intro": "转发给运行时 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml，Hermes/Kimi/Kiro 通过 ACP mcpServers，OpenClaw 通过每个任务的配置 wrapper）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。OpenClaw 的 HTTP/SSE 条目需要使用 OpenClaw 自己的字段名（例如 \"transport\": \"streamable-http\"），而不是 Claude 的 \"type\"。",
+      "intro": "转发给运行时 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml，Hermes/Kimi/Kiro 通过 ACP mcpServers，OpenCode 通过 OPENCODE_CONFIG_CONTENT，OpenClaw 通过每个任务的配置 wrapper）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。OpenClaw 的 HTTP/SSE 条目需要使用 OpenClaw 自己的字段名（例如 \"transport\": \"streamable-http\"），而不是 Claude 的 \"type\"。",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP 配置 JSON 编辑器",
       "clear_action": "清空",
@@ -386,7 +406,12 @@
       "add_dialog_confirm_default": "添加",
       "add_dialog_confirm_other": "添加 {{count}} 个 skill",
       "add_dialog_cancel": "取消",
-      "add_failed_toast": "添加 skill 失败"
+      "add_failed_toast": "添加 skill 失败",
+      "add_dialog_confirm_one": "Add {{count}} skill"
+    },
+    "integrations": {
+      "intro": "把这个智能体连接到外部聊天平台，让大家在自己熟悉的工具里直接与它协作。",
+      "members_note": "只有工作区的所有者和管理员才能为智能体绑定飞书 Bot。你可以在「设置 → 集成」中查看已连接的 Bot。"
     },
     "activity": {
       "section_now": "当前",
@@ -430,7 +455,9 @@
       "retry_failed_toast": "重试运行失败",
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
-      "queued_prefix": "{{when}}排队"
+      "queued_prefix": "{{when}}排队",
+      "subtitle_active_one": "{{count}} active task",
+      "runs_one": "run"
     }
   },
   "char_counter": {
@@ -481,7 +508,9 @@
     "no_data": "未记录执行数据。",
     "sort_label": "排序",
     "sort_chronological": "时间顺序",
-    "sort_newest_first": "最新在前"
+    "sort_newest_first": "最新在前",
+    "tool_calls_one": "{{count}} tool call",
+    "events_one": "{{count}} events"
   },
   "task_failure": {
     "agent_error": "智能体执行出错",

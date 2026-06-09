@@ -138,6 +138,16 @@ WHERE chat_session_id = $1
 ORDER BY created_at DESC
 LIMIT $2;
 
+-- name: ListChatMessagesPage :many
+SELECT * FROM chat_message
+WHERE chat_session_id = $1
+  AND (
+    sqlc.narg('before_created_at')::timestamptz IS NULL
+    OR (created_at, id) < (sqlc.narg('before_created_at')::timestamptz, sqlc.narg('before_id')::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $2;
+
 -- name: ListUnrespondedUserMessages :many
 -- Returns every user message in the session that has not yet been answered
 -- by an assistant turn, in chronological order. The daemon claim path
@@ -169,7 +179,6 @@ WHERE chat_session_id = $1
   AND role = 'user'
   AND responded_at IS NULL
   AND created_at < $2;
-
 -- name: GetChatMessage :one
 SELECT * FROM chat_message
 WHERE id = $1;
@@ -258,3 +267,14 @@ WHERE id = $1;
 -- unread boundary stable across multiple incoming replies.
 UPDATE chat_session SET unread_since = now()
 WHERE id = $1 AND unread_since IS NULL;
+
+-- name: GetMostRecentUserChatMessage :one
+-- Returns the most recent role='user' message in a session. Used by the
+-- Lark `/issue` command parser: when the user types `/issue` with no
+-- title, the spec falls back to "use the previous user message as the
+-- title". Bot replies (role='assistant') are excluded — only human
+-- input qualifies as a fallback title source.
+SELECT * FROM chat_message
+WHERE chat_session_id = $1 AND role = 'user'
+ORDER BY created_at DESC
+LIMIT 1;

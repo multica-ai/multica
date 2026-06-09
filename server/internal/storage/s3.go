@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -172,6 +173,33 @@ func (s *S3Storage) GetReader(ctx context.Context, key string) (io.ReadCloser, e
 	return out.Body, nil
 }
 
+func (s *S3Storage) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	return s.PresignGetWithContentDisposition(ctx, key, ttl, "")
+}
+
+func (s *S3Storage) PresignGetWithContentDisposition(ctx context.Context, key string, ttl time.Duration, contentDisposition string) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("s3 PresignGet: empty key")
+	}
+	if ttl <= 0 {
+		ttl = 30 * time.Minute
+	}
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}
+	if contentDisposition != "" {
+		input.ResponseContentDisposition = aws.String(contentDisposition)
+	}
+	out, err := s3.NewPresignClient(s.client).PresignGetObject(ctx, input, func(opts *s3.PresignOptions) {
+		opts.Expires = ttl
+	})
+	if err != nil {
+		return "", fmt.Errorf("s3 PresignGetObject: %w", err)
+	}
+	return out.URL, nil
+}
+
 // Delete removes an object from S3. Errors are logged but not fatal.
 func (s *S3Storage) Delete(ctx context.Context, key string) {
 	if key == "" {
@@ -194,17 +222,12 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 }
 
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
-	safe := sanitizeFilename(filename)
-	disposition := "attachment"
-	if isInlineContentType(contentType) {
-		disposition = "inline"
-	}
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:             aws.String(s.bucket),
 		Key:                aws.String(key),
 		Body:               bytes.NewReader(data),
 		ContentType:        aws.String(contentType),
-		ContentDisposition: aws.String(fmt.Sprintf(`%s; filename="%s"`, disposition, safe)),
+		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
 	})

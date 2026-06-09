@@ -84,9 +84,12 @@ func newSkillForkTestCmd() *cobra.Command {
 	return c
 }
 
-// captureStdout swaps os.Stdout with a pipe for the duration of fn so tests
-// can assert on the table / json output emitted by cli.PrintJSON / PrintTable.
-func captureStdout(t *testing.T, fn func()) string {
+// captureGovernanceStdout swaps os.Stdout with a pipe for the duration of fn
+// so tests can assert on the table / json output emitted by cli.PrintJSON /
+// PrintTable. CEREBRO-PATCH(skill-cli-governance-helper): renamed from
+// captureStdout to avoid colliding with the upstream-defined captureStdout
+// helper in cmd_skill_test.go which has a different signature.
+func captureGovernanceStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -154,7 +157,7 @@ func TestRunSkillProposeSendsSessionRefAndPayload(t *testing.T) {
 	_ = cmd.Flags().Set("file", "scripts/helper.sh="+helperPath)
 	_ = cmd.Flags().Set("file", helperPath) // basename fallback
 
-	output := captureStdout(t, func() {
+	output := captureGovernanceStdout(t, func() {
 		if err := runSkillPropose(cmd, []string{skillID}); err != nil {
 			t.Fatalf("runSkillPropose: %v", err)
 		}
@@ -240,7 +243,7 @@ func TestRunSkillChangeRequestsList(t *testing.T) {
 
 		cmd := newSkillChangeRequestsListTestCmd()
 		_ = cmd.Flags().Set("skill", skillID)
-		out := captureStdout(t, func() {
+		out := captureGovernanceStdout(t, func() {
 			if err := runSkillChangeRequestsList(cmd, nil); err != nil {
 				t.Fatalf("list: %v", err)
 			}
@@ -267,7 +270,7 @@ func TestRunSkillChangeRequestsList(t *testing.T) {
 		t.Setenv("MULTICA_TOKEN", "tok")
 
 		cmd := newSkillChangeRequestsListTestCmd()
-		out := captureStdout(t, func() {
+		out := captureGovernanceStdout(t, func() {
 			if err := runSkillChangeRequestsList(cmd, nil); err != nil {
 				t.Fatalf("list: %v", err)
 			}
@@ -375,7 +378,7 @@ func TestRunSkillVersions(t *testing.T) {
 	t.Setenv("MULTICA_TOKEN", "tok")
 
 	cmd := newSkillVersionsTestCmd()
-	out := captureStdout(t, func() {
+	out := captureGovernanceStdout(t, func() {
 		if err := runSkillVersions(cmd, []string{skillID}); err != nil {
 			t.Fatalf("versions: %v", err)
 		}

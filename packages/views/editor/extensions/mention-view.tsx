@@ -30,6 +30,7 @@ import { SkillMentionChip } from "@multica/cerebro-skill-mention";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { IssueChip } from "../../issues/components/issue-chip";
+import { ProjectChip } from "../../projects/components/project-chip";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
@@ -54,6 +55,14 @@ export function MentionView({ node }: NodeViewProps) {
     return (
       <NodeViewWrapper as="span" className="inline">
         <AgentMention agentId={id} fallbackLabel={label} />
+      </NodeViewWrapper>
+    );
+  }
+
+  if (type === "project") {
+    return (
+      <NodeViewWrapper as="span" className="inline">
+        <ProjectMention projectId={id} fallbackLabel={label} />
       </NodeViewWrapper>
     );
   }
@@ -122,6 +131,38 @@ function AgentMention({
   }
 
   return <span className="mention">@{fallbackLabel ?? agentId}</span>;
+}
+
+function ProjectMention({
+  projectId,
+  fallbackLabel,
+}: {
+  projectId: string;
+  fallbackLabel?: string;
+}) {
+  const p = useWorkspacePaths();
+  const { push, openInNewTab } = useNavigation();
+  const projectPath = p.projectDetail(projectId);
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      if (openInNewTab) openInNewTab(projectPath, fallbackLabel);
+      return;
+    }
+    push(projectPath);
+  };
+
+  return (
+    <a href={projectPath} onClick={handleClick} className="project-mention inline-flex">
+      <ProjectChip
+        projectId={projectId}
+        fallbackLabel={fallbackLabel}
+        className="cursor-pointer hover:bg-accent transition-colors"
+      />
+    </a>
+  );
 }
 
 function IssueMention({

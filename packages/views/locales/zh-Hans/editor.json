@@ -4,6 +4,7 @@
     "italic": "斜体",
     "strikethrough": "删除线",
     "code": "代码",
+    "highlight": "高亮",
     "link": "链接",
     "list": "列表",
     "quote": "引用",
@@ -62,10 +63,20 @@
     "no_project_access": "无权访问此项目",
     "no_trigger_private": "已锁定 — 标记会向 {{owner}} 发送运行请求，由 {{owner}} 运行此个人 Agent",
     "no_trigger_private_unknown_owner": "已锁定 — 标记会向所有者发送运行请求，由所有者运行此个人 Agent",
-    "run_request_owner_suffix": "由 {{owner}} 审批"
+    "run_request_owner_suffix": "由 {{owner}} 审批",
+    "group_current": "当前页面",
+    "group_recent": "最近浏览",
+    "group_search": "搜索结果"
+  },
+  "slash_command": {
+    "no_skills_configured": "暂无配置的技能",
+    "no_results": "没有匹配的技能"
   },
   "code_block": {
-    "copy_code": "复制代码"
+    "copy_code": "复制代码",
+    "show_preview": "Show preview",
+    "show_source": "Show source",
+    "fullscreen": "Fullscreen"
   },
   "file_card": {
     "uploading": "正在上传 {{filename}}"

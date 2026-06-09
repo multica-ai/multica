@@ -134,11 +134,13 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useRecentContextStore } from "@multica/core/chat";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -155,10 +157,7 @@ import { useT } from "../../i18n";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
 type ActivityT = ReturnType<typeof useT<"issues">>["t"];
@@ -208,12 +207,12 @@ function formatActivity(
     }
     case "start_date_changed": {
       if (!details.to) return t(($) => $.activity.start_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.start_date_set, { date: formatted });
     }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.due_date_set, { date: formatted });
     }
     case "title_changed":
@@ -817,9 +816,17 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
+  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
   useEffect(() => {
     if (issue) {
       recordVisit(wsId, issue.id);
+      recordRecentContext(wsId, {
+        type: "issue",
+        id: issue.id,
+        label: issue.identifier,
+        subtitle: issue.title,
+        status: issue.status,
+      });
     }
   }, [issue?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

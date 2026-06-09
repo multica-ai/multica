@@ -1,5 +1,7 @@
 export { createChatStore, CHAT_MIN_W, CHAT_MIN_H, CHAT_DEFAULT_W, CHAT_DEFAULT_H, DRAFT_NEW_SESSION } from "./store";
 export type { ChatStoreOptions, ChatState, ChatTimelineItem, ContextAnchor } from "./store";
+export { useRecentContextStore, selectRecentContexts } from "./recent-context-store";
+export type { RecentContextEntry, RecentContextType } from "./recent-context-store";
 
 import type { createChatStore as CreateChatStoreFn } from "./store";
 

@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -154,7 +156,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publish(protocol.EventInvitationCreated, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
 
-	h.Analytics.Capture(analytics.TeamInviteSent(
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.TeamInviteSent(
 		uuidToString(requester.UserID),
 		uuidToString(requester.WorkspaceID),
 		email,
@@ -513,7 +515,8 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		prefix := h.getIssuePrefix(r.Context(), seededIssue.WorkspaceID)
 		issueResp := issueToResponse(seededIssue, prefix)
 		h.publish(protocol.EventIssueCreated, wsID, "member", userID, map[string]any{"issue": issueResp})
-		h.Analytics.Capture(analytics.IssueCreated(
+		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(
 			userID,
 			wsID,
 			uuidToString(seededIssue.ID),
@@ -521,6 +524,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 			"",
 			"",
 			analytics.SourceOnboarding,
+			platform,
 		))
 	}
 
@@ -531,7 +535,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	if inv.CreatedAt.Valid {
 		daysSinceInvite = int64(time.Since(inv.CreatedAt.Time).Hours() / 24)
 	}
-	h.Analytics.Capture(analytics.TeamInviteAccepted(
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.TeamInviteAccepted(
 		userID,
 		wsID,
 		daysSinceInvite,
@@ -541,7 +545,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		if onboardedUser.OnboardedAt.Valid {
 			onboardedAt = onboardedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
 		}
-		h.Analytics.Capture(analytics.OnboardingCompleted(
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingCompleted(
 			userID,
 			wsID,
 			analytics.OnboardingPathInviteAccept,

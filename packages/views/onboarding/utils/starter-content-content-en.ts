@@ -62,7 +62,7 @@ export function buildWelcomeIssueText(
     `Keep it friendly and under 200 words. End with a small, curious question — something like "what's something you've been wondering about lately?" — so ${name} has an easy way to reply without having to come up with a real task yet.`,
   ].join("\n");
 
-  switch (q.use_case) {
+  switch (q.use_case[0]) {
     case "coding":
       return {
         title: "👋 Welcome to Multica — let's work together",
@@ -208,7 +208,7 @@ export function buildAgentGuidedSubIssues(
     });
   }
 
-  if (q.role === "developer" || q.use_case === "coding") {
+  if (q.role === "developer" || q.use_case[0] === "coding") {
     tier2.push({
       status: "todo",
       priority: "medium",
@@ -515,7 +515,7 @@ export function buildSelfServeSubIssues(
     },
   ];
 
-  if (q.role === "developer" || q.use_case === "coding") {
+  if (q.role === "developer" || q.use_case[0] === "coding") {
     tier3.push({
       status: "backlog",
       priority: "low",

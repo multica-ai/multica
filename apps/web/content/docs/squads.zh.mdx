@@ -123,6 +123,7 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 | `multica squad delete <id>` | 归档（软删除）——同时把当前分配给小队的 issue 转给队长 |
 | `multica squad member list <id>` | 列出小队成员 |
 | `multica squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | 加成员（owner / admin）|
+| `multica squad member set-role <id> --member-id <uuid> --member-type agent\|member --role "..."` | 不移除成员，直接修改 role |
 | `multica squad member remove <id> --member-id <uuid> --type agent\|member` | 移除成员（**不能移除队长**——先换队长）|
 | `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 队长每次结束前由它自己调用 |
 

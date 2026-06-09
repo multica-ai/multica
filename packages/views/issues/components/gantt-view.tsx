@@ -8,6 +8,7 @@ import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Issue, IssueStatus } from "@multica/core/types";
+import { dateOnlyToUTCDate } from "@multica/core/issues/date";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Tooltip,
@@ -43,11 +44,11 @@ function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / MS_PER_DAY);
 }
 
+// Issue dates arrive as date-only "YYYY-MM-DD" strings (calendar days). Anchor
+// each to UTC midnight so the bar lands on exactly that day, independent of the
+// viewer's timezone. See @multica/core/issues/date.
 function parseDay(iso: string | null): Date | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return startOfDayUTC(d);
+  return dateOnlyToUTCDate(iso);
 }
 
 function isWeekendUTC(d: Date): boolean {

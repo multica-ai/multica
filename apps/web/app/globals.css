@@ -5,11 +5,29 @@
 @import "../../../packages/ui/styles/base.css";
 @import "./custom.css";
 
+@custom-variant dark (&:is(.dark *));
+
+@source "../../../packages/ui/**/*.{ts,tsx}";
+@source "../../../packages/core/**/*.{ts,tsx}";
+@source "../../../packages/views/**/*.{ts,tsx}";
+@source "../../../packages/cerebro-*/**/*.{ts,tsx}";
+
+/* Font stack. `--font-inter` is the next/font Inter family (+ its synthetic
+   size-adjusted fallback), set on <html> by inter.variable in app/layout.tsx.
+   We compose `--font-sans` here in static CSS — rather than baking the CJK tail
+   into next/font's `fallback` — so it can be overridden per `<html lang>` and
+   stays CSP-safe (no inline <style>). Tailwind's `font-sans` utility resolves
+   `var(--font-sans)` (see packages/ui/styles/tokens.css `@theme inline`).
+
+   Default (en / zh / ko): Latin chars render with Inter; CJK chars fall through
+   to the platform Chinese fonts, then Korean. Chinese MUST stay before Korean so
+   zh users never get Korean Hanja glyph shapes (Hangul is a separate Unicode
+   block, so ko users still get Korean fonts for Hangul). Kept in sync with
+   apps/desktop/src/renderer/src/globals.css. */
 :root {
-  /* Keep route compilation offline: do not depend on next/font/google fetches. */
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
-    "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo",
+    "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
     monospace;
   --font-serif: "Source Serif 4", "Iowan Old Style", "Apple Garamond",
@@ -17,9 +35,52 @@
   --font-serif-zh: "Noto Serif SC", "Songti SC", "SimSun", serif;
 }
 
-@custom-variant dark (&:is(.dark *));
+/* Japanese: Kanji are Han ideographs sharing the same Unicode block as Chinese,
+   and CSS font-fallback order is NOT affected by `<html lang>` — so the
+   Chinese-first default above would hand Japanese users Chinese glyph shapes
+   for shared ideographs. Promote a Japanese-first CJK chain only for Japanese.
+   `[lang|="ja"]` is the BCP-47 language-range selector: it matches exactly `ja`
+   or `ja-<region>` (layout.tsx emits `ja-JP`), never unrelated 3-letter subtags
+   such as `jam`. Inter still leads for Latin; zh/ko remain as a deep fallback. */
+html[lang|="ja"] {
+  --font-sans: var(--font-inter), "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic", "YuGothic", "Meiryo", "Noto Sans CJK JP", "Noto Sans JP",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans CJK KR", sans-serif;
+}
 
-@source "../../../packages/ui/**/*.{ts,tsx}";
-@source "../../../packages/core/**/*.{ts,tsx}";
-@source "../../../packages/views/**/*.{ts,tsx}";
-@source "../../../packages/cerebro-*/**/*.{ts,tsx}";
+/*
+ * TECH-2903: the workspace sidebar is `position: fixed; inset-y-0`, so
+ * bar.js' body padding does not push it down. Once the Firtal portal top bar
+ * has actually loaded, shift the fixed sidebar below the 48px portal bar so
+ * the bar can never cover the workspace switcher at the sidebar's top edge.
+ * The body[data-firtal-bar="on"] attribute is owned by CerebroFirtalPortalBar.
+ */
+body[data-firtal-bar="on"] [data-slot="sidebar-container"] {
+  top: 3rem;
+  height: calc(100svh - 3rem);
+}
+
+/*
+ * TECH-2911: bar.js reserves 48px on body when the portal bar is active.
+ * The sidebar-wrapper (SidebarProvider root) is h-svh, so without an explicit
+ * height limit it can extend below the visible viewport and drag
+ * absolutely-positioned children like the chat input bar off-screen.
+ */
+body[data-firtal-bar="on"] [data-slot="sidebar-wrapper"] {
+  height: calc(100svh - 3rem);
+  min-height: calc(100svh - 3rem);
+}
+
+/*
+ * TECH-2911 follow-up: belt-and-braces for the portal-bar inactive state.
+ * bar.js writes body.style.paddingTop inline. Installed PWA sessions can keep
+ * an old document alive long enough for that inline value to survive a route
+ * transition or service-worker-driven refresh. Until CerebroFirtalPortalBar
+ * confirms that bar.js loaded and sets data-firtal-bar="on", force the app
+ * shell back to zero top padding. !important beats stale inline padding.
+ */
+body:not([data-firtal-bar="on"]) {
+  padding-top: 0 !important;
+}

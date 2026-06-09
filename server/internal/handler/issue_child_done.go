@@ -126,7 +126,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// author_type='system'); this keeps smuggled mentions from the child
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
-	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment)
+	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment, requesterUserID)
 }
 
 // sanitizeChildTitleForSystemComment removes mention-style markdown from a
@@ -247,7 +247,7 @@ func sanitizeMentionLabel(name string) string {
 //     for the same parent (e.g. two children finishing back-to-back).
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
-func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, child db.Issue, systemComment db.Comment) {
+func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, child db.Issue, systemComment db.Comment, requesterUserID string) {
 	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
 		return
 	}
@@ -256,7 +256,7 @@ func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, chi
 	case "agent":
 		h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
 	case "squad":
-		h.triggerChildDoneSquad(ctx, parent, child, systemComment.ID)
+		h.triggerChildDoneSquad(ctx, parent, child, systemComment.ID, requesterUserID)
 	}
 }
 
@@ -305,12 +305,24 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 //   - same effective leader on both sides — child agent == leader, or
 //     child squad's leader == this squad's leader (the cross-squad shared
 //     leader loop).
-func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID) {
+func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID, requesterUserID string) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
 	if err != nil {
+		return
+	}
+
+	// Private-leader gate (MUL-2860): a member who moved the child to done may
+	// only wake the parent's squad leader if they can access that leader. The
+	// system/github path (empty requester) is treated as an agent actor and
+	// passes, matching canEnqueueSquadLeader's "system" handling.
+	actorType, actorID := "member", requesterUserID
+	if requesterUserID == "" {
+		actorType = "system"
+	}
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, actorType, actorID, uuidToString(parent.WorkspaceID)) {
 		return
 	}
 

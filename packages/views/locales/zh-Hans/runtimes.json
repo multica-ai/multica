@@ -56,8 +56,12 @@
       "workload_hint": "{{running}} running · {{queued}} queued",
       "cli": "CLI",
       "cloud_worker": "Cloud worker",
-      "local_daemon": "Local daemon"
-    }
+      "local_daemon": "Local daemon",
+      "runtimes_hint_one": "{{count}} online",
+      "health_issues_one": "{{count}} issue"
+    },
+    "runtime_count_one": "{{count}} runtime",
+    "busy_count_one": "{{count}} busy"
   },
   "health": {
     "online": {
@@ -152,13 +156,19 @@
           "workload_queued": "排队中",
           "visibility_workspace": "工作区",
           "visibility_private": "私有"
-        }
+        },
+        "title_one": "Archive {{count}} agent and delete this Runtime?",
+        "checkbox_one": "I understand this {{count}} agent will be archived and any queued or running tasks will be cancelled.",
+        "confirm_one": "Archive {{count}} agent and delete runtime"
       }
     },
     "toast_deleted": "已删除运行时",
     "toast_delete_failed": "删除运行时失败",
     "running_chip_other": "· {{count}} 个进行中",
-    "queued_chip_other": "· {{count}} 个排队中"
+    "queued_chip_other": "· {{count}} 个排队中",
+    "serving_count_one": "{{count}} agent",
+    "running_chip_one": "· {{count}} running",
+    "queued_chip_one": "· {{count}} queued"
   },
   "detail_page": {
     "not_found_title": "未找到运行时",
@@ -270,7 +280,11 @@
     "row_actions_aria": "行操作",
     "delete_action": "删除",
     "delete_permission_hint": "只有运行时所有者和工作区管理员可以删除这个运行时",
-    "delete_admin_hint": "只有运行时所有者和工作区管理员可以删除运行时。"
+    "delete_admin_hint": "只有运行时所有者和工作区管理员可以删除运行时。",
+    "col_cli": "CLI",
+    "cli_managed_badge": "Desktop",
+    "cli_update_available_aria": "Update available",
+    "cli_update_available_tooltip": "Update available: {{version}}"
   },
   "usage": {
     "period_label": "时间范围",
@@ -324,6 +338,13 @@
     "table_output": "输出",
     "table_cache_r": "缓存读",
     "table_cache_w": "缓存写",
-    "no_data": "还没有使用数据"
-  }
+    "no_data": "还没有使用数据",
+    "unmapped_notice_one": "{{count}} model has no maintained price — its tokens are excluded from cost totals.",
+    "cost_by_caption_agent_one": "{{count}} agent on this runtime",
+    "cost_by_caption_model_one": "{{count}} model used",
+    "dimension_label": "Dimension",
+    "when_tab_weekly": "Weekly"
+  },
+  "running_one": "{{count}} running",
+  "queued_one": "{{count}} queued"
 }

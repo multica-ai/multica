@@ -12,6 +12,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "hermes",
   "kimi",
   "kiro",
+  "opencode",
   "openclaw",
 ]);
 

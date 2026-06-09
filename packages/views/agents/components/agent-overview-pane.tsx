@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BookOpenText,
@@ -11,10 +11,14 @@ import {
   ListTodo,
   Plug,
   Terminal,
+  Webhook,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { createAgentToolsTabs } from "@multica/cerebro-agent-tools/views"; // CEREBRO-PATCH(agent-tools-tab): tab extension
 import { providerSupportsMcpConfig } from "@multica/core/agents";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { larkInstallationsOptions } from "@multica/core/lark";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,10 +39,11 @@ import { CustomArgsTab } from "./tabs/custom-args-tab";
 // CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — persona sandbox tab (cerebro-only)
 import { SandboxTab } from "./tabs/sandbox-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
+import { IntegrationsTab } from "./tabs/integrations-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
-type DetailTab =
+export type DetailTab =
   | "activity"
   | "tasks"
   | "instructions"
@@ -47,7 +52,8 @@ type DetailTab =
   | "infisical"
   | "custom_args"
   | "sandbox"
-  | "mcp_config";
+  | "mcp_config"
+  | "integrations";
 
 type TabLabelKey =
   | "activity"
@@ -59,7 +65,8 @@ type TabLabelKey =
   | "custom_args"
   | "sandbox"
   | "tools"
-  | "mcp_config";
+  | "mcp_config"
+  | "integrations";
 
 const TAB_LABEL_KEY: Record<DetailTab, TabLabelKey> = {
   activity: "activity",
@@ -71,6 +78,7 @@ const TAB_LABEL_KEY: Record<DetailTab, TabLabelKey> = {
   custom_args: "custom_args",
   sandbox: "sandbox",
   mcp_config: "mcp_config",
+  integrations: "integrations",
 };
 
 const coreDetailTabs: {
@@ -87,6 +95,7 @@ const coreDetailTabs: {
   { id: "custom_args", icon: Terminal, labelKey: TAB_LABEL_KEY.custom_args },
   { id: "sandbox", icon: Shield, labelKey: TAB_LABEL_KEY.sandbox },
   { id: "mcp_config", icon: Plug, labelKey: TAB_LABEL_KEY.mcp_config },
+  { id: "integrations", icon: Webhook, labelKey: TAB_LABEL_KEY.integrations },
 ];
 
 const detailTabs = [
@@ -99,6 +108,14 @@ interface AgentOverviewPaneProps {
   runtimes: AgentRuntime[];
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  /**
+   * One-shot request from a sibling (the inspector's compact Lark status
+   * row) to focus a specific tab. Routed through the same `requestTabChange`
+   * the tab buttons use, so the unsaved-changes guard still fires. The pane
+   * calls `onNavIntentHandled` to clear it after consuming.
+   */
+  navIntent?: DetailTab | null;
+  onNavIntentHandled?: () => void;
 }
 
 /**
@@ -129,8 +146,11 @@ export function AgentOverviewPane({
   runtimes,
   canEdit,
   onUpdate,
+  navIntent,
+  onNavIntentHandled,
 }: AgentOverviewPaneProps) {
   const { t } = useT("agents");
+  const wsId = useWorkspaceId();
   const [activeTab, setActiveTab] = useState<string>("activity");
   const [activeDirty, setActiveDirty] = useState(false);
   // Holds the destination when a tab change is intercepted by the dirty
@@ -142,14 +162,32 @@ export function AgentOverviewPane({
     ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
     : null;
 
+  // Cached per-workspace and shared with the inspector's bind button, so this
+  // is at most one extra GET per workspace. We only read `configured` to
+  // decide whether the Integrations tab is worth showing at all.
+  const { data: larkListing } = useQuery({
+    ...larkInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
+  const larkConfigured = larkListing?.configured === true;
+
   // The MCP tab is only shown when the agent's runtime backend actually
   // consumes mcp_config — see providerSupportsMcpConfig. We default to
   // showing it when the runtime row hasn't loaded yet so a slow fetch
   // can't transiently flicker the tab off and then on.
+  //
+  // The Integrations tab only appears once the deployment has Lark wired
+  // (configured). Unlike MCP we default to HIDING while the listing loads:
+  // deployments without Lark are the common case, so flashing the tab on
+  // then off would be the worse flicker.
   const visibleTabs = useMemo(() => {
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
-    return detailTabs.filter((tab) => tab.id !== "mcp_config" || showMcp);
-  }, [runtime]);
+    return detailTabs.filter((tab) => {
+      if (tab.id === "mcp_config") return showMcp;
+      if (tab.id === "integrations") return larkConfigured;
+      return true;
+    });
+  }, [runtime, larkConfigured]);
 
   // If the active tab disappears (e.g. user just switched the agent's
   // runtime to one that doesn't read mcp_config), fall back to Activity
@@ -178,6 +216,17 @@ export function AgentOverviewPane({
       setPendingTab(null);
     }
   };
+
+  // Consume a one-shot tab-focus request from a sibling. Routing through
+  // `requestTabChange` (rather than `setActiveTab`) keeps the unsaved-changes
+  // guard honored even when the request originates outside the tab strip. The
+  // effect body is a no-op while `navIntent` is null, so the unstable
+  // `requestTabChange`/`onNavIntentHandled` identities can't loop it.
+  useEffect(() => {
+    if (navIntent == null) return;
+    requestTabChange(navIntent);
+    onNavIntentHandled?.();
+  }, [navIntent, requestTabChange, onNavIntentHandled]);
 
   return (
     // On mobile the parent stacks the inspector and overview and scrolls the
@@ -272,6 +321,11 @@ export function AgentOverviewPane({
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
+          </TabContent>
+        )}
+        {effectiveTab === "integrations" && (
+          <TabContent>
+            <IntegrationsTab agent={agent} />
           </TabContent>
         )}
         {detailTabs.map((tab) =>

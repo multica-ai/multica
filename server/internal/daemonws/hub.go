@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -72,6 +73,14 @@ func (c *client) markSeen(eventID string) bool {
 type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
 // CEREBRO-PATCH(ws-heartbeat-handler-payload): JEH-997 takes the full
 
+// MessageKindRecorder is the optional metric hook called once per inbound
+// daemon WebSocket frame. kind is the protocol message type with the
+// "daemon:" prefix stripped (e.g. "heartbeat") or the literal "unknown" for
+// types we don't model. A nil recorder is safely no-op'd.
+type MessageKindRecorder interface {
+	RecordDaemonWSMessageReceived(kind string)
+}
+
 // MessageHandler is the fall-through callback for daemon-originated frames
 // that the hub's built-in switch doesn't recognise (today: anything not
 // daemon:heartbeat). Returning an error is logged at debug level.
@@ -98,8 +107,11 @@ type Hub struct {
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
 
-	msgMu      sync.RWMutex
-	onMessage  MessageHandler // CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
+	kindMu       sync.RWMutex
+	kindRecorder MessageKindRecorder
+
+	msgMu     sync.RWMutex
+	onMessage MessageHandler // CEREBRO-PATCH(daemonws-message-handler): callback seam for cerebro-only frame types
 
 	dcMu         sync.RWMutex
 	onDisconnect DisconnectHandler // CEREBRO-PATCH(daemonws-disconnect-handler): cleanup hook for cerebro-owned per-runtime state on daemon disconnect
@@ -138,6 +150,27 @@ func (h *Hub) heartbeatHandler() HeartbeatHandler {
 	h.hbMu.RLock()
 	defer h.hbMu.RUnlock()
 	return h.onHeartbeat
+}
+
+// SetMessageKindRecorder installs an optional callback fired exactly once per
+// inbound daemon WebSocket frame. Used by the metrics layer to count traffic
+// by handler kind without hard-coupling the hub to any specific collector.
+func (h *Hub) SetMessageKindRecorder(rec MessageKindRecorder) {
+	if h == nil {
+		return
+	}
+	h.kindMu.Lock()
+	h.kindRecorder = rec
+	h.kindMu.Unlock()
+}
+
+func (h *Hub) messageKindRecorder() MessageKindRecorder {
+	if h == nil {
+		return nil
+	}
+	h.kindMu.RLock()
+	defer h.kindMu.RUnlock()
+	return h.kindRecorder
 }
 
 // SetMessageHandler installs the fall-through handler for non-heartbeat
@@ -407,7 +440,17 @@ func (c *client) handleFrame(raw []byte) {
 	var msg protocol.Message
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		slog.Debug("daemon websocket invalid frame", "error", err, "daemon_id", c.identity.DaemonID)
+		if rec := c.hub.messageKindRecorder(); rec != nil {
+			rec.RecordDaemonWSMessageReceived("invalid")
+		}
 		return
+	}
+	kind := strings.TrimPrefix(msg.Type, "daemon:")
+	if kind == "" {
+		kind = "unknown"
+	}
+	if rec := c.hub.messageKindRecorder(); rec != nil {
+		rec.RecordDaemonWSMessageReceived(kind)
 	}
 	switch msg.Type {
 	case protocol.EventDaemonHeartbeat:

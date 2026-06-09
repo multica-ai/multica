@@ -70,6 +70,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     updateWorkspace: mockUpdateWorkspace,
     generateWorkspaceLogos: mockGenerateWorkspaceLogos,
+    getBaseUrl: () => "http://127.0.0.1:8080",
   },
 }));
 

@@ -27,7 +27,8 @@
     "online": "온라인",
     "paused": "Paused",
     "unstable": "불안정",
-    "offline": "오프라인"
+    "offline": "오프라인",
+    "archived": "보관됨"
   },
   "avatar_backfill": {
     "_comment": "CEREBRO-PATCH(agent-avatar-backfill): admin action for missing avatars + regenerate-all (FIR-2321).",
@@ -66,7 +67,18 @@
     "no_archived": "아직 보관된 에이전트가 없습니다.",
     "search_active": "\"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "search_active_filtered": "이 필터에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
-    "no_filter_match": "이 필터와 일치하는 에이전트가 없습니다."
+    "no_filter_match": "이 필터와 일치하는 에이전트가 없습니다.",
+    "search_runtime_filtered": "\"{{machine}}\"에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
+    "runtime_filtered": "\"{{machine}}\"에 에이전트가 없습니다."
+  },
+  "runtime_filter": {
+    "all": "모든 런타임",
+    "section_local": "로컬",
+    "section_remote": "원격",
+    "section_cloud": "클라우드",
+    "agent_count_one": "에이전트 {{count}}개",
+    "agent_count_other": "에이전트 {{count}}개",
+    "empty": "아직 기기가 없습니다"
   },
   "columns": {
     "agent": "에이전트",
@@ -90,7 +102,9 @@
     "last_7_days": "최근 7일",
     "no_activity": "활동 없음",
     "runs_other": "실행 {{count}}회",
-    "failed_suffix": " · 실패 {{count}}회({{percent}}%)"
+    "failed_suffix": " · 실패 {{count}}회({{percent}}%)",
+    "created_days_ago_one": "Created {{count}} day ago",
+    "runs_one": "{{count}} run"
   },
   "row_actions": {
     "cancel_all_tasks": "모든 작업 취소",
@@ -116,7 +130,9 @@
     "archive_dialog_title": "\"{{name}}\"을(를) 보관할까요?",
     "archive_dialog_description": "이 에이전트는 할당하거나 멘션할 수 없고, 활성 작업은 모두 취소됩니다. 기록은 유지되며 나중에 복원할 수 있습니다.",
     "archive_dialog_cancel": "취소",
-    "archive_dialog_confirm": "보관"
+    "archive_dialog_confirm": "보관",
+    "cancelled_tasks_toast_one": "Cancelled {{count}} task",
+    "cancel_dialog_impact_one": "This will cancel {{summary}} task."
   },
   "detail": {
     "back_to_agents": "에이전트",
@@ -146,6 +162,7 @@
     "section_properties": "속성",
     "section_details": "세부 정보",
     "section_skills": "스킬",
+    "section_integrations": "연동",
     "prop_runtime": "런타임",
     "prop_model": "모델",
     "prop_thinking": "추론",
@@ -218,6 +235,7 @@
     "tools": "Tools",
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "mcp_config": "MCP",
+    "integrations": "연동",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -264,7 +282,8 @@
       "list_loading": "불러오는 중...",
       "list_empty_default": "사용 가능한 스킬이 없습니다.",
       "list_no_match": "일치하는 스킬이 없습니다.",
-      "search_placeholder": "스킬 검색..."
+      "search_placeholder": "스킬 검색...",
+      "selected_one": "{{count}} selected — click to edit"
     },
     "avatar": {
       "change_aria": "아바타 변경",
@@ -304,7 +323,8 @@
       "reveal_action": "공개하고 수정",
       "revealing": "공개하는 중...",
       "reveal_failed_toast": "환경 변수 값을 불러오지 못했습니다",
-      "empty_editable": "설정된 환경 변수가 없습니다. 시작 시 에이전트에 주입할 변수를 추가하세요."
+      "empty_editable": "설정된 환경 변수가 없습니다. 시작 시 에이전트에 주입할 변수를 추가하세요.",
+      "not_revealed_title_one": "{{count}} variable configured"
     },
     "infisical": {
       "_comment": "CEREBRO-PATCH(agent-infisical-secrets): infisical folder grants tab strings",
@@ -340,7 +360,7 @@
       "save_failed_toast": "Failed to save sandbox binding"
     },
     "mcp_config": {
-      "intro": "런타임 CLI로 전달되는 MCP server configuration입니다(Claude는 --mcp-config, Codex는 $CODEX_HOME/config.toml, Hermes/Kimi/Kiro는 ACP mcpServers, OpenClaw는 task별 config wrapper). 그대로 저장되며 secret이 포함될 수 있으므로 에이전트 소유자와 워크스페이스 관리자만 읽을 수 있습니다. 비워두면 CLI 자체 기본값을 사용합니다. OpenClaw HTTP/SSE 항목은 Claude의 \"type\" 대신 OpenClaw의 필드명(예: \"transport\": \"streamable-http\")을 사용하세요.",
+      "intro": "런타임 CLI로 전달되는 MCP server configuration입니다(Claude는 --mcp-config, Codex는 $CODEX_HOME/config.toml, Hermes/Kimi/Kiro는 ACP mcpServers, OpenCode는 OPENCODE_CONFIG_CONTENT, OpenClaw는 task별 config wrapper). 그대로 저장되며 secret이 포함될 수 있으므로 에이전트 소유자와 워크스페이스 관리자만 읽을 수 있습니다. 비워두면 CLI 자체 기본값을 사용합니다. OpenClaw HTTP/SSE 항목은 Claude의 \"type\" 대신 OpenClaw의 필드명(예: \"transport\": \"streamable-http\")을 사용하세요.",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP config JSON editor",
       "clear_action": "지우기",
@@ -367,7 +387,8 @@
       "add_dialog_confirm_default": "추가",
       "add_dialog_confirm_other": "스킬 {{count}}개 추가",
       "add_dialog_cancel": "취소",
-      "add_failed_toast": "스킬을 추가하지 못했습니다"
+      "add_failed_toast": "스킬을 추가하지 못했습니다",
+      "add_dialog_confirm_one": "Add {{count}} skill"
     },
     "tools": {
       "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290/1351/1353/1360 W8 — tools tab body strings",
@@ -387,6 +408,10 @@
       "row_limit_label": "Row limit",
       "spreadsheet_id_label": "Default Spreadsheet ID",
       "url_allowlist_label": "URL allowlist (comma-separated)"
+    },
+    "integrations": {
+      "intro": "이 에이전트를 외부 채팅 플랫폼에 연결해 팀원이 평소 사용하는 도구에서 바로 함께 작업할 수 있도록 합니다.",
+      "members_note": "에이전트에 Lark 봇을 연결할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
     },
     "activity": {
       "section_now": "현재",
@@ -430,7 +455,9 @@
       "retry_failed_toast": "실행을 재시도하지 못했습니다",
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
-      "queued_prefix": "{{when}} 대기 시작"
+      "queued_prefix": "{{when}} 대기 시작",
+      "subtitle_active_one": "{{count}} active task",
+      "runs_one": "run"
     }
   },
   "char_counter": {
@@ -481,7 +508,9 @@
     "no_data": "기록된 실행 데이터가 없습니다.",
     "sort_label": "정렬",
     "sort_chronological": "오래된 순",
-    "sort_newest_first": "최신 순"
+    "sort_newest_first": "최신 순",
+    "tool_calls_one": "{{count}} tool call",
+    "events_one": "{{count}} events"
   },
   "task_failure": {
     "agent_error": "에이전트 실행 오류",

@@ -27,6 +27,7 @@ export interface Workspace {
   settings: WorkspaceSettings;
   repos: WorkspaceRepo[];
   issue_prefix: string;
+  avatar_url: string | null;
   created_at: string;
   updated_at: string;
 }

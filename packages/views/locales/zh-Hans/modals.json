@@ -185,6 +185,9 @@
       "error_daemon_version": "该智能体的守护进程 CLI（{{current}}）低于要求的 {{min}}。请升级守护进程后再使用通过智能体创建。",
       "error_unknown": "提交失败，请重试。",
       "sub_issue_of": "作为 {{identifier}} 的子 issue"
-    }
+    },
+    "title_required": "Enter a title to create",
+    "toast_duplicate_title": "Duplicate issue",
+    "toast_duplicate_view": "View existing issue"
   }
 }

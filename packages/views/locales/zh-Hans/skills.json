@@ -239,7 +239,18 @@
     "skill_description_label": "描述",
     "skill_description_placeholder": "可选——描述智能体什么时候应该使用这个 skill。",
     "toast_imported": "已导入 skill",
-    "toast_import_failed": "导入 skill 失败"
+    "toast_import_failed": "导入 skill 失败",
+    "select_all": "Select all ({{count}})",
+    "bulk_ready": "{{count}} skills selected",
+    "bulk_import_button": "Import {{count}} Skills",
+    "bulk_progress": "Importing {{completed}} / {{total}}…",
+    "bulk_cancel_button": "Cancel",
+    "bulk_complete_hint": "Import complete.",
+    "bulk_cancelled_hint": "Import cancelled.",
+    "bulk_done_button": "Done",
+    "bulk_summary_imported": "Imported",
+    "bulk_summary_skipped": "Skipped",
+    "bulk_summary_failed": "Failed"
   },
   "file_tree": {
     "no_files": "无文件"

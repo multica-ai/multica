@@ -11,7 +11,14 @@ import type { AgentRuntime } from "@multica/core/types";
  * to the desktop preload typings (which live in apps/desktop/src/preload).
  */
 interface DaemonStatusLike {
-  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
+  state:
+    | "running"
+    | "stopped"
+    | "starting"
+    | "stopping"
+    | "installing_cli"
+    | "cli_not_found"
+    | "auth_expired";
   daemonId?: string;
 }
 
@@ -25,7 +32,11 @@ interface DaemonStatusLike {
  * within 75s.
  */
 function mergeDaemonStatus(rt: AgentRuntime, status: DaemonStatusLike): AgentRuntime {
-  if (status.state === "stopped" || status.state === "stopping") {
+  if (
+    status.state === "stopped" ||
+    status.state === "stopping" ||
+    status.state === "auth_expired"
+  ) {
     return { ...rt, status: "offline" };
   }
   if (status.state === "running") {

@@ -33,6 +33,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
@@ -95,9 +96,10 @@ export function TokensTab() {
 
   const handleCopyToken = async () => {
     if (!newToken) return;
-    await navigator.clipboard.writeText(newToken);
-    setTokenCopied(true);
-    setTimeout(() => setTokenCopied(false), 2000);
+    if (await copyText(newToken)) {
+      setTokenCopied(true);
+      setTimeout(() => setTokenCopied(false), 2000);
+    }
   };
 
   return (

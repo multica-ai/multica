@@ -38,7 +38,10 @@
   },
   "common": {
     "back": "返回",
-    "continue": "继续"
+    "continue": "继续",
+    "skip": "跳过",
+    "cancel": "取消",
+    "close": "关闭"
   },
   "questionnaire": {
     "eyebrow": "开始之前",
@@ -68,6 +71,58 @@
     "unlock_agents_title": "智能体抢跑",
     "unlock_agents_body": "连接一个运行时，按你的角色挑选模板 —— 顺手把第一个 task 也写好。",
     "learn_more": "了解智能体怎么工作 →"
+  },
+  "source_backfill": {
+    "eyebrow": "顺便问一句",
+    "lede": "我们注意到你之前没有勾选这一项——花一秒补一下，能帮我们更了解像你一样的用户。完成后立刻回到你正在做的事。",
+    "submit": "提交",
+    "hint_ready": "看起来不错，准备好就点提交。"
+  },
+  "questions": {
+    "eyebrow_about_you": "关于你",
+    "source": {
+      "question": "你是从哪里了解到 Multica 的？",
+      "friends_colleagues": "朋友或同事",
+      "search": "Google / 搜索",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_github": "GitHub",
+      "social_misc": "其他社区",
+      "blog_newsletter": "博客 / Newsletter",
+      "ai_assistant": "ChatGPT / Claude / Cursor 推荐",
+      "from_work": "工作场景接触到",
+      "event_conference": "线下活动 / Meetup",
+      "dont_remember": "想不起来了",
+      "other": "其他",
+      "other_placeholder": "例如：一档播客"
+    },
+    "role": {
+      "question": "你是什么角色？",
+      "engineer": "工程师 / 开发者",
+      "product": "产品经理",
+      "designer": "设计师",
+      "founder": "创始人 / 高管",
+      "marketing": "市场 / 增长",
+      "writer": "写作 / 内容",
+      "research": "研究员 / 分析师",
+      "ops": "运营 / 项目管理",
+      "student": "学生 / 个人使用",
+      "other": "其他",
+      "other_placeholder": "例如：教师、支持负责人"
+    },
+    "use_case": {
+      "question": "你打算用 Multica 做什么？",
+      "ship_code": "让 AI agent 帮我写代码",
+      "manage_team": "给团队做任务管理",
+      "personal_tasks": "管理我自己的任务",
+      "plan_research": "计划、头脑风暴、调研",
+      "write_publish": "写作、编辑、发布",
+      "automate_ops": "自动化日常运营",
+      "evaluate": "先逛逛看看",
+      "other": "其他",
+      "other_placeholder": "例如：协调学习小组"
+    }
   },
   "option_card": {
     "other_label": "其他",
@@ -325,7 +380,12 @@
     "hint_pick": "在上方选一个运行时继续。",
     "hint_waiting": "等待第一个结果...",
     "hint_waitlist_done": "已在候补名单 —— 跳过即可继续探索。",
-    "hint_skip_or_waitlist": "跳过进入工作区，或在上方加入云候补。"
+    "hint_skip_or_waitlist": "跳过进入工作区，或在上方加入云候补。",
+    "runtime_count_one": "{{count}} runtime",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "hint_skip_or_refresh": "Refresh after installing one, or skip to enter your workspace.",
+    "start_exploring": "Start exploring"
   },
   "step_platform": {
     "eyebrow": "第 3 步 · 运行时",
@@ -360,7 +420,8 @@
     "stage_slow_suffix": " 的终端是否有错误。",
     "stage_stalled_prefix": "还没有任何信号传来。如果你不太习惯终端，",
     "stage_stalled_term": "桌面端",
-    "stage_stalled_suffix": " 更顺手 —— 它内置守护进程。关闭这个对话框选择桌面端，或点跳过继续。"
+    "stage_stalled_suffix": " 更顺手 —— 它内置守护进程。关闭这个对话框选择桌面端，或点跳过继续。",
+    "runtimes_connected_one": "{{count}} runtime connected"
   },
   "step_teammate": {
     "eyebrow": "第一个队友",
@@ -378,5 +439,9 @@
   },
   "errors": {
     "skip_failed": "完成上手引导失败"
+  },
+  "step_question": {
+    "hint_pick": "Pick one to continue — or skip if you'd rather not say.",
+    "hint_continue": "Looks good. Hit Continue when you're ready."
   }
 }

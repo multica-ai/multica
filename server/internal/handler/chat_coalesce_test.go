@@ -325,9 +325,9 @@ func TestClaimTask_PopulatesBackwardsCompatChatMessage(t *testing.T) {
 	if len(resp.Task.ChatMessages) != 2 {
 		t.Fatalf("ChatMessages: expected 2 entries, got %d", len(resp.Task.ChatMessages))
 	}
-	if resp.Task.ChatMessage != "second message" {
-		t.Fatalf("ChatMessage backwards-compat field: expected %q (latest user msg), got %q",
-			"second message", resp.Task.ChatMessage)
+	if resp.Task.ChatMessage != "first message\n\nsecond message" {
+		t.Fatalf("ChatMessage backwards-compat field: expected all unanswered msgs joined, got %q",
+			resp.Task.ChatMessage)
 	}
 	if len(resp.Task.ChatHistory) != 2 {
 		t.Fatalf("ChatHistory: expected 2 entries, got %d", len(resp.Task.ChatHistory))

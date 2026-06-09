@@ -229,22 +229,22 @@ INSERT INTO issue (
 `
 
 type CreateIssueParams struct {
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        string             `json:"status"`
-	Priority      string             `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	CreatorType   string             `json:"creator_type"`
-	CreatorID     pgtype.UUID        `json:"creator_id"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	Number        int32              `json:"number"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
-	Kind          pgtype.Text        `json:"kind"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Title         string      `json:"title"`
+	Description   pgtype.Text `json:"description"`
+	Status        string      `json:"status"`
+	Priority      string      `json:"priority"`
+	AssigneeType  pgtype.Text `json:"assignee_type"`
+	AssigneeID    pgtype.UUID `json:"assignee_id"`
+	CreatorType   string      `json:"creator_type"`
+	CreatorID     pgtype.UUID `json:"creator_id"`
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	Position      float64     `json:"position"`
+	StartDate     pgtype.Date `json:"start_date"`
+	DueDate       pgtype.Date `json:"due_date"`
+	Number        int32       `json:"number"`
+	ProjectID     pgtype.UUID `json:"project_id"`
+	Kind          pgtype.Text `json:"kind"`
 }
 
 func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
@@ -314,25 +314,25 @@ INSERT INTO issue (
 `
 
 type CreateIssueWithOriginParams struct {
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        string             `json:"status"`
-	Priority      string             `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	CreatorType   string             `json:"creator_type"`
-	CreatorID     pgtype.UUID        `json:"creator_id"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	Number        int32              `json:"number"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
-	OriginType    pgtype.Text        `json:"origin_type"`
-	OriginID      pgtype.UUID        `json:"origin_id"`
-	Kind          pgtype.Text        `json:"kind"`
-	IsPrivate     pgtype.Bool        `json:"is_private"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Title         string      `json:"title"`
+	Description   pgtype.Text `json:"description"`
+	Status        string      `json:"status"`
+	Priority      string      `json:"priority"`
+	AssigneeType  pgtype.Text `json:"assignee_type"`
+	AssigneeID    pgtype.UUID `json:"assignee_id"`
+	CreatorType   string      `json:"creator_type"`
+	CreatorID     pgtype.UUID `json:"creator_id"`
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	Position      float64     `json:"position"`
+	StartDate     pgtype.Date `json:"start_date"`
+	DueDate       pgtype.Date `json:"due_date"`
+	Number        int32       `json:"number"`
+	ProjectID     pgtype.UUID `json:"project_id"`
+	OriginType    pgtype.Text `json:"origin_type"`
+	OriginID      pgtype.UUID `json:"origin_id"`
+	Kind          pgtype.Text `json:"kind"`
+	IsPrivate     pgtype.Bool `json:"is_private"`
 }
 
 // CEREBRO-PATCH(create-issue-origin-private): autopilot-created issues can inherit privacy from the source autopilot (JEH-1749).
@@ -951,8 +951,8 @@ type ListIssuesRow struct {
 	CreatorID     pgtype.UUID        `json:"creator_id"`
 	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
 	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
+	StartDate     pgtype.Date        `json:"start_date"`
+	DueDate       pgtype.Date        `json:"due_date"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	Number        int32              `json:"number"`
@@ -1116,8 +1116,8 @@ type ListOpenIssuesRow struct {
 	CreatorID     pgtype.UUID        `json:"creator_id"`
 	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
 	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
+	StartDate     pgtype.Date        `json:"start_date"`
+	DueDate       pgtype.Date        `json:"due_date"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	Number        int32              `json:"number"`
@@ -1300,19 +1300,19 @@ RETURNING id, workspace_id, title, description, status, priority, assignee_type,
 `
 
 type UpdateIssueParams struct {
-	ID            pgtype.UUID        `json:"id"`
-	Title         pgtype.Text        `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        pgtype.Text        `json:"status"`
-	Priority      pgtype.Text        `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	Position      pgtype.Float8      `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
-	IsPrivate     pgtype.Bool        `json:"is_private"`
+	ID            pgtype.UUID   `json:"id"`
+	Title         pgtype.Text   `json:"title"`
+	Description   pgtype.Text   `json:"description"`
+	Status        pgtype.Text   `json:"status"`
+	Priority      pgtype.Text   `json:"priority"`
+	AssigneeType  pgtype.Text   `json:"assignee_type"`
+	AssigneeID    pgtype.UUID   `json:"assignee_id"`
+	Position      pgtype.Float8 `json:"position"`
+	StartDate     pgtype.Date   `json:"start_date"`
+	DueDate       pgtype.Date   `json:"due_date"`
+	ParentIssueID pgtype.UUID   `json:"parent_issue_id"`
+	ProjectID     pgtype.UUID   `json:"project_id"`
+	IsPrivate     pgtype.Bool   `json:"is_private"`
 }
 
 func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue, error) {

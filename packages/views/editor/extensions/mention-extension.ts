@@ -5,8 +5,8 @@ import { MentionView } from "./mention-view";
 
 // CEREBRO-PATCH(skill-mention-prefix): the `skill` mention type renders bare
 // (like `issue`) so the chip displays a skill name without an `@`. Member /
-// agent / all keep the `@` prefix.
-const NO_AT_PREFIX_TYPES = new Set(["issue", "skill"]);
+// agent / all keep the `@` prefix. Project also renders bare.
+const NO_AT_PREFIX_TYPES = new Set(["issue", "project", "skill"]);
 
 export const BaseMentionExtension = Mention.extend({
   addNodeView() {

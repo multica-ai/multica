@@ -18,6 +18,7 @@
 import { useState } from "react";
 import { Check, Code as CodeIcon, Copy, Eye } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
 import { CodeBlockIframe } from "./code-block-iframe";
 import { CodeBlockStatic } from "./code-block-static";
@@ -40,13 +41,9 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
 
   const handleCopy = async () => {
     if (!html) return;
-    try {
-      await navigator.clipboard.writeText(html);
+    if (await copyText(html)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard failures are user-recoverable (click again, or copy
-      // manually from the source view) — no need for a toast here.
     }
   };
 

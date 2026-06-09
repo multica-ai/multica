@@ -257,6 +257,11 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"codex", "minimal", true},
 		{"codex", "xhigh", true},
 		{"codex", "max", false}, // Claude-only token rejected for Codex
+		{"opencode", "", true},
+		{"opencode", "max", true},
+		{"opencode", "fast-mode", true},  // custom opencode.json variant names are valid
+		{"opencode", ".hidden", false},   // reject suspicious / malformed names server-side
+		{"opencode", "bad value", false}, // spaces are not valid variant names
 		{"hermes", "", true},
 		{"hermes", "low", false}, // hermes has no thinking concept
 	}
@@ -368,6 +373,59 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 	if ok {
 		t.Errorf("unknown model must fail closed; got true")
+	}
+}
+
+func TestValidateThinkingLevel_OpenCodeEmptyModelUsesAdvertisedVariants(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	modelCacheMu.Lock()
+	delete(modelCache, "opencode")
+	modelCacheMu.Unlock()
+	defer func() {
+		modelCacheMu.Lock()
+		delete(modelCache, "opencode")
+		modelCacheMu.Unlock()
+	}()
+
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "opencode")
+	script := `#!/bin/sh
+if [ "$1" = "models" ]; then
+  cat <<'EOF'
+opencode/deepseek-v4
+{
+  "id": "deepseek-v4",
+  "reasoning": true,
+  "variants": {
+    "high": {},
+    "max": {}
+  }
+}
+EOF
+  exit 0
+fi
+echo "opencode 9.9.9"
+`
+	writeTestExecutable(t, fake, []byte(script))
+
+	ctx := context.Background()
+	ok, err := ValidateThinkingLevel(ctx, "opencode", fake, "", "max")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected empty-model opencode max to pass when any advertised model supports it")
+	}
+
+	ok, err = ValidateThinkingLevel(ctx, "opencode", fake, "", "xhigh")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ok {
+		t.Fatalf("xhigh should fail when no advertised OpenCode model exposes it")
 	}
 }
 
@@ -650,4 +708,3 @@ func argIndexOf(slice []string, target string) int {
 	}
 	return -1
 }
-

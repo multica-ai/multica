@@ -48,7 +48,9 @@
     "squads_group": "小队",
     "issue_count_other": "{{count}} 个 issue",
     "reset": "重置全部筛选",
-    "active_count_other": "{{count}} 个筛选"
+    "active_count_other": "{{count}} 个筛选",
+    "issue_count_one": "{{count}} issue",
+    "active_count_one": "{{count}} filter"
   },
   "display": {
     "tooltip": "显示设置",
@@ -116,7 +118,9 @@
         "title": "没有已创建的 issue",
         "description": "由这里创建的 issue 会显示在此视图中。"
       }
-    }
+    },
+    "search_placeholder": "Search issues...",
+    "search_empty": "No issues match your search."
   },
   "list": {
     "empty_status": "无 issue",
@@ -297,7 +301,9 @@
       "bar_other": "来自 {{authors}} 的 {{count}} 条已解决评论",
       "bar_authors_more_other": "{{names}} 等 {{count}} 人",
       "resolve_failed": "标记已解决失败",
-      "unresolve_failed": "重新打开失败"
+      "unresolve_failed": "重新打开失败",
+      "bar_one": "{{count}} resolved comment from {{authors}}",
+      "bar_authors_more_one": "{{names}} and {{count}} other"
     },
     "_move_to_subissue": "CEREBRO-PATCH(i18n-comment-move-subissue): JEH-1309 move comment thread to sub-issue UI",
     "move": {
@@ -319,7 +325,8 @@
       "moving_action": "正在移动...",
       "success_toast": "已移到新线程",
       "failed_toast": "移动评论失败"
-    }
+    },
+    "reply_count_one": "{{count}} reply"
   },
   "reply": {
     "placeholder": "回复...",
@@ -345,7 +352,8 @@
     "status_queued": "排队中",
     "chip_label": "工作中",
     "empty_hover": "当前没有智能体在工作",
-    "filter_active_label": "正在查看工作中的智能体"
+    "filter_active_label": "正在查看工作中的智能体",
+    "hover_header_one": "{{count}} agent working"
   },
   "agent_live": {
     "is_working": "{{name}} 正在处理",
@@ -359,7 +367,8 @@
     "transcript_button": "查看记录",
     "stop_button": "停止",
     "stop_tooltip": "停止智能体",
-    "cancel_failed": "取消 task 失败"
+    "cancel_failed": "取消 task 失败",
+    "tool_count_one": "{{count}} tool"
   },
   "execution_log": {
     "section": "执行日志",
@@ -409,7 +418,11 @@
     "delete_dialog_title_other": "删除 {{count}} 个 issue？",
     "delete_dialog_desc_other": "此操作无法撤销，所选 issue 及其全部关联数据都会被永久删除。",
     "delete_dialog_warning": "任何工作区成员都可以删除 issue。",
-    "cancel": "取消"
+    "cancel": "取消",
+    "update_success_one": "Updated {{count}} issue",
+    "delete_success_one": "Deleted {{count}} issue",
+    "delete_dialog_title_one": "Delete {{count}} issue?",
+    "delete_dialog_desc_one": "This action cannot be undone. This will permanently delete the selected issue and all associated data."
   },
   "card": {
     "update_failed": "更新 issue 失败",

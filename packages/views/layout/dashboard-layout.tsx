@@ -5,6 +5,7 @@
 import type { ReactNode } from "react";
 import { SidebarProvider, SidebarInset } from "@multica/ui/components/ui/sidebar";
 import { ModalRegistry } from "../modals/registry";
+import { SourceBackfillModal } from "../onboarding";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
 import { useAppBadgeSync } from "../inbox/use-app-badge";
@@ -46,6 +47,7 @@ export function DashboardLayout({
           <NavigationProgress />
           {children}
           <ModalRegistry />
+          <SourceBackfillModal />
           {extra}
         </SidebarInset>
       </SidebarProvider>

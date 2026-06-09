@@ -17,6 +17,7 @@ import type {
   IssueStatus,
   IssuePriority,
 } from "@multica/core/types";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { Text } from "@/components/ui/text";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { PriorityIcon } from "@/components/ui/priority-icon";
@@ -79,12 +80,9 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   manually_added: "Added to inbox", // CEREBRO-PATCH(cerebro-inbox-add-issue): label for manually added inbox items.
 };
 
+// due_date is a calendar day — format timezone-safely (no offset day shift).
 function shortDate(dateStr: string): string {
-  if (!dateStr) return "";
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(dateStr, { month: "short", day: "numeric" }, "en-US");
 }
 
 function singleLine(value: string | null | undefined): string {

@@ -18,6 +18,7 @@
     "./lib/utils": "./lib/utils.ts",
     "./lib/data-table": "./lib/data-table.ts",
     "./lib/code-style": "./lib/code-style.ts",
+    "./lib/clipboard": "./lib/clipboard.ts",
     "./i18n-types": "./types/i18next.ts",
     "./styles/tokens.css": "./styles/tokens.css",
     "./styles/base.css": "./styles/base.css"

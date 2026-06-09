@@ -282,7 +282,11 @@
     "row_actions_aria": "Row actions",
     "delete_action": "Delete",
     "delete_permission_hint": "Only the runtime owner and workspace admins can delete this runtime",
-    "delete_admin_hint": "Only the runtime owner and workspace admins can delete a runtime."
+    "delete_admin_hint": "Only the runtime owner and workspace admins can delete a runtime.",
+    "col_cli": "CLI",
+    "cli_managed_badge": "Desktop",
+    "cli_update_available_aria": "Update available",
+    "cli_update_available_tooltip": "Update available: {{version}}"
   },
   "usage": {
     "period_label": "Period",
@@ -339,6 +343,8 @@
     "table_output": "Output",
     "table_cache_r": "Cache R",
     "table_cache_w": "Cache W",
-    "no_data": "No usage data yet"
+    "no_data": "No usage data yet",
+    "dimension_label": "Dimension",
+    "when_tab_weekly": "Weekly"
   }
 }

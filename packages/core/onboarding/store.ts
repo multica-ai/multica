@@ -19,10 +19,15 @@ export async function saveQuestionnaire(
   const user = await api.patchOnboarding({ questionnaire: answers });
   useAuthStore.getState().setUser(user);
   // Mirror the three cohort signals into person properties so every
-  // PostHog event on this user can be broken down by role / use_case /
-  // team_size without re-joining the DB. Matches the $set block the
-  // server writes alongside `onboarding_questionnaire_submitted`.
-  if (answers.team_size || answers.role || answers.use_case) {
+  // PostHog event on this user can be broken down by source / role /
+  // use_case without re-joining the DB. `source` is single-select but
+  // shipped as a one-element array for v2 back-compat with the JSONB
+  // column; `use_case` is multi-select. PostHog accepts array property
+  // values, and breakdowns split each element into its own group — so
+  // single-element source still slices cleanly.
+  const sourceList = answers.source ?? [];
+  const useCaseList = answers.use_case ?? [];
+  if (sourceList.length > 0 || answers.role || useCaseList.length > 0) {
     setPersonProperties({
       ...(answers.team_size ? { team_size: answers.team_size } : {}),
       ...(answers.role ? { role: answers.role } : {}),

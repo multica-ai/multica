@@ -193,6 +193,10 @@ export function WorkspaceTab() {
   const isSoleOwner = isOwner && ownerCount <= 1;
   const isSoleMember = members.length <= 1;
 
+  // Reset form state only when the user switches to a different workspace.
+  // Keying on workspace?.id (not the object ref) avoids wiping unsaved edits
+  // when an unrelated mutation — e.g. avatar/logo upload — replaces the
+  // cached Workspace object via setQueryData.
   useEffect(() => {
     setName(workspace?.name ?? "");
     setDescription(workspace?.description ?? "");
@@ -208,6 +212,7 @@ export function WorkspaceTab() {
     // CEREBRO-PATCH(workspace-logo-uploader): FIR-2580 — key the form-reset on the
     // workspace identity, not the whole object. A logo upload mutates the cached
     // workspace (new reference) and would otherwise wipe unsaved name/description edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
 
   // Letters + digits only, uppercase, capped at 10 chars. The backend
@@ -260,6 +265,8 @@ export function WorkspaceTab() {
     }
     void performSave(false);
   };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSaveWorkflowSettings = async () => {
     if (!workspace) return;
@@ -361,6 +368,27 @@ export function WorkspaceTab() {
     }
   }, [googleServiceAccountJson, t]);
 
+  const { upload, uploading } = useFileUpload(api);
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!workspace) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so the same file can be re-selected
+    e.target.value = "";
+    try {
+      const result = await upload(file);
+      if (!result) return;
+      const updated = await api.updateWorkspace(workspace.id, { avatar_url: result.link });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      toast.success(t(($) => $.workspace.toast_logo_updated));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.workspace.toast_logo_failed));
+    }
+  };
+
   const handleLeaveWorkspace = () => {
     if (!workspace) return;
     setConfirmAction({
@@ -401,6 +429,8 @@ export function WorkspaceTab() {
 
   if (!workspace) return null;
 
+  const logoUrl = resolvePublicFileUrl(workspace.avatar_url);
+
   return (
     <div className="space-y-8">
       {/* Workspace settings */}
@@ -412,6 +442,48 @@ export function WorkspaceTab() {
             {/* CEREBRO-PATCH(workspace-logo-uploader): FIR-2580 — logo uploader at the top of General; owner/admin only. */}
             {logoEnabled && canManageWorkspace && (
               <WorkspaceLogoUploader workspace={workspace} canManage={canManageWorkspace} />
+            )}
+            {!logoEnabled && (
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-md bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading || !canManageWorkspace}
+                  aria-label={t(($) => $.workspace.change_logo_aria)}
+                >
+                  {logoUrl ? (
+                    <img
+                      src={logoUrl}
+                      alt={workspace.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-muted-foreground">
+                      {workspace.name.charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                  {canManageWorkspace && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                      {uploading ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-white" />
+                      ) : (
+                        <Camera className="h-5 w-5 text-white" />
+                      )}
+                    </div>
+                  )}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={handleLogoUpload}
+                />
+                <div className="text-xs text-muted-foreground">
+                  {t(($) => $.workspace.click_logo_hint)}
+                </div>
+              </div>
             )}
             <div>
               <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.name_label)}</Label>

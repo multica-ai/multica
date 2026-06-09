@@ -59,6 +59,9 @@ export interface Issue {
   project_id: string | null;
   position: number;
   metadata?: Record<string, unknown>;
+  // Calendar days as date-only "YYYY-MM-DD" (no time, no timezone). Use the
+  // helpers in @multica/core/issues/date to format/compare — never `new Date()`
+  // + local formatting, which shifts the day by the viewer's offset.
   start_date: string | null;
   due_date: string | null;
   is_private?: boolean;

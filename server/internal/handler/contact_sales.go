@@ -12,6 +12,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -26,13 +27,13 @@ import (
 // request body itself is bounded so an attacker can't POST megabytes of
 // junk into the JSONB-free TEXT columns.
 const (
-	contactSalesMaxFirstName    = 80
-	contactSalesMaxLastName     = 80
-	contactSalesMaxEmail        = 254
-	contactSalesMaxCompanyName  = 200
-	contactSalesMaxGoals        = 2000
-	contactSalesHourlyEmailCap  = 3
-	contactSalesBodyLimit       = 16 * 1024
+	contactSalesMaxFirstName   = 80
+	contactSalesMaxLastName    = 80
+	contactSalesMaxEmail       = 254
+	contactSalesMaxCompanyName = 200
+	contactSalesMaxGoals       = 2000
+	contactSalesHourlyEmailCap = 3
+	contactSalesBodyLimit      = 16 * 1024
 )
 
 // contactSalesAllowedCompanySize is the closed enum the frontend dropdown
@@ -92,14 +93,21 @@ var freeEmailDomains = map[string]struct{}{
 }
 
 type CreateContactSalesRequest struct {
-	FirstName       string `json:"first_name"`
-	LastName        string `json:"last_name"`
-	BusinessEmail   string `json:"business_email"`
-	CompanyName     string `json:"company_name"`
-	CompanySize     string `json:"company_size"`
-	CountryRegion   string `json:"country_region"`
-	UseCase         string `json:"use_case"`
-	Goals           string `json:"goals"`
+	FirstName     string `json:"first_name"`
+	LastName      string `json:"last_name"`
+	BusinessEmail string `json:"business_email"`
+	CompanyName   string `json:"company_name"`
+	CompanySize   string `json:"company_size"`
+	CountryRegion string `json:"country_region"`
+	UseCase       string `json:"use_case"`
+	Goals         string `json:"goals"`
+	// Source identifies where the form was opened from. Frontend
+	// enumerates {page, onboarding, agents_page}; the metric label
+	// `multica_contact_sales_submitted_total{source=...}` reads it
+	// via the metrics.NormalizeContactSalesSource allow-list, anything
+	// else collapses to "other". Empty falls back to "page" so legacy
+	// clients that don't send the field don't blackhole the metric.
+	Source          string `json:"source"`
 	ConsentOutreach bool   `json:"consent_outreach"`
 	ConsentUpdates  bool   `json:"consent_updates"`
 }
@@ -219,11 +227,17 @@ func (h *Handler) CreateContactSales(w http.ResponseWriter, r *http.Request) {
 			"use_case", useCase,
 		)...)
 
-	h.Analytics.Capture(analytics.ContactSalesSubmitted(
+	formSource := strings.TrimSpace(req.Source)
+	if formSource == "" {
+		formSource = "page"
+	}
+
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.ContactSalesSubmitted(
 		inquiryID,
 		companySize,
 		countryRegion,
 		useCase,
+		formSource,
 		goals != "",
 	))
 

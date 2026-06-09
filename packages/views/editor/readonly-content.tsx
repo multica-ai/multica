@@ -46,12 +46,20 @@ import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { IssueChip } from "../issues/components/issue-chip";
 import { ImageLightbox } from "./extensions/image-view";
+import { ProjectChip } from "../projects/components/project-chip";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
+import { HtmlBlockPreview } from "./html-block-preview";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
+
+// Match the exact language token to decide whether the `pre` wrapper should
+// be dropped. Using exact token matching (not substring includes) prevents
+// false positives on adjacent languages like `language-htmlbars`.
+const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
 
 // ---------------------------------------------------------------------------
 // Lowlight — same engine + language set as Tiptap's CodeBlockLowlight
@@ -65,10 +73,13 @@ const lowlight = createLowlight(common);
 
 const sanitizeSchema = {
   ...defaultSchema,
-  tagNames: [...(defaultSchema.tagNames ?? []), "input"], // CEREBRO-PATCH(todo-list-editor): allow readonly checkbox markup from GFM task lists.
+  // CEREBRO-PATCH(todo-list-editor): allow readonly checkbox markup from GFM task lists.
+  // Allow <mark> (text highlight) — emitted by highlightToHtml from `==text==`.
+  // It carries no attributes, so only the tag name needs whitelisting.
+  tagNames: [...(defaultSchema.tagNames ?? []), "input", "mark"],
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "mention"],
+    href: [...(defaultSchema.protocols?.href ?? []), "mention", "slash"],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -112,6 +123,7 @@ const sanitizeSchema = {
 
 function urlTransform(url: string): string {
   if (url.startsWith("mention://")) return url;
+  if (url.startsWith("slash://skill/")) return url;
   return defaultUrlTransform(url);
 }
 
@@ -168,6 +180,30 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
   );
 }
 
+function ProjectMentionLink({ projectId, label }: { projectId: string; label?: string }) {
+  const { push, openInNewTab } = useNavigation();
+  const p = useWorkspacePaths();
+  const path = p.projectDetail(projectId);
+  return (
+    <span
+      className="inline align-middle"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          if (openInNewTab) {
+            openInNewTab(path, label);
+          }
+          return;
+        }
+        push(path);
+      }}
+    >
+      <ProjectChip projectId={projectId} fallbackLabel={label} className="cursor-pointer hover:bg-accent transition-colors" />
+    </span>
+  );
+}
+
 // Named component so it can call useWorkspaceSlug() — arrow function inlined
 // inside `components` below would still work, but extracting it keeps the
 // hook usage explicit and avoids hook-in-object-literal surprises.
@@ -180,10 +216,14 @@ function ReadonlyLink({
 }) {
   const slug = useWorkspaceSlug();
 
+  if (href?.startsWith("slash://skill/")) {
+    return <span className="slash-command">{children}</span>;
+  }
+
   if (isMentionHref(href)) {
     // CEREBRO-PATCH(skill-mention-readonly-route): `skill` joins the mention regex
     // and routes to SkillMentionChip; member/agent/all keep their plain @-text render.
-    const match = href.match(/^mention:\/\/(member|agent|issue|all|skill)\/(.+)$/);
+    const match = href.match(/^mention:\/\/(member|agent|issue|project|all|skill)\/(.+)$/);
     if (match?.[1] === "skill" && match[2]) {
       const label =
         typeof children === "string"
@@ -201,6 +241,15 @@ function ReadonlyLink({
             ? children.join("")
             : undefined;
       return <IssueMentionLink issueId={match[2]} label={label} />;
+    }
+    if (match?.[1] === "project" && match[2]) {
+      const label =
+        typeof children === "string"
+          ? children
+          : Array.isArray(children)
+            ? children.join("")
+            : undefined;
+      return <ProjectMentionLink projectId={match[2]} label={label} />;
     }
     // Member / agent / all mentions
     return <span className="mention">{children}</span>;
@@ -364,6 +413,13 @@ const components: Partial<Components> = {
     if (isBlock && lang === "mermaid") {
       return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
     }
+    if (isBlock && lang === "html") {
+      // Like Mermaid, return the React element directly here and rely on
+      // the `pre` renderer below to unwrap it — react-markdown otherwise
+      // wraps `code` children in a `<pre>` whose monospace + overflow
+      // styles would clamp the preview iframe.
+      return <HtmlBlockPreview html={String(children).replace(/\n$/, "")} />;
+    }
 
     if (!isBlock && !lang) {
       // Inline code — CSS handles styling via .rich-text-editor code
@@ -399,10 +455,15 @@ const components: Partial<Components> = {
     );
   },
 
-  // Pre — pass through (CSS handles styling via .rich-text-editor pre)
+  // Pre — pass through (CSS handles styling via .rich-text-editor pre).
+  // react-markdown calls `pre` BEFORE the `code` renderer runs, so `children`
+  // is the raw `<code>` AST element. Identify blocks to unwrap by className.
   pre: ({ children }) => {
-    if (isValidElement(children) && children.type === MermaidDiagram) {
-      return <>{children}</>;
+    if (isValidElement(children)) {
+      const childProps = children.props as { className?: string };
+      if (PRE_UNWRAP_RE.test(childProps.className ?? "")) {
+        return <>{children}</>;
+      }
     }
     return <pre>{children}</pre>;
   },
@@ -441,7 +502,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
     return map;
   }, [attachments]);
   const processed = useMemo(
-    () => preprocessMarkdown(content, attachmentsByUrl),
+    () => highlightToHtml(preprocessMarkdown(content, attachmentsByUrl)),
     [content, attachmentsByUrl],
   );
   const wrapperRef = useRef<HTMLDivElement>(null);

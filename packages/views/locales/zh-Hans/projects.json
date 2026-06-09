@@ -3,7 +3,11 @@
     "title": "项目",
     "new_project": "新建项目",
     "empty": "还没有项目",
-    "create_first": "创建第一个项目"
+    "create_first": "创建第一个项目",
+    "view_compact": "Compact",
+    "view_comfortable": "Comfortable",
+    "search_placeholder": "Search projects...",
+    "no_search_results": "No results match your search"
   },
   "table": {
     "name": "名称",
@@ -59,7 +63,8 @@
     "empty_issues_new_button": "新建 issue",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
-    "toast_move_issue_failed": "移动 issue 失败"
+    "toast_move_issue_failed": "移动 issue 失败",
+    "no_issues_yet": "No issues yet"
   },
   "resources": {
     "section_header": "资源",

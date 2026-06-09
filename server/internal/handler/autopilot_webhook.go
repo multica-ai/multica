@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -852,6 +853,7 @@ func (h *Handler) finaliseDeliveryTerminal(
 			"error", err,
 		)
 	}
+	h.Metrics.RecordWebhookDelivery(h.deliveryProvider(r.Context(), id), status)
 }
 
 // finaliseDeliveryWithRun records a delivery that produced (or was admission-
@@ -879,6 +881,23 @@ func (h *Handler) finaliseDeliveryWithRun(
 			"error", err,
 		)
 	}
+	h.Metrics.RecordWebhookDelivery(h.deliveryProvider(r.Context(), id), status)
+}
+
+// deliveryProvider best-effort reads the provider for a delivery id so the
+// webhook delivery metric carries useful provenance. On lookup failure we
+// fall back to "generic" — the metric must always be incremented exactly
+// once per finalise call so the dashboard counts line up with autopilot_run
+// volume.
+func (h *Handler) deliveryProvider(ctx context.Context, id pgtype.UUID) string {
+	if h.Queries == nil {
+		return "generic"
+	}
+	row, err := h.Queries.GetWebhookDelivery(ctx, id)
+	if err != nil || row.Provider == "" {
+		return "generic"
+	}
+	return row.Provider
 }
 
 // ── Rate-limit / IP plumbing ────────────────────────────────────────────────

@@ -3,6 +3,7 @@
 // cerebro pause state surfaces on agent presence dots and filters.
 import {
   AlertCircle,
+  Archive,
   CircleDot,
   CircleSlash,
   Clock,
@@ -73,6 +74,15 @@ export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> =
     dotClass: "bg-muted-foreground/40",
     textClass: "text-muted-foreground",
     icon: CircleSlash,
+  },
+  // Lifecycle state, not a runtime state — a retired agent. Gray like
+  // offline (it can't take work) but labelled distinctly so the user reads
+  // "this agent is archived", not "temporarily unreachable".
+  archived: {
+    label: "Archived",
+    dotClass: "bg-muted-foreground/40",
+    textClass: "text-muted-foreground",
+    icon: Archive,
   },
 };
 

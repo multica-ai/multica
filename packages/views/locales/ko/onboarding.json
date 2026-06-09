@@ -38,7 +38,10 @@
   },
   "common": {
     "back": "뒤로",
-    "continue": "계속"
+    "continue": "계속",
+    "skip": "건너뛰기",
+    "cancel": "취소",
+    "close": "닫기"
   },
   "questionnaire": {
     "eyebrow": "Before we start",
@@ -68,6 +71,58 @@
     "unlock_agents_title": "A head start with agents",
     "unlock_agents_body": "Connect a runtime and we'll pick a template for your role — plus write its first task.",
     "learn_more": "Learn how agents work →"
+  },
+  "source_backfill": {
+    "eyebrow": "간단한 질문 하나",
+    "lede": "가입할 때 선택하지 않으셨더라고요. 어떤 사용자에게 Multica가 유용한지 파악하는 데 도움이 됩니다. 답하시면 바로 작업으로 돌아가실 수 있어요.",
+    "submit": "제출",
+    "hint_ready": "좋습니다. 준비되면 제출을 눌러주세요."
+  },
+  "questions": {
+    "eyebrow_about_you": "내 정보",
+    "source": {
+      "question": "Multica를 어디서 알게 되셨나요?",
+      "friends_colleagues": "친구 또는 동료",
+      "search": "Google / 검색",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_github": "GitHub",
+      "social_misc": "기타 소셜",
+      "blog_newsletter": "블로그 / 뉴스레터",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "직장에서",
+      "event_conference": "컨퍼런스 / 밋업",
+      "dont_remember": "기억나지 않음",
+      "other": "기타",
+      "other_placeholder": "예: 자주 듣는 팟캐스트"
+    },
+    "role": {
+      "question": "어떤 역할에 가장 가까우신가요?",
+      "engineer": "엔지니어 / 개발자",
+      "product": "프로덕트 매니저",
+      "designer": "디자이너",
+      "founder": "창업자 / 임원",
+      "marketing": "마케팅 / 그로스",
+      "writer": "작가 / 콘텐츠",
+      "research": "리서처 / 애널리스트",
+      "ops": "운영 / 프로젝트 관리",
+      "student": "학생 / 개인 사용",
+      "other": "기타",
+      "other_placeholder": "예: 교사, 지원팀 리드"
+    },
+    "use_case": {
+      "question": "Multica를 무엇에 쓰고 싶으신가요?",
+      "ship_code": "AI 에이전트와 코드 배포",
+      "manage_team": "팀 작업 관리",
+      "personal_tasks": "개인 작업 정리",
+      "plan_research": "기획, 브레인스토밍, 리서치",
+      "write_publish": "작성, 편집, 게시",
+      "automate_ops": "운영 및 워크플로 자동화",
+      "evaluate": "일단 둘러보기",
+      "other": "기타",
+      "other_placeholder": "예: 스터디 그룹 운영"
+    }
   },
   "option_card": {
     "other_label": "기타",
@@ -325,7 +380,12 @@
     "hint_pick": "계속하려면 위에서 에이전트 런타임을 선택하세요.",
     "hint_waiting": "첫 결과를 기다리는 중...",
     "hint_waitlist_done": "You're on the waitlist — skip to keep exploring.",
-    "hint_skip_or_waitlist": "Skip to enter your workspace, or join the cloud waitlist above."
+    "hint_skip_or_waitlist": "Skip to enter your workspace, or join the cloud waitlist above.",
+    "runtime_count_one": "{{count}} runtime",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "hint_skip_or_refresh": "Refresh after installing one, or skip to enter your workspace.",
+    "start_exploring": "Start exploring"
   },
   "step_platform": {
     "eyebrow": "컴퓨터 연결",
@@ -360,7 +420,8 @@
     "stage_slow_suffix": "을(를) 실행한 터미널에서 오류가 있는지 확인하세요.",
     "stage_stalled_prefix": "아직 아무 것도 들어오지 않습니다. 터미널이 익숙하지 않다면 ",
     "stage_stalled_term": "데스크톱",
-    "stage_stalled_suffix": "이 더 부드러운 경로입니다. 한 번 클릭하면 이 컴퓨터가 연결됩니다. 이 대화상자를 닫고 데스크톱을 선택하거나, 건너뛰기를 눌러 계속하세요."
+    "stage_stalled_suffix": "이 더 부드러운 경로입니다. 한 번 클릭하면 이 컴퓨터가 연결됩니다. 이 대화상자를 닫고 데스크톱을 선택하거나, 건너뛰기를 눌러 계속하세요.",
+    "runtimes_connected_one": "{{count}} runtime connected"
   },
   "step_teammate": {
     "eyebrow": "First teammate",
@@ -378,5 +439,9 @@
   },
   "errors": {
     "skip_failed": "온보딩을 마치지 못했습니다"
+  },
+  "step_question": {
+    "hint_pick": "Pick one to continue — or skip if you'd rather not say.",
+    "hint_continue": "Looks good. Hit Continue when you're ready."
   }
 }

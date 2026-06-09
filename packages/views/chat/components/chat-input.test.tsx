@@ -77,6 +77,8 @@ vi.mock("../../editor", () => {
         defaultValue?: string;
         placeholder?: string;
         autoFocus?: boolean;
+        mentionMode?: string;
+        mentionContextItems?: unknown[];
       },
       ref: Ref<{
         getMarkdown: () => string;

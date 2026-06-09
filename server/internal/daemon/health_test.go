@@ -27,6 +27,7 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 		logger:     slog.Default(),
 	}
 	d.activeTasks.Store(3)
+	d.ready.Store(true) // preflight done -> status should be "running"
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -65,6 +66,42 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	}
 	if resp.ActiveTaskCount != 3 {
 		t.Errorf("ActiveTaskCount: got %d, want 3", resp.ActiveTaskCount)
+	}
+}
+
+// TestHealthHandlerReportsStartingUntilReady pins the liveness/readiness split:
+// the health server binds and answers before preflight finishes, but it must
+// report "starting" until d.ready is set, and only then "running". Otherwise a
+// slow or failing preflight would be misreported to `daemon start` (and the
+// desktop) as a fully started daemon.
+func TestHealthHandlerReportsStartingUntilReady(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{
+		cfg:        Config{CLIVersion: "v1.0.0"},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+	handler := d.healthHandler(time.Now())
+
+	readStatus := func() string {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		var resp HealthResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp.Status
+	}
+
+	if got := readStatus(); got != "starting" {
+		t.Fatalf("status before ready: got %q, want \"starting\"", got)
+	}
+
+	d.ready.Store(true)
+
+	if got := readStatus(); got != "running" {
+		t.Fatalf("status after ready: got %q, want \"running\"", got)
 	}
 }
 

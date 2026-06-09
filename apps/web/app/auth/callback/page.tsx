@@ -131,7 +131,10 @@ function CallbackContent() {
 
           // 3. Default: hand off to the resolver (onboarding for first-timers,
           //    first workspace for returning users, /workspaces/new for
-          //    onboarded users with zero workspaces).
+          //    onboarded users with zero workspaces). Source-attribution
+          //    backfill for onboarded users with no recorded source is
+          //    handled by `<SourceBackfillModal />` inside the dashboard
+          //    shell — not a route detour, so we route straight to dest.
           // CEREBRO-PATCH(jeh-1642-start-page): apply start page preference on login
           const defaultDest = resolvePostAuthDestination(wsList, onboarded);
           const firstWs = wsList[0];

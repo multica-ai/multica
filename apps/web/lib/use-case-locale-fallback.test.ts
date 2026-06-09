@@ -93,6 +93,31 @@ describe("use case source locale fallback", () => {
     ).toEqual(["localized", "english-only"]);
   });
 
+  it("maps the ja locale to the ja use-case lang and keeps the English fallback", () => {
+    const localizedPage = {
+      slugs: ["localized"],
+      data: { title: "ローカライズ済み" },
+    };
+    const englishOnly = {
+      slugs: ["english-only"],
+      data: { title: "English only" },
+    };
+
+    vi.mocked(useCasesSource.getPages).mockImplementation((lang?: string) => {
+      if (lang === "ja") {
+        return [localizedPage] as ReturnType<typeof useCasesSource.getPages>;
+      }
+      if (lang === "en") {
+        return [englishOnly] as ReturnType<typeof useCasesSource.getPages>;
+      }
+      return [] as ReturnType<typeof useCasesSource.getPages>;
+    });
+
+    expect(
+      getUseCasePagesForLocale("ja").map((page) => page.slugs.join("/")),
+    ).toEqual(["localized", "english-only"]);
+  });
+
   it("falls back to English-only detail pages in the production detail wrapper", () => {
     const localizedPage = {
       slugs: ["localized"],

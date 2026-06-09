@@ -123,6 +123,7 @@ There is currently no unarchive command; create a new squad if you need the rout
 | `multica squad delete <id>` | Archive (soft-delete) — transfers assigned issues to the leader |
 | `multica squad member list <id>` | List a squad's members |
 | `multica squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | Add a member (owner / admin) |
+| `multica squad member set-role <id> --member-id <uuid> --member-type agent\|member --role "..."` | Change a member's role without removing it |
 | `multica squad member remove <id> --member-id <uuid> --type agent\|member` | Remove a member (the leader cannot be removed — change leader first) |
 | `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Recorded by the leader agent at the end of every turn |
 

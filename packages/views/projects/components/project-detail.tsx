@@ -5,6 +5,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, ProjectTreeItem, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
@@ -26,7 +27,9 @@ import {
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER, PROJECT_COLORS, getProjectColor } from "@multica/core/projects/config";
@@ -40,6 +43,7 @@ import { CerebroStatusModelProvider, useStatusPresentation } from "@multica/cere
 import { ProjectDocuments } from "@multica/cerebro-artifacts/views/components";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
+import { filterRunningAssigneeGroups } from "./project-issue-filters";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
@@ -160,6 +164,16 @@ function ProjectIssuesContent({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const subIssueDisplay = useViewStore((s) => s.subIssueDisplay);
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of snapshot) {
+      if (task.status === "running" && task.issue_id) ids.add(task.issue_id);
+    }
+    return ids;
+  }, [snapshot]);
 
   // CEREBRO-PATCH(project-detail-sub-issues): hide child issues when not "standalone"
   const displayIssues = useMemo(() => {
@@ -168,8 +182,8 @@ function ProjectIssuesContent({
   }, [projectIssues, subIssueDisplay]);
 
   const issues = useMemo(
-    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
   );
   const doneColumnCount = useMemo(
     () => displayIssues.filter((issue) => issue.status === "done").length,
@@ -182,16 +196,21 @@ function ProjectIssuesContent({
 
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+  );
+
+  const filteredAssigneeGroups = useMemo(
+    () => filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
+    [assigneeGroups, agentRunningFilter, runningIssueIds],
   );
 
   // Build children-by-parent map for inline nesting in "on-parent" mode
@@ -271,8 +290,8 @@ function ProjectIssuesContent({
     <div className="flex flex-col flex-1 min-h-0">
       {viewMode === "board" ? (
         <BoardView
-          issues={assigneeGroups ? projectIssues : issues}
-          assigneeGroups={assigneeGroups}
+          issues={filteredAssigneeGroups ? filteredAssigneeGroups.flatMap((group) => group.issues) : issues}
+          assigneeGroups={filteredAssigneeGroups}
           assigneeGroupQueryKey={assigneeGroupQueryKey}
           assigneeGroupFilter={assigneeGroupFilter}
           visibleStatuses={visibleStatuses}
@@ -444,6 +463,19 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
+  useEffect(() => {
+    if (project) {
+      recordRecentContext(wsId, {
+        type: "project",
+        id: project.id,
+        label: project.title,
+        subtitle: project.description ?? undefined,
+        icon: project.icon,
+        projectStatus: project.status,
+      });
+    }
+  }, [project?.id, project?.title, project?.description, project?.icon, project?.status, recordRecentContext, wsId]);
   const { data: projectTree = [] } = useQuery(projectTreeOptions(wsId));
   const flatProjectTree = useMemo(() => flattenProjectTree(projectTree), [projectTree]);
   const nestingProject = flatProjectTree.find((p) => p.id === projectId);
@@ -894,8 +926,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 />
                 <DropdownMenuContent align="end" className="w-auto">
                   <DropdownMenuItem onClick={() => {
-                    navigator.clipboard.writeText(window.location.href);
-                    toast.success(t(($) => $.detail.toast_link_copied));
+                    void copyText(window.location.href).then((ok) => {
+                      if (ok) toast.success(t(($) => $.detail.toast_link_copied));
+                    });
                   }}>
                     <Link2 className="h-3.5 w-3.5" />
                     {t(($) => $.detail.copy_link)}

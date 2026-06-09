@@ -13,8 +13,9 @@ name: Mobile Verify
 # - pnpm-workspace.yaml           — catalog versions
 # - turbo.json                    — turbo task pipeline
 #
-# Mobile has no vitest suite today; if one lands, add `test` to the turbo
-# task list below.
+# Mobile's vitest suite is intentionally narrow (Node env, pure-function
+# tests under apps/mobile/lib/*.test.ts — see apps/mobile/vitest.config.ts).
+# RN component-level rendering is not exercised here.
 
 on:
   push:
@@ -61,5 +62,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Type check and lint
-        run: pnpm exec turbo typecheck lint --filter=@multica/mobile
+      - name: Type check, lint, and test
+        run: pnpm exec turbo typecheck lint test --filter=@multica/mobile

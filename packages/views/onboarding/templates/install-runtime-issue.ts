@@ -24,6 +24,7 @@ export const INSTALL_RUNTIME_ISSUE_TITLE = {
   en: "Step 1 — Connect a runtime to start using agents",
   zh: "第 1 步 —— 连接运行时,开始使用 agent",
   ko: "1단계 — agent를 사용하려면 runtime 연결하기",
+  ja: "ステップ1 — agent を使うために runtime を接続する",
 } as const;
 
 const en = `Welcome to Multica.
@@ -144,7 +145,46 @@ Codex 참고 문서: https://developers.openai.com/codex/cli
 
 runtime이 연결되면 Multica Helper를 만들어 안내를 받으며 첫 실행을 시작할 수 있습니다.`;
 
-export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, ko } as const;
+const ja = `Multica へようこそ。
+
+agent が作業を実行するには、まず runtime が必要です。runtime をインストールしている間も、Multica を軽量なプロジェクト管理ワークスペースとして先に使うことができます。
+
+## まず Multica を使ってみる
+
+runtime が準備できる前に、次のことを試せます:
+
+1. いまの仕事のための project を作る。
+2. issue をいくつか作り、backlog、todo、in_progress、done の間で動かしてみる。
+3. priority、label、comment、subscription を追加する。
+4. Inbox で自分への割り当てや mention を確認する。
+
+これでまずプロジェクト管理のレイヤーに慣れることができます。runtime を接続すると、agent が同じ issue から作業を始められます。
+
+## 最初の agent runtime をインストールする
+
+詳しいガイド: https://multica.ai/docs/install-agent-runtime
+
+日本語ユーザーには、Codex で始めるのが最も速い経路です:
+
+1. Node.js がインストールされていることを確認します。
+2. Codex をインストールします:
+   npm i -g @openai/codex
+3. サインインします:
+   codex
+4. ターミナルから見つけられるか確認します:
+   which codex
+   codex --version
+5. Multica daemon を再起動します:
+   multica daemon restart
+   デスクトップアプリを使っている場合は、アプリを再起動するだけで十分です。
+6. Runtimes に戻って再読み込みします。Codex runtime が online と表示されるはずです。
+7. その runtime から最初の agent を作り、issue を agent に割り当てて status を todo にします。
+
+Codex のリファレンス: https://developers.openai.com/codex/cli
+
+runtime が接続されたら、Multica Helper を作成して、案内付きの最初の実行を始められます。`;
+
+export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, ko, ja } as const;
 
 /**
  * Prefix sentence for the follow-up comment posted on this issue (the one
@@ -159,4 +199,5 @@ export const FOLLOWUP_COMMENT_PREFIX = {
   en: "Your next step:",
   zh: "完成后的下一步：",
   ko: "다음 단계:",
+  ja: "次のステップ:",
 } as const;

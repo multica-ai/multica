@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const chineseFonts = ["PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC"];
 const koreanFonts = ["Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR"];
+const japaneseFonts = ["Hiragino Sans", "Yu Gothic", "Noto Sans CJK JP"];
 
 function expectChineseFontsBeforeKoreanFonts(source: string) {
   const chineseIndexes = chineseFonts.map((font) => source.indexOf(font));
@@ -19,6 +20,23 @@ function expectChineseFontsBeforeKoreanFonts(source: string) {
   }
 }
 
+// Japanese Kanji share the Han Unicode block with Chinese, so the global
+// Chinese-first stack must stay Chinese-first (no zh regression) while a
+// Japanese-first CJK stack is scoped to html[lang|="ja"]. App.tsx syncs
+// document.documentElement.lang so the selector matches at runtime.
+function expectJapaneseScopedOverride(source: string) {
+  expect(source).toContain('html[lang|="ja"]');
+
+  const japaneseIndexes = japaneseFonts.map((font) => source.indexOf(font));
+  expect(japaneseIndexes).not.toContain(-1);
+
+  const firstJapanese = Math.min(...japaneseIndexes);
+  const lastChinese = Math.max(
+    ...chineseFonts.map((font) => source.lastIndexOf(font)),
+  );
+  expect(firstJapanese).toBeLessThan(lastChinese);
+}
+
 describe("CJK font fallback order", () => {
   it("keeps desktop Chinese font fallbacks before Korean font fallbacks", () => {
     const desktopCss = readFileSync(
@@ -27,5 +45,14 @@ describe("CJK font fallback order", () => {
     );
 
     expectChineseFontsBeforeKoreanFonts(desktopCss);
+  });
+
+  it("scopes the Japanese-first CJK stack to html[lang|='ja']", () => {
+    const desktopCss = readFileSync(
+      resolve(process.cwd(), "src/renderer/src/globals.css"),
+      "utf8",
+    );
+
+    expectJapaneseScopedOverride(desktopCss);
   });
 });

@@ -11,7 +11,14 @@ export interface LocalDaemonStatus {
 }
 
 interface DaemonStatusLike {
-  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
+  state:
+    | "running"
+    | "stopped"
+    | "starting"
+    | "stopping"
+    | "installing_cli"
+    | "cli_not_found"
+    | "auth_expired";
   daemonId?: string;
   deviceName?: string;
 }

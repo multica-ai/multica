@@ -62,6 +62,18 @@ export interface ChatMessage {
   responded_at: string | null;
 }
 
+export interface ChatMessagesCursor {
+  created_at: string;
+  id: string;
+}
+
+export interface ChatMessagesPage {
+  messages: ChatMessage[];
+  limit: number;
+  has_more: boolean;
+  next_cursor?: ChatMessagesCursor | null;
+}
+
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;

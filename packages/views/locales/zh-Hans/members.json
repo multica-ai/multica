@@ -8,7 +8,8 @@
     "unavailable": "成员信息不可用",
     "agents_section": "智能体（{{count}}）",
     "detail_link": "详情 →",
-    "more_agents_other": "另有 {{count}} 个智能体"
+    "more_agents_other": "另有 {{count}} 个智能体",
+    "more_agents_one": "and {{count}} other agent"
   },
   "detail": {
     "workspace_fallback": "工作区",

@@ -322,6 +322,7 @@ var catalog = []Capability{
 			"POST /api/agents/{id}/restore",
 			"POST /api/agents/{id}/cancel-tasks",
 			"PUT /api/agents/{id}/skills",
+			"POST /api/agents/{id}/skills/add",
 			"PUT /api/agents/{id}/env",
 			"PUT /api/agents/{id}/infisical-folders",
 			"PUT /api/agents/{id}/tools/{name}/",
@@ -680,6 +681,8 @@ var catalog = []Capability{
 		Description: "Connect or disconnect external integrations (e.g. a GitHub App installation).",
 		Ops: []string{
 			"DELETE /api/workspaces/{id}/github/installations/{installationId}",
+			"DELETE /api/workspaces/{id}/lark/installations/{installationId}",
+			"POST /api/workspaces/{id}/lark/install/begin",
 		},
 	},
 
@@ -874,6 +877,7 @@ var excluded = map[string]string{
 	"POST /api/persona/approvals/{id}/approve":          "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
 	"POST /api/persona/approvals/{id}/deny":             "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
 	"POST /api/channels/{id}/read":                      "self_only — caller marking a channel read",
+	"POST /api/lark/binding/redeem":                     "self_only — caller binding their own Lark open_id to their Multica account",
 
 	// chat sessions — the caller's own AI chat, not an admin-governed action.
 	"POST /api/chat/sessions/":                             "personal-chat — caller's own AI chat session",

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 // CEREBRO-PATCH(web-serwist): service-worker provider for installed PWA
 import { SerwistProvider } from "@serwist/next/react";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -10,6 +11,47 @@ import { RESOURCES } from "@multica/views/locales";
 import { CEREBRO_AGENT_AVATAR_RESOURCES } from "@multica/cerebro-agent-avatar/locales";
 import { getRequestLocale } from "@/lib/request-locale";
 import "./globals.css";
+
+// Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
+// plus a synthetic size-adjusted fallback face to prevent FOUT layout shift —
+// both are exposed under the `--font-inter` CSS variable.
+//
+// The full `--font-sans` stack (Inter + the per-locale CJK fallback chain) is
+// assembled in static CSS in ./globals.css, not here: it must be overridable per
+// `<html lang>` (Japanese Kanji are Han ideographs and need a Japanese-first CJK
+// stack), and a hashed family name can only be referenced from CSS via a variable.
+// Keeping the CJK chain in CSS also keeps it CSP-safe and in sync with the desktop
+// app, which defines the same chain in apps/desktop/src/renderer/src/globals.css.
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+});
+// Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
+// non-aligned with a mono grid (Chinese is proportional), so listing CJK fonts
+// here would falsely signal alignment guarantees. Browser default fallback handles
+// the rare mixed case correctly.
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
+});
+// Editorial serif used for onboarding headlines. Italic support for h1 em
+// accents (e.g. "...on one shared board."). Only loaded on routes that
+// render the font; layout-shift-prevention handled by next/font's synthetic
+// fallback metrics, same as Inter.
+const sourceSerif = Source_Serif_4({
+  subsets: ["latin"],
+  style: ["normal", "italic"],
+  variable: "--font-serif",
+  fallback: [
+    "ui-serif",
+    "Iowan Old Style",
+    "Apple Garamond",
+    "Baskerville",
+    "Times New Roman",
+    "serif",
+  ],
+});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -87,6 +129,7 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   en: "en",
   "zh-Hans": "zh-CN",
   ko: "ko-KR",
+  ja: "ja-JP",
 };
 
 export default async function RootLayout({
@@ -107,7 +150,7 @@ export default async function RootLayout({
     <html
       lang={HTML_LANG[locale]}
       suppressHydrationWarning
-      className={cn("antialiased font-sans h-full")}
+      className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
         {/* CEREBRO-PATCH(web-serwist): wrap with SerwistProvider for service worker */}

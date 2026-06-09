@@ -9,9 +9,8 @@
 // pending upload survives the pin toggle. Auto-unpins on submit.
 
 import { useCallback, useId, useRef, useState } from "react";
-import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
+import { ArrowUp, Loader2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
 import { FileDropOverlay } from "../../editor/file-drop-overlay";
@@ -59,7 +58,6 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
   const [isEmpty, setIsEmpty] = useState(true);
   const [markdown, setMarkdown] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
   // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — gate send on a foreign-private-agent confirm.
@@ -164,7 +162,6 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
           className={cn(
             "relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border min-h-20",
             isPinned && "ring-emerald-500/40 shadow-lg",
-            isExpanded ? "h-[70vh]" : "max-h-56",
           )}
         >
           <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
@@ -208,23 +205,6 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
                 unpinLabel={t(($) => $.comment.unpin_tooltip)}
               />
             )}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsExpanded((v) => !v);
-                      editorRef.current?.focus();
-                    }}
-                    className="rounded-sm p-1.5 text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                  >
-                    {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-                  </button>
-                }
-              />
-              <TooltipContent side="top">{isExpanded ? t(($) => $.comment.collapse_tooltip) : t(($) => $.comment.expand_tooltip)}</TooltipContent>
-            </Tooltip>
             <Button
               size="icon-sm"
               aria-label="Submit comment"

@@ -116,7 +116,8 @@
       "permissions_owner": "이 스킬을 수정하고 삭제할 수 있습니다. 변경사항은 다음 에이전트 실행부터 적용됩니다.",
       "permissions_locked_creator": "생성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 수정할 수 있습니다.",
       "permissions_locked": "생성자 또는 워크스페이스 관리자만 이 스킬을 수정할 수 있습니다.",
-      "used_by_empty": "아직 어떤 에이전트에도 할당되지 않았습니다. 에이전트의 스킬 탭에서 할당하세요."
+      "used_by_empty": "아직 어떤 에이전트에도 할당되지 않았습니다. 에이전트의 스킬 탭에서 할당하세요.",
+      "used_by_one": "Used by {{count}} agent"
     },
     "origin_card": {
       "imported_runtime": "로컬 런타임에서 가져옴",
@@ -141,7 +142,8 @@
       "warning": "이 작업은 되돌릴 수 없습니다.",
       "cancel": "취소",
       "confirm": "영구 삭제",
-      "deleting": "삭제하는 중..."
+      "deleting": "삭제하는 중...",
+      "description_with_agents_one": "This will permanently delete \"{{name}}\" and remove it from {{count}} agent currently using it."
     },
     "add_file": {
       "placeholder": "templates/review.md",
@@ -236,7 +238,19 @@
     "skill_description_label": "설명",
     "skill_description_placeholder": "선택 사항 — 에이전트가 이 스킬을 언제 써야 하는지 설명하세요.",
     "toast_imported": "스킬을 가져왔습니다",
-    "toast_import_failed": "스킬을 가져오지 못했습니다"
+    "toast_import_failed": "스킬을 가져오지 못했습니다",
+    "skill_files_one": "{{count}} file",
+    "select_all": "Select all ({{count}})",
+    "bulk_ready": "{{count}} skills selected",
+    "bulk_import_button": "Import {{count}} Skills",
+    "bulk_progress": "Importing {{completed}} / {{total}}…",
+    "bulk_cancel_button": "Cancel",
+    "bulk_complete_hint": "Import complete.",
+    "bulk_cancelled_hint": "Import cancelled.",
+    "bulk_done_button": "Done",
+    "bulk_summary_imported": "Imported",
+    "bulk_summary_skipped": "Skipped",
+    "bulk_summary_failed": "Failed"
   },
   "file_tree": {
     "no_files": "파일 없음"

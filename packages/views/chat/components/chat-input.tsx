@@ -25,6 +25,7 @@ import { useWorkspaceId } from "@multica/core/hooks"; // CEREBRO-PATCH(chat-inpu
 import { api } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
 import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
+import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
@@ -54,6 +55,8 @@ interface ChatInputProps {
   // CEREBRO-PATCH(chat-session-scoped-draft): JEH-806 — embedded panels can pass
   // the owning session id so drafts do not read the global active session.
   draftSessionId?: string | null;
+  /** Chat @ suggestions: current/recent issue/project entries. */
+  contextItems?: MentionItem[];
 }
 
 export function ChatInput({
@@ -68,6 +71,7 @@ export function ChatInput({
   topSlot,
   autoFocus = false,
   draftSessionId,
+  contextItems,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -203,6 +207,9 @@ export function ChatInput({
             onSubmit={handleSend}
             onUploadFile={handleUpload}
             debounceMs={100}
+            mentionMode={contextItems ? "context" : "default"}
+            mentionContextItems={contextItems}
+            enableSlashCommands
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}

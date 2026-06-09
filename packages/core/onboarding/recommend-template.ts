@@ -29,11 +29,11 @@ export function recommendTemplate(
   if (role === "writer") return "writing";
 
   if (role === "developer") {
-    return use_case === "planning" ? "planning" : "coding";
+    return use_case.includes("planning") ? "planning" : "coding";
   }
 
   if (role === "product_lead") {
-    return use_case === "coding" ? "coding" : "planning";
+    return use_case.includes("coding") ? "coding" : "planning";
   }
 
   // Unknown / null role — user hasn't answered Q2 yet.

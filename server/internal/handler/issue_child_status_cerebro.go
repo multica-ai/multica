@@ -119,6 +119,7 @@ func (h *Handler) notifyParentOfChildStatus(ctx context.Context, prev, issue db.
 	})
 
 	// Wake the parent assignee (agent task / squad-leader task). Reuses the
-	// done path's dispatcher, which carries the loop + idempotency guards.
-	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment)
+	// done path's dispatcher, which carries the loop + idempotency guards
+	// (including the MUL-2860 private-leader gate).
+	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment, requesterUserID)
 }

@@ -63,7 +63,7 @@ export function StepQuestionnaire({
   const setUseCase = (v: UseCase) =>
     setAnswers((a) => ({
       ...a,
-      use_case: v,
+      use_case: [v],
       use_case_other: v === "other" ? a.use_case_other : null,
     }));
 
@@ -81,8 +81,8 @@ export function StepQuestionnaire({
       answers.role !== null &&
       (answers.role !== "other" || (answers.role_other ?? "").trim() !== "");
     const q3 =
-      answers.use_case !== null &&
-      (answers.use_case !== "other" ||
+      answers.use_case.length > 0 &&
+      (answers.use_case[0] !== "other" ||
         (answers.use_case_other ?? "").trim() !== "");
     return (q1 ? 1 : 0) + (q2 ? 1 : 0) + (q3 ? 1 : 0);
   }, [answers]);
@@ -211,27 +211,27 @@ export function StepQuestionnaire({
                 ariaLabel={t(($) => $.questionnaire.q3_question)}
               >
                 <OptionCard
-                  selected={answers.use_case === "coding"}
+                  selected={answers.use_case[0] === "coding"}
                   onSelect={() => setUseCase("coding")}
                   label={t(($) => $.questionnaire.q3_coding)}
                 />
                 <OptionCard
-                  selected={answers.use_case === "planning"}
+                  selected={answers.use_case[0] === "planning"}
                   onSelect={() => setUseCase("planning")}
                   label={t(($) => $.questionnaire.q3_planning)}
                 />
                 <OptionCard
-                  selected={answers.use_case === "writing_research"}
+                  selected={answers.use_case[0] === "writing_research"}
                   onSelect={() => setUseCase("writing_research")}
                   label={t(($) => $.questionnaire.q3_writing_research)}
                 />
                 <OptionCard
-                  selected={answers.use_case === "explore"}
+                  selected={answers.use_case[0] === "explore"}
                   onSelect={() => setUseCase("explore")}
                   label={t(($) => $.questionnaire.q3_explore)}
                 />
                 <OtherOptionCard
-                  selected={answers.use_case === "other"}
+                  selected={answers.use_case[0] === "other"}
                   onSelect={() => setUseCase("other")}
                   otherValue={answers.use_case_other ?? ""}
                   onOtherChange={(v) =>

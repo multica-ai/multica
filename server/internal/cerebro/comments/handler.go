@@ -191,7 +191,7 @@ func (h *Handler) MoveToSubIssue(w http.ResponseWriter, r *http.Request) {
 		CreatorID:     rootComment.AuthorID,
 		ParentIssueID: hostIssue.ID,
 		Position:      0,
-		DueDate:       pgtype.Timestamptz{},
+		DueDate:       pgtype.Date{},
 		Number:        number,
 		ProjectID:     hostIssue.ProjectID,
 	})

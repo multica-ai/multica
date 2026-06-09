@@ -105,7 +105,7 @@ export type {
   UpdateArtifactFolderRequest,
   ListArtifactsParams,
 } from "./artifact";
-export type { ChatSession, ChatMessage, ChatPendingTask, ChatSessionUsage, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
+export type { ChatSession, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSessionUsage, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 // CEREBRO-PATCH(chat-message-cost-types): FIR-31 per-reply cost badge response types.
 export type { ChatMessageCost, ChatSessionMessageCosts } from "./chat";
 // CEREBRO-PATCH(core-types-index-channel-listen): JEH-699 — re-export
@@ -156,6 +156,13 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  LarkInstallation,
+  ListLarkInstallationsResponse,
+  BeginLarkInstallResponse,
+  LarkInstallStatusResponse,
+  RedeemLarkBindingTokenResponse,
+} from "./lark";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
@@ -191,6 +198,10 @@ export type {
   RemoveSquadMemberRequest,
   UpdateSquadMemberRoleRequest,
   CreateSquadActivityLogRequest,
+  SquadMemberStatus,
+  SquadMemberStatusValue,
+  SquadActiveIssueBrief,
+  SquadMemberStatusListResponse,
 } from "./squad";
 export type {
   BillingBalance,

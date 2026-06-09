@@ -435,41 +435,50 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
 	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
-	// Available Commands lists `multica issue comment add` neutrally —
-	// three input modes, pick what fits.
-	// The previous "MUST pipe via stdin" mandate (#1795 / #1851) was
-	// originally a Codex-specific fix for codex emitting literal `\n`
-	// escapes inside `--content "..."`, but it landed in this global
-	// section and ended up steering every provider at stdin, which then
-	// burned non-ASCII bytes on Windows where the agent's shell layer
-	// (typically PowerShell) re-encodes the pipe through an ASCII /
-	// non-UTF-8 codepage and drops non-representable bytes as `?`
-	// (issues #2198 / #2236 / #2376).
+	// Available Commands lists `multica issue comment add` with all three input
+	// modes, but the menu entry now actively steers agents away from inlining
+	// `--content` for agent-authored bodies. The prescriptive form-by-platform
+	// guidance lives in the "## Comment Formatting" section below.
 	//
-	// Strong "MUST" wording lives in the Codex-Specific section below
-	// where it actually belongs; non-Codex providers handle inline
-	// escaping correctly and can pick whichever flag suits their
-	// content. The `--content-file` line in the menu doubles as a
-	// pointer at the Windows-safe path.
-	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. Pick the input mode that preserves your content; run `multica issue comment add --help` for details.\n")
+	// Two distinct shell-layer hazards motivate this, and both bite an inlined
+	// body before the CLI ever runs:
+	//   - Backtick / `$()` command substitution, `$VAR` expansion, and quote /
+	//     newline mangling on Linux/macOS shells. A backtick-wrapped token in
+	//     the body is executed and silently deleted, corrupting the stored
+	//     comment and triggering a retry loop (MUL-2904 / OKK-497).
+	//   - Non-ASCII bytes dropped as `?` on Windows, where the shell layer
+	//     (typically PowerShell) re-encodes a stdin pipe through an ASCII /
+	//     non-UTF-8 codepage (issues #2198 / #2236 / #2376) — which is why
+	//     Windows uses `--content-file`, not stdin.
+	// Because the corruption is shell-driven, the guardrail is provider-agnostic.
+	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. For agent-authored bodies, do NOT inline `--content` — the shell can rewrite backticks, `$()`, quotes, or newlines before the CLI sees them; use the platform-correct non-inline mode shown in ## Comment Formatting below. Run `multica issue comment add --help` for details.\n")
 	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
 	b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
+	b.WriteString("### Squad maintenance\n")
+	b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
 	b.WriteString(cerebroArtifactBrief()) // CEREBRO-PATCH(runtime-config-artifact-brief): adds Documents & Artifacts section to Available Commands
 	b.WriteString(cerebroWakeupBrief())   // CEREBRO-PATCH(cerebro-wakeup-brief): TECH-3013 adds Agent Wakeup section to Available Commands
 	b.WriteString(cerebroChatBrief())     // CEREBRO-PATCH(cerebro-chat-brief): TECH-3183 adds Chat Reply section to Available Commands
 
-	if provider == "codex" {
-		b.WriteString("## Codex-Specific Comment Formatting\n\n")
-		if runtimeGOOS == "windows" {
-			b.WriteString("Codex often follows the per-turn reply command literally. On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
-			b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
-			b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
-		} else {
-			b.WriteString("Codex often follows the per-turn reply command literally. For issue comments, always use `--content-stdin` with a HEREDOC, even for short single-line replies. ")
-			b.WriteString("Never use inline `--content` for agent-authored comments. Keep the same `--parent` value from the trigger comment when replying. ")
-			b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
-		}
+	// Comment Formatting guardrail for ALL providers. The MUL-2904
+	// duplicate-comment loop happened because an agent inlined a backtick-wrapped
+	// table name into `--content "..."`; the shell ran it as a command
+	// substitution, silently deleted it, and the model retried forever. Because
+	// the corruption is shell-driven, not provider-driven, this directive is not
+	// scoped to Codex — every agent-authored comment must avoid inline
+	// `--content`. The platform split mirrors BuildCommentReplyInstructions:
+	// Windows → file (stdin pipes drop non-ASCII), Linux/macOS → quoted HEREDOC
+	// over stdin (the quoted delimiter blocks backtick / `$()` / `$VAR`).
+	b.WriteString("## Comment Formatting\n\n")
+	if runtimeGOOS == "windows" {
+		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
+		b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
+		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
+	} else {
+		b.WriteString("For issue comments, always use `--content-stdin` with a HEREDOC, even for short single-line replies — use a quoted delimiter (`<<'COMMENT'`) so the shell does not expand backticks, `$()`, or `$VAR` inside the body. `--content-file <path>` works too. ")
+		b.WriteString("Never use inline `--content` for agent-authored comments: unescaped backticks, `$()`, `$VAR`, or quotes in the body are rewritten by the shell before the CLI receives them. Keep the same `--parent` value from the trigger comment when replying. ")
+		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	}
 
 	// Inject available repositories section.
@@ -522,6 +531,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- **Recommended keys** (reuse these names so queries stay consistent across the workspace; coin a new key only when none fits): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`. Use snake_case ASCII. The list is short on purpose — most issues only need 1-2 of these pinned, not the full set.\n\n")
 	}
 
+	isAssignmentTriggered := ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" && ctx.TriggerCommentID == ""
+	if isAssignmentTriggered {
+		b.WriteString("## Instruction Precedence\n\n")
+		b.WriteString("Agent Identity instructions have priority over the assignment workflow below. ")
+		b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
+		b.WriteString("Never treat this runtime workflow as permission to change issue status, investigate, implement, or otherwise act beyond your Agent Identity.\n\n")
+	}
 	if hasIssueContext { // CEREBRO-PATCH(runtime-config-no-busywait): FIR-2610 — standing rule: never busy-wait on CI/deploy
 		b.WriteString(cerebroNoBusyWaitRule())
 		b.WriteString(cerebroWakeupMandatoryRule()) // CEREBRO-PATCH(runtime-config-wakeup-mandatory): TECH-3121 — set a wakeup and state the time whenever you comment about waiting or returning
@@ -585,7 +601,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
 		b.WriteString(commentIssueGetStep(ctx.IssueID, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): skip/replace the issue get step when a fewer-calls saving is on (FIR-2384)
 		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
-		b.WriteString(commentThreadStep(ctx.IssueID, ctx.TriggerCommentID, ctx.NewCommentCount, ctx.NewCommentsSince, ctx.PriorSessionResumed, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): skip/replace the comment-list step when a fewer-calls saving is on (FIR-2384). Upstream's BuildNewCommentsHint / BuildResumedCommentsHint / BuildColdCommentsHint (MUL-2785/2809/2805) are wired through commentThreadStep so the FIR-2384 bundling and the upstream since-delta hints coexist.
+		b.WriteString(commentThreadStep(ctx.IssueID, ctx.TriggerCommentID, ctx.TriggerThreadID, ctx.NewCommentCount, ctx.NewCommentsSince, ctx.PriorSessionResumed, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): skip/replace the comment-list step when a fewer-calls saving is on (FIR-2384). Upstream's BuildNewCommentsHint / BuildResumedCommentsHint / BuildColdCommentsHint (MUL-2785/2809/2805) are wired through commentThreadStep so the FIR-2384 bundling and the upstream since-delta hints coexist.
 		fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) inside the thread you just read and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
 		if ctx.IsSquadLeader {
 			b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
@@ -600,20 +616,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
-		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
+		b.WriteString("You are responsible for managing the issue status throughout your work, unless your Agent Identity forbids issue status changes.\n\n")
 		b.WriteString(assignmentIssueGetStep(ctx.IssueID, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): skip/replace the issue get step when a fewer-calls saving is on (FIR-2384)
 		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
 		b.WriteString(assignmentCommentListStep(ctx.IssueID, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): the bundled/inlined thread satisfies the mandatory history read when a fewer-calls saving is on (FIR-2384)
-		fmt.Fprintf(&b, "4. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-		b.WriteString("5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
+		fmt.Fprintf(&b, "4. Run `multica issue status %s in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.\n", ctx.IssueID)
+		b.WriteString("5. Complete the task within your Agent Identity boundaries. Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action; if your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered.\n")
 		if ctx.IsSquadLeader {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
 		} else {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		}
 		b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
-		fmt.Fprintf(&b, "8. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "9. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+		fmt.Fprintf(&b, "8. When done, run `multica issue status %s in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "9. If blocked, run `multica issue status %s blocked` unless your Agent Identity forbids issue status changes. Post a comment explaining the blocker unless your Agent Identity forbids issue comments.\n\n", ctx.IssueID)
 	}
 
 	// Sub-issue creation semantics — the only piece of the old Parent /
@@ -652,7 +668,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		}
 		for _, skill := range ctx.AgentSkills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+			// Emit the skill's one-line description alongside its name so the
+			// brief carries a "when to load" trigger signal. Claude-family
+			// providers get this natively from frontmatter discovery; providers
+			// without native discovery (hermes/default) only ever see this
+			// list, so a bare name gives them no signal for on-demand loading.
+			if desc := strings.TrimSpace(skill.Description); desc != "" {
+				fmt.Fprintf(&b, "- **%s** — %s\n", skill.Name, desc)
+			} else {
+				fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+			}
 		}
 		b.WriteString("\n")
 	}

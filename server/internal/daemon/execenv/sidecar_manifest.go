@@ -331,6 +331,63 @@ func CleanupSidecars(envRoot string) error {
 	return firstErr
 }
 
+// removeReusedManagedSkillDirs force-removes the skill directories the prior
+// dispatch recorded under skillsParent in its sidecar manifest at envRoot,
+// even when they are now non-empty. It is the reuse-path companion to
+// CleanupSidecars and runs just before it.
+//
+// CleanupSidecars deliberately preserves a recorded directory once it has
+// become non-empty — the agent may have dropped a file inside a dir we
+// created, and on the local_directory teardown path that content must
+// survive. But that same preservation reopens #3684 on the reuse path: if a
+// prior-run agent wrote into .claude/skills/issue-review/, CleanupSidecars
+// deletes the recorded SKILL.md yet keeps the directory, so the canonical
+// slug stays occupied and the refreshed skill dodges to
+// issue-review-multica. A managed skill directory is platform-owned — the
+// manifest is proof we created it — so on reuse we reclaim the whole
+// directory (dropping any scratch the agent left inside it, exactly as the
+// Codex path's os.RemoveAll(skillsDir) already does) and let the refresh
+// re-create it at its natural slug.
+//
+// Only directories whose immediate parent is skillsParent are removed, so
+// the blast radius is exactly the platform's own skill roots: sibling skills
+// the agent installed under the same parent, checked-out repos, and the rest
+// of the workdir are untouched. The reuse path only ever runs on cloud
+// workdirs (the daemon skips Reuse for local_directory tasks), so there is no
+// user-owned skills tree to protect here in the first place.
+//
+// envRoot or skillsParent empty, a missing manifest, or a parse failure are
+// all no-ops — the refresh simply proceeds. The manifest file is left in
+// place; CleanupSidecars, which runs next, owns deleting it.
+func removeReusedManagedSkillDirs(envRoot, skillsParent string) error {
+	if envRoot == "" || skillsParent == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(envRoot, sidecarManifestFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read sidecar manifest for reuse skill rollback: %w", err)
+	}
+	var m sidecarManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("parse sidecar manifest for reuse skill rollback: %w", err)
+	}
+
+	cleanParent := filepath.Clean(skillsParent)
+	var firstErr error
+	for _, d := range m.Dirs {
+		if filepath.Dir(filepath.Clean(d)) != cleanParent {
+			continue
+		}
+		if err := os.RemoveAll(d); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("remove managed skill dir %s: %w", d, err)
+		}
+	}
+	return firstErr
+}
+
 // dirHasEntries inspects dir and reports whether it currently contains
 // any entries. The second return value distinguishes three states
 // CleanupSidecars must handle separately:

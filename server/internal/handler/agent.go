@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -196,11 +197,14 @@ type AgentTaskResponse struct {
 	Repos            []RepoData            `json:"repos,omitempty"`
 	ProjectID        string                `json:"project_id,omitempty"`        // issue's project, when present
 	ProjectTitle     string                `json:"project_title,omitempty"`     // for surfacing in agent context
+
 	// CEREBRO-PATCH(agent-task-issue-title): FIR-2763 M1 — daemon-resolved issue
 	// titles so the trace-upload sidecar can stamp human-readable names on each
 	// ai_proxy_logs row. Empty when unresolved; registry stores null.
 	IssueTitle       string                `json:"issue_title,omitempty"`
 	ParentIssueTitle string                `json:"parent_issue_title,omitempty"`
+
+
 	ProjectResources []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
 	CreatedAt        string                `json:"created_at"`
 	PriorSessionID   string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
@@ -218,14 +222,21 @@ type AgentTaskResponse struct {
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
 	RelativeWorkDir         string               `json:"relative_work_dir,omitempty"`
 	TriggerCommentID        *string              `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+
+
+	TriggerThreadID         string               `json:"trigger_thread_id,omitempty"`         // root comment ID for the triggering thread
+
 	TriggerCommentContent   string               `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerSummary          *string              `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType       string               `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string               `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+
 	TriggerUserID           string               `json:"trigger_user_id,omitempty"`           // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
 	IssueKind               string               `json:"issue_kind,omitempty"`                // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
 	IssueSnapshot           string               `json:"issue_snapshot,omitempty"`            // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
 	BundleContextHint       bool                 `json:"bundle_context_hint,omitempty"`       // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
+
+
 	NewCommentCount         int                  `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
 	NewCommentsSince        string               `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
 	ChatSessionID           string               `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
@@ -866,7 +877,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
-	h.Analytics.Capture(analytics.AgentCreated(
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 		ownerID,
 		workspaceID,
 		uuidToString(created.ID),

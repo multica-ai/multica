@@ -65,7 +65,7 @@ export function buildWelcomeIssueText(
     `语气友好、不超过 200 字。结尾抛一个轻松的小问题——比如"最近你在琢磨什么有意思的事？"——让 ${name} 不必先想好一个真实任务也能轻松回复。`,
   ].join("\n");
 
-  switch (q.use_case) {
+  switch (q.use_case[0]) {
     case "coding":
       return {
         title: "👋 欢迎来到 Multica —— 一起开工",
@@ -211,7 +211,7 @@ export function buildAgentGuidedSubIssues(
     });
   }
 
-  if (q.role === "developer" || q.use_case === "coding") {
+  if (q.role === "developer" || q.use_case[0] === "coding") {
     tier2.push({
       status: "todo",
       priority: "medium",
@@ -518,7 +518,7 @@ export function buildSelfServeSubIssues(
     },
   ];
 
-  if (q.role === "developer" || q.use_case === "coding") {
+  if (q.role === "developer" || q.use_case[0] === "coding") {
     tier3.push({
       status: "backlog",
       priority: "low",

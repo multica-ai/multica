@@ -102,3 +102,84 @@ describe("resetAnalytics", () => {
     expect(posthog.register).not.toHaveBeenCalled();
   });
 });
+
+describe("normalizePageviewPath", () => {
+  it("collapses resource-id segments to the section route", async () => {
+    const { analytics } = await loadModule();
+    expect(
+      analytics.normalizePageviewPath("/acme/issues/8d5c1a2b-0035-4c62-9f14-1ad4215736a5"),
+    ).toBe("/acme/issues");
+    expect(analytics.normalizePageviewPath("/acme/issues/MUL-123")).toBe("/acme/issues");
+    expect(
+      analytics.normalizePageviewPath("/invite/8d5c1a2b-0035-4c62-9f14-1ad4215736a5"),
+    ).toBe("/invite");
+  });
+
+  it("strips query string and hash", async () => {
+    const { analytics } = await loadModule();
+    expect(analytics.normalizePageviewPath("/acme/issues?status=open&view=board")).toBe(
+      "/acme/issues",
+    );
+    expect(analytics.normalizePageviewPath("/acme/issues#section")).toBe("/acme/issues");
+  });
+
+  it("keeps non-id sub-sections and never drops the leading segment", async () => {
+    const { analytics } = await loadModule();
+    expect(analytics.normalizePageviewPath("/acme/settings/members")).toBe(
+      "/acme/settings/members",
+    );
+    // A workspace slug that looks like an issue key must not be dropped.
+    expect(analytics.normalizePageviewPath("/team-1/issues/MUL-9")).toBe("/team-1/issues");
+    expect(analytics.normalizePageviewPath("/login")).toBe("/login");
+    expect(analytics.normalizePageviewPath("/")).toBe("/");
+  });
+});
+
+describe("capturePageview", () => {
+  function captureMock(posthog: unknown) {
+    return (posthog as { capture: ReturnType<typeof vi.fn> }).capture;
+  }
+
+  it("emits the section-normalized path as $current_url", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    const capture = captureMock(posthog);
+    capture.mockClear();
+
+    analytics.capturePageview("/acme/issues/8d5c1a2b-0035-4c62-9f14-1ad4215736a5");
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture).toHaveBeenCalledWith("$pageview", { $current_url: "/acme/issues" });
+  });
+
+  it("dedupes consecutive views of the same section but fires on section change", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    const capture = captureMock(posthog);
+    capture.mockClear();
+
+    // Two different issues collapse to the same section → one event.
+    analytics.capturePageview("/acme/issues/a1b2c3d4-0035-4c62-9f14-1ad4215736a5");
+    analytics.capturePageview("/acme/issues/b2c3d4e5-0035-4c62-9f14-1ad4215736a5");
+    expect(capture).toHaveBeenCalledTimes(1);
+
+    // A real section change fires again.
+    analytics.capturePageview("/acme/projects");
+    expect(capture).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-emits the same section after resetAnalytics clears the dedup state", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    const capture = captureMock(posthog);
+    capture.mockClear();
+
+    analytics.capturePageview("/acme/inbox");
+    analytics.capturePageview("/acme/inbox");
+    expect(capture).toHaveBeenCalledTimes(1);
+
+    analytics.resetAnalytics();
+    analytics.capturePageview("/acme/inbox");
+    expect(capture).toHaveBeenCalledTimes(2);
+  });
+});

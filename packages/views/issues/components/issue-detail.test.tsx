@@ -41,6 +41,12 @@ vi.mock("@multica/core/auth", () => ({
   createAuthStore: vi.fn(),
 }));
 
+// CEREBRO-PATCH: mock cerebro-preferences to avoid auth-store dependency in tests
+vi.mock("@multica/cerebro-preferences/views", () => ({
+  useSubmitOnEnter: () => true,
+  useTheme: () => "system",
+}));
+
 // Mock @multica/core/workspace/hooks
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
@@ -209,6 +215,12 @@ vi.mock("../../editor/use-file-drop-zone", async () => {
   const barrel = await import("../../editor");
   return {
     useFileDropZone: (barrel as { useFileDropZone: unknown }).useFileDropZone,
+  };
+});
+vi.mock("../../editor/readonly-content", async () => {
+  const barrel = await import("../../editor");
+  return {
+    ReadonlyContent: (barrel as { ReadonlyContent: unknown }).ReadonlyContent,
   };
 });
 

@@ -30,10 +30,13 @@ import { useT } from "../i18n";
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
   team_size: null,
   team_size_other: null,
+  source: [],
+  source_other: null,
   role: null,
   role_other: null,
-  use_case: null,
+  use_case: [],
   use_case_other: null,
+  version: 2,
 };
 
 function mergeQuestionnaire(

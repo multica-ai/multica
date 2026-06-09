@@ -3,6 +3,11 @@
 import { useState } from "react";
 import { CalendarClock } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
+import {
+  toDateOnly,
+  dateOnlyToLocalDate,
+  formatDateOnly,
+} from "@multica/core/issues/date";
 import { Calendar } from "@multica/ui/components/ui/calendar";
 import {
   Popover,
@@ -37,7 +42,7 @@ export function StartDatePicker({
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
-  const date = startDate ? new Date(startDate) : undefined;
+  const date = dateOnlyToLocalDate(startDate);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -50,7 +55,7 @@ export function StartDatePicker({
             <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
             {date ? (
               <span>
-                {date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                {formatDateOnly(startDate, { month: "short", day: "numeric" }, "en-US")}
               </span>
             ) : (
               <span className="text-muted-foreground">{t(($) => $.pickers.start_date.trigger_label)}</span>
@@ -63,7 +68,7 @@ export function StartDatePicker({
           mode="single"
           selected={date}
           onSelect={(d: Date | undefined) => {
-            onUpdate({ start_date: d ? d.toISOString() : null });
+            onUpdate({ start_date: d ? toDateOnly(d) : null });
             setOpen(false);
           }}
         />

@@ -155,7 +155,7 @@ func (h *Handler) ensureRuntimeApprovalIssue(
 		CreatorID:     requesterID,
 		ParentIssueID: pgtype.UUID{},
 		Position:      0,
-		DueDate:       pgtype.Timestamptz{},
+		DueDate:       pgtype.Date{},
 		Number:        issueNumber,
 		ProjectID:     pgtype.UUID{},
 		OriginType:    pgtype.Text{String: runtimeApprovalIssueOriginType, Valid: true},

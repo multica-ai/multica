@@ -8,7 +8,6 @@ export {
   type TitleEditorProps,
   type TitleEditorRef,
 } from "./title-editor";
-export { copyMarkdown } from "./utils/clipboard";
 export { ReadonlyContent } from "./readonly-content";
 export { Attachment } from "./attachment";
 export { useFileDropZone } from "./use-file-drop-zone";
@@ -21,3 +20,4 @@ export {
   isPreviewable,
 } from "./attachment-preview-modal";
 export type { AttachmentPreviewHandle } from "./attachment-preview-modal";
+export { copyMarkdown } from "./utils/clipboard";

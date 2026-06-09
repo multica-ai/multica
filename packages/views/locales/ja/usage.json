@@ -1,0 +1,58 @@
+{
+  "title": "使用量",
+  "subtitle": "このワークスペース全体のトークン消費とエージェントの活動です。",
+  "filter": {
+    "project_label": "プロジェクト",
+    "all_projects": "すべてのプロジェクト",
+    "period_label": "期間"
+  },
+  "kpi": {
+    "cost_label": "コスト · {{days}}日",
+    "tokens_label": "トークン · {{days}}日",
+    "tokens_hint": "入力 {{input}} · 出力 {{output}}",
+    "run_time_label": "実行時間 · {{days}}日",
+    "run_time_hint": "{{tasks}} 件のタスク全体",
+    "tasks_label": "タスク · {{days}}日",
+    "tasks_hint": "{{failed}} 件失敗"
+  },
+  "dim": {
+    "label": "単位",
+    "daily": "日別",
+    "weekly": "週別"
+  },
+  "daily": {
+    "title_cost": "日別コスト",
+    "title_tokens": "日別トークン",
+    "title_time": "日別実行時間",
+    "title_tasks": "日別タスク",
+    "metric_cost": "コスト",
+    "metric_tokens": "トークン",
+    "metric_time": "時間",
+    "metric_tasks": "タスク",
+    "no_data": "この期間に使用量はありません。"
+  },
+  "weekly": {
+    "title_cost": "週別コスト",
+    "title_tokens": "週別トークン",
+    "title_time": "週別実行時間",
+    "title_tasks": "週別タスク",
+    "partial_label": "{{range}} (一部 · 7日中 {{covered}}日)"
+  },
+  "leaderboard": {
+    "title": "リーダーボード",
+    "caption": "{{count}} 件のエージェント",
+    "header_agent": "エージェント",
+    "header_tokens": "トークン",
+    "header_cost": "コスト",
+    "header_time": "時間",
+    "header_tasks": "タスク",
+    "no_data": "この期間にエージェントの活動はありません。"
+  },
+  "empty": {
+    "title": "まだ使用量はありません",
+    "body": "ここでエージェントがタスクを実行し始めると、トークンの消費と実行時間がこの画面に表示されます。"
+  },
+  "duration": {
+    "less_than_minute": "1分未満"
+  }
+}

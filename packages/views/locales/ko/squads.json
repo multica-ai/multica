@@ -40,7 +40,16 @@
     "leader_chip": "리더",
     "view_agent_tooltip": "에이전트 상세 열기",
     "make_leader_tooltip": "스쿼드 리더로 지정",
-    "remove_member_tooltip": "스쿼드에서 제거"
+    "remove_member_tooltip": "스쿼드에서 제거",
+    "status_working": "작업 중",
+    "status_idle": "유휴",
+    "status_offline": "오프라인",
+    "status_unstable": "불안정",
+    "status_archived": "보관됨",
+    "issue_status_blocked": "막힘",
+    "active_issue_more": "외 {{count}}개",
+    "last_active_label": "마지막 활동 {{time}}",
+    "section_count_one": "{{count}} member in this squad"
   },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",
@@ -48,11 +57,20 @@
     "archived": "보관됨",
     "member_count_other": "멤버 {{count}}명",
     "members_section": "멤버",
-    "more_members_other": "+{{count}}명 더 보기"
+    "more_members_other": "+{{count}}명 더 보기",
+    "member_count_one": "{{count}} member",
+    "more_members_one": "+{{count}} more"
   },
   "instructions_tab": {
     "description": "스쿼드에 할당된 이슈를 리더 에이전트가 처리할 때마다 스쿼드 지침이 리더 프롬프트에 포함됩니다. 스쿼드 전체의 방향, 작업 합의, 매 작업마다 따라야 할 맥락을 리더에게 전달할 때 사용하세요.",
     "unsaved_changes": "저장하지 않은 변경사항",
     "save_button": "저장"
+  },
+  "archive_dialog": {
+    "title": "Archive this squad?",
+    "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
+    "cancel": "Cancel",
+    "confirm": "Archive",
+    "archiving": "Archiving…"
   }
 }

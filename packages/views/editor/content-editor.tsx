@@ -43,6 +43,12 @@ import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  parseMarkdownChunked,
+  MARKDOWN_CHUNK_THRESHOLD,
+  type MarkdownManagerLike,
+} from "./utils/parse-markdown-chunked";
+import type { MentionItem } from "./extensions/mention-suggestion";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
@@ -103,6 +109,11 @@ interface ContentEditorProps {
    * system prompts, where the content is fed to an LLM as plain text).
    */
   disableMentions?: boolean;
+  /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
+  mentionMode?: "default" | "context";
+  mentionContextItems?: MentionItem[];
+  /** Enable the chat-only `/` skill picker. Defaults false. */
+  enableSlashCommands?: boolean;
   /**
    * CEREBRO-PATCH(input-autofocus): JEH-756 — when true, focus the editor
    * once it finishes initialising. The focus call is owned by ContentEditor
@@ -159,6 +170,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       currentIssueId,
       disableMentions = false,
       autoFocus = false,
+      mentionMode = "default",
+      mentionContextItems,
+      enableSlashCommands = false,
     },
     ref,
   ) {
@@ -167,6 +181,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onUploadFileRef = useRef(onUploadFile);
+    const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
     const dictationPreviewRangeRef = useRef<{ from: number; to: number } | null>(null);
 
@@ -182,6 +197,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
     onUploadFileRef.current = onUploadFile;
+    mentionContextItemsRef.current = mentionContextItems ?? [];
 
     const queryClient = useQueryClient();
 
@@ -190,6 +206,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // and re-applies the request for session/agent/channel switches.
     const [autoFocusAtMount] = useState(() => autoFocus);
 
+    const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
+    // parseMarkdownChunked). Small docs stay on the single-parse fast path.
+    const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
+
     const editor = useEditor({
       immediatelyRender: false,
       // Note: in v3.22.1 the default is already false/undefined (same behavior).
@@ -197,10 +218,32 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       shouldRerenderOnTransaction: false,
       autofocus: false,
       onCreate: ({ editor: ed }) => {
+        // For large docs we mount empty (below) and parse in chunks here, so the
+        // O(n²) marked tokenizer never sees the whole document at once.
+        if (mountChunked) {
+          const manager = (
+            ed.storage as { markdown?: { manager?: MarkdownManagerLike } }
+          ).markdown?.manager;
+          if (manager) {
+            ed.commands.setContent(
+              parseMarkdownChunked(manager, initialContent),
+              { emitUpdate: false },
+            );
+          } else {
+            ed.commands.setContent(initialContent, {
+              emitUpdate: false,
+              contentType: "markdown",
+            });
+          }
+        }
         lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
       },
-      content: defaultValue ? preprocessMarkdown(defaultValue) : "",
-      contentType: defaultValue ? "markdown" : undefined,
+      content: mountChunked ? "" : initialContent,
+      contentType: mountChunked
+        ? undefined
+        : defaultValue
+          ? "markdown"
+          : undefined,
       extensions: createEditorExtensions({
         placeholder: placeholderText,
         queryClient,
@@ -212,6 +255,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         // the editor's current issue id into the mention factory so cerebro
         // can dim members lacking project access.
         currentIssueId,
+        mentionMode,
+        getMentionContextItems: () => mentionContextItemsRef.current,
+        enableSlashCommands,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;

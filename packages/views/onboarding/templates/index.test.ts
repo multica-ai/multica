@@ -6,6 +6,7 @@ describe("pickContentLang", () => {
     expect(pickContentLang("en-US")).toBe("en");
     expect(pickContentLang("zh-Hant")).toBe("zh");
     expect(pickContentLang("ko-KR")).toBe("ko");
+    expect(pickContentLang("ja-JP")).toBe("ja");
   });
 
   it("falls back to English for unsupported or missing languages", () => {

@@ -48,6 +48,7 @@
     "row_workspace_fallback": "工作区",
     "row_inviter_fallback": "某人",
     "row_invited_admin": "{{inviter}} 邀请你以管理员身份加入",
-    "row_invited_member": "{{inviter}} 邀请你以成员身份加入"
+    "row_invited_member": "{{inviter}} 邀请你以成员身份加入",
+    "submit_join_one": "Join 1 workspace"
   }
 }

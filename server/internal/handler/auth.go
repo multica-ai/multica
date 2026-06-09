@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -49,6 +50,7 @@ var supportedLanguages = map[string]struct{}{
 	"en":      {},
 	"zh-Hans": {},
 	"ko":      {},
+	"ja":      {},
 }
 
 type UserResponse struct {
@@ -411,7 +413,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isNew {
-		h.Analytics.Capture(analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
 	}
 	h.provisionMembershipForNewUser(r.Context(), user, "code") // CEREBRO-PATCH(auth-identity-hook-code): FIR-2523 auto-membership+group, every login (self-heal).
 
@@ -588,7 +590,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	if isNew {
 		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
 		evt.Properties["auth_method"] = "google"
-		h.Analytics.Capture(evt)
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, evt)
 	}
 	h.provisionMembershipForNewUser(r.Context(), user, "google") // CEREBRO-PATCH(auth-identity-hook-google): FIR-2523 auto-membership+group, every login (self-heal).
 

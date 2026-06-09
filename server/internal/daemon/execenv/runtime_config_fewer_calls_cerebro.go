@@ -57,27 +57,25 @@ func commentIssueGetStep(issueID string, snapshotInlined, bundleHint bool) strin
 // TestCommentTriggeredBriefCarriesNewCommentsHint and
 // TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead fail because
 // the brief uses the old generic step 3 instead of the situational hint.
-func commentThreadStep(issueID, triggerCommentID string, newCommentCount int, newCommentsSince string, priorSessionResumed, snapshotInlined, bundleHint bool) string {
+func commentThreadStep(issueID, triggerCommentID, triggerThreadID string, newCommentCount int, newCommentsSince string, priorSessionResumed, snapshotInlined, bundleHint bool) string {
 	switch {
 	case snapshotInlined:
 		return fmt.Sprintf("3. The triggering thread is in the inlined context above. Only if you need replies older than what is shown, run `multica issue comment list %s --thread %s --tail 30 --output json` and page older replies with the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line.\n", issueID, triggerCommentID)
 	case bundleHint:
 		return fmt.Sprintf("3. The triggering thread came back with your `multica issue context` call in step 1 — read it there; do NOT run a separate `multica issue comment list` for it. Only if you need replies older than what it returned, run `multica issue comment list %s --thread %s --tail 30 --output json` and page older replies with the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line.\n", issueID, triggerCommentID)
-	case priorSessionResumed:
-		return fmt.Sprintf("3. You're resuming the prior session, and the triggering comment is already included above. No other new comments on this issue since your last run. Do not re-read comment history by default. Only if the resumed session is missing thread context, pull the triggering conversation: `multica issue comment list %s --thread %s --tail 30 --output json`.\n", issueID, triggerCommentID)
 	}
 	// Pick the comment-reading pointer that matches the run's state. Mirrors
 	// the per-turn prompt path in daemon.buildCommentPrompt so the two
 	// surfaces cannot drift (PR #2816 single-source rule).
-	if hint := BuildNewCommentsHint(issueID, triggerCommentID, newCommentsSince, newCommentCount); hint != "" {
+	if hint := BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newCommentsSince, newCommentCount); hint != "" {
 		return "3. " + hint
 	}
 	if priorSessionResumed {
-		if hint := BuildResumedCommentsHint(issueID, triggerCommentID); hint != "" {
+		if hint := BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID); hint != "" {
 			return "3. " + hint
 		}
 	}
-	if cold := BuildColdCommentsHint(issueID, triggerCommentID); cold != "" {
+	if cold := BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID); cold != "" {
 		return "3. " + cold
 	}
 	// Final defensive fallback when there is no triggering comment id (should

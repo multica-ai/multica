@@ -1,6 +1,7 @@
 package service
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -35,12 +36,82 @@ func TestSanitizeSubjectField(t *testing.T) {
 	}
 }
 
+func TestNewEmailService_TLSMode(t *testing.T) {
+	tests := []struct {
+		name         string
+		smtpTLS      string
+		smtpPort     string
+		wantImplicit bool
+	}{
+		{"unset on 465 auto-enables implicit", "", "465", true},
+		{"unset on 587 stays starttls", "", "587", false},
+		{"unset default port stays starttls", "", "", false},
+		{"explicit implicit on 587 forces SMTPS", "implicit", "587", true},
+		{"smtps alias", "smtps", "587", true},
+		{"ssl alias", "ssl", "587", true},
+		{"explicit starttls on 465 overrides auto-detect", "starttls", "465", false},
+		{"case-insensitive", "IMPLICIT", "587", true},
+		{"trims whitespace", "  implicit  ", "587", true},
+		{"unknown value falls back to starttls", "tls", "465", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Isolate from any ambient mail config so only SMTP_TLS/SMTP_PORT drive the result.
+			t.Setenv("RESEND_API_KEY", "")
+			t.Setenv("SMTP_HOST", "smtp.example.com")
+			t.Setenv("SMTP_PORT", tt.smtpPort)
+			t.Setenv("SMTP_TLS", tt.smtpTLS)
+
+			s := NewEmailService()
+			if s.smtpTLSImplicit != tt.wantImplicit {
+				t.Errorf("SMTP_TLS=%q SMTP_PORT=%q: smtpTLSImplicit = %v, want %v",
+					tt.smtpTLS, tt.smtpPort, s.smtpTLSImplicit, tt.wantImplicit)
+			}
+		})
+	}
+}
+
+func TestNewEmailService_EHLOName(t *testing.T) {
+	tests := []struct {
+		name    string
+		ehloEnv string
+		want    string // when fromEnv is false, the os.Hostname() fallback is expected instead
+		fromEnv bool
+	}{
+		{"explicit name used verbatim", "mail.example.com", "mail.example.com", true},
+		{"explicit name is trimmed", "  mail.example.com  ", "mail.example.com", true},
+		{"unset falls back to hostname", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Isolate from ambient mail config so only SMTP_EHLO_NAME drives the result.
+			t.Setenv("RESEND_API_KEY", "")
+			t.Setenv("SMTP_HOST", "smtp.example.com")
+			t.Setenv("SMTP_EHLO_NAME", tt.ehloEnv)
+
+			s := NewEmailService()
+			if tt.fromEnv {
+				if s.smtpEHLOName != tt.want {
+					t.Errorf("SMTP_EHLO_NAME=%q: smtpEHLOName = %q, want %q", tt.ehloEnv, s.smtpEHLOName, tt.want)
+				}
+				return
+			}
+			// Unset: must mirror os.Hostname() exactly — including the empty result if
+			// Hostname() errors, which makes sendSMTP skip the EHLO override.
+			want, _ := os.Hostname()
+			if s.smtpEHLOName != want {
+				t.Errorf("SMTP_EHLO_NAME unset: smtpEHLOName = %q, want os.Hostname() %q", s.smtpEHLOName, want)
+			}
+		})
+	}
+}
+
 func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 	tests := []struct {
-		name        string
-		inviter     string
-		workspace   string
-		wantInBody  []string
+		name          string
+		inviter       string
+		workspace     string
+		wantInBody    []string
 		wantNotInBody []string
 	}{
 		{

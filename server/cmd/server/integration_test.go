@@ -1258,36 +1258,59 @@ func TestWebSocketIntegration(t *testing.T) {
 		t.Fatalf("expected type 'issue:created', got '%s'", wsMsg["type"])
 	}
 
-	// Update the issue — should trigger another broadcast
+	// Update the issue — should trigger another broadcast.
+	// Drain any interleaved events (e.g. agent-task WS messages) until we
+	// see issue:updated for our specific issue.
 	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
 		"status": "in_progress",
 	})
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on update: %v", err)
-	}
+	deadline := time.Now().Add(3 * time.Second)
 	var updateMsg map[string]any
-	json.Unmarshal(msg, &updateMsg)
-	if updateMsg["type"] != "issue:updated" {
-		t.Fatalf("expected type 'issue:updated', got '%s'", updateMsg["type"])
+	for {
+		conn.SetReadDeadline(deadline)
+		_, msg, err = conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("WebSocket read error on update: %v", err)
+		}
+		json.Unmarshal(msg, &updateMsg)
+		if updateMsg["type"] == "issue:updated" {
+			if payload, ok := updateMsg["payload"].(map[string]any); ok {
+				if issue, ok := payload["issue"].(map[string]any); ok {
+					if issue["id"] == issueID {
+						break
+					}
+				}
+			} else {
+				break // no payload wrapper — older format, accept it
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected type 'issue:updated', got '%s'", updateMsg["type"])
+		}
 	}
 
-	// Delete the issue — should trigger another broadcast
+	// Delete the issue — should trigger another broadcast.
+	// Drain any interleaved events until we see issue:deleted for our issue.
 	resp = authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on delete: %v", err)
-	}
+	deadline = time.Now().Add(3 * time.Second)
 	var deleteMsg map[string]any
-	json.Unmarshal(msg, &deleteMsg)
-	if deleteMsg["type"] != "issue:deleted" {
-		t.Fatalf("expected type 'issue:deleted', got '%s'", deleteMsg["type"])
+	for {
+		conn.SetReadDeadline(deadline)
+		_, msg, err = conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("WebSocket read error on delete: %v", err)
+		}
+		json.Unmarshal(msg, &deleteMsg)
+		if deleteMsg["type"] == "issue:deleted" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected type 'issue:deleted', got '%s'", deleteMsg["type"])
+		}
 	}
 }
 

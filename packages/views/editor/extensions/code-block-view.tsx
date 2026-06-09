@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Copy, Check } from "lucide-react";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
 import { MermaidDiagram } from "../mermaid-diagram";
 
@@ -37,9 +38,10 @@ function CodeBlockView({ node }: NodeViewProps) {
   const handleCopy = async () => {
     const text = node.textContent;
     if (!text) return;
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (await copyText(text)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (

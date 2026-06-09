@@ -56,8 +56,12 @@
       "workload_hint": "실행 중 {{running}}개 · 대기 중 {{queued}}개",
       "cli": "CLI",
       "cloud_worker": "클라우드 워커",
-      "local_daemon": "로컬 데몬"
-    }
+      "local_daemon": "로컬 데몬",
+      "runtimes_hint_one": "{{count}} online",
+      "health_issues_one": "{{count}} issue"
+    },
+    "runtime_count_one": "{{count}} runtime",
+    "busy_count_one": "{{count}} busy"
   },
   "health": {
     "online": {
@@ -152,13 +156,19 @@
           "workload_queued": "대기 중",
           "visibility_workspace": "워크스페이스",
           "visibility_private": "비공개"
-        }
+        },
+        "title_one": "Archive {{count}} agent and delete this Runtime?",
+        "checkbox_one": "I understand this {{count}} agent will be archived and any queued or running tasks will be cancelled.",
+        "confirm_one": "Archive {{count}} agent and delete runtime"
       }
     },
     "toast_deleted": "런타임을 삭제했습니다",
     "toast_delete_failed": "런타임을 삭제하지 못했습니다",
     "running_chip_other": "· 실행 중 {{count}}개",
-    "queued_chip_other": "· 대기 중 {{count}}개"
+    "queued_chip_other": "· 대기 중 {{count}}개",
+    "serving_count_one": "{{count}} agent",
+    "running_chip_one": "· {{count}} running",
+    "queued_chip_one": "· {{count}} queued"
   },
   "detail_page": {
     "not_found_title": "런타임을 찾을 수 없습니다",
@@ -270,7 +280,11 @@
     "row_actions_aria": "행 작업",
     "delete_action": "삭제",
     "delete_permission_hint": "런타임 소유자와 워크스페이스 관리자만 이 런타임을 삭제할 수 있습니다",
-    "delete_admin_hint": "런타임 소유자와 워크스페이스 관리자만 런타임을 삭제할 수 있습니다."
+    "delete_admin_hint": "런타임 소유자와 워크스페이스 관리자만 런타임을 삭제할 수 있습니다.",
+    "col_cli": "CLI",
+    "cli_managed_badge": "Desktop",
+    "cli_update_available_aria": "Update available",
+    "cli_update_available_tooltip": "Update available: {{version}}"
   },
   "usage": {
     "period_label": "기간",
@@ -324,6 +338,13 @@
     "table_output": "출력",
     "table_cache_r": "캐시 R",
     "table_cache_w": "캐시 W",
-    "no_data": "아직 사용량 데이터가 없습니다"
-  }
+    "no_data": "아직 사용량 데이터가 없습니다",
+    "unmapped_notice_one": "{{count}} model has no maintained price — its tokens are excluded from cost totals.",
+    "cost_by_caption_agent_one": "{{count}} agent on this runtime",
+    "cost_by_caption_model_one": "{{count}} model used",
+    "dimension_label": "Dimension",
+    "when_tab_weekly": "Weekly"
+  },
+  "running_one": "{{count}} running",
+  "queued_one": "{{count}} queued"
 }

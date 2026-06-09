@@ -48,7 +48,9 @@
     "squads_group": "스쿼드",
     "issue_count_other": "이슈 {{count}}개",
     "reset": "필터 모두 초기화",
-    "active_count_other": "필터 {{count}}개"
+    "active_count_other": "필터 {{count}}개",
+    "issue_count_one": "{{count}} issue",
+    "active_count_one": "{{count}} filter"
   },
   "display": {
     "tooltip": "보기 설정",
@@ -116,7 +118,9 @@
         "title": "생성한 이슈가 없습니다",
         "description": "여기에서 만든 이슈가 이 보기로 표시됩니다."
       }
-    }
+    },
+    "search_placeholder": "Search issues...",
+    "search_empty": "No issues match your search."
   },
   "list": {
     "empty_status": "이슈 없음",
@@ -226,7 +230,8 @@
     "link_copy_failed": "링크를 복사하지 못했습니다",
     "workdir_path_copied": "작업 디렉터리 경로를 복사했습니다",
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
-    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 이슈를 실행하지 않았습니다"
+    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 이슈를 실행하지 않았습니다",
+    "pull_request_card_files_count_one": "{{count}} file"
   },
   "timeline": {
     "loading": "불러오는 중..."
@@ -256,7 +261,11 @@
     "squad_leader_failed_reason": "평가 실패: {{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_other": "활동 {{count}}개",
-    "show_more_activities_other": "활동 {{count}}개 더 보기"
+    "show_more_activities_other": "활동 {{count}}개 더 보기",
+    "task_completed_one": "completed the task",
+    "task_failed_one": "task failed",
+    "activity_count_one": "{{count}} activity",
+    "show_more_activities_one": "Show {{count}} more activity"
   },
   "comment": {
     "delete_title": "댓글 삭제",
@@ -292,7 +301,9 @@
       "bar_other": "{{authors}}님의 해결된 댓글 {{count}}개",
       "bar_authors_more_other": "{{names}} 외 {{count}}명",
       "resolve_failed": "스레드를 해결하지 못했습니다",
-      "unresolve_failed": "스레드 해결을 취소하지 못했습니다"
+      "unresolve_failed": "스레드 해결을 취소하지 못했습니다",
+      "bar_one": "{{count}} resolved comment from {{authors}}",
+      "bar_authors_more_one": "{{names}} and {{count}} other"
     },
     "_move_to_subissue": "CEREBRO-PATCH(i18n-comment-move-subissue): JEH-1309 move comment thread to sub-issue UI",
     "move": {
@@ -301,7 +312,8 @@
       "title": "Move thread to sub-issue?",
       "description_other": "This comment and {{count}} replies will become a new sub-issue. The original thread will be replaced with a link.",
       "success_toast": "Moved to {{identifier}}",
-      "failed_toast": "Failed to move thread"
+      "failed_toast": "Failed to move thread",
+      "description_one": "This comment will become a new sub-issue. The original comment will be replaced with a link."
     },
     "_move_thread": "CEREBRO-PATCH(i18n-comment-move-thread): JEH-2488 move picked comments to a new thread UI",
     "move_thread": {
@@ -311,8 +323,10 @@
       "move_action_other": "Move {{count}} comments to new thread",
       "moving_action": "Moving...",
       "success_toast": "Moved to a new thread",
-      "failed_toast": "Couldn't move the comments"
-    }
+      "failed_toast": "Couldn't move the comments",
+      "move_action_one": "Move {{count}} comment to new thread"
+    },
+    "reply_count_one": "{{count}} reply"
   },
   "reply": {
     "placeholder": "답글 남기기...",
@@ -338,7 +352,8 @@
     "status_queued": "대기 중",
     "chip_label": "작업 중",
     "empty_hover": "현재 작업 중인 에이전트가 없습니다",
-    "filter_active_label": "작업 중인 에이전트만 보는 중"
+    "filter_active_label": "작업 중인 에이전트만 보는 중",
+    "hover_header_one": "{{count}} agent working"
   },
   "agent_live": {
     "is_working": "{{name}} 작업 중",
@@ -352,7 +367,8 @@
     "transcript_button": "트랜스크립트 보기",
     "stop_button": "중지",
     "stop_tooltip": "에이전트 중지",
-    "cancel_failed": "작업을 취소하지 못했습니다"
+    "cancel_failed": "작업을 취소하지 못했습니다",
+    "tool_count_one": "{{count}} tool"
   },
   "execution_log": {
     "section": "실행 로그",
@@ -402,7 +418,11 @@
     "delete_dialog_title_other": "이슈 {{count}}개를 삭제할까요?",
     "delete_dialog_desc_other": "이 작업은 되돌릴 수 없습니다. 선택한 이슈와 관련 데이터가 영구 삭제됩니다.",
     "delete_dialog_warning": "워크스페이스 멤버라면 누구나 이슈를 삭제할 수 있습니다.",
-    "cancel": "취소"
+    "cancel": "취소",
+    "update_success_one": "Updated {{count}} issue",
+    "delete_success_one": "Deleted {{count}} issue",
+    "delete_dialog_title_one": "Delete {{count}} issue?",
+    "delete_dialog_desc_one": "This action cannot be undone. This will permanently delete the selected issue and all associated data."
   },
   "card": {
     "update_failed": "이슈를 업데이트하지 못했습니다",

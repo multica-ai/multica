@@ -1,0 +1,10 @@
+{
+  "generate_ai": "AIで生成",
+  "modal_title": "AIでアバターを生成",
+  "modal_description": "空欄のままにすると自動でフォトリアルな肖像が生成されます。希望する見た目を記入することもできます。",
+  "prompt_placeholder": "見た目を記入（任意）",
+  "generate_button": "生成",
+  "generating": "生成中…",
+  "cancel": "キャンセル",
+  "generate_error": "アバターの生成に失敗しました"
+}

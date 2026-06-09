@@ -275,6 +275,116 @@ write_conflict_report() {
   } > "$out"
 }
 
+# build_pr_body <outcome> <upstream_sha> <behind>
+# Generates the full PR description with release notes and browser verification checklist.
+build_pr_body() {
+  local outcome="$1" upstream_sha="$2" behind="$3"
+  local range="$ORIGIN_REMOTE/$BASE_BRANCH..$UPSTREAM_REMOTE/$BASE_BRANCH"
+
+  # --- Header ---
+  printf 'Nightly upstream sync from `multica-ai/multica`.\n\n'
+  printf '- **Outcome:** %s\n' "$outcome"
+  printf '- **Upstream HEAD:** `%s`\n' "$upstream_sha"
+  printf '- **Commits in batch:** %s\n\n' "$behind"
+
+  # --- Changelog / Release notes ---
+  local changelog_commits
+  changelog_commits="$(git log --oneline "$range" 2>/dev/null | grep -i 'changelog\|release note' | head -10 || true)"
+  if [[ -n "$changelog_commits" ]]; then
+    printf '## 📋 Changelog entries\n\n'
+    while IFS= read -r line; do
+      printf '- %s\n' "$line"
+    done <<< "$changelog_commits"
+    printf '\n'
+  fi
+
+  # --- Release notes by category ---
+  printf '## 🚀 What'\''s new in this batch\n\n'
+  local feat_commits fix_commits perf_commits
+  feat_commits="$(git log --oneline "$range" 2>/dev/null | grep -E '^[a-f0-9]+ feat' | head -20 || true)"
+  fix_commits="$(git log --oneline "$range" 2>/dev/null | grep -E '^[a-f0-9]+ fix' | head -20 || true)"
+  perf_commits="$(git log --oneline "$range" 2>/dev/null | grep -E '^[a-f0-9]+ perf' | head -10 || true)"
+
+  if [[ -n "$feat_commits" ]]; then
+    printf '**Features**\n'
+    while IFS= read -r line; do
+      printf '- %s\n' "$line"
+    done <<< "$feat_commits"
+    printf '\n'
+  fi
+  if [[ -n "$fix_commits" ]]; then
+    printf '**Fixes**\n'
+    while IFS= read -r line; do
+      printf '- %s\n' "$line"
+    done <<< "$fix_commits"
+    printf '\n'
+  fi
+  if [[ -n "$perf_commits" ]]; then
+    printf '**Performance**\n'
+    while IFS= read -r line; do
+      printf '- %s\n' "$line"
+    done <<< "$perf_commits"
+    printf '\n'
+  fi
+
+  # --- Browser verification checklist ---
+  printf '## ✅ Browser verification checklist\n\n'
+  printf '_Generated from changed files. Use agent-browser to verify each item._\n\n'
+
+  local changed_files
+  changed_files="$(git diff --name-only "$ORIGIN_REMOTE/$BASE_BRANCH..$ROLLING_BRANCH" 2>/dev/null || true)"
+
+  # Map changed areas to verification tasks
+  local checks=()
+
+  echo "$changed_files" | grep -q 'packages/views/chat/' && \
+    checks+=('- [ ] Chat: åbn en chat-session, send en besked, verificer streaming-svar virker')
+  echo "$changed_files" | grep -q 'packages/views/editor/' && \
+    checks+=('- [ ] Editor: skriv en kommentar med @-mention, billede-upload, og markdown (fed/kursiv/kode)')
+  echo "$changed_files" | grep -q 'packages/views/issues/' && \
+    checks+=('- [ ] Issues: åbn en issue-detalje, tilføj kommentar, skift status')
+  echo "$changed_files" | grep -q 'packages/views/agents/' && \
+    checks+=('- [ ] Agenter: åbn agent-detalje, tjek alle tabs (Overview/Tools/Integrations)')
+  echo "$changed_files" | grep -q 'packages/views/layout/' && \
+    checks+=('- [ ] Navigation: sidebar viser korrekt, pinned items, workspace-switch')
+  echo "$changed_files" | grep -q 'packages/views/workspace/' && \
+    checks+=('- [ ] Workspace-indstillinger: åbn Settings, tjek workspace-logo upload')
+  echo "$changed_files" | grep -q 'packages/views/settings/' && \
+    checks+=('- [ ] Settings: åbn Workspace Settings, tjek at alle tabs indlæser korrekt')
+  echo "$changed_files" | grep -q 'packages/views/squads/' && \
+    checks+=('- [ ] Squads: åbn squad-detalje, tjek member-liste med status-dots')
+  echo "$changed_files" | grep -q 'packages/views/onboarding/' && \
+    checks+=('- [ ] Onboarding: tjek at onboarding-flow starter korrekt for ny bruger')
+  echo "$changed_files" | grep -q 'packages/views/search/' && \
+    checks+=('- [ ] Søgning: åbn command palette (Cmd+K), søg efter en issue')
+  echo "$changed_files" | grep -q 'packages/views/projects/' && \
+    checks+=('- [ ] Projekter: åbn projekt-detalje i Board/List/Gantt-view')
+  echo "$changed_files" | grep -q 'apps/web/app/auth/' && \
+    checks+=('- [ ] Auth: login-flow virker, session opretholds efter reload')
+  echo "$changed_files" | grep -q 'apps/desktop/' && \
+    checks+=('- [ ] Desktop: åbn desktop-app, tjek tab-navigation og workspace-switch')
+  echo "$changed_files" | grep -q 'server/internal/daemon/' && \
+    checks+=('- [ ] Daemon/runtime: start en agent-kørsel, verificer at den gennemføres uden timeout')
+  echo "$changed_files" | grep -q 'server/internal/handler/file' && \
+    checks+=('- [ ] Fil-downloads: download en vedhæftet fil fra en kommentar')
+  echo "$changed_files" | grep -q 'packages/ui/markdown/' && \
+    checks+=('- [ ] Markdown-rendering: verificer at links, bold, kode-blokke og billeder renderer korrekt')
+  echo "$changed_files" | grep -q 'packages/views/autopilots/' && \
+    checks+=('- [ ] Autopilots: åbn autopilot-detalje, tjek at konfiguration vises korrekt')
+
+  # Always include a basic smoke test
+  checks+=('- [ ] Generel smoke: åbn workspace, tjek at issues-listen indlæser uden fejl i konsollen')
+
+  for check in "${checks[@]}"; do
+    printf '%s\n' "$check"
+  done
+
+  printf '\n---\n\n'
+  printf 'Auto-opened by the upstream-sync bot. Review and merge as part of normal QA.\n\n'
+  printf 'Tracking-Issue: %s\n\n' "$TRACKING_ISSUE"
+  printf 'When Tine posts `Resultat: PASS` referencing this PR on the tracking issue, the nightly deploy pass auto-merges and deploys it.\n'
+}
+
 push_and_open_pr() {
   local upstream_sha="$1" behind="$2" outcome="$3"
 
@@ -301,8 +411,7 @@ push_and_open_pr() {
   local short_sha title body
   short_sha="$(echo "$upstream_sha" | cut -c1-12)"
   title="chore: sync upstream/main ($short_sha)"
-  body="$(printf 'Nightly upstream sync from \x60multica-ai/multica\x60.\n\n- Outcome: %s\n- Upstream HEAD: \x60%s\x60\n- Commits in batch: %s\n\nAuto-opened by the upstream-sync bot. Review and merge as part of normal QA.\n\nTracking-Issue: %s\n\nWhen Tine posts \x60Resultat: PASS\x60 referencing this PR on the tracking issue, the nightly deploy pass auto-merges and deploys it.\n' \
-    "$outcome" "$upstream_sha" "$behind" "$TRACKING_ISSUE")"
+  body="$(build_pr_body "$outcome" "$upstream_sha" "$behind")"
 
   local pr_url repo
   repo="$(origin_repo 2>/dev/null || true)"

@@ -14,10 +14,9 @@ const sizeMap = {
 
 interface WorkspaceAvatarProps {
   name: string;
+  avatarUrl?: string | null;
   size?: keyof typeof sizeMap;
   className?: string;
-  /** FIR-2580: optional workspace logo URL; null/empty → letter fallback. */
-  avatarUrl?: string | null;
 }
 
 function WorkspaceAvatar({ name, size = "sm", className, avatarUrl }: WorkspaceAvatarProps) {
@@ -30,6 +29,7 @@ function WorkspaceAvatar({ name, size = "sm", className, avatarUrl }: WorkspaceA
   }, [resolved]);
 
   const showImg = !!resolved && !imgError;
+
   return (
     <span
       className={cn(

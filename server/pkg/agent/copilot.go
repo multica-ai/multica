@@ -195,21 +195,20 @@ func withCopilotExitCode(msg string, exitCode int) string {
 }
 
 func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	execPath := b.cfg.ExecutablePath
-	if execPath == "" {
-		execPath = "copilot"
+	execName := b.cfg.ExecutablePath
+	if execName == "" {
+		execName = "copilot"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("copilot executable not found at %q: %w", execPath, err)
+	lookedUp, err := exec.LookPath(execName)
+	if err != nil {
+		return nil, fmt.Errorf("copilot executable not found at %q: %w", execName, err)
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCopilotArgs(prompt, opts, b.cfg.Logger)
+	execPath, args := chooseCopilotInvocation(execName, lookedUp, args, b.cfg.Logger)
 
 	// CEREBRO-PATCH(agent-copilot-sandbox): prepareCommand wraps the agent in
 	// the daemon sandbox when enabled; falls back to plain exec.CommandContext.
@@ -226,6 +225,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	}()
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Debug("agent command", "exec", execPath, "args", args)
+
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd

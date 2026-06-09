@@ -5,6 +5,10 @@ import { Pencil, Eye } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import {
+  parseFrontmatter,
+  type SkillFrontmatter,
+} from "@multica/core/skills/frontmatter";
 import { Markdown } from "../../common/markdown";
 import { useT } from "../../i18n";
 
@@ -13,52 +17,10 @@ function isMarkdown(path: string) {
 }
 
 // ---------------------------------------------------------------------------
-// YAML frontmatter parsing
-// ---------------------------------------------------------------------------
-
-interface Frontmatter {
-  [key: string]: string;
-}
-
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
-
-function parseFrontmatter(raw: string): {
-  frontmatter: Frontmatter | null;
-  body: string;
-} {
-  const match = FRONTMATTER_RE.exec(raw);
-  if (!match) return { frontmatter: null, body: raw };
-
-  const yamlBlock = match[1]!;
-  const body = raw.slice(match[0].length);
-  const frontmatter: Frontmatter = {};
-
-  for (const line of yamlBlock.split("\n")) {
-    const idx = line.indexOf(":");
-    if (idx === -1) continue;
-    const key = line.slice(0, idx).trim();
-    let value = line.slice(idx + 1).trim();
-    // Strip surrounding quotes
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (key) frontmatter[key] = value;
-  }
-
-  return {
-    frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : null,
-    body,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Frontmatter display
 // ---------------------------------------------------------------------------
 
-function FrontmatterCard({ data }: { data: Frontmatter }) {
+function FrontmatterCard({ data }: { data: SkillFrontmatter }) {
   return (
     <div className="mb-4 rounded-lg border bg-muted/30 px-4 py-3">
       <div className="grid gap-1.5">
@@ -67,7 +29,9 @@ function FrontmatterCard({ data }: { data: Frontmatter }) {
             <span className="shrink-0 font-medium text-muted-foreground min-w-[80px]">
               {key}
             </span>
-            <span className="text-foreground">{value}</span>
+            <span className="text-foreground whitespace-pre-wrap break-words">
+              {value.trimEnd()}
+            </span>
           </div>
         ))}
       </div>

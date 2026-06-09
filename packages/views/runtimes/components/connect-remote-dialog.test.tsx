@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { configStore } from "@multica/core/config";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
@@ -30,7 +31,25 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: vi.fn() }),
 }));
 
-function renderDialog() {
+function resetConfigStore() {
+  configStore.setState({
+    cdnDomain: "",
+    allowSignup: true,
+    googleClientId: "",
+    daemonServerUrl: "",
+    daemonAppUrl: "",
+    workspaceCreationDisabled: false,
+  });
+}
+
+function renderDialog(config?: {
+  daemonServerUrl?: string;
+  daemonAppUrl?: string;
+}) {
+  resetConfigStore();
+  if (config) {
+    configStore.getState().setDaemonConfig(config);
+  }
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -47,6 +66,36 @@ const ligatureClasses = [
 ];
 
 describe("ConnectRemoteDialog", () => {
+  it("uses cloud setup commands by default", () => {
+    const { baseElement } = renderDialog();
+
+    expect(baseElement).toHaveTextContent("multica setup");
+    expect(baseElement).not.toHaveTextContent("multica setup self-host");
+    expect(baseElement).toHaveTextContent(
+      "multica config set server_url https://api.multica.ai",
+    );
+    expect(baseElement).toHaveTextContent(
+      "multica config set app_url https://multica.ai",
+    );
+  });
+
+  it("uses self-host daemon URLs from runtime config", () => {
+    const { baseElement } = renderDialog({
+      daemonServerUrl: "https://api.example.com/",
+      daemonAppUrl: "https://app.example.com/",
+    });
+
+    expect(baseElement).toHaveTextContent(
+      "multica setup self-host --server-url https://api.example.com --app-url https://app.example.com",
+    );
+    expect(baseElement).toHaveTextContent(
+      "multica config set server_url https://api.example.com",
+    );
+    expect(baseElement).toHaveTextContent(
+      "multica config set app_url https://app.example.com",
+    );
+  });
+
   it("disables font ligatures in setup command code", () => {
     const { baseElement } = renderDialog();
 

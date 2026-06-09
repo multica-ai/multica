@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy" // CEREBRO-PATCH(daemon-repo-toolpolicy): FIR-2505 repo-capability resolved via tool-policy chain
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp" // CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge workspace connections into RuntimeToolsConfig
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/profile"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -416,7 +417,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			OwnerID:     ownerID,
 		})
 		if err != nil {
-			h.Analytics.Capture(analytics.RuntimeFailed(
+			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
 				uuidToString(ownerID),
 				req.WorkspaceID,
 				req.DaemonID,
@@ -449,7 +450,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
 		if row.Inserted {
-			h.Analytics.Capture(analytics.RuntimeRegistered(
+			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeRegistered(
 				uuidToString(ownerID),
 				req.WorkspaceID,
 				uuidToString(registered.ID),
@@ -459,7 +460,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				req.CLIVersion,
 			))
 			if registered.Status == "online" {
-				h.Analytics.Capture(analytics.RuntimeReady(
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeReady(
 					uuidToString(ownerID),
 					req.WorkspaceID,
 					uuidToString(registered.ID),
@@ -735,7 +736,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
 		}
-		h.Analytics.Capture(analytics.RuntimeOffline(
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeOffline(
 			uuidToString(rt.OwnerID),
 			wsID,
 			uuidToString(rt.ID),
@@ -1529,7 +1530,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+		// Workspace-bound skills first, then platform built-in skills. Built-in
+		// names carry a "multica-" prefix so their on-disk slugs never collide
+		// with a user-authored workspace skill (see writeSkillFiles).
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+		skills = append(skills, h.TaskService.BuiltinSkills()...)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
 			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -1694,6 +1699,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if task.TriggerCommentID.Valid {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
+				resp.TriggerThreadID = uuidToString(comment.ID)
+				if comment.ParentID.Valid {
+					resp.TriggerThreadID = uuidToString(comment.ParentID)
+				}
 				resp.TriggerAuthorType = comment.AuthorType
 				resp.TriggerUserID = uuidToString(comment.AuthorID) // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggerer for the trace user-label (FIR-2438)
 				switch comment.AuthorType {
@@ -1810,6 +1819,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+
 			// CEREBRO-PATCH(daemon-handler-chat-history-cap): cap chat history at the SQL layer so long-lived
 			// sessions don't pull megabytes per claim. Query orders newest-first; we reverse to keep the
 			// downstream loop's chronological order intact.
@@ -1826,6 +1836,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					content := strings.TrimSpace(m.Content)
 					if role == "" || content == "" {
 						continue
+
 					}
 					resp.ChatHistory = append(resp.ChatHistory, ChatHistoryMessage{
 						Role:    role,
@@ -1834,22 +1845,34 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			// Load every user message that hasn't yet been answered by an
-			// assistant turn, in chronological order. Coalescing on enqueue
-			// means a single queued task may need to absorb multiple user
-			// messages that arrived while the prior turn was running —
-			// pulling them all here ensures the agent's next response
-			// addresses all of them.
-			if msgs, err := h.Queries.ListUnrespondedUserMessages(r.Context(), cs.ID); err == nil {
-				for _, m := range msgs {
-					resp.ChatMessages = append(resp.ChatMessages, m.Content)
+			// assistant turn. Coalescing on enqueue means a single queued task
+			// may need to absorb multiple user messages that arrived while the
+			// prior turn was running — delivering all of them joined with \n\n
+			// ensures the agent addresses each one (e.g. "看上海天气" then
+			// "还有青岛" → both answered, not just Qingdao).
+			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
+				unanswered := trailingUserMessages(msgs)
+				parts := make([]string, 0, len(unanswered))
+				for _, m := range unanswered {
+					if strings.TrimSpace(m.Content) != "" {
+						parts = append(parts, m.Content)
+					}
+					if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
+						ChatMessageID: m.ID,
+						WorkspaceID:   parseUUID(resp.WorkspaceID),
+					}); attErr == nil && len(atts) > 0 {
+						for _, a := range atts {
+							resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
+								ID:          uuidToString(a.ID),
+								Filename:    a.Filename,
+								ContentType: a.ContentType,
+							})
+						}
+					}
 				}
-				// Backwards-compat: pre-JEH-330 daemons read chat_message
-				// (singular) and don't know about chat_messages. Set it to
-				// the most recent user message so old binaries still build
-				// a non-empty prompt. Drop once all runtimes have upgraded.
-				if n := len(resp.ChatMessages); n > 0 {
-					resp.ChatMessage = resp.ChatMessages[n-1]
-				}
+				resp.ChatMessage = strings.Join(parts, "\n\n")
+				// Also populate ChatMessages list for daemons that read it directly.
+				resp.ChatMessages = parts
 			}
 			// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — pre-create the
 			// assistant chat_message row up-front so the agent can attach files
@@ -2107,6 +2130,25 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
 }
 
+// trailingUserMessages returns the run of user messages after the last
+// assistant message in a chronologically-ordered chat history — the set the
+// agent has NOT yet replied to. The agent resumes its prior session and only
+// learns of new input through the claim response's chat_message, so a single
+// run that covers a debounced burst (MUL-2968) must deliver every one of
+// these, not just the latest. Every completed or failed run writes an
+// assistant row, so the anchor advances one turn at a time; the result is the
+// whole slice on the first turn and exactly the new message(s) thereafter.
+func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
+	start := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "user" {
+			start = i + 1
+			break
+		}
+	}
+	return msgs[start:]
+}
+
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.
 func (h *Handler) ListPendingTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
@@ -2306,7 +2348,7 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 	if marked.CreatorType == "agent" {
 		distinct = "agent:" + distinct
 	}
-	h.Analytics.Capture(analytics.IssueExecuted(
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueExecuted(
 		distinct,
 		uuidToString(marked.WorkspaceID),
 		uuidToString(marked.ID),
@@ -2365,7 +2407,9 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			CostCents: u.CostCents,
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
+			continue
 		}
+
 
 		accountTokens += u.InputTokens + u.OutputTokens
 
@@ -2374,6 +2418,9 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		// here are warnings, not 4xx, so the raw token usage above still
 		// lands even if the rollup hits a constraint or DB hiccup.
 		h.recordBudgetSpend(r.Context(), workspaceID, task, u)
+
+		h.TaskService.CaptureTaskUsage(r.Context(), task, u.Provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+
 	}
 	h.recordCerebroAccountTokenUsage(r.Context(), task, accountTokens) // CEREBRO-PATCH(handler-daemon-account-token-usage): keep account rolling windows in lockstep with task usage.
 
