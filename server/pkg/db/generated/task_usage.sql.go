@@ -228,6 +228,71 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardRuntimeRunTime = `-- name: ListDashboardRuntimeRunTime :many
+SELECT
+    atq.runtime_id,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY atq.runtime_id
+ORDER BY total_seconds DESC
+`
+
+type ListDashboardRuntimeRunTimeParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardRuntimeRunTimeRow struct {
+	RuntimeID    pgtype.UUID `json:"runtime_id"`
+	TotalSeconds int64       `json:"total_seconds"`
+	TaskCount    int32       `json:"task_count"`
+	FailedCount  int32       `json:"failed_count"`
+}
+
+// Per-runtime total task run time and task count for the workspace.
+// Mirrors ListDashboardAgentRunTime but groups on runtime_id. Same
+// terminal-task filter (completed or failed with both timestamps) and
+// @since treatment (viewer's local start-of-day, passed through without
+// re-truncation).
+func (q *Queries) ListDashboardRuntimeRunTime(ctx context.Context, arg ListDashboardRuntimeRunTimeParams) ([]ListDashboardRuntimeRunTimeRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardRuntimeRunTime, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardRuntimeRunTimeRow{}
+	for rows.Next() {
+		var i ListDashboardRuntimeRunTimeRow
+		if err := rows.Scan(
+			&i.RuntimeID,
+			&i.TotalSeconds,
+			&i.TaskCount,
+			&i.FailedCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardUsageByAgent = `-- name: ListDashboardUsageByAgent :many
 SELECT
     agent_id,
@@ -289,6 +354,66 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 		if err := rows.Scan(
 			&i.AgentID,
 			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardUsageByModel = `-- name: ListDashboardUsageByModel :many
+SELECT
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(task_count)::int             AS task_count
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= $2::timestamptz
+  AND ($3::uuid IS NULL OR project_id = $3)
+GROUP BY model
+ORDER BY SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) DESC
+`
+
+type ListDashboardUsageByModelParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardUsageByModelRow struct {
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	TaskCount        int32  `json:"task_count"`
+}
+
+// Per-model token aggregates from task_usage_hourly. Groups workspace
+// usage by model for the dashboard's Model scope. No agent dimension.
+func (q *Queries) ListDashboardUsageByModel(ctx context.Context, arg ListDashboardUsageByModelParams) ([]ListDashboardUsageByModelRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsageByModel, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUsageByModelRow{}
+	for rows.Next() {
+		var i ListDashboardUsageByModelRow
+		if err := rows.Scan(
 			&i.Model,
 			&i.InputTokens,
 			&i.OutputTokens,

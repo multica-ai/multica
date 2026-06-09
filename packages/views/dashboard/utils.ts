@@ -1,8 +1,10 @@
 import type {
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardUsageByModel,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
+  DashboardRuntimeRunTime,
 } from "@multica/core/types";
 import {
   addDaysIso,
@@ -393,4 +395,46 @@ export function formatDuration(seconds: number, lessThanMinuteLabel: string): st
     return h > 0 ? `${days}d ${h}h` : `${days}d`;
   }
   return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
+// ---------------------------------------------------------------------------
+// Model and runtime leaderboard aggregations
+// ---------------------------------------------------------------------------
+
+export interface ModelDashboardRow {
+  model: string;
+  tokens: number;
+  cost: number;
+  taskCount: number;
+}
+
+// Per-model token rows → sorted rows for the Model scope leaderboard.
+// The server already groups by model, so this just reshapes and sorts by
+// cost descending. taskCount is informational (see ListDashboardUsageByAgent
+// caveat about over-counting across hours).
+export function aggregateModelRows(rows: DashboardUsageByModel[]): ModelDashboardRow[] {
+  return rows.map((r) => ({
+    model: r.model,
+    tokens: r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens,
+    cost: estimateCost(r),
+    taskCount: r.task_count,
+  })).toSorted((a, b) => b.cost - a.cost);
+}
+
+export interface RuntimeDashboardRow {
+  runtimeId: string;
+  seconds: number;
+  taskCount: number;
+  failedCount: number;
+}
+
+// Per-runtime run-time rows → sorted rows for the Runtime scope leaderboard.
+// Sorted by total_seconds descending (most active runtime first).
+export function aggregateRuntimeRows(rows: DashboardRuntimeRunTime[]): RuntimeDashboardRow[] {
+  return rows.map((r) => ({
+    runtimeId: r.runtime_id,
+    seconds: r.total_seconds,
+    taskCount: r.task_count,
+    failedCount: r.failed_count,
+  })).toSorted((a, b) => b.seconds - a.seconds);
 }

@@ -127,6 +127,54 @@ WHERE a.workspace_id = $1
 GROUP BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
 
+-- name: ListDashboardUsageByModel :many
+-- Per-model token aggregates from `task_usage_hourly`. Groups workspace
+-- usage by model for the dashboard's Model scope. No agent dimension —
+-- the client computes cost from its per-model pricing table; the model
+-- field is the key.
+--
+-- @since is the viewer's local start-of-day-(N) (same convention as
+-- ListDashboardUsageByAgent); passed straight through without re-truncation.
+SELECT
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(task_count)::int             AS task_count
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+GROUP BY model
+ORDER BY SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) DESC;
+
+-- name: ListDashboardRuntimeRunTime :many
+-- Per-runtime total task run time and task count for the workspace.
+-- Mirrors ListDashboardAgentRunTime but groups on runtime_id. Same
+-- terminal-task filter (completed or failed with both timestamps) and
+-- @since treatment (viewer's local start-of-day, passed through without
+-- re-truncation).
+SELECT
+    atq.runtime_id,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY atq.runtime_id
+ORDER BY total_seconds DESC;
+
 -- name: ListDashboardAgentRunTime :many
 -- Per-agent total task run time and task count for the workspace, optionally
 -- scoped to a single project. Counts only terminal runs (completed or failed)
