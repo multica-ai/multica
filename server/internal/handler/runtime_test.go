@@ -490,13 +490,15 @@ func TestResumeRuntimeClearsHold(t *testing.T) {
 	})
 
 	// Wire up a TaskService so ResumeRuntime can call ClearRuntimeHold.
+	// Save and restore the original value so parallel tests are not affected.
+	savedTaskSvc := testHandler.TaskService
 	queries := db.New(testPool)
 	hub := realtime.NewHub()
 	go hub.Run()
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, hub, bus)
 	testHandler.TaskService = taskSvc
-	t.Cleanup(func() { testHandler.TaskService = nil })
+	t.Cleanup(func() { testHandler.TaskService = savedTaskSvc })
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/resume", nil)
