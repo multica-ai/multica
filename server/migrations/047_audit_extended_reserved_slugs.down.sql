@@ -1,1 +1,0 @@
--- No-op: 047 is an audit-only migration. Nothing to roll back.

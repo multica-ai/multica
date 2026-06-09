@@ -201,6 +201,58 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
+// ExportSession runs `opencode export <sessionID>` and returns the
+// concatenated text output from the session database. This is the
+// fallback path when `opencode run --format json` completes with
+// status=completed but output_bytes=0 — opencode v1.16.2 and later
+// may not stream text/reasoning events over NDJSON, even though the
+// response is stored in the session DB and retrievable via export.
+// See #3922.
+func (b *opencodeBackend) ExportSession(ctx context.Context, sessionID string) (string, error) {
+	execPath := b.cfg.ExecutablePath
+	if execPath == "" {
+		execPath = "opencode"
+	}
+	resolved, err := exec.LookPath(execPath)
+	if err != nil {
+		return "", fmt.Errorf("opencode executable not found: %w", err)
+	}
+
+	exportCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(exportCtx, resolved, "export", sessionID)
+	hideAgentWindow(cmd)
+	b.cfg.Logger.Info("opencode export fallback", "session_id", sessionID)
+
+	stdout, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("opencode export %s: %w", sessionID, err)
+	}
+
+	// Parse the export output: each line is a JSON object with type and text fields.
+	var texts []string
+	scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var entry struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry.Type == "text" && entry.Text != "" {
+			texts = append(texts, entry.Text)
+		}
+	}
+	return strings.Join(texts, ""), nil
+}
+
 // ── Event handlers ──
 
 // eventResult holds the accumulated state from processing the event stream.

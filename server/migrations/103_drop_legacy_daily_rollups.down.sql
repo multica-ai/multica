@@ -1,7 +1,0 @@
--- Intentionally empty: there is no automatic way to reconstruct the
--- legacy daily rollups from a `task_usage_hourly` snapshot AND restore
--- their bucket_date semantics (one materialised in runtime tz per
--- migration 082, the other in UTC per migration 084) without
--- re-deciding which tz to use. If a deployment truly needs to roll
--- back, the operator should restore from a pre-drop backup; this is
--- not the place to encode that judgement call.

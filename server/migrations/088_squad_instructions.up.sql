@@ -1,1 +1,0 @@
-ALTER TABLE squad ADD COLUMN instructions TEXT NOT NULL DEFAULT '';

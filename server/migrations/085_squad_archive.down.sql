@@ -1,2 +1,0 @@
-ALTER TABLE squad DROP COLUMN IF EXISTS archived_by;
-ALTER TABLE squad DROP COLUMN IF EXISTS archived_at;
