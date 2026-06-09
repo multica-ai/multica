@@ -60,7 +60,12 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], disabled = false
 
   const isAnnotation = (() => {
     const fs = saved?.format_schema ?? node.format_schema;
-    return fs && typeof fs === "object" && !Array.isArray(fs) && (fs as Record<string, unknown>).type === "annotation";
+    return Boolean(
+      fs &&
+      typeof fs === "object" &&
+      !Array.isArray(fs) &&
+      (fs as Record<string, unknown>).type === "annotation",
+    );
   })();
 
   const [title, setTitle] = useState(saved?.title ?? node.title);
