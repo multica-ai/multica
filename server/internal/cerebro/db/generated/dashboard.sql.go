@@ -1067,13 +1067,19 @@ func (q *Queries) DashboardRecentTasks(ctx context.Context, arg DashboardRecentT
 	return items, nil
 }
 
-const dashboardSessionCost = `-- name: DashboardSessionCost :one
-SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cost_cents
+const dashboardSessionCost = `-- name: DashboardSessionCost :many
+SELECT tu.model,
+       COALESCE(SUM(tu.cost_cents), 0)::bigint AS cost_cents,
+       COALESCE(SUM(tu.input_tokens), 0)::bigint AS input_tokens,
+       COALESCE(SUM(tu.output_tokens), 0)::bigint AS output_tokens,
+       COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS cache_read_tokens,
+       COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS cache_write_tokens
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
   AND cs.id = $2
+GROUP BY tu.model
 `
 
 type DashboardSessionCostParams struct {
@@ -1081,14 +1087,45 @@ type DashboardSessionCostParams struct {
 	ID          pgtype.UUID `json:"id"`
 }
 
-// Total cost (USD cents) of every agent task belonging to a chat session.
-// task_usage.cost_cents is the gateway's exact per-task charge (cerebro 9047).
-// TECH-3139.
-func (q *Queries) DashboardSessionCost(ctx context.Context, arg DashboardSessionCostParams) (int64, error) {
-	row := q.db.QueryRow(ctx, dashboardSessionCost, arg.WorkspaceID, arg.ID)
-	var cost_cents int64
-	err := row.Scan(&cost_cents)
-	return cost_cents, err
+type DashboardSessionCostRow struct {
+	Model            string `json:"model"`
+	CostCents        int64  `json:"cost_cents"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+}
+
+// Per-model token + cost totals for every agent task belonging to a chat
+// session. The handler prefers task_usage.cost_cents (the gateway's exact
+// per-task charge, cerebro 9047) when it is non-zero, and otherwise estimates
+// from tokens via the pricing package — matching how the workspace SPEND card
+// is computed, so the per-session figure is consistent with it. TECH-3139.
+func (q *Queries) DashboardSessionCost(ctx context.Context, arg DashboardSessionCostParams) ([]DashboardSessionCostRow, error) {
+	rows, err := q.db.Query(ctx, dashboardSessionCost, arg.WorkspaceID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardSessionCostRow{}
+	for rows.Next() {
+		var i DashboardSessionCostRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.CostCents,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const dashboardSessionMessages = `-- name: DashboardSessionMessages :many

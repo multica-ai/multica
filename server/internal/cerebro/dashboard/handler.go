@@ -1000,13 +1000,27 @@ func (h *Handler) SessionMessages(w http.ResponseWriter, r *http.Request) {
 		msgs = append(msgs, m)
 	}
 
-	cost, err := h.Cerebro.DashboardSessionCost(r.Context(), cerebrodb.DashboardSessionCostParams{
+	// Cost is best-effort; a usage-table hiccup must not blank the sheet.
+	var cost int64
+	if costRows, err := h.Cerebro.DashboardSessionCost(r.Context(), cerebrodb.DashboardSessionCostParams{
 		WorkspaceID: wsUUID,
 		ID:          sessionUUID,
-	})
-	if err != nil {
-		// Cost is best-effort; a usage-table hiccup must not blank the sheet.
-		cost = 0
+	}); err == nil {
+		for _, row := range costRows {
+			// Prefer the gateway's exact charge; fall back to a token-based
+			// estimate (same pricing the workspace SPEND card uses) when the
+			// exact charge was never recorded for this model's tasks.
+			if row.CostCents > 0 {
+				cost += row.CostCents
+				continue
+			}
+			cost += int64(pricing.ComputeCents(row.Model, pricing.Usage{
+				InputTokens:      row.InputTokens,
+				OutputTokens:     row.OutputTokens,
+				CacheReadTokens:  row.CacheReadTokens,
+				CacheWriteTokens: row.CacheWriteTokens,
+			}))
+		}
 	}
 
 	writeJSON(w, http.StatusOK, sessionMessagesResponse{

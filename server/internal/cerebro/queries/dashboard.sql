@@ -427,13 +427,21 @@ WHERE cs.workspace_id = $1
 ORDER BY cm.created_at ASC
 LIMIT 500;
 
--- name: DashboardSessionCost :one
--- Total cost (USD cents) of every agent task belonging to a chat session.
--- task_usage.cost_cents is the gateway's exact per-task charge (cerebro 9047).
--- TECH-3139.
-SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cost_cents
+-- name: DashboardSessionCost :many
+-- Per-model token + cost totals for every agent task belonging to a chat
+-- session. The handler prefers task_usage.cost_cents (the gateway's exact
+-- per-task charge, cerebro 9047) when it is non-zero, and otherwise estimates
+-- from tokens via the pricing package — matching how the workspace SPEND card
+-- is computed, so the per-session figure is consistent with it. TECH-3139.
+SELECT tu.model,
+       COALESCE(SUM(tu.cost_cents), 0)::bigint AS cost_cents,
+       COALESCE(SUM(tu.input_tokens), 0)::bigint AS input_tokens,
+       COALESCE(SUM(tu.output_tokens), 0)::bigint AS output_tokens,
+       COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS cache_read_tokens,
+       COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS cache_write_tokens
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
-  AND cs.id = $2;
+  AND cs.id = $2
+GROUP BY tu.model;

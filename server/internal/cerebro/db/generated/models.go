@@ -1613,6 +1613,7 @@ type WorkspaceConnection struct {
 	Enabled             bool               `json:"enabled"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	Tools               []byte             `json:"tools"`
 }
 
 type WorkspaceInvitation struct {
