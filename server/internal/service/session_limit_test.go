@@ -112,10 +112,10 @@ func TestParseSessionLimitResetTimeValues(t *testing.T) {
 // conversions produce the correct 24-hour UTC values.
 func TestParseSessionLimitResetTimeConversions(t *testing.T) {
 	cases := []struct {
-		name        string
-		message     string
-		wantHour    int
-		wantMinute  int
+		name       string
+		message    string
+		wantHour   int
+		wantMinute int
 	}{
 		{
 			name:       "12am is midnight (hour 0)",
