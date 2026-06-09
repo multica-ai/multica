@@ -2,12 +2,17 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { AlertCircle, ArrowUpRight, Clock3, ListTodo, Loader2, XCircle } from "lucide-react";
-import type { Agent, AgentTask } from "@multica/core/types";
+import { toast } from "sonner";
+import type { Agent, AgentTask, UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions } from "@multica/core/issues/queries";
+import { useBatchUpdateIssues } from "@multica/core/issues/mutations";
 import { useQuery } from "@tanstack/react-query";
+import { AssigneePicker } from "@multica/views/issues/components";
+import { AppLink } from "@multica/views/navigation";
 import { LONG_RUNNING_TASK_MS, getTaskQueueBucket, getTaskQueueDisplay, getTaskReviewFlag } from "../../config";
 
 const REVIEW_ITEM_LIMIT = 3;
@@ -25,8 +30,10 @@ export function TasksTab({ agent }: { agent: Agent }) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const [reviewAssignOpen, setReviewAssignOpen] = useState(false);
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
+  const batchUpdateIssues = useBatchUpdateIssues();
 
   useEffect(() => {
     setLoading(true);
@@ -41,23 +48,6 @@ export function TasksTab({ agent }: { agent: Agent }) {
     const interval = window.setInterval(() => setCurrentTime(Date.now()), SUMMARY_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3 rounded-lg border px-4 py-3">
-            <Skeleton className="h-4 w-4 rounded shrink-0" />
-            <div className="flex-1 space-y-1.5">
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-3 w-1/3" />
-            </div>
-            <Skeleton className="h-4 w-16" />
-          </div>
-        ))}
-      </div>
-    );
-  }
 
   const activeStatuses = ["running", "dispatched", "queued"];
   const sortedTasks = [...tasks].sort((a, b) => {
@@ -78,6 +68,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
     const blockedItems: { issueId: string; id: string; title: string; blockers: number }[] = [];
     const reviewItems: { issueId: string; id: string; title: string; label: string; detail: string }[] = [];
     const reviewCounts = { failed: 0, longRunning: 0 };
+    const reviewIssueIds: string[] = [];
 
     for (const task of tasks) {
       const issue = issueMap.get(task.issue_id);
@@ -105,6 +96,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
       if (reviewFlag.tone === "failed") reviewCounts.failed += 1;
       if (reviewFlag.tone === "long-running") reviewCounts.longRunning += 1;
 
+      reviewIssueIds.push(task.issue_id);
       reviewItems.push({
         issueId: task.issue_id,
         id: issue?.identifier ?? task.issue_id.slice(0, 8),
@@ -119,6 +111,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
       blockedItems: blockedItems.slice(0, REVIEW_ITEM_LIMIT),
       reviewItems: reviewItems.slice(0, REVIEW_ITEM_LIMIT),
       reviewCounts,
+      reviewIssueIds: Array.from(new Set(reviewIssueIds)),
     };
   }, [currentTime, issueMap, tasks]);
 
@@ -128,6 +121,36 @@ export function TasksTab({ agent }: { agent: Agent }) {
     queueSummary.reviewCounts.failed > 0
       ? "border-destructive/20 bg-destructive/5"
       : "border-warning/20 bg-warning/5";
+
+  const handleReviewBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
+    const ids = queueSummary.reviewIssueIds;
+    if (ids.length === 0) return;
+
+    try {
+      await batchUpdateIssues.mutateAsync({ ids, updates });
+      toast.success(`Updated ${ids.length} review issue${ids.length > 1 ? "s" : ""}`);
+      setReviewAssignOpen(false);
+    } catch {
+      toast.error("Failed to update review issues");
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 rounded-lg border px-4 py-3">
+            <Skeleton className="h-4 w-4 rounded shrink-0" />
+            <div className="flex-1 space-y-1.5">
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-3 w-1/3" />
+            </div>
+            <Skeleton className="h-4 w-16" />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -185,7 +208,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
               {queueSummary.blockedItems.length > 0 && (
                 <div className="space-y-1 text-xs text-muted-foreground">
                   {queueSummary.blockedItems.map((item) => (
-                    <a
+                    <AppLink
                       key={`${item.issueId}-${item.id}`}
                       href={`/issues/${item.issueId}`}
                       className="flex items-start gap-2 rounded-sm px-1 py-1 transition-colors hover:bg-background/60"
@@ -194,7 +217,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
                       <span className="min-w-0 flex-1 truncate">{item.title}</span>
                       <span className="shrink-0">{item.blockers} blocker{item.blockers === 1 ? "" : "s"}</span>
                       <ArrowUpRight className="mt-0.5 h-3 w-3 shrink-0 opacity-50" />
-                    </a>
+                    </AppLink>
                   ))}
                 </div>
               )}
@@ -210,10 +233,27 @@ export function TasksTab({ agent }: { agent: Agent }) {
 
         {hasReviewItems && (
           <div className={`rounded-md border px-3 py-3 ${reviewPanelClass}`}>
-            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Needs review
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Needs review
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Escalated tasks can be reassigned without leaving the queue view.
+                </div>
+              </div>
+              <AssigneePicker
+                assigneeType={null}
+                assigneeId={null}
+                onUpdate={handleReviewBatchUpdate}
+                open={reviewAssignOpen}
+                onOpenChange={setReviewAssignOpen}
+                triggerRender={<Button variant="outline" size="sm" />}
+                trigger={`Reassign ${queueSummary.reviewIssueIds.length} issue${queueSummary.reviewIssueIds.length > 1 ? "s" : ""}`}
+                align="end"
+              />
             </div>
-            <div className="mt-2 space-y-2 text-sm">
+            <div className="mt-3 space-y-2 text-sm">
               {queueSummary.reviewCounts.failed > 0 && (
                 <div>
                   <span className="font-medium text-foreground">{queueSummary.reviewCounts.failed} failed</span>{" "}
@@ -228,7 +268,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
               )}
               <div className="space-y-1.5 text-xs text-muted-foreground">
                 {queueSummary.reviewItems.map((item) => (
-                  <a
+                  <AppLink
                     key={`${item.issueId}-${item.label}`}
                     href={`/issues/${item.issueId}`}
                     className="flex items-start gap-2 rounded-sm px-1 py-1 transition-colors hover:bg-background/60"
@@ -239,7 +279,7 @@ export function TasksTab({ agent }: { agent: Agent }) {
                       <div className="truncate">{item.label}: {item.detail}</div>
                     </div>
                     <ArrowUpRight className="mt-0.5 h-3 w-3 shrink-0 opacity-50" />
-                  </a>
+                  </AppLink>
                 ))}
               </div>
             </div>
@@ -295,12 +335,12 @@ export function TasksTab({ agent }: { agent: Agent }) {
                         {issue.identifier}
                       </span>
                     )}
-                    <a
+                    <AppLink
                       href={`/issues/${task.issue_id}`}
                       className={`min-w-0 truncate text-sm hover:underline ${isHighlighted ? "font-medium" : ""}`}
                     >
                       {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
-                    </a>
+                    </AppLink>
                   </div>
                   <div className={`mt-0.5 text-xs ${isDependencyBlocked ? "text-warning" : "text-muted-foreground"}`}>
                     {display.detail ?? formatTaskTimestamp(task, isRunning)}
