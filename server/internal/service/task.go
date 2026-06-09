@@ -1414,6 +1414,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		s.broadcastChatDone(ctx, task, assistantMsg)
 	}
 
+	if task.ChannelID.Valid && task.ChannelMessageID.Valid {
+		s.maybePostChannelTaskOutput(ctx, task, result)
+	}
+
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
@@ -1593,6 +1597,97 @@ func resumeUnsafeFailureReason(reason string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (s *TaskService) maybePostChannelTaskOutput(ctx context.Context, task db.AgentTaskQueue, result []byte) {
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil || payload.Output == "" {
+		return
+	}
+	body := strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+	if body == "" || isTrivialDoneOutput(body) || isNoActionReasoning(body) {
+		return
+	}
+	if task.StartedAt.Valid {
+		agentMessaged, err := s.Queries.HasAgentChannelMessageSince(ctx, db.HasAgentChannelMessageSinceParams{
+			ChannelID: task.ChannelID,
+			AuthorID:  task.AgentID,
+			CreatedAt: task.StartedAt,
+		})
+		if err != nil {
+			slog.Warn("channel task fallback: failed to check existing agent messages",
+				"task_id", util.UUIDToString(task.ID),
+				"channel_id", util.UUIDToString(task.ChannelID),
+				"agent_id", util.UUIDToString(task.AgentID),
+				"error", err)
+			return
+		}
+		if agentMessaged {
+			return
+		}
+	}
+	var workspaceID pgtype.UUID
+	if triggerMsg, err := s.Queries.GetChannelMessage(ctx, task.ChannelMessageID); err == nil {
+		workspaceID = triggerMsg.WorkspaceID
+	} else if ch, ok := s.parseChannelMentionContext(task); ok {
+		if parsed, err := util.ParseUUID(ch.WorkspaceID); err == nil {
+			workspaceID = parsed
+		}
+	}
+	if !workspaceID.Valid {
+		slog.Warn("channel task fallback: missing workspace id",
+			"task_id", util.UUIDToString(task.ID),
+			"channel_id", util.UUIDToString(task.ChannelID),
+			"agent_id", util.UUIDToString(task.AgentID))
+		return
+	}
+	msg, err := s.Queries.CreateChannelMessageTopLevel(ctx, db.CreateChannelMessageTopLevelParams{
+		ChannelID:   task.ChannelID,
+		WorkspaceID: workspaceID,
+		AuthorType:  "agent",
+		AuthorID:    task.AgentID,
+		Content:     redact.Text(body),
+	})
+	if err != nil {
+		slog.Warn("channel task fallback: failed to create channel message",
+			"task_id", util.UUIDToString(task.ID),
+			"channel_id", util.UUIDToString(task.ChannelID),
+			"agent_id", util.UUIDToString(task.AgentID),
+			"error", err)
+		return
+	}
+	if err := s.Queries.TouchChannel(ctx, task.ChannelID); err != nil {
+		slog.Warn("channel task fallback: failed to touch channel",
+			"task_id", util.UUIDToString(task.ID),
+			"channel_id", util.UUIDToString(task.ChannelID),
+			"error", err)
+	}
+	workspaceIDString := util.UUIDToString(msg.WorkspaceID)
+	if workspaceIDString == "" {
+		workspaceIDString = s.ResolveTaskWorkspaceID(ctx, task)
+	}
+	if s.Bus != nil && workspaceIDString != "" {
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventChannelMessageCreated,
+			WorkspaceID: workspaceIDString,
+			ActorType:   "agent",
+			ActorID:     util.UUIDToString(task.AgentID),
+			Payload: map[string]any{
+				"channel_id": util.UUIDToString(task.ChannelID),
+				"message": map[string]any{
+					"id":           util.UUIDToString(msg.ID),
+					"channel_id":   util.UUIDToString(msg.ChannelID),
+					"workspace_id": util.UUIDToString(msg.WorkspaceID),
+					"author_type":  msg.AuthorType,
+					"author_id":    util.UUIDToString(msg.AuthorID),
+					"content":      msg.Content,
+					"reply_count":  0,
+					"created_at":   util.TimestampToString(msg.CreatedAt),
+					"updated_at":   util.TimestampToString(msg.UpdatedAt),
+				},
+			},
+		})
 	}
 }
 

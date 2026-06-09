@@ -276,6 +276,22 @@ export function useRealtimeSync(
     const scheduleTaskRefresh = (wsId: string) => {
       taskInvalidator.schedule(wsId);
     };
+    const invalidateChannelTaskSource = (payload: { channel_id?: string; channel_message_id?: string }) => {
+      const wsId = getCurrentWsId();
+      if (!wsId || !payload.channel_id) return;
+      qc.invalidateQueries({
+        queryKey: channelKeys.channelMessages(wsId, payload.channel_id),
+      });
+      if (payload.channel_message_id) {
+        qc.invalidateQueries({
+          queryKey: channelKeys.messageThread(
+            wsId,
+            payload.channel_id,
+            payload.channel_message_id,
+          ),
+        });
+      }
+    };
 
     const refreshMap: Record<string, () => void> = {
       inbox: () => {
@@ -835,6 +851,9 @@ export function useRealtimeSync(
     // when reconnect replays the event for an already-running task).
     const unsubTaskQueued = ws.on("task:queued", (p) => {
       const payload = p as TaskQueuedPayload;
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -855,6 +874,9 @@ export function useRealtimeSync(
     // taskMessages → "Thinking · Ns".
     const unsubTaskDispatch = ws.on("task:dispatch", (p) => {
       const payload = p as TaskDispatchPayload;
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -872,6 +894,9 @@ export function useRealtimeSync(
     // would stay parked even after the daemon resumed work.
     const unsubTaskRunning = ws.on("task:running", (p) => {
       const payload = p as TaskRunningPayload;
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -891,6 +916,9 @@ export function useRealtimeSync(
       "task:waiting_local_directory",
       (p) => {
         const payload = p as TaskWaitingLocalDirectoryPayload;
+        if (payload.channel_id) {
+          invalidateChannelTaskSource(payload);
+        }
         if (!payload.chat_session_id) return;
         qc.setQueryData<ChatPendingTask>(
           chatKeys.pendingTask(payload.chat_session_id),
@@ -910,6 +938,9 @@ export function useRealtimeSync(
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
       const wsId = getCurrentWsId();
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) {
         // Issue task: invalidate agent presence and task caches
         if (wsId) {
@@ -928,6 +959,9 @@ export function useRealtimeSync(
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
       const wsId = getCurrentWsId();
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) {
         // Issue task: invalidate agent presence, task lists, and activity caches
         // so the execution log, agent cards, and activity charts refresh.
@@ -952,6 +986,9 @@ export function useRealtimeSync(
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
       const wsId = getCurrentWsId();
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) {
         // Issue task: same invalidation as task:completed
         if (wsId) {

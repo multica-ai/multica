@@ -448,6 +448,13 @@ LIMIT 1;
 SELECT count(*) > 0 AS has_task FROM agent_task_queue
 WHERE channel_message_id = $1 AND agent_id = $2;
 
+-- name: ListChannelMentionTasksForMessages :many
+-- Returns channel-origin agent tasks keyed by their triggering message so the
+-- channel timeline can render per-message run state and transcript history.
+SELECT * FROM agent_task_queue
+WHERE channel_message_id = ANY(sqlc.arg('message_ids')::uuid[])
+ORDER BY created_at ASC;
+
 -- name: GetLastTaskStartedAtForIssueAndAgent :one
 -- Returns the started_at of the most recent prior task for this (agent, issue)
 -- pair, used as the "since" anchor for counting comments that arrived since the

@@ -9,6 +9,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // TestV2FlatMessageSendAndList verifies the V2 flat message flow:
@@ -68,6 +69,53 @@ func TestV2FlatMessageSendAndList(t *testing.T) {
 	}
 	if listResp.Messages[0].ID != msg.ID {
 		t.Fatalf("listed message ID mismatch")
+	}
+}
+
+func TestV2ChannelMessagesIncludeMentionAgentTasks(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
+	})
+	agentID := createHandlerTestAgent(t, "Channel Message Task Agent", nil)
+	channel := createChannelForMentionTest(t, "Message Task Channel", "open")
+
+	msg := sendChannelMessageForMentionTest(t, channel.ID, testUserID,
+		"please handle [@Agent](mention://agent/"+agentID+")")
+
+	rr := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodGet, "/", nil), "id", channel.ID)
+	testHandler.ListChannelMessages(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ListChannelMessages: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var listResp struct {
+		Messages []ChannelMessageV2Response `json:"messages"`
+		Total    int                        `json:"total"`
+	}
+	decodeJSON(t, rr, &listResp)
+	var found *ChannelMessageV2Response
+	for i := range listResp.Messages {
+		if listResp.Messages[i].ID == msg.ID {
+			found = &listResp.Messages[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("trigger message %s not found in response", msg.ID)
+	}
+	if len(found.AgentTasks) != 1 {
+		t.Fatalf("message agent_tasks length = %d, want 1: %+v", len(found.AgentTasks), found.AgentTasks)
+	}
+	task := found.AgentTasks[0]
+	if task.AgentID != agentID || task.ChannelMessageID != msg.ID || task.Kind != "channel_mention" {
+		t.Fatalf("unexpected channel agent task: %+v", task)
+	}
+	if task.AgentName == "" {
+		t.Fatalf("expected agent name in channel task response: %+v", task)
 	}
 }
 
@@ -726,5 +774,59 @@ func TestV2ChannelContextIncludesTriggerAndReplies(t *testing.T) {
 	}
 	if len(resp.Replies) != 1 || resp.Replies[0].Content != "reply context" {
 		t.Fatalf("expected reply context, got %+v", resp.Replies)
+	}
+}
+
+func TestV2ChannelMentionTaskCompletionFallsBackToTopLevelChannelMessage(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Channel Completion Agent", nil)
+	channel := createChannelForMentionTest(t, "Completion Channel", "open")
+	trigger := sendChannelMessageForMentionTest(t, channel.ID, testUserID,
+		"please report here [@Completion](mention://agent/"+agentID+")")
+	tasks := channelMentionTasksForAgent(t, agentID, channel.ID)
+	if len(tasks) != 1 {
+		t.Fatalf("expected one channel task, got %d", len(tasks))
+	}
+	task := tasks[0]
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET status = 'running', started_at = now()
+		WHERE id = $1
+	`, task.ID); err != nil {
+		t.Fatalf("mark task running: %v", err)
+	}
+	payload, err := json.Marshal(protocol.TaskCompletedPayload{
+		TaskID: uuidToString(task.ID),
+		Output: "完成：已处理频道请求",
+	})
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	completed, err := testHandler.TaskService.CompleteTask(ctx, task.ID, payload, "channel-session", "/tmp/channel-task")
+	if err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+	if completed == nil || completed.Status != "completed" {
+		t.Fatalf("task not completed: %+v", completed)
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM channel_message
+		WHERE channel_id = $1
+		  AND thread_id IS NULL
+		  AND author_type = 'agent'
+		  AND author_id = $2
+		  AND content = '完成：已处理频道请求'
+	`, channel.ID, agentID).Scan(&count); err != nil {
+		t.Fatalf("count fallback channel messages: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("fallback channel message count = %d, want 1", count)
+	}
+	if trigger.ID == "" {
+		t.Fatal("trigger sanity check failed")
 	}
 }

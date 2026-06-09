@@ -192,6 +192,17 @@ SELECT count(*)::int AS reply_count
 FROM channel_message
 WHERE reply_to_id = $1;
 
+-- name: HasAgentChannelMessageSince :one
+-- Used by channel-origin task completion fallback. If the agent already wrote
+-- a visible channel message during the task, do not synthesize another one from
+-- final stdout.
+SELECT count(*) > 0 AS has_message
+FROM channel_message
+WHERE channel_id = $1
+  AND author_type = 'agent'
+  AND author_id = $2
+  AND created_at >= $3;
+
 -- ============ Channel context (for agents) ============
 
 -- name: GetChannelContext :many

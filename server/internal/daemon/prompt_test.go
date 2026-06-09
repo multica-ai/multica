@@ -280,6 +280,8 @@ func TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow(t *testing.
 		"Channel name: release",
 		"Triggering message ID: message-1",
 		"multica channel context channel-1 --message message-1 --include-replies --recent 20 --output json",
+		"default to a top-level channel message",
+		"multica channel message send <channel-id>",
 		"multica channel message reply <channel-id> <message-id>",
 		"Prior session available",
 		"Guodage",

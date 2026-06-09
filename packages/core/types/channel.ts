@@ -1,3 +1,5 @@
+import type { AgentTask } from "./agent";
+
 export interface ChannelSummary {
   id: string;
   workspace_id: string;
@@ -57,6 +59,14 @@ export interface ListChannelThreadsResponse {
   total: number;
 }
 
+export type ChannelAgentTask = AgentTask & {
+  channel_id: string;
+  channel_message_id: string;
+  channel_thread_id?: string;
+  channel_reply_to_id?: string;
+  agent_name?: string;
+};
+
 export interface ChannelMessage {
   id: string;
   thread_id?: string;
@@ -71,6 +81,7 @@ export interface ChannelMessage {
   reply_count?: number;
   created_at: string;
   updated_at: string;
+  agent_tasks?: ChannelAgentTask[];
 }
 
 export interface ListChannelMessagesResponse {

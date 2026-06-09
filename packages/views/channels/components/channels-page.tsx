@@ -11,6 +11,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Bot,
   FileText,
   Hash,
   Loader2,
@@ -88,6 +89,8 @@ import {
 } from "../../editor";
 import { useNavigation } from "../../navigation";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import { TranscriptButton } from "../../common/task-transcript";
+import { taskStatusConfig } from "../../agents/config";
 
 interface ChannelsPageProps {
   channelId?: string;
@@ -680,6 +683,7 @@ function MessageRow({
                 {message.reply_count} 条回复
               </button>
             )}
+            <ChannelAgentTaskStrip tasks={message.agent_tasks ?? []} />
           </div>
         </li>
       </ContextMenuTrigger>
@@ -695,6 +699,65 @@ function MessageRow({
       </ContextMenuContent>
     </ContextMenu>
   );
+}
+
+function ChannelAgentTaskStrip({ tasks }: { tasks: ChannelMessage["agent_tasks"] }) {
+  if (!tasks || tasks.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      {tasks.map((task) => {
+        const cfg = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
+        const Icon = cfg.icon;
+        const isRunning = task.status === "running";
+        const agentName = task.agent_name || "Agent";
+        return (
+          <div
+            key={task.id}
+            className={cn(
+              "inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border bg-background px-2 text-xs text-muted-foreground",
+              isRunning && "border-brand/40 bg-brand/5 text-foreground",
+              task.status === "failed" && "border-destructive/30 bg-destructive/5",
+            )}
+          >
+            <Bot className="h-3.5 w-3.5 shrink-0" />
+            <span className="max-w-32 truncate text-foreground/85">{agentName}</span>
+            <Icon className={cn("h-3.5 w-3.5 shrink-0", cfg.color, isRunning && "animate-spin")} />
+            <span className="shrink-0">{channelTaskStatusLabel(task.status)}</span>
+            {task.status !== "queued" && (
+              <TranscriptButton
+                task={task}
+                agentName={agentName}
+                isLive={isRunning}
+                className="-mr-1 h-5 w-5 p-0"
+                title="查看执行历史"
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function channelTaskStatusLabel(status: string): string {
+  switch (status) {
+    case "queued":
+      return "排队中";
+    case "dispatched":
+      return "已派发";
+    case "waiting_local_directory":
+      return "等待目录";
+    case "running":
+      return "运行中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "cancelled":
+      return "已取消";
+    default:
+      return status;
+  }
 }
 
 function RepliesPanel({
@@ -841,6 +904,7 @@ function PanelMessage({
           <span className="text-[10px] text-muted-foreground">{formatTime(message.created_at)}</span>
         </div>
         <ReadonlyContent content={message.content} className="mt-1 select-text break-words text-sm" />
+        <ChannelAgentTaskStrip tasks={message.agent_tasks ?? []} />
       </div>
     </div>
   );

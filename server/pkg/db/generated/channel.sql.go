@@ -544,6 +544,31 @@ func (q *Queries) GetThreadByRootMessage(ctx context.Context, rootMessageID pgty
 	return i, err
 }
 
+const hasAgentChannelMessageSince = `-- name: HasAgentChannelMessageSince :one
+SELECT count(*) > 0 AS has_message
+FROM channel_message
+WHERE channel_id = $1
+  AND author_type = 'agent'
+  AND author_id = $2
+  AND created_at >= $3
+`
+
+type HasAgentChannelMessageSinceParams struct {
+	ChannelID pgtype.UUID        `json:"channel_id"`
+	AuthorID  pgtype.UUID        `json:"author_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Used by channel-origin task completion fallback. If the agent already wrote
+// a visible channel message during the task, do not synthesize another one from
+// final stdout.
+func (q *Queries) HasAgentChannelMessageSince(ctx context.Context, arg HasAgentChannelMessageSinceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasAgentChannelMessageSince, arg.ChannelID, arg.AuthorID, arg.CreatedAt)
+	var has_message bool
+	err := row.Scan(&has_message)
+	return has_message, err
+}
+
 const linkIssueSource = `-- name: LinkIssueSource :exec
 
 UPDATE issue SET source_channel_id = $2, source_thread_id = $3

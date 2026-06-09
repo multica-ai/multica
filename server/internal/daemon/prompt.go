@@ -86,7 +86,7 @@ func buildChannelMentionPrompt(task Task) string {
 	b.WriteString("\nStart by understanding the triggering message. If you need surrounding context, run:\n\n")
 	fmt.Fprintf(&b, "`multica channel context %s --message %s --include-replies --recent 20 --output json`\n\n", task.ChannelID, task.ChannelMessageID)
 	b.WriteString("You may also use workspace/member/agent/repo CLI commands as needed. Avoid Issue-oriented commands unless you explicitly create or choose a real issue during this task.\n\n")
-	b.WriteString("When a channel reply is warranted, post it with `multica channel message reply <channel-id> <message-id> --content \"...\"`. For a top-level channel update, use `multica channel message send <channel-id> --content \"...\"`. If no visible reply is warranted, finish silently after doing the required work.\n")
+	b.WriteString("When you need to share a final result, default to a top-level channel message so it appears in the channel message list: `multica channel message send <channel-id> --content \"...\"`. Use `multica channel message reply <channel-id> <message-id> --content \"...\"` only when the result should stay attached to the triggering message. If no visible reply is warranted, finish silently after doing the required work.\n")
 	return b.String()
 }
 

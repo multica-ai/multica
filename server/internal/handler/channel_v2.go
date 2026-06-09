@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -15,16 +16,40 @@ import (
 // ---------- V2 response shapes ----------
 
 type ChannelMessageV2Response struct {
-	ID          string  `json:"id"`
-	ChannelID   string  `json:"channel_id"`
-	WorkspaceID string  `json:"workspace_id"`
-	AuthorType  string  `json:"author_type"`
-	AuthorID    *string `json:"author_id"`
-	Content     string  `json:"content"`
-	ReplyToID   *string `json:"reply_to_id,omitempty"`
-	ReplyCount  int32   `json:"reply_count"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID          string                     `json:"id"`
+	ChannelID   string                     `json:"channel_id"`
+	WorkspaceID string                     `json:"workspace_id"`
+	AuthorType  string                     `json:"author_type"`
+	AuthorID    *string                    `json:"author_id"`
+	Content     string                     `json:"content"`
+	ReplyToID   *string                    `json:"reply_to_id,omitempty"`
+	ReplyCount  int32                      `json:"reply_count"`
+	CreatedAt   string                     `json:"created_at"`
+	UpdatedAt   string                     `json:"updated_at"`
+	AgentTasks  []ChannelAgentTaskResponse `json:"agent_tasks,omitempty"`
+}
+
+type ChannelAgentTaskResponse struct {
+	ID               string  `json:"id"`
+	AgentID          string  `json:"agent_id"`
+	RuntimeID        string  `json:"runtime_id"`
+	IssueID          string  `json:"issue_id"`
+	Status           string  `json:"status"`
+	Priority         int32   `json:"priority"`
+	Result           any     `json:"result"`
+	Error            *string `json:"error"`
+	FailureReason    string  `json:"failure_reason,omitempty"`
+	TriggerSummary   *string `json:"trigger_summary,omitempty"`
+	ChannelID        string  `json:"channel_id"`
+	ChannelMessageID string  `json:"channel_message_id"`
+	ChannelThreadID  string  `json:"channel_thread_id,omitempty"`
+	ChannelReplyToID string  `json:"channel_reply_to_id,omitempty"`
+	CreatedAt        string  `json:"created_at"`
+	DispatchedAt     *string `json:"dispatched_at,omitempty"`
+	StartedAt        *string `json:"started_at,omitempty"`
+	CompletedAt      *string `json:"completed_at,omitempty"`
+	Kind             string  `json:"kind"`
+	AgentName        string  `json:"agent_name,omitempty"`
 }
 
 type ChannelContextResponse struct {
@@ -72,6 +97,78 @@ func channelMessageToV2Response(m db.ChannelMessage, replyCount int32) ChannelMe
 		CreatedAt:   timestampToString(m.CreatedAt),
 		UpdatedAt:   timestampToString(m.UpdatedAt),
 	}
+}
+
+func channelAgentTaskToResponse(t db.AgentTaskQueue, agents map[string]db.Agent) ChannelAgentTaskResponse {
+	failureReason := ""
+	if t.FailureReason.Valid {
+		failureReason = t.FailureReason.String
+	}
+	agentID := uuidToString(t.AgentID)
+	agentName := ""
+	if agent, ok := agents[agentID]; ok {
+		agentName = agent.Name
+	}
+	return ChannelAgentTaskResponse{
+		ID:               uuidToString(t.ID),
+		AgentID:          agentID,
+		RuntimeID:        uuidToString(t.RuntimeID),
+		IssueID:          uuidToString(t.IssueID),
+		Status:           t.Status,
+		Priority:         t.Priority,
+		Result:           nil,
+		Error:            textToPtr(t.Error),
+		FailureReason:    failureReason,
+		TriggerSummary:   textToPtr(t.TriggerSummary),
+		ChannelID:        uuidToString(t.ChannelID),
+		ChannelMessageID: uuidToString(t.ChannelMessageID),
+		ChannelThreadID:  uuidToString(t.ChannelThreadID),
+		ChannelReplyToID: uuidToString(t.ChannelReplyToID),
+		CreatedAt:        timestampToString(t.CreatedAt),
+		DispatchedAt:     timestampToPtr(t.DispatchedAt),
+		StartedAt:        timestampToPtr(t.StartedAt),
+		CompletedAt:      timestampToPtr(t.CompletedAt),
+		Kind:             computeTaskKind(t),
+		AgentName:        agentName,
+	}
+}
+
+func (h *Handler) attachChannelAgentTasks(ctx context.Context, messages []ChannelMessageV2Response) []ChannelMessageV2Response {
+	if len(messages) == 0 {
+		return messages
+	}
+	messageIDs := make([]pgtype.UUID, 0, len(messages))
+	for _, msg := range messages {
+		if id, err := parseUUIDErr(msg.ID); err == nil {
+			messageIDs = append(messageIDs, id)
+		}
+	}
+	if len(messageIDs) == 0 {
+		return messages
+	}
+	tasks, err := h.Queries.ListChannelMentionTasksForMessages(ctx, messageIDs)
+	if err != nil {
+		return messages
+	}
+	agentIDs := make(map[string]pgtype.UUID)
+	for _, task := range tasks {
+		agentIDs[uuidToString(task.AgentID)] = task.AgentID
+	}
+	agents := make(map[string]db.Agent, len(agentIDs))
+	for id, uuid := range agentIDs {
+		if agent, err := h.Queries.GetAgent(ctx, uuid); err == nil {
+			agents[id] = agent
+		}
+	}
+	byMessage := make(map[string][]ChannelAgentTaskResponse)
+	for _, task := range tasks {
+		msgID := uuidToString(task.ChannelMessageID)
+		byMessage[msgID] = append(byMessage[msgID], channelAgentTaskToResponse(task, agents))
+	}
+	for i := range messages {
+		messages[i].AgentTasks = byMessage[messages[i].ID]
+	}
+	return messages
 }
 
 func channelContextRowToMessage(m db.GetChannelContextRow) ChannelContextMessage {
@@ -128,6 +225,7 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 	for i, m := range messages {
 		resp[i] = channelMessageV2ToResponse(m)
 	}
+	resp = h.attachChannelAgentTasks(r.Context(), resp)
 	writeJSON(w, http.StatusOK, map[string]any{"messages": resp, "total": len(resp)})
 }
 
@@ -322,8 +420,9 @@ func (h *Handler) GetMessageThread(w http.ResponseWriter, r *http.Request) {
 	thread, err := h.Queries.GetThreadByRootMessage(r.Context(), msgUUID)
 	if err != nil {
 		// No thread yet — return just the root message with no replies.
+		rootResp := h.attachChannelAgentTasks(r.Context(), []ChannelMessageV2Response{channelMessageToV2Response(rootMsg, 0)})
 		writeJSON(w, http.StatusOK, map[string]any{
-			"root_message": channelMessageToV2Response(rootMsg, 0),
+			"root_message": rootResp[0],
 			"replies":      []ChannelMessageV2Response{},
 			"thread":       nil,
 		})
@@ -336,12 +435,14 @@ func (h *Handler) GetMessageThread(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list replies")
 		return
 	}
-	replyResp := make([]ChannelMessageResponse, len(replies))
+	replyResp := make([]ChannelMessageV2Response, len(replies))
 	for i, m := range replies {
-		replyResp[i] = channelMessageToResponse(m)
+		replyResp[i] = channelMessageToV2Response(m, 0)
 	}
+	rootResp := h.attachChannelAgentTasks(r.Context(), []ChannelMessageV2Response{channelMessageToV2Response(rootMsg, int32(len(replies)))})
+	replyResp = h.attachChannelAgentTasks(r.Context(), replyResp)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"root_message": channelMessageToV2Response(rootMsg, int32(len(replies))),
+		"root_message": rootResp[0],
 		"replies":      replyResp,
 		"thread":       channelThreadToResponse(thread),
 	})
