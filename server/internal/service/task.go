@@ -640,6 +640,8 @@ func taskErrorType(reason string) string {
 		return "agent_output"
 	case "cancelled", "user_cancelled":
 		return "cancelled"
+	case "session_limit":
+		return "session_limit"
 	default:
 		return "agent_error"
 	}
@@ -2174,6 +2176,20 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
 
+	// Session limit: place the runtime on hold before auto-retry so the
+	// retried task won't be claimed until the hold lifts.
+	if failureReason == "session_limit" && task.RuntimeID.Valid {
+		if resetTime, ok := ParseSessionLimitResetTime(errMsg); ok {
+			if err := s.HoldRuntime(ctx, task.RuntimeID, "session_limit", resetTime); err != nil {
+				slog.Warn("failed to hold runtime after session limit",
+					"runtime_id", util.UUIDToString(task.RuntimeID),
+					"task_id", util.UUIDToString(task.ID),
+					"error", err,
+				)
+			}
+		}
+	}
+
 	// The auto-retry child (if any) was created inside the transaction above so
 	// no newer chat task could jump ahead of it. Surface it now: broadcast
 	// queued first, then notify the daemon — see EnqueueTaskForIssue for the
@@ -2246,6 +2262,7 @@ var retryableReasons = map[string]bool{
 	"runtime_recovery":          true,
 	"timeout":                   true,
 	"codex_semantic_inactivity": true,
+	"session_limit":             true,
 }
 
 func resumeUnsafeFailureReason(reason string) bool {

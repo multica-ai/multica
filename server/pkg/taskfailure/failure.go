@@ -99,6 +99,11 @@ const (
 	// resume lookup. Written by classifyPoisonedError in daemon/poisoned.go.
 	ReasonAPIInvalidRequest Reason = "api_invalid_request"
 
+	// ReasonSessionLimit: the runtime hit a session limit (e.g. Claude
+	// "You've hit your session limit"). The runtime is placed on hold
+	// until the reset time; tasks are auto-retried after the hold lifts.
+	ReasonSessionLimit Reason = "session_limit"
+
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
 	// the right sub-reason from the string. IsAgentError returns true
@@ -192,6 +197,7 @@ var allReasons = []Reason{
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
+	ReasonSessionLimit,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,

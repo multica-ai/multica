@@ -110,8 +110,8 @@ func TestAllReasonsContents(t *testing.T) {
 	t.Parallel()
 
 	got := AllReasons()
-	if len(got) != 21 {
-		t.Fatalf("AllReasons() returned %d entries, want 21", len(got))
+	if len(got) != 22 {
+		t.Fatalf("AllReasons() returned %d entries, want 22", len(got))
 	}
 
 	seen := make(map[Reason]bool, len(got))
@@ -128,8 +128,8 @@ func TestAllReasonsContents(t *testing.T) {
 		}
 	}
 
-	if platformCount != 7 {
-		t.Errorf("AllReasons(): platform-side count = %d, want 7", platformCount)
+	if platformCount != 8 {
+		t.Errorf("AllReasons(): platform-side count = %d, want 8", platformCount)
 	}
 	if agentCount != 14 {
 		t.Errorf("AllReasons(): agent-side count = %d, want 14", agentCount)

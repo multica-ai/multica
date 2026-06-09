@@ -62,7 +62,11 @@ func TestClassifyRules(t *testing.T) {
 		{"does not have access", "Your account does not have access to this model", ReasonAgentProviderAuthOrAccess},
 		{"may not have access", "you may not have access to claude-3-opus", ReasonAgentProviderAuthOrAccess},
 
-		// 4. Provider quota / billing.
+		// 4. Session limit (checked before quota).
+		{"session limit pm", "You've hit your session limit · resets 5:10pm (UTC)", ReasonSessionLimit},
+		{"session limit am", "You've hit your session limit · resets 10:10am (UTC)", ReasonSessionLimit},
+
+		// 5. Provider quota / billing.
 		{"402", "API Error: 402 Payment Required", ReasonAgentProviderQuotaLimit},
 		{"insufficient_balance", `{"error":{"code":"insufficient_balance"}}`, ReasonAgentProviderQuotaLimit},
 		{"balance is too low", "balance is too low to make this request", ReasonAgentProviderQuotaLimit},
