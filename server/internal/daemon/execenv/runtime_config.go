@@ -457,6 +457,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
 	b.WriteString(cerebroArtifactBrief()) // CEREBRO-PATCH(runtime-config-artifact-brief): adds Documents & Artifacts section to Available Commands
 	b.WriteString(cerebroWakeupBrief())   // CEREBRO-PATCH(cerebro-wakeup-brief): TECH-3013 adds Agent Wakeup section to Available Commands
+	b.WriteString(cerebroChatBrief())     // CEREBRO-PATCH(cerebro-chat-brief): TECH-3183 adds Chat Reply section to Available Commands
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
