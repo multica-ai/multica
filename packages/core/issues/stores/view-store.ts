@@ -48,6 +48,7 @@ export interface IssueViewState {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  blockedOnly: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
@@ -60,6 +61,7 @@ export interface IssueViewState {
   toggleCreatorFilter: (value: ActorFilterValue) => void;
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
+  toggleBlockedOnly: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
@@ -78,6 +80,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   creatorFilters: [],
   projectFilters: [],
   includeNoProject: false,
+  blockedOnly: false,
   sortBy: "position",
   sortDirection: "asc",
   cardProperties: {
@@ -137,6 +140,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     })),
   toggleNoProject: () =>
     set((state) => ({ includeNoProject: !state.includeNoProject })),
+  toggleBlockedOnly: () =>
+    set((state) => ({ blockedOnly: !state.blockedOnly })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one
@@ -162,6 +167,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       creatorFilters: [],
       projectFilters: [],
       includeNoProject: false,
+      blockedOnly: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
@@ -192,6 +198,7 @@ export const viewStorePersistOptions = (name: string) => ({
     creatorFilters: state.creatorFilters,
     projectFilters: state.projectFilters,
     includeNoProject: state.includeNoProject,
+    blockedOnly: state.blockedOnly,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,

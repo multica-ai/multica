@@ -9,6 +9,7 @@ export interface IssueFilters {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  blockedOnly?: boolean;
 }
 
 /**
@@ -21,7 +22,16 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject } = filters;
+  const {
+    statusFilters,
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters,
+    includeNoProject,
+    blockedOnly = false,
+  } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
 
@@ -30,6 +40,9 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       return false;
 
     if (priorityFilters.length > 0 && !priorityFilters.includes(issue.priority))
+      return false;
+
+    if (blockedOnly && !((issue.blocked_by_count ?? 0) > 0))
       return false;
 
     if (hasAssigneeFilter) {

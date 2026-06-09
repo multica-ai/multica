@@ -8,7 +8,7 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions } from "@multica/core/issues/queries";
 import { useQuery } from "@tanstack/react-query";
-import { taskStatusConfig } from "../../config";
+import { getTaskQueueDisplay } from "../../config";
 
 export function TasksTab({ agent }: { agent: Agent }) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
@@ -77,11 +77,13 @@ export function TasksTab({ agent }: { agent: Agent }) {
       ) : (
         <div className="space-y-1.5">
           {sortedTasks.map((task) => {
-            const config = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
-            const Icon = config.icon;
             const issue = issueMap.get(task.issue_id);
-            const isActive = task.status === "running" || task.status === "dispatched";
+            const display = getTaskQueueDisplay(task, issue);
+            const Icon = display.icon;
             const isRunning = task.status === "running";
+            const isActive = task.status === "running" || task.status === "dispatched";
+            const isDependencyBlocked = display.tone === "blocked";
+            const isHighlighted = isActive || isDependencyBlocked;
 
             return (
               <div
@@ -91,11 +93,13 @@ export function TasksTab({ agent }: { agent: Agent }) {
                     ? "border-success/40 bg-success/5"
                     : task.status === "dispatched"
                       ? "border-info/40 bg-info/5"
-                      : ""
+                      : isDependencyBlocked
+                        ? "border-warning/40 bg-warning/5"
+                        : ""
                 }`}
               >
                 <Icon
-                  className={`h-4 w-4 shrink-0 ${config.color} ${
+                  className={`h-4 w-4 shrink-0 ${display.color} ${
                     isRunning ? "animate-spin" : ""
                   }`}
                 />
@@ -106,24 +110,26 @@ export function TasksTab({ agent }: { agent: Agent }) {
                         {issue.identifier}
                       </span>
                     )}
-                    <span className={`text-sm truncate ${isActive ? "font-medium" : ""}`}>
+                    <span className={`text-sm truncate ${isHighlighted ? "font-medium" : ""}`}>
                       {issue?.title ?? `Issue ${task.issue_id.slice(0, 8)}...`}
                     </span>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    {isRunning && task.started_at
-                      ? `Started ${new Date(task.started_at).toLocaleString()}`
-                      : task.status === "dispatched" && task.dispatched_at
-                        ? `Dispatched ${new Date(task.dispatched_at).toLocaleString()}`
-                        : task.status === "completed" && task.completed_at
-                          ? `Completed ${new Date(task.completed_at).toLocaleString()}`
-                          : task.status === "failed" && task.completed_at
-                            ? `Failed ${new Date(task.completed_at).toLocaleString()}`
-                            : `Queued ${new Date(task.created_at).toLocaleString()}`}
+                  <div className={`mt-0.5 text-xs ${isDependencyBlocked ? "text-warning" : "text-muted-foreground"}`}>
+                    {display.detail ?? (
+                      isRunning && task.started_at
+                        ? `Started ${new Date(task.started_at).toLocaleString()}`
+                        : task.status === "dispatched" && task.dispatched_at
+                          ? `Dispatched ${new Date(task.dispatched_at).toLocaleString()}`
+                          : task.status === "completed" && task.completed_at
+                            ? `Completed ${new Date(task.completed_at).toLocaleString()}`
+                            : task.status === "failed" && task.completed_at
+                              ? `Failed ${new Date(task.completed_at).toLocaleString()}`
+                              : `Queued ${new Date(task.created_at).toLocaleString()}`
+                    )}
                   </div>
                 </div>
-                <span className={`shrink-0 text-xs font-medium ${config.color}`}>
-                  {config.label}
+                <span className={`shrink-0 text-xs font-medium ${display.color}`}>
+                  {display.label}
                 </span>
               </div>
             );

@@ -36,6 +36,7 @@ export function IssuesPage() {
   const creatorFilters = useIssueViewStore((s) => s.creatorFilters);
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
+  const blockedOnly = useIssueViewStore((s) => s.blockedOnly);
 
   useEffect(() => {
     initFilterWorkspaceSync((cb) => useWorkspaceStore.subscribe((s) => cb(s.workspace?.id)));
@@ -55,8 +56,8 @@ export function IssuesPage() {
   }, [allIssues, scope]);
 
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject],
+    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, blockedOnly }),
+    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, blockedOnly],
   );
 
   // Compute sub-issue progress for each parent from the full (unfiltered) issue list

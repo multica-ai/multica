@@ -11,6 +11,7 @@ import {
   Filter,
   FolderKanban,
   FolderMinus,
+  Link2,
   List,
   SignalHigh,
   SlidersHorizontal,
@@ -93,6 +94,7 @@ function getActiveFilterCount(state: {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  blockedOnly: boolean;
 }) {
   let count = 0;
   if (state.statusFilters.length > 0) count++;
@@ -100,6 +102,7 @@ function getActiveFilterCount(state: {
   if (state.assigneeFilters.length > 0 || state.includeNoAssignee) count++;
   if (state.creatorFilters.length > 0) count++;
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
+  if (state.blockedOnly) count++;
   return count;
 }
 
@@ -112,6 +115,7 @@ function useIssueCounts(allIssues: Issue[]) {
     const project = new Map<string, number>();
     let noAssignee = 0;
     let noProject = 0;
+    let blockedBy = 0;
 
     for (const issue of allIssues) {
       status.set(issue.status, (status.get(issue.status) ?? 0) + 1);
@@ -132,9 +136,13 @@ function useIssueCounts(allIssues: Issue[]) {
       } else {
         project.set(issue.project_id, (project.get(issue.project_id) ?? 0) + 1);
       }
+
+      if ((issue.blocked_by_count ?? 0) > 0) {
+        blockedBy++;
+      }
     }
 
-    return { status, priority, assignee, creator, noAssignee, project, noProject };
+    return { status, priority, assignee, creator, noAssignee, project, noProject, blockedBy };
   }, [allIssues]);
 }
 
@@ -392,6 +400,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
+  const blockedOnly = useViewStore((s) => s.blockedOnly);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const cardProperties = useViewStore((s) => s.cardProperties);
@@ -408,6 +417,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
       creatorFilters,
       projectFilters,
       includeNoProject,
+      blockedOnly,
     }) > 0;
 
   const sortLabel =
@@ -600,6 +610,21 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+
+            <DropdownMenuCheckboxItem
+              checked={blockedOnly}
+              onCheckedChange={() => act.toggleBlockedOnly()}
+              className={FILTER_ITEM_CLASS}
+            >
+              <HoverCheck checked={blockedOnly} />
+              <Link2 className="size-3.5 text-muted-foreground" />
+              Has blockers
+              {counts.blockedBy > 0 && (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {counts.blockedBy}
+                </span>
+              )}
+            </DropdownMenuCheckboxItem>
 
             {/* Reset */}
             {hasActiveFilters && (

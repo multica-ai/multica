@@ -112,6 +112,7 @@ const mockViewState = {
   creatorFilters: [] as { type: string; id: string }[],
   projectFilters: [] as string[],
   includeNoProject: false,
+  blockedOnly: false,
   sortBy: "position" as const,
   sortDirection: "asc" as const,
   cardProperties: { priority: true, description: true, assignee: true, dueDate: true },
@@ -124,6 +125,7 @@ const mockViewState = {
   toggleCreatorFilter: vi.fn(),
   toggleProjectFilter: vi.fn(),
   toggleNoProject: vi.fn(),
+  toggleBlockedOnly: vi.fn(),
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
   clearFilters: vi.fn(),
@@ -357,6 +359,7 @@ describe("IssuesPage (shared)", () => {
     mockViewState.viewMode = "board";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
+    mockViewState.blockedOnly = false;
   });
 
   it("shows loading skeletons initially", () => {
@@ -428,6 +431,27 @@ describe("IssuesPage (shared)", () => {
     await screen.findByText("All");
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
+  });
+
+  it("filters to issues with blockers when blocker filter is active", async () => {
+    mockViewState.viewMode = "list";
+    mockViewState.blockedOnly = true;
+    const issuesWithBlockedDependency = mockIssues.map((issue) =>
+      issue.id === "issue-1" ? { ...issue, blocked_by_count: 2 } : issue,
+    );
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve(
+        params?.open_only
+          ? { issues: issuesWithBlockedDependency, total: issuesWithBlockedDependency.length }
+          : { issues: [], total: 0 },
+      ),
+    );
+
+    renderWithQuery(<IssuesPage />);
+
+    expect(await screen.findByText("Implement auth")).toBeInTheDocument();
+    expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
+    expect(screen.queryByText("Write tests")).not.toBeInTheDocument();
   });
 
   it("shows blocked dependency badges in list view", async () => {
