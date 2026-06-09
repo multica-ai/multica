@@ -42,7 +42,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
-	cmd.WaitDelay = 20 * time.Second
+	cmd.WaitDelay = 500 * time.Millisecond
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -159,7 +159,6 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				// Current Cursor Agent versions can emit the terminal result
 				// event but keep a worker process alive. Treat result as the
 				// protocol boundary so the daemon can report completion.
-				cmd.WaitDelay = 500 * time.Millisecond
 				cancel()
 
 			case "error":
