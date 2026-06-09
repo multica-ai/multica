@@ -274,6 +274,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	} else if ok {
 		agents["firtal-gateway"] = entry
 	}
+	// CEREBRO-PATCH(daemon-config-firtal-local): TECH-3226 register the local Ollama tool-loop runtime when MULTICA_RUNTIME_TYPE=firtal-local.
+	if entry, ok := firtalLocalAgentEntry(); ok {
+		agents["firtal-local"] = entry
+	}
 	if len(agents) == 0 {
 		return Config{}, fmt.Errorf("no agent runtime found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy on PATH, or set MULTICA_RUNTIME_TYPE=%s together with FIRTAL_REGISTRY_URL and FIRTAL_REGISTRY_KEY", FirtalRegistryRuntimeType)
 	}
@@ -627,6 +631,10 @@ func patternsFromEnv(name string, defaults []string) []string {
 // string field; future values may be added as new runtime types appear.
 const FirtalRegistryRuntimeType = "firtal-registry"
 
+// FirtalLocalRuntimeType is the MULTICA_RUNTIME_TYPE value that makes the daemon
+// register the dedicated local-Ollama runtime (provider firtal-local, TECH-3226).
+const FirtalLocalRuntimeType = "firtal-local"
+
 func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
 	// CEREBRO-PATCH(daemon-config-firtal-gateway): register managed gateway runtime ONLY when MULTICA_RUNTIME_TYPE=firtal-registry.
 	// URL+key alone is no longer enough — without the explicit opt-in every dev/codex
@@ -651,6 +659,23 @@ func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
 		Model:       strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_MODEL")),
 		DisplayName: strings.TrimSpace(os.Getenv("FIRTAL_REGISTRY_RUNTIME_NAME")), // CEREBRO-PATCH(daemon-firtal-gateway-runtime-name): custom runtime display name
 	}, true, nil
+}
+
+// CEREBRO-PATCH(daemon-config-firtal-local): TECH-3226 — register the dedicated
+// local-Ollama runtime (provider firtal-local) when MULTICA_RUNTIME_TYPE is set
+// to firtal-local. This is mutually exclusive with the firtal-gateway managed
+// runtime (firtal-registry), keeping the local model fully separate from the
+// cloud gateway. The Ollama URL/temperature are read by the backend from the
+// daemon env (FIRTAL_LOCAL_OLLAMA_URL, default http://localhost:11434).
+func firtalLocalAgentEntry() (AgentEntry, bool) {
+	if strings.TrimSpace(os.Getenv("MULTICA_RUNTIME_TYPE")) != FirtalLocalRuntimeType {
+		return AgentEntry{}, false
+	}
+	return AgentEntry{
+		Path:        "",
+		Model:       strings.TrimSpace(os.Getenv("FIRTAL_LOCAL_MODEL")),
+		DisplayName: strings.TrimSpace(os.Getenv("FIRTAL_LOCAL_RUNTIME_NAME")),
+	}, true
 }
 
 func shellArgsFromEnv(name string) ([]string, error) {

@@ -158,8 +158,11 @@ func New(agentType string, cfg Config) (Backend, error) {
 	// CEREBRO-PATCH(agent-openai-eu-runtime): TECH-2989 EU-compliant OpenAI backend.
 	case openaiEUProvider:
 		return &openaiEUBackend{cfg: cfg}, nil
+	// CEREBRO-PATCH(agent-firtal-local): TECH-3226 dedicated local Ollama backend with a full tool loop.
+	case firtalLocalProvider:
+		return &firtalLocalBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity, firtal-gateway, openai-eu)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity, firtal-gateway, openai-eu, firtal-local)", agentType)
 	}
 }
 
@@ -186,6 +189,8 @@ var launchHeaders = map[string]string{
 	firtalGatewayProvider: "Firtal Data Registry AI Gateway (HTTP)",
 	// CEREBRO-PATCH(agent-openai-eu-runtime): TECH-2989
 	openaiEUProvider: "OpenAI EU (api.eu.openai.com, HTTP)",
+	// CEREBRO-PATCH(agent-firtal-local): TECH-3226
+	firtalLocalProvider: "Firtal Local Ollama (tool loop, HTTP)",
 	"gemini":              "gemini (stream-json)",
 	"hermes":              "hermes acp",
 	"kimi":                "kimi acp",

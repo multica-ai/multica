@@ -203,6 +203,18 @@ var providerRegistry = map[string]Set{
 		// secret binding so an admin can govern key-attachment.
 		DiscoveryMethod: "static",
 	},
+
+	// CEREBRO-PATCH(capabilities-firtal-local): TECH-3226 local Ollama tool-loop runtime.
+	"firtal-local": {
+		Providers:       []string{"firtal-local"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"native_tool_loop"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
 }
 
 // staticFallback is what we return for any provider name we haven't curated

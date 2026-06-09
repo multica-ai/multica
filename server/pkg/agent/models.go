@@ -149,6 +149,9 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 	// CEREBRO-PATCH(agent-models-openai-eu): TECH-2989 EU-compliant OpenAI models via api.eu.openai.com.
 	case openaiEUProvider:
 		return openaiEUStaticModels(), nil
+	// CEREBRO-PATCH(agent-models-firtal-local): TECH-3226 local Ollama models.
+	case firtalLocalProvider:
+		return firtalLocalStaticModels(), nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}
