@@ -424,6 +424,67 @@ func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllC
 	return items, nil
 }
 
+const listAllChatSessionsInWorkspace = `-- name: ListAllChatSessionsInWorkspace :many
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id,
+       (cs.unread_since IS NOT NULL)::bool AS has_unread
+FROM chat_session cs
+WHERE cs.workspace_id = $1
+ORDER BY cs.updated_at DESC
+`
+
+type ListAllChatSessionsInWorkspaceRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
+	Title       string             `json:"title"`
+	SessionID   pgtype.Text        `json:"session_id"`
+	WorkDir     pgtype.Text        `json:"work_dir"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince pgtype.Timestamptz `json:"unread_since"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	HasUnread   bool               `json:"has_unread"`
+}
+
+// CEREBRO-PATCH(fir-125-channel-cli): workspace-level chat session listing for analytics
+// Returns ALL chat sessions in the workspace regardless of creator.
+// Used by the multica CLI for workspace-wide analytics.
+func (q *Queries) ListAllChatSessionsInWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAllChatSessionsInWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listAllChatSessionsInWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllChatSessionsInWorkspaceRow{}
+	for rows.Next() {
+		var i ListAllChatSessionsInWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AgentID,
+			&i.CreatorID,
+			&i.Title,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UnreadSince,
+			&i.RuntimeID,
+			&i.HasUnread,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listArchivedChatSessionsByCreator = `-- name: ListArchivedChatSessionsByCreator :many
 SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id,
        (cs.unread_since IS NOT NULL)::bool AS has_unread

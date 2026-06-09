@@ -100,6 +100,74 @@ func (q *Queries) GetDMByMembers(ctx context.Context, arg GetDMByMembersParams) 
 	return i, err
 }
 
+const listAllChannelsInWorkspace = `-- name: ListAllChannelsInWorkspace :many
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+       i.kind, i.assignee_type, i.assignee_id,
+       i.creator_type, i.creator_id, i.project_id,
+       i.created_at, i.updated_at, i.number
+FROM issue i
+WHERE i.workspace_id = $1
+  AND i.kind IN ('channel', 'dm')
+ORDER BY i.updated_at DESC
+`
+
+type ListAllChannelsInWorkspaceRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Title        string             `json:"title"`
+	Description  pgtype.Text        `json:"description"`
+	Status       string             `json:"status"`
+	Priority     string             `json:"priority"`
+	Kind         string             `json:"kind"`
+	AssigneeType pgtype.Text        `json:"assignee_type"`
+	AssigneeID   pgtype.UUID        `json:"assignee_id"`
+	CreatorType  string             `json:"creator_type"`
+	CreatorID    pgtype.UUID        `json:"creator_id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Number       int32              `json:"number"`
+}
+
+// CEREBRO-PATCH(fir-125-channel-cli): workspace-level channel/DM listing for analytics
+// Returns ALL channels and DMs in the workspace regardless of subscriber.
+// Used by the multica CLI for workspace-wide analytics.
+func (q *Queries) ListAllChannelsInWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAllChannelsInWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listAllChannelsInWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllChannelsInWorkspaceRow{}
+	for rows.Next() {
+		var i ListAllChannelsInWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.Kind,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ProjectID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelParticipantNames = `-- name: ListChannelParticipantNames :many
 SELECT u.name AS display_name, s.created_at AS subscribed_at
 FROM issue_subscriber s

@@ -99,6 +99,31 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
 
+	// CEREBRO-PATCH(fir-125-channel-cli): ?all=true returns all workspace chat sessions
+	if r.URL.Query().Get("all") == "true" {
+		raw, err := h.Queries.ListAllChatSessionsInWorkspace(r.Context(), parseUUID(workspaceID))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list all chat sessions")
+			return
+		}
+		resp := make([]ChatSessionResponse, len(raw))
+		for i, s := range raw {
+			resp[i] = ChatSessionResponse{
+				ID:          uuidToString(s.ID),
+				WorkspaceID: uuidToString(s.WorkspaceID),
+				AgentID:     uuidToString(s.AgentID),
+				CreatorID:   uuidToString(s.CreatorID),
+				Title:       s.Title,
+				Status:      s.Status,
+				HasUnread:   s.HasUnread,
+				CreatedAt:   timestampToString(s.CreatedAt),
+				UpdatedAt:   timestampToString(s.UpdatedAt),
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
 	status := r.URL.Query().Get("status")
 
 	type listed struct {

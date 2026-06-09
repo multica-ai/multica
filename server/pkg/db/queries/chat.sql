@@ -38,6 +38,16 @@ FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'archived'
 ORDER BY cs.updated_at DESC;
 
+-- CEREBRO-PATCH(fir-125-channel-cli): workspace-level chat session listing for analytics
+-- name: ListAllChatSessionsInWorkspace :many
+-- Returns ALL chat sessions in the workspace regardless of creator.
+-- Used by the multica CLI for workspace-wide analytics.
+SELECT cs.*,
+       (cs.unread_since IS NOT NULL)::bool AS has_unread
+FROM chat_session cs
+WHERE cs.workspace_id = $1
+ORDER BY cs.updated_at DESC;
+
 -- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1

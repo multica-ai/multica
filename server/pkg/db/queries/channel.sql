@@ -81,6 +81,19 @@ WHERE id = $1
   AND kind = 'dm'
 RETURNING *;
 
+-- CEREBRO-PATCH(fir-125-channel-cli): workspace-level channel/DM listing for analytics
+-- name: ListAllChannelsInWorkspace :many
+-- Returns ALL channels and DMs in the workspace regardless of subscriber.
+-- Used by the multica CLI for workspace-wide analytics.
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+       i.kind, i.assignee_type, i.assignee_id,
+       i.creator_type, i.creator_id, i.project_id,
+       i.created_at, i.updated_at, i.number
+FROM issue i
+WHERE i.workspace_id = $1
+  AND i.kind IN ('channel', 'dm')
+ORDER BY i.updated_at DESC;
+
 -- name: ListChannelParticipantNames :many
 -- Returns display names of every (member or agent) subscriber of a channel/dm
 -- in subscribed-at order. Used to auto-generate a channel title on DM

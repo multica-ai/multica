@@ -257,13 +257,20 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListChannels handles GET /api/channels. Returns every channel/DM the
-// requesting member is a subscriber of.
+// requesting member is a subscriber of. When ?all=true is set, returns every
+// channel/DM in the workspace regardless of subscriber (analytics use).
 func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
 	workspaceID := h.resolveWorkspaceID(r)
+
+	// CEREBRO-PATCH(fir-125-channel-cli): ?all=true returns all workspace channels
+	if r.URL.Query().Get("all") == "true" {
+		h.listAllChannels(w, r, workspaceID, userID)
+		return
+	}
 
 	rows, err := h.Queries.ListChannelsForUser(r.Context(), db.ListChannelsForUserParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -498,4 +505,46 @@ func (h *Handler) audienceForChannel(c ChannelResponse) []string {
 		}
 	}
 	return out
+}
+
+// CEREBRO-PATCH(fir-125-channel-cli): listAllChannels backs ListChannels when ?all=true.
+// Returns every channel/DM in the workspace, regardless of subscriber membership.
+func (h *Handler) listAllChannels(w http.ResponseWriter, r *http.Request, workspaceID, userID string) {
+	rows, err := h.Queries.ListAllChannelsInWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list all channels")
+		return
+	}
+
+	channelIDs := make([]pgtype.UUID, 0, len(rows))
+	for _, row := range rows {
+		channelIDs = append(channelIDs, row.ID)
+	}
+	lastMessages := h.lastMessagesForChannels(r.Context(), channelIDs)
+
+	prefix := h.getIssuePrefix(r.Context(), parseUUID(workspaceID))
+	resp := make([]ChannelResponse, 0, len(rows))
+	for _, row := range rows {
+		resp = append(resp, ChannelResponse{
+			ID:           uuidToString(row.ID),
+			WorkspaceID:  uuidToString(row.WorkspaceID),
+			Number:       row.Number,
+			Identifier:   prefix + "-" + strconv.Itoa(int(row.Number)),
+			Kind:         row.Kind,
+			Title:        row.Title,
+			Description:  textToPtr(row.Description),
+			Status:       row.Status,
+			ProjectID:    uuidToPtr(row.ProjectID),
+			AssigneeType: textToPtr(row.AssigneeType),
+			AssigneeID:   uuidToPtr(row.AssigneeID),
+			CreatorType:  row.CreatorType,
+			CreatorID:    uuidToString(row.CreatorID),
+			Participants: h.loadParticipants(r.Context(), row.ID),
+			UnreadCount:  h.unreadInboxCount(r.Context(), userID, row.ID),
+			LastMessage:  lastMessages[uuidToString(row.ID)],
+			CreatedAt:    timestampToString(row.CreatedAt),
+			UpdatedAt:    timestampToString(row.UpdatedAt),
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
