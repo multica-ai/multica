@@ -15,7 +15,8 @@
 
 import { useMemo } from "react";
 import { createLowlight, common } from "lowlight";
-import { toHtml } from "hast-util-to-html";
+import { toJsxRuntime } from "hast-util-to-jsx-runtime";
+import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { cn } from "@multica/ui/lib/utils";
 import "./styles/code.css";
 
@@ -28,30 +29,26 @@ interface CodeBlockStaticProps {
 }
 
 export function CodeBlockStatic({ language, body, className }: CodeBlockStaticProps) {
-  const html = useMemo(() => {
+  const highlighted = useMemo(() => {
     const code = body.replace(/\n$/, "");
     try {
       const tree = language
         ? lowlight.highlight(language, code)
         : lowlight.highlightAuto(code);
-      return toHtml(tree) as string;
+      if (tree.children.length > 0) {
+        return toJsxRuntime(tree, { jsx, jsxs, Fragment });
+      }
     } catch {
-      // Unknown language tag — fall back to escaped plain text so we don't
-      // crash on an esoteric extension.
-      return escapeHtml(code);
+      // Unknown language tag — fall back to plain text
     }
+    return code;
   }, [body, language]);
 
   return (
-    <pre className={cn("rich-text-editor m-0 overflow-auto text-sm", className)}>
-      <code
-        className={cn("hljs", language && `language-${language}`)}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+    <pre className={cn("rich-text-editor m-0 overflow-auto text-sm select-text", className)}>
+      <code className={cn("hljs", language && `language-${language}`)}>
+        {highlighted}
+      </code>
     </pre>
   );
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

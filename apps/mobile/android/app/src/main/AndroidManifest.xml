@@ -39,6 +39,12 @@
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="wujieai-multicam"/>
       </intent-filter>
+      <intent-filter android:autoVerify="true" data-generated="true">
+        <action android:name="android.intent.action.VIEW"/>
+        <data android:scheme="https" android:host="multica.wujieai.com" android:pathPrefix="/"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+      </intent-filter>
     </activity>
   </application>
 </manifest>

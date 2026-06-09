@@ -83,7 +83,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor", "DeepSeek-TUI",
-		"gemini", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"gemini", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "qoderclicn",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {
@@ -104,7 +104,7 @@ func TestCapabilityRegistryCoversSupportedBackends(t *testing.T) {
 
 	supported := []string{
 		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes",
-		"gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity",
+		"gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity", "qoderclicn",
 	}
 	for _, provider := range supported {
 		if _, ok := CapabilityFor(provider); !ok {
@@ -146,10 +146,11 @@ func TestStreamDisplayGating(t *testing.T) {
 	}
 
 	streamProviders := map[string]bool{
-		"claude":   true,
-		"codex":    true,
-		"copilot":  true,
-		"opencode": true,
+		"claude":     true,
+		"codex":      true,
+		"copilot":    true,
+		"opencode":   true,
+		"qoderclicn": true,
 	}
 
 	for _, name := range RegisteredProviders() {

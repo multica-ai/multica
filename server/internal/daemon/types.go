@@ -77,8 +77,8 @@ type Task struct {
 	// no owner (cloud / system runtimes) or the user hasn't set a description.
 	// Injected into the brief under `## Requesting User`; omitted entirely
 	// when description is empty so the agent doesn't see a useless heading.
-	RequestingUserName               string `json:"requesting_user_name,omitempty"`
-	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
+	RequestingUserName               string          `json:"requesting_user_name,omitempty"`
+	RequestingUserProfileDescription string          `json:"requesting_user_profile_description,omitempty"`
 	Context                          json.RawMessage `json:"context,omitempty"`
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
@@ -103,6 +103,7 @@ type ChatAttachmentMeta struct {
 type AgentData struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name"`
+	Description   string            `json:"description,omitempty"`
 	Instructions  string            `json:"instructions"`
 	Skills        []SkillData       `json:"skills"`
 	CustomEnv     map[string]string `json:"custom_env,omitempty"`

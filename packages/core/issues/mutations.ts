@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import {
   issueKeys,
   ISSUE_PAGE_SIZE,
@@ -285,12 +285,18 @@ export function useUpdateIssue() {
       return { prevLists, prevDetail, prevChildren, parentId, id };
     },
     onError: (_err, _vars, ctx) => {
+      const isConflict = _err instanceof ApiError && _err.status === 409;
       if (ctx?.prevLists) {
         for (const [key, snapshot] of ctx.prevLists) {
           qc.setQueryData(key, snapshot);
         }
       }
-      if (ctx?.prevDetail)
+      // For 409 Conflict: keep the optimistic detail update in place.
+      // The editor holds the user's latest typed content; rolling back
+      // the cache would briefly show the old server value before the
+      // refetch (from onSettled) brings the current server state, and
+      // ContentEditor's suppressSyncRef protects the editor throughout.
+      if (!isConflict && ctx?.prevDetail)
         qc.setQueryData(issueKeys.detail(wsId, ctx.id), ctx.prevDetail);
       if (ctx?.parentId && ctx.prevChildren !== undefined) {
         qc.setQueryData(

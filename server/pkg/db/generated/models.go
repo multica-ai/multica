@@ -177,6 +177,7 @@ type Autopilot struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	AssigneeType       string             `json:"assignee_type"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
+	ManualOptions      []string           `json:"manual_options"`
 }
 
 type AutopilotRun struct {

@@ -27,18 +27,15 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 		t.Fatalf("symlink codex shim: %v", err)
 	}
 	origExecute := executeLocalCLIForRun
-	executeLocalCLIForRun = func(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
+	executeLocalCLIForRun = func(args []string, cwd, cliName string, env localCLIEnv, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
 		if cliName != "codex" {
 			t.Fatalf("cliName = %q, want codex", cliName)
 		}
 		if len(args) == 0 || args[0] != codexPath {
 			t.Fatalf("args = %v, want codex path first", args)
 		}
-		if env.RunID != "run-1" || env.IssueID != "issue-1" {
-			t.Fatalf("env = %+v, want run and issue metadata", env)
-		}
-		if !strings.Contains(initialPrompt, "Assigned issue ID: issue-1") {
-			t.Fatalf("initialPrompt missing issue context: %q", initialPrompt)
+		if env.RunID != "run-1" || env.IssueID != "issue-1" || env.WorkspaceID != "ws-1" {
+			t.Fatalf("env = %+v, want run, issue, and workspace metadata", env)
 		}
 		return 0, nil
 	}
@@ -179,36 +176,6 @@ func TestInferCLIName(t *testing.T) {
 	}
 }
 
-func TestLocalRunPromptUsesPlatformContextCommandsAndSilence(t *testing.T) {
-	got := localRunPrompt("issue-1")
-	if got == "" || !containsAll(got, []string{
-		"Multica issue issue-1",
-		"Assigned issue ID: issue-1",
-		"`multica issue get issue-1 --output json`",
-		"`multica issue comment list issue-1 --output json`",
-		"Do not use any other `multica` command during bootstrap",
-		"read the assigned issue and its comments only",
-		"Do not proactively fetch parent issues, child issues, or issues mentioned in text",
-		"After loading context, produce no output",
-		"Wait silently for the user's next input",
-	}) {
-		t.Fatalf("prompt %q does not include platform context command instructions", got)
-	}
-	for _, forbidden := range []string{
-		".multica",
-		"runs",
-		"context directory",
-		"Issue JSON:",
-		"Comments JSON:",
-		`"title": "Fake issue"`,
-		`"content": "Prior decision"`,
-	} {
-		if strings.Contains(got, forbidden) {
-			t.Fatalf("prompt %q contains forbidden reference %q", got, forbidden)
-		}
-	}
-}
-
 func TestReporterIgnoresPostsAfterClose(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
@@ -330,10 +297,114 @@ func TestValidateCodexRemoteArgsRejectsManagedFlags(t *testing.T) {
 	}
 }
 
+func TestCodexRemoteChildArgsUseRemoteWithoutInitialPrompt(t *testing.T) {
+	args := codexRemoteChildArgs([]string{"codex", "--model", "gpt-5.5"}, "ws://127.0.0.1:1234")
+	joined := "\n" + strings.Join(args, "\n") + "\n"
+	if !containsAll(joined, []string{
+		"\n--remote\n",
+		"\nws://127.0.0.1:1234\n",
+		"\n--model\n",
+		"\ngpt-5.5\n",
+	}) {
+		t.Fatalf("codex args missing remote/model args: %v", args)
+	}
+	for _, forbidden := range []string{"bootstrap mode", "produce no output", "wait silently", "Assigned issue ID:"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("codex args contain forbidden bootstrap prompt %q: %v", forbidden, args)
+		}
+	}
+}
+
+func TestCodexLocalRunSystemPromptIsBoundIssueContextOnly(t *testing.T) {
+	content := codexLocalRunSystemPrompt("issue-1")
+	if !containsAll(content, []string{
+		"Multica local run context",
+		"not a startup task",
+		"Bound Multica issue ID: issue-1",
+		"Get issue details: multica issue get issue-1 --output json",
+		"Get issue comments: multica issue comment list issue-1 --output json",
+		"current or bound Multica issue",
+		"issue details",
+		"issue comments",
+		"what was said in comments",
+		"Do not use those commands for ordinary greetings, food, preferences, casual chat",
+		"general coding questions that do not mention the Multica issue",
+		"code comments, git commit messages, GitHub PR comments, or GitHub issue comments",
+		"answer only the user's current question",
+		"Do not offer next-step menus",
+		"do not continue summarizing the issue",
+		"ignore local command pseudo-messages",
+	}) {
+		t.Fatalf("system prompt missing required guidance:\n%s", content)
+	}
+	for _, forbidden := range []string{
+		"bootstrap mode",
+		"produce no output",
+		"wait silently",
+		"After loading context",
+		"I can continue",
+		"choose one",
+		"choose an option",
+	} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("system prompt contains forbidden instruction %q:\n%s", forbidden, content)
+		}
+	}
+}
+
+func TestCodexAppServerMapperInjectsDeveloperInstructions(t *testing.T) {
+	mapper := newCodexAppServerMapper(nil, nil)
+	mapper.developerInstructions = codexLocalRunSystemPrompt("issue-1")
+
+	rewritten := mapper.rewriteClientMessage([]byte(`{"id":1,"method":"thread/start","params":{"cwd":"/tmp/project","developerInstructions":"Existing instructions."}}`))
+	var msg map[string]any
+	if err := json.Unmarshal(rewritten, &msg); err != nil {
+		t.Fatalf("unmarshal rewritten message: %v\n%s", err, rewritten)
+	}
+	params, _ := msg["params"].(map[string]any)
+	instructions := stringValue(params["developerInstructions"])
+	if !containsAll(instructions, []string{
+		"Existing instructions.",
+		"Multica local run context",
+		"Bound Multica issue ID: issue-1",
+		"multica issue get issue-1 --output json",
+		"multica issue comment list issue-1 --output json",
+	}) {
+		t.Fatalf("developerInstructions missing appended Multica guidance:\n%s", instructions)
+	}
+	if params["cwd"] != "/tmp/project" {
+		t.Fatalf("params = %+v, want unrelated params preserved", params)
+	}
+}
+
+func TestCodexAppServerMapperInjectsDeveloperInstructionsOnResume(t *testing.T) {
+	mapper := newCodexAppServerMapper(nil, nil)
+	mapper.developerInstructions = codexLocalRunSystemPrompt("issue-1")
+
+	rewritten := mapper.rewriteClientMessage([]byte(`{"id":2,"method":"thread/resume","params":{"threadId":"thread-old"}}`))
+	var msg map[string]any
+	if err := json.Unmarshal(rewritten, &msg); err != nil {
+		t.Fatalf("unmarshal rewritten message: %v\n%s", err, rewritten)
+	}
+	params, _ := msg["params"].(map[string]any)
+	if params["threadId"] != "thread-old" {
+		t.Fatalf("params = %+v, want threadId preserved", params)
+	}
+	instructions := stringValue(params["developerInstructions"])
+	if !containsAll(instructions, []string{
+		"Multica local run context",
+		"Bound Multica issue ID: issue-1",
+		"multica issue get issue-1 --output json",
+		"multica issue comment list issue-1 --output json",
+	}) {
+		t.Fatalf("developerInstructions missing Multica guidance:\n%s", instructions)
+	}
+}
+
 func TestCodexAppServerMapperMapsUserAndFinal(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "bootstrap prompt")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","content":[{"type":"text","text":"你好"}]}}}`))
 	mapper.Observe(false, []byte(`{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"agent-1","delta":"你好"}}`))
@@ -356,27 +427,10 @@ func TestCodexAppServerMapperMapsUserAndFinal(t *testing.T) {
 	}
 }
 
-func TestCodexAppServerMapperSkipsBootstrapComments(t *testing.T) {
-	poster := &fakeLocalRunPoster{}
-	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "bootstrap prompt")
-
-	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","text":"bootstrap prompt"}}}`))
-	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"agent-1","type":"agentMessage","phase":"final_answer","text":"should stay silent"}}}`))
-	reporter.Close()
-
-	if inputs := userInputMessages(poster.messages()); len(inputs) != 0 {
-		t.Fatalf("inputs = %+v, want bootstrap user skipped", inputs)
-	}
-	if finals := finalMessages(poster.messages()); len(finals) != 0 {
-		t.Fatalf("finals = %+v, want bootstrap final skipped", finals)
-	}
-}
-
 func TestCodexAppServerMapperMapsSlashCommandWithArgsAsUserInput(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","text":"/plan 帮我规划实现方案"}}}`))
 	reporter.Close()
@@ -393,7 +447,7 @@ func TestCodexAppServerMapperMapsSlashCommandWithArgsAsUserInput(t *testing.T) {
 func TestCodexAppServerMapperSkipsSlashCommandWithoutArgs(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","text":"/status"}}}`))
 	reporter.Close()
@@ -406,7 +460,7 @@ func TestCodexAppServerMapperSkipsSlashCommandWithoutArgs(t *testing.T) {
 func TestCodexAppServerMapperMapsCommandExecution(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(false, []byte(`{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"cmd-1","type":"commandExecution","command":"go test ./cmd/multica"}}}`))
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"cmd-1","type":"commandExecution","aggregatedOutput":"ok\n"}}}`))
@@ -426,7 +480,7 @@ func TestCodexAppServerMapperMapsCommandExecution(t *testing.T) {
 func TestCodexAppServerMapperMapsFileChange(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(false, []byte(`{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"patch-1","type":"fileChange"}}}`))
 	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"patch-1","type":"fileChange"}}}`))
@@ -446,7 +500,7 @@ func TestCodexAppServerMapperMapsFileChange(t *testing.T) {
 func TestCodexAppServerMapperMapsProposedPlanRequest(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(false, []byte(`{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}`))
 	mapper.Observe(false, []byte(`{"jsonrpc":"2.0","id":23,"method":"item/tool/requestUserInput","params":{"itemId":"item-1","threadId":"thread-1","turnId":"turn-1","questions":[{"id":"q1","header":"Proposed Plan","question":"1. Inspect localrun sync\n2. Persist the proposed plan","options":[{"label":"Approve plan","description":"Continue"},{"label":"Edit plan","description":"Revise"},{"label":"Cancel","description":"Stop"}]}]}}`))
@@ -467,7 +521,7 @@ func TestCodexAppServerMapperMapsProposedPlanRequest(t *testing.T) {
 func TestCodexAppServerMapperMapsProposedPlanItem(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(false, []byte(`{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}`))
 	mapper.Observe(false, []byte(`{"method":"item/plan/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"plan-1","delta":"1. Inspect localrun sync\n"}}`))
@@ -490,7 +544,7 @@ func TestCodexAppServerMapperMapsProposedPlanItem(t *testing.T) {
 func TestCodexAppServerMapperMapsErrors(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(false, []byte(`{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"failed","error":{"message":"unexpected status 401 Unauthorized"}}}}`))
 	mapper.Observe(false, []byte(`{"method":"error","params":{"error":{"message":"websocket closed"}}}`))
@@ -506,7 +560,7 @@ func TestCodexAppServerMapperReportsUsage(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	usageReporter := newLocalRunUsageReporter(poster, "run-1", time.Hour)
-	mapper := newCodexAppServerMapper(reporter, usageReporter, "")
+	mapper := newCodexAppServerMapper(reporter, usageReporter)
 
 	mapper.Observe(true, []byte(`{"id":1,"method":"thread/start","params":{}}`))
 	mapper.Observe(false, []byte(`{"id":1,"result":{"thread":{"id":"thread-1"},"model":"gpt-5.5"}}`))
@@ -527,7 +581,7 @@ func TestCodexAppServerMapperReportsUsageAcrossClearAndResume(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	usageReporter := newLocalRunUsageReporter(poster, "run-1", time.Hour)
-	mapper := newCodexAppServerMapper(reporter, usageReporter, "")
+	mapper := newCodexAppServerMapper(reporter, usageReporter)
 
 	mapper.Observe(true, []byte(`{"id":9,"method":"thread/start","params":{"sessionStartSource":"clear"}}`))
 	mapper.Observe(false, []byte(`{"id":9,"result":{"thread":{"id":"thread-clear"},"model":"gpt-5.5"}}`))
@@ -553,7 +607,7 @@ func TestCodexAppServerMapperReportsReroutedUsageModel(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	usageReporter := newLocalRunUsageReporter(poster, "run-1", time.Hour)
-	mapper := newCodexAppServerMapper(reporter, usageReporter, "")
+	mapper := newCodexAppServerMapper(reporter, usageReporter)
 
 	mapper.Observe(true, []byte(`{"id":1,"method":"thread/start","params":{}}`))
 	mapper.Observe(false, []byte(`{"id":1,"result":{"thread":{"id":"thread-1"},"model":"gpt-5.4"}}`))
@@ -575,7 +629,7 @@ func TestCodexAppServerMapperReportsReroutedUsageModel(t *testing.T) {
 func TestCodexAppServerMapperSkipsLifecycleMessages(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(true, []byte(`{"id":9,"method":"thread/start","params":{"sessionStartSource":"clear"}}`))
 	mapper.Observe(false, []byte(`{"id":9,"result":{"thread":{"id":"thread-clear","sessionId":"thread-clear","path":"/tmp/clear.jsonl","cwd":"/tmp"}}}`))
@@ -592,7 +646,7 @@ func TestCodexAppServerMapperSkipsLifecycleMessages(t *testing.T) {
 func TestCodexAppServerMapperTracksClearAndResumeThreadsForComments(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	mapper := newCodexAppServerMapper(reporter, nil, "")
+	mapper := newCodexAppServerMapper(reporter, nil)
 
 	mapper.Observe(true, []byte(`{"id":9,"method":"thread/start","params":{"sessionStartSource":"clear"}}`))
 	mapper.Observe(false, []byte(`{"id":9,"result":{"thread":{"id":"thread-clear","sessionId":"thread-clear","path":"/tmp/clear.jsonl","cwd":"/tmp"}}}`))
@@ -1104,23 +1158,25 @@ func TestLocalCLIProcessEnvInjectsRunMetadataAndToken(t *testing.T) {
 		"MULTICA_TOKEN=old-token",
 		"OTHER=value",
 	}, localCLIEnv{
-		RunID:     "run-1",
-		IssueID:   "issue-1",
-		ServerURL: "http://127.0.0.1:8080",
-		Token:     "token-1",
+		RunID:       "run-1",
+		IssueID:     "issue-1",
+		WorkspaceID: "ws-1",
+		ServerURL:   "http://127.0.0.1:8080",
+		Token:       "token-1",
 	})
 	joined := "\n" + strings.Join(got, "\n") + "\n"
 	if !containsAll(joined, []string{
 		"\nMULTICA_RUN_ID=run-1\n",
 		"\nMULTICA_ISSUE_ID=issue-1\n",
+		"\nMULTICA_WORKSPACE_ID=ws-1\n",
 		"\nMULTICA_SERVER_URL=http://127.0.0.1:8080\n",
 		"\nMULTICA_TOKEN=token-1\n",
 		"\nOTHER=value\n",
 	}) {
 		t.Fatalf("env missing resolved values: %v", got)
 	}
-	if strings.Contains(joined, "\nMULTICA_WORKSPACE_ID=") || strings.Contains(joined, "old-token") {
-		t.Fatalf("env leaked workspace or real token: %v", got)
+	if strings.Contains(joined, "old-ws") || strings.Contains(joined, "old-token") {
+		t.Fatalf("env leaked parent workspace or real token: %v", got)
 	}
 }
 

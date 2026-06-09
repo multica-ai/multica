@@ -47,6 +47,7 @@ pnpm --filter @multica/mobile ios
 | `EXPO_PUBLIC_API_BASE_URL` | API base URL | `app.json` 的 `expo.extra.apiBaseUrl` |
 | `EXPO_PUBLIC_WS_URL` | WebSocket URL | `app.json` 的 `expo.extra.wsUrl` |
 | `EXPO_PUBLIC_WEB_BASE_URL` | Web 入口 URL | 默认跟随 API base URL |
+| `EXPO_PUBLIC_APP_LINK_HOSTS` | Android App Links / iOS Universal Links 域名，逗号分隔 | `multica.wujieai.com` |
 
 当前 `app.json` 默认连接 Multica Cloud：
 
@@ -98,6 +99,15 @@ pnpm --filter @multica/mobile build:ios
 - iOS `buildNumber`
 
 发布前仍然需要确认 `app.json` 中的 `version` 和 `runtimeVersion` 是否符合当前 release 预期。当前项目使用 bare workflow，`runtimeVersion` 需要手动维护为固定字符串；当 native runtime 发生不兼容变化时，应随新包一起递增。
+
+### App Links / Universal Links
+
+Mobile app 会在原生配置中为 `EXPO_PUBLIC_APP_LINK_HOSTS` 声明 Android App Links 和 iOS Universal Links。Web 部署必须同时公开：
+
+- `/.well-known/assetlinks.json`：设置 `MULTICA_ANDROID_SHA256_CERT_FINGERPRINTS`，多个 Android 发布证书 SHA-256 指纹用逗号或换行分隔。
+- `/.well-known/apple-app-site-association`：设置 `MULTICA_APPLE_TEAM_ID`，或直接设置逗号分隔的 `MULTICA_IOS_APP_IDS`。
+
+Android 如果使用 Play App Signing，应使用 Play Console 中的 App signing certificate 指纹。iOS 的 app id 形态是 `<Apple Team ID>.com.wujieai.multica`。
 
 ### iOS APNs 和 TestFlight
 

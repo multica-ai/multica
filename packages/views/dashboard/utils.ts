@@ -173,8 +173,52 @@ export interface AgentCostRow {
   displayName?: string;
   ownerId?: string;
   tokens: number;
+  nonCachedTokens: number;
+  cachedTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   cost: number;
   taskCount: number;
+}
+
+function zeroAgentTokenFields() {
+  return {
+    tokens: 0,
+    nonCachedTokens: 0,
+    cachedTokens: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+}
+
+function addAgentTokenFields(
+  entry: Pick<
+    AgentCostRow,
+    | "tokens"
+    | "nonCachedTokens"
+    | "cachedTokens"
+    | "inputTokens"
+    | "outputTokens"
+    | "cacheReadTokens"
+    | "cacheWriteTokens"
+  >,
+  r: Pick<
+    DashboardUsageByAgent,
+    "input_tokens" | "output_tokens" | "cache_read_tokens" | "cache_write_tokens"
+  >,
+) {
+  entry.tokens +=
+    r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+  entry.nonCachedTokens += r.input_tokens + r.output_tokens + r.cache_write_tokens;
+  entry.cachedTokens += r.cache_read_tokens;
+  entry.inputTokens += r.input_tokens;
+  entry.outputTokens += r.output_tokens;
+  entry.cacheReadTokens += r.cache_read_tokens;
+  entry.cacheWriteTokens += r.cache_write_tokens;
 }
 
 // Fold per-(agent, model) rows into one row per agent. Cost is the sum
@@ -186,12 +230,11 @@ export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRo
     const entry = map.get(r.agent_id) ?? {
       agentId: r.agent_id,
       source: "agent" as const,
-      tokens: 0,
+      ...zeroAgentTokenFields(),
       cost: 0,
       taskCount: 0,
     };
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    addAgentTokenFields(entry, r);
     entry.cost += estimateCost(r);
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
@@ -210,12 +253,11 @@ export function aggregateLocalRunnerTokens(
       source: "local" as const,
       displayName: r.runner_name,
       ownerId: r.owner_id,
-      tokens: 0,
+      ...zeroAgentTokenFields(),
       cost: 0,
       taskCount: 0,
     };
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    addAgentTokenFields(entry, r);
     entry.cost += estimateCost(r);
     entry.taskCount += r.task_count;
     map.set(runnerId, entry);
@@ -229,6 +271,12 @@ export interface AgentDashboardRow {
   displayName?: string;
   ownerId?: string;
   tokens: number;
+  nonCachedTokens: number;
+  cachedTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   cost: number;
   seconds: number;
   taskCount: number;
@@ -248,7 +296,11 @@ export function mergeAgentDashboardRows(
   runTimeRows: DashboardAgentRunTime[],
   localRows: AgentCostRow[] = [],
   localRunTimeRows: DashboardLocalRunTimeByRunner[] = [],
+  agents: { id: string; owner_id: string | null }[] = [],
 ): AgentDashboardRow[] {
+  const agentOwnerMap = new Map(
+    agents.map((a) => [a.id, a.owner_id] as const),
+  );
   const runTimeByAgent = new Map(
     runTimeRows.map((r) => [r.agent_id, r] as const),
   );
@@ -261,7 +313,14 @@ export function mergeAgentDashboardRows(
     merged.set(r.agentId, {
       agentId: r.agentId,
       source: "agent",
+      ownerId: agentOwnerMap.get(r.agentId) ?? undefined,
       tokens: r.tokens,
+      nonCachedTokens: r.nonCachedTokens,
+      cachedTokens: r.cachedTokens,
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      cacheReadTokens: r.cacheReadTokens,
+      cacheWriteTokens: r.cacheWriteTokens,
       cost: r.cost,
       seconds: rt?.total_seconds ?? 0,
       taskCount: rt ? rt.task_count : r.taskCount,
@@ -275,7 +334,8 @@ export function mergeAgentDashboardRows(
     merged.set(r.agent_id, {
       agentId: r.agent_id,
       source: "agent",
-      tokens: 0,
+      ownerId: agentOwnerMap.get(r.agent_id) ?? undefined,
+      ...zeroAgentTokenFields(),
       cost: 0,
       seconds: r.total_seconds,
       taskCount: r.task_count,
@@ -289,6 +349,12 @@ export function mergeAgentDashboardRows(
       displayName: r.displayName,
       ownerId: r.ownerId,
       tokens: r.tokens,
+      nonCachedTokens: r.nonCachedTokens,
+      cachedTokens: r.cachedTokens,
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      cacheReadTokens: r.cacheReadTokens,
+      cacheWriteTokens: r.cacheWriteTokens,
       cost: r.cost,
       seconds: rt?.total_seconds ?? 0,
       taskCount: rt ? rt.task_count : r.taskCount,
@@ -302,7 +368,7 @@ export function mergeAgentDashboardRows(
       source: "local",
       displayName: r.runner_name,
       ownerId: r.owner_id,
-      tokens: 0,
+      ...zeroAgentTokenFields(),
       cost: 0,
       seconds: r.total_seconds,
       taskCount: r.task_count,
@@ -463,4 +529,61 @@ export function formatDuration(seconds: number, lessThanMinuteLabel: string): st
     return h > 0 ? `${days}d ${h}h` : `${days}d`;
   }
   return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
+// ---------------------------------------------------------------------------
+// Member aggregation — groups AgentDashboardRow entries by ownerId so the
+// leaderboard can switch between per-agent and per-member views. Agents
+// without an ownerId (system-level) are grouped under a synthetic
+// "system" key. Each MemberDashboardRow carries its constituent agent rows
+// for the collapsible detail panel.
+// ---------------------------------------------------------------------------
+
+export interface MemberDashboardRow {
+  /** user_id of the member, or "__system__" for unowned agents. */
+  ownerId: string;
+  tokens: number;
+  nonCachedTokens: number;
+  cachedTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cost: number;
+  seconds: number;
+  taskCount: number;
+  agents: AgentDashboardRow[];
+}
+
+const SYSTEM_OWNER = "__system__";
+
+export function aggregateByMember(rows: AgentDashboardRow[]): MemberDashboardRow[] {
+  const map = new Map<string, MemberDashboardRow>();
+  for (const r of rows) {
+    const key = r.ownerId ?? SYSTEM_OWNER;
+    const entry = map.get(key) ?? {
+      ownerId: key,
+      ...zeroAgentTokenFields(),
+      cost: 0,
+      seconds: 0,
+      taskCount: 0,
+      agents: [],
+    };
+    entry.tokens += r.tokens;
+    entry.nonCachedTokens += r.nonCachedTokens;
+    entry.cachedTokens += r.cachedTokens;
+    entry.inputTokens += r.inputTokens;
+    entry.outputTokens += r.outputTokens;
+    entry.cacheReadTokens += r.cacheReadTokens;
+    entry.cacheWriteTokens += r.cacheWriteTokens;
+    entry.cost += r.cost;
+    entry.seconds += r.seconds;
+    entry.taskCount += r.taskCount;
+    entry.agents.push(r);
+    map.set(key, entry);
+  }
+  return Array.from(map.values()).toSorted((a, b) => {
+    if (b.cost !== a.cost) return b.cost - a.cost;
+    return b.seconds - a.seconds;
+  });
 }

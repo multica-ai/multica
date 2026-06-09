@@ -66,6 +66,7 @@ type TaskContextForEnv struct {
 	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
 	AgentID                 string // unique ID of the dispatched agent
 	AgentName               string
+	AgentDescription        string
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills             []SkillContextForEnv
 	Repos                   []RepoContextForEnv     // workspace repos available for checkout

@@ -34,6 +34,14 @@ export interface UpdateIssueRequest {
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */
   attachment_ids?: string[];
+  /** RFC3339 timestamp of the issue.updated_at value the client last saw.
+   *  When sent together with `description`, the server rejects the update (409)
+   *  if another writer changed the description in the meantime. */
+  description_base_updated_at?: string;
+  /** The description text the client based its edit on.  Sent together with
+   *  `description_base_updated_at` to avoid false-positive conflicts when only
+   *  non-description fields caused `updated_at` to change. */
+  description_base_value?: string;
 }
 
 export interface ListIssuesParams {
