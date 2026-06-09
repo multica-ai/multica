@@ -108,7 +108,16 @@ export type CerebroFlagKey =
   // the server-side gate lets every tool call through for this workspace without
   // an inbox ask or a deny — even when CEREBRO_APPROVAL_GATE_ENABLED is true on
   // the server. Defaults ON so existing workspaces keep their current behaviour.
-  | "cerebro_approval_gate";
+  | "cerebro_approval_gate"
+  // TECH-3173: staged rollout of per-tool enforcement on LOCAL CLI runtimes
+  // (Claude/Codex/Cursor/Gemini). Master on/off; when on the daemon resolves each
+  // tool call through the same tool-policy chain + approval inbox as the gateway.
+  // Default OFF (no behaviour change until an admin opts in from Settings).
+  | "cerebro_local_tool_policy"
+  // TECH-3173: when cerebro_local_tool_policy is on, flips the stage from observe
+  // (resolve + log what WOULD block, allow everything) to enforce (Allow proceeds,
+  // Block stops, Ask → inbox + wait). Default OFF = observe-only dry run.
+  | "cerebro_local_tool_policy_enforce";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -260,6 +269,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // disable enforcement for their workspace without a server restart. Off = all
   // tool calls are allowed through for this workspace regardless of policy rows.
   cerebro_approval_gate: true,
+  // TECH-3173: OFF by default — local-runtime per-tool enforcement stays dormant
+  // until an admin opts in from Settings, so a deploy never changes behaviour.
+  cerebro_local_tool_policy: false,
+  // TECH-3173: OFF by default — when the master is on, observe-only (dry run)
+  // until an admin explicitly flips to enforce. Staged rollout, fail-safe.
+  cerebro_local_tool_policy_enforce: false,
 };
 
 /**
@@ -752,6 +767,21 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "When on, the server enforces the per-tool Allow / Ask / Block policy for every agent tool call — tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off lets all tool calls through for this workspace without an inbox ask, even when the server gate is active. Requires the server's CEREBRO_APPROVAL_GATE_ENABLED flag to have any effect. FIR-2563.",
+  },
+  // TECH-3173: local-runtime per-tool enforcement, staged from settings.
+  {
+    key: "cerebro_local_tool_policy",
+    label: "Tool enforcement on local runtimes",
+    group: "permissions",
+    description:
+      "Extend the per-tool Allow / Ask / Block policy to agents running on LOCAL CLI runtimes (Claude, Codex, Cursor, Gemini), which otherwise bypass the gateway gate entirely. When on, the daemon resolves each tool call through the SAME tool-policy chain and approval inbox as the gateway. Off by default — turning it on starts in observe-only mode (see 'Enforce on local runtimes'). No restart needed. TECH-3173.",
+  },
+  {
+    key: "cerebro_local_tool_policy_enforce",
+    label: "Enforce on local runtimes (else observe-only)",
+    group: "permissions",
+    description:
+      "Only matters when 'Tool enforcement on local runtimes' is on. Off = observe-only dry run: the daemon resolves every tool call and logs what an enforce WOULD block, but allows everything through (safe to watch before committing). On = enforce: Allow proceeds, Block stops, Ask routes to the approval inbox and blocks until a human decides. Default off so you can watch the would-block stream first. TECH-3173.",
   },
 ];
 

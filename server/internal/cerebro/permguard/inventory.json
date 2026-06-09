@@ -697,6 +697,10 @@
             "gate": "daemon_auth"
         },
         {
+            "id": "POST /api/daemon/workspaces/{workspaceId}/tool-policy/resolve",
+            "gate": "daemon_auth"
+        },
+        {
             "id": "POST /api/feedback",
             "gate": "self_only"
         },

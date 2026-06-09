@@ -327,7 +327,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
-	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool)  // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
+	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool) // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from).
 	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool))
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler.
@@ -557,8 +557,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
-		r.Post("/workspaces/{workspaceId}/repo/check", h.CheckDaemonRepoCapability)          // CEREBRO-PATCH(daemon-repo-grants): FIR-2512
-		r.Get("/workspaces/{workspaceId}/repo/check/{approvalId}", h.PollDaemonRepoApproval) // CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 poll a repo-checkout approval
+		r.Post("/workspaces/{workspaceId}/repo/check", h.CheckDaemonRepoCapability)                         // CEREBRO-PATCH(daemon-repo-grants): FIR-2512
+		r.Get("/workspaces/{workspaceId}/repo/check/{approvalId}", h.PollDaemonRepoApproval)                // CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 poll a repo-checkout approval
+		r.Post("/workspaces/{workspaceId}/tool-policy/resolve", h.ResolveDaemonToolPolicy)                  // CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-3173 per-tool resolve for local CLI runtimes
+		r.Get("/workspaces/{workspaceId}/tool-policy/resolve/{approvalId}", h.PollDaemonToolPolicyApproval) // CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-3173 poll a local-runtime tool approval
 		r.Get("/workspaces/{workspaceId}/agents/persona", h.ListWorkspacePersonaAgents)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
