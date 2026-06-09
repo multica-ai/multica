@@ -51,11 +51,12 @@ func (s *TaskService) HoldRuntime(ctx context.Context, runtimeID pgtype.UUID, re
 }
 
 // ResumeRuntime clears the hold on a runtime, allowing tasks to be
-// dispatched to it again.
-func (s *TaskService) ResumeRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+// dispatched to it again. It returns the updated runtime row produced by the
+// ClearRuntimeHold query so callers can avoid a redundant re-fetch.
+func (s *TaskService) ResumeRuntime(ctx context.Context, runtimeID pgtype.UUID) (db.AgentRuntime, error) {
 	rt, err := s.Queries.ClearRuntimeHold(ctx, runtimeID)
 	if err != nil {
-		return err
+		return db.AgentRuntime{}, err
 	}
 
 	slog.Info("runtime hold cleared",
@@ -70,5 +71,5 @@ func (s *TaskService) ResumeRuntime(ctx context.Context, runtimeID pgtype.UUID) 
 			"runtime_id": util.UUIDToString(runtimeID),
 		},
 	})
-	return nil
+	return rt, nil
 }
