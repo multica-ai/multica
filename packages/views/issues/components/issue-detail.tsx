@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -55,19 +55,19 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
+import type { IssueDependencyType, UpdateIssueRequest, IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, canAssignAgent } from ".";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceStore } from "@multica/core/workspace";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueDependenciesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue, useDeleteIssue } from "@multica/core/issues/mutations";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -99,6 +99,45 @@ function statusLabel(status: string): string {
 
 function priorityLabel(priority: string): string {
   return PRIORITY_CONFIG[priority as IssuePriority]?.label ?? priority;
+}
+
+function dependencyLabel(type: IssueDependencyType): string {
+  switch (type) {
+    case "blocked_by":
+      return "Blocked by";
+    case "blocks":
+      return "Blocks";
+    case "related":
+      return "Related";
+    default:
+      return type;
+  }
+}
+
+function formatDependencyHint(type: IssueDependencyType): string {
+  switch (type) {
+    case "blocked_by":
+      return "This issue waits on the linked issue.";
+    case "blocks":
+      return "The linked issue is waiting on this one.";
+    case "related":
+      return "Linked for context.";
+    default:
+      return "";
+  }
+}
+
+function formatDependencyBadgeClasses(type: IssueDependencyType): string {
+  switch (type) {
+    case "blocked_by":
+      return "bg-warning/10 text-warning";
+    case "blocks":
+      return "bg-info/10 text-info";
+    case "related":
+      return "bg-muted text-muted-foreground";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
 }
 
 function formatActivity(
@@ -284,12 +323,26 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     ...childIssuesOptions(wsId, id),
     enabled: !!issue,
   });
+  const { data: issueDependencies = [] } = useQuery({
+    ...issueDependenciesOptions(id),
+    enabled: !!issue,
+  });
   // Parent's children — used to render the "x/y" progress next to the
   // "Sub-issue of …" breadcrumb under the title.
   const { data: parentChildIssues = [] } = useQuery({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+  const dependencyIssueQueries = useQueries({
+    queries: issueDependencies.map((dep) => ({
+      ...issueDetailOptions(wsId, dep.depends_on_issue_id),
+      initialData: allIssues.find((candidate) => candidate.id === dep.depends_on_issue_id),
+    })),
+  });
+  const dependencyItems = useMemo(() => issueDependencies.map((dep, index) => ({
+    dependency: dep,
+    issue: dependencyIssueQueries[index]?.data ?? allIssues.find((candidate) => candidate.id === dep.depends_on_issue_id) ?? null,
+  })), [allIssues, dependencyIssueQueries, issueDependencies]);
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
   const loading = issueLoading;
@@ -1248,6 +1301,55 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
                   <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
                   <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
                 </AppLink>
+              </div>
+            </div>
+          )}
+
+          {/* Dependencies */}
+          {dependencyItems.length > 0 && (
+            <div>
+              <div className="text-xs font-medium mb-2 flex items-center gap-1">
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rotate-90" />
+                Dependencies
+              </div>
+              <div className="space-y-2 pl-2">
+                {dependencyItems.map(({ dependency, issue: linkedIssue }) => (
+                  <div
+                    key={dependency.id}
+                    className="rounded-md border bg-card/40 px-2.5 py-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                          formatDependencyBadgeClasses(dependency.type),
+                        )}
+                      >
+                        {dependencyLabel(dependency.type)}
+                      </span>
+                      {linkedIssue ? (
+                        <AppLink
+                          href={`/issues/${linkedIssue.id}`}
+                          className="flex min-w-0 flex-1 items-center gap-1.5 text-xs hover:text-foreground"
+                        >
+                          <StatusIcon status={linkedIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                          <span className="shrink-0 text-muted-foreground tabular-nums">
+                            {linkedIssue.identifier}
+                          </span>
+                          <span className="truncate">{linkedIssue.title}</span>
+                        </AppLink>
+                      ) : (
+                        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+                          <Link2 className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate font-mono">{dependency.depends_on_issue_id}</span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {formatDependencyHint(dependency.type)}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
           )}

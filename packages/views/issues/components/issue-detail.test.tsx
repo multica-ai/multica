@@ -175,6 +175,7 @@ const mockApiObj = vi.hoisted(() => ({
   listTasksByIssue: vi.fn().mockResolvedValue([]),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
+  listIssueDependencies: vi.fn().mockResolvedValue({ dependencies: [] }),
   listIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
   uploadFile: vi.fn(),
   listIssueReactions: vi.fn().mockResolvedValue([]),
@@ -463,6 +464,51 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
     });
+  });
+
+  it("renders issue dependencies in the sidebar", async () => {
+    mockApiObj.listIssueDependencies.mockResolvedValueOnce({
+      dependencies: [
+        {
+          id: "dep-1",
+          issue_id: "issue-1",
+          depends_on_issue_id: "issue-2",
+          type: "blocked_by",
+        },
+      ],
+    });
+    mockApiObj.getIssue.mockImplementation(async (id: string) => {
+      if (id === "issue-2") {
+        return {
+          id: "issue-2",
+          workspace_id: "ws-1",
+          number: 2,
+          identifier: "ISS-2",
+          title: "Prerequisite issue",
+          description: null,
+          status: "in_progress",
+          priority: "medium",
+          assignee_type: null,
+          assignee_id: null,
+          creator_type: "member",
+          creator_id: "user-1",
+          parent_issue_id: null,
+          project_id: null,
+          position: 0,
+          due_date: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return mockIssue;
+    });
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Dependencies")).toBeInTheDocument();
+    expect(await screen.findByText("Blocked by")).toBeInTheDocument();
+    expect(await screen.findByText("ISS-2")).toBeInTheDocument();
+    expect(await screen.findByText("Prerequisite issue")).toBeInTheDocument();
   });
 
   it("renders comments from timeline", async () => {

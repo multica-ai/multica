@@ -14,6 +14,7 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "children", id] as const,
+  dependencies: (issueId: string) => ["issues", "dependencies", issueId] as const,
   timeline: (issueId: string) => ["issues", "timeline", issueId] as const,
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
@@ -93,6 +94,13 @@ export function childIssuesOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.children(wsId, id),
     queryFn: () => api.listChildIssues(id).then((r) => r.issues),
+  });
+}
+
+export function issueDependenciesOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.dependencies(issueId),
+    queryFn: () => api.listIssueDependencies(issueId).then((r) => r.dependencies),
   });
 }
 

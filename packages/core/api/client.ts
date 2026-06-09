@@ -1,5 +1,6 @@
 import type {
   Issue,
+  IssueDependency,
   CreateIssueRequest,
   UpdateIssueRequest,
   ListIssuesResponse,
@@ -233,6 +234,10 @@ export class ApiClient {
 
   async listChildIssues(id: string): Promise<{ issues: Issue[] }> {
     return this.fetch(`/api/issues/${id}/children`);
+  }
+
+  async listIssueDependencies(issueId: string): Promise<{ dependencies: IssueDependency[] }> {
+    return this.fetch(`/api/issues/${issueId}/dependencies`);
   }
 
   async deleteIssue(id: string): Promise<void> {
