@@ -2,6 +2,7 @@ package service
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,17 +30,13 @@ func ParseSessionLimitResetTime(message string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 
-	hour, minute, ampm := 0, 0, ""
-	switch {
-	case len(matches) >= 4:
-		hour = parseInt(matches[1])
-		minute = parseInt(matches[2])
-		ampm = strings.ToLower(matches[3])
-	default:
-		return time.Time{}, false
-	}
+	// The regex guarantees matches[1] and matches[2] are digit runs, so the
+	// conversion cannot fail; the error is discarded by construction.
+	hour, _ := strconv.Atoi(matches[1])
+	minute, _ := strconv.Atoi(matches[2])
+	ampm := strings.ToLower(matches[3])
 
-	if hour < 1 || hour > 12 || minute < 0 || minute > 59 {
+	if hour < 1 || hour > 12 || minute > 59 {
 		return time.Time{}, false
 	}
 
@@ -55,14 +52,4 @@ func ParseSessionLimitResetTime(message string) (time.Time, bool) {
 		reset = reset.AddDate(0, 0, 1)
 	}
 	return reset, true
-}
-
-func parseInt(s string) int {
-	n := 0
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			n = n*10 + int(c-'0')
-		}
-	}
-	return n
 }

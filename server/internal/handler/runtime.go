@@ -959,15 +959,10 @@ func (h *Handler) ResumeRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.TaskService.ResumeRuntime(r.Context(), runtimeUUID); err != nil {
+	updated, err := h.TaskService.ResumeRuntime(r.Context(), runtimeUUID)
+	if err != nil {
 		slog.Error("ResumeRuntime failed", "error", err, "runtime_id", runtimeID)
 		writeError(w, http.StatusInternalServerError, "failed to resume runtime")
-		return
-	}
-
-	updated, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
