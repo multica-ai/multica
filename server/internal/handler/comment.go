@@ -1061,7 +1061,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
 		if delegationErr != nil {
 			slog.Warn("enqueue agent task on comment blocked by delegation policy", "issue_id", issueID, "error", delegationErr)
-		} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation); err != nil {
+		// CEREBRO-PATCH(new-thread-fresh-session): new top-level threads start a fresh agent session; replies resume.
+		} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
 	}
@@ -1552,7 +1553,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
 				if delegationErr != nil {
 					slog.Warn("enqueue agent task on comment-edit blocked by delegation policy", "issue_id", uuidToString(issue.ID), "error", delegationErr)
-				} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation); err != nil {
+				// CEREBRO-PATCH(new-thread-fresh-session): edited top-level comments also start fresh sessions.
+				} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
 					slog.Warn("enqueue agent task on comment-edit failed", "issue_id", uuidToString(issue.ID), "error", err)
 				}
 			}

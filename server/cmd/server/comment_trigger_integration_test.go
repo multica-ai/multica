@@ -603,6 +603,64 @@ func TestCommentTriggerCoalescing(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(new-thread-fresh-session): assert comment-triggered tasks set
+// fresh-session state differently for top-level threads and replies.
+// latestForceFreshSession returns the force_fresh_session value of the most
+// recently created queued/dispatched task for the given issue.
+func latestForceFreshSession(t *testing.T, issueID string) bool {
+	t.Helper()
+	var fresh *bool
+	err := testPool.QueryRow(context.Background(),
+		`SELECT force_fresh_session
+		   FROM agent_task_queue
+		  WHERE issue_id = $1 AND status IN ('queued', 'dispatched')
+		  ORDER BY created_at DESC
+		  LIMIT 1`,
+		issueID).Scan(&fresh)
+	if err != nil {
+		t.Fatalf("failed to fetch force_fresh_session: %v", err)
+	}
+	return fresh != nil && *fresh
+}
+
+// TestCommentTriggerNewThreadFreshSession verifies that a new top-level comment
+// (no parent_id) enqueues a task with force_fresh_session=true, while a reply
+// (with parent_id) enqueues with force_fresh_session=false.
+func TestCommentTriggerNewThreadFreshSession(t *testing.T) {
+	agentID := getAgentID(t)
+	issueID := createIssueAssignedToAgent(t, "new-thread fresh-session test", agentID)
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	t.Run("new top-level comment sets force_fresh_session=true", func(t *testing.T) {
+		clearTasks(t, issueID)
+		postComment(t, issueID, "Please start fresh on this", nil)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Fatalf("expected 1 pending task, got %d", n)
+		}
+		if got := latestForceFreshSession(t, issueID); !got {
+			t.Errorf("new top-level comment: expected force_fresh_session=true, got false")
+		}
+	})
+
+	t.Run("reply to agent thread sets force_fresh_session=false", func(t *testing.T) {
+		clearTasks(t, issueID)
+		// Agent starts a thread.
+		threadID := postCommentAsAgent(t, issueID, "Here is my analysis.", agentID, nil)
+		// Member replies in the agent thread.
+		postComment(t, issueID, "Please continue", strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Fatalf("expected 1 pending task, got %d", n)
+		}
+		if got := latestForceFreshSession(t, issueID); got {
+			t.Errorf("reply to agent thread: expected force_fresh_session=false, got true")
+		}
+	})
+}
+
 // TestCommentTriggerMentionAssigneeDoneIssue verifies that @mentioning the
 // assigned agent on a done issue still triggers execution. Previously the
 // assignee was unconditionally skipped in the mention path (assuming

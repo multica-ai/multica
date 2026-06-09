@@ -527,11 +527,14 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // EnqueueTaskForIssueFromComment is the comment-triggered variant. It requires
 // delegation context so agent-authored comment starts cannot run without the
 // original user captured on the source task.
-func (s *TaskService) EnqueueTaskForIssueFromComment(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, delegation TaskDelegationContext) (db.AgentTaskQueue, error) {
+// CEREBRO-PATCH(new-thread-fresh-session): optional forceFreshSession — callers pass true for new top-level threads.
+func (s *TaskService) EnqueueTaskForIssueFromComment(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, delegation TaskDelegationContext, forceFreshSession ...bool) (db.AgentTaskQueue, error) {
 	if !delegation.OriginalUserID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent delegation denied: missing original user")
 	}
-	return s.enqueueIssueTask(ctx, issue, triggerCommentID, false, delegation)
+	// CEREBRO-PATCH(new-thread-fresh-session): new top-level threads bypass session resume; replies resume as before.
+	fresh := len(forceFreshSession) > 0 && forceFreshSession[0]
+	return s.enqueueIssueTask(ctx, issue, triggerCommentID, fresh, delegation)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
