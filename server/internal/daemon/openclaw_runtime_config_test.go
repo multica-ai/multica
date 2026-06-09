@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -114,5 +115,49 @@ func TestOpenclawGatewayPinDefaultFormattingMasksToken(t *testing.T) {
 	// useful for debugging the non-secret half of the pin.
 	if !strings.Contains(string(raw), "gw.internal") {
 		t.Errorf("MarshalJSON dropped host along with token: %s", raw)
+	}
+}
+
+// TestDecodeOpenclawRuntimeConfigLocalModeDropsGatewayPin — a local-mode
+// payload that still carries a gateway block (craftable via a direct PATCH)
+// must not surface the pin. Otherwise the bearer token would be written into
+// the 0o600 per-task wrapper that `--local` makes openclaw ignore.
+func TestDecodeOpenclawRuntimeConfigLocalModeDropsGatewayPin(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"mode": "local",
+		"gateway": {"host": "gw.internal", "port": 18789, "token": "secret", "tls": true}
+	}`)
+	mode, gw := decodeOpenclawRuntimeConfig(raw, quietLogger())
+	if mode != "local" {
+		t.Errorf("mode: got %q, want %q", mode, "local")
+	}
+	if !gw.IsZero() {
+		t.Errorf("gateway for local mode: got %+v, want zero", gw)
+	}
+}
+
+// TestDecodeOpenclawRuntimeConfigUnknownModeWarnsAndDropsPin — a typo'd mode
+// neither behaves like gateway nor silently like local: it falls back to local
+// (zero pin) AND logs a WARN so the misconfiguration is discoverable.
+func TestDecodeOpenclawRuntimeConfigUnknownModeWarnsAndDropsPin(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	raw := json.RawMessage(`{
+		"mode": "gatway",
+		"gateway": {"host": "gw.internal", "port": 18789, "token": "secret"}
+	}`)
+	mode, gw := decodeOpenclawRuntimeConfig(raw, logger)
+	if mode != "gatway" {
+		t.Errorf("mode: got %q, want %q", mode, "gatway")
+	}
+	if !gw.IsZero() {
+		t.Errorf("gateway for unknown mode: got %+v, want zero", gw)
+	}
+	if !strings.Contains(buf.String(), "unrecognized mode") {
+		t.Errorf("expected WARN about unrecognized mode, got: %q", buf.String())
 	}
 }

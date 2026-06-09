@@ -759,6 +759,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		isFirstAgent = len(existing) == 0
 	}
 
+	// A create has no prior token to restore, so if the caller submitted the
+	// public mask sentinel as gateway.token (e.g. replayed a masked GET body)
+	// drop it rather than persisting a literal "***" as a real bearer token.
+	preserveMaskedGatewayToken(req.RuntimeConfig, nil)
 	rc, _ := json.Marshal(req.RuntimeConfig)
 	if req.RuntimeConfig == nil {
 		rc = []byte("{}")

@@ -49,59 +49,13 @@ type ExecOptions struct {
 	// the openclaw backend. "" or "local" keeps the historical behaviour —
 	// the daemon spawns `openclaw agent --local …` and the agent loop runs
 	// in-process on the daemon host. "gateway" instructs the daemon to drop
-	// the --local flag and let openclaw route the turn through a Gateway
-	// (either the user's globally-configured one or, when OpenclawGateway
-	// below is populated, an endpoint pinned in the per-task config). Other
-	// backends ignore this field, mirroring ThinkingLevel's renderer-side
-	// fall-through pattern. See issue #3260.
-	OpenclawMode    string
-	OpenclawGateway OpenclawGateway
-}
-
-// OpenclawGateway pins a specific OpenClaw Gateway endpoint for an openclaw
-// backend run. Used only when ExecOptions.OpenclawMode == "gateway"; ignored
-// (and may be zero) otherwise. All fields are optional — when zero, the
-// daemon relies on the user's existing `~/.openclaw/openclaw.json` for the
-// gateway address and token, which keeps the historical behaviour for users
-// who pre-configured their host. When populated, the daemon writes the
-// values into the per-task `openclaw-config.json` wrapper so the spawned
-// `openclaw` CLI dials the pinned endpoint without touching the user's
-// global file. See server/internal/daemon/execenv/openclaw_config.go for
-// the wrapper that consumes this.
-type OpenclawGateway struct {
-	Host  string
-	Port  int
-	Token string
-	TLS   bool
-}
-
-// String masks the bearer token in default formatting paths (`%v` / `%+v` /
-// `fmt.Stringer`). The Token field is still readable directly for the
-// wrapper-config emitter that needs it; this protects against a future
-// caller that logs an ExecOptions summary at a level a non-admin can see
-// (issue #3260 CR).
-func (g OpenclawGateway) String() string {
-	tok := ""
-	if g.Token != "" {
-		tok = "***"
-	}
-	return fmt.Sprintf("OpenclawGateway{Host:%q Port:%d Token:%s TLS:%t}", g.Host, g.Port, tok, g.TLS)
-}
-
-// MarshalJSON masks the bearer token in any default JSON dump (debug
-// endpoints, error envelopes, structured-log encoders).
-func (g OpenclawGateway) MarshalJSON() ([]byte, error) {
-	type alias struct {
-		Host  string `json:"host,omitempty"`
-		Port  int    `json:"port,omitempty"`
-		Token string `json:"token,omitempty"`
-		TLS   bool   `json:"tls,omitempty"`
-	}
-	masked := alias{Host: g.Host, Port: g.Port, TLS: g.TLS}
-	if g.Token != "" {
-		masked.Token = "***"
-	}
-	return json.Marshal(masked)
+	// the --local flag and let openclaw route the turn through a Gateway (the
+	// user's globally-configured one, or an endpoint pinned in the per-task
+	// config wrapper that the daemon writes from execenv.OpenclawGatewayPin —
+	// see server/internal/daemon/execenv/openclaw_config.go). Other backends
+	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
+	// pattern. See issue #3260.
+	OpenclawMode string
 }
 
 // Session represents a running agent execution.

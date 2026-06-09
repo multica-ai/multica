@@ -2840,12 +2840,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
 		OpenclawMode:              openclawMode,
-		OpenclawGateway: agent.OpenclawGateway{
-			Host:  openclawGateway.Host,
-			Port:  openclawGateway.Port,
-			Token: openclawGateway.Token,
-			TLS:   openclawGateway.TLS,
-		},
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
