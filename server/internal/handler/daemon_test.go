@@ -847,6 +847,111 @@ func TestListTaskMessagesByUser_InvalidTaskIDReturnsBadRequest(t *testing.T) {
 	}
 }
 
+func TestListTaskMessagesByUser_RedactsHistoricalAgentCustomEnv(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "task-message-redaction-agent", nil)
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		VALUES ($1, 'Task message redaction issue', 'todo', 'medium', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
+	agentListOutput := `[
+		{
+			"id": "agent-1",
+			"name": "Router",
+			"status": "online",
+			"runtime_mode": "cloud",
+			"skills": [{"id": "skill-1", "name": "route"}],
+			"custom_env": {
+				"SECOND_BRAIN_TOKEN": "token-value-123",
+				"SEARCH_API_KEY": "key-value-456",
+				"DB_PASSWORD": "password-value-789",
+				"SESSION_JWT": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+			},
+			"custom_env_redacted": false
+		}
+	]`
+	inputJSON := []byte(`{
+		"command": "multica agent list --output json",
+		"custom_env": {
+			"CLI_TOKEN": "token-in-input",
+			"PRIVATE_KEY": "key-in-input"
+		}
+	}`)
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_message (task_id, seq, type, tool, content, input, output)
+		VALUES ($1, 1, 'tool_result', 'multica', $2, $3, $4)
+	`, taskID, agentListOutput, inputJSON, agentListOutput); err != nil {
+		t.Fatalf("failed to seed task message: %v", err)
+	}
+	taskRow, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(taskID))
+	if err != nil {
+		t.Fatalf("failed to read seeded task: %v", err)
+	}
+	if wsID := testHandler.TaskService.ResolveTaskWorkspaceID(ctx, taskRow); wsID != testWorkspaceID {
+		t.Fatalf("seeded task workspace = %q, want %q", wsID, testWorkspaceID)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodGet, "/api/tasks/"+taskID+"/messages", nil)
+	req = withURLParams(req, "taskId", taskID)
+	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{}))
+	testHandler.ListTaskMessagesByUser(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var messages []protocol.TaskMessagePayload
+	if err := json.NewDecoder(w.Body).Decode(&messages); err != nil {
+		t.Fatalf("decode task messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+
+	body := w.Body.String()
+	for _, leak := range []string{
+		"SECOND_BRAIN_TOKEN",
+		"SEARCH_API_KEY",
+		"DB_PASSWORD",
+		"SESSION_JWT",
+		"CLI_TOKEN",
+		"PRIVATE_KEY",
+		"token-value-123",
+		"key-value-456",
+		"password-value-789",
+		"token-in-input",
+		"key-in-input",
+		"eyJhbGci",
+	} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("task message response leaked %q: %s", leak, body)
+		}
+	}
+	for _, kept := range []string{`"id":"agent-1"`, `"name":"Router"`, `"status":"online"`, `"runtime_mode":"cloud"`, `"skills"`} {
+		if !strings.Contains(messages[0].Output, kept) {
+			t.Fatalf("routing metadata %q missing from redacted output: %s", kept, messages[0].Output)
+		}
+	}
+	if messages[0].Input["custom_env"] != nil {
+		t.Fatalf("custom_env should not appear in redacted input: %#v", messages[0].Input)
+	}
+	if messages[0].Input["custom_env_redacted"] != true {
+		t.Fatalf("expected input custom_env_redacted=true, got %#v", messages[0].Input)
+	}
+}
+
 // setupForeignWorkspaceFixture creates an isolated workspace (not reachable
 // from testUserID) with its own agent, runtime, issue, and queued task.
 // Returns (issueID, taskID). All rows are cleaned up when the test ends.

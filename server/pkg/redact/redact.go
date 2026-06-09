@@ -3,6 +3,9 @@
 package redact
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/user"
 	"regexp"
@@ -51,21 +54,22 @@ var patterns = []secretPattern{
 	{regexp.MustCompile(`(?i)(?:API_KEY|API_SECRET|SECRET_KEY|SECRET|ACCESS_TOKEN|AUTH_TOKEN|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD|DB_URL|REDIS_URL|PASSWORD|TOKEN)\s*[=:]\s*\S+`), "[REDACTED CREDENTIAL]"},
 }
 
-// InputMap returns a copy of m with all string values passed through Text.
-// Non-string values are preserved as-is.
+var sensitiveJSONKey = regexp.MustCompile(`(?i)(^|[_-])(api[_-]?key|api[_-]?secret|secret[_-]?key|secret|access[_-]?token|auth[_-]?token|private[_-]?key|database[_-]?url|db[_-]?password|db[_-]?url|redis[_-]?url|password|token|jwt)($|[_-])`)
+
+const redactedCredential = "[REDACTED CREDENTIAL]"
+
+// InputMap returns a copy of m with all string values passed through Text and
+// any nested custom_env object replaced by coarse metadata. Non-string values
+// are preserved unless they are nested inside a secret-bearing key.
 func InputMap(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
 	}
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		if s, ok := v.(string); ok {
-			out[k] = Text(s)
-		} else {
-			out[k] = v
-		}
+	redacted, _ := redactJSONMap(m)
+	if out, ok := redacted.(map[string]any); ok {
+		return out
 	}
-	return out
+	return map[string]any{}
 }
 
 // homeDir is resolved once at init for path redaction.
@@ -83,6 +87,11 @@ func init() {
 // matches with safe placeholders. It also masks the local user's home
 // directory path to prevent leaking the username.
 func Text(s string) string {
+	s = redactStructuredJSON(s)
+	return redactPlainText(s)
+}
+
+func redactPlainText(s string) string {
 	for _, p := range patterns {
 		s = p.re.ReplaceAllString(s, p.replacement)
 	}
@@ -94,4 +103,95 @@ func Text(s string) string {
 	}
 
 	return s
+}
+
+func redactStructuredJSON(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || (trimmed[0] != '{' && trimmed[0] != '[') {
+		return s
+	}
+
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	dec.UseNumber()
+
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return s
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return s
+	}
+
+	redacted, changed := redactJSONValue(value)
+	if !changed {
+		return s
+	}
+	out, err := json.Marshal(redacted)
+	if err != nil {
+		return s
+	}
+	return string(out)
+}
+
+func redactJSONValue(value any) (any, bool) {
+	switch v := value.(type) {
+	case map[string]any:
+		return redactJSONMap(v)
+	case []any:
+		out := make([]any, len(v))
+		changed := false
+		for i, item := range v {
+			redacted, itemChanged := redactJSONValue(item)
+			out[i] = redacted
+			changed = changed || itemChanged
+		}
+		return out, changed
+	case string:
+		redacted := redactPlainText(v)
+		return redacted, redacted != v
+	default:
+		return value, false
+	}
+}
+
+func redactJSONMap(m map[string]any) (any, bool) {
+	out := make(map[string]any, len(m))
+	changed := false
+	customEnvSeen := false
+	customEnvKeyCount := 0
+
+	for k, v := range m {
+		if strings.EqualFold(k, "custom_env") {
+			customEnvSeen = true
+			customEnvKeyCount = countObjectKeys(v)
+			changed = true
+			continue
+		}
+
+		if sensitiveJSONKey.MatchString(k) {
+			out[k] = redactedCredential
+			changed = true
+			continue
+		}
+
+		redacted, valueChanged := redactJSONValue(v)
+		out[k] = redacted
+		changed = changed || valueChanged
+	}
+
+	if customEnvSeen {
+		out["has_custom_env"] = customEnvKeyCount > 0
+		out["custom_env_key_count"] = customEnvKeyCount
+		out["custom_env_redacted"] = true
+	}
+
+	return out, changed
+}
+
+func countObjectKeys(value any) int {
+	if m, ok := value.(map[string]any); ok {
+		return len(m)
+	}
+	return 0
 }

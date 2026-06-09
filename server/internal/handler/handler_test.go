@@ -52,6 +52,11 @@ func TestMain(m *testing.M) {
 		pool.Close()
 		os.Exit(0)
 	}
+	if err := ensureHandlerTestSchema(ctx, pool); err != nil {
+		fmt.Printf("Failed to update handler test schema: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
 
 	queries := db.New(pool)
 	hub := realtime.NewHub()
@@ -86,6 +91,34 @@ func TestMain(m *testing.M) {
 	}
 	pool.Close()
 	os.Exit(code)
+}
+
+func ensureHandlerTestSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	if err := ensureHandlerTestColumn(ctx, pool, "agent_task_queue", "wait_reason", `ALTER TABLE agent_task_queue ADD COLUMN wait_reason TEXT`); err != nil {
+		return err
+	}
+	return ensureHandlerTestColumn(ctx, pool, "issue", "metadata", `ALTER TABLE issue ADD COLUMN metadata JSONB NOT NULL DEFAULT '{}'::jsonb`)
+}
+
+func ensureHandlerTestColumn(ctx context.Context, pool *pgxpool.Pool, tableName, columnName, ddl string) error {
+	var exists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = $1
+				AND column_name = $2
+		)
+	`, tableName, columnName).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	_, err := pool.Exec(ctx, ddl)
+	return err
 }
 
 func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, string, error) {

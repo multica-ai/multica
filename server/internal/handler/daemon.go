@@ -2143,20 +2143,7 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
-		var input map[string]any
-		if m.Input != nil {
-			json.Unmarshal(m.Input, &input)
-		}
-		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
-		}
+		resp[i] = taskMessagePayloadFromRow(m, taskID, issueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2286,23 +2273,27 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
-		var input map[string]any
-		if m.Input != nil {
-			json.Unmarshal(m.Input, &input)
-		}
-		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
-		}
+		resp[i] = taskMessagePayloadFromRow(m, taskID, issueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func taskMessagePayloadFromRow(m db.TaskMessage, taskID, issueID string) protocol.TaskMessagePayload {
+	var input map[string]any
+	if m.Input != nil {
+		json.Unmarshal(m.Input, &input)
+	}
+	return protocol.TaskMessagePayload{
+		TaskID:  taskID,
+		IssueID: issueID,
+		Seq:     int(m.Seq),
+		Type:    m.Type,
+		Tool:    m.Tool.String,
+		Content: redact.Text(m.Content.String),
+		Input:   redact.InputMap(input),
+		Output:  redact.Text(m.Output.String),
+	}
 }
 
 // GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
