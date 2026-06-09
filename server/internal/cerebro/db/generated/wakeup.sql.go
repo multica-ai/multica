@@ -458,3 +458,22 @@ func (q *Queries) ReleaseWakeupToPending(ctx context.Context, id pgtype.UUID) er
 	_, err := q.db.Exec(ctx, releaseWakeupToPending, id)
 	return err
 }
+
+const postponeWakeup = `-- name: PostponeWakeup :exec
+UPDATE cerebro_agent_wakeup
+SET state = 'pending',
+    trigger_type = 'time',
+    fire_at = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type PostponeWakeupParams struct {
+	ID        pgtype.UUID        `json:"id"`
+	NewFireAt pgtype.Timestamptz `json:"new_fire_at"`
+}
+
+func (q *Queries) PostponeWakeup(ctx context.Context, arg PostponeWakeupParams) error {
+	_, err := q.db.Exec(ctx, postponeWakeup, arg.ID, arg.NewFireAt)
+	return err
+}

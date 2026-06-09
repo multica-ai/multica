@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -24,6 +25,10 @@ const (
 
 	StatePending    = "pending"
 	StateDispatched = "dispatched"
+
+	// postponeDelay is how long to wait before retrying a wakeup that couldn't
+	// fire because the issue had an active task or the agent runtime was offline.
+	postponeDelay = 5 * time.Minute
 )
 
 var ErrNotFound = errors.New("wakeup not found")
@@ -200,6 +205,39 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	if util.UUIDToString(issue.WorkspaceID) != util.UUIDToString(row.WorkspaceID) {
 		return fmt.Errorf("issue workspace mismatch")
 	}
+
+	// Postpone if another run is already active on this issue — firing now
+	// would create a duplicate concurrent task.
+	if hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, row.IssueID); checkErr == nil && hasActive {
+		slog.Info("cerebro wakeup postponed: active task on issue",
+			"wakeup_id", util.UUIDToString(row.ID),
+			"issue_id", util.UUIDToString(row.IssueID),
+		)
+		return s.postpone(ctx, row)
+	}
+
+	// Postpone if the agent has no runtime or the runtime is currently offline.
+	agent, agentErr := s.Queries.GetAgent(ctx, row.AgentID)
+	if agentErr != nil {
+		return fmt.Errorf("load agent: %w", agentErr)
+	}
+	if !agent.RuntimeID.Valid {
+		slog.Info("cerebro wakeup postponed: agent has no runtime",
+			"wakeup_id", util.UUIDToString(row.ID),
+			"agent_id", util.UUIDToString(row.AgentID),
+		)
+		return s.postpone(ctx, row)
+	}
+	rt, rtErr := s.Queries.GetAgentRuntime(ctx, agent.RuntimeID)
+	if rtErr != nil || rt.Status != "online" {
+		slog.Info("cerebro wakeup postponed: agent runtime offline",
+			"wakeup_id", util.UUIDToString(row.ID),
+			"agent_id", util.UUIDToString(row.AgentID),
+			"runtime_id", util.UUIDToString(agent.RuntimeID),
+		)
+		return s.postpone(ctx, row)
+	}
+
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -224,14 +262,26 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 			ActorType:   "system",
 			Payload: map[string]any{
 				"comment": map[string]any{
-					"id":         util.UUIDToString(comment.ID),
-					"issue_id":   util.UUIDToString(comment.IssueID),
-					"content":    comment.Content,
-					"type":       comment.Type,
-					"created_at": comment.CreatedAt,
+					"id":          util.UUIDToString(comment.ID),
+					"issue_id":    util.UUIDToString(comment.IssueID),
+					"content":     comment.Content,
+					"type":        comment.Type,
+					"author_type": "system",
+					"created_at":  comment.CreatedAt,
 				},
 			},
 		})
+	}
+	return nil
+}
+
+func (s *Service) postpone(ctx context.Context, row cerebrodb.CerebroAgentWakeup) error {
+	newFireAt := pgtype.Timestamptz{Time: time.Now().Add(postponeDelay), Valid: true}
+	if err := s.Cerebro.PostponeWakeup(ctx, cerebrodb.PostponeWakeupParams{
+		ID:        row.ID,
+		NewFireAt: newFireAt,
+	}); err != nil {
+		return fmt.Errorf("postpone wakeup: %w", err)
 	}
 	return nil
 }

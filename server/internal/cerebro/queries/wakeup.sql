@@ -130,3 +130,14 @@ SET state = 'cancelled',
     updated_at = now()
 WHERE issue_id = $1
   AND state = 'pending';
+
+-- name: PostponeWakeup :exec
+-- Resets a claimed wakeup back to pending as a time trigger, firing after the
+-- given delay. Used when dispatch conditions aren't met (active task on issue
+-- or agent runtime offline).
+UPDATE cerebro_agent_wakeup
+SET state = 'pending',
+    trigger_type = 'time',
+    fire_at = $2,
+    updated_at = now()
+WHERE id = $1;
