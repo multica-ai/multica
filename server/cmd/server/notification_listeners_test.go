@@ -341,10 +341,11 @@ func TestNotification_IssueCreated_AssigneeNotified(t *testing.T) {
 		t.Fatalf("expected severity 'action_required', got %q", items[0].Severity)
 	}
 
-	// Creator (actor) should NOT have any inbox items
+	// Creator (actor) should get only the default started-issue inbox item,
+	// not an assignment notification.
 	creatorItems := inboxItemsForRecipient(t, queries, testUserID)
-	if len(creatorItems) != 0 {
-		t.Fatalf("expected 0 inbox items for creator, got %d", len(creatorItems))
+	if len(creatorItems) != 1 || creatorItems[0].Type != "issue_started" {
+		t.Fatalf("expected one issue_started inbox item for creator, got %+v", creatorItems)
 	}
 
 	// At least one inbox:new event should have been published
@@ -442,7 +443,7 @@ func TestNotification_IssueCreated_StartedIssueWorkspaceSettingSkipsBacklog(t *t
 }
 
 // TestNotification_IssueCreated_SelfAssign verifies that when the creator
-// assigns the issue to themselves, no notification is generated.
+// assigns the issue to themselves, no assignment notification is generated.
 func TestNotification_IssueCreated_SelfAssign(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
@@ -481,16 +482,16 @@ func TestNotification_IssueCreated_SelfAssign(t *testing.T) {
 	})
 
 	items := inboxItemsForRecipient(t, queries, testUserID)
-	if len(items) != 0 {
-		t.Fatalf("expected 0 inbox items for self-assign, got %d", len(items))
+	if len(items) != 1 || items[0].Type != "issue_started" {
+		t.Fatalf("expected one issue_started inbox item for self-assign, got %+v", items)
 	}
-	if len(inboxEvents) != 0 {
-		t.Fatalf("expected 0 inbox:new events for self-assign, got %d", len(inboxEvents))
+	if len(inboxEvents) != 1 {
+		t.Fatalf("expected 1 inbox:new event for self-assign started issue, got %d", len(inboxEvents))
 	}
 }
 
 // TestNotification_IssueCreated_NoAssignee verifies that when an issue is
-// created without an assignee, no notifications are generated.
+// created without an assignee, only the creator's started-issue inbox item is generated.
 func TestNotification_IssueCreated_NoAssignee(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
@@ -525,11 +526,11 @@ func TestNotification_IssueCreated_NoAssignee(t *testing.T) {
 	})
 
 	items := inboxItemsForRecipient(t, queries, testUserID)
-	if len(items) != 0 {
-		t.Fatalf("expected 0 inbox items for no-assignee issue, got %d", len(items))
+	if len(items) != 1 || items[0].Type != "issue_started" {
+		t.Fatalf("expected one issue_started inbox item for no-assignee issue, got %+v", items)
 	}
-	if len(inboxEvents) != 0 {
-		t.Fatalf("expected 0 inbox:new events, got %d", len(inboxEvents))
+	if len(inboxEvents) != 1 {
+		t.Fatalf("expected 1 inbox:new event for no-assignee started issue, got %d", len(inboxEvents))
 	}
 }
 
@@ -657,25 +658,24 @@ func TestNotification_CommentCreated(t *testing.T) {
 		},
 	})
 
-	// Creator should get a new_comment notification
-	creatorItems := inboxItemsForRecipient(t, queries, testUserID)
-	if len(creatorItems) != 1 {
-		t.Fatalf("expected 1 inbox item for creator, got %d", len(creatorItems))
+	// Creator should get a new_comment on both default routes.
+	creatorInboxItems := inboxItemsByRoute(t, testUserID, routeInbox)
+	if len(creatorInboxItems) != 1 || creatorInboxItems[0].Type != "new_comment" {
+		t.Fatalf("expected one inbox-routed new_comment item for creator, got %+v", creatorInboxItems)
 	}
-	if creatorItems[0].Type != "new_comment" {
-		t.Fatalf("expected type 'new_comment', got %q", creatorItems[0].Type)
-	}
-	if creatorItems[0].Severity != "info" {
-		t.Fatalf("expected severity 'info', got %q", creatorItems[0].Severity)
+	creatorNotificationItems := inboxItemsByRoute(t, testUserID, routeNotifications)
+	if len(creatorNotificationItems) != 1 || creatorNotificationItems[0].Type != "new_comment" {
+		t.Fatalf("expected one notification-routed new_comment item for creator, got %+v", creatorNotificationItems)
 	}
 
-	// sub1 should also get a new_comment notification
-	sub1Items := inboxItemsForRecipient(t, queries, sub1ID)
-	if len(sub1Items) != 1 {
-		t.Fatalf("expected 1 inbox item for sub1, got %d", len(sub1Items))
+	// sub1 should also get a new_comment on both default routes.
+	sub1InboxItems := inboxItemsByRoute(t, sub1ID, routeInbox)
+	if len(sub1InboxItems) != 1 || sub1InboxItems[0].Type != "new_comment" {
+		t.Fatalf("expected one inbox-routed new_comment item for sub1, got %+v", sub1InboxItems)
 	}
-	if sub1Items[0].Type != "new_comment" {
-		t.Fatalf("expected type 'new_comment', got %q", sub1Items[0].Type)
+	sub1NotificationItems := inboxItemsByRoute(t, sub1ID, routeNotifications)
+	if len(sub1NotificationItems) != 1 || sub1NotificationItems[0].Type != "new_comment" {
+		t.Fatalf("expected one notification-routed new_comment item for sub1, got %+v", sub1NotificationItems)
 	}
 
 	// Commenter (actor) should NOT get a notification
