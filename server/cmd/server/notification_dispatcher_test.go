@@ -236,6 +236,51 @@ func loadNotificationDeliveryByEvent(t *testing.T, eventID string) db.Notificati
 	return deliveries[0]
 }
 
+func waitForDaemonRuntimeConnection(t *testing.T, hub *daemonws.Hub, runtimeID string) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for hub.RuntimeConnectionCount(runtimeID) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("runtime connection %s was not registered", runtimeID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func sendDaemonHeartbeatFrame(t *testing.T, conn *websocket.Conn, runtimeID string, supportsNotificationDeliveryResult bool) {
+	t.Helper()
+
+	hbFrame, err := json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonHeartbeat,
+		Payload: marshalNotificationRaw(protocol.DaemonHeartbeatRequestPayload{
+			RuntimeID:                          runtimeID,
+			SupportsBatchImport:                true,
+			SupportsNotificationDeliveryResult: supportsNotificationDeliveryResult,
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal heartbeat: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, hbFrame); err != nil {
+		t.Fatalf("WriteMessage heartbeat: %v", err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline heartbeat ack: %v", err)
+	}
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage heartbeat ack: %v", err)
+	}
+	var msg protocol.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal heartbeat ack: %v", err)
+	}
+	if msg.Type != protocol.EventDaemonHeartbeatAck {
+		t.Fatalf("heartbeat ack type = %q, want %q", msg.Type, protocol.EventDaemonHeartbeatAck)
+	}
+}
+
 func seedPendingMobilePushDelivery(t *testing.T, cid string) (string, string) {
 	return seedPendingMobilePushDeliveryForIssue(t, cid, "", "")
 }
@@ -559,6 +604,9 @@ func TestDispatchPendingOpenclawWeixinDeliveries_AwaitsDaemonAck(t *testing.T) {
 
 	eventID, deliveryID := seedPendingOpenclawWeixinDelivery(t)
 	hub := daemonws.NewHub()
+	hub.SetHeartbeatHandler(func(_ context.Context, _ daemonws.ClientIdentity, runtimeID string, _ bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+		return &protocol.DaemonHeartbeatAckPayload{RuntimeID: runtimeID, Status: "ok"}, nil
+	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hub.HandleWebSocket(w, r, daemonws.ClientIdentity{
 			UserID:     testUserID,
@@ -573,13 +621,8 @@ func TestDispatchPendingOpenclawWeixinDeliveries_AwaitsDaemonAck(t *testing.T) {
 	}
 	defer conn.Close()
 
-	deadline := time.Now().Add(time.Second)
-	for hub.RuntimeConnectionCount("runtime-1") == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("runtime connection was not registered")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForDaemonRuntimeConnection(t, hub, "runtime-1")
+	sendDaemonHeartbeatFrame(t, conn, "runtime-1", true)
 
 	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, hub)
 
@@ -614,6 +657,143 @@ func TestDispatchPendingOpenclawWeixinDeliveries_AwaitsDaemonAck(t *testing.T) {
 	}
 	if payload.DeliveryID != deliveryID || payload.Channel != "openclaw-weixin" || payload.OpenClawChannel != "openclaw-weixin" {
 		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestDispatchPendingOpenclawWeixinDeliveries_LegacyDaemonMarksSent(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	eventID, deliveryID := seedPendingOpenclawWeixinDelivery(t)
+	hub := daemonws.NewHub()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, daemonws.ClientIdentity{
+			UserID:     testUserID,
+			RuntimeIDs: []string{"runtime-legacy"},
+		})
+	}))
+	defer server.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+	waitForDaemonRuntimeConnection(t, hub, "runtime-legacy")
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, hub)
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if delivery.Status != "sent" {
+		t.Fatalf("expected legacy daemon delivery to be marked sent, got %q", delivery.Status)
+	}
+	if delivery.AttemptCount != 1 {
+		t.Fatalf("expected attempt_count 1, got %d", delivery.AttemptCount)
+	}
+	if delivery.LastError.Valid {
+		t.Fatalf("expected empty last_error, got %#v", delivery.LastError)
+	}
+	if !delivery.SentAt.Valid {
+		t.Fatal("expected sent_at to be populated for legacy daemon fallback")
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage notification deliver: %v", err)
+	}
+	var msg protocol.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal frame: %v", err)
+	}
+	if msg.Type != protocol.EventNotificationDeliver {
+		t.Fatalf("frame type = %q, want %q", msg.Type, protocol.EventNotificationDeliver)
+	}
+	var payload protocol.NotificationDeliverPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.DeliveryID != deliveryID {
+		t.Fatalf("delivery_id = %q, want %q", payload.DeliveryID, deliveryID)
+	}
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, hub)
+	after := loadNotificationDeliveryByEvent(t, eventID)
+	if after.Status != "sent" || after.AttemptCount != 1 {
+		t.Fatalf("expected no retry after legacy sent fallback, got status=%q attempt_count=%d", after.Status, after.AttemptCount)
+	}
+}
+
+func TestDispatchPendingOpenclawWeixinDeliveries_PrefersAckCapableSingleDaemon(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	eventID, deliveryID := seedPendingOpenclawWeixinDelivery(t)
+	hub := daemonws.NewHub()
+	hub.SetHeartbeatHandler(func(_ context.Context, _ daemonws.ClientIdentity, runtimeID string, _ bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+		return &protocol.DaemonHeartbeatAckPayload{RuntimeID: runtimeID, Status: "ok"}, nil
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, daemonws.ClientIdentity{
+			UserID:     testUserID,
+			RuntimeIDs: []string{"runtime-legacy", "runtime-current"},
+		})
+	}))
+	defer server.Close()
+
+	legacyConn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("Dial legacy: %v", err)
+	}
+	defer legacyConn.Close()
+	currentConn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("Dial current: %v", err)
+	}
+	defer currentConn.Close()
+	waitForDaemonRuntimeConnection(t, hub, "runtime-legacy")
+	waitForDaemonRuntimeConnection(t, hub, "runtime-current")
+	sendDaemonHeartbeatFrame(t, currentConn, "runtime-current", true)
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, hub)
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if delivery.Status != "awaiting_ack" {
+		t.Fatalf("expected ack-capable daemon delivery to await ack, got %q", delivery.Status)
+	}
+	if delivery.AttemptCount != 1 {
+		t.Fatalf("expected attempt_count 1, got %d", delivery.AttemptCount)
+	}
+
+	if err := currentConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline current: %v", err)
+	}
+	_, raw, err := currentConn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage current notification deliver: %v", err)
+	}
+	var msg protocol.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal current frame: %v", err)
+	}
+	if msg.Type != protocol.EventNotificationDeliver {
+		t.Fatalf("current frame type = %q, want %q", msg.Type, protocol.EventNotificationDeliver)
+	}
+	var payload protocol.NotificationDeliverPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal current payload: %v", err)
+	}
+	if payload.DeliveryID != deliveryID {
+		t.Fatalf("delivery_id = %q, want %q", payload.DeliveryID, deliveryID)
+	}
+
+	if err := legacyConn.SetReadDeadline(time.Now().Add(150 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline legacy: %v", err)
+	}
+	if _, _, err := legacyConn.ReadMessage(); err == nil {
+		t.Fatal("expected legacy daemon not to receive duplicate notification delivery")
 	}
 }
 

@@ -1279,10 +1279,28 @@ func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, dae
 		return
 	}
 
-	delivered := daemonHub.SendToUser(recipientID, frame)
+	delivered, awaitsAck := daemonHub.SendNotificationDeliveryToUser(recipientID, frame)
 	if !delivered {
 		finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("no online daemon for user"))
 		return
+	}
+	if awaitsAck {
+		return
+	}
+	if _, err := queries.CompleteNotificationDeliveryIfStatus(ctx, db.CompleteNotificationDeliveryIfStatusParams{
+		ID:        claimed.ID,
+		Status:    "sent",
+		LastError: pgtype.Text{},
+		SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		Status_2:  "awaiting_ack",
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		slog.Warn("notification dispatcher: failed to mark openclaw_weixin delivery sent for legacy daemon",
+			"delivery_id", util.UUIDToString(claimed.ID),
+			"error", err,
+		)
 	}
 }
 

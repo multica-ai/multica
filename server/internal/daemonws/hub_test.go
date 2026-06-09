@@ -386,6 +386,108 @@ func TestNotificationDeliveryResultHandlerInvoked(t *testing.T) {
 	}
 }
 
+func TestHeartbeatRecordsNotificationDeliveryResultSupport(t *testing.T) {
+	hub := NewHub()
+	hub.SetHeartbeatHandler(func(_ context.Context, _ ClientIdentity, runtimeID string, _ bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+		return &protocol.DaemonHeartbeatAckPayload{RuntimeID: runtimeID, Status: "ok"}, nil
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{
+			UserID:     "user-1",
+			RuntimeIDs: []string{"runtime-1"},
+		})
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	hbFrame, err := json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonHeartbeat,
+		Payload: mustMarshalRaw(protocol.DaemonHeartbeatRequestPayload{
+			RuntimeID:                          "runtime-1",
+			SupportsNotificationDeliveryResult: true,
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal heartbeat: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, hbFrame); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("ReadMessage heartbeat ack: %v", err)
+	}
+
+	delivered, supportsResult := hub.SendNotificationDeliveryToUser("user-1", []byte(`{"type":"notification:deliver"}`))
+	if !delivered {
+		t.Fatal("expected notification delivery to be enqueued")
+	}
+	if !supportsResult {
+		t.Fatal("expected notification delivery result support to be recorded")
+	}
+}
+
+func TestSendNotificationDeliveryToUserFallsBackToLegacyDaemon(t *testing.T) {
+	hub := NewHub()
+	legacy := attachDaemonTestClient(hub, "runtime-legacy")
+	legacy.identity.UserID = "user-1"
+
+	delivered, supportsResult := hub.SendNotificationDeliveryToUser("user-1", []byte("deliver"))
+	if !delivered {
+		t.Fatal("expected notification delivery to be enqueued")
+	}
+	if supportsResult {
+		t.Fatal("expected legacy daemon fallback to report no result support")
+	}
+	select {
+	case got := <-legacy.send:
+		if string(got) != "deliver" {
+			t.Fatalf("legacy daemon received %q, want deliver", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected legacy daemon to receive delivery")
+	}
+}
+
+func TestSendNotificationDeliveryToUserPrefersAckCapableSingleConnection(t *testing.T) {
+	hub := NewHub()
+	legacy := attachDaemonTestClient(hub, "runtime-legacy")
+	legacy.identity.UserID = "user-1"
+	current := attachDaemonTestClient(hub, "runtime-current")
+	current.identity.UserID = "user-1"
+	current.supportsNotificationDeliveryResult = true
+
+	delivered, supportsResult := hub.SendNotificationDeliveryToUser("user-1", []byte("deliver"))
+	if !delivered {
+		t.Fatal("expected notification delivery to be enqueued")
+	}
+	if !supportsResult {
+		t.Fatal("expected ack-capable daemon to be selected")
+	}
+	select {
+	case got := <-current.send:
+		if string(got) != "deliver" {
+			t.Fatalf("ack-capable daemon received %q, want deliver", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected ack-capable daemon to receive delivery")
+	}
+	select {
+	case got := <-legacy.send:
+		t.Fatalf("expected legacy daemon not to receive duplicate delivery, got %q", got)
+	default:
+	}
+}
+
 func attachDaemonTestClient(hub *Hub, runtimeID string) *client {
 	c := &client{
 		send:     make(chan []byte, 2),
@@ -394,7 +496,12 @@ func attachDaemonTestClient(hub *Hub, runtimeID string) *client {
 
 	hub.mu.Lock()
 	hub.clients[c] = true
-	hub.byRuntime[runtimeID] = map[*client]bool{c: true}
+	conns := hub.byRuntime[runtimeID]
+	if conns == nil {
+		conns = map[*client]bool{}
+		hub.byRuntime[runtimeID] = conns
+	}
+	conns[c] = true
 	hub.mu.Unlock()
 
 	return c
