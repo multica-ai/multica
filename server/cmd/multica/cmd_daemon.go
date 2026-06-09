@@ -322,6 +322,19 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			serverURL = c.ServerURL
 		}
 	}
+	if serverURL == "" {
+		// Derive from costrict base URL + prefix (same logic as resolveServerURL).
+		if base := resolveCoStrictBaseURL(); base != "" {
+			prefix := strings.TrimSpace(os.Getenv("MULTICA_SERVER_PREFIX"))
+			if prefix == "" {
+				prefix = "/multica-backend"
+			}
+			if !strings.HasPrefix(prefix, "/") {
+				prefix = "/" + prefix
+			}
+			serverURL = base + prefix
+		}
+	}
 	overrides := daemon.Overrides{
 		ServerURL:   serverURL,
 		DaemonID:    flagString(cmd, "daemon-id"),
