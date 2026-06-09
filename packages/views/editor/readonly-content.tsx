@@ -28,7 +28,8 @@ import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
-import { toHtml } from "hast-util-to-html";
+import { toJsxRuntime } from "hast-util-to-jsx-runtime";
+import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { Check, Copy, Trash2 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
@@ -291,19 +292,21 @@ function buildComponents(): Partial<Components> {
         return <code {...props}>{codeText || children}</code>;
       }
 
-      // Block code — highlight with lowlight, output hljs classes
       const code = codeText || String(children).replace(/\n$/, "");
+
+      // Block code — highlight with lowlight, render as React elements
+      // (not dangerouslySetInnerHTML) so DOM stays stable across re-renders
+      // and browser text selection is never destroyed.
       try {
         const tree = lang
           ? lowlight.highlight(lang, code)
           : lowlight.highlightAuto(code);
-        const html = toHtml(tree);
-        if (html) {
+        if (tree.children.length > 0) {
+          const highlighted = toJsxRuntime(tree, { jsx, jsxs, Fragment });
           return (
-            <code
-              className={cn("hljs", lang && `language-${lang}`)}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
+            <code className={cn("hljs", lang && `language-${lang}`)}>
+              {highlighted}
+            </code>
           );
         }
       } catch {
@@ -321,7 +324,7 @@ function buildComponents(): Partial<Components> {
     // renderer above so the outer `<pre>` does not wrap them — this is the
     // standard two-layer pattern used to escape react-markdown's default
     // `<pre><code>` envelope.
-    pre: ({ children }) => {
+    pre: ({ node, children }) => {
       // react-markdown calls `pre` BEFORE invoking the `code` renderer —
       // `children` is the unrendered `<code>` element from the AST. So we
       // identify "this block was meant to be unwrapped" by inspecting the
@@ -398,8 +401,6 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 
-  // Components map is now static — all attachment-aware logic lives in
-  // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
   const components = useMemo(() => buildComponents(), []);
 
   return (

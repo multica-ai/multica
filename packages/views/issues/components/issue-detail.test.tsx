@@ -1733,4 +1733,3 @@ describe("IssueDetail (shared)", () => {
     });
   });
 });
-});

@@ -55,6 +55,7 @@ vi.mock("../i18n", () => ({
           copy_code: "Copy code",
           show_preview: "Show preview",
           show_source: "Show source",
+          fullscreen: "Fullscreen",
         },
         mermaid: {
           rendering: "Rendering diagram...",
@@ -315,6 +316,24 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
+  it("renders code blocks with syntax highlighting as stable React elements (not dangerouslySetInnerHTML)", () => {
+    const codeText = [
+      "const url = \"http://wujieai.com\";",
+      "const user = \"@agent\";",
+    ].join("\n");
+    const { container } = render(
+      <ReadonlyContent content={["```javascript", codeText, "```"].join("\n")} />,
+    );
+
+    const blockCode = container.querySelector("pre code");
+
+    expect(blockCode?.textContent).toBe(codeText);
+    // Should have hljs spans for syntax highlighting (not plain text)
+    expect(blockCode?.querySelector("span.hljs-keyword")).not.toBeNull();
+    // Should NOT use dangerouslySetInnerHTML (no __html attribute on any child)
+    expect(blockCode?.innerHTML).not.toBe("");
+  });
+
   it("keeps readonly code block chrome separate from selectable code text", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -372,6 +391,8 @@ describe("ReadonlyContent code styling", () => {
     expect(codeCss).toContain(".rich-text-editor code");
     expect(codeCss).toContain(".rich-text-editor pre");
     expect(codeCss).toContain(".rich-text-editor pre code");
+    expect(codeCss).toContain("display: block;");
+    expect(codeCss).toContain("min-width: max-content;");
     expect(codeCss).toContain("font-variant-ligatures: none;");
     expect(codeCss).toContain('font-feature-settings: "liga" 0;');
     expect(codeCss).toContain("user-select: text;");
@@ -465,7 +486,7 @@ describe("ReadonlyContent Mermaid rendering", () => {
 
     const button = await waitFor(() => {
       const found = container.querySelector<HTMLButtonElement>(
-        ".mermaid-diagram-toolbar button",
+        ".code-block-header button[aria-label='Open Mermaid diagram fullscreen']",
       );
       expect(found).not.toBeNull();
       return found!;
@@ -534,7 +555,7 @@ describe("ReadonlyContent HTML block rendering", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle("Preview"));
+    fireEvent.click(screen.getByTitle("Fullscreen"));
     const frames = document.querySelectorAll<HTMLIFrameElement>("iframe");
     expect(frames.length).toBe(2);
     expect(frames[1]?.getAttribute("sandbox")).toBe("allow-scripts");

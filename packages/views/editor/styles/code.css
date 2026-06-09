@@ -39,6 +39,8 @@ pre.rich-text-editor {
 
 .rich-text-editor pre code,
 pre.rich-text-editor code {
+  display: block;
+  min-width: max-content;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0;
   background: none;
