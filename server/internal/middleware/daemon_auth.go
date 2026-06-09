@@ -192,9 +192,15 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			// Fallback: Casdoor RS256 JWT.
 			if jwks != nil && resolver != nil {
 				userInfo, err := auth.ParseCasdoorJWT(tokenString, jwks)
-				if err == nil {
+				if err != nil {
+					slog.Warn("daemon_auth: Casdoor JWT parse failed", "path", r.URL.Path, "error", err)
+				} else {
 					multicaUserID, err := resolver(r.Context(), userInfo.SubjectID)
-					if err == nil && multicaUserID != "" {
+					if err != nil {
+						slog.Warn("daemon_auth: Casdoor subject resolution failed", "path", r.URL.Path, "subject", userInfo.SubjectID, "error", err)
+					} else if multicaUserID == "" {
+						slog.Warn("daemon_auth: Casdoor resolver returned empty user_id", "path", r.URL.Path, "subject", userInfo.SubjectID)
+					} else {
 						r.Header.Set("X-User-ID", multicaUserID)
 						r.Header.Set("X-Subject-ID", userInfo.SubjectID)
 						ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathCasdoor)
@@ -202,6 +208,8 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 						return
 					}
 				}
+			} else {
+				slog.Debug("daemon_auth: Casdoor fallback skipped (jwks or resolver nil)", "path", r.URL.Path, "jwks_nil", jwks == nil, "resolver_nil", resolver == nil)
 			}
 
 			slog.Warn("daemon_auth: invalid token", "path", r.URL.Path)
