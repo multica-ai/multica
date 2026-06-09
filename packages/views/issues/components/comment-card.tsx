@@ -335,6 +335,7 @@ function CommentRow({
   currentUserId,
   canModerate = false,
   isResolution = false,
+  isHighlighted = false,
   onEdit,
   onDelete,
   onToggleReaction,
@@ -348,6 +349,8 @@ function CommentRow({
   canModerate?: boolean;
   /** True when this reply is the thread's resolution (shows the green badge). */
   isResolution?: boolean;
+  /** True when this row is the deep-link target currently being highlighted. */
+  isHighlighted?: boolean;
   onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -369,12 +372,17 @@ function CommentRow({
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   return (
-    <div className="py-3">
+    <div className="py-1.5">
       {/* Header pins to the timeline's scroll parent within this reply's own
-          row (the py-3 box is its containing block), so a LONG reply keeps its
+          row box, so a LONG reply keeps its
           author + actions visible while you scroll its body, then releases once
           this reply ends. bg-card occludes the body scrolling underneath. */}
-      <div className="sticky top-0 z-10 flex items-center gap-2.5 bg-card">
+      <div
+        className={cn(
+          "sticky top-0 z-10 flex items-center gap-2.5 px-4 pt-1 pb-1.5",
+          isHighlighted ? "bg-brand/5" : "bg-card",
+        )}
+      >
         <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
         <span className="cursor-pointer text-sm font-medium">
           {getActorName(entry.actor_type, entry.actor_id)}
@@ -471,7 +479,7 @@ function CommentRow({
       {edit.editing ? (
         <div
           {...edit.dropZoneProps}
-          className="relative mt-1.5 pl-8"
+          className="relative pl-12 pr-4"
           onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
         >
           <div className="text-sm leading-relaxed">
@@ -520,17 +528,17 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
+          <div className="pl-12 pr-4 text-sm leading-relaxed text-foreground/85">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
-          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
+          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
           <ReactionBar
             reactions={reactions}
             currentUserId={currentUserId}
             onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
             getActorName={getActorName}
             hideAddButton={!isLongContent}
-            className="mt-1.5 pl-8"
+            className="mt-1.5 pl-12 pr-4"
           />
         </>
       )}
@@ -636,7 +644,13 @@ function CommentCardImpl({
             stays stuck behind every reply. */}
         <div>
         {/* Header — always visible, acts as toggle */}
-        <div className={cn("px-4 py-3", stickyHeader && "sticky top-0 z-10 bg-card")}>
+        <div
+          className={cn(
+            "px-4 py-3",
+            stickyHeader && "sticky top-0 z-10",
+            stickyHeader && (isHighlighted ? "bg-brand/5" : "bg-card"),
+          )}
+        >
           <div className="flex items-center gap-2.5">
             <CollapsibleTrigger className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
               <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
@@ -832,7 +846,7 @@ function CommentCardImpl({
                 </div>
               )}
               {resolutionReply && (
-                <div id={`comment-${resolutionReply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === resolutionReply.id && "bg-brand/5")}>
+                <div id={`comment-${resolutionReply.id}`} className={cn("border-t border-border/50 transition-colors duration-700", highlightedCommentId === resolutionReply.id && "bg-brand/5")}>
                   <CommentRow
                     issueId={issueId}
                     entry={resolutionReply}
@@ -840,6 +854,7 @@ function CommentCardImpl({
                     currentUserId={currentUserId}
                     canModerate={canModerate}
                     isResolution
+                    isHighlighted={highlightedCommentId === resolutionReply.id}
                     onEdit={onEdit}
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
@@ -864,7 +879,7 @@ function CommentCardImpl({
               )}
               {/* Replies — chronological; the resolution keeps its place with a badge */}
               {allNestedReplies.map((reply) => (
-                <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
+                <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
                   <CommentRow
                     issueId={issueId}
                     entry={reply}
@@ -872,6 +887,7 @@ function CommentCardImpl({
                     currentUserId={currentUserId}
                     canModerate={canModerate}
                     isResolution={reply.id === replyResolutionId}
+                    isHighlighted={highlightedCommentId === reply.id}
                     onEdit={onEdit}
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
