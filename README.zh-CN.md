@@ -219,7 +219,9 @@ func Run(input map[string]any) map[string]any {
 
 ### 沙箱
 
-步骤运行在内嵌的 Go 解释器中，而非编译后的二进制文件，因此可以在运行时编写和修改，无需重新部署。解释器采用**白名单制**：步骤只能导入纯粹、确定性的标准库包（`fmt`、`strings`、`strconv`、`regexp`、`encoding/json`、`time`、`slices`、`math` 等），其余一概不可。`os`、`os/exec`、`io`、`net/*`、`syscall` 均不可导入——步骤可以对输入做计算，但无法触及主机、文件系统或网络。每次运行都有超时上限，步骤代码中的 panic 会以 `INTERNAL_ERROR` 形式返回，绝不会导致进程崩溃。
+步骤运行在内嵌的 Go 解释器中，而非编译后的二进制文件，因此可以在运行时编写和修改，无需重新部署。解释器采用**白名单制**：步骤只能导入纯粹、确定性的标准库包（`fmt`、`strings`、`strconv`、`regexp`、`encoding/json`、`time`、`slices`、`math` 等），其余一概不可。`os`、`os/exec`、`io`、`net/*`、`syscall` 均不可导入——步骤可以对输入做计算，但无法触及主机、文件系统或网络。
+
+每次运行还会在**独立的隔离进程**中进行（二进制文件以一次性沙箱模式重新执行自身），而非在进程内运行：子进程只拥有不含服务端任何密钥的最小环境，并带有内核 CPU 时间上限；步骤一旦超时即被硬性终止（`SIGKILL`），panic 则以 `INTERNAL_ERROR` 形式返回——绝不会导致崩溃，也不会在长期运行的进程中泄漏 goroutine。
 
 ### 启用面向 Agent 的工具平面
 

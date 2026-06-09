@@ -216,7 +216,9 @@ func Run(input map[string]any) map[string]any {
 
 ### Sandbox
 
-Steps run in an embedded Go interpreter, not the compiled binary, so they can be written and changed at runtime without redeploying. The interpreter is **allow-list only**: a step may import pure, deterministic standard-library packages (`fmt`, `strings`, `strconv`, `regexp`, `encoding/json`, `time`, `slices`, `math`, …) and nothing else. `os`, `os/exec`, `io`, `net/*`, and `syscall` are not importable — a step can compute over its input but cannot touch the host, the filesystem, or the network. Every run is bounded by a timeout, and a panic in step code surfaces as an `INTERNAL_ERROR`, never a crash.
+Steps run in an embedded Go interpreter, not the compiled binary, so they can be written and changed at runtime without redeploying. The interpreter is **allow-list only**: a step may import pure, deterministic standard-library packages (`fmt`, `strings`, `strconv`, `regexp`, `encoding/json`, `time`, `slices`, `math`, …) and nothing else. `os`, `os/exec`, `io`, `net/*`, and `syscall` are not importable — a step can compute over its input but cannot touch the host, the filesystem, or the network.
+
+Each run also happens in a **separate, isolated process** (the binary re-exec'd as a one-shot sandbox) rather than in-process: the child gets a minimal environment with none of the server's secrets and a kernel CPU-time limit, a runaway step is hard-killed (`SIGKILL`) when it exceeds its timeout, and a panic surfaces as an `INTERNAL_ERROR` — never a crash or a leaked goroutine in a long-lived process.
 
 ### Enabling the agent-facing plane
 
