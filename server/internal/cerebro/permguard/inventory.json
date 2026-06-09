@@ -545,6 +545,10 @@
             "gate": "workspace_member"
         },
         {
+            "id": "POST /api/chat/sessions/{sessionId}/agent-message",
+            "gate": "workspace_member"
+        },
+        {
             "id": "POST /api/chat/sessions/{sessionId}/convert-to-issue",
             "gate": "workspace_member"
         },
@@ -1795,6 +1799,10 @@
         {
             "id": "autopilot update",
             "gate": "via:PATCH /api/autopilots/{id}/"
+        },
+        {
+            "id": "chat session send",
+            "gate": "via:POST /api/chat/sessions/{sessionId}/agent-message"
         },
         {
             "id": "config set",
