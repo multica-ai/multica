@@ -130,6 +130,16 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, agy)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	// Transport is "acp-stdio" for ACP protocol backends, empty for built-in
+	// stream-json backends. Set by the daemon from runtime.json for external
+	// runtime extensions.
+	Transport string
+	// ACPArgs are extra CLI arguments for ACP protocol backends (e.g. ["--acp"]).
+	// Set by the daemon from runtime.json command.args.
+	ACPArgs []string
+	// IsExternal is true when the backend was loaded from a runtime.json
+	// extension rather than being a built-in provider.
+	IsExternal bool
 }
 
 // New creates a Backend for the given agent type.
@@ -165,6 +175,12 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "antigravity":
 		return &antigravityBackend{cfg: cfg}, nil
 	default:
+		// External runtime extensions (loaded from runtime.json) use the
+		// ACP protocol. The transport field in Config determines whether
+		// we route to an ACP backend.
+		if cfg.Transport == "acp-stdio" || cfg.IsExternal {
+			return &acpExternalBackend{cfg: cfg}, nil
+		}
 		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity)", agentType)
 	}
 }

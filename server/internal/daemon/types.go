@@ -4,8 +4,11 @@ import "encoding/json"
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path       string // path to CLI binary
+	Model      string // model override (optional)
+	Transport  string // "stream-json" (default) or "acp-stdio" (from runtime.json)
+	ACPArgs    []string // extra args for ACP mode (from runtime.json)
+	IsExternal bool     // true when loaded from runtime.json
 }
 
 // Runtime represents a registered daemon runtime.

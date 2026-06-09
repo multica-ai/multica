@@ -18,7 +18,7 @@ type RuntimeManifest struct {
 	Version     string                 `json:"version"`
 	Description string                 `json:"description,omitempty"`
 	Provider    string                 `json:"provider"`
-	Transport   string                 `json:"transport"` // "acp-stdio" or "acp-http"
+	Transport   string                 `json:"transport"` // "acp-stdio" or "stream-json"
 	Command     RuntimeManifestCommand `json:"command"`
 	Env         map[string]string      `json:"env,omitempty"`
 }
@@ -27,6 +27,22 @@ type RuntimeManifest struct {
 type RuntimeManifestCommand struct {
 	Executable string   `json:"executable"`
 	Args       []string `json:"args,omitempty"`
+}
+
+// ToAgentEntry converts a runtime manifest into a daemon AgentEntry for
+// registration. The transport field determines how the daemon spawns the
+// CLI at task time.
+func (m RuntimeManifest) ToAgentEntry() AgentEntry {
+	transport := m.Transport
+	if transport == "" {
+		transport = "acp-stdio"
+	}
+	return AgentEntry{
+		Path:       m.Command.Executable,
+		Transport:  transport,
+		ACPArgs:    m.Command.Args,
+		IsExternal: true,
+	}
 }
 
 // LoadRuntimeManifests scans rootDir (typically ~/.multica/runtimes/)

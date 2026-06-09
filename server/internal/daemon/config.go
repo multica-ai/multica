@@ -289,10 +289,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			fmt.Fprintf(os.Stderr, "warning: runtime extension %q conflicts with built-in provider %q, skipping\n", m.ID, m.Provider)
 			continue
 		}
-		agents[m.Provider] = AgentEntry{
-			Path:  m.Command.Executable,
-			Model: m.Env["MULTICA_MODEL"],
-		}
+		agents[m.Provider] = m.ToAgentEntry()
 	}
 
 	if len(agents) == 0 {
