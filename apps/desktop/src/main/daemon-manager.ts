@@ -580,6 +580,15 @@ async function ensureRunningDaemonVersionMatches(): Promise<
 > {
   const active = await ensureActiveProfile();
   const running = await fetchHealthAtPort(active.port);
+
+  // Don't try to version-match a daemon we can't restart (e.g. WSL2). Treat it
+  // as up-to-date — restartDaemon would no-op anyway, and skipping here avoids
+  // a misleading "restarting daemon" log on every auto-start. #3916.
+  if (isDaemonExternallyManaged(running?.os, normalizeHostOS(process.platform))) {
+    pendingVersionRestart = false;
+    return "ok";
+  }
+
   const bundled = await getCliBinaryVersion();
   const action = decideVersionAction(bundled, running);
 
@@ -862,6 +871,15 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
 }
 
 async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
+  // Central lifecycle guard: a daemon running in an environment we can't drive
+  // (e.g. Linux in WSL2 behind a Windows desktop) can't be stopped by the
+  // native CLI — it would act on the host process namespace and no-op, while
+  // still flipping our state to "stopped". Bail as a successful no-op so every
+  // caller (logout, quit, restart, the Runtime card) is covered in one place
+  // rather than each remembering to check. lastExternallyManaged is only ever
+  // true for such a running daemon, so a native daemon stops normally. #3916.
+  if (lastExternallyManaged) return { success: true };
+
   const bin = await resolveCliBinary();
   if (!bin) return { success: false, error: "multica CLI is not installed" };
 
@@ -888,6 +906,10 @@ async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
 }
 
 async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
+  // Same central guard as stopDaemon: we can neither stop nor start a daemon
+  // we don't manage, so don't try (user-switch, reauth, first-workspace, and
+  // any future restart caller all route through here). #3916.
+  if (lastExternallyManaged) return { success: true };
   const stopResult = await stopDaemon();
   if (!stopResult.success) return stopResult;
   return startDaemon();
@@ -1086,13 +1108,6 @@ export function setupDaemonManager(
     const bin = await resolveCliBinary();
     if (!bin) return;
     const health = await fetchHealth();
-    if (health.externallyManaged) {
-      // The daemon runs in an environment we can't drive (e.g. WSL2). Don't
-      // try to start, restart, or version-match it — the lifecycle CLI can't
-      // reach its process, and a restart would only spawn a stray native
-      // daemon alongside it. The user manages it from that environment. #3916.
-      return;
-    }
     if (health.state === "running") {
       // Daemon is up but may be running an older CLI than the one we just
       // bundled. Restart it so the new binary actually takes effect.
@@ -1138,15 +1153,12 @@ export function setupDaemonManager(
     stopLogTail();
 
     loadPrefs().then(async (prefs) => {
-      // Skip auto-stop for a daemon we can't control (e.g. WSL2): stopDaemon
-      // would no-op against the host process namespace yet still hold up the
-      // quit on the CLI's shutdown poll. The user stops it from its own
-      // environment. lastExternallyManaged is only ever true for such a
-      // running daemon, so a native daemon's auto-stop is unaffected. #3916.
-      if (prefs.autoStop && !lastExternallyManaged) {
+      if (prefs.autoStop) {
         isQuitting = true;
         event.preventDefault();
         try {
+          // stopDaemon no-ops for an externally-managed daemon (WSL2 etc.), so
+          // this is safe and instant in that case — the guard lives there. #3916
           await stopDaemon();
         } catch {
           // Best-effort stop on quit
