@@ -288,7 +288,7 @@ function FocusListRow({
       ) : (
         <button
           type="button"
-          className={`flex-1 text-left text-sm ${
+          className={`flex-1 min-w-0 text-left text-sm ${
             isDone ? "text-muted-foreground/60 line-through" : ""
           }`}
           onClick={() => setEditing(true)}
