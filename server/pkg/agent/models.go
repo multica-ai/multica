@@ -441,6 +441,14 @@ func parseOpenCodeModelIDLine(line string) string {
 	if strings.HasPrefix(id, `"`) || strings.HasPrefix(id, "{") || strings.HasPrefix(id, "[") {
 		return ""
 	}
+	// Normalize the first colon to slash so that model IDs emitted by
+	// opencode in provider:model format (e.g. "custom:lfm2.5:8b") are
+	// treated the same as provider/model. Subsequent colons (as in the
+	// model segment "lfm2.5:8b") are preserved.  This mirrors the
+	// normalisation applied by parsePiModels for the pi backend.
+	if strings.Contains(id, ":") && !strings.Contains(id, "/") {
+		id = strings.Replace(id, ":", "/", 1)
+	}
 	if !strings.Contains(id, "/") {
 		return ""
 	}

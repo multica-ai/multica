@@ -287,6 +287,33 @@ nonprefixed-line
 	}
 }
 
+func TestParseOpenCodeModelsColonProvider(t *testing.T) {
+	// opencode may emit local/custom models as "provider:model"
+	// (e.g. "custom:lfm2.5:8b"). The first colon should be
+	// normalised to a slash so the model is not silently dropped.
+	input := `PROVIDER/MODEL                     CONTEXT  MAX_OUT
+custom:lfm2.5:8b                   32768    4096
+custom:qwen3:4b                    131072   8192
+openai/gpt-4o                      128000   16384
+`
+	models := parseOpenCodeModels(input)
+	if len(models) != 3 {
+		t.Fatalf("expected 3 models (colon normalised), got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "custom/lfm2.5:8b" {
+		t.Errorf("custom:lfm2.5:8b not normalised, got %q", models[0].ID)
+	}
+	if models[0].Provider != "custom" {
+		t.Errorf("expected provider custom, got %q", models[0].Provider)
+	}
+	if models[1].ID != "custom/qwen3:4b" {
+		t.Errorf("custom:qwen3:4b not normalised, got %q", models[1].ID)
+	}
+	if models[2].ID != "openai/gpt-4o" {
+		t.Errorf("expected openai/gpt-4o, got %q", models[2].ID)
+	}
+}
+
 func TestParseOpenCodeModelsVerboseVariants(t *testing.T) {
 	input := `openai/gpt-5
 {
