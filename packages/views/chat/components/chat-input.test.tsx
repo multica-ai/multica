@@ -20,6 +20,11 @@ function makeUpload(overrides: Partial<UploadResult> & { id: string; link: strin
     content_type: "image/png",
     size_bytes: 1,
     created_at: new Date(0).toISOString(),
+    // markdownLink defaults to the same value as `link` so legacy
+    // tests assert the previous URL shape unless they pass an
+    // explicit override. Real callers always set it to the stable
+    // /api/attachments/<id>/download path via useFileUpload.
+    markdownLink: overrides.link,
     ...overrides,
   };
 }

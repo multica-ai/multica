@@ -58,6 +58,11 @@ function makeUpload(
     content_type: "image/png",
     size_bytes: 1,
     created_at: new Date(0).toISOString(),
+    // markdownLink defaults to the same value as `link` so legacy tests
+    // continue to assert the previous URL shape unless they pass an
+    // explicit override. Real callers always set it to the stable
+    // `/api/attachments/<id>/download` path via useFileUpload.
+    markdownLink: overrides.link,
     ...overrides,
   };
 }
@@ -185,5 +190,36 @@ describe("uploadAndInsertFile", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("persists markdownLink (the stable per-attachment URL) into the markdown body, not the short-lived storage URL", async () => {
+    // Regression pin for MUL-3130 review feedback. useFileUpload returns
+    // both `link` (= att.url, short-lived signed `/uploads/<key>?exp&sig`
+    // on LocalStorage) and `markdownLink` (= /api/attachments/<id>/download).
+    // The editor must persist `markdownLink` so the comment doesn't
+    // capture a 30-min signature, while non-markdown callers (avatar
+    // pickers, logo upload) keep using `link` for backward compatibility.
+    const editor = makeEditor();
+    const SIGNED_URL = "/uploads/workspaces/ws-1/photo.png?exp=42&sig=fake";
+    const STABLE_URL = "/api/attachments/attachment-7/download";
+    const handler = vi.fn(async () =>
+      makeUpload({
+        id: "attachment-7",
+        link: SIGNED_URL,
+        markdownLink: STABLE_URL,
+        filename: "photo.png",
+      }),
+    );
+    const file = new File(["image"], "photo.png", { type: "image/png" });
+
+    await uploadAndInsertFile(editor, file, handler);
+
+    // The img node ends up with the stable URL as its src — the
+    // expiring signed URL never makes it into the persisted markdown.
+    const attrs = firstImageAttrs(editor);
+    expect(attrs?.src).toBe(STABLE_URL);
+    expect(editor.getMarkdown().trimEnd()).toBe(`![photo.png](${STABLE_URL})`);
+    expect(editor.getMarkdown()).not.toContain("?exp=");
+    expect(editor.getMarkdown()).not.toContain("?sig=");
   });
 });
