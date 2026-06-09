@@ -112,6 +112,7 @@ describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
       online_count: 1,
       providers: ["claude"],
       has_claude: true,
+      has_codebuddy: false,
       has_codex: false,
       has_cursor: false,
     });
@@ -123,12 +124,13 @@ describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
     });
   });
 
-  it("derives has_claude / has_codex / has_cursor from distinct providers", () => {
+  it("derives has_claude / has_codebuddy / has_codex / has_cursor from distinct providers", () => {
     setPicker({
       runtimes: [
         makeRuntime({ id: "rt1", provider: "claude" }),
         makeRuntime({ id: "rt2", provider: "codex", status: "offline" }),
         makeRuntime({ id: "rt3", provider: "cursor" }),
+        makeRuntime({ id: "rt4", provider: "codebuddy" }),
       ],
       hasRuntimes: true,
     });
@@ -137,10 +139,11 @@ describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
 
     expect(mocks.captureEvent).toHaveBeenCalledTimes(1);
     const props = mocks.captureEvent.mock.calls[0]![1] as Record<string, unknown>;
-    expect(props.runtime_count).toBe(3);
-    expect(props.online_count).toBe(2);
-    expect(props.providers).toEqual(["claude", "codex", "cursor"]);
+    expect(props.runtime_count).toBe(4);
+    expect(props.online_count).toBe(3);
+    expect(props.providers).toEqual(["claude", "codex", "cursor", "codebuddy"]);
     expect(props.has_claude).toBe(true);
+    expect(props.has_codebuddy).toBe(true);
     expect(props.has_codex).toBe(true);
     expect(props.has_cursor).toBe(true);
   });
@@ -170,6 +173,7 @@ describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
       online_count: 0,
       providers: [],
       has_claude: false,
+      has_codebuddy: false,
       has_codex: false,
       has_cursor: false,
     });

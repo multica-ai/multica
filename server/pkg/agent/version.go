@@ -11,9 +11,10 @@ import (
 // MinVersions defines the minimum required CLI version for each agent type.
 // Versions below these will be rejected during daemon registration.
 var MinVersions = map[string]string{
-	"claude":  "2.0.0",
-	"codex":   "0.100.0", // app-server --listen stdio:// added in 0.100.0
-	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
+	"claude":    "2.0.0",
+	"codebuddy": "0.1.0",
+	"codex":     "0.100.0", // app-server --listen stdio:// added in 0.100.0
+	"copilot":   "1.0.0",   // --output-format json envelope stable from 1.0.x
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against

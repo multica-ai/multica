@@ -152,6 +152,7 @@ function FancyView({
       online_count: onlineCount,
       providers,
       has_claude: providers.includes("claude"),
+      has_codebuddy: providers.includes("codebuddy"),
       has_codex: providers.includes("codex"),
       has_cursor: providers.includes("cursor"),
       detect_ms: detectMs,
