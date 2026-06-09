@@ -133,17 +133,54 @@ Alternatively, configure step by step: `multica config set server_url http://loc
 3. Go to **Settings → Agents** and create a new agent
 4. Create an issue and assign it to your agent
 
-## Usage Dashboard Rollup (Required)
+## Usage Dashboard Rollup
 
-Starting with `v0.3.5`, the Usage / Runtime dashboards read from a derived `task_usage_hourly` table populated by `rollup_task_usage_hourly()`. The bundled `pgvector/pgvector:pg17` image does **not** include `pg_cron`, and the backend doesn't run the rollup in-process either — until you schedule it yourself, the dashboard will stay at zero even though `task_usage` is populated.
+The Usage / Runtime dashboards read from a derived `task_usage_hourly` table populated by `rollup_task_usage_hourly()`. As of MUL-2957 the backend runs this rollup **in-process** on every replica via a DB-backed scheduler (`sys_cron_executions`). A fresh self-host install needs no operator action — the bundled `pgvector/pgvector:pg17` image works as-is, and you do **not** need to swap it for an image that ships `pg_cron`, register an external cron job, run a systemd timer, or schedule a Kubernetes `CronJob`.
 
-Pick one supported path before relying on the Usage / Runtime dashboard:
+Multiple backend replicas are safe: every replica ticks every 30 seconds and tries to claim the current 5-minute UTC plan, but the unique key `(job_name, scope_kind, scope_id, plan_time)` means only one wins each plan. Inspect the audit table to confirm steady-state operation:
 
-- **External cron / systemd-timer / Kubernetes `CronJob`**: schedule `SELECT rollup_task_usage_hourly()` every 5 minutes. Idempotent, watermark-driven — overlapping or skipped ticks are safe.
-- **Postgres with `pg_cron`**: swap the bundled Postgres image for one that ships `pg_cron`, set `shared_preload_libraries=pg_cron`, then `SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', 'SELECT rollup_task_usage_hourly()')` once.
-- **Backfill historical data**: required on the `v0.3.4 → v0.3.5+` upgrade path when the database already has `task_usage` rows — migration `103` is fail-closed and will abort `migrate up` with `refusing to drop legacy daily rollups: ...` until the hourly table is seeded. Run `./backfill_task_usage_hourly --sleep-between-slices=2s` inside the backend container, then re-run the upgrade and configure one of the schedules above.
+```sql
+SELECT plan_time, status, attempt, runner_id,
+       error_code, error_msg, started_at, finished_at
+  FROM sys_cron_executions
+ WHERE job_name = 'rollup_task_usage_hourly'
+ ORDER BY plan_time DESC
+ LIMIT 20;
+```
 
-Full reference (Compose + Kubernetes templates, flag descriptions, upgrade order) lives in [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+<Callout>
+**Upgrading from `v0.3.4` to `v0.3.5+`?** As of MUL-2957 the `migrate up` command runs an idempotent monthly-slice backfill automatically right before applying migration `103`, so the upgrade completes in a single invocation — no operator step required. If you are on a pre-MUL-2957 binary or the auto-hook fails for an environmental reason, run `backfill_task_usage_hourly` against the same database and re-run the upgrade. Full recovery flow lives in [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+</Callout>
+
+### Compatibility paths (existing deployments only)
+
+External schedulers — **`pg_cron` registered on the database, an external cron job, a systemd timer, or a Kubernetes `CronJob`** — that call `SELECT rollup_task_usage_hourly()` directly were the only option before MUL-2957 and remain a supported compatibility path. They are no longer the recommended setup; new deployments should rely on the in-process scheduler. The SQL function holds advisory lock 4246 internally, so the in-process scheduler and any pre-existing external schedule can coexist without ever double-writing the rollup.
+
+If you already have a `pg_cron` job in production and want to retire it, the safe sequence is:
+
+1. Confirm the in-process scheduler is healthy on at least one backend replica — recent SUCCESS rows should be landing in `sys_cron_executions` for `rollup_task_usage_hourly`:
+
+   ```sql
+   SELECT plan_time, status, runner_id, finished_at
+     FROM sys_cron_executions
+    WHERE job_name = 'rollup_task_usage_hourly'
+      AND status = 'SUCCESS'
+    ORDER BY plan_time DESC
+    LIMIT 5;
+   ```
+
+2. Once SUCCESS rows are arriving on schedule, unschedule the redundant `pg_cron` entry:
+
+   ```sql
+   SELECT cron.unschedule('rollup_task_usage_hourly')
+     FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
+   ```
+
+3. Leave the `pg_cron` extension itself installed unless you are sure no other workload depends on it. The bundled `pgvector/pgvector:pg17` image does **not** ship `pg_cron`, so nothing in Multica's default install needs it; uninstalling `pg_cron` from a custom image that other workloads still use is a separate decision.
+
+External cron / systemd timer / Kubernetes `CronJob` setups that call `SELECT rollup_task_usage_hourly()` directly can be retired the same way — once `sys_cron_executions` shows steady SUCCESS rows from the in-process scheduler, the external job is redundant and can be removed.
+
+Full reference (audit table semantics, advisory lock 4246, the standalone backfill command, flag descriptions, the migration auto-hook) lives in [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
 
 ## Stopping Services
 

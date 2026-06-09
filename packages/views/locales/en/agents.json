@@ -25,7 +25,8 @@
     "all": "All",
     "online": "Online",
     "unstable": "Unstable",
-    "offline": "Offline"
+    "offline": "Offline",
+    "archived": "Archived"
   },
   "workload": {
     "working": "Working",
@@ -46,7 +47,18 @@
     "no_archived": "No archived agents yet.",
     "search_active": "No agents match \"{{query}}\".",
     "search_active_filtered": "No agents match \"{{query}}\" in this filter.",
-    "no_filter_match": "No agents match this filter."
+    "no_filter_match": "No agents match this filter.",
+    "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
+    "runtime_filtered": "No agents on \"{{machine}}\"."
+  },
+  "runtime_filter": {
+    "all": "All runtimes",
+    "section_local": "Local",
+    "section_remote": "Remote",
+    "section_cloud": "Cloud",
+    "agent_count_one": "{{count}} agent",
+    "agent_count_other": "{{count}} agents",
+    "empty": "No machines yet"
   },
   "columns": {
     "agent": "Agent",
@@ -128,6 +140,7 @@
     "section_properties": "Properties",
     "section_details": "Details",
     "section_skills": "Skills",
+    "section_integrations": "Integrations",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
     "prop_thinking": "Thinking",
@@ -196,6 +209,7 @@
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
+    "integrations": "Integrations",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -325,6 +339,10 @@
       "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
+    },
+    "integrations": {
+      "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
+      "members_note": "Only workspace owners and admins can bind a Lark Bot to an agent. You can view connected bots in Settings → Integrations."
     },
     "activity": {
       "section_now": "Now",

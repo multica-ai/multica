@@ -80,7 +80,7 @@ func daemonSetupURLsFromEnv() (string, string) {
 	if serverURL == "" {
 		serverURL = appURL
 	}
-	if isOfficialCloudDaemonConfig(serverURL, appURL) {
+	if isOfficialCloudDaemonConfig(appURL) {
 		return "", ""
 	}
 	return serverURL, appURL
@@ -90,10 +90,16 @@ func normalizePublicURL(raw string) string {
 	return strings.TrimRight(strings.TrimSpace(raw), "/")
 }
 
-func isOfficialCloudDaemonConfig(serverURL, appURL string) bool {
-	if !urlHostEquals(serverURL, "api.multica.ai") {
-		return false
-	}
+// isOfficialCloudDaemonConfig reports whether this deployment is the official
+// Multica Cloud, identified by its frontend host alone (multica.ai /
+// app.multica.ai). The daemon setup for the managed cloud is always
+// `multica setup` (which hardcodes api.multica.ai), so the per-deployment URLs
+// must be omitted from /api/config even when MULTICA_PUBLIC_URL is unset or
+// misconfigured. Previously this also required serverURL==api.multica.ai, so a
+// cloud deployment that forgot MULTICA_PUBLIC_URL fell through and emitted a
+// `setup self-host --server-url https://multica.ai` command — pointing the
+// daemon's backend at the frontend (no /health, no WebSocket proxy).
+func isOfficialCloudDaemonConfig(appURL string) bool {
 	return urlHostEquals(appURL, "multica.ai") || urlHostEquals(appURL, "app.multica.ai")
 }
 

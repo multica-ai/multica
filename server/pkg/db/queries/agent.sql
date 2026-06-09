@@ -251,6 +251,18 @@ RETURNING *;
 SELECT * FROM agent_task_queue
 WHERE id = $1;
 
+-- name: GetAgentTaskInWorkspace :one
+-- Loads a task only when its owning agent lives in the given workspace.
+-- agent_id is NOT NULL on every task row (and ON DELETE CASCADE, so the agent
+-- always exists), which makes this the universal tenant guard for
+-- user-initiated cancellation — independent of which optional source FK
+-- (issue / chat_session / autopilot_run) happens to be set. It is what lets
+-- run_only autopilot tasks and quick_create tasks (whose issue does not exist
+-- yet) be cancelled at all, instead of 404-ing on a missing source FK.
+SELECT atq.* FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE atq.id = $1 AND a.workspace_id = $2;
+
 -- name: ClaimAgentTask :one
 -- Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
 -- a task is only claimable when no other task for the same issue AND same agent is

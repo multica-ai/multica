@@ -121,7 +121,6 @@ function renderActionsCell(row: RuntimeRow) {
     const { t } = useT("runtimes");
     const columns = createRuntimeColumns({
       showOwner: false,
-      latestCliVersion: null,
       wsId: "ws-1",
       now: Date.now(),
       t,
@@ -185,5 +184,82 @@ describe("runtime list row menu", () => {
       ),
     );
     expect(screen.queryByLabelText("Row actions")).not.toBeInTheDocument();
+  });
+});
+
+// The CLI column lives in its own cell renderer; resolve it from
+// createRuntimeColumns and render it in isolation, mirroring renderActionsCell.
+function renderCliCell(row: RuntimeRow) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  function Harness() {
+    const { t } = useT("runtimes");
+    const columns = createRuntimeColumns({
+      showOwner: false,
+      wsId: "ws-1",
+      now: Date.now(),
+      t,
+    });
+    const cli = columns.find((c) => c.id === "cli");
+    if (!cli || typeof cli.cell !== "function") {
+      throw new Error("cli column missing or has no cell renderer");
+    }
+    const cell = cli.cell({
+      row: { original: row },
+    } as unknown as Parameters<typeof cli.cell>[0]);
+    return <>{cell}</>;
+  }
+
+  return render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={qc}>
+        <Harness />
+      </QueryClientProvider>
+    </I18nProvider>,
+  );
+}
+
+describe("runtime list CLI column", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // #3838: every agent showed the same number because the column rendered the
+  // shared multica daemon `cli_version`. It must instead show the agent's own
+  // tool version from `metadata.version`.
+  it("shows the agent's own CLI tool version, not the shared daemon version", () => {
+    renderCliCell(
+      makeRow(
+        makeRuntime({
+          runtime_mode: "local",
+          metadata: { version: "2.1.5 (Claude Code)", cli_version: "0.3.17" },
+        }),
+      ),
+    );
+    expect(screen.getByText("2.1.5 (Claude Code)")).toBeInTheDocument();
+    expect(screen.queryByText("0.3.17")).not.toBeInTheDocument();
+  });
+
+  it("falls back to an em dash when the agent version is missing", () => {
+    renderCliCell(
+      makeRow(
+        makeRuntime({
+          runtime_mode: "local",
+          metadata: { cli_version: "0.3.17" },
+        }),
+      ),
+    );
+    expect(screen.queryByText("0.3.17")).not.toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("renders an em dash for cloud runtimes", () => {
+    renderCliCell(
+      makeRow(
+        makeRuntime({
+          runtime_mode: "cloud",
+          metadata: { version: "2.1.5 (Claude Code)" },
+        }),
+      ),
+    );
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 });

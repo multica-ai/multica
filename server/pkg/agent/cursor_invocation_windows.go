@@ -14,28 +14,27 @@ import (
 // tests; production callers should leave it at its default.
 var powerShellLookup = defaultPowerShellLookup
 
-// platformCursorInvocation rewrites the cursor-agent invocation on Windows
-// when the resolved executable is the official cursor-agent.cmd launcher
-// (or a .bat alias) that delegates to cursor-agent.ps1.
+// rewriteCmdToPS1 handles the .cmd → PowerShell rewrite for npm-installed
+// agent CLIs on Windows. Each CLI ships a <name>.cmd launcher whose body is
+// effectively
 //
-// We replace
+//	powershell -NoProfile -ExecutionPolicy Bypass -File <name>.ps1 %*
 //
-//	cursor-agent.cmd <args...>
+// Going through cmd.exe causes %* re-expansion to re-tokenise the raw
+// command-line string, which mangles multi-line arguments (most critically
+// the -p prompt). We instead invoke PowerShell with -File <name>.ps1
+// directly so Go passes each argv element as a discrete token.
 //
-// with
-//
-//	powershell.exe -NoProfile -ExecutionPolicy Bypass -File cursor-agent.ps1 <args...>
-//
-// which is exactly what the .cmd does internally, but lets Go pass each arg
-// as a discrete token instead of routing through cmd.exe's %* re-expansion
-// (which mangles multi-line / whitespace-heavy prompts such as a long -p).
-func platformCursorInvocation(lookedUp string, args []string, logger *slog.Logger) (string, []string, bool) {
+// toolName is used both for the log message and to derive the canonical ps1
+// filename (toolName + ".ps1" in the same directory as lookedUp). Using the
+// canonical name rather than the launcher basename ensures we find the right
+// script even when the user has a custom .bat wrapper with a different name.
+func rewriteCmdToPS1(toolName, lookedUp string, args []string, logger *slog.Logger) (string, []string, bool) {
 	ext := strings.ToLower(filepath.Ext(lookedUp))
 	if ext != ".cmd" && ext != ".bat" {
 		return "", nil, false
 	}
-	dir := filepath.Dir(lookedUp)
-	ps1 := filepath.Join(dir, "cursor-agent.ps1")
+	ps1 := filepath.Join(filepath.Dir(lookedUp), toolName+".ps1")
 	if st, err := os.Stat(ps1); err != nil || st.IsDir() {
 		return "", nil, false
 	}
@@ -50,13 +49,19 @@ func platformCursorInvocation(lookedUp string, args []string, logger *slog.Logge
 	full = append(full, args...)
 
 	if logger != nil {
-		logger.Info("cursor-agent: routing through powershell -File to preserve argv tokens",
+		logger.Info(toolName+": routing through powershell -File to preserve argv tokens",
 			"powershell", psExe,
 			"ps1", ps1,
 			"original", lookedUp,
 		)
 	}
 	return psExe, full, true
+}
+
+// platformCursorInvocation rewrites cursor-agent.cmd → PowerShell -File
+// cursor-agent.ps1 on Windows to avoid cmd.exe %* re-tokenisation.
+func platformCursorInvocation(lookedUp string, args []string, logger *slog.Logger) (string, []string, bool) {
+	return rewriteCmdToPS1("cursor-agent", lookedUp, args, logger)
 }
 
 // defaultPowerShellLookup prefers PowerShell on PATH (PowerShell 7's pwsh.exe

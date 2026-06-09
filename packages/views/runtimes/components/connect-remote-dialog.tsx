@@ -18,6 +18,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
@@ -127,8 +128,9 @@ function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
   }, [copied]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
+    void copyText(text).then((ok) => {
+      if (ok) setCopied(true);
+    });
   };
 
   return (

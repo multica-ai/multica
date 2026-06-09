@@ -56,11 +56,39 @@ postgres:
 # Backend (Go API + WS server)
 # -----------------------------------------------------------------------------
 backend:
+  # Concurrent backend pods are now safe to start: cmd/migrate uses a
+  # Postgres session-level advisory lock to serialize the startup
+  # `migrate up` run, so late-arriving pods queue and then no-op (see
+  # GitHub multica-ai/multica#3647). 1 is still the recommended default
+  # because the chart Deployment uses strategy: Recreate and there is no
+  # leader-elected workload split — increase this only if you actually
+  # need horizontal scale of the API/WS server.
   replicas: 1
   uploads:
     persistence:
+      # When true (default) the chart provisions a PersistentVolumeClaim for
+      # /app/data/uploads and mounts it into the backend pod. The backend only
+      # uses this directory when S3 is NOT configured (`backend.config.s3Bucket`
+      # empty) — see server/cmd/server/router.go for the storage selection.
+      #
+      # Set to false when you have configured S3/CloudFront and don't want the
+      # chart to declare the uploads PVC at all. The default access mode is
+      # ReadWriteOnce, which prevents `backend.replicas > 1` from scheduling a
+      # second pod (Multi-Attach error); disabling persistence — or switching
+      # accessModes to a ReadWriteMany class — removes that constraint on the
+      # storage side. Note: backend startup migrations are not yet serialized
+      # across pods, so multi-replica still requires care beyond the chart.
+      enabled: true
       size: 5Gi
+      # Leave empty to use the cluster's default StorageClass.
       storageClass: ""
+      # PVC accessModes. Defaults to [ReadWriteOnce] to match the typical
+      # local-path / hostPath / EBS StorageClass on a single-node setup. Switch
+      # to [ReadWriteMany] (with a compatible StorageClass such as NFS, EFS,
+      # CephFS) if you intend to share the uploads volume across multiple
+      # backend replicas without S3.
+      accessModes:
+        - ReadWriteOnce
   # All non-secret backend env. Secret values come from `existingSecret`.
   config:
     appEnv: production
@@ -132,3 +160,17 @@ ingress:
   # tls:
   #   - hosts: [multica.dev.lan, api.multica.dev.lan]
   #     secretName: multica-tls
+
+# -----------------------------------------------------------------------------
+# Monitoring
+# -----------------------------------------------------------------------------
+monitoring:
+  prometheusRule:
+    # Requires the Prometheus Operator CRD (monitoring.coreos.com/v1). Kept
+    # disabled by default so minimal self-host installs without that CRD still
+    # render and install.
+    enabled: false
+    additionalLabels: {}
+    samplerQueryErrorsFor: 5m
+    samplerQueryLatencyFor: 10m
+    severity: warning

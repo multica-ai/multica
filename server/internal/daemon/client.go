@@ -267,7 +267,8 @@ func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
 }
 
 // GetTaskStatus returns the current status of a task. Used by the daemon to
-// detect if a task was cancelled while it was executing.
+// detect terminal/interruption signals (cancelled, failed, completed, or a
+// 404 task-not-found) while a task is executing.
 func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, error) {
 	var resp struct {
 		Status string `json:"status"`

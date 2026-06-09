@@ -25,7 +25,8 @@
     "all": "전체",
     "online": "온라인",
     "unstable": "불안정",
-    "offline": "오프라인"
+    "offline": "오프라인",
+    "archived": "보관됨"
   },
   "workload": {
     "working": "작업 중",
@@ -46,7 +47,18 @@
     "no_archived": "아직 보관된 에이전트가 없습니다.",
     "search_active": "\"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "search_active_filtered": "이 필터에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
-    "no_filter_match": "이 필터와 일치하는 에이전트가 없습니다."
+    "no_filter_match": "이 필터와 일치하는 에이전트가 없습니다.",
+    "search_runtime_filtered": "\"{{machine}}\"에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
+    "runtime_filtered": "\"{{machine}}\"에 에이전트가 없습니다."
+  },
+  "runtime_filter": {
+    "all": "모든 런타임",
+    "section_local": "로컬",
+    "section_remote": "원격",
+    "section_cloud": "클라우드",
+    "agent_count_one": "에이전트 {{count}}개",
+    "agent_count_other": "에이전트 {{count}}개",
+    "empty": "아직 기기가 없습니다"
   },
   "columns": {
     "agent": "에이전트",
@@ -128,6 +140,7 @@
     "section_properties": "속성",
     "section_details": "세부 정보",
     "section_skills": "스킬",
+    "section_integrations": "연동",
     "prop_runtime": "런타임",
     "prop_model": "모델",
     "prop_thinking": "추론",
@@ -196,6 +209,7 @@
     "environment": "환경",
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",
+    "integrations": "연동",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -325,6 +339,10 @@
       "add_dialog_confirm_other": "스킬 {{count}}개 추가",
       "add_dialog_cancel": "취소",
       "add_failed_toast": "스킬을 추가하지 못했습니다"
+    },
+    "integrations": {
+      "intro": "이 에이전트를 외부 채팅 플랫폼에 연결해 팀원이 평소 사용하는 도구에서 바로 함께 작업할 수 있도록 합니다.",
+      "members_note": "에이전트에 Lark 봇을 연결할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
     },
     "activity": {
       "section_now": "현재",

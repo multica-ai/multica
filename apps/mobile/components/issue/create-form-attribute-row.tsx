@@ -18,6 +18,7 @@ import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { PriorityIcon } from "@/components/ui/priority-icon";
 import { ProjectIcon } from "@/components/ui/project-icon";
 import { StatusIcon } from "@/components/ui/status-icon";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorLookup } from "@/data/use-actor-name";
 import { useNewIssueDraftStore } from "@/data/stores/new-issue-draft-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -131,8 +132,7 @@ export function CreateFormAttributeRow() {
   );
 }
 
+// due_date is a calendar day — format timezone-safely (no offset day shift).
 function formatDueDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "Due date";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatDateOnly(iso, { month: "short", day: "numeric" }) || "Due date";
 }

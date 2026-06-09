@@ -1,0 +1,239 @@
+---
+title: オートパイロット
+description: エージェントが cron スケジュールやインバウンド webhook で作業を開始したり、UI や CLI で一度だけ手動でトリガーしたりできるようにします。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+オートパイロットは、[エージェント](/agents)が**スケジュールに従って自動的に作業を開始**できるようにします — cron 式とタイムゾーンを設定すると、あなたが何もトリガーしなくても Multica が自ら [`task`](/tasks) をディスパッチします。定期点検、繰り返しのレポート、夜間のクリーンアップ作業など、「常設指示（standing order）」の形の作業に適しています。残りの 3 つのトリガー経路（[割り当て](/assigning-issues)、[@-メンション](/mentioning-agents)、[チャット](/chat) — いずれもあなた自身が起点となる方式）と比べたとき、オートパイロットの核心的な違いは**時間駆動**であることです。
+
+## オートパイロットを構成する
+
+ワークスペースの**オートパイロット**ページで新しいオートパイロットを作成します。次の項目を設定します。
+
+- **名前（Name）** — 表示名
+- **エージェント（Agent）** — 実行をディスパッチする対象
+- **優先度（Priority）** — 生成される `task` に継承されます（イシューの優先度と同じ意味）
+- **説明 / プロンプト（Description / prompt）** — 実行のたびにエージェントが受け取る作業説明
+- **実行モード（Execution mode）** — 以下を参照
+- **トリガー（Triggers）** — `schedule`（cron + タイムゾーン）または `webhook` のうち少なくとも 1 つ
+
+## 実行モードを選ぶ
+
+オートパイロットには 2 つの実行モードがあります。**「イシュー作成」モードから始めてください。**
+
+- **イシュー作成モード（Create issue mode）**（`create_issue`） — デフォルトであり、**推奨**されます。各トリガーはまずワークスペースにイシューを作成し（タイトルには現在、単一のプレースホルダー `{{date}}` のみがサポートされ、これは `YYYY-MM-DD` 形式の UTC 日付に補間されます。それ以外の `{{...}}` トークンは作成時点で拒否されるため、タイプミスがイシュータイトルにリテラル文字列として静かに紛れ込むことを防ぎます）、通常の割り当てフローを通じてそのイシューをエージェントに割り当てます。すべての作業は、手動で割り当てたイシューと同じ履歴、コメント、ステータスを持った状態でイシューボードに上がります。
+- **実行専用モード（Run-only mode）**（`run_only`） — イシュー作成をスキップし、`task` を直接キューに入れます。この実行はボードには表示されません — オートパイロットの実行履歴でのみ確認できます。
+
+## スケジュールに従って実行する
+
+すべてのオートパイロットには少なくとも 1 つの `schedule` トリガーが必要です。Cron は**標準の 5 フィールド形式**（分 時 日 月 曜日）を使用し、最小単位は **1 分**です（秒単位はありません）。タイムゾーンは IANA 形式（例: `Asia/Shanghai`）で、cron 式がどのタイムゾーンで解釈されるかを決定します。
+
+いくつかの例:
+
+- `0 9 * * 1-5`, `Asia/Shanghai` — 平日の北京時間午前 9 時
+- `*/30 * * * *`, `UTC` — 30 分ごと
+- `0 3 * * *`, `UTC` — 毎日 UTC 午前 3 時
+
+Multica サーバーは**30 秒**ごとに期限が来たトリガーをスキャンします — **実際の発火時刻は最大 30 秒まで遅れる可能性があり**、秒単位で正確ではありません。発火時刻のあたりでサーバーが再起動された場合、起動時に逃したトリガーを追いつきます（何も失われませんが、すぐに発火します）。
+
+## 一度だけ手動でトリガーする
+
+オートパイロットのデバッグ中に cron を待たないためには、手動でトリガーしてください。
+
+- UI: オートパイロット詳細ページで「Run now」をクリック
+- CLI:
+
+```bash
+multica autopilot trigger <autopilot-id>
+```
+
+手動トリガーは `schedule` トリガーとまったく同じ実行フローを通り — 実行レコードの `source` フィールドのみが `manual` とマークされます。
+
+## webhook からトリガーする
+
+オートパイロットはインバウンドの HTTP webhook でも発火できます。オートパイロット詳細ページで **Webhook** トリガーを追加すると、Multica は次のような形の一意の URL を生成します。
+
+```
+https://<your-multica-host>/api/webhooks/autopilots/awt_…
+```
+
+その URL に任意の JSON を POST してください — Multica は `source = webhook` で実行を記録し、本文を実行の `trigger_payload` として保存し、schedule トリガーとまったく同じ方法でエージェントをディスパッチします。
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"demo.received","eventPayload":{"message":"hello"}}'
+```
+
+**イシュー作成モード**では、インバウンドの payload が新しいイシューの説明に追記され、エージェントがインラインで読めるようになります。**実行専用モード**では、payload はデーモンがエージェントに渡す実行コンテキストの一部になります。
+
+### Payload の形
+
+独自のエンベロープ（envelope）を送れます。
+
+```json
+{ "event": "github.pull_request.opened", "eventPayload": { } }
+```
+
+…または任意の JSON オブジェクト / 配列を送ることもできます。Multica はこれを内部エンベロープに正規化します。
+
+```json
+{
+  "event": "<inferred>",
+  "eventPayload": <your body>,
+  "request": { "receivedAt": "<rfc3339>", "contentType": "application/json" }
+}
+```
+
+`event` フィールドを指定しない場合、Multica は一般的なヘッダーと本文フィールドからこれを推論します（`X-GitHub-Event` + 本文 `action`、`X-Gitlab-Event`、`X-Event-Type`、本文の `event`/`type`/`action`）。どれも一致しない場合、イベントは `webhook.received` になります。
+
+GitHub のようなソースを構成するときは、content type を `application/json` に設定してください — フォームエンコードされた webhook payload は受け付けられません。
+
+### イベントフィルター
+
+新しい webhook トリガーはインバウンドの POST ごとに発火します。単一用途の URL には問題ありませんが、多数のイベントタイプをファンアウトするソース（GitHub が代表的です — 単一のリポジトリ webhook 一つが `push`、`pull_request`、`workflow_run`、`check_suite` などを配信できます）にはノイズになります。webhook トリガーの**イベントフィルター（Event filters）**セクションを使うと、実際に実行をディスパッチするイベントを制限でき、それ以外のすべては `status = ignored`、`reason = event_filtered` で配信履歴に記録され、実行もイシューも作成されません。
+
+各行は 1 つのルールです。**イベント名（event name）**と、任意でカンマ区切りの **action** リストで構成されます。Multica は**いずれか 1 つ**の行でも一致すれば webhook を許可します。セクションを空のままにすると、すべてを受け付けます（フィルタリング以前の動作）。
+
+例:
+
+| イベント名     | Actions             | 一致対象                                                                  |
+| -------------- | ------------------- | ------------------------------------------------------------------------ |
+| `workflow_run` | `completed, failed` | `action: completed` または `action: failed` の `workflow_run` イベントのみ |
+| `workflow_run` | _(空)_              | action に関係なくすべての `workflow_run` イベント                          |
+| `push`         | _(空)_              | すべての `push` イベント                                                   |
+
+#### イベント名と action の出所
+
+Multica は次の順序でインバウンドリクエストから `event` 名と `action` を導き出します — **最初に一致したものが優先されます**。
+
+**1. 本文エンベロープ（Body envelope）。** 本文が文字列の `event` フィールドを持つ JSON オブジェクトであれば、その値がそのままイベント名になります。任意の `eventPayload` オブジェクトは、自身の `action` / `state` / `conclusion` / `status` フィールドから action 候補を提供します。
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'Content-Type: application/json' \
+  -d '{"event":"trigger","eventPayload":{"action":"true"}}'
+# inferred: event = trigger, action candidate = true
+```
+
+**2. ヘッダー（Headers）。** 本文エンベロープがない場合、Multica は次のよく知られたプロバイダーヘッダーを読みます。
+
+- `X-GitHub-Event: <event>` — （存在する場合）最上位の本文 `action` フィールドと組み合わされて `github.<event>.<action>` を形成します。
+- `X-Gitlab-Event: <event>` — `gitlab.<event>` になります。
+- `X-Event-Type: <event>` — そのまま通過します。
+
+```bash
+# GitHub-style: header gives the event name, body gives the action.
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-GitHub-Event: workflow_run' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"completed"}'
+# inferred: event = github.workflow_run.completed
+#        → matches a filter row of workflow_run / completed
+
+# Generic event-type header — no body fields needed.
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-Event-Type: trigger.true' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+# inferred: event = trigger.true → matches trigger / true
+```
+
+**3. 本文フォールバック（Body fallback）。** 本文エンベロープも既知のヘッダーもない場合、Multica は次の順序で最上位の本文文字列フィールドにフォールバックします: `event` → `type` → `action`。
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"trigger","action":"true"}'
+# inferred: event = trigger (from `type`), action candidate = true
+```
+
+**4. デフォルト（Default）。** 上記のいずれも一致しない場合、イベントは `webhook.received` で、action 候補はありません。
+
+**action 候補、全リスト。** イベントが決定されると、Multica は以下のすべての値を可能な action 一致対象として考慮します。
+
+- イベントが `provider.event.<action>` の形のときのイベント名のサフィックス（例: `github.workflow_run.completed` → `completed`）。
+- 本文フィールド `action`、`state`、`conclusion`、`status` — **JSON 文字列のときのみ該当します**。ブール値（`{"action": true}`）や数値は資格がないため、`event=trigger, action=true` を期待するフィルターは `{"trigger": true}` の本文とは決して一致しません。`true` は文字列ではなく bool だからです。
+
+**よくある落とし穴。** `Event name: trigger` / `Actions: true` のようなフィルター行は、「本文に `trigger: true` があれば発火せよ」という意味では**ありません** — イベントフィルターは任意の本文フィールドではなく、*推論されたイベントと action* に一致させます。これにヒットさせるには、`X-Event-Type` で `trigger.true` を送るか（または上に示した本文エンベロープを使ってください）。保存されたフィルター行の周囲の空白（`" workflow_run "`）はそのまま保存され、決して一致しないため — 保存する前に trim してください。
+
+#### クイックテスト
+
+フィルターを構成したら、`curl` で両方の分岐を確認できます。
+
+```bash
+# Allowed — header drives event=workflow_run, body drives action=completed
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-GitHub-Event: workflow_run' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"completed"}'
+# → 200 {"status":"accepted", ...}
+
+# Filtered — same event, action not in allowlist
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-GitHub-Event: workflow_run' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"in_progress"}'
+# → 200 {"status":"ignored","reason":"event_filtered"}
+```
+
+### URL は bearer secret です
+
+生成された URL **そのものが**認証情報です。それを持っている人は誰でもオートパイロットを発火できます。トークンのように扱ってください。
+
+- **公開のイシュースレッド、スクリーンショット、チャット履歴に貼り付けないでください。**
+- **漏洩したら交換してください** — トリガー行で「Rotate URL」をクリックするか、`multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>` を実行してください。古い URL はただちに動作を停止します。
+- 強力なソース認証が必要なソースの場合は、トリガーごとの HMAC 署名検証を待ってください。この v1 URL は bearer 方式のみをサポートします。
+- 現時点では、オートパイロットを閲覧できるワークスペースメンバーであればその webhook URL を読めます — 役割ごとのより厳格な secret の可視性は後続作業です。
+
+### ステータスコードの意味
+
+Multica は正常な no-op の結果に対して `status` フィールド付きで `200 OK` を返すため、プロバイダーの webhook 再試行メカニズムが URL を叩き続けることはありません。
+
+- `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}` — 実行がディスパッチされました。
+- `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}` — 割り当て先のランタイムがオフラインで、`skipped` の実行として記録されます。
+- `{"status":"ignored","reason":"trigger_disabled"}` — トリガーが無効になっています。
+- `{"status":"ignored","reason":"autopilot_paused"}` — オートパイロットが一時停止しています。
+- `{"status":"ignored","reason":"autopilot_archived"}` — オートパイロットがアーカイブされています。
+
+2xx 以外の応答は実際の失敗を扱います。
+
+- `400` — 無効な JSON、スカラー本文、空の本文。
+- `404` — 不明なトークン（`{"error":"webhook not found"}`）。
+- `413` — payload が 256 KiB を超えました。
+- `429` — トークンごとのレート制限超過（デフォルトは 60 req/min）。
+
+### セルフホスト: 公開 URL を構成する
+
+サーバーに `MULTICA_PUBLIC_URL` が設定されている場合（例: `https://multica.example.com`）、トリガー応答に絶対パスの `webhook_url` が含まれ、UI にはすぐにコピーできる URL が表示されます。設定しない場合、UI はクライアントの API origin から URL を構成します — デスクトップと同一オリジンの Web には問題ありませんが、カスタムのセルフホストリバースプロキシには適しません。Multica は、誤って構成されたリバースプロキシが攻撃者の制御するホストを指す webhook URL をサーバーに発行させて欺くことができないよう、`Host` / `X-Forwarded-Host` ヘッダーから公開ホストを導出しないよう意図的に設計されています。
+
+## 実行履歴を見る
+
+すべてのトリガーは**実行レコード（run record）**を生成し、オートパイロット詳細ページの「History」タブで確認できます。
+
+- トリガーソース（`schedule` / `manual` / `webhook`）
+- 開始時刻、完了時刻
+- ステータス（`issue_created` / `running` / `completed` / `failed` / `skipped`）
+- 連携したイシュー（イシュー作成モード）または `task`（実行専用モード）
+- 失敗理由（失敗またはスキップした場合）
+
+## オートパイロットが失敗したらどうなるか
+
+<Callout type="warning">
+**オートパイロットの失敗は自動的に再試行されず、インボックス通知も送られません。** 失敗は実行履歴に `failed` のエントリを残すだけで — 割り当てや @-メンションのようなシステムレベルの再キューイングもなく、誰にも通知が行きません。オートパイロットが定期的な場合、**次の cron 発火が新しい実行をトリガー**しますが、失敗した作業が自動的に再実行されることはありません。
+
+オートパイロットが重要な場合は、独自のモニタリングを設計してください — 例えば、エージェントに成功時にコメントを残させ、コメントの欠落に気づくことで失敗を検出する、といった具合です。
+</Callout>
+
+自動再試行がない理由: オートパイロットはすでに定期的であるため、システムレベルの再試行を追加すると次の予定実行の上に重なり、重複した実行を生み出します。スケジューリングを完全に cron に任せることで、すっきりと保てます。
+
+## まだ提供されていない機能
+
+**API 種類のトリガーはまだ接続されていません。** トリガースキーマは `api` 種類を予約していますが、それを発火させるイングレスルートはありません。UI は既存の行に Deprecated バッジを表示し、コピー / 交換の操作は提供しません。トリガーごとの HMAC 署名検証、IP 許可リスト、プロバイダー固有のイベントプリセットは後続作業として追跡されており、v1 URL は bearer 方式のみをサポートします。
+
+## 次へ
+
+- [**エージェントにイシューを割り当てる**](/assigning-issues) — イシューをエージェントに一回限りで引き渡す
+- [**コメントでエージェントを @-メンションする**](/mentioning-agents) — コメントからエージェントを呼んで一度見てもらう
+- [**チャット**](/chat) — イシューの外での一対一の会話

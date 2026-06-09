@@ -272,8 +272,6 @@
     "reply_count_other": "{{count}} 条回复",
     "leave_comment_placeholder": "留下评论...",
     "send_tooltip": "发送",
-    "expand_tooltip": "展开",
-    "collapse_tooltip": "收起",
     "resolve": {
       "resolve_action": "标记为已解决",
       "unresolve_action": "重新打开",
@@ -285,9 +283,7 @@
     }
   },
   "reply": {
-    "placeholder": "回复...",
-    "expand_tooltip": "展开",
-    "collapse_tooltip": "收起"
+    "placeholder": "回复..."
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体正在工作",

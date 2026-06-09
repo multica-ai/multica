@@ -1,6 +1,7 @@
 package service
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -70,12 +71,47 @@ func TestNewEmailService_TLSMode(t *testing.T) {
 	}
 }
 
+func TestNewEmailService_EHLOName(t *testing.T) {
+	tests := []struct {
+		name    string
+		ehloEnv string
+		want    string // when fromEnv is false, the os.Hostname() fallback is expected instead
+		fromEnv bool
+	}{
+		{"explicit name used verbatim", "mail.example.com", "mail.example.com", true},
+		{"explicit name is trimmed", "  mail.example.com  ", "mail.example.com", true},
+		{"unset falls back to hostname", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Isolate from ambient mail config so only SMTP_EHLO_NAME drives the result.
+			t.Setenv("RESEND_API_KEY", "")
+			t.Setenv("SMTP_HOST", "smtp.example.com")
+			t.Setenv("SMTP_EHLO_NAME", tt.ehloEnv)
+
+			s := NewEmailService()
+			if tt.fromEnv {
+				if s.smtpEHLOName != tt.want {
+					t.Errorf("SMTP_EHLO_NAME=%q: smtpEHLOName = %q, want %q", tt.ehloEnv, s.smtpEHLOName, tt.want)
+				}
+				return
+			}
+			// Unset: must mirror os.Hostname() exactly — including the empty result if
+			// Hostname() errors, which makes sendSMTP skip the EHLO override.
+			want, _ := os.Hostname()
+			if s.smtpEHLOName != want {
+				t.Errorf("SMTP_EHLO_NAME unset: smtpEHLOName = %q, want os.Hostname() %q", s.smtpEHLOName, want)
+			}
+		})
+	}
+}
+
 func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 	tests := []struct {
-		name        string
-		inviter     string
-		workspace   string
-		wantInBody  []string
+		name          string
+		inviter       string
+		workspace     string
+		wantInBody    []string
 		wantNotInBody []string
 	}{
 		{
