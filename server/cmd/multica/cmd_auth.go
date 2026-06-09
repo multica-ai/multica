@@ -308,7 +308,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	}
-	if err := patClient.GetJSON(ctx, "/api/me", &me); err != nil {
+	if err := patClient.GetJSON(ctx, "/api/auth/me", &me); err != nil {
 		return fmt.Errorf("token verification failed: %w", err)
 	}
 
@@ -361,7 +361,7 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	}
-	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
+	if err := client.GetJSON(ctx, "/api/auth/me", &me); err != nil {
 		return fmt.Errorf("invalid token: %w", err)
 	}
 
@@ -397,7 +397,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	}
-	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
+	if err := client.GetJSON(ctx, "/api/auth/me", &me); err != nil {
 		fmt.Fprintf(os.Stderr, "Token is invalid or expired: %v\nRun 'multica login' to re-authenticate.\n", err)
 		return nil
 	}
