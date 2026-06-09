@@ -345,9 +345,25 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	runCtx, cancel := context.WithTimeout(parent, cfg.TaskTimeout)
 	defer cancel()
 	meta := GatewayRequestMeta{
-		TaskID:      taskID,
-		AgentID:     util.UUIDToString(task.AgentID),
-		WorkspaceID: util.UUIDToString(plan.workspaceID),
+		TaskID:         taskID,
+		AgentID:        util.UUIDToString(task.AgentID),
+		AgentName:      agent.Name,
+		WorkspaceID:    util.UUIDToString(plan.workspaceID),
+		IssueID:        plan.context.issueID,
+		IssueTitle:     plan.context.issueTitle,
+		ProjectID:      plan.context.projectID,
+		ProjectName:    plan.context.projectName,
+		Surface:        plan.context.surface,
+		AutopilotID:    plan.context.autopilotID,
+		CaptureContent: true,
+	}
+	// The human who triggered the run (best-effort): forwarded so the registry
+	// can attribute gateway calls to a person, not just the agent UUID.
+	if task.OriginalUserID.Valid {
+		meta.TriggerUserID = util.UUIDToString(task.OriginalUserID)
+		if u, err := e.queries.GetUser(parent, task.OriginalUserID); err == nil {
+			meta.TriggerUserName = u.Name
+		}
 	}
 	var completion GatewayCompletion
 	if e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID) {
@@ -401,6 +417,21 @@ type taskPlan struct {
 	// start prompt instead of leaving the agent to fetch them — the input to the
 	// snapshot_prompt / bundled_read cost measurements (FIR-2325).
 	inlinedContextReads int
+	// context is the human-readable run context (surface, issue, project)
+	// forwarded to the registry AI-gateway so each logged call is attributable.
+	context gatewayContext
+}
+
+// gatewayContext is the best-effort, human-readable context for a gateway run.
+// Empty fields are simply not sent; the registry stores null and its UI falls
+// back to the ID column.
+type gatewayContext struct {
+	surface     string // chat | issue | autopilot
+	issueID     string
+	issueTitle  string
+	projectID   string
+	projectName string
+	autopilotID string
 }
 
 func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.AgentTaskQueue, agent db.Agent) (taskPlan, error) {
@@ -424,6 +455,7 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			emptyMessageError: "chat task has no user message to answer",
 			// Chat history is inlined; a daemon agent would list it itself.
 			inlinedContextReads: 1,
+			context:             gatewayContext{surface: "chat"},
 		}, nil
 
 	case task.IssueID.Valid:
@@ -453,6 +485,17 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			inlinedReads = 3
 		}
 		wsCtx := gatewayLoadWorkspaceContext(ctx, e.queries, issue.WorkspaceID)
+		issueCtx := gatewayContext{
+			surface:    "issue",
+			issueID:    util.UUIDToString(issue.ID),
+			issueTitle: issue.Title,
+		}
+		if issue.ProjectID.Valid {
+			issueCtx.projectID = util.UUIDToString(issue.ProjectID)
+			if project, err := e.queries.GetProject(ctx, issue.ProjectID); err == nil {
+				issueCtx.projectName = project.Title
+			}
+		}
 		return taskPlan{
 			workspaceID:      issue.WorkspaceID,
 			workspaceContext: wsCtx,
@@ -461,6 +504,7 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			},
 			emptyMessageError:   "issue task has no user message to answer",
 			inlinedContextReads: inlinedReads,
+			context:             issueCtx,
 		}, nil
 
 	case task.AutopilotRunID.Valid:
@@ -473,6 +517,17 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			return taskPlan{}, fmt.Errorf("failed to load autopilot: %w", err)
 		}
 		wsCtx := gatewayLoadWorkspaceContext(ctx, e.queries, ap.WorkspaceID)
+		apCtx := gatewayContext{
+			surface:     "autopilot",
+			issueTitle:  ap.Title,
+			autopilotID: util.UUIDToString(ap.ID),
+		}
+		if ap.ProjectID.Valid {
+			apCtx.projectID = util.UUIDToString(ap.ProjectID)
+			if project, err := e.queries.GetProject(ctx, ap.ProjectID); err == nil {
+				apCtx.projectName = project.Title
+			}
+		}
 		return taskPlan{
 			workspaceID:      ap.WorkspaceID,
 			workspaceContext: wsCtx,
@@ -480,6 +535,7 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 				return buildGatewayAutopilotMessages(agent, wsCtx, ap)
 			},
 			emptyMessageError: "autopilot run has no prompt to answer",
+			context:           apCtx,
 		}, nil
 
 	default:

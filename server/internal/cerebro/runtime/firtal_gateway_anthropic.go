@@ -193,15 +193,7 @@ func (c *GatewayClient) completeAnthropic(
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Skill", "multica-server-runtime")
 	req.Header.Set("X-Tags", "multica,cerebro,server-runtime,anthropic")
-	if meta.TaskID != "" {
-		req.Header.Set("X-Session-ID", meta.TaskID)
-	}
-	if meta.AgentID != "" {
-		req.Header.Set("X-User-ID", meta.AgentID)
-	}
-	if meta.WorkspaceID != "" {
-		req.Header.Set("X-Workspace-ID", meta.WorkspaceID)
-	}
+	meta.applyContextHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

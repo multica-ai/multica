@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/firtalgateway"
@@ -88,10 +89,62 @@ type GatewayCompletion struct {
 	PromptInputChars int64
 }
 
+// GatewayRequestMeta is the run context forwarded to the registry AI-gateway on
+// every call so each logged request carries who/what/which-issue (not bare
+// UUIDs) and, when CaptureContent is set, the full prompt + tool calls +
+// response. Free-text fields (names, titles) are URL-encoded into headers so
+// non-ASCII (Danish æøå, emoji) survives the latin-1 HTTP header transport; the
+// registry decodes them with decodeURIComponent.
 type GatewayRequestMeta struct {
-	TaskID      string
-	AgentID     string
-	WorkspaceID string
+	TaskID          string
+	AgentID         string
+	AgentName       string
+	WorkspaceID     string
+	IssueID         string
+	IssueTitle      string
+	ProjectID       string
+	ProjectName     string
+	TriggerUserID   string
+	TriggerUserName string
+	Surface         string // chat | issue | autopilot
+	AutopilotID     string
+	// CaptureContent asks the registry to persist the full prompt/response/tool
+	// content for this call (not just token counts + a hash).
+	CaptureContent bool
+}
+
+// applyContextHeaders attaches the run identity + content-capture signal to a
+// gateway request. ID/enum fields go verbatim (ASCII); human-readable
+// free-text fields are URL-encoded so arbitrary Unicode survives HTTP headers.
+func (m GatewayRequestMeta) applyContextHeaders(req *http.Request) {
+	setRaw := func(key, val string) {
+		if val != "" {
+			req.Header.Set(key, val)
+		}
+	}
+	setText := func(key, val string) {
+		if val != "" {
+			req.Header.Set(key, url.QueryEscape(val))
+		}
+	}
+	setRaw("X-Session-ID", m.TaskID)
+	setRaw("X-Agent-ID", m.AgentID)
+	// X-User-ID stays the agent UUID for backward-compatible session/skill
+	// attribution; the human who triggered the run is X-Trigger-User-ID.
+	setRaw("X-User-ID", m.AgentID)
+	setText("X-Agent-Name", m.AgentName)
+	setRaw("X-Workspace-ID", m.WorkspaceID)
+	setRaw("X-Issue-ID", m.IssueID)
+	setText("X-Issue-Title", m.IssueTitle)
+	setRaw("X-Project-ID", m.ProjectID)
+	setText("X-Project-Name", m.ProjectName)
+	setRaw("X-Trigger-User-ID", m.TriggerUserID)
+	setText("X-Trigger-User-Name", m.TriggerUserName)
+	setRaw("X-Surface", m.Surface)
+	setRaw("X-Autopilot-ID", m.AutopilotID)
+	if m.CaptureContent {
+		req.Header.Set("X-Capture-Content", "full")
+	}
 }
 
 type GatewayClient struct {
@@ -177,15 +230,7 @@ func (c *GatewayClient) completeChat(ctx context.Context, model string, messages
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Skill", "multica-server-runtime")
 	req.Header.Set("X-Tags", "multica,cerebro,server-runtime")
-	if meta.TaskID != "" {
-		req.Header.Set("X-Session-ID", meta.TaskID)
-	}
-	if meta.AgentID != "" {
-		req.Header.Set("X-User-ID", meta.AgentID)
-	}
-	if meta.WorkspaceID != "" {
-		req.Header.Set("X-Workspace-ID", meta.WorkspaceID)
-	}
+	meta.applyContextHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
