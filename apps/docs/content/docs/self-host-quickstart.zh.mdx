@@ -162,6 +162,10 @@ multica setup self-host \
   --app-url https://<你的域名>
 ```
 
+<Callout type="info">
+更习惯用环境变量？省略对应 flag 时，`setup self-host` 会读取 `MULTICA_SERVER_URL` 和 `MULTICA_APP_URL`（同时设置时 flag 优先）。`MULTICA_SERVER_URL` 也接受[环境变量](/environment-variables)里那种 `ws://…/ws` 的 daemon 写法，并自动归一化为 HTTP 地址。
+</Callout>
+
 最小可用的 Caddyfile，单域名同时挂前后端（带 WebSocket 转发，daemon 和网页端都依赖）：
 
 ```nginx

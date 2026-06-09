@@ -2104,7 +2104,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if msg.Input != nil {
 			inputJSON, _ = json.Marshal(msg.Input)
 		}
-		h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
+		created, createErr := h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
 			TaskID:  parseUUID(taskID),
 			Seq:     int32(msg.Seq),
 			Type:    msg.Type,
@@ -2113,22 +2113,54 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			Input:   inputJSON,
 			Output:  pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
 		})
+		if createErr != nil {
+			slog.Error("failed to create task message", "task_id", taskID, "seq", msg.Seq, "error", createErr)
+			writeError(w, http.StatusInternalServerError, "failed to persist task message")
+			return
+		}
 
 		if workspaceID != "" {
+			createdAt := ""
+			if created.CreatedAt.Valid {
+				createdAt = created.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+			}
 			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
-				TaskID:  taskID,
-				IssueID: uuidToString(task.IssueID),
-				Seq:     msg.Seq,
-				Type:    msg.Type,
-				Tool:    msg.Tool,
-				Content: msg.Content,
-				Input:   msg.Input,
-				Output:  msg.Output,
+				TaskID:    taskID,
+				IssueID:   uuidToString(task.IssueID),
+				Seq:       msg.Seq,
+				Type:      msg.Type,
+				Tool:      msg.Tool,
+				Content:   msg.Content,
+				Input:     msg.Input,
+				Output:    msg.Output,
+				CreatedAt: createdAt,
 			})
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.TaskMessagePayload {
+	var input map[string]any
+	if m.Input != nil {
+		json.Unmarshal(m.Input, &input)
+	}
+	createdAt := ""
+	if m.CreatedAt.Valid {
+		createdAt = m.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return protocol.TaskMessagePayload{
+		TaskID:    taskID,
+		IssueID:   issueID,
+		Seq:       int(m.Seq),
+		Type:      m.Type,
+		Tool:      m.Tool.String,
+		Content:   m.Content.String,
+		Input:     input,
+		Output:    m.Output.String,
+		CreatedAt: createdAt,
+	}
 }
 
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).
@@ -2167,20 +2199,7 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
-		var input map[string]any
-		if m.Input != nil {
-			json.Unmarshal(m.Input, &input)
-		}
-		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
-		}
+		resp[i] = taskMessageToPayload(m, taskID, issueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2310,20 +2329,7 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
-		var input map[string]any
-		if m.Input != nil {
-			json.Unmarshal(m.Input, &input)
-		}
-		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
-		}
+		resp[i] = taskMessageToPayload(m, taskID, issueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

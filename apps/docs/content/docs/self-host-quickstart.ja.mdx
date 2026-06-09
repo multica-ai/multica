@@ -162,6 +162,10 @@ multica setup self-host \
   --app-url https://<your-domain>
 ```
 
+<Callout type="info">
+フラグより環境変数を使いたい場合は、対応するフラグを省略すると `setup self-host` が `MULTICA_SERVER_URL` と `MULTICA_APP_URL` を読み取ります（両方設定した場合はフラグが優先されます）。`MULTICA_SERVER_URL` は[環境変数](/environment-variables)で示される `ws://…/ws` というデーモン形式も受け付け、HTTP ベース URL に正規化します。
+</Callout>
+
 単一のホスト名でフロントエンドとバックエンドの両方を前段に置く（デーモンと Web アプリの両方に必要な WebSocket サポートを含む）最小限の Caddyfile は次のとおりです。
 
 ```nginx

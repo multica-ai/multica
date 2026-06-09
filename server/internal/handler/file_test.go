@@ -22,7 +22,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -435,8 +434,13 @@ func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.R
 }
 
 func newDownloadRouter() http.Handler {
+	// Mirrors the production router after MUL-3130: the download
+	// route is registered under Auth-only with no
+	// RequireWorkspaceMember wrapper. The handler self-resolves the
+	// workspace from the attachment row and enforces membership
+	// internally, so a native browser <img>/<video> resource load
+	// with no X-Workspace-* headers is the supported call shape.
 	r := chi.NewRouter()
-	r.Use(middleware.RequireWorkspaceMember(testHandler.Queries))
 	r.Get("/api/attachments/{id}/download", testHandler.DownloadAttachment)
 	return r
 }
@@ -556,21 +560,111 @@ func TestDownloadAttachment_BareNavigationWithWorkspaceSlugQueryPassesMiddleware
 	}
 }
 
-func TestDownloadAttachment_BareNavigationWithoutWorkspaceQueryFailsMiddleware(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/attachments/00000000-0000-0000-0000-000000000001/download", nil)
+// TestDownloadAttachment_BareNavigationServesMemberWithoutWorkspaceHeaders
+// is the regression test for MUL-3130: a markdown image rendered as
+// `<img src="/api/attachments/<id>/download">` produces a native browser
+// resource load that cannot attach X-Workspace-Slug / X-Workspace-ID
+// headers. After the fix the handler self-resolves the workspace from
+// the attachment row, so a bare URL succeeds for a workspace member.
+func TestDownloadAttachment_BareNavigationServesMemberWithoutWorkspaceHeaders(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "proxy"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	key := "downloads/bare-nav.txt"
+	body := []byte("download body")
+	store.put(key, body)
+	id := seedAttachmentURL(t, "https://s3.example.com/test-bucket/"+key, "bare-nav.txt", "text/plain", int64(len(body)))
+
+	// Bare URL — no workspace_slug / workspace_id query, no
+	// X-Workspace-* headers. This is what a browser <img> tag emits
+	// when the markdown stores `/api/attachments/<id>/download`.
+	req := httptest.NewRequest("GET", "/api/attachments/"+id+"/download", nil)
 	req.Header.Set("X-User-ID", testUserID)
 	w := httptest.NewRecorder()
 
 	newDownloadRouter().ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "workspace_id or workspace_slug is required") {
-		t.Fatalf("body = %q, want workspace identifier error", w.Body.String())
+	if got := w.Body.String(); got != string(body) {
+		t.Fatalf("body = %q, want %q", got, body)
 	}
 	if req.Header.Get("X-Workspace-ID") != "" || req.Header.Get("X-Workspace-Slug") != "" {
 		t.Fatalf("bare navigation test must not set custom workspace headers")
+	}
+}
+
+// TestDownloadAttachment_BareNavigationDeniesNonMemberWith404 covers the
+// IDOR boundary: a stray attachment ID belonging to a workspace the
+// requester is NOT a member of must return 404, not 200 (would leak
+// bytes) and not 403 (would confirm the ID exists). Mirrors
+// ServeLocalUpload's deny shape.
+func TestDownloadAttachment_BareNavigationDeniesNonMemberWith404(t *testing.T) {
+	if testPool == nil {
+		t.Skip("test database not available")
+	}
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "proxy"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	// Seed an attachment that lives in a workspace testUserID is NOT
+	// a member of. The workspace row has to exist so the FK on
+	// attachment.workspace_id resolves; we tear both down on
+	// cleanup.
+	ctx := context.Background()
+	var foreignWorkspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ('Bare-Nav Foreign', 'bare-nav-foreign', '', 'BNF')
+		RETURNING id::text
+	`).Scan(&foreignWorkspaceID); err != nil {
+		t.Fatalf("seed foreign workspace: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID) })
+
+	key := "downloads/bare-nav-foreign.txt"
+	store.put(key, []byte("foreign-body"))
+	var id string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, $3, $4, $5, $6)
+		RETURNING id::text
+	`, foreignWorkspaceID, testUserID, "foreign.txt", "https://s3.example.com/test-bucket/"+key, "text/plain", 12).Scan(&id); err != nil {
+		t.Fatalf("seed foreign attachment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM attachment WHERE id = $1`, id) })
+
+	req := httptest.NewRequest("GET", "/api/attachments/"+id+"/download", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+
+	newDownloadRouter().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for non-member; body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "foreign-body") {
+		t.Fatalf("response body leaked file contents: %q", w.Body.String())
 	}
 }
 

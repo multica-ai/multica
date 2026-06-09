@@ -118,6 +118,39 @@ func (e *NetworkError) Error() string {
 
 func (e *NetworkError) Unwrap() error { return e.Err }
 
+// UserMessageError attaches a command-specific, user-facing message to an
+// underlying error. FormatError shows Msg verbatim (in preference to the
+// generic kind-based copy it would otherwise derive from a wrapped
+// *NetworkError / *HTTPError), so command-level guidance — e.g. a `multica
+// login` failure that is more helpful than the generic 401/timeout line — is
+// visible in the default (non-debug) output.
+//
+// It preserves Unwrap(), so ExitCodeFor still classifies by the underlying
+// typed error and --debug still prints the full original chain.
+type UserMessageError struct {
+	Msg string
+	Err error
+}
+
+func (e *UserMessageError) Error() string {
+	if e.Err != nil {
+		return e.Msg + ": " + e.Err.Error()
+	}
+	return e.Msg
+}
+
+func (e *UserMessageError) Unwrap() error { return e.Err }
+
+// WithUserMessage wraps err with a user-facing message that FormatError will
+// surface by default. It returns nil when err is nil so it can be used inline
+// in a `return` without an extra check.
+func WithUserMessage(msg string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &UserMessageError{Msg: msg, Err: err}
+}
+
 // Kind maps an HTTPError's status code onto an ErrorKind.
 func (e *HTTPError) Kind() ErrorKind {
 	switch e.StatusCode {
@@ -339,6 +372,15 @@ func FormatError(err error, debug bool) string {
 
 // userMessage produces the friendly message for the root cause of err.
 func userMessage(err error, lang Language) string {
+	// A command-supplied user-facing message takes precedence over the generic
+	// kind-based copy, so command-specific guidance (e.g. sign-in failures) is
+	// visible by default. Unwrap() is preserved, so ExitCodeFor and --debug
+	// still see the underlying typed error.
+	var um *UserMessageError
+	if errors.As(err, &um) {
+		return um.Msg
+	}
+
 	// Transport-layer failure.
 	var netErr *NetworkError
 	if errors.As(err, &netErr) {

@@ -164,7 +164,14 @@ export async function uploadAndInsertFile(
         if (imagePos !== null && imageNode) {
           const tr = editor.state.tr.setNodeMarkup(imagePos, undefined, {
             ...imageNode.attrs,
-            src: result.link,
+            // Persist the stable per-attachment URL into markdown so
+            // the comment doesn't capture a short-lived signed URL
+            // (MUL-3130). Falls back to `link` for the no-workspace
+            // avatar branch where there's no attachment-row id; that
+            // path is unreachable from comment/issue editors but the
+            // fallback keeps the contract consistent for any caller
+            // that drops in without an issue context.
+            src: result.markdownLink || result.link,
             alt: result.filename,
             uploading: false,
           });
@@ -192,7 +199,7 @@ export async function uploadAndInsertFile(
     try {
       const result = await handler(file);
       if (result) {
-        finalizeFileCard(editor, uploadId, result.link);
+        finalizeFileCard(editor, uploadId, result.markdownLink || result.link);
       } else {
         removeUploadingFileCard(editor, uploadId);
       }

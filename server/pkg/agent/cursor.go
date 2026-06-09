@@ -39,7 +39,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
-	cmd.WaitDelay = 20 * time.Second
+	cmd.WaitDelay = 500 * time.Millisecond
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -78,6 +78,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		resultSeen := false
 		// stepUsage accumulates per-step token counts from "step_finish" events.
 		// resultUsage holds authoritative session totals from "result" events.
 		// If the result event includes usage, we use resultUsage exclusively;
@@ -140,6 +141,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				})
 
 			case "result":
+				resultSeen = true
 				if evt.IsError || evt.Subtype == "error" {
 					finalStatus = "failed"
 					finalError = cursorErrorText(&evt)
@@ -151,6 +153,10 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.Usage != nil {
 					hasResultUsage = true
 				}
+				// Current Cursor Agent versions can emit the terminal result
+				// event but keep a worker process alive. Treat result as the
+				// protocol boundary so the daemon can report completion.
+				cancel()
 
 			case "error":
 				errMsg := cursorErrorText(&evt)
@@ -198,10 +204,10 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf("cursor-agent timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
+		} else if runCtx.Err() == context.Canceled && !resultSeen {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" {
+		} else if exitErr != nil && finalStatus == "completed" && !resultSeen {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("cursor-agent exited with error: %v", exitErr)
 		}

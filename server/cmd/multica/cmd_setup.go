@@ -60,8 +60,8 @@ Examples:
 }
 
 func init() {
-	setupSelfHostCmd.Flags().String("server-url", "", "Backend server URL (e.g. https://api.internal.co)")
-	setupSelfHostCmd.Flags().String("app-url", "", "Frontend app URL (e.g. https://app.internal.co)")
+	setupSelfHostCmd.Flags().String("server-url", "", "Backend server URL (e.g. https://api.internal.co) (env: MULTICA_SERVER_URL)")
+	setupSelfHostCmd.Flags().String("app-url", "", "Frontend app URL (e.g. https://app.internal.co) (env: MULTICA_APP_URL)")
 	setupSelfHostCmd.Flags().Int("port", 8080, "Backend server port (used when --server-url is not set)")
 	setupSelfHostCmd.Flags().Int("frontend-port", 3000, "Frontend port (used when --app-url is not set)")
 	setupSelfHostCmd.Flags().String(callbackHostFlag, "", "Host the OAuth callback URL points at (auto-detected when empty). Use this for reverse-proxy / FQDN setups.")
@@ -162,16 +162,16 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	serverURL, _ := cmd.Flags().GetString("server-url")
-	appURL, _ := cmd.Flags().GetString("app-url")
-	port, _ := cmd.Flags().GetInt("port")
+	// Honor MULTICA_SERVER_URL / MULTICA_APP_URL when the matching flag is not
+	// set — consistent with the rest of the CLI (resolveServerURL) and with the
+	// env vars documented on the root --server-url flag and in `multica --help`.
+	// Before this, setup self-host read only the flags, so a self-hoster who set
+	// MULTICA_SERVER_URL still got the localhost default and an "unreachable"
+	// error (GitHub #3912).
+	serverURL, userProvidedServerURL := resolveSelfHostServerURL(cmd)
+	appURL := cli.FlagOrEnv(cmd, "app-url", "MULTICA_APP_URL", "")
 	frontendPort, _ := cmd.Flags().GetInt("frontend-port")
-	userProvidedServerURL := serverURL != ""
 
-	// If custom URLs provided, use them; otherwise default to localhost with ports.
-	if serverURL == "" {
-		serverURL = fmt.Sprintf("http://localhost:%d", port)
-	}
 	if appURL == "" {
 		if userProvidedServerURL && !serverHostIsLocal(serverURL) {
 			// We can't guess the frontend URL for a remote server: api.x.co
@@ -244,6 +244,26 @@ func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, probe f
 		return false, err
 	}
 	return true, nil
+}
+
+// resolveSelfHostServerURL picks the backend URL for `setup self-host`: the
+// --server-url flag wins, then the MULTICA_SERVER_URL env var (consistent with
+// the rest of the CLI and the env var documented on the root flag), then the
+// localhost default built from --port. userProvided is true when the URL came
+// from the user (flag or env) rather than the localhost fallback — the caller
+// uses it to decide whether a remote host needs an explicit app_url.
+//
+// A user-supplied URL is run through normalizeAPIBaseURL, the same path
+// resolveServerURL uses: MULTICA_SERVER_URL is documented as a ws:// daemon
+// address (e.g. ws://localhost:8080/ws), so the ws/wss form and a trailing /ws
+// are accepted and converted to the http(s) base that the reachability probe
+// and the stored server_url expect.
+func resolveSelfHostServerURL(cmd *cobra.Command) (serverURL string, userProvided bool) {
+	if v := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", ""); v != "" {
+		return normalizeAPIBaseURL(v), true
+	}
+	port, _ := cmd.Flags().GetInt("port")
+	return fmt.Sprintf("http://localhost:%d", port), false
 }
 
 // serverHostIsLocal reports whether serverURL points at the same machine as

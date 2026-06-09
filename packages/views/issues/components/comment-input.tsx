@@ -7,6 +7,7 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -68,9 +69,12 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
-    // Only send attachment IDs for uploads still present in the content.
+    // Track every attachment whose stable download URL OR legacy
+    // storage URL is referenced in the markdown body. Both shapes
+    // can appear in the same comment during the MUL-3130 rollout —
+    // see contentReferencesAttachment for the rationale.
     const activeIds = pendingAttachments
-      .filter((a) => content.includes(a.url))
+      .filter((a) => contentReferencesAttachment(content, a))
       .map((a) => a.id);
     setSubmitting(true);
     try {

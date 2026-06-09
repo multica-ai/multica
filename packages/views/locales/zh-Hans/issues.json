@@ -273,10 +273,14 @@
     "leave_comment_placeholder": "留下评论...",
     "send_tooltip": "发送",
     "resolve": {
-      "resolve_action": "标记为已解决",
+      "resolve_thread_action": "解决该讨论",
+      "unresolve_thread_action": "重新打开讨论",
+      "resolve_with_comment_action": "以此评论解决讨论",
       "unresolve_action": "重新打开",
+      "resolution_badge": "结论",
       "collapse": "收起",
       "bar_other": "来自 {{authors}} 的 {{count}} 条已解决评论",
+      "fold_other": "来自 {{authors}} 的 {{count}} 条评论",
       "bar_authors_more_other": "{{names}} 等 {{count}} 人",
       "resolve_failed": "标记已解决失败",
       "unresolve_failed": "重新打开失败"

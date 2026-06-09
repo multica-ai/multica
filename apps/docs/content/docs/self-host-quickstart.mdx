@@ -163,6 +163,10 @@ multica setup self-host \
   --app-url https://<your-domain>
 ```
 
+<Callout type="info">
+Prefer environment variables over flags? `setup self-host` reads `MULTICA_SERVER_URL` and `MULTICA_APP_URL` when the matching flag is omitted — a flag still takes precedence over the env var. `MULTICA_SERVER_URL` also accepts the `ws://…/ws` daemon form from [Environment variables](/environment-variables) and normalizes it to the HTTP base.
+</Callout>
+
 A minimal Caddyfile that fronts both the frontend and the backend (with WebSocket support, which the daemon and the web app both need) on a single hostname:
 
 ```nginx

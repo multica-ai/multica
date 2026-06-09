@@ -110,7 +110,7 @@ function normalize(
     return {
       filename: input.attachment.filename,
       contentType: input.attachment.content_type,
-      url: input.attachment.url,
+      url: pickInlineMediaURL(input.attachment, input.attachment.url),
       attachmentId: input.attachment.id,
       record: input.attachment,
       uploading: false,
@@ -120,13 +120,66 @@ function normalize(
   return {
     filename: input.filename || record?.filename || "",
     contentType: input.contentType || record?.content_type || "",
-    url: input.url,
+    // When the markdown URL resolved to an attachment record, swap to
+    // the record's freshly-loadable URL. The persisted markdown URL
+    // (`/api/attachments/<id>/download` for new content; raw stored URL
+    // for legacy) is correct as a stable reference but doesn't
+    // necessarily load as a native <img>/<video> resource for every
+    // client — token-mode clients can't attach an Authorization header
+    // to bare /api/* fetches, and a CloudFront-signed `download_url`
+    // is the only working media src in that mode. `pickInlineMediaURL`
+    // picks the URL with embedded credentials when one exists and
+    // falls back to the input URL otherwise so legacy / unresolved
+    // markdown stays on its existing path. See MUL-3130 review.
+    url: record ? pickInlineMediaURL(record, input.url) : input.url,
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
     width: input.width,
     height: input.height,
   };
+}
+
+// pickInlineMediaURL returns the URL most likely to load successfully
+// inside a native <img>/<video>/<iframe> resource fetch — i.e. without
+// the calling client attaching an Authorization header.
+//
+// The metadata response from the backend offers two URL fields per
+// attachment row:
+//
+//   - `record.url`         — for LocalStorage this is a freshly-signed
+//                             `/uploads/<key>?exp=<unix>&sig=<HMAC>`
+//                             URL whose query string IS the auth (works
+//                             for token-mode <img> loads). For S3/
+//                             CloudFront it's the raw stored URL with
+//                             no signature.
+//   - `record.download_url` — `/api/attachments/<id>/download` in the
+//                             default proxy/presign mode (requires
+//                             cookie or Authorization header — does
+//                             NOT work as a native resource load for
+//                             token-mode clients). In CloudFront mode
+//                             this is replaced server-side with a
+//                             CloudFront-signed URL that DOES work as
+//                             a native <img> src.
+//
+// Heuristic: when `download_url` is an absolute URL with a recognised
+// CDN signature query (`Signature` / `Expires` / `Key-Pair-Id` for
+// CloudFront, `X-Amz-Signature` / `X-Amz-Expires` for raw S3 presigns
+// that may surface here in future modes), use it. Otherwise use
+// `record.url`, which carries the LocalStorage `?exp&sig` token and is
+// the only inline-loadable URL in that backend. Falls back to the
+// input URL when neither is usable so legacy markdown links keep their
+// pre-fix behaviour.
+function pickInlineMediaURL(record: AttachmentRecord, fallback: string): string {
+  const dl = record.download_url ?? "";
+  if (
+    /^https?:\/\//i.test(dl) &&
+    /[?&](Signature|X-Amz-Signature|Key-Pair-Id|Expires|X-Amz-Expires)=/i.test(dl)
+  ) {
+    return dl;
+  }
+  if (record.url) return record.url;
+  return fallback;
 }
 
 // ---------------------------------------------------------------------------

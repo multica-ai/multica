@@ -40,14 +40,15 @@ type TaskCompletedPayload struct {
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
 type TaskMessagePayload struct {
-	TaskID  string         `json:"task_id"`
-	IssueID string         `json:"issue_id,omitempty"`
-	Seq     int            `json:"seq"`
-	Type    string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
-	Tool    string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
-	Content string         `json:"content,omitempty"` // text content
-	Input   map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
-	Output  string         `json:"output,omitempty"`  // tool output (tool_result only)
+	TaskID    string         `json:"task_id"`
+	IssueID   string         `json:"issue_id,omitempty"`
+	Seq       int            `json:"seq"`
+	Type      string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
+	Tool      string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
+	Content   string         `json:"content,omitempty"` // text content
+	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
+	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)
+	CreatedAt string         `json:"created_at,omitempty"`
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.

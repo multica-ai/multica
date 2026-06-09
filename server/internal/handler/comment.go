@@ -1395,11 +1395,14 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// loadRootCommentForActor resolves a {commentId} URL param to a root comment in
-// the caller's workspace. Returns the comment, the workspace UUID, the actor
+// loadCommentForActor resolves a {commentId} URL param to a comment in the
+// caller's workspace. Returns the comment, the workspace UUID, the actor
 // identity, and ok. Resolve / unresolve handlers share this scaffolding so the
-// "must be a root comment" rule lives in one place.
-func (h *Handler) loadRootCommentForActor(w http.ResponseWriter, r *http.Request) (db.Comment, string, string, string, bool) {
+// workspace membership + tenant guard stay identical. Any comment (root or
+// reply) may be resolved: resolving a root collapses the whole thread; resolving
+// a reply marks it as the thread's resolution. Which one is the thread's
+// resolution is a pure frontend derivation, so the backend stays a plain setter.
+func (h *Handler) loadCommentForActor(w http.ResponseWriter, r *http.Request) (db.Comment, string, string, string, bool) {
 	commentId := chi.URLParam(r, "commentId")
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -1425,16 +1428,12 @@ func (h *Handler) loadRootCommentForActor(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, "comment not found")
 		return db.Comment{}, "", "", "", false
 	}
-	if comment.ParentID.Valid {
-		writeError(w, http.StatusBadRequest, "only root comments can be resolved")
-		return db.Comment{}, "", "", "", false
-	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	return comment, workspaceID, actorType, actorID, true
 }
 
 func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {
-	comment, workspaceID, actorType, actorID, ok := h.loadRootCommentForActor(w, r)
+	comment, workspaceID, actorType, actorID, ok := h.loadCommentForActor(w, r)
 	if !ok {
 		return
 	}
@@ -1471,7 +1470,7 @@ func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
-	comment, workspaceID, actorType, actorID, ok := h.loadRootCommentForActor(w, r)
+	comment, workspaceID, actorType, actorID, ok := h.loadCommentForActor(w, r)
 	if !ok {
 		return
 	}

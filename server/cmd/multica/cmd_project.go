@@ -95,6 +95,18 @@ var validProjectStatuses = []string{
 	"planned", "in_progress", "paused", "completed", "cancelled",
 }
 
+// validateProjectStatus rejects unknown statuses client-side so a typo fails
+// fast with the valid list instead of a server round-trip and a 400. Shared by
+// `project create`, `project update`, and `project status`.
+func validateProjectStatus(status string) error {
+	for _, s := range validProjectStatuses {
+		if s == status {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validProjectStatuses, ", "))
+}
+
 func init() {
 	projectCmd.AddCommand(projectListCmd)
 	projectCmd.AddCommand(projectGetCmd)
@@ -303,6 +315,9 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		body["description"] = v
 	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
+		if err := validateProjectStatus(v); err != nil {
+			return err
+		}
 		body["status"] = v
 	}
 	if v, _ := cmd.Flags().GetString("icon"); v != "" {
@@ -383,6 +398,9 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")
+		if err := validateProjectStatus(v); err != nil {
+			return err
+		}
 		body["status"] = v
 	}
 	if cmd.Flags().Changed("icon") {
@@ -449,15 +467,8 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
 
-	valid := false
-	for _, s := range validProjectStatuses {
-		if s == status {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validProjectStatuses, ", "))
+	if err := validateProjectStatus(status); err != nil {
+		return err
 	}
 
 	client, err := newAPIClient(cmd)

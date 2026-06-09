@@ -162,6 +162,10 @@ multica setup self-host \
   --app-url https://<your-domain>
 ```
 
+<Callout type="info">
+플래그 대신 환경 변수를 선호한다면, 해당 플래그를 생략할 때 `setup self-host`가 `MULTICA_SERVER_URL`과 `MULTICA_APP_URL`을 읽습니다(둘 다 설정하면 플래그가 우선합니다). `MULTICA_SERVER_URL`은 [환경 변수](/environment-variables)에 나오는 `ws://…/ws` 데몬 형식도 허용하며 HTTP 기본 URL로 정규화합니다.
+</Callout>
+
 단일 호스트네임에서 프런트엔드와 백엔드를 모두 앞단에 두는(데몬과 웹 앱 모두에 필요한 WebSocket 지원 포함) 최소 Caddyfile은 다음과 같습니다.
 
 ```nginx

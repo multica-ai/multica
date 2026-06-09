@@ -136,7 +136,12 @@ describe("Attachment — image dispatch", () => {
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
     const img = document.querySelector("img");
     expect(img).toBeTruthy();
-    expect(img?.getAttribute("src")).toBe(att.url);
+    // The rendered src is the freshly-loadable URL — when the record
+    // carries a signed download_url (CloudFront / S3 presign style) it
+    // wins over the raw stored url so token-mode <img> loads work
+    // without an Authorization header. See pickInlineMediaURL in
+    // attachment.tsx for the rationale (MUL-3130 review follow-up).
+    expect(img?.getAttribute("src")).toBe(att.download_url);
     expect(img?.getAttribute("alt")).toBe("shot.png");
     expect(screen.getByTitle("View")).toBeTruthy();
     expect(screen.getByTitle("Download")).toBeTruthy();
@@ -176,7 +181,12 @@ describe("Attachment — image dispatch", () => {
       />,
     );
     const img = document.querySelector("img");
-    expect(img?.getAttribute("src")).toBe(att.url);
+    // Once the URL resolves to a record, the rendered src swaps to
+    // the record's signed download_url so the image is loadable in
+    // token-mode clients that can't attach Authorization headers
+    // (MUL-3130 review). The raw stored url is the fallback for
+    // unresolved markdown only.
+    expect(img?.getAttribute("src")).toBe(att.download_url);
     fireEvent.click(screen.getByTitle("Download"));
     expect(downloadMock).toHaveBeenCalledWith("att-1");
   });
@@ -228,6 +238,30 @@ describe("Attachment — image dispatch", () => {
     );
     expect(screen.queryByTitle("View")).toBeNull();
     expect(screen.queryByTitle("Download")).toBeNull();
+  });
+
+  it("stable /api/attachments/<id>/download download_url falls through to the freshly-signed record.url for token-mode loadability (MUL-3130)", () => {
+    // Pinned behavior: when an attachment record carries the default
+    // proxy-mode download_url (a bare /api/attachments/<id>/download
+    // path, which does NOT load as a native <img>/<video> src in
+    // token-mode clients because they can't attach Authorization
+    // headers), the renderer must fall through to record.url. On the
+    // LocalStorage backend record.url carries a freshly-minted
+    // /uploads/<key>?exp&sig query whose signature IS the auth, so
+    // the image loads regardless of how the client is authenticated.
+    // pickInlineMediaURL implements this fallback (attachment.tsx).
+    const signedStorageURL =
+      "/uploads/workspaces/ws-1/freshly-signed.png?exp=99&sig=fresh";
+    const att = makeRecord({
+      url: signedStorageURL,
+      // bare API path — no signature query, so pickInlineMediaURL
+      // skips download_url and uses record.url.
+      download_url: "/api/attachments/att-1/download",
+    });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(signedStorageURL);
+    expect(img?.getAttribute("src")).not.toContain("/api/attachments/");
   });
 });
 
