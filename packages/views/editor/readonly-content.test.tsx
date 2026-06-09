@@ -55,6 +55,7 @@ vi.mock("../i18n", () => ({
           copy_code: "Copy code",
           show_preview: "Show preview",
           show_source: "Show source",
+          fullscreen: "Fullscreen",
         },
         mermaid: {
           rendering: "Rendering diagram...",
@@ -393,7 +394,7 @@ describe("ReadonlyContent Mermaid rendering", () => {
 
     const button = await waitFor(() => {
       const found = container.querySelector<HTMLButtonElement>(
-        ".mermaid-diagram-toolbar button",
+        ".code-block-header button[aria-label='Open Mermaid diagram fullscreen']",
       );
       expect(found).not.toBeNull();
       return found!;
@@ -462,7 +463,7 @@ describe("ReadonlyContent HTML block rendering", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle("Preview"));
+    fireEvent.click(screen.getByTitle("Fullscreen"));
     const frames = document.querySelectorAll<HTMLIFrameElement>("iframe");
     expect(frames.length).toBe(2);
     expect(frames[1]?.getAttribute("sandbox")).toBe("allow-scripts");

@@ -17,8 +17,9 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { Maximize2, X } from "lucide-react";
+import { Maximize2, X, Code as CodeIcon, Eye } from "lucide-react";
 import { useT } from "../i18n";
+import { CodeBlockStatic } from "./code-block-static";
 
 type MermaidAPI = typeof import("mermaid").default;
 
@@ -208,7 +209,7 @@ function useThemeVersion() {
   return themeVersion;
 }
 
-function MermaidLightbox({
+export function MermaidLightbox({
   srcDoc,
   onClose,
 }: {
@@ -251,7 +252,11 @@ function MermaidLightbox({
   );
 }
 
-export function MermaidDiagram({ chart }: { chart: string }) {
+export function MermaidDiagram({ chart, bare, onExpandedDocReady }: {
+  chart: string;
+  bare?: boolean;
+  onExpandedDocReady?: (doc: string | null) => void;
+}) {
   const { t } = useT("editor");
   const reactId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -269,6 +274,11 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   const [layout, setLayout] = useState<MermaidLayout>(() => readCachedLayout(chart) ?? {});
   const [error, setError] = useState<string | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [view, setView] = useState<"preview" | "source">("preview");
+
+  useEffect(() => {
+    onExpandedDocReady?.(expandedDocument);
+  }, [expandedDocument, onExpandedDocReady]);
 
   useEffect(() => {
     let cancelled = false;
@@ -334,15 +344,15 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     ? undefined
     : { minHeight: layout.height ?? MERMAID_SKELETON_HEIGHT_PX };
 
-  return (
-    <div
-      ref={containerRef}
-      className="mermaid-diagram"
-      aria-label="Mermaid diagram"
-      style={containerStyle}
-    >
-      {sandboxedDocument ? (
-        <>
+  if (bare) {
+    return (
+      <div
+        ref={containerRef}
+        className="mermaid-diagram"
+        aria-label="Mermaid diagram"
+        style={containerStyle}
+      >
+        {sandboxedDocument ? (
           <iframe
             className="mermaid-diagram-frame"
             sandbox=""
@@ -353,25 +363,74 @@ export function MermaidDiagram({ chart }: { chart: string }) {
             }}
             title="Mermaid diagram"
           />
-          <div className="mermaid-diagram-toolbar">
-            <button
-              type="button"
-              onClick={() => setLightboxOpen(true)}
-              title="Open fullscreen"
-              aria-label="Open Mermaid diagram fullscreen"
-            >
-              <Maximize2 className="size-3.5" />
-            </button>
-          </div>
-          {lightboxOpen && expandedDocument && (
-            <MermaidLightbox
-              srcDoc={expandedDocument}
-              onClose={() => setLightboxOpen(false)}
-            />
+        ) : (
+          <div className="mermaid-diagram-loading">{t(($) => $.mermaid.rendering)}</div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="code-block-wrapper group/code relative my-2 overflow-hidden rounded-md border border-border">
+      <div className="code-block-header pointer-events-none absolute top-0 right-0 z-10 flex select-none items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100">
+        <span className="text-xs text-muted-foreground select-none">mermaid</span>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setView((v) => (v === "preview" ? "source" : "preview"))}
+          className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          title={view === "preview" ? t(($) => $.code_block.show_source) : t(($) => $.code_block.show_preview)}
+          aria-label={view === "preview" ? t(($) => $.code_block.show_source) : t(($) => $.code_block.show_preview)}
+        >
+          {view === "preview" ? (
+            <CodeIcon className="h-3.5 w-3.5" />
+          ) : (
+            <Eye className="h-3.5 w-3.5" />
           )}
-        </>
+        </button>
+        {view === "preview" && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setLightboxOpen(true)}
+            className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            title="Open fullscreen"
+            aria-label="Open Mermaid diagram fullscreen"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {view === "preview" ? (
+        <div
+          ref={containerRef}
+          className="mermaid-diagram"
+          aria-label="Mermaid diagram"
+          style={containerStyle}
+        >
+          {sandboxedDocument ? (
+            <iframe
+              className="mermaid-diagram-frame"
+              sandbox=""
+              srcDoc={sandboxedDocument}
+              style={{
+                height: layout.height ? `${layout.height}px` : undefined,
+                width: layout.width ? `${layout.width}px` : undefined,
+              }}
+              title="Mermaid diagram"
+            />
+          ) : (
+            <div className="mermaid-diagram-loading">{t(($) => $.mermaid.rendering)}</div>
+          )}
+        </div>
       ) : (
-        <div className="mermaid-diagram-loading">{t(($) => $.mermaid.rendering)}</div>
+        <CodeBlockStatic language="mermaid" body={chart} />
+      )}
+      {lightboxOpen && expandedDocument && (
+        <MermaidLightbox
+          srcDoc={expandedDocument}
+          onClose={() => setLightboxOpen(false)}
+        />
       )}
     </div>
   );
