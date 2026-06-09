@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil, Trash2 } from "lucide-react";
+import { ExternalLink, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
@@ -33,6 +33,8 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "@multica/views/navigation";
 import { ArtifactContent } from "./artifact-content";
 import { KindIcon, KIND_LABELS } from "./kind-icon";
 import { MoveScopeMenu } from "./move-scope-menu";
@@ -64,6 +66,8 @@ export function ArtifactSheet({
   );
   const userId = useAuthStore((s) => s.user?.id);
   const { getActorName } = useActorName();
+  const wsPaths = useWorkspacePaths();
+  const nav = useNavigation();
 
   const update = useUpdateArtifact();
   const remove = useDeleteArtifact();
@@ -72,6 +76,50 @@ export function ArtifactSheet({
   const [draftTitle, setDraftTitle] = React.useState("");
   const [draftBody, setDraftBody] = React.useState("");
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+
+  const DEFAULT_WIDTH = 900;
+  const [sheetWidth, setSheetWidth] = React.useState(DEFAULT_WIDTH);
+  const isResizing = React.useRef(false);
+  const resizeStartX = React.useRef(0);
+  const resizeStartWidth = React.useRef(0);
+
+  const handleResizeMouseDown = React.useCallback(
+    (e: React.MouseEvent) => {
+      isResizing.current = true;
+      resizeStartX.current = e.clientX;
+      resizeStartWidth.current = sheetWidth;
+      e.preventDefault();
+    },
+    [sheetWidth],
+  );
+
+  React.useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isResizing.current) return;
+      const delta = resizeStartX.current - e.clientX;
+      const next = Math.max(400, Math.min(window.innerWidth - 60, resizeStartWidth.current + delta));
+      setSheetWidth(next);
+    };
+    const onMouseUp = () => { isResizing.current = false; };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  const openInDocuments = React.useCallback(() => {
+    if (!artifact) return;
+    const path = wsPaths.documentDetail(artifact.id);
+    if (nav.openInNewTab) {
+      nav.openInNewTab(path);
+    } else if (nav.getShareableUrl) {
+      window.open(nav.getShareableUrl(path), "_blank", "noopener,noreferrer");
+    } else {
+      window.open(path, "_blank", "noopener,noreferrer");
+    }
+  }, [artifact, wsPaths, nav]);
 
   React.useEffect(() => {
     if (artifact && !editing) {
@@ -110,7 +158,15 @@ export function ArtifactSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-[96vw] sm:max-w-[96vw] lg:max-w-6xl xl:max-w-7xl">
+      <SheetContent
+        className="w-auto sm:max-w-none"
+        style={{ width: sheetWidth }}
+      >
+        {/* Drag-to-resize handle on the left edge */}
+        <div
+          className="absolute left-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-primary/20 transition-colors z-10"
+          onMouseDown={handleResizeMouseDown}
+        />
         {isLoading || !artifact ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Loading…
@@ -128,6 +184,16 @@ export function ArtifactSheet({
                     agent
                   </Badge>
                 )}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="ml-auto"
+                  onClick={openInDocuments}
+                  title="Open in Documents"
+                >
+                  <ExternalLink className="size-4" />
+                  <span className="sr-only">Open in Documents</span>
+                </Button>
               </div>
               {editing ? (
                 <Input
