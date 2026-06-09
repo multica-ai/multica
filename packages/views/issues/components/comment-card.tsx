@@ -370,7 +370,11 @@ function CommentRow({
 
   return (
     <div className="py-3">
-      <div className="flex items-center gap-2.5">
+      {/* Header pins to the timeline's scroll parent within this reply's own
+          row (the py-3 box is its containing block), so a LONG reply keeps its
+          author + actions visible while you scroll its body, then releases once
+          this reply ends. bg-card occludes the body scrolling underneath. */}
+      <div className="sticky top-0 z-10 flex items-center gap-2.5 bg-card">
         <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
         <span className="cursor-pointer text-sm font-medium">
           {getActorName(entry.actor_type, entry.actor_id)}
@@ -594,6 +598,19 @@ function CommentCardImpl({
     ? allNestedReplies.find((r) => r.id === replyResolutionId) ?? null
     : null;
 
+  // Pin the root comment's header to the timeline's scroll parent while the
+  // thread is open, so a LONG root comment keeps its author + actions visible
+  // as you scroll its body (overflow-clip on the Card anchors this to the
+  // timeline, not the card — see below). The root-section wrapper below scopes
+  // its containing block to the header + body, so it releases the moment the
+  // replies begin — exactly one header is pinned at a time. Each reply pins its
+  // header the same way, scoped to its own row (see CommentRow). Skip the root
+  // header whenever a resolution collapse bar already owns the top-0 sticky slot
+  // (root resolved + expanded, or reply-resolution expanded): two sticky bars at
+  // the same offset would stack and hide one.
+  const stickyHeader =
+    open && !onCollapseResolved && !(replyResolutionId != null && threadExpanded);
+
   return (
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
     // scroll container, so the sticky collapse affordances below resolve to the
@@ -611,8 +628,15 @@ function CommentCardImpl({
         </button>
       )}
       <Collapsible open={open} onOpenChange={handleOpenChange}>
+        {/* root-section — the sticky header's containing block. It wraps ONLY
+            the header + root body, so the header releases the moment you scroll
+            past the body into the replies (which render OUTSIDE this wrapper).
+            That is what keeps exactly one header pinned at a time: without this
+            wrapper the header's containing block is the whole thread and it
+            stays stuck behind every reply. */}
+        <div>
         {/* Header — always visible, acts as toggle */}
-        <div className="px-4 py-3">
+        <div className={cn("px-4 py-3", stickyHeader && "sticky top-0 z-10 bg-card")}>
           <div className="flex items-center gap-2.5">
             <CollapsibleTrigger className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
               <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
@@ -788,7 +812,14 @@ function CommentCardImpl({
               </>
             )}
           </div>
+        </CollapsibleContent>
+        </div>
 
+        {/* Replies + reply input — rendered OUTSIDE root-section so the root
+            header's sticky containing block ends with the body. Gated on `open`
+            to mirror the body Panel's collapse visibility. */}
+        {open && (
+          <>
           {replyFolded ? (
             <>
               {/* reply-mode folded: other replies behind a bar, resolution pinned below */}
@@ -863,7 +894,8 @@ function CommentCardImpl({
               </div>
             </>
           )}
-        </CollapsibleContent>
+          </>
+        )}
       </Collapsible>
     </Card>
   );
