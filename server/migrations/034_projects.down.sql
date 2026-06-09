@@ -1,2 +1,0 @@
-ALTER TABLE issue DROP COLUMN IF EXISTS project_id;
-DROP TABLE IF EXISTS project;

@@ -1,2 +1,0 @@
-ALTER TABLE agent DROP COLUMN IF EXISTS archived_by;
-ALTER TABLE agent DROP COLUMN IF EXISTS archived_at;

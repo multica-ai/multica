@@ -1,1 +1,0 @@
-ALTER TABLE squad DROP COLUMN IF EXISTS avatar_url;

@@ -1,7 +1,0 @@
--- Intentionally empty. The up is a convergence step ("ensure no FK on
--- initiator_user_id") whose effect is conditional (DROP CONSTRAINT IF EXISTS),
--- so it has no single inverse: on a database first migrated with the FK-free
--- 117 there was never a constraint to restore, and re-adding the FK on rollback
--- would reintroduce the exact lock-on-"user" timeout this migration removed.
--- The FK is non-essential, so leaving the column FK-less on rollback is correct.
--- Full rollback drops the column via 117's down migration.

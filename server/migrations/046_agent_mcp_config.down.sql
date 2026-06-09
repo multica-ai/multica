@@ -1,1 +1,0 @@
-ALTER TABLE agent DROP COLUMN IF EXISTS mcp_config;

@@ -1,1 +1,0 @@
-ALTER TABLE agent_runtime ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC';
