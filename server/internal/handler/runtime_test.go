@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -435,6 +438,115 @@ func TestResolveViewingTZ(t *testing.T) {
 	req = newRequest("GET", "/api/dashboard/usage/daily", nil)
 	if got := testHandler.resolveViewingTZ(req); got != "UTC" {
 		t.Fatalf("unauthenticated caller: expected UTC, got %q", got)
+	}
+}
+
+// TestResumeRuntimeRejectsMalformedID verifies that POST /resume returns 400
+// for a non-UUID runtime ID (consistent with all other runtime endpoints).
+func TestResumeRuntimeRejectsMalformedID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/runtimes/not-a-uuid/resume", nil)
+	req = withURLParam(req, "runtimeId", "not-a-uuid")
+	testHandler.ResumeRuntime(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed runtimeId, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestResumeRuntimeReturnsNotFoundForUnknownRuntime pins that 404 is returned
+// when the runtime ID is a valid UUID that doesn't exist.
+func TestResumeRuntimeReturnsNotFoundForUnknownRuntime(t *testing.T) {
+	// A well-formed UUID that does not exist in the DB.
+	const missing = "00000000-0000-0000-0000-000000000001"
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/runtimes/"+missing+"/resume", nil)
+	req = withURLParam(req, "runtimeId", missing)
+	testHandler.ResumeRuntime(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown runtime, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestResumeRuntimeClearsHold is the happy-path integration test: place a
+// runtime on hold, call ResumeRuntime, assert hold_until is cleared and the
+// response contains the runtime without hold fields set.
+func TestResumeRuntimeClearsHold(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
+
+	// Place the runtime on hold.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET hold_until = now() + interval '1 hour', hold_reason = 'session_limit'
+		WHERE id = $1
+	`, runtimeID); err != nil {
+		t.Fatalf("set hold: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `UPDATE agent_runtime SET hold_until = NULL, hold_reason = NULL WHERE id = $1`, runtimeID)
+	})
+
+	// Wire up a TaskService so ResumeRuntime can call ClearRuntimeHold.
+	queries := db.New(testPool)
+	hub := realtime.NewHub()
+	go hub.Run()
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, hub, bus)
+	testHandler.TaskService = taskSvc
+	t.Cleanup(func() { testHandler.TaskService = nil })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/resume", nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ResumeRuntime(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ResumeRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// DB assertion: hold must be cleared.
+	var holdUntilSet bool
+	if err := testPool.QueryRow(ctx, `SELECT hold_until IS NOT NULL FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&holdUntilSet); err != nil {
+		t.Fatalf("read hold after resume: %v", err)
+	}
+	if holdUntilSet {
+		t.Fatal("ResumeRuntime: hold_until should be NULL after successful resume")
+	}
+
+	// Response must include hold_until as null.
+	var resp AgentRuntimeResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.HoldUntil != nil {
+		t.Fatalf("ResumeRuntime: response hold_until should be nil, got %q", *resp.HoldUntil)
+	}
+}
+
+// TestResumeRuntimeWithoutTaskServiceReturns503 ensures the graceful
+// degradation path is exercised: when TaskService is nil (not wired), the
+// handler must return 503 rather than panic.
+func TestResumeRuntimeWithoutTaskServiceReturns503(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := handlerTestRuntimeID(t)
+
+	// Ensure TaskService is nil for this test.
+	saved := testHandler.TaskService
+	testHandler.TaskService = nil
+	t.Cleanup(func() { testHandler.TaskService = saved })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/resume", nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ResumeRuntime(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when TaskService is nil, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
