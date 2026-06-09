@@ -1801,6 +1801,14 @@
             "gate": "via:PATCH /api/autopilots/{id}/"
         },
         {
+            "id": "channel list",
+            "exempt": "read-only — wraps GET /api/channels"
+        },
+        {
+            "id": "chat session list",
+            "exempt": "read-only — wraps GET /api/chat/sessions"
+        },
+        {
             "id": "chat session send",
             "gate": "via:POST /api/chat/sessions/{sessionId}/agent-message"
         },
