@@ -1,1 +1,0 @@
-ALTER TABLE inbox_item ADD COLUMN IF NOT EXISTS details JSONB DEFAULT '{}';

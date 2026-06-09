@@ -1,1 +1,0 @@
-ALTER TABLE comment ADD COLUMN parent_id UUID REFERENCES comment(id) ON DELETE SET NULL;

@@ -1,5 +1,0 @@
-ALTER TABLE agent
-    DROP COLUMN IF EXISTS description,
-    DROP COLUMN IF EXISTS skills,
-    DROP COLUMN IF EXISTS tools,
-    DROP COLUMN IF EXISTS triggers;

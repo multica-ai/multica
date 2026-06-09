@@ -1,1 +1,0 @@
-ALTER TABLE verification_code ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
