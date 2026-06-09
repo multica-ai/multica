@@ -900,3 +900,33 @@ export const EMPTY_DETERMINISTIC_TOOL_RESULT: DeterministicToolResult = {
   retryable: false,
   error_code: "INTERNAL_ERROR",
 };
+
+// A persisted workspace-authored deterministic tool (the entity, distinct from
+// the Result envelope a test run returns). `.loose()` tolerates future fields.
+export const DeterministicToolSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  source: z.string().default(""),
+  enabled: z.boolean().default(true),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export type DeterministicTool = z.infer<typeof DeterministicToolSchema>;
+
+export const DeterministicToolListSchema = z.array(DeterministicToolSchema);
+
+export const EMPTY_DETERMINISTIC_TOOL: DeterministicTool = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  source: "",
+  enabled: true,
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_DETERMINISTIC_TOOL_LIST: DeterministicTool[] = [];

@@ -7,8 +7,8 @@ export {
 export type { ApiClientOptions } from "./client";
 export { parseWithFallback, setSchemaLogger } from "./schema";
 export type { ParseOptions } from "./schema";
-export { DuplicateIssueErrorBodySchema, DeterministicToolResultSchema } from "./schemas";
-export type { DuplicateIssueErrorBody, DeterministicToolResult } from "./schemas";
+export { DuplicateIssueErrorBodySchema, DeterministicToolResultSchema, DeterministicToolSchema } from "./schemas";
+export type { DuplicateIssueErrorBody, DeterministicToolResult, DeterministicTool } from "./schemas";
 export { WSClient } from "./ws-client";
 
 import type { ApiClient as ApiClientType } from "./client";
