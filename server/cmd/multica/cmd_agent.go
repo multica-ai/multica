@@ -217,13 +217,32 @@ func resolveCoStrictBaseURL() string {
 }
 
 // resolveAuthBaseURL returns the URL for costrict-web auth endpoints
-// (/api/me, /api/tokens). Falls back to legacy resolveServerURL when no
+// (/api/auth/me, /api/tokens). Falls back to legacy resolveServerURL when no
 // costrict configuration is available.
 func resolveAuthBaseURL(cmd *cobra.Command) string {
-	if base := resolveCoStrictBaseURL(); base != "" {
+	base := resolveCoStrictBaseURL()
+	if base == "" {
+		return resolveServerURL(cmd)
+	}
+
+	// Localhost dev environments talk directly to the API, no /cloud-api prefix.
+	if strings.Contains(base, "localhost") || strings.Contains(base, "127.0.0.1") {
 		return base
 	}
-	return resolveServerURL(cmd)
+
+	prefix := strings.TrimSpace(os.Getenv("COSTRICT_AUTH_PREFIX"))
+	if prefix == "" {
+		prefix = "/cloud-api"
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+
+	// Avoid double-appending when base already ends with the prefix.
+	if strings.HasSuffix(base, prefix) {
+		return base
+	}
+	return base + prefix
 }
 
 // resolveServerURL returns the multica service API base URL.
