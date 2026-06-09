@@ -525,14 +525,15 @@ func openclawManagedMcpServers(raw json.RawMessage) (map[string]any, bool, error
 // for path simply isn't set, as opposed to a real failure (bad config,
 // CLI bug, missing binary). The CLI's "key not found" exit text has varied
 // across versions, so we match on a handful of substrings rather than the
-// exit code alone.
+// exit code alone. Matching is case-insensitive to tolerate CLI wording
+// changes (e.g. "Path not found" → "Config path not found").
 func isOpenclawKeyMissing(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "No value at ") ||
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no value at ") ||
 		strings.Contains(msg, "not set") ||
 		strings.Contains(msg, "missing key") ||
-		strings.Contains(msg, "Path not found")
+		strings.Contains(msg, "path not found")
 }
