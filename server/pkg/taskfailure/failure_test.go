@@ -26,6 +26,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonIterationLimit, "iteration_limit"},
 		{ReasonAgentBlocked, "agent_blocked"},
 		{ReasonAPIInvalidRequest, "api_invalid_request"},
+		{ReasonSessionLimit, "session_limit"},
 		// Agent-side.
 		{ReasonAgentProviderAuthOrAccess, "agent_error.provider_auth_or_access"},
 		{ReasonAgentProviderQuotaLimit, "agent_error.provider_quota_limit"},
@@ -43,7 +44,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonAgentUnknown, "agent_error.unknown"},
 	}
 
-	if got, want := len(cases), 21; got != want {
+	if got, want := len(cases), 22; got != want {
 		t.Fatalf("constant count = %d, want %d (canonical taxonomy size)", got, want)
 	}
 
@@ -70,6 +71,7 @@ func TestIsAgentError(t *testing.T) {
 		ReasonIterationLimit,
 		ReasonAgentBlocked,
 		ReasonAPIInvalidRequest,
+		ReasonSessionLimit,
 	}
 	for _, r := range platformSide {
 		if r.IsAgentError() {
