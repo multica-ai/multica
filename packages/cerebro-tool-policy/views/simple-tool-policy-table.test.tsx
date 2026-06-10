@@ -46,6 +46,7 @@ const row = (over: Partial<ToolPolicyRow> = {}): ToolPolicyRow => ({
   managed_externally: false,
   layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
   effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+  capped_by_groups: [],
   ...over,
 });
 

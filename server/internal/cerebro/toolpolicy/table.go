@@ -56,6 +56,21 @@ type TableRow struct {
 	Layers map[Layer]Setting
 	// Effective is the combined verdict across the whole chain for this tool.
 	Effective Effective
+	// CappedByGroups names the group(s) whose policy drives the group-layer
+	// restriction on this row, each with its owner (the group's creator). Only
+	// populated when the Group layer is the decider or capper, so the UI can say
+	// "Capped by group <name> (owner: <person>)" instead of an anonymous "group"
+	// (TECH-3287 hul 5). Empty when no group caps this row.
+	CappedByGroups []GroupAttribution
+}
+
+// GroupAttribution names one group that drives a group-layer restriction and the
+// person who owns it (the group's creator), so the admin sees exactly which group
+// to change and who to ask. Owner is empty for groups with no recorded creator
+// (e.g. synced groups).
+type GroupAttribution struct {
+	Name  string
+	Owner string
 }
 
 // TableQuery selects the tool universe (a workspace) and the chain context the
@@ -155,9 +170,13 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	defer rows.Close()
 
 	// Accumulate per tool, preserving the SQL order (category, title) via order[].
+	// groupSubjects keeps each group row's (id, setting) so we can later name the
+	// group(s) that drive a group-layer cap (TECH-3287 hul 5); groups holds the
+	// same settings flattened for CombineGroups.
 	type acc struct {
-		row    TableRow
-		groups []Setting
+		row           TableRow
+		groups        []Setting
+		groupSubjects []groupSubjectSetting
 	}
 	byTool := map[string]*acc{}
 	var order []string
@@ -190,6 +209,7 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		set := Setting(setting.String)
 		if l == LayerGroup {
 			a.groups = append(a.groups, set)
+			a.groupSubjects = append(a.groupSubjects, groupSubjectSetting{id: subjectID, setting: set})
 		} else {
 			a.row.Layers[l] = set
 		}
@@ -199,13 +219,22 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	}
 
 	out := make([]TableRow, 0, len(order))
+	// drivingByIndex[i] holds the group ids that drive row i's group-layer cap,
+	// resolved to names in one batch query after the loop so attribution costs a
+	// single round-trip regardless of table size (TECH-3287 hul 5).
+	drivingByIndex := make([][]pgtype.UUID, 0, len(order))
+	allGroupIDs := map[string]pgtype.UUID{}
 	for _, key := range order {
 		a := byTool[key]
 		if len(a.groups) > 0 {
 			a.row.Layers[LayerGroup] = CombineGroups(a.groups...)
 		}
 		a.row.Effective = Resolve(Input{Settings: a.row.Layers, Base: in.Base})
+		drivingByIndex = append(drivingByIndex, drivingGroupIDs(a.row.Effective, a.row.Layers[LayerGroup], a.groupSubjects, allGroupIDs))
 		out = append(out, a.row)
+	}
+	if err := s.attachGroupAttribution(ctx, out, drivingByIndex, allGroupIDs); err != nil {
+		return nil, err
 	}
 
 	// Append the per-repo rows (one per repo capability per workspace repo). These
@@ -249,4 +278,95 @@ func uuidParam(raw string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, nil
 	}
 	return util.ParseUUID(raw)
+}
+
+// groupSubjectSetting pairs one group's id with the setting it holds for a tool,
+// so we can name the group behind a group-layer cap (TECH-3287 hul 5).
+type groupSubjectSetting struct {
+	id      pgtype.UUID
+	setting Setting
+}
+
+// drivingGroupIDs returns the group ids responsible for a group-layer
+// restriction on one row. It only attributes when the Group layer is the decider
+// or capper (otherwise the group did not shape the verdict). The driving groups
+// are those whose setting matches the combined group value (CombineGroups keeps
+// the least-restrictive opinion, so for a Deny cap every opinionated group is a
+// Deny and all are named). Discovered ids are recorded in seen for the batch
+// name lookup.
+func drivingGroupIDs(eff Effective, combined Setting, subjects []groupSubjectSetting, seen map[string]pgtype.UUID) []pgtype.UUID {
+	if eff.CappedBy != LayerGroup && eff.DecidedBy != LayerGroup {
+		return nil
+	}
+	combinedRank := rank(combined)
+	var driving []pgtype.UUID
+	for _, gs := range subjects {
+		if gs.id.Valid && rank(gs.setting) == combinedRank {
+			driving = append(driving, gs.id)
+			seen[uuidKey(gs.id)] = gs.id
+		}
+	}
+	return driving
+}
+
+// attachGroupAttribution resolves every driving group id to its name + owner in
+// one query and writes the result onto each row's CappedByGroups, preserving the
+// driving order. A row with no driving groups is left untouched.
+func (s *Store) attachGroupAttribution(ctx context.Context, out []TableRow, drivingByIndex [][]pgtype.UUID, allGroupIDs map[string]pgtype.UUID) error {
+	if len(allGroupIDs) == 0 {
+		return nil
+	}
+	ids := make([]pgtype.UUID, 0, len(allGroupIDs))
+	for _, id := range allGroupIDs {
+		ids = append(ids, id)
+	}
+	attr, err := s.loadGroupAttribution(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range out {
+		for _, id := range drivingByIndex[i] {
+			if ga, ok := attr[uuidKey(id)]; ok {
+				out[i].CappedByGroups = append(out[i].CappedByGroups, ga)
+			}
+		}
+	}
+	return nil
+}
+
+// loadGroupAttribution batch-loads the name + owner (creator) for the given group
+// ids. It uses the raw pool like the rest of this read model, so no sqlc query
+// has to land for a read that only the admin table needs.
+func (s *Store) loadGroupAttribution(ctx context.Context, ids []pgtype.UUID) (map[string]GroupAttribution, error) {
+	out := map[string]GroupAttribution{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT g.id, g.name, COALESCE(u.name, '')
+		FROM cerebro_group g
+		LEFT JOIN "user" u ON u.id = g.created_by
+		WHERE g.id = ANY($1::uuid[])
+	`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: load group attribution: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id pgtype.UUID
+		var name, owner string
+		if err := rows.Scan(&id, &name, &owner); err != nil {
+			return nil, fmt.Errorf("toolpolicy: scan group attribution: %w", err)
+		}
+		out[uuidKey(id)] = GroupAttribution{Name: name, Owner: owner}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("toolpolicy: iterate group attribution: %w", err)
+	}
+	return out, nil
+}
+
+// uuidKey is a stable map key for a pgtype.UUID (its raw 16 bytes).
+func uuidKey(id pgtype.UUID) string {
+	return string(id.Bytes[:])
 }

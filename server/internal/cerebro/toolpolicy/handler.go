@@ -61,15 +61,24 @@ type effectiveResponse struct {
 	Reason    string `json:"reason"`
 }
 
+// groupAttributionResponse names a group that drives a group-layer cap on a row
+// and the person who owns it, so the UI can say "Capped by group <name>
+// (owner: <person>)" (TECH-3287 hul 5).
+type groupAttributionResponse struct {
+	Name  string `json:"name"`
+	Owner string `json:"owner"`
+}
+
 type toolPolicyRow struct {
-	ToolKey           string            `json:"tool_key"`
-	ResourcePattern   string            `json:"resource_pattern"`
-	Title             string            `json:"title"`
-	Category          string            `json:"category"`
-	Source            string            `json:"source"`
-	ManagedExternally bool              `json:"managed_externally"`
-	Layers            layerSettings     `json:"layers"`
-	Effective         effectiveResponse `json:"effective"`
+	ToolKey           string                     `json:"tool_key"`
+	ResourcePattern   string                     `json:"resource_pattern"`
+	Title             string                     `json:"title"`
+	Category          string                     `json:"category"`
+	Source            string                     `json:"source"`
+	ManagedExternally bool                       `json:"managed_externally"`
+	Layers            layerSettings              `json:"layers"`
+	Effective         effectiveResponse          `json:"effective"`
+	CappedByGroups    []groupAttributionResponse `json:"capped_by_groups"`
 }
 
 // --- request types ----------------------------------------------------------
@@ -250,6 +259,10 @@ func (h *Handler) serverError(w http.ResponseWriter, r *http.Request, op string,
 }
 
 func toRowResponse(row TableRow) toolPolicyRow {
+	groups := make([]groupAttributionResponse, len(row.CappedByGroups))
+	for i, g := range row.CappedByGroups {
+		groups[i] = groupAttributionResponse{Name: g.Name, Owner: g.Owner}
+	}
 	return toolPolicyRow{
 		ToolKey:           row.ToolKey,
 		ResourcePattern:   row.ResourcePattern,
@@ -270,6 +283,7 @@ func toRowResponse(row TableRow) toolPolicyRow {
 			CappedBy:  string(row.Effective.CappedBy),
 			Reason:    row.Effective.Reason,
 		},
+		CappedByGroups: groups,
 	}
 }
 

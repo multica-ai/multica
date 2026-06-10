@@ -15,7 +15,7 @@
 // same rows.
 
 import { useMemo, useState } from "react";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Lock, Search } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Sheet,
@@ -27,8 +27,10 @@ import {
 } from "@multica/ui/components/ui/sheet";
 import { cn } from "@multica/ui/lib/utils";
 import {
+  isLockedFromElsewhere,
   useSetToolPolicy,
   useClearToolPolicy,
+  type ToolEffectiveSetting,
   type ToolLayer,
   type ToolSetting,
   type ToolPolicyRow,
@@ -42,6 +44,39 @@ const CHOICE_LABEL: Record<ToolSetting, string> = {
   inherit: "Inherit",
 };
 
+// Restrictiveness rank — a per-tool choice can only TIGHTEN the connection-wide
+// floor, never loosen it. Any concrete choice below the floor's rank is futile,
+// so the sheet disables it (TECH-3287 hul 7). `inherit` is never futile: it
+// clears the per-tool row so the tool simply follows the connection floor.
+const SETTING_RANK: Record<ToolEffectiveSetting, number> = { allow: 0, ask: 1, deny: 2 };
+
+const LAYER_LABEL: Record<string, string> = {
+  workspace: "Workspace",
+  runtime: "Runtime",
+  agent: "Agent",
+  group: "Group",
+  user: "User",
+};
+
+// changeHint tells the admin WHERE to change the blocking layer (TECH-3287 hul 4
+// copy, scoped to the connection sheet).
+function changeHint(layer: string): string {
+  switch (layer) {
+    case "workspace":
+      return "Ændr det under Settings → Tools (workspace).";
+    case "runtime":
+      return "Ændr det på Runtime-indstillinger → Tools.";
+    case "agent":
+      return "Ændr det på denne agents Tools-fane.";
+    case "group":
+      return "Ændr det under Settings → Groups.";
+    case "user":
+      return "Det er sat på brugerens egne rettigheder (loftet).";
+    default:
+      return "";
+  }
+}
+
 export interface ConnectionConfigSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -49,6 +84,12 @@ export interface ConnectionConfigSheetProps {
   connectionKey: string;
   /** The connection's display name, shown in the header. */
   connectionLabel: string;
+  /**
+   * The connection-wide row (source === "connection"). Its Effective verdict is
+   * the floor every per-tool row inherits — used to explain a block from above
+   * and disable futile per-tool choices (TECH-3287 hul 1/6/7).
+   */
+  connectionRow: ToolPolicyRow;
   /** The per-tool rows for this connection (source === "connection-tool"). */
   toolRows: ToolPolicyRow[];
   /** The layer this surface authors and the subject those writes target. */
@@ -61,6 +102,7 @@ export function ConnectionConfigSheet({
   onOpenChange,
   connectionKey,
   connectionLabel,
+  connectionRow,
   toolRows,
   editLayer,
   subjectId,
@@ -70,6 +112,29 @@ export function ConnectionConfigSheet({
   const [search, setSearch] = useState("");
 
   const busy = setPolicy.isPending || clearPolicy.isPending;
+
+  // The connection-wide Effective is the floor every per-tool row inherits. A
+  // per-tool choice can only tighten it, so anything below it is futile.
+  const floor = connectionRow.effective.setting;
+  const floorRank = SETTING_RANK[floor];
+  // Blocked from a higher layer this page can't loosen → drives the banner +
+  // the lock icon (TECH-3287 hul 1/3).
+  const blockedAbove = isLockedFromElsewhere(connectionRow, editLayer);
+  // "Tillad alle" can never beat a connection-wide Ask/Deny → disable it when the
+  // floor is not Allow (TECH-3287 hul 6).
+  const allowAllFutile = floorRank > 0;
+  // A concrete per-tool choice looser than the floor is futile (TECH-3287 hul 7).
+  const choiceFutile = (choice: ToolSetting) =>
+    choice !== "inherit" && SETTING_RANK[choice] < floorRank;
+
+  const blocker = connectionRow.effective.capped_by || connectionRow.effective.decided_by;
+  const blockerGroups = connectionRow.capped_by_groups
+    .map((g) => (g.owner ? `${g.name} (ejer: ${g.owner})` : g.name))
+    .join(", ");
+  const blockerLabel =
+    blocker === "group" && blockerGroups
+      ? `gruppen ${blockerGroups}`
+      : (LAYER_LABEL[blocker] ?? blocker);
 
   // API connections expose endpoint+method rows ("POST /orders"); MCP connections
   // expose tools. Adapt the copy so a REST connection doesn't read as "tools".
@@ -134,6 +199,26 @@ export function ConnectionConfigSheet({
           </SheetDescription>
         </SheetHeader>
 
+        {blockedAbove ? (
+          <div
+            data-testid="connection-blocked-banner"
+            className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive"
+          >
+            <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-medium">
+                Hele forbindelsen er sat til “{CHOICE_LABEL[floor]}” af {blockerLabel}.
+              </p>
+              <p className="mt-0.5 text-destructive/90">
+                {floor === "deny"
+                  ? `En Allow på et enkelt ${unitLabel} her får ingen effekt — forbindelsen er blokeret ovenfra.`
+                  : `Et enkelt ${unitLabel} kan kun strammes (ikke gøres mere åbent end forbindelsen).`}{" "}
+                {changeHint(blocker)}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex items-center gap-2 border-b p-4">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -149,8 +234,13 @@ export function ConnectionConfigSheet({
             type="button"
             variant="outline"
             size="sm"
-            disabled={busy || toolRows.length === 0}
+            disabled={busy || toolRows.length === 0 || allowAllFutile}
             onClick={allowAll}
+            title={
+              allowAllFutile
+                ? `Forbindelsen er sat til “${CHOICE_LABEL[floor]}” — Tillad alle får ingen effekt.`
+                : undefined
+            }
           >
             {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
             Tillad alle
@@ -189,22 +279,30 @@ export function ConnectionConfigSheet({
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    {CHOICES.map((choice) => (
-                      <button
-                        key={choice}
-                        type="button"
-                        disabled={busy}
-                        onClick={() => write(r.resource_pattern, choice)}
-                        className={cn(
-                          "rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
-                          layerSetting === choice
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {CHOICE_LABEL[choice]}
-                      </button>
-                    ))}
+                    {CHOICES.map((choice) => {
+                      const futile = choiceFutile(choice);
+                      return (
+                        <button
+                          key={choice}
+                          type="button"
+                          disabled={busy || futile}
+                          onClick={() => write(r.resource_pattern, choice)}
+                          title={
+                            futile
+                              ? `Forbindelsen er sat til “${CHOICE_LABEL[floor]}” — “${CHOICE_LABEL[choice]}” her er mere åbent og får ingen effekt.`
+                              : undefined
+                          }
+                          className={cn(
+                            "rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
+                            layerSetting === choice
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {CHOICE_LABEL[choice]}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               );

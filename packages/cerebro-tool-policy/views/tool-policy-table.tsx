@@ -61,6 +61,7 @@ import { cn } from "@multica/ui/lib/utils";
 import {
   classFacets,
   classifySideEffect,
+  isLockedFromElsewhere,
   SIDE_EFFECT_LABEL,
   SIDE_EFFECTS,
   toolPolicyTableOptions,
@@ -282,6 +283,9 @@ export function ToolPolicyTable({
 
   function bulkSet(setting: Exclude<ToolSetting, "inherit">) {
     for (const row of filtered) {
+      // TECH-3287 hul 6: "Allow all" can't loosen a row a higher layer blocks —
+      // skip those instead of firing a silent dead write that reverts on refetch.
+      if (setting === "allow" && isLockedFromElsewhere(row, editLayer)) continue;
       setPolicy.mutate({ tool_key: row.tool_key, layer: editLayer, subject_id: subjectId, setting });
     }
   }
@@ -386,6 +390,7 @@ export function ToolPolicyTable({
                             connectionKey={row.tool_key}
                             connectionLabel={row.title || row.tool_key}
                             toolRows={connectionToolsByKey.get(row.tool_key) ?? []}
+                            connectionRow={row}
                             editLayer={editLayer}
                             subjectId={subjectId}
                           />
@@ -431,6 +436,7 @@ export function ToolPolicyTable({
                         connectionKey={row.tool_key}
                         connectionLabel={row.title || row.tool_key}
                         toolRows={connectionToolsByKey.get(row.tool_key) ?? []}
+                            connectionRow={row}
                         editLayer={editLayer}
                         subjectId={subjectId}
                       />
@@ -769,6 +775,87 @@ export function originOf(
   return { kind: "inherited", level, label: `Inherited from ${level}` };
 }
 
+// changeHint is the navigation breadcrumb shown in the tooltip so an admin knows
+// WHERE to change a blocking layer, not just that it is blocked (TECH-3287 hul 4).
+function changeHint(layer: string): string {
+  switch (layer) {
+    case "workspace":
+      return "Ændr det under Settings → Tools (workspace).";
+    case "runtime":
+      return "Ændr det på Runtime-indstillinger → Tools.";
+    case "agent":
+      return "Ændr det på denne agents Tools-fane.";
+    case "group":
+      return "Ændr det under Settings → Groups.";
+    case "user":
+      return "Det er sat på brugerens egne rettigheder (loftet).";
+    default:
+      return "";
+  }
+}
+
+// formatGroupAttribution renders the blocking group(s) as "Navn (ejer: Person)",
+// the TECH-3287 hul 5 copy. Owner is omitted when the backend has no creator.
+function formatGroupAttribution(row: ToolPolicyRow): string {
+  return row.capped_by_groups
+    .map((g) => (g.owner ? `${g.name} (ejer: ${g.owner})` : g.name))
+    .join(", ");
+}
+
+interface RowAttribution {
+  kind: "override" | "inherited" | "capped";
+  label: string;
+  tooltip: string;
+}
+
+// blockerText names the layer (or group, by name + owner) that forces the
+// verdict, for the "where to change it" copy (TECH-3287 hul 4/5).
+function blockerText(row: ToolPolicyRow): { phrase: string; hint: string } {
+  const blocker = row.effective.capped_by || row.effective.decided_by;
+  if (blocker === "group" && row.capped_by_groups.length > 0) {
+    return { phrase: `gruppen ${formatGroupAttribution(row)}`, hint: changeHint("group") };
+  }
+  return { phrase: LAYER_LABEL[blocker] ?? blocker, hint: changeHint(blocker) };
+}
+
+// rowAttribution is the single source of truth for what the Origin badge says.
+//
+// TECH-3287 hul 2/4/5 reframes two things WITHOUT touching the established
+// override/inherited language for the normal case:
+//   1. The lie: when this page holds an explicit override that a HIGHER layer
+//      overrides (a futile override beneath a cap), the old code still printed
+//      "Override on Agent". We now name the real blocker instead.
+//   2. The silent inherit: when a row is locked from a layer this page can't
+//      loosen, we keep the "Inherited from X" label but enrich the tooltip with
+//      where to change the blocking layer (and the DecisionControl shows a lock).
+export function rowAttribution(row: ToolPolicyRow, editLayer: ToolLayer): RowAttribution {
+  const locked = isLockedFromElsewhere(row, editLayer);
+  const hasLocalOverride = !!row.layers[editLayer];
+  const blocker = row.effective.capped_by || row.effective.decided_by;
+
+  // Case 1 — a futile local override beneath a higher decision: tell the truth.
+  if (locked && hasLocalOverride && blocker !== editLayer) {
+    const { phrase, hint } = blockerText(row);
+    return {
+      kind: "capped",
+      label: blocker === "group" ? `Capped by group ${formatGroupAttribution(row)}` : `Capped by ${phrase}`,
+      tooltip: `Din ${LAYER_LABEL[editLayer]}-indstilling slår ikke igennem — blokeret af ${phrase}. ${hint}`,
+    };
+  }
+
+  // Case 2 — the normal override/inherited language, enriched when locked.
+  const origin = originOf(row, editLayer);
+  let tooltip =
+    origin.kind === "override"
+      ? `This rule is an override set on ${origin.level}.`
+      : `No override on this level — the rule is inherited from ${origin.level}.`;
+  if (locked) {
+    const { phrase, hint } = blockerText(row);
+    tooltip = `Blokeret af ${phrase} — kan ikke gøres mere åbent her. ${hint}`;
+  }
+  return { kind: origin.kind, label: origin.label, tooltip };
+}
+
 function OriginTag({
   row,
   editLayer,
@@ -776,23 +863,19 @@ function OriginTag({
   row: ToolPolicyRow;
   editLayer: ToolLayer;
 }) {
-  const origin = originOf(row, editLayer);
+  const attr = rowAttribution(row, editLayer);
   return (
     <Badge
       variant="outline"
-      title={
-        origin.kind === "override"
-          ? `This rule is an override set on ${origin.level}.`
-          : `No override on this level — the rule is inherited from ${origin.level}.`
-      }
+      title={attr.tooltip}
       className={cn(
         "font-normal",
-        origin.kind === "override"
-          ? "border-primary/40 text-primary"
-          : "text-muted-foreground",
+        attr.kind === "override" && "border-primary/40 text-primary",
+        attr.kind === "capped" && "border-destructive/40 text-destructive",
+        attr.kind === "inherited" && "text-muted-foreground",
       )}
     >
-      {origin.label}
+      {attr.label}
     </Badge>
   );
 }
@@ -814,13 +897,19 @@ function DecisionControl({
   onChange: (setting: ToolSetting) => void;
 }) {
   const verdict = row.effective.setting;
-  const Icon = row.effective.capped_by ? Lock : VERDICT_ICON[verdict];
+  // Lock whenever the verdict is forced by a layer this page can't loosen — not
+  // only the group/user cap the old code checked, but also a workspace/runtime
+  // base Deny on the agent page (TECH-3287 hul 2).
+  const locked = isLockedFromElsewhere(row, editLayer);
+  const Icon = locked ? Lock : VERDICT_ICON[verdict];
   const overridden = !!row.layers[editLayer];
+  const lockTooltip = locked ? rowAttribution(row, editLayer).tooltip : undefined;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         disabled={disabled}
         aria-label={`Decision: ${SETTING_LABEL[verdict]}`}
+        title={lockTooltip}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50",
           VERDICT_PILL[verdict],

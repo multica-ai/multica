@@ -136,6 +136,31 @@ describe("ToolPolicyTable (capability catalog)", () => {
     ).toBeInTheDocument();
   });
 
+  it("names the blocking group instead of lying with 'Override on Agent' (TECH-3287 hul 2/5)", async () => {
+    // create_issue: the agent layer says Allow, but a group denies it. The old
+    // code printed "Override on Agent" — the lie Jesper hit. It must now name the
+    // group AND its owner so the admin knows where to change it.
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        {
+          tool_key: "create_issue",
+          title: "Create issue",
+          category: "Issues",
+          source: "builtin",
+          layers: { runtime: null, agent: "allow", group: "deny", user: null },
+          effective: { setting: "deny", decided_by: "group", capped_by: "group", reason: "Capped by group" },
+          capped_by_groups: [{ name: "All members", owner: "Jesper Hvejsel" }],
+        },
+      ],
+    });
+    renderTable("agent");
+    const row = await screen.findByTestId("tool-row-create_issue");
+    expect(
+      within(row).getByText("Capped by group All members (ejer: Jesper Hvejsel)"),
+    ).toBeInTheDocument();
+    expect(within(row).queryByText("Override on Agent")).not.toBeInTheDocument();
+  });
+
   it("on the runtime page the same row reads as inherited, not an override", async () => {
     // deploy_restart is set on the agent layer, not the runtime layer. Viewed
     // from the runtime page it must read as inherited (from the agent), proving

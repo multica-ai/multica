@@ -172,6 +172,84 @@ func TestTable_WorkspaceRootLayer(t *testing.T) {
 	}
 }
 
+// TestTable_GroupCapNamesTheGroup is the TECH-3287 hul 5 check: when a group
+// layer caps a tool to Deny, the row carries the blocking group's name AND its
+// owner (the creator), so the UI can say "Capped by group <name> (owner: …)"
+// instead of an anonymous "group".
+func TestTable_GroupCapNamesTheGroup(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	addCap(t, s, "create_issue", "Create issue", "Issues", "builtin")
+
+	// A real group, owned by the test user, that the user belongs to.
+	var groupID pgtype.UUID
+	if err := s.pool.QueryRow(ctx,
+		`INSERT INTO cerebro_group (workspace_id, name, created_by) VALUES ($1, $2, $3) RETURNING id`,
+		tpTestWorkspaceID, "All members", tpTestUserID).Scan(&groupID); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(), `DELETE FROM cerebro_group WHERE id = $1`, groupID)
+	})
+	if _, err := s.pool.Exec(ctx,
+		`INSERT INTO cerebro_group_member (group_id, user_id) VALUES ($1, $2)`,
+		groupID, tpTestUserID); err != nil {
+		t.Fatalf("add group member: %v", err)
+	}
+
+	// The group denies the tool; the user layer is silent, so the group caps it.
+	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: "create_issue", Layer: LayerGroup, SubjectID: groupID, Setting: SettingDeny}); err != nil {
+		t.Fatalf("set group: %v", err)
+	}
+
+	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, UserID: tpTestUserID})
+	if err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	row, ok := findRow(rows, "create_issue")
+	if !ok {
+		t.Fatal("create_issue missing from table")
+	}
+	if row.Effective.Setting != SettingDeny || row.Effective.CappedBy != LayerGroup {
+		t.Fatalf("effective = %q capped=%q, want deny/group", row.Effective.Setting, row.Effective.CappedBy)
+	}
+	if len(row.CappedByGroups) != 1 {
+		t.Fatalf("CappedByGroups = %v, want exactly one blocking group", row.CappedByGroups)
+	}
+	if row.CappedByGroups[0].Name != "All members" {
+		t.Fatalf("blocking group name = %q, want %q", row.CappedByGroups[0].Name, "All members")
+	}
+	if row.CappedByGroups[0].Owner != tpTestName {
+		t.Fatalf("blocking group owner = %q, want %q", row.CappedByGroups[0].Owner, tpTestName)
+	}
+}
+
+// TestTable_NoGroupCapNoAttribution proves a row that is not group-capped carries
+// no group attribution — we never name a group that did not shape the verdict.
+func TestTable_NoGroupCapNoAttribution(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	addCap(t, s, "read_file", "Read file", "Files", "builtin")
+
+	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, UserID: tpTestUserID})
+	if err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	row, ok := findRow(rows, "read_file")
+	if !ok {
+		t.Fatal("read_file missing")
+	}
+	if len(row.CappedByGroups) != 0 {
+		t.Fatalf("unconfigured row should have no group attribution, got %v", row.CappedByGroups)
+	}
+}
+
 // TestTable_RuntimeViewIgnoresOtherSubjects proves a runtime-only view (no agent
 // or user) reflects just the runtime layer — an agent override on the same tool
 // must not bleed into the runtime page.

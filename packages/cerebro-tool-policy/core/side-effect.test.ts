@@ -20,6 +20,7 @@ function row(
       capped_by: "",
       reason: "",
     },
+    capped_by_groups: [],
   };
 }
 

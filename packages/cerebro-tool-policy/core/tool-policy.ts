@@ -33,6 +33,17 @@ export interface ToolPolicyEffective {
   reason: string;
 }
 
+/**
+ * One group that drives a group-layer cap on a row, with its owner (the group's
+ * creator). Populated by the backend only when the Group layer decided/capped
+ * the row, so the UI can name the exact group to change and who owns it
+ * (TECH-3287 hul 5). Owner is "" for groups with no recorded creator.
+ */
+export interface GroupAttribution {
+  name: string;
+  owner: string;
+}
+
 /** Explicit setting at each layer for the queried context; null = no override. */
 export interface ToolPolicyLayers {
   workspace: ToolSetting | null;
@@ -62,6 +73,11 @@ export interface ToolPolicyRow {
   managed_externally: boolean;
   layers: ToolPolicyLayers;
   effective: ToolPolicyEffective;
+  /**
+   * The group(s) behind a group-layer cap on this row, each with its owner.
+   * Empty unless the Group layer decided/capped the verdict (TECH-3287 hul 5).
+   */
+  capped_by_groups: GroupAttribution[];
 }
 
 /**
@@ -93,6 +109,25 @@ export interface ClearToolPolicyRequest {
   subject_id: string;
   /** Per-resource scope to clear; omit/empty for the capability-wide row. */
   resource_pattern?: string;
+}
+
+// --- pure helpers -----------------------------------------------------------
+
+/**
+ * Whether the effective verdict is forced by a layer the given editLayer cannot
+ * loosen — a higher group/user cap (capped_by) OR a workspace/runtime base that
+ * decided a restriction (decided_by ≠ editLayer). The chain only ever tightens,
+ * so once another layer decides Ask/Deny this page can never reach a looser
+ * result: that is exactly when a control should read as locked (TECH-3287 hul 2).
+ * Lives in core so both the table and the connection sheet share one definition.
+ */
+export function isLockedFromElsewhere(
+  row: ToolPolicyRow,
+  editLayer: ToolLayer,
+): boolean {
+  const eff = row.effective;
+  if (eff.capped_by) return true;
+  return !!eff.decided_by && eff.decided_by !== editLayer && eff.setting !== "allow";
 }
 
 // --- schemas (fail closed) --------------------------------------------------
@@ -139,6 +174,17 @@ const toolPolicyRowSchema = z.object({
       reason: z.string().default(""),
     })
     .default({ setting: "deny", decided_by: "", capped_by: "", reason: "" }),
+  // Group attribution drifts to an empty list rather than failing the parse — a
+  // missing/odd value just means "no named group", never a crash.
+  capped_by_groups: z
+    .array(
+      z.object({
+        name: z.string().default(""),
+        owner: z.string().default(""),
+      }),
+    )
+    .catch([])
+    .default([]),
 });
 
 const toolPolicyTableSchema = z.object({
