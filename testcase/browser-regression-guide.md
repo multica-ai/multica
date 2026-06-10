@@ -59,11 +59,26 @@ multica --profile local daemon status --output json
 multica --profile local daemon restart
 ```
 
-Safe cleanup policy:
+### Default cleanup (no tunnel requested)
 
-- Preserve Docker volumes, database data, images, and local profile state by default.
-- Do not reset/truncate local data unless the user explicitly asks.
-- Remove only temporary dev containers and local report artifacts that were already uploaded, if cleanup is required.
+After tester-run regression, the default behavior is to clean up **temporary resources only**:
+
+- Tear down Docker Compose preview runtimes (containers, networks).
+- Disconnect any temporary ngrok tunnel.
+- Remove local report artifacts that were already uploaded to the Issue.
+
+Must NOT delete:
+
+- Worktrees — the human reviewer needs them for final code review.
+- Branches (local or remote) — the human reviewer needs the branch to inspect or merge.
+- Postgres containers, volumes, databases — the local DB instance may be shared across multiple previews.
+- Docker volumes, database data, images, or local profile state.
+
+Worktree and branch cleanup is a separate lifecycle step handled by the unified worktree cleanup flow.
+
+### Exception — tunnel for human acceptance
+
+Only when the human reviewer explicitly requests a live preview (e.g. "打一个 tunnel 让我看"), preserve the Docker Compose preview runtime and create a temporary ngrok tunnel. Clean up the tunnel and runtime after the human reviewer confirms acceptance. Worktrees and branches remain untouched.
 
 ## 5. Agent runtime self-healing
 
@@ -82,7 +97,7 @@ Proceed only if the daemon reports `status: running` and the local workspace has
 
 For cloud/shared workspaces:
 
-- Prefer Guodage-owned test agents/runtimes or agents explicitly assigned for the task.
+- Prefer project-maintainer-owned test agents/runtimes or agents explicitly assigned for the task.
 - Do not mutate agents/runtimes owned by unclear or unrelated users.
 - If ownership is unclear and no safe test agent exists, report the blocker.
 

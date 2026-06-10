@@ -1,6 +1,8 @@
 # Regression and Acceptance Convention
 
-> **Default: Human acceptance is required after tester regression unless the task explicitly waives it.** Tester agents must preserve the tested preview environment intact after regression so the human reviewer can perform final verification.
+> **Default: Clean up the regression preview environment after tester regression.** Tester agents must tear down Docker Compose preview runtimes and temporary tunnels after regression unless the human reviewer explicitly requests a remote access link for acceptance. Worktrees, branches, and shared databases must not be deleted — the human reviewer needs them for final code review.
+>
+> When the human reviewer explicitly requests a live preview (e.g. "打一个 tunnel 让我看"), the tester must preserve the preview environment, create a temporary tunnel link, and report both the tunnel URL and the original local frontend URL. The environment is cleaned up only after the human reviewer confirms acceptance.
 
 This file defines project-level regression rules for Multica PR acceptance, upstream merge verification, and release verification. It complements `.ci/deploy.md`.
 
@@ -29,7 +31,9 @@ For PR / upstream merge / release acceptance:
 3. Run selected impacted browser cases against the correct build.
 4. Upload report and evidence to the Multica Issue when the task is executed through Multica.
 5. Report PASS / PARTIAL PASS / BLOCKED / FAIL with exact blockers and failed-case handback.
-6. Preserve the tested preview/worktree after tester-run regression so Guodage can perform final human acceptance. Do not tear down Docker Compose preview runtimes, delete worktrees, or delete branches as part of the tester run unless explicitly instructed.
+6. Clean up temporary resources after tester-run regression: tear down Docker Compose preview runtimes and temporary ngrok tunnels. Do not delete worktrees, branches, or shared databases (e.g. the local Postgres instance used by multiple previews) — the human reviewer needs them for final code review. Worktree and branch cleanup is a separate lifecycle step handled by the unified worktree cleanup flow.
+
+If the human reviewer explicitly requests a remote access link: preserve the Docker Compose preview runtime, create a temporary ngrok tunnel, and report both the tunnel URL and the original local frontend URL. Clean up the tunnel and runtime only after the human reviewer confirms acceptance.
 
 ## Preview lifecycle for tester-run regression
 
@@ -41,7 +45,7 @@ make selfhost-build-preview ISSUE=OPE-123
 
 The `ISSUE` parameter is the primary user-facing key. Internally the preview derives a profile and Docker Compose project from it (for example `OPE-123` → `multica_preview_ope_123`). `PROFILE=<name>` is only an advanced override for non-Issue experiments or duplicate previews.
 
-Tester reports must include enough information for later human acceptance and cleanup:
+Tester reports must include enough information for later human acceptance, cleanup, and the eventual worktree cleanup flow:
 
 - Issue key,
 - preview profile,
@@ -52,7 +56,7 @@ Tester reports must include enough information for later human acceptance and cl
 - branch,
 - commit SHA and/or PR number.
 
-If Guodage needs to verify from a phone or another machine, the tester may create a temporary tunnel/public link and include that URL in the report.
+**Exception — human reviewer requests remote access.** If the human reviewer explicitly requests a live preview (e.g. "打一个 tunnel 让我看"), the tester must preserve the preview environment and create a temporary tunnel/public link. The preview environment is cleaned up only after the human reviewer confirms acceptance.
 
 Recommended quick path for local human acceptance is to expose the preview frontend port only, for example:
 
@@ -66,6 +70,29 @@ Notes:
 - The report must include both the tunnel URL and the original local frontend URL.
 - API requests normally work through the frontend's same-origin proxy/rewrite. WebSocket/live-update support is best effort unless the task specifically requires it; if WebSocket behavior is in scope, call it out explicitly and validate the tunnel/proxy path for `/ws`.
 - If ngrok refuses to start because local HTTP/HTTPS proxy env vars are set, run it with proxy env vars unset (for example `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY ngrok http <frontend-port>`).
+
+### Default cleanup after regression
+
+After tester-run regression (the default, non-tunnel path), the tester must clean up **temporary resources only**:
+
+- Stop and tear down the Docker Compose preview runtime (containers, networks).
+- Disconnect the temporary ngrok tunnel if one was created.
+- Remove local report artifacts that were already uploaded to the Issue.
+
+Must NOT delete:
+
+- Worktrees — the human reviewer needs them for final code review.
+- Branches (local or remote) — the human reviewer needs the branch to inspect or merge.
+- Postgres containers, volumes, databases — the local DB instance may be shared across multiple previews.
+- Docker images or local profile state.
+
+Worktree and branch cleanup is handled by the explicit unified worktree cleanup flow, not by a single tester run.
+
+### Cleanup after tunnel-assisted human acceptance
+
+When a tunnel link was created per the exception rule above: after the human reviewer confirms acceptance, tear down the Docker Compose preview runtime and disconnect the tunnel. Worktrees and branches remain untouched until the unified worktree cleanup flow.
+
+---
 
 Cleanup is a separate lifecycle step. `make selfhost-preview-clean ISSUE=OPE-123` may stop the Docker Compose preview runtime, but it must not delete Postgres containers, volumes, databases, or long-lived local test data. Git worktree/branch cleanup is handled by the explicit unified worktree cleanup flow, not by a single tester run.
 
