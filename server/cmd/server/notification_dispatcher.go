@@ -1150,8 +1150,6 @@ func pgTextToString(value pgtype.Text) string {
 
 // --- OpenClaw WeChat notification delivery ---
 
-const openclawWeixinDeliveryMaxAttempts = 3
-
 type openclawWeixinDeliveryPayload struct {
 	BindingID         string          `json:"binding_id"`
 	Provider          string          `json:"provider"`
@@ -1306,7 +1304,7 @@ func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, dae
 
 func finalizeFailedOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
 	nextStatus := "pending"
-	if delivery.AttemptCount >= openclawWeixinDeliveryMaxAttempts {
+	if delivery.AttemptCount >= notifyutil.OpenclawWeixinDeliveryMaxAttempts {
 		nextStatus = "failed"
 	}
 

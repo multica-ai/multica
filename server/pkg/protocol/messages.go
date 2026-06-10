@@ -180,10 +180,13 @@ type DaemonHeartbeatPendingLocalSkillImport struct {
 // NotificationDeliverPayload is sent from server to daemon to ask the daemon
 // to execute a local notification delivery command.
 type NotificationDeliverPayload struct {
-	DeliveryID      string `json:"delivery_id,omitempty"`
-	Channel         string `json:"channel"`
-	Type            string `json:"type"`
-	WechatID        string `json:"wechat_id"`
+	DeliveryID string `json:"delivery_id,omitempty"`
+	Channel    string `json:"channel"` // Provider CLI channel, e.g. "openclaw-weixin".
+	Type       string `json:"type"`    // Multica notification delivery type, e.g. "openclaw_weixin".
+	WechatID   string `json:"wechat_id"`
+	// OpenClawChannel is the explicit provider CLI channel for new daemons.
+	// Channel remains populated for rolling-upgrade compatibility with old
+	// daemons that pass it directly to `openclaw message send --channel`.
 	OpenClawChannel string `json:"openclaw_channel,omitempty"`
 	Content         string `json:"content"`
 	Title           string `json:"title,omitempty"`
