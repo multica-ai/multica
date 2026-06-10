@@ -143,6 +143,7 @@ function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
     filename: "test.bin",
     url: "https://cdn.example.test/att-1.bin",
     download_url: "https://cdn.example.test/att-1.bin?Signature=s",
+    markdown_url: "https://cdn.example.test/api/attachments/att-1/download",
     content_type: "application/octet-stream",
     size_bytes: 0,
     created_at: "2026-05-13T00:00:00Z",

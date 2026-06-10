@@ -320,6 +320,7 @@ describe("onIssueDeleted", () => {
         filename: "evidence.png",
         url: "s3://bucket/evidence.png",
         download_url: "https://example.test/evidence.png",
+        markdown_url: "https://example.test/api/attachments/att-1/download",
         content_type: "image/png",
         size_bytes: 1,
         created_at: "2025-01-01T00:00:00Z",

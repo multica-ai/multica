@@ -313,6 +313,19 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
   }
+  // Per-issue caches are keyed without wsId, so the issueKeys.all(wsId)
+  // prefix above does not reach them. They rely entirely on WS events for
+  // freshness (staleTime: Infinity), so events missed while disconnected
+  // left them stale until a full reload — the inbox showed an agent's new
+  // comment while the issue timeline didn't (#3953). Inactive caches only
+  // get marked stale here and refetch on next mount; the one mounted issue
+  // refetches immediately, same as its own useWSReconnect already does.
+  qc.invalidateQueries({ queryKey: issueKeys.timelineAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.reactionsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 

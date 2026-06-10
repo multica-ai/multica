@@ -2120,21 +2120,8 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if workspaceID != "" {
-			createdAt := ""
-			if created.CreatedAt.Valid {
-				createdAt = created.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
-			}
-			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
-				TaskID:    taskID,
-				IssueID:   uuidToString(task.IssueID),
-				Seq:       msg.Seq,
-				Type:      msg.Type,
-				Tool:      msg.Tool,
-				Content:   msg.Content,
-				Input:     msg.Input,
-				Output:    msg.Output,
-				CreatedAt: createdAt,
-			})
+			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID,
+				taskMessageToPayload(created, taskID, uuidToString(task.IssueID)))
 		}
 	}
 

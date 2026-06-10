@@ -6,6 +6,7 @@
     "table": {
       "name": "名前",
       "agent": "エージェント",
+      "created_by": "作成者",
       "mode": "モード",
       "status": "ステータス",
       "last_run": "最終実行"
@@ -71,6 +72,7 @@
     "section_run_history": "実行履歴",
     "section_danger": "危険な操作",
     "field_agent": "エージェント",
+    "field_created_by": "作成者",
     "field_output_mode": "出力モード",
     "field_project": "プロジェクト",
     "no_project": "プロジェクトなし",

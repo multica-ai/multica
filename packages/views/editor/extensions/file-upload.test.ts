@@ -55,6 +55,7 @@ function makeUpload(
     uploader_id: "user-1",
     url: overrides.link,
     download_url: overrides.link,
+    markdown_url: overrides.link,
     content_type: "image/png",
     size_bytes: 1,
     created_at: new Date(0).toISOString(),

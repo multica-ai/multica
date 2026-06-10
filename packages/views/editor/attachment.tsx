@@ -32,6 +32,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { api } from "@multica/core/api";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { useT } from "../i18n";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
@@ -110,7 +111,9 @@ function normalize(
     return {
       filename: input.attachment.filename,
       contentType: input.attachment.content_type,
-      url: pickInlineMediaURL(input.attachment, input.attachment.url),
+      url: absolutizeMediaURL(
+        pickInlineMediaURL(input.attachment, input.attachment.url),
+      ),
       attachmentId: input.attachment.id,
       record: input.attachment,
       uploading: false,
@@ -131,7 +134,19 @@ function normalize(
     // picks the URL with embedded credentials when one exists and
     // falls back to the input URL otherwise so legacy / unresolved
     // markdown stays on its existing path. See MUL-3130 review.
-    url: record ? pickInlineMediaURL(record, input.url) : input.url,
+    //
+    // After picking the credential-bearing URL we run the absolutize
+    // pass so a site-relative `/api/attachments/...` or `/uploads/...`
+    // path becomes a proper origin-bearing URL when the renderer's
+    // document origin doesn't proxy /api or /uploads to the API host
+    // (Electron desktop, mobile webview). Web with a same-origin
+    // proxy keeps `apiBaseUrl=""` and the helper is a no-op there.
+    // See MUL-3192 — quick-create modal regressed because the freshly-
+    // uploaded image URL stayed site-relative and Electron's renderer
+    // origin (file://) couldn't load it.
+    url: absolutizeMediaURL(
+      record ? pickInlineMediaURL(record, input.url) : input.url,
+    ),
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
@@ -140,36 +155,80 @@ function normalize(
   };
 }
 
+// absolutizeMediaURL is the legacy-compat fallback for old markdown bodies
+// that persisted a site-relative `/api/attachments/<id>/download` or
+// `/uploads/<key>` URL.
+//
+// The current (post-MUL-3192) write path persists an absolute URL chosen
+// server-side by `buildMarkdownURL` (see server/internal/handler/file.go),
+// so new content already loads natively on every client. This helper only
+// matters for content written BEFORE MUL-3192 — those bodies still carry
+// the old relative shape, and rendering them on a surface whose document
+// origin is NOT the API host (Electron desktop, mobile webview) needs the
+// API base URL pinned in at render time.
+//
+// On web, `api.getBaseUrl()` is empty (the Next.js rewrite proxies /api/*
+// to the API host server-side), so this is a no-op there.
+//
+// http(s)://, blob:, and data: URLs are passed through unchanged — they
+// already carry their own origin.
+function absolutizeMediaURL(rawUrl: string): string {
+  if (!rawUrl) return rawUrl;
+  if (/^https?:\/\//i.test(rawUrl)) return rawUrl;
+  if (/^blob:/i.test(rawUrl) || /^data:/i.test(rawUrl)) return rawUrl;
+  if (!rawUrl.startsWith("/")) return rawUrl;
+  // The api singleton is a Proxy that returns `undefined` for any property
+  // access before `setApiInstance()` runs (boot ordering, SSR). Optional
+  // chaining lets us cope with that without throwing — pre-init renders
+  // simply keep the site-relative path.
+  const baseUrl = (api.getBaseUrl?.() ?? "").replace(/\/+$/, "");
+  if (!baseUrl) return rawUrl;
+  return `${baseUrl}${rawUrl}`;
+}
+
 // pickInlineMediaURL returns the URL most likely to load successfully
 // inside a native <img>/<video>/<iframe> resource fetch — i.e. without
 // the calling client attaching an Authorization header.
 //
-// The metadata response from the backend offers two URL fields per
-// attachment row:
+// The metadata response carries three URL fields per attachment row,
+// each with a different lifetime / accessibility:
 //
-//   - `record.url`         — for LocalStorage this is a freshly-signed
-//                             `/uploads/<key>?exp=<unix>&sig=<HMAC>`
-//                             URL whose query string IS the auth (works
-//                             for token-mode <img> loads). For S3/
-//                             CloudFront it's the raw stored URL with
-//                             no signature.
-//   - `record.download_url` — `/api/attachments/<id>/download` in the
-//                             default proxy/presign mode (requires
-//                             cookie or Authorization header — does
-//                             NOT work as a native resource load for
-//                             token-mode clients). In CloudFront mode
-//                             this is replaced server-side with a
-//                             CloudFront-signed URL that DOES work as
-//                             a native <img> src.
+//   - `record.download_url` — this-response click-time URL. In
+//                             CloudFront-signed mode this is the
+//                             signed redirect (works as a native img
+//                             src for the duration of the TTL); in
+//                             other modes it's the bare API endpoint
+//                             (`/api/attachments/<id>/download`) which
+//                             requires per-request auth and does NOT
+//                             load as a native img on a non-same-site
+//                             origin like Desktop's file://.
+//   - `record.markdown_url` — the durable URL the server picked for
+//                             persistence (MUL-3192 / `buildMarkdownURL`):
+//                             public CDN passthrough when the storage is
+//                             public-readable, or `MULTICA_PUBLIC_URL +
+//                             /api/attachments/<id>/download` for
+//                             private-bucket modes. Aligned with the
+//                             server-side policy by construction, so it
+//                             beats `record.url` whenever both exist.
+//   - `record.url`          — raw storage URL. May be private (S3 /
+//                             CloudFront-signed, R2, MinIO) and unable
+//                             to load directly. Last-resort fallback
+//                             for legacy responses that omit
+//                             `markdown_url`.
 //
-// Heuristic: when `download_url` is an absolute URL with a recognised
-// CDN signature query (`Signature` / `Expires` / `Key-Pair-Id` for
-// CloudFront, `X-Amz-Signature` / `X-Amz-Expires` for raw S3 presigns
-// that may surface here in future modes), use it. Otherwise use
-// `record.url`, which carries the LocalStorage `?exp&sig` token and is
-// the only inline-loadable URL in that backend. Falls back to the
-// input URL when neither is usable so legacy markdown links keep their
-// pre-fix behaviour.
+// Order:
+//
+//  1. Signed `download_url` — when CloudFront has minted a signed
+//     redirect for THIS response, use it; the TTL means the signed URL
+//     beats `markdown_url` on first paint (no extra hop through the
+//     API endpoint), and the renderer doesn't persist it so the TTL is
+//     not a problem.
+//  2. `record.markdown_url` — the durable, server-policy-aligned URL.
+//     Beats raw `record.url` because it never points at a private
+//     bucket (must-fix 2 from MUL-3192 review).
+//  3. `record.url` — legacy fallback for responses that omit
+//     `markdown_url` (a backend old enough to predate MUL-3192).
+//  4. The input URL — when there's no record at all.
 function pickInlineMediaURL(record: AttachmentRecord, fallback: string): string {
   const dl = record.download_url ?? "";
   if (
@@ -178,6 +237,7 @@ function pickInlineMediaURL(record: AttachmentRecord, fallback: string): string 
   ) {
     return dl;
   }
+  if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
   return fallback;
 }

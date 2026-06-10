@@ -85,6 +85,15 @@ func (m *mockStorage) KeyFromURL(rawURL string) string {
 	return rawURL
 }
 func (m *mockStorage) CdnDomain() string { return "cdn.example.com" }
+
+// mockStorageNoCdn is a mockStorage variant that returns an empty CdnDomain
+// to simulate a private S3 / R2 / MinIO deployment where the operator has
+// NOT configured a public-facing CDN domain. buildMarkdownURL must not
+// persist `a.Url` for this shape — it would write a private bucket URL
+// into markdown that no client can load.
+type mockStorageNoCdn struct{ mockStorage }
+
+func (m *mockStorageNoCdn) CdnDomain() string { return "" }
 func (m *mockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -954,6 +963,235 @@ func TestIsTextPreviewable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isTextPreviewable(tc.contentType, tc.filename); got != tc.want {
 				t.Errorf("isTextPreviewable(%q, %q) = %v, want %v", tc.contentType, tc.filename, got, tc.want)
+			}
+		})
+	}
+}
+
+// MUL-3192 — buildMarkdownURL must emit a durable, absolute-when-possible
+// URL that loads natively in any client (web, desktop, mobile webview).
+// `download_url` may be a short-lived signed URL and is unsafe to persist;
+// `markdown_url` is the contract for "ok to embed in markdown body".
+//
+// Matrix:
+//
+//   - public CDN durable URL ............... reuse a.Url verbatim
+//   - LocalStorage with PublicURL set ....... reuse a.Url (already absolute)
+//   - CloudFront-signed mode ................ never reuse a.Url (raw S3),
+//                                              prefer absolute API endpoint
+//   - LocalStorage relative + PublicURL set . prefix to absolute API endpoint
+//   - PublicURL unset ....................... fall back to site-relative
+//                                              (web's Next rewrite handles it)
+//   - signed URL (CloudFront-signed leaked
+//     into a.Url somehow) ................... reject as durable, fall through
+//                                              to API endpoint to avoid
+//                                              re-opening MUL-3130
+
+func TestBuildMarkdownURL_PublicCdnAbsoluteURLReusedVerbatim(t *testing.T) {
+	origPublic := testHandler.cfg.PublicURL
+	origSigner := testHandler.CFSigner
+	origStorage := testHandler.Storage
+	t.Cleanup(func() {
+		testHandler.cfg.PublicURL = origPublic
+		testHandler.CFSigner = origSigner
+		testHandler.Storage = origStorage
+	})
+	testHandler.cfg.PublicURL = "https://api.multica.test"
+	testHandler.CFSigner = nil
+	// mockStorage.CdnDomain() returns "cdn.example.com" — that's the
+	// operator-set signal that the URL host serves content publicly
+	// without per-request auth. Without this, the new gate routes
+	// through the API endpoint to be safe.
+	testHandler.Storage = &mockStorage{}
+
+	id := seedAttachmentURL(t, "https://cdn.multica.test/uploads/abc.png", "abc.png", "image/png", 1)
+	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+
+	resp := testHandler.attachmentToResponse(att)
+	if resp.MarkdownURL != "https://cdn.multica.test/uploads/abc.png" {
+		t.Fatalf("markdown_url = %q, want raw a.Url passthrough", resp.MarkdownURL)
+	}
+}
+
+// MUL-3192 review must-fix 1 — `att.url` for a private S3 / R2 / MinIO
+// bucket is absolute https + unsigned but is NOT publicly readable. The
+// generic "absolute http(s) without signature" check would have wrongly
+// persisted it; the gate now also requires `Storage.CdnDomain()` to be
+// set so the operator has explicitly opted into "URLs from this storage
+// load directly".
+func TestBuildMarkdownURL_PrivateBucketWithoutCdnDomainRoutesThroughAPIEndpoint(t *testing.T) {
+	origPublic := testHandler.cfg.PublicURL
+	origSigner := testHandler.CFSigner
+	origStorage := testHandler.Storage
+	t.Cleanup(func() {
+		testHandler.cfg.PublicURL = origPublic
+		testHandler.CFSigner = origSigner
+		testHandler.Storage = origStorage
+	})
+	testHandler.cfg.PublicURL = "https://api.multica.test"
+	testHandler.CFSigner = nil
+	testHandler.Storage = &mockStorageNoCdn{}
+
+	id := seedAttachmentURL(t, "https://prod.s3.amazonaws.com/key.png", "key.png", "image/png", 1)
+	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+
+	resp := testHandler.attachmentToResponse(att)
+	want := "https://api.multica.test/api/attachments/" + id + "/download"
+	if resp.MarkdownURL != want {
+		t.Fatalf("markdown_url = %q, want absolute API endpoint %q (private bucket without explicit CDN must not persist raw S3 URL)", resp.MarkdownURL, want)
+	}
+}
+
+func TestBuildMarkdownURL_CloudFrontSignedModeNeverPersistsRawStorageURL(t *testing.T) {
+	origPublic := testHandler.cfg.PublicURL
+	origSigner := testHandler.CFSigner
+	t.Cleanup(func() {
+		testHandler.cfg.PublicURL = origPublic
+		testHandler.CFSigner = origSigner
+	})
+	testHandler.cfg.PublicURL = "https://api.multica.test"
+	testHandler.CFSigner = testCloudFrontSigner(t)
+
+	// Raw S3 URL — private bucket, not loadable directly by clients.
+	id := seedAttachmentURL(t, "https://prod.s3.amazonaws.com/key.png", "key.png", "image/png", 1)
+	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+
+	resp := testHandler.attachmentToResponse(att)
+	want := "https://api.multica.test/api/attachments/" + id + "/download"
+	if resp.MarkdownURL != want {
+		t.Fatalf("markdown_url = %q, want absolute API endpoint %q", resp.MarkdownURL, want)
+	}
+	// download_url is allowed to carry a TTL (CloudFront-signed); it's NOT
+	// what the client persists, but it IS what the renderer uses for this
+	// response. The two are intentionally distinct.
+	if resp.DownloadURL == resp.MarkdownURL {
+		t.Fatalf("download_url and markdown_url must differ in CloudFront-signed mode (got identical %q)", resp.DownloadURL)
+	}
+}
+
+func TestBuildMarkdownURL_RelativeStorageURLPrefixedWithPublicURL(t *testing.T) {
+	origPublic := testHandler.cfg.PublicURL
+	origSigner := testHandler.CFSigner
+	t.Cleanup(func() {
+		testHandler.cfg.PublicURL = origPublic
+		testHandler.CFSigner = origSigner
+	})
+	testHandler.cfg.PublicURL = "https://api.multica.test"
+	testHandler.CFSigner = nil
+
+	// LocalStorage without LOCAL_UPLOAD_BASE_URL stores a site-relative URL.
+	id := seedAttachmentURL(t, "/uploads/abc.png", "abc.png", "image/png", 1)
+	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+
+	resp := testHandler.attachmentToResponse(att)
+	want := "https://api.multica.test/api/attachments/" + id + "/download"
+	if resp.MarkdownURL != want {
+		t.Fatalf("markdown_url = %q, want absolute API endpoint %q", resp.MarkdownURL, want)
+	}
+}
+
+func TestBuildMarkdownURL_PublicURLUnsetFallsBackToSiteRelative(t *testing.T) {
+	origPublic := testHandler.cfg.PublicURL
+	origSigner := testHandler.CFSigner
+	t.Cleanup(func() {
+		testHandler.cfg.PublicURL = origPublic
+		testHandler.CFSigner = origSigner
+	})
+	testHandler.cfg.PublicURL = ""
+	testHandler.CFSigner = nil
+
+	id := seedAttachmentURL(t, "/uploads/abc.png", "abc.png", "image/png", 1)
+	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+
+	resp := testHandler.attachmentToResponse(att)
+	want := "/api/attachments/" + id + "/download"
+	if resp.MarkdownURL != want {
+		t.Fatalf("markdown_url = %q, want site-relative fallback %q", resp.MarkdownURL, want)
+	}
+}
+
+func TestBuildMarkdownURL_StripsTrailingSlashOnPublicURL(t *testing.T) {
+	origPublic := testHandler.cfg.PublicURL
+	origSigner := testHandler.CFSigner
+	t.Cleanup(func() {
+		testHandler.cfg.PublicURL = origPublic
+		testHandler.CFSigner = origSigner
+	})
+	testHandler.cfg.PublicURL = "https://api.multica.test/"
+	testHandler.CFSigner = nil
+
+	id := seedAttachmentURL(t, "/uploads/abc.png", "abc.png", "image/png", 1)
+	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+
+	resp := testHandler.attachmentToResponse(att)
+	want := "https://api.multica.test/api/attachments/" + id + "/download"
+	if resp.MarkdownURL != want {
+		t.Fatalf("markdown_url = %q, want exactly one separator %q", resp.MarkdownURL, want)
+	}
+}
+
+func TestIsDurablePublicURL(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"absolute https no signature", "https://cdn.multica.test/foo.png", true},
+		{"absolute http no signature", "http://cdn.multica.test/foo.png", true},
+		{"absolute with port + path", "https://cdn.example.test:8080/a/b/c.png", true},
+		{"empty string", "", false},
+		{"site-relative", "/uploads/abc.png", false},
+		{"protocol-relative", "//cdn.example/foo.png", false},
+		{"data URL", "data:image/png;base64,abc", false},
+		{"blob URL", "blob:https://app/abc", false},
+		{"unsupported scheme", "ftp://server/foo", false},
+		{"cloudfront-signed Signature", "https://cdn.example/foo.png?Signature=abc&Key-Pair-Id=K1", false},
+		{"cloudfront-signed Key-Pair-Id alone", "https://cdn.example/foo.png?Key-Pair-Id=K1", false},
+		{"s3-presigned X-Amz-Signature", "https://bucket.s3/foo.png?X-Amz-Signature=abc", false},
+		{"s3-presigned X-Amz-Expires alone", "https://bucket.s3/foo.png?X-Amz-Expires=900", false},
+		{"plain Expires query", "https://cdn.example/foo.png?Expires=99", false},
+		{"unrelated query", "https://cdn.example/foo.png?cache=1", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isDurablePublicURL(tc.url); got != tc.want {
+				t.Errorf("isDurablePublicURL(%q) = %v, want %v", tc.url, got, tc.want)
 			}
 		})
 	}

@@ -757,6 +757,24 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 </div>
               </div>
               <div>
+                <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_created_by)}</label>
+                <div className="mt-1 flex items-center gap-2">
+                  {/* Creator may be a member or an agent: the HTTP create path stamps
+                      member today, but backend logic also writes created_by_type=agent.
+                      ActorAvatar/getActorName resolve both, so never assume member. */}
+                  <ActorAvatar
+                    actorType={autopilot.created_by_type}
+                    actorId={autopilot.created_by_id}
+                    size={20}
+                    enableHoverCard
+                    showStatusDot={autopilot.created_by_type === "agent"}
+                  />
+                  <span className="cursor-pointer">
+                    {getActorName(autopilot.created_by_type, autopilot.created_by_id)}
+                  </span>
+                </div>
+              </div>
+              <div>
                 <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_output_mode)}</label>
                 <div className="mt-1">
                   {t(($) => $.execution_mode[autopilot.execution_mode as AutopilotExecutionMode])}

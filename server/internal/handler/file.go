@@ -65,9 +65,35 @@ type AttachmentResponse struct {
 	Filename      string  `json:"filename"`
 	URL           string  `json:"url"`
 	DownloadURL   string  `json:"download_url"`
-	ContentType   string  `json:"content_type"`
-	SizeBytes     int64   `json:"size_bytes"`
-	CreatedAt     string  `json:"created_at"`
+	// MarkdownURL is the durable, absolute-when-possible URL the client
+	// SHOULD persist into markdown bodies (issue descriptions, comments,
+	// chat messages). It is computed per deployment policy by
+	// buildMarkdownURL — preferring the storage URL when it is already a
+	// public, durable absolute URL (public CDN / LocalStorage with
+	// MULTICA_LOCAL_UPLOAD_BASE_URL), and otherwise prefixing
+	// MULTICA_PUBLIC_URL onto the stable per-attachment endpoint that the
+	// server self-resigns / proxies on every request.
+	//
+	// Why a separate field from URL / DownloadURL:
+	//   - URL is the raw storage object URL — fine for avatar/logo
+	//     surfaces but may be private (S3 + CloudFront-signed mode) or
+	//     site-relative (LocalStorage with no base URL configured).
+	//   - DownloadURL is the URL the renderer uses for THIS response — it
+	//     can be a short-lived signed URL (CloudFront, S3 presign) and
+	//     therefore must NOT be persisted. It expires.
+	//   - MarkdownURL is contracted to be persistable: it never carries a
+	//     TTL, and on every supported deployment shape it is loadable as
+	//     a native browser resource fetch (no Authorization header required
+	//     beyond the cookies/credentials the client already has on the
+	//     resolved host).
+	//
+	// MUL-3192 — fixes the Desktop / mobile-webview regression where the
+	// previous site-relative `/api/attachments/<id>/download` link only
+	// resolved when the document origin proxied /api to the API host.
+	MarkdownURL string `json:"markdown_url"`
+	ContentType string `json:"content_type"`
+	SizeBytes   int64  `json:"size_bytes"`
+	CreatedAt   string `json:"created_at"`
 }
 
 func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
@@ -80,6 +106,7 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		Filename:     a.Filename,
 		URL:          a.Url,
 		DownloadURL:  attachmentDownloadPath(id),
+		MarkdownURL:  h.buildMarkdownURL(a, id),
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
@@ -108,6 +135,104 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 
 func attachmentDownloadPath(id string) string {
 	return "/api/attachments/" + id + "/download"
+}
+
+// buildMarkdownURL chooses the durable URL the client persists into
+// markdown bodies. The contract is "absolute, no TTL, loadable as a native
+// browser resource fetch on every supported client" (MUL-3192).
+//
+// Decision:
+//
+//  1. Persist `a.Url` only when the deployment has signaled the storage
+//     backend serves URLs publicly without per-request auth:
+//       - `Storage.CdnDomain()` is non-empty (operator configured a
+//         public-facing base URL — `S3_CDN_DOMAIN` for the S3 backend or
+//         `LOCAL_UPLOAD_BASE_URL` for LocalStorage), AND
+//       - `h.CFSigner` is nil (no per-request CloudFront signing — when
+//         signing is on, the same CDN domain serves PRIVATE content via
+//         time-bounded signed URLs and the raw `a.Url` is unauth-deny),
+//         AND
+//       - `a.Url` is itself an absolute http(s) URL with no signature
+//         query — defends against legacy rows backfilled while baseURL
+//         was unset, and against a freshly-signed `download_url` ever
+//         leaking into `a.Url` (the original MUL-3130 bug).
+//
+//  2. Every other shape — CloudFront-signed mode, S3 presign /proxy
+//     against a private bucket without a CDN domain, raw S3 / R2 /
+//     MinIO, LocalStorage with no `LOCAL_UPLOAD_BASE_URL` — uses the
+//     stable per-attachment endpoint that the server self-signs /
+//     proxies on every request, anchored on `MULTICA_PUBLIC_URL` so the
+//     persisted URL keeps working for clients that don't share the
+//     document origin (Desktop / mobile webview).
+//
+//  3. Last-resort fallback (no `MULTICA_PUBLIC_URL` configured): emit
+//     the site-relative path. Web's Next.js rewrite handles this; non-
+//     web clients on a deployment without `PublicURL` configured were
+//     already broken before MUL-3192 and stay broken here, but we
+//     don't make them worse.
+func (h *Handler) buildMarkdownURL(a db.Attachment, id string) string {
+	relPath := attachmentDownloadPath(id)
+	publicURL := strings.TrimRight(h.cfg.PublicURL, "/")
+
+	if h.storageURLIsPubliclyReadable(a.Url) {
+		return a.Url
+	}
+
+	if publicURL != "" {
+		return publicURL + relPath
+	}
+	return relPath
+}
+
+// storageURLIsPubliclyReadable returns true when the deployment has signaled
+// that `a.Url` can be loaded directly by an unauthenticated native browser
+// fetch — the only case where it is safe to persist `a.Url` into a markdown
+// body that will outlive the current session.
+func (h *Handler) storageURLIsPubliclyReadable(rawURL string) bool {
+	if h.Storage == nil || h.CFSigner != nil {
+		// CFSigner != nil is per-request signing; the CDN domain serves
+		// private content via signed URLs and `a.Url` is the raw S3 URL.
+		return false
+	}
+	if h.Storage.CdnDomain() == "" {
+		// No public-facing base URL configured — the storage's URL is
+		// the raw private object URL (S3 / R2 / MinIO) or a site-relative
+		// LocalStorage path that doesn't carry an origin.
+		return false
+	}
+	return isDurablePublicURL(rawURL)
+}
+
+// isDurablePublicURL is true when `rawURL` is an absolute http(s) URL that
+// is safe to persist into long-lived markdown bodies — i.e. it carries no
+// CloudFront / S3 signature query that would make it expire.
+func isDurablePublicURL(rawURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	if u.Host == "" {
+		return false
+	}
+	q := u.Query()
+	for _, k := range []string{
+		"Signature",
+		"X-Amz-Signature",
+		"Key-Pair-Id",
+		"Expires",
+		"X-Amz-Expires",
+	} {
+		if q.Get(k) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeAttachmentDownloadMode(raw string) (attachmentDownloadMode, bool) {
