@@ -4,5 +4,8 @@
 -- those rows. We keep this strict (no DROP NOT VALID dance) to preserve
 -- the schema invariant downstream code relies on.
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_origin_type_check;
+-- CEREBRO-PATCH(issue-origin-lark-chat): preserve 'runtime_approval' and 'agent_task'
+-- on rollback — the upstream down migration reverted to ('autopilot', 'quick_create')
+-- which drops the cerebro-added values.
 ALTER TABLE issue ADD CONSTRAINT issue_origin_type_check
-    CHECK (origin_type IN ('autopilot', 'quick_create'));
+    CHECK (origin_type IN ('autopilot', 'quick_create', 'runtime_approval', 'agent_task'));

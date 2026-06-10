@@ -5,7 +5,7 @@
 -- issues only have creator_type='agent' and disappear from the human's inbox.
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_origin_type_check;
 ALTER TABLE issue ADD CONSTRAINT issue_origin_type_check
-    CHECK (origin_type IN ('autopilot', 'quick_create', 'runtime_approval', 'agent_task'));
+    CHECK (origin_type IN ('autopilot', 'quick_create', 'runtime_approval', 'agent_task', 'lark_chat'));
 
 -- Also widen the issue_subscriber.reason CHECK so the listener can record the
 -- new 'triggered_agent' provenance. Members can still opt out per-reason via

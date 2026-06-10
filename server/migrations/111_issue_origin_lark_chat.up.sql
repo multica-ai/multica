@@ -6,5 +6,9 @@
 -- check three times, each crash dragging the WS connector down + Lark
 -- retrying the same event into the next crash.
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_origin_type_check;
+-- CEREBRO-PATCH(issue-origin-lark-chat): cerebro migrations 9023 + 9054 added
+-- 'runtime_approval' and 'agent_task' to this constraint. The upstream list only
+-- contained ('autopilot', 'quick_create', 'lark_chat'), which caused SQLSTATE 23514
+-- on existing rows in the cerebro DB.
 ALTER TABLE issue ADD CONSTRAINT issue_origin_type_check
-    CHECK (origin_type IN ('autopilot', 'quick_create', 'lark_chat'));
+    CHECK (origin_type IN ('autopilot', 'quick_create', 'runtime_approval', 'agent_task', 'lark_chat'));
