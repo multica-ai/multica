@@ -140,7 +140,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </p>
           ) : wecomInstall ? (
             <p className="text-xs text-muted-foreground">
-              {ts(($) => $.wecom.connected_bots)}: Bot {wecomInstall.bot_id}
+              {ts(($) => $.wecom.installation_connected, { id: wecomInstall.bot_id })}
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">

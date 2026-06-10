@@ -156,7 +156,7 @@ type IssueCreator interface {
 // the Dispatcher is small enough that depending on the whole
 // TaskService struct is gratuitous.
 type ChatTaskEnqueuer interface {
-	EnqueueChatTask(ctx context.Context, session db.ChatSession) (db.AgentTaskQueue, error)
+	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error)
 }
 
 // DispatcherQueries is the narrow subset of *db.Queries the Dispatcher
@@ -555,7 +555,7 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 	//    Note: a daemon that's merely disconnected is NOT an error. As
 	//    long as agent.runtime_id is set, the chat task is enqueued at
 	//    flush and waits for the daemon to claim it on next online.
-	d.scheduleRun(inst, msg, sessionID)
+	d.scheduleRun(inst, msg, sessionID, binding.MulticaUserID)
 	return res, postAppendFinalize, nil
 }
 
@@ -563,8 +563,8 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 // it inline when batching is disabled). The flush closure captures this
 // message's installation + InboundMessage so the offline/archived notice,
 // if any, targets the right chat; the latest message in a window wins.
-func (d *Dispatcher) scheduleRun(inst db.WecomInstallation, msg InboundMessage, sessionID pgtype.UUID) {
-	flush := func() { d.flushChatRun(inst, msg, sessionID) }
+func (d *Dispatcher) scheduleRun(inst db.WecomInstallation, msg InboundMessage, sessionID pgtype.UUID, initiatorUserID pgtype.UUID) {
+	flush := func() { d.flushChatRun(inst, msg, sessionID, initiatorUserID) }
 	if d.batcher == nil {
 		// Batching disabled (unit tests / degenerate config): trigger the
 		// run immediately. Production always installs a batcher via
@@ -584,7 +584,7 @@ func (d *Dispatcher) scheduleRun(inst db.WecomInstallation, msg InboundMessage, 
 // returned to a caller (the message is already ACKed and durable), so they
 // are logged: a failed enqueue leaves the message in the session to be
 // picked up by the next message's run.
-func (d *Dispatcher) flushChatRun(inst db.WecomInstallation, msg InboundMessage, sessionID pgtype.UUID) {
+func (d *Dispatcher) flushChatRun(inst db.WecomInstallation, msg InboundMessage, sessionID pgtype.UUID, initiatorUserID pgtype.UUID) {
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
 
@@ -596,7 +596,7 @@ func (d *Dispatcher) flushChatRun(inst db.WecomInstallation, msg InboundMessage,
 		)
 		return
 	}
-	task, err := d.TaskService.EnqueueChatTask(ctx, session)
+	task, err := d.TaskService.EnqueueChatTask(ctx, session, initiatorUserID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):

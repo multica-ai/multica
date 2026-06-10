@@ -320,7 +320,10 @@
     "toast_connected": "WeCom bot connected",
     "toast_connect_failed": "Failed to connect WeCom bot",
     "toast_disconnected": "WeCom bot disconnected",
-    "toast_disconnect_failed": "Disconnect failed"
+    "toast_disconnect_failed": "Disconnect failed",
+    "installation_bot": "Bot {{id}}",
+    "installation_agent": "Agent {{id}}",
+    "installation_connected": "Connected: Bot {{id}}"
   },
   "repositories": {
     "section_title": "Repositories",

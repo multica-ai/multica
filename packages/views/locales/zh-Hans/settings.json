@@ -320,7 +320,10 @@
     "toast_connected": "企业微信 Bot 已连接",
     "toast_connect_failed": "连接失败",
     "toast_disconnected": "已断开企业微信 Bot",
-    "toast_disconnect_failed": "断开失败"
+    "toast_disconnect_failed": "断开失败",
+    "installation_bot": "Bot {{id}}",
+    "installation_agent": "智能体 {{id}}",
+    "installation_connected": "已连接：Bot {{id}}"
   },
   "repositories": {
     "section_title": "代码仓库",

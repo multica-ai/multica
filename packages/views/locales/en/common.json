@@ -24,5 +24,20 @@
     "error_already_bound": "This Lark account is already bound to a different Multica user. Account transfers must go through an explicit unbind first.",
     "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
     "error_unknown": "Something went wrong. Try again, and if the problem persists, contact the workspace admin."
+  },
+  "wecom_bind": {
+    "page_title": "Bind your WeCom identity",
+    "verifying_auth": "Verifying sign-in…",
+    "redeeming": "Binding…",
+    "needs_auth_description": "Sign in to Multica to complete the binding.",
+    "sign_in": "Sign in",
+    "done_description": "You're bound. Return to WeCom to continue chatting with the Bot.",
+    "error_missing_token": "The link is missing its binding token.",
+    "error_mixed_content": "This page is HTTPS but the API is configured as http://localhost:8080, which the browser blocks. Open the binding link on localhost on your PC.",
+    "error_expired": "This binding link is invalid or expired. Send the Bot a new message in WeCom to get a fresh link.",
+    "error_already_bound": "This WeCom account is already bound to a different Multica user.",
+    "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
+    "error_unknown": "Binding failed. The link may be expired or already used.",
+    "open_localhost_bind": "Open binding link on localhost"
   }
 }

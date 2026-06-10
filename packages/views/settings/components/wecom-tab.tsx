@@ -138,8 +138,12 @@ export function WecomTab() {
             <Card key={inst.id}>
               <CardContent className="flex items-center justify-between gap-4 pt-6">
                 <div className="min-w-0 text-sm">
-                  <p className="font-medium truncate">Bot {inst.bot_id}</p>
-                  <p className="text-muted-foreground truncate">Agent {inst.agent_id}</p>
+                  <p className="font-medium truncate">
+                    {t(($) => $.wecom.installation_bot, { id: inst.bot_id })}
+                  </p>
+                  <p className="text-muted-foreground truncate">
+                    {t(($) => $.wecom.installation_agent, { id: inst.agent_id })}
+                  </p>
                 </div>
                 {canManage && inst.status === "active" && (
                   <Button
