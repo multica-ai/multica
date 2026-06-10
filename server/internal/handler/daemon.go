@@ -21,9 +21,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp" // CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge workspace connections into RuntimeToolsConfig
 	cerebropersona "github.com/multica-ai/multica/server/internal/cerebro/persona"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy" // CEREBRO-PATCH(daemon-repo-toolpolicy): FIR-2505 repo-capability resolved via tool-policy chain
-	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp" // CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge workspace connections into RuntimeToolsConfig
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1754,6 +1754,20 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// CEREBRO-PATCH(agent-task-trigger-human-origin): TECH-3295 R3 — the runtime
+		// trace's "user" must be the human who originated the chain, not the agent
+		// that handed off on an agent→agent comment. task.OriginalUserID is the
+		// delegation chain's human principal (same signal the mention/handoff guard
+		// uses); mirror the gateway executor and attribute to that human. The
+		// immediate author still lives in TriggerAuthorType/Name for the mention-loop
+		// harness signal, so this only changes who the spend is counted against.
+		if task.OriginalUserID.Valid {
+			resp.TriggerUserID = uuidToString(task.OriginalUserID)
+			if u, err := h.Queries.GetUser(r.Context(), task.OriginalUserID); err == nil {
+				resp.TriggerUserName = u.Name
+			}
+		}
+
 		// Look up the prior session for this (agent, issue) pair so the daemon
 		// can resume the Claude Code conversation context.
 		//
@@ -2409,7 +2423,6 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
 		}
-
 
 		accountTokens += u.InputTokens + u.OutputTokens
 

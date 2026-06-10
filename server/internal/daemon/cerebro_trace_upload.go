@@ -115,10 +115,15 @@ func traceSurface(task Task) string {
 	}
 }
 
-// traceTriggerUserName is the display name of whoever triggered the run: the
-// triggering comment's author for issue tasks, else the requesting user (chat /
-// direct). Empty when neither is set.
+// traceTriggerUserName is the display name attributed to the run's "user" in
+// the trace. TECH-3295 R3: prefer the chain's human origin (TriggerUserName,
+// resolved server-side from task.OriginalUserID) so an agent→agent handoff is
+// counted against the human behind it, not the handoff agent. Falls back to the
+// immediate triggering author, then the requesting (runtime-owner) user.
 func traceTriggerUserName(task Task) string {
+	if task.TriggerUserName != "" { // CEREBRO-PATCH(daemon-trace-upload-prefer-human-origin): TECH-3295 R3 — chain's human origin wins over the handoff agent's name
+		return task.TriggerUserName
+	}
 	if task.TriggerAuthorName != "" {
 		return task.TriggerAuthorName
 	}

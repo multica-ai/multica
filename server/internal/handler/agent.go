@@ -181,29 +181,28 @@ type AgentTaskResponse struct {
 	// as `## Workspace Context` so every agent running in this workspace —
 	// regardless of issue / chat / autopilot / quick-create — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
-	WorkspaceContext string                `json:"workspace_context,omitempty"`
-	Status           string                `json:"status"`
-	Priority         int32                 `json:"priority"`
-	DispatchedAt     *string               `json:"dispatched_at"`
-	StartedAt        *string               `json:"started_at"`
-	CompletedAt      *string               `json:"completed_at"`
-	Result           any                   `json:"result"`
-	Error            *string               `json:"error"`
-	FailureReason    string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt          int32                 `json:"attempt"`
-	MaxAttempts      int32                 `json:"max_attempts"`
-	ParentTaskID     *string               `json:"parent_task_id,omitempty"`
-	Agent            *TaskAgentData        `json:"agent,omitempty"`
-	Repos            []RepoData            `json:"repos,omitempty"`
-	ProjectID        string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle     string                `json:"project_title,omitempty"`     // for surfacing in agent context
+	WorkspaceContext string         `json:"workspace_context,omitempty"`
+	Status           string         `json:"status"`
+	Priority         int32          `json:"priority"`
+	DispatchedAt     *string        `json:"dispatched_at"`
+	StartedAt        *string        `json:"started_at"`
+	CompletedAt      *string        `json:"completed_at"`
+	Result           any            `json:"result"`
+	Error            *string        `json:"error"`
+	FailureReason    string         `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt          int32          `json:"attempt"`
+	MaxAttempts      int32          `json:"max_attempts"`
+	ParentTaskID     *string        `json:"parent_task_id,omitempty"`
+	Agent            *TaskAgentData `json:"agent,omitempty"`
+	Repos            []RepoData     `json:"repos,omitempty"`
+	ProjectID        string         `json:"project_id,omitempty"`    // issue's project, when present
+	ProjectTitle     string         `json:"project_title,omitempty"` // for surfacing in agent context
 
 	// CEREBRO-PATCH(agent-task-issue-title): FIR-2763 M1 — daemon-resolved issue
 	// titles so the trace-upload sidecar can stamp human-readable names on each
 	// ai_proxy_logs row. Empty when unresolved; registry stores null.
-	IssueTitle       string                `json:"issue_title,omitempty"`
-	ParentIssueTitle string                `json:"parent_issue_title,omitempty"`
-
+	IssueTitle       string `json:"issue_title,omitempty"`
+	ParentIssueTitle string `json:"parent_issue_title,omitempty"`
 
 	ProjectResources []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
 	CreatedAt        string                `json:"created_at"`
@@ -220,22 +219,21 @@ type AgentTaskResponse struct {
 	// when WorkDir is empty, or when stripping leaves nothing. See
 	// relativeWorkDir() for the full rules. Older clients can still read
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
-	RelativeWorkDir         string               `json:"relative_work_dir,omitempty"`
-	TriggerCommentID        *string              `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	RelativeWorkDir  string  `json:"relative_work_dir,omitempty"`
+	TriggerCommentID *string `json:"trigger_comment_id,omitempty"` // comment that triggered this task
 
+	TriggerThreadID string `json:"trigger_thread_id,omitempty"` // root comment ID for the triggering thread
 
-	TriggerThreadID         string               `json:"trigger_thread_id,omitempty"`         // root comment ID for the triggering thread
+	TriggerCommentContent string  `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	TriggerSummary        *string `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType     string  `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName     string  `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
 
-	TriggerCommentContent   string               `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
-	TriggerSummary          *string              `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	TriggerAuthorType       string               `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName       string               `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-
-	TriggerUserID           string               `json:"trigger_user_id,omitempty"`           // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
-	IssueKind               string               `json:"issue_kind,omitempty"`                // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
-	IssueSnapshot           string               `json:"issue_snapshot,omitempty"`            // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
-	BundleContextHint       bool                 `json:"bundle_context_hint,omitempty"`       // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
-
+	TriggerUserID     string `json:"trigger_user_id,omitempty"`     // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
+	TriggerUserName   string `json:"trigger_user_name,omitempty"`   // CEREBRO-PATCH(agent-task-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin for the trace user-label
+	IssueKind         string `json:"issue_kind,omitempty"`          // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
+	IssueSnapshot     string `json:"issue_snapshot,omitempty"`      // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
+	BundleContextHint bool   `json:"bundle_context_hint,omitempty"` // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
 
 	NewCommentCount         int                  `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
 	NewCommentsSince        string               `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
@@ -259,24 +257,24 @@ type AgentTaskResponse struct {
 	// empty otherwise. The daemon emits both into the brief under
 	// `## Requesting User`; the heading is skipped entirely when description
 	// is empty.
-	RequestingUserName               string               `json:"requesting_user_name,omitempty"`
-	RequestingUserProfileDescription string               `json:"requesting_user_profile_description,omitempty"`
-	UserProfilePrompt                string               `json:"user_profile_prompt,omitempty"`
-	Kind                             string               `json:"kind"`                     // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
-	Title                            *string              `json:"title,omitempty"`          // CEREBRO-PATCH(task-title-builder): short generated headline.
+	RequestingUserName               string  `json:"requesting_user_name,omitempty"`
+	RequestingUserProfileDescription string  `json:"requesting_user_profile_description,omitempty"`
+	UserProfilePrompt                string  `json:"user_profile_prompt,omitempty"`
+	Kind                             string  `json:"kind"`            // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	Title                            *string `json:"title,omitempty"` // CEREBRO-PATCH(task-title-builder): short generated headline.
 	// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — queued-task hint while runtime is paused (runtime_paused|reason|unpause_at).
-	WaitReason                       *string              `json:"wait_reason,omitempty"`
-	ModelOverride                    string               `json:"model_override,omitempty"` // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
-	SandboxEnabled                   *bool                `json:"sandbox_enabled,omitempty"`
-	RuntimeSandboxPolicy             json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
-	RuntimePersonaSandbox            string               `json:"runtime_persona_sandbox,omitempty"`
-	RuntimeToolsConfig               json.RawMessage      `json:"runtime_tools_config,omitempty"`
-	DisallowedMCPTools               []string             `json:"disallowed_mcp_tools,omitempty"` // CEREBRO-PATCH(agent-task-disallowed-mcp-tools): TECH-3156 per-tool connection denies passed to the agent at spawn.
-	PersonaSpawnUserID               string               `json:"persona_spawn_user_id,omitempty"`
-	PersonaSpawnGroupIDs             []string             `json:"persona_spawn_group_ids,omitempty"`
-	ChatHistory                      []ChatHistoryMessage `json:"chat_history,omitempty"`
-	ChatMessages                     []string             `json:"chat_messages,omitempty"`
-	ChatMessageID                    string               `json:"chat_message_id,omitempty"`
+	WaitReason            *string              `json:"wait_reason,omitempty"`
+	ModelOverride         string               `json:"model_override,omitempty"` // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	SandboxEnabled        *bool                `json:"sandbox_enabled,omitempty"`
+	RuntimeSandboxPolicy  json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
+	RuntimePersonaSandbox string               `json:"runtime_persona_sandbox,omitempty"`
+	RuntimeToolsConfig    json.RawMessage      `json:"runtime_tools_config,omitempty"`
+	DisallowedMCPTools    []string             `json:"disallowed_mcp_tools,omitempty"` // CEREBRO-PATCH(agent-task-disallowed-mcp-tools): TECH-3156 per-tool connection denies passed to the agent at spawn.
+	PersonaSpawnUserID    string               `json:"persona_spawn_user_id,omitempty"`
+	PersonaSpawnGroupIDs  []string             `json:"persona_spawn_group_ids,omitempty"`
+	ChatHistory           []ChatHistoryMessage `json:"chat_history,omitempty"`
+	ChatMessages          []string             `json:"chat_messages,omitempty"`
+	ChatMessageID         string               `json:"chat_message_id,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
@@ -370,7 +368,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
 		// CEREBRO-PATCH(task-title-builder): surface generated title to clients.
-		Title:           textToPtr(t.Title),
+		Title: textToPtr(t.Title),
 		// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — explain queued waits without issue comments.
 		WaitReason:      textToPtr(t.WaitReason),
 		WorkDir:         workDir,

@@ -122,6 +122,8 @@ type Task struct {
 
 	// CEREBRO-PATCH(daemon-trace-upload-trigger-user): FIR-2438 — user who triggered the run.
 	TriggerUserID string `json:"trigger_user_id,omitempty"`
+	// CEREBRO-PATCH(daemon-trace-upload-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin, used for the trace user-label instead of the handoff agent's name.
+	TriggerUserName string `json:"trigger_user_name,omitempty"`
 	// CEREBRO-PATCH(daemon-trace-upload-display-titles): FIR-2763 M1 display titles resolved at claim time; empty when unknown.
 	IssueTitle       string `json:"issue_title,omitempty"`
 	ParentIssueTitle string `json:"parent_issue_title,omitempty"`
