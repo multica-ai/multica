@@ -46,7 +46,6 @@
     "caption_member": "{{count}} members",
     "header_agent": "Agent",
     "header_member": "Member",
-    "header_tokens": "Tokens",
     "header_processed_tokens": "Processed Tokens",
     "header_non_cached_tokens": "Non-cached Tokens",
     "header_cached_tokens": "Cached Tokens",
