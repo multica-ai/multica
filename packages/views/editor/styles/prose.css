@@ -59,6 +59,12 @@
   line-height: 1.625;
 }
 
+/* CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — prevent long links from widening message layouts. */
+.rich-text-editor a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* First child should not have top margin */
 .rich-text-editor > *:first-child {
   margin-top: 0;

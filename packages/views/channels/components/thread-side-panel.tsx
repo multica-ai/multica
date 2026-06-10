@@ -4,8 +4,8 @@
 // clicks the "N replies" pill on a Slack message row.
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowUp, Copy, Loader2, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { ArrowLeft, ArrowUp, BellRing, Copy, Loader2, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -50,6 +50,7 @@ import { collectThreadReplies } from "../../issues/components/thread-utils";
 import { ReadonlyContent } from "../../editor";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
 import { useT } from "../../i18n";
+import { useCommentReminder } from "@multica/cerebro-inbox";
 
 interface ThreadSidePanelProps {
   channelId: string;
@@ -215,9 +216,12 @@ function ThreadEntry({
   const { getActorName } = useActorName();
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { uploadWithToast } = useFileUpload(api);
+  const reminder = useCommentReminder(channelId);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
     enabled: editing,
@@ -228,6 +232,24 @@ function ThreadEntry({
   const canDelete = isOwn;
   const isTemp = entry.id.startsWith("temp-");
   const reactions = entry.reactions ?? [];
+  // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — match mobile message actions and reminders inside threads.
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearLongPressTimer, [clearLongPressTimer]);
+
+  const startLongPress = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (isTemp || editing || event.pointerType === "mouse") return;
+    clearLongPressTimer();
+    longPressTimerRef.current = setTimeout(() => {
+      setActionsOpen(true);
+      longPressTimerRef.current = null;
+    }, 500);
+  }, [clearLongPressTimer, editing, isTemp]);
 
   const startEdit = useCallback(() => {
     cancelledRef.current = false;
@@ -256,6 +278,15 @@ function ThreadEntry({
 
   return (
     <div
+      onPointerDown={startLongPress}
+      onPointerUp={clearLongPressTimer}
+      onPointerCancel={clearLongPressTimer}
+      onPointerLeave={clearLongPressTimer}
+      onContextMenu={(event) => {
+        if (isTemp || editing) return;
+        event.preventDefault();
+        setActionsOpen(true);
+      }}
       className={cn(
         "group/threadrow relative flex gap-2.5 px-4 py-2 hover:bg-accent/30 transition-colors",
         isRoot && "border-b pb-3",
@@ -269,7 +300,7 @@ function ThreadEntry({
         enableHoverCard
         showStatusDot
       />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-hidden">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-semibold">
             {getActorName(entry.actor_type, entry.actor_id)}
@@ -329,7 +360,7 @@ function ThreadEntry({
             {isDragOver && <FileDropOverlay />}
           </div>
         ) : (
-          <div className="text-sm leading-snug text-foreground/90">
+          <div className="text-sm leading-snug text-foreground/90 wrap-anywhere">
             <ReadonlyContent
               content={entry.content ?? ""}
               attachments={entry.attachments}
@@ -358,12 +389,17 @@ function ThreadEntry({
       </div>
 
       {!isTemp && !editing && (
-        <div className="absolute -top-3 right-4 hidden items-center gap-0.5 rounded-md border bg-background shadow-sm group-hover/threadrow:flex">
+        <div
+          className={cn(
+            "absolute -top-3 right-4 items-center gap-0.5 rounded-md border bg-background shadow-sm",
+            actionsOpen ? "flex" : "hidden sm:group-hover/threadrow:flex sm:focus-within:flex",
+          )}
+        >
           <QuickEmojiPicker
             onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
             align="end"
           />
-          <DropdownMenu>
+          <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
             <DropdownMenuTrigger
               render={
                 <Button
@@ -386,6 +422,12 @@ function ThreadEntry({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {reminder.enabled && (
+                <DropdownMenuItem onClick={() => reminder.openReminder(entry.id, entry.content ?? "")}>
+                  <BellRing className="h-3.5 w-3.5" />
+                  {reminder.label}
+                </DropdownMenuItem>
+              )}
               {(canEdit || canDelete) && (
                 <>
                   <DropdownMenuSeparator />
@@ -410,6 +452,7 @@ function ThreadEntry({
           </DropdownMenu>
         </div>
       )}
+      {reminder.dialog}
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
