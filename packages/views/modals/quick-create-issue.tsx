@@ -495,7 +495,11 @@ export function AgentCreatePanel({
         <div className="flex items-center gap-1.5 px-4 pb-2 shrink-0 flex-wrap">
           <ProjectPicker
             projectId={projectId}
-            onUpdate={(u) => setProjectId(u.project_id ?? null)}
+            onUpdate={(u) => {
+              const newProjectId = u.project_id ?? null;
+              setProjectId(newProjectId);
+              setLastProjectId(newProjectId);
+            }}
             triggerRender={<PillButton />}
             align="start"
           />
