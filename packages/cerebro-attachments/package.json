@@ -12,6 +12,7 @@
     "./core": "./core/index.ts",
     "./core/queries": "./core/queries.ts",
     "./core/viewable": "./core/viewable.ts",
+    "./core/download-url": "./core/download-url.ts",
     "./views": "./views/index.tsx",
     "./views/pages": "./views/pages/index.ts"
   },

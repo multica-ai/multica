@@ -7,6 +7,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { attachmentDetailOptions } from "@multica/cerebro-attachments/core/queries";
 import { viewableKind } from "@multica/cerebro-attachments/core/viewable";
+import { attachmentDownloadHref } from "@multica/cerebro-attachments/core/download-url";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { api } from "@multica/core/api";
@@ -81,9 +82,15 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
     );
   }
 
+  // Make the server-relative download URL self-sufficient for plain browser
+  // navigation / credentialed fetch (window.open, <a href>, the inline PDF
+  // fetch) — these can't send the workspace header the API client adds.
+  const downloadHref = attachment.download_url
+    ? attachmentDownloadHref(attachment.download_url, wsId)
+    : "";
   const handleDownload = () => {
-    if (attachment.download_url) {
-      window.open(attachment.download_url, "_blank", "noopener,noreferrer");
+    if (downloadHref) {
+      window.open(downloadHref, "_blank", "noopener,noreferrer");
     }
   };
   const handleCopyLink = async () => {
@@ -160,17 +167,17 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
         </h1>
 
         <div className="mt-6">
-          {kind === "pdf" && inlinePdf && attachment.download_url ? (
+          {kind === "pdf" && inlinePdf && downloadHref ? (
             <PdfViewer
-              fileUrl={attachment.download_url}
+              fileUrl={downloadHref}
               title={attachment.filename}
-              downloadUrl={attachment.download_url}
+              downloadUrl={downloadHref}
             />
           ) : kind === "html" ? (
             body.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : body.isError || !body.data ? (
-              <FallbackUnavailable downloadUrl={attachment.download_url} />
+              <FallbackUnavailable downloadUrl={downloadHref} />
             ) : (
               <iframe
                 srcDoc={body.data}
@@ -183,7 +190,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
             body.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : body.isError || !body.data ? (
-              <FallbackUnavailable downloadUrl={attachment.download_url} />
+              <FallbackUnavailable downloadUrl={downloadHref} />
             ) : (
               <div className="prose prose-sm max-w-none dark:prose-invert">
                 <ArtifactBody body={body.data} />
@@ -193,7 +200,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
             body.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : body.isError || !body.data ? (
-              <FallbackUnavailable downloadUrl={attachment.download_url} isPdf={kind === "pdf"} />
+              <FallbackUnavailable downloadUrl={downloadHref} isPdf={kind === "pdf"} />
             ) : (
               <pre className="overflow-x-auto rounded border border-border bg-muted/40 p-3 text-xs">
                 <code>{body.data}</code>
@@ -202,7 +209,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
           ) : (
             // Non-viewable filetype — keep behavior consistent: nothing to render
             // inline, but still expose download.
-            <FallbackUnavailable downloadUrl={attachment.download_url} />
+            <FallbackUnavailable downloadUrl={downloadHref} />
           )}
         </div>
       </div>
