@@ -20,6 +20,32 @@ If neither label is set, the scanner defaults to **skip** — same effect as
 `staging-only`, but the intent is unclear. Add the label so future agents and
 human reviewers can tell at a glance what you meant.
 
+## Who is allowed to set `prod-ready`
+
+Any PR author — agent or human — may set `prod-ready` on their own PR
+**when they judge it is ready, with green CI as the minimum bar**. Green
+CI alone is not the trigger; it is the floor below which `prod-ready` is
+not allowed.
+
+- **Open with `staging-only` while CI is still running** or if any check
+  has failed. The default for an un-verified change is staging.
+- **Flip to `prod-ready` once CI is fully green AND you judge the change
+  is ready to ship.** "Ready" is the author's call — for a trivial
+  one-line fix it can mean immediately on green CI; for a larger change
+  you may want to re-read your own diff, soak it on staging for a while,
+  or wait for one more eye before promoting. CI green is the floor, not
+  the trigger.
+- **Use `staging-only` deliberately** when you actively do NOT want the
+  change considered for production today — work in progress, an experiment,
+  a one-off probe, or something you want to soak in staging for a while
+  before promoting.
+
+CI green is the floor because every check we ship — typecheck, unit
+tests, Go tests, build — is the automated proof we accept before a
+change is even considered for production. The `deploy_review` raised on
+`main` is the human-side review; that still happens regardless of who
+set the label.
+
 ## Why this exists
 
 `main` is staging (`Sara.firtal.com`). Anything that lands there goes live
@@ -35,14 +61,15 @@ The label is the explicit signal that separates "ready for production" from
 
 ## When in doubt
 
-- Quick refactor that you have tested in your worktree and want a human to
-  promote → `prod-ready`.
+- Quick refactor you have tested in your worktree, CI green → `prod-ready`.
 - Probing something / spike / WIP / "let me see if this even builds" →
-  `staging-only`.
-- Reverting or rolling back a previous promotion → `prod-ready` (the revert
-  needs to reach production to actually undo the bad change).
-- Documentation-only change touching `apps/docs/` → `prod-ready` (docs ship
-  with prod).
+  `staging-only`. May never be promoted — that is fine.
+- CI still running or any check red → `staging-only` until CI is green;
+  flip to `prod-ready` once it is.
+- Reverting or rolling back a previous promotion, CI green → `prod-ready`
+  (the revert needs to reach production to actually undo the bad change).
+- Documentation-only change touching `apps/docs/`, CI green → `prod-ready`
+  (docs ship with prod).
 
 ## Mechanics (what the scanner actually does)
 

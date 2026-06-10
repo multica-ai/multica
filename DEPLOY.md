@@ -38,6 +38,18 @@ Godkendelse sker som en `approve`-kommentar på release-issuet i Multica (Deploy
 
 **Aldrig deploy fredag** uden Saras eksplicitte godkendelse.
 
+## PR-labels: `staging-only` vs `prod-ready`
+
+Hver PR til `main` skal have ÉT af to labels: `staging-only` eller `prod-ready`. Det er labelet, der afgør om en flettet PR rejser et `deploy_review` (= flytter ændringen videre til produktion) — se `docs/agents/production-gate.md` for de tekniske detaljer.
+
+**Reglen:** Alle PR-forfattere (mennesker OG agenter) må selv sætte `prod-ready` på deres egen PR, **når de selv vurderer ændringen er klar, med grøn CI som minimum**. Grøn CI er gulvet — ikke selve triggeren. Du må gerne vente længere end "CI gik grøn" hvis du vil; du må ikke flippe før.
+
+- **Åbn med `staging-only`** mens CI stadig kører, eller hvis nogen tjek fejler.
+- **Flip til `prod-ready` når CI er helt grøn OG du vurderer ændringen er klar** til produktion. "Klar" er forfatterens skøn — for en triviel 1-linjes rettelse er det med det samme CI går grøn; for en større ændring må du gerne re-læse din egen diff, soak'e den på staging et stykke tid, eller vente på endnu et øje først. Grøn CI er minimum, ikke en knap der presser sig selv.
+- **Brug `staging-only` bevidst** når du IKKE vil have ændringen overvejet til produktion i dag — work-in-progress, eksperimenter, eller noget der skal soak'e i staging et stykke tid først.
+
+**Hvorfor grøn CI er minimum:** CI-pipen (typecheck, unit-tests, Go-tests, build) er den automatiske bekræftelse vi accepterer som "forfatter har testet". Det egentlige menneskelige tjek sker som `deploy_review`-godkendelse på release-issuet i Multica — det er DER nogen kigger på ændringen før den faktisk går mod produktion.
+
 ## Verificering efter deploy
 
 **Staging (`main` → `Sara.firtal.com`):**
