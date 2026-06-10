@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { useNavigation } from "../../navigation";
 import { BarChart3, ChevronDown, FolderKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -91,7 +92,7 @@ type TimeRange = (typeof TIME_RANGES)[number]["days"];
 type Dim = "daily" | "weekly";
 
 const DEFAULT_DAYS_BY_DIM: Record<Dim, TimeRange> = {
-  daily: 30,
+  daily: 7,
   weekly: 90,
 };
 
@@ -165,17 +166,76 @@ export function DashboardPage() {
   const { t } = useT("usage");
   const wsId = useWorkspaceId();
   const viewTZ = useViewingTimezone();
-  const [dim, setDim] = useState<Dim>("daily");
-  const [days, setDays] = useState<TimeRange>(30);
+  const { searchParams, replace, pathname } = useNavigation();
+  const [dim, setDimState] = useState<Dim>("daily");
+  const [days, setDaysState] = useState<TimeRange>(7);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+
+  // Sync state from URL
+  useEffect(() => {
+    const urlRange = searchParams.get("range");
+    let nextDays: TimeRange = 7;
+    if (urlRange) {
+      const match = urlRange.match(/^(\d+)d$/);
+      if (match) {
+        const d = parseInt(match[1]!, 10);
+        const allowed = TIME_RANGES.map((r) => r.days);
+        if (allowed.includes(d as TimeRange)) {
+          nextDays = d as TimeRange;
+        }
+      }
+    }
+
+    const urlGran = searchParams.get("granularity");
+    let nextDim: Dim = "daily";
+    if (urlGran === "day") {
+      nextDim = "daily";
+    } else if (urlGran === "week") {
+      nextDim = "weekly";
+    }
+
+    if (nextDays !== days) {
+      setDaysState(nextDays);
+    }
+    if (nextDim !== dim) {
+      setDimState(nextDim);
+    }
+  }, [searchParams, days, dim]);
+
+  // Fill in default URL parameters if missing
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    let changed = false;
+    if (!params.has("range")) {
+      params.set("range", "7d");
+      changed = true;
+    }
+    if (!params.has("granularity")) {
+      params.set("granularity", "day");
+      changed = true;
+    }
+    if (changed) {
+      replace(`${pathname}?${params.toString()}`);
+    }
+  }, [searchParams, pathname, replace]);
 
   const allowedRanges = rangesForDim(dim);
   const handleDimChange = (next: Dim) => {
-    setDim(next);
+    const params = new URLSearchParams(searchParams);
+    params.set("granularity", next === "daily" ? "day" : "week");
     const stillAllowed = (rangesForDim(next) as readonly { days: number }[]).some(
       (r) => r.days === days,
     );
-    if (!stillAllowed) setDays(DEFAULT_DAYS_BY_DIM[next]);
+    if (!stillAllowed) {
+      params.set("range", `${DEFAULT_DAYS_BY_DIM[next]}d`);
+    }
+    replace(`${pathname}?${params.toString()}`);
+  };
+
+  const handleDaysChange = (nextDays: TimeRange) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("range", `${nextDays}d`);
+    replace(`${pathname}?${params.toString()}`);
   };
 
   // The user can save model prices from the runtimes page; re-render when
@@ -396,7 +456,7 @@ export function DashboardPage() {
           />
           <Segmented
             value={days}
-            onChange={setDays}
+            onChange={handleDaysChange}
             options={allowedRanges.map((r) => ({ label: r.label, value: r.days }))}
           />
         </div>
