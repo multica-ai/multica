@@ -502,6 +502,7 @@ describe("estimateCost", () => {
     expect(isModelPriced("deepseek/deepseek-v4-flash")).toBe(true);
     expect(isModelPriced("moonshotai/kimi-k2.6")).toBe(true);
     expect(isModelPriced("zhipuai/glm-5.1")).toBe(true);
+    expect(isModelPriced("zhipuai/glm-4.5-air")).toBe(true);
   });
 });
 

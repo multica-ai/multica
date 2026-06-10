@@ -39,6 +39,7 @@ const ALLOWED_PROVIDERS = [
   "moonshotai",
   "openai",
   "xai",
+  "zai",
   // Aggregators — prefixed keys only; bare keys are skipped if already
   // claimed by a first-party provider above.
   "github-copilot",
