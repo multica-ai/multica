@@ -95,6 +95,14 @@ vi.mock("./custom-pricing-dialog", () => ({
   CustomPricingDialog: () => null,
 }));
 
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    searchParams: new URLSearchParams(),
+    replace: vi.fn(),
+    pathname: "",
+  }),
+}));
+
 import { UsageSection } from "./usage-section";
 
 const RUNTIME: AgentRuntime = {
