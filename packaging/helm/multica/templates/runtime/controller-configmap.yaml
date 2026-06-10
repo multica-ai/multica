@@ -44,6 +44,15 @@ without K8S access" path.
       pvcName: multica-repocache-repos
       mountPath: /repos
     {{- end }}
+    {{- if .Values.runtime.githubTokenSecretName }}
+    # Cluster-wide GitHub PAT for the `gh` CLI baked into the runtime image.
+    # Optional — when unset, no GH_TOKEN env var is added to worker pods and
+    # `gh` simply can't authenticate. The Secret is created out-of-band; the
+    # chart never templates a token value.
+    githubToken:
+      secretName: {{ .Values.runtime.githubTokenSecretName | quote }}
+      secretKey: {{ .Values.runtime.githubTokenSecretKey | quote }}
+    {{- end }}
     {{- if .Values.runtime.claudeBroker.enabled }}
     # When the broker is enabled, the controller wires worker Jobs to inject
     # CLAUDE_CODE_OAUTH_TOKEN from the broker's access-token Secret via

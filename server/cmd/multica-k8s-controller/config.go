@@ -23,6 +23,7 @@ type Config struct {
 	ImagePullSecret string              `yaml:"imagePullSecret"`
 	ClaudeBroker    ClaudeBrokerOptions `yaml:"claudeBroker"`
 	RepoCache       RepoCacheOptions    `yaml:"repoCache"`
+	GitHubToken     GitHubTokenOptions  `yaml:"githubToken"`
 
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
@@ -73,6 +74,16 @@ type RepoCacheOptions struct {
 	Enabled   bool   `yaml:"enabled"`
 	PVCName   string `yaml:"pvcName"`   // default multica-repocache-repos
 	MountPath string `yaml:"mountPath"` // default /repos
+}
+
+// GitHubTokenOptions controls cluster-wide GitHub PAT injection into worker
+// Job pods. When SecretName is non-empty, DispatchJob adds GH_TOKEN to the
+// runtask container's env via secretKeyRef so the `gh` CLI on PATH works
+// out of the box. Empty SecretName = no env var, `gh` unusable (rest of the
+// runtime is unaffected).
+type GitHubTokenOptions struct {
+	SecretName string `yaml:"secretName"`
+	SecretKey  string `yaml:"secretKey"` // default "token"
 }
 
 func LoadConfig() (*Config, error) {
@@ -151,6 +162,11 @@ func LoadConfig() (*Config, error) {
 		if cfg.RepoCache.MountPath == "" {
 			cfg.RepoCache.MountPath = "/repos"
 		}
+	}
+
+	// GitHubToken default key — only matters when a SecretName was set.
+	if cfg.GitHubToken.SecretName != "" && cfg.GitHubToken.SecretKey == "" {
+		cfg.GitHubToken.SecretKey = "token"
 	}
 
 	return cfg, nil

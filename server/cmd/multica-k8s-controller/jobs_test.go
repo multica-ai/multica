@@ -72,7 +72,7 @@ func TestCreateJob_AndPayloadConfigMap(t *testing.T) {
 		RuntimeID: "rt-1",
 	}
 
-	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{})
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{}, GitHubTokenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestCreateJob_BrokerMode(t *testing.T) {
 	}
 	cb := ClaudeBrokerOptions{Enabled: true, AccessTokenSecret: "multica-claude-broker-access-token", SecretKey: "access_token"}
 
-	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", cb, RepoCacheOptions{})
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", cb, RepoCacheOptions{}, GitHubTokenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +179,81 @@ func TestCreateJob_BrokerMode(t *testing.T) {
 	}
 }
 
+// TestDispatchJob_WithGitHubToken asserts that, when GitHubTokenOptions.SecretName
+// is set, DispatchJob adds a GH_TOKEN env var to the runtask container sourced
+// from the named Secret. With SecretName empty, no GH_TOKEN must appear.
+func TestDispatchJob_WithGitHubToken(t *testing.T) {
+	k := fake.NewSimpleClientset()
+	r := Registered{
+		WorkspaceID: "ws-1", AgentName: "Lambda", Provider: "claude",
+		Image:   "registry/multica-runtime-claude:v0.3.0-mk1",
+		PVCSize: "5Gi",
+	}
+	task := daemon.Task{
+		ID: "task-gh", IssueID: "iss-1", AgentID: "ag-1", WorkspaceID: r.WorkspaceID,
+		RuntimeID: "rt-1",
+	}
+	gh := GitHubTokenOptions{SecretName: "multica-github-token", SecretKey: "token"}
+
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{}, gh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := k.BatchV1().Jobs("multica").Get(context.Background(), jobName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Job missing: %v", err)
+	}
+	runtask := job.Spec.Template.Spec.Containers[0]
+	var ghEnv *corev1.EnvVar
+	for i := range runtask.Env {
+		if runtask.Env[i].Name == "GH_TOKEN" {
+			ghEnv = &runtask.Env[i]
+		}
+	}
+	if ghEnv == nil {
+		t.Fatalf("runtask missing GH_TOKEN env; env=%+v", runtask.Env)
+	}
+	if ghEnv.ValueFrom == nil || ghEnv.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("GH_TOKEN must be sourced from secretKeyRef; got %+v", ghEnv)
+	}
+	ref := ghEnv.ValueFrom.SecretKeyRef
+	if ref.Name != "multica-github-token" {
+		t.Errorf("secretKeyRef.name = %q, want multica-github-token", ref.Name)
+	}
+	if ref.Key != "token" {
+		t.Errorf("secretKeyRef.key = %q, want token", ref.Key)
+	}
+}
+
+// TestDispatchJob_NoGitHubToken asserts that when GitHubTokenOptions.SecretName
+// is empty, GH_TOKEN does not appear in the runtask env at all.
+func TestDispatchJob_NoGitHubToken(t *testing.T) {
+	k := fake.NewSimpleClientset()
+	r := Registered{
+		WorkspaceID: "ws-1", AgentName: "Lambda", Provider: "claude",
+		Image:   "registry/multica-runtime-claude:v0.3.0-mk1",
+		PVCSize: "5Gi",
+	}
+	task := daemon.Task{
+		ID: "task-no-gh", IssueID: "iss-1", AgentID: "ag-1", WorkspaceID: r.WorkspaceID,
+		RuntimeID: "rt-1",
+	}
+
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{}, GitHubTokenOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := k.BatchV1().Jobs("multica").Get(context.Background(), jobName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Job missing: %v", err)
+	}
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "GH_TOKEN" {
+			t.Errorf("GH_TOKEN must not be set when SecretName is empty; got %+v", e)
+		}
+	}
+}
+
 func hasVolume(vs []corev1.Volume, name string) bool {
 	for _, v := range vs {
 		if v.Name == name {
@@ -224,7 +299,7 @@ func TestDispatchJob_WithRepoCache(t *testing.T) {
 		MountPath: "/repos",
 	}
 
-	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, rc)
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, rc, GitHubTokenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +388,7 @@ func TestDispatchJob_RepoCacheDisabled(t *testing.T) {
 		Repos:     []daemon.RepoData{{URL: "https://github.com/chrissnell/graywolf.git"}},
 	}
 
-	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{Enabled: false})
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{Enabled: false}, GitHubTokenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +432,7 @@ func TestDispatchJob_WorkerServiceAccount(t *testing.T) {
 		RuntimeID: "rt-1",
 	}
 
-	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{})
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{}, GitHubTokenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +459,7 @@ func TestDispatchJob_NoWorkerServiceAccount(t *testing.T) {
 		RuntimeID: "rt-1",
 	}
 
-	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{})
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{}, GitHubTokenOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

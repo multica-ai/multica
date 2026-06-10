@@ -73,6 +73,13 @@ spec:
                   name: {{ .Values.runtime.daemon.agent.apiKeySecretName }}
                   key: {{ .Values.runtime.daemon.agent.apiKeySecretKey }}
             {{- end }}
+            {{- if .Values.runtime.githubTokenSecretName }}
+            - name: GH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.githubTokenSecretName }}
+                  key: {{ .Values.runtime.githubTokenSecretKey }}
+            {{- end }}
             {{- with .Values.runtime.daemon.agent.model }}
             - name: MULTICA_CLAUDE_MODEL
               value: {{ . | quote }}

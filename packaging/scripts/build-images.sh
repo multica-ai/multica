@@ -8,13 +8,14 @@
 # Usage:
 #   ./build-images.sh [--no-push] [--registry REG] [--tag TAG] [image…]
 #
-# Defaults: registry=ghcr.io/chrissnell, tag=$(git rev-parse --short HEAD).
+# Defaults: registry=registry.chrissnell.com/multica, tag=$(git rev-parse --short HEAD).
+# Override with --registry ghcr.io/chrissnell to use the old public registry.
 # With no image args, builds backend/web/postgres/controller. Pass `runtime`
 # explicitly to build the runtime base + runtime-claude images (Plan C).
 
 set -euo pipefail
 
-REGISTRY="${REGISTRY:-ghcr.io/chrissnell}"
+REGISTRY="${REGISTRY:-registry.chrissnell.com/multica}"
 TAG="${TAG:-$(git rev-parse --short HEAD)}"
 # K8s nodes are amd64; default to that even when building on Apple Silicon.
 PLATFORM="${PLATFORM:-linux/amd64}"
@@ -79,16 +80,20 @@ build_runtime() {
   # Toolchain pins for the runtime base. Each lives in its own text file
   # so future watcher workflows can bump them via PR (same pattern as
   # claude-code-version).
-  local rust_version kotlin_version golangci_lint_version ktlint_version pnpm_version
+  local rust_version kotlin_version golangci_lint_version ktlint_version pnpm_version kubectl_version helm_version gh_version
   rust_version="$(read_pin rust-version)"
   kotlin_version="$(read_pin kotlin-version)"
   golangci_lint_version="$(read_pin golangci-lint-version)"
   ktlint_version="$(read_pin ktlint-version)"
   pnpm_version="$(read_pin pnpm-version)"
+  kubectl_version="$(read_pin kubectl-version)"
+  helm_version="$(read_pin helm-version)"
+  gh_version="$(read_pin gh-version)"
 
   echo "==> Building $base (version=$version commit=$commit)"
   echo "    rust=$rust_version kotlin=$kotlin_version pnpm=$pnpm_version"
   echo "    golangci-lint=$golangci_lint_version ktlint=$ktlint_version"
+  echo "    kubectl=$kubectl_version helm=$helm_version gh=$gh_version"
   docker build --platform "$platform" \
     --build-arg VERSION="$version" \
     --build-arg COMMIT="$commit" \
@@ -97,6 +102,9 @@ build_runtime() {
     --build-arg GOLANGCI_LINT_VERSION="$golangci_lint_version" \
     --build-arg KTLINT_VERSION="$ktlint_version" \
     --build-arg PNPM_VERSION="$pnpm_version" \
+    --build-arg KUBECTL_VERSION="$kubectl_version" \
+    --build-arg HELM_VERSION="$helm_version" \
+    --build-arg GH_VERSION="$gh_version" \
     -f packaging/docker/runtime/Dockerfile.base \
     -t "$base" .
   if [[ "$push" -eq 1 ]]; then
