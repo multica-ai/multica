@@ -88,7 +88,7 @@ func signRS256(t *testing.T, key *rsa.PrivateKey, kid string, claims jwt.MapClai
 // unexpected subject.
 func stubResolver(t *testing.T, wantSubject, multicaUUID string) SubjectResolver {
 	t.Helper()
-	return func(_ context.Context, subjectID string) (string, error) {
+	return func(_ context.Context, subjectID, name, email string) (string, error) {
 		if subjectID != wantSubject {
 			t.Fatalf("resolver called with subject %q, want %q", subjectID, wantSubject)
 		}
@@ -147,7 +147,7 @@ func TestCasdoorAuth_NoCookie_Returns401(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 	jwks := setupTestJWKS(t, &key.PublicKey, "kid")
-	resolver := func(_ context.Context, _ string) (string, error) {
+	resolver := func(_ context.Context, _, _, _ string) (string, error) {
 		t.Fatal("resolver should not be called when no token is present")
 		return "", nil
 	}
@@ -187,7 +187,7 @@ func TestCasdoorAuth_PATTokenPassesThrough(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 	jwks := setupTestJWKS(t, &key.PublicKey, "kid")
-	resolver := func(_ context.Context, _ string) (string, error) {
+	resolver := func(_ context.Context, _, _, _ string) (string, error) {
 		t.Fatal("resolver should not be called for PAT tokens")
 		return "", nil
 	}

@@ -374,3 +374,45 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (Multica
 	)
 	return i, err
 }
+
+const updateUserNameAndEmail = `-- name: UpdateUserNameAndEmail :one
+UPDATE multica_user SET
+    name = $2,
+    email = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id, can_manage_workflows
+`
+
+type UpdateUserNameAndEmailParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Name  string      `json:"name"`
+	Email string      `json:"email"`
+}
+
+// Syncs name and email from an external identity provider (Casdoor).
+// Called by the SubjectResolver when the JWT claims differ from the
+// locally stored profile.
+func (q *Queries) UpdateUserNameAndEmail(ctx context.Context, arg UpdateUserNameAndEmailParams) (MulticaUser, error) {
+	row := q.db.QueryRow(ctx, updateUserNameAndEmail, arg.ID, arg.Name, arg.Email)
+	var i MulticaUser
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+		&i.SubjectID,
+		&i.CanManageWorkflows,
+	)
+	return i, err
+}
