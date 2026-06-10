@@ -339,7 +339,7 @@ RETURNING *;
 UPDATE agent_runtime
 SET hold_until = NULL, hold_reason = NULL, updated_at = now()
 WHERE hold_until IS NOT NULL AND hold_until <= now()
-RETURNING id, workspace_id, owner_id, daemon_id, provider;
+RETURNING id, workspace_id;
 
 -- name: DeleteStaleOfflineRuntimes :many
 -- Deletes runtimes that have been offline for longer than the TTL and have

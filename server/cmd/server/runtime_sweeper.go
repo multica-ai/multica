@@ -85,7 +85,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
-			sweepExpiredHolds(ctx, queries, taskSvc, bus)
+			sweepExpiredHolds(ctx, queries, bus)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -289,7 +289,7 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 // sweepExpiredHolds clears holds on runtimes whose hold_until has passed.
 // After clearing, it broadcasts a daemon:register event so connected clients
 // refresh the runtime list and the daemon can pick up queued tasks.
-func sweepExpiredHolds(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
+func sweepExpiredHolds(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 	released, err := queries.ClearExpiredHolds(ctx)
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to clear expired holds", "error", err)
@@ -306,17 +306,15 @@ func sweepExpiredHolds(ctx context.Context, queries *db.Queries, taskSvc *servic
 		)
 		wsID := util.UUIDToString(row.WorkspaceID)
 		workspaces[wsID] = true
-		if bus != nil {
-			bus.Publish(events.Event{
-				Type:        protocol.EventRuntimeResumed,
-				WorkspaceID: wsID,
-				ActorType:   "system",
-				Payload: map[string]any{
-					"runtime_id": util.UUIDToString(row.ID),
-					"auto":       true,
-				},
-			})
-		}
+		bus.Publish(events.Event{
+			Type:        protocol.EventRuntimeResumed,
+			WorkspaceID: wsID,
+			ActorType:   "system",
+			Payload: map[string]any{
+				"runtime_id": util.UUIDToString(row.ID),
+				"auto":       true,
+			},
+		})
 	}
 
 	for wsID := range workspaces {
