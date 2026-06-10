@@ -57,6 +57,29 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	}
 }
 
+func TestClaudeStaticModelsExposesFable5(t *testing.T) {
+	models := claudeStaticModels()
+	ids := map[string]Model{}
+	defaults := 0
+	for _, m := range models {
+		ids[m.ID] = m
+		if m.Default {
+			defaults++
+		}
+	}
+
+	fable, ok := ids["claude-fable-5"]
+	if !ok {
+		t.Fatalf("missing Claude Fable 5 in: %+v", models)
+	}
+	if fable.Label != "Claude Fable 5" || fable.Provider != "anthropic" || fable.Default {
+		t.Errorf("unexpected Fable entry: %+v", fable)
+	}
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
+	}
+}
+
 func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 	// Gemini CLI has no `models list` subcommand, so we expose the
 	// CLI's own aliases (auto / pro / flash / flash-lite) plus
