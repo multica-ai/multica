@@ -21,7 +21,11 @@ function WorkspaceAvatar({ name, avatarUrl, size = "sm", className }: WorkspaceA
       <img
         src={resolvedUrl}
         alt={name}
-        className={cn("inline-block shrink-0 border object-cover", sizeMap[size], className)}
+        className={cn(
+          "inline-block shrink-0 border aspect-square overflow-hidden object-cover object-center",
+          sizeMap[size],
+          className,
+        )}
       />
     );
   }

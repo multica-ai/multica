@@ -50,7 +50,7 @@ function ActorAvatar({
         <img
           src={avatarUrl}
           alt={name}
-          className="h-full w-full object-cover"
+          className="h-full w-full object-cover object-center"
           onError={() => setImgError(true)}
         />
       ) : isSystem ? (
