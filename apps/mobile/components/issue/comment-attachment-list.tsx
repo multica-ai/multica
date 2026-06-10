@@ -133,7 +133,13 @@ function FileCard({
         size={20}
         color={theme.mutedForeground}
       />
-      <View className="flex-1">
+      {/* `min-w-0` is required so `numberOfLines={1}` can actually truncate
+       *  a long filename. Without it, RN sizes this column to the Text's
+       *  intrinsic width — a long name like
+       *  "Screenshot 2026-05-28 at 08.40.44.png" pushes the row past
+       *  the bubble's content width and the whole comment renders
+       *  wider than the screen. Same pattern as inbox-row.tsx:38. */}
+      <View className="flex-1 min-w-0">
         <Text
           className="text-sm text-foreground"
           numberOfLines={1}
