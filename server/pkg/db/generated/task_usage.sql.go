@@ -556,3 +556,133 @@ func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams
 	)
 	return err
 }
+
+const listDashboardModelRunTime = `-- name: ListDashboardModelRunTime :many
+SELECT
+    tu.model,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(DISTINCT atq.id)::int AS task_count,
+    COUNT(DISTINCT atq.id) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY tu.model
+ORDER BY total_seconds DESC
+`
+
+type ListDashboardModelRunTimeParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardModelRunTimeRow struct {
+	Model        string `json:"model"`
+	TotalSeconds int64  `json:"total_seconds"`
+	TaskCount    int32  `json:"task_count"`
+	FailedCount  int32  `json:"failed_count"`
+}
+
+// Per-model task run time and task count. Joins task_usage with
+// agent_task_queue on task_id. A task that uses multiple models
+// contributes its full duration to each model.
+func (q *Queries) ListDashboardModelRunTime(ctx context.Context, arg ListDashboardModelRunTimeParams) ([]ListDashboardModelRunTimeRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardModelRunTime, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardModelRunTimeRow{}
+	for rows.Next() {
+		var i ListDashboardModelRunTimeRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.TotalSeconds,
+			&i.TaskCount,
+			&i.FailedCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardRuntimeUsage = `-- name: ListDashboardRuntimeUsage :many
+SELECT
+    atq.runtime_id,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens
+FROM agent_task_queue atq
+JOIN task_usage tu ON tu.task_id = atq.id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY atq.runtime_id, tu.model
+ORDER BY atq.runtime_id, tu.model
+`
+
+type ListDashboardRuntimeUsageParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardRuntimeUsageRow struct {
+	RuntimeID        pgtype.UUID `json:"runtime_id"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+}
+
+// Per-(runtime_id, model) token aggregates. Joins agent_task_queue with
+// task_usage on task_id. Model dimension preserved for client-side cost math.
+func (q *Queries) ListDashboardRuntimeUsage(ctx context.Context, arg ListDashboardRuntimeUsageParams) ([]ListDashboardRuntimeUsageRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardRuntimeUsage, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardRuntimeUsageRow{}
+	for rows.Next() {
+		var i ListDashboardRuntimeUsageRow
+		if err := rows.Scan(
+			&i.RuntimeID,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

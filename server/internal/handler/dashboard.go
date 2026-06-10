@@ -338,6 +338,103 @@ func (h *Handler) GetDashboardRuntimeRunTime(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// DashboardModelRunTimeResponse is one model's total run time and task counts
+// over the window. Powers the Model scope time column on the leaderboard.
+type DashboardModelRunTimeResponse struct {
+	Model        string `json:"model"`
+	TotalSeconds int64  `json:"total_seconds"`
+	TaskCount    int32  `json:"task_count"`
+	FailedCount  int32  `json:"failed_count"`
+}
+
+// GetDashboardModelRunTime returns per-model task run time and task counts
+// for the workspace, optionally scoped to a project. Joins task_usage with
+// agent_task_queue on task_id — a task that uses multiple models contributes
+// its full duration to each model.
+func (h *Handler) GetDashboardModelRunTime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	since := parseSinceParamInTZ(r, 30, tz)
+
+	rows, err := h.Queries.ListDashboardModelRunTime(r.Context(), db.ListDashboardModelRunTimeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list model run time")
+		return
+	}
+
+	resp := make([]DashboardModelRunTimeResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardModelRunTimeResponse{
+			Model:        row.Model,
+			TotalSeconds: row.TotalSeconds,
+			TaskCount:    row.TaskCount,
+			FailedCount:  row.FailedCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DashboardRuntimeUsageResponse is one (runtime_id, model) token aggregate.
+// The model dimension is preserved so the client can compute per-model cost.
+type DashboardRuntimeUsageResponse struct {
+	RuntimeID        string `json:"runtime_id"`
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+}
+
+// GetDashboardRuntimeUsage returns per-(runtime_id, model) token aggregates
+// for the workspace, optionally scoped to a project. Powers the Runtime scope
+// token and cost columns on the leaderboard.
+func (h *Handler) GetDashboardRuntimeUsage(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	since := parseSinceParamInTZ(r, 30, tz)
+
+	rows, err := h.Queries.ListDashboardRuntimeUsage(r.Context(), db.ListDashboardRuntimeUsageParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list runtime usage")
+		return
+	}
+
+	resp := make([]DashboardRuntimeUsageResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardRuntimeUsageResponse{
+			RuntimeID:        uuidToString(row.RuntimeID),
+			Model:            row.Model,
+			InputTokens:      row.InputTokens,
+			OutputTokens:     row.OutputTokens,
+			CacheReadTokens:  row.CacheReadTokens,
+			CacheWriteTokens: row.CacheWriteTokens,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // DashboardRunTimeDailyResponse is one (date) bucket of terminal-task run
 // time and counts. Powers the workspace dashboard's daily Time and Tasks
 // charts — same toggle as Tokens / Cost, different metric.

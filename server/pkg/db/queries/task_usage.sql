@@ -204,3 +204,62 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC;
+
+-- name: ListDashboardModelRunTime :many
+-- Per-model task run time and task count, derived by joining task_usage
+-- with agent_task_queue on task_id. A task that uses multiple models
+-- contributes its full duration to each model — total_seconds may exceed
+-- the workspace total for workspaces where tasks call multiple models.
+-- COUNT(DISTINCT) avoids inflating the task count for multi-model tasks.
+--
+-- @since is the viewer's local start-of-day-(N), consistent with the
+-- companion ListDashboardUsageByModel query.
+SELECT
+    tu.model,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(DISTINCT atq.id)::int AS task_count,
+    COUNT(DISTINCT atq.id) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY tu.model
+ORDER BY total_seconds DESC;
+
+-- name: ListDashboardRuntimeUsage :many
+-- Per-(runtime_id, model) token aggregates for the workspace. Derived by
+-- joining agent_task_queue with task_usage on task_id. The model dimension
+-- is preserved so the client can compute per-model cost and sum per-runtime,
+-- mirroring how ListDashboardUsageByAgent works for the agent scope.
+--
+-- Only terminal tasks with both timestamps contribute (consistent with
+-- ListDashboardRuntimeRunTime so the time and token data cover the same
+-- set of tasks).
+SELECT
+    atq.runtime_id,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens
+FROM agent_task_queue atq
+JOIN task_usage tu ON tu.task_id = atq.id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY atq.runtime_id, tu.model
+ORDER BY atq.runtime_id, tu.model;
