@@ -5,6 +5,8 @@ import type {
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
   DashboardRuntimeRunTime,
+  DashboardModelRunTime,
+  DashboardRuntimeUsage,
 } from "@multica/core/types";
 import {
   addDaysIso,
@@ -406,19 +408,47 @@ export interface ModelDashboardRow {
   tokens: number;
   cost: number;
   taskCount: number;
+  seconds: number;
+  failedCount: number;
 }
 
-// Per-model token rows → sorted rows for the Model scope leaderboard.
-// The server already groups by model, so this just reshapes and sorts by
-// cost descending. taskCount is informational (see ListDashboardUsageByAgent
-// caveat about over-counting across hours).
-export function aggregateModelRows(rows: DashboardUsageByModel[]): ModelDashboardRow[] {
-  return rows.map((r) => ({
-    model: r.model,
-    tokens: r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens,
-    cost: estimateCost(r),
-    taskCount: r.task_count,
-  })).toSorted((a, b) => b.cost - a.cost);
+// Merge per-model token rows with per-model run-time rows into one sorted
+// row per model. taskCount comes from run-time rows when available (true
+// distinct per-task count), falling back to the token rollup count for
+// models with token data but no terminal tasks yet. Sorted by cost desc.
+export function aggregateModelRows(
+  usageRows: DashboardUsageByModel[],
+  runTimeRows: DashboardModelRunTime[],
+): ModelDashboardRow[] {
+  const runTimeByModel = new Map(runTimeRows.map((r) => [r.model, r] as const));
+  const merged = new Map<string, ModelDashboardRow>();
+  for (const r of usageRows) {
+    const rt = runTimeByModel.get(r.model);
+    merged.set(r.model, {
+      model: r.model,
+      tokens: r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens,
+      cost: estimateCost(r),
+      taskCount: rt ? rt.task_count : r.task_count,
+      seconds: rt?.total_seconds ?? 0,
+      failedCount: rt?.failed_count ?? 0,
+    });
+  }
+  // Models with run-time but zero tokens (tasks errored before usage was reported).
+  for (const r of runTimeRows) {
+    if (merged.has(r.model)) continue;
+    merged.set(r.model, {
+      model: r.model,
+      tokens: 0,
+      cost: 0,
+      taskCount: r.task_count,
+      seconds: r.total_seconds,
+      failedCount: r.failed_count,
+    });
+  }
+  return Array.from(merged.values()).toSorted((a, b) => {
+    if (b.cost !== a.cost) return b.cost - a.cost;
+    return b.seconds - a.seconds;
+  });
 }
 
 export interface RuntimeDashboardRow {
@@ -426,15 +456,52 @@ export interface RuntimeDashboardRow {
   seconds: number;
   taskCount: number;
   failedCount: number;
+  tokens: number;
+  cost: number;
 }
 
-// Per-runtime run-time rows → sorted rows for the Runtime scope leaderboard.
-// Sorted by total_seconds descending (most active runtime first).
-export function aggregateRuntimeRows(rows: DashboardRuntimeRunTime[]): RuntimeDashboardRow[] {
-  return rows.map((r) => ({
-    runtimeId: r.runtime_id,
-    seconds: r.total_seconds,
-    taskCount: r.task_count,
-    failedCount: r.failed_count,
-  })).toSorted((a, b) => b.seconds - a.seconds);
+// Merge per-runtime run-time rows with per-(runtime, model) usage rows into
+// one sorted row per runtime. Cost is the sum across all models for that
+// runtime, matching how the agent scope computes per-agent cost.
+// Sorted by seconds desc, then cost desc.
+export function aggregateRuntimeRows(
+  runTimeRows: DashboardRuntimeRunTime[],
+  usageRows: DashboardRuntimeUsage[],
+): RuntimeDashboardRow[] {
+  // Fold (runtime, model) usage rows into per-runtime token+cost totals.
+  const usageByRuntime = new Map<string, { tokens: number; cost: number }>();
+  for (const r of usageRows) {
+    const entry = usageByRuntime.get(r.runtime_id) ?? { tokens: 0, cost: 0 };
+    entry.tokens += r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    entry.cost += estimateCost(r);
+    usageByRuntime.set(r.runtime_id, entry);
+  }
+  const merged = new Map<string, RuntimeDashboardRow>();
+  for (const r of runTimeRows) {
+    const usage = usageByRuntime.get(r.runtime_id);
+    merged.set(r.runtime_id, {
+      runtimeId: r.runtime_id,
+      seconds: r.total_seconds,
+      taskCount: r.task_count,
+      failedCount: r.failed_count,
+      tokens: usage?.tokens ?? 0,
+      cost: usage?.cost ?? 0,
+    });
+  }
+  // Runtimes with usage but no terminal run-time rows are unlikely but handled.
+  for (const [runtimeId, usage] of usageByRuntime) {
+    if (merged.has(runtimeId)) continue;
+    merged.set(runtimeId, {
+      runtimeId,
+      seconds: 0,
+      taskCount: 0,
+      failedCount: 0,
+      tokens: usage.tokens,
+      cost: usage.cost,
+    });
+  }
+  return Array.from(merged.values()).toSorted((a, b) => {
+    if (b.seconds !== a.seconds) return b.seconds - a.seconds;
+    return b.cost - a.cost;
+  });
 }

@@ -39,6 +39,18 @@ export const dashboardKeys = {
     projectId: string | null,
     tz: string,
   ) => [...dashboardKeys.all(wsId), "runtime-runtime", days, projectId, tz] as const,
+  modelRunTime: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "model-runtime", days, projectId, tz] as const,
+  runtimeUsage: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "runtime-usage", days, projectId, tz] as const,
 };
 
 // 5-min rollup cadence on the server, 60s background refetch on the client.
@@ -153,6 +165,44 @@ export function dashboardRuntimeRunTimeOptions(
     queryKey: dashboardKeys.runtimeRunTime(wsId, days, projectId, tz),
     queryFn: () =>
       api.getDashboardRuntimeRunTime({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardModelRunTimeOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.modelRunTime(wsId, days, projectId, tz),
+    queryFn: () =>
+      api.getDashboardModelRunTime({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardRuntimeUsageOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.runtimeUsage(wsId, days, projectId, tz),
+    queryFn: () =>
+      api.getDashboardRuntimeUsage({
         days,
         project_id: projectId ?? undefined,
         tz,

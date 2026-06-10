@@ -468,6 +468,26 @@ const DashboardRuntimeRunTimeSchema = z.object({
 
 export const DashboardRuntimeRunTimeListSchema = z.array(DashboardRuntimeRunTimeSchema);
 
+const DashboardModelRunTimeSchema = z.object({
+  model: z.string().default(""),
+  total_seconds: z.number().default(0),
+  task_count: z.number().default(0),
+  failed_count: z.number().default(0),
+}).loose();
+
+export const DashboardModelRunTimeListSchema = z.array(DashboardModelRunTimeSchema);
+
+const DashboardRuntimeUsageSchema = z.object({
+  runtime_id: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+}).loose();
+
+export const DashboardRuntimeUsageListSchema = z.array(DashboardRuntimeUsageSchema);
+
 // ---------------------------------------------------------------------------
 // Runtime usage schemas — the runtime-detail page's four usage endpoints
 // (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard

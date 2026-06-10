@@ -342,24 +342,27 @@ describe("aggregateWeeklyTasks", () => {
 
 describe("aggregateModelRows", () => {
   it("reshapes per-model rows and sorts by cost desc", () => {
-    const rows = aggregateModelRows([
-      {
-        model: "claude-sonnet-4-6",
-        input_tokens: 1_000_000,
-        output_tokens: 500_000,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        task_count: 3,
-      },
-      {
-        model: "claude-haiku-4-5",
-        input_tokens: 10_000_000,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        task_count: 10,
-      },
-    ]);
+    const rows = aggregateModelRows(
+      [
+        {
+          model: "claude-sonnet-4-6",
+          input_tokens: 1_000_000,
+          output_tokens: 500_000,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 3,
+        },
+        {
+          model: "claude-haiku-4-5",
+          input_tokens: 10_000_000,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 10,
+        },
+      ],
+      [],
+    );
     // claude-sonnet-4-6: 1M × $3 + 0.5M × $15 = $10.5
     // claude-haiku-4-5: 10M × $0.8 = $8 (haiku input price)
     // sonnet has higher cost so lands first
@@ -369,17 +372,57 @@ describe("aggregateModelRows", () => {
     expect(rows[1]?.model).toBe("claude-haiku-4-5");
   });
 
+  it("merges run-time data into model rows", () => {
+    const rows = aggregateModelRows(
+      [
+        {
+          model: "claude-sonnet-4-6",
+          input_tokens: 1_000_000,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 3,
+        },
+      ],
+      [
+        {
+          model: "claude-sonnet-4-6",
+          total_seconds: 120,
+          task_count: 2,
+          failed_count: 1,
+        },
+      ],
+    );
+    expect(rows[0]?.seconds).toBe(120);
+    expect(rows[0]?.taskCount).toBe(2); // run-time count takes precedence
+    expect(rows[0]?.failedCount).toBe(1);
+  });
+
+  it("includes runtime-only models (zero tokens) in the result", () => {
+    const rows = aggregateModelRows(
+      [],
+      [{ model: "model-x", total_seconds: 60, task_count: 1, failed_count: 0 }],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tokens).toBe(0);
+    expect(rows[0]?.cost).toBe(0);
+    expect(rows[0]?.seconds).toBe(60);
+  });
+
   it("treats unmapped models as zero-cost but still returns them", () => {
-    const rows = aggregateModelRows([
-      {
-        model: "unknown-model",
-        input_tokens: 999_999,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        task_count: 1,
-      },
-    ]);
+    const rows = aggregateModelRows(
+      [
+        {
+          model: "unknown-model",
+          input_tokens: 999_999,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 1,
+        },
+      ],
+      [],
+    );
     expect(rows).toHaveLength(1);
     expect(rows[0]?.cost).toBe(0);
     expect(rows[0]?.tokens).toBe(999_999);
@@ -388,27 +431,60 @@ describe("aggregateModelRows", () => {
 
 describe("aggregateRuntimeRows", () => {
   it("reshapes per-runtime rows and sorts by seconds desc", () => {
-    const rows = aggregateRuntimeRows([
-      {
-        runtime_id: "runtime-slow",
-        total_seconds: 100,
-        task_count: 2,
-        failed_count: 0,
-      },
-      {
-        runtime_id: "runtime-fast",
-        total_seconds: 5000,
-        task_count: 20,
-        failed_count: 1,
-      },
-    ]);
+    const rows = aggregateRuntimeRows(
+      [
+        { runtime_id: "runtime-slow", total_seconds: 100, task_count: 2, failed_count: 0 },
+        { runtime_id: "runtime-fast", total_seconds: 5000, task_count: 20, failed_count: 1 },
+      ],
+      [],
+    );
     expect(rows.map((r) => r.runtimeId)).toEqual(["runtime-fast", "runtime-slow"]);
     expect(rows[0]?.seconds).toBe(5000);
     expect(rows[0]?.taskCount).toBe(20);
     expect(rows[0]?.failedCount).toBe(1);
+    expect(rows[0]?.tokens).toBe(0);
+    expect(rows[0]?.cost).toBe(0);
+  });
+
+  it("merges usage data into runtime rows", () => {
+    const rows = aggregateRuntimeRows(
+      [{ runtime_id: "rt-1", total_seconds: 300, task_count: 5, failed_count: 0 }],
+      [
+        {
+          runtime_id: "rt-1",
+          model: "claude-sonnet-4-6",
+          input_tokens: 1_000_000,
+          output_tokens: 500_000,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+        },
+      ],
+    );
+    expect(rows[0]?.tokens).toBe(1_500_000);
+    expect(rows[0]?.cost).toBeGreaterThan(0);
+    expect(rows[0]?.seconds).toBe(300);
+  });
+
+  it("includes usage-only runtimes (zero time) in the result", () => {
+    const rows = aggregateRuntimeRows(
+      [],
+      [
+        {
+          runtime_id: "rt-2",
+          model: "claude-haiku-4-5",
+          input_tokens: 5_000_000,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+        },
+      ],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.seconds).toBe(0);
+    expect(rows[0]?.tokens).toBe(5_000_000);
   });
 
   it("returns empty array when given no rows", () => {
-    expect(aggregateRuntimeRows([])).toEqual([]);
+    expect(aggregateRuntimeRows([], [])).toEqual([]);
   });
 });
