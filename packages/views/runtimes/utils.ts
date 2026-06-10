@@ -19,9 +19,13 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
 
 // Human-readable countdown until a hold expires ("in 5h 23m", "in 12m", "soon").
 // Returns null when holdUntil is null/undefined so callers can gate on truthiness.
-export function formatHoldUntil(holdUntil: string | null | undefined): string | null {
+// `now` defaults to Date.now() but can be injected for testability.
+export function formatHoldUntil(
+  holdUntil: string | null | undefined,
+  now: number = Date.now(),
+): string | null {
   if (!holdUntil) return null;
-  const diffMs = new Date(holdUntil).getTime() - Date.now();
+  const diffMs = new Date(holdUntil).getTime() - now;
   if (diffMs <= 0) return "soon";
   const minutes = Math.ceil(diffMs / 60_000);
   const hours = Math.floor(minutes / 60);
