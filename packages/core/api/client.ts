@@ -3940,6 +3940,14 @@ export class ApiClient {
     return this.fetch(`/api/cerebro/wakeups?${qs.toString()}`);
   }
 
+  // CEREBRO-PATCH(cerebro-wakeup-inbox-list): TECH-3322 — list pending wakeups across the workspace so the inbox can mark scheduled issues as Running.
+  async listWorkspaceWakeups(state = "pending", limit = 200): Promise<{
+    wakeups: { id: string; issue_id: string; trigger_type: string; fire_at?: string; state: string }[];
+  }> {
+    const qs = new URLSearchParams({ state, limit: String(limit) });
+    return this.fetch(`/api/cerebro/wakeups?${qs.toString()}`);
+  }
+
   async cancelWakeup(id: string): Promise<{ id: string; state: string }> {
     return this.fetch(`/api/cerebro/wakeups/${encodeURIComponent(id)}/cancel`, {
       method: "POST",

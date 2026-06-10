@@ -73,6 +73,44 @@ func decodeToolArgs(raw string) map[string]any {
 	return args
 }
 
+// connectionDenyBlocks reports whether toolName is denied for this agent by a
+// workspace-connection per-tool rule (TECH-3174), resolved through the same
+// chain the permissions screen writes. It is the always-on firtal-gateway
+// enforcement: the customer-service MCP tools are dispatched server-side here, so
+// the daemon's --disallowedTools never sees them.
+//
+// Fail-open on a DB/lookup error (logged at warn): an always-on per-call check
+// must not take the whole gateway fleet offline on a transient error. The Deny
+// holds in every non-error case, which is the requirement.
+func (e *FirtalGatewayExecutor) connectionDenyBlocks(
+	ctx context.Context,
+	agentID, workspaceID pgtype.UUID,
+	toolName string,
+	meta GatewayRequestMeta,
+) (bool, string) {
+	if e.connDeny == nil || !agentID.Valid || toolName == "" {
+		return false, ""
+	}
+	agent, err := e.queries.GetAgent(ctx, agentID)
+	if err != nil {
+		e.logger.Warn("connection deny: agent lookup failed — allowing",
+			"agent_id", meta.AgentID, "tool", toolName, "error", err)
+		return false, ""
+	}
+	denied, err := e.connDeny.ConnectionToolDenied(ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID, toolName)
+	if err != nil {
+		e.logger.Warn("connection deny: resolve failed — allowing",
+			"agent_id", meta.AgentID, "tool", toolName, "error", err)
+		return false, ""
+	}
+	if denied {
+		e.logger.Info("connection tool blocked by per-tool Deny (TECH-3174)",
+			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName)
+		return true, fmt.Sprintf("tool %q is denied for this agent by a connection permission", toolName)
+	}
+	return false, ""
+}
+
 // guardToolCall is the enforcement choke-point. It returns (allowed, reason).
 //
 // Default-off: when e.gate is nil it allows immediately without any lookup.
@@ -89,7 +127,18 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	args map[string]any,
 	meta GatewayRequestMeta,
 ) (bool, string) {
-	if e == nil || e.gate == nil {
+	if e == nil {
+		return true, ""
+	}
+	// TECH-3174: always-on workspace-connection per-tool Deny. This runs even when
+	// the approval gate is off (e.gate == nil), because connection tools (e.g. the
+	// customer-service MCP tools) are dispatched server-side on this runtime and
+	// never reach the daemon's --disallowedTools. A Deny here makes the tool
+	// uncallable regardless of the approval-gate rollout.
+	if blocked, reason := e.connectionDenyBlocks(ctx, agentID, workspaceID, toolName, meta); blocked {
+		return false, reason
+	}
+	if e.gate == nil {
 		return true, ""
 	}
 	if len(e.gateAgents) > 0 {

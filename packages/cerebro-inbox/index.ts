@@ -54,6 +54,12 @@ export {
   type InboxActionEntry,
 } from "./action-groups";
 export { useInboxActionGroupLabels } from "./strings";
+// TECH-3322 — pending wakeups feed the "Running" action group + the clock pip.
+export {
+  useInboxWakeupStates,
+  buildInboxWakeupHints,
+  type InboxWakeupHint,
+} from "./use-inbox-wakeups";
 // FIR-2653 — "Pinned" inbox view: only items tied to a pinned issue/parent/project.
 export {
   useInboxPinnedMatcher,

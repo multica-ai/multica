@@ -60,6 +60,22 @@ type FirtalGatewayExecutor struct {
 	// tool calls. Nil by default — it is only set under the toolpolicy gate mode
 	// (see MaybeEnableApprovalGate), keeping production on the prior behaviour.
 	toolPolicy *toolpolicy.Store
+
+	// connDeny enforces per-tool workspace-connection Deny rows on the
+	// firtal-gateway path (TECH-3174). Unlike toolPolicy it is ALWAYS set and
+	// runs independently of the approval gate / its env flag, because connection
+	// tools (e.g. the customer-service MCP tools) are dispatched server-side here
+	// and never see the daemon's --disallowedTools. Pool-backed so it can read
+	// workspace_connection. Nil only in tests that don't wire it.
+	connDeny *toolpolicy.Store
+}
+
+// SetConnectionDenyStore wires the always-on connection per-tool deny resolver
+// (TECH-3174). The server calls it after construction with a pool-backed store.
+func (e *FirtalGatewayExecutor) SetConnectionDenyStore(s *toolpolicy.Store) {
+	if e != nil {
+		e.connDeny = s
+	}
 }
 
 func NewFirtalGatewayExecutor(
