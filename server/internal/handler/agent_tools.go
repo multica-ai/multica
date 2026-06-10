@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // CerebroToolItem holds display metadata for one registered tool.
@@ -95,6 +97,21 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(agent-tools-cascade-check): TECH-3226 — also mark tools
+	// enabled when the cascade system grants them, so firtal-local (and any
+	// other external runtime that fetches /tools) sees the correct enabled list.
+	cascadeEnabled := map[string]bool{}
+	if h.CerebroQueries != nil {
+		if userID, err := util.ParseUUID(r.Header.Get("X-User-ID")); err == nil {
+			if cascadeRows, err := h.CerebroQueries.ResolveCerebroAgentToolAccess(r.Context(),
+				cerebrodb.ResolveCerebroAgentToolAccessParams{ID: agent.ID, UserID: userID}); err == nil {
+				for _, cr := range cascadeRows {
+					cascadeEnabled[cr.ToolName] = true
+				}
+			}
+		}
+	}
+
 	// Build response from the ordered tool list merged with grant data.
 	out := make([]AgentToolResponse, 0, len(h.cerebroToolItems))
 	for _, item := range h.cerebroToolItems {
@@ -110,12 +127,15 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 		}
 		if g, ok := grants[item.Name]; ok {
 			resp.Enabled = g.enabled
-			if item.Status == "explicitly_excluded" {
-				resp.Enabled = false
-			}
 			if len(g.config) > 0 {
 				resp.ConfigJSON = json.RawMessage(g.config)
 			}
+		}
+		if cascadeEnabled[item.Name] {
+			resp.Enabled = true
+		}
+		if item.Status == "explicitly_excluded" {
+			resp.Enabled = false
 		}
 		out = append(out, resp)
 	}
