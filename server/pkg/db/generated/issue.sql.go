@@ -903,8 +903,8 @@ type ListArchivedIssuesRow struct {
 	CreatorID     pgtype.UUID        `json:"creator_id"`
 	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
 	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
+	StartDate     pgtype.Date        `json:"start_date"`
+	DueDate       pgtype.Date        `json:"due_date"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
