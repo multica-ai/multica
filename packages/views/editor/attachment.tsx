@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { api } from "@multica/core/api";
+import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { useT } from "../i18n";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
@@ -106,13 +107,14 @@ interface Normalized {
 function normalize(
   input: AttachmentInput,
   resolve: (url: string) => AttachmentRecord | undefined,
+  cdnDomain: string,
 ): Normalized {
   if (input.kind === "record") {
     return {
       filename: input.attachment.filename,
       contentType: input.attachment.content_type,
       url: absolutizeMediaURL(
-        pickInlineMediaURL(input.attachment, input.attachment.url),
+        pickInlineMediaURL(input.attachment, input.attachment.url, cdnDomain),
       ),
       attachmentId: input.attachment.id,
       record: input.attachment,
@@ -145,7 +147,7 @@ function normalize(
     // uploaded image URL stayed site-relative and Electron's renderer
     // origin (file://) couldn't load it.
     url: absolutizeMediaURL(
-      record ? pickInlineMediaURL(record, input.url) : input.url,
+      record ? pickInlineMediaURL(record, input.url, cdnDomain) : input.url,
     ),
     attachmentId: record?.id,
     record,
@@ -223,13 +225,23 @@ function absolutizeMediaURL(rawUrl: string): string {
 //     beats `markdown_url` on first paint (no extra hop through the
 //     API endpoint), and the renderer doesn't persist it so the TTL is
 //     not a problem.
-//  2. `record.markdown_url` — the durable, server-policy-aligned URL.
+//  2. Known CDN `record.url` — when `/api/config` exposes the same CDN
+//     host as the attachment record, the browser can load the object
+//     directly (public CDN, or CloudFront cookie mode). Prefer it over
+//     an API-shaped `markdown_url` so the rendered `<img src>` and Copy
+//     Link affordance expose the CDN URL while the persisted markdown
+//     can remain the stable attachment endpoint.
+//  3. `record.markdown_url` — the durable, server-policy-aligned URL.
 //     Beats raw `record.url` because it never points at a private
 //     bucket (must-fix 2 from MUL-3192 review).
-//  3. `record.url` — legacy fallback for responses that omit
+//  4. `record.url` — legacy fallback for responses that omit
 //     `markdown_url` (a backend old enough to predate MUL-3192).
-//  4. The input URL — when there's no record at all.
-function pickInlineMediaURL(record: AttachmentRecord, fallback: string): string {
+//  5. The input URL — when there's no record at all.
+function pickInlineMediaURL(
+  record: AttachmentRecord,
+  fallback: string,
+  cdnDomain: string,
+): string {
   const dl = record.download_url ?? "";
   if (
     /^https?:\/\//i.test(dl) &&
@@ -237,9 +249,40 @@ function pickInlineMediaURL(record: AttachmentRecord, fallback: string): string 
   ) {
     return dl;
   }
+  if (storageURLMatchesCdnDomain(record.url, cdnDomain)) return record.url;
   if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
   return fallback;
+}
+
+function storageURLMatchesCdnDomain(rawURL: string, cdnDomain: string): boolean {
+  const expected = normalizeHost(cdnDomain);
+  if (!rawURL || !expected) return false;
+  try {
+    const u = new URL(rawURL);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    if (normalizeHost(u.hostname) !== expected) return false;
+    return !hasExpiringSignatureQuery(u.searchParams);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeHost(host: string): string {
+  return host.trim().toLowerCase().replace(/\.$/, "");
+}
+
+function hasExpiringSignatureQuery(q: URLSearchParams): boolean {
+  for (const key of [
+    "Signature",
+    "X-Amz-Signature",
+    "Key-Pair-Id",
+    "Expires",
+    "X-Amz-Expires",
+  ]) {
+    if (q.has(key)) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,10 +297,11 @@ export function Attachment({
   className,
 }: AttachmentProps) {
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
   const download = useDownloadAttachment();
   const preview = useAttachmentPreview();
 
-  const state = normalize(attachment, resolveAttachment);
+  const state = normalize(attachment, resolveAttachment, cdnDomain);
   const forceKind =
     attachment.kind === "url" ? attachment.forceKind : undefined;
   const kind =

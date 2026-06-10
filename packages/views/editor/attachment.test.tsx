@@ -89,12 +89,31 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
 // Resolver mock — feeds the test-scoped attachments[] into the
 // useAttachmentDownloadResolver hook the component reads.
 const resolverState: { attachments: AttachmentRecord[] } = { attachments: [] };
+function attachmentIdFromTestDownloadURL(url: string): string | undefined {
+  const path = /^https?:\/\//i.test(url)
+    ? (() => {
+        try {
+          return new URL(url).pathname;
+        } catch {
+          return "";
+        }
+      })()
+    : url.split(/[?#]/, 1)[0] ?? "";
+  const match = path.match(/^\/api\/attachments\/([^/]+)\/download$/);
+  return match?.[1];
+}
 vi.mock("./attachment-download-context", () => ({
   useAttachmentDownloadResolver: () => ({
     resolveAttachmentId: (url: string) =>
-      resolverState.attachments.find((a) => a.url === url)?.id,
+      resolverState.attachments.find((a) => {
+        const id = attachmentIdFromTestDownloadURL(url);
+        return a.url === url || (id !== undefined && a.id === id);
+      })?.id,
     resolveAttachment: (url: string) =>
-      resolverState.attachments.find((a) => a.url === url),
+      resolverState.attachments.find((a) => {
+        const id = attachmentIdFromTestDownloadURL(url);
+        return a.url === url || (id !== undefined && a.id === id);
+      }),
     openByUrl: openByUrlMock,
   }),
   AttachmentDownloadProvider: ({ children }: { children: ReactNode }) =>
@@ -102,6 +121,7 @@ vi.mock("./attachment-download-context", () => ({
 }));
 
 import { Attachment } from "./attachment";
+import { configStore } from "@multica/core/config";
 
 function makeRecord(overrides: Partial<AttachmentRecord> = {}): AttachmentRecord {
   return {
@@ -134,6 +154,7 @@ function renderWithQuery(ui: ReactElement) {
 beforeEach(() => {
   vi.clearAllMocks();
   resolverState.attachments = [];
+  configStore.setState({ cdnDomain: "" });
   // Default to "no proxy override" — site-relative URLs stay as-is, mirroring
   // the web app's same-origin proxy. Tests that simulate Desktop / mobile
   // webview override per-case via getBaseUrlMock.mockReturnValue(...).
@@ -203,6 +224,39 @@ describe("Attachment — image dispatch", () => {
     expect(img?.getAttribute("src")).toBe(att.download_url);
     fireEvent.click(screen.getByTitle("Download"));
     expect(downloadMock).toHaveBeenCalledWith("att-1");
+  });
+
+  it("renders the configured CDN URL when description markdown stores the stable API URL", () => {
+    configStore.setState({ cdnDomain: "cdn.example.test" });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const att = makeRecord({
+      id,
+      url: "https://cdn.example.test/uploads/ws/shot.png",
+      // This is the shape persisted in issue descriptions on deployments
+      // that keep markdown stable via the API endpoint. Once the URL
+      // resolves to an attachment record, the rendered <img> must expose the
+      // CDN URL instead of copying the API endpoint back to the user.
+      markdown_url: markdownUrl,
+      download_url: `/api/attachments/${id}/download`,
+    });
+    resolverState.attachments = [att];
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://cdn.example.test/uploads/ws/shot.png",
+    );
   });
 
   it("forceKind=image renders as image even when filename is empty (markdown ![](url) regression)", () => {
