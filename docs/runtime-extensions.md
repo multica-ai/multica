@@ -74,7 +74,7 @@ as a registered runtime in the workspace settings.
 | `pricing`              | ❌        | map<modelID,pricing>  | `{ input, output, cacheRead?, cacheWrite? }` per million tokens.          |
 | `config_file`          | ❌        | string                | E.g. `"AGENTS.md"`, `"CLAUDE.md"`, `""` to skip config injection.         |
 | `skills_root`          | ❌        | string                | Manifest skills root; exported as `MULTICA_AGENT_SKILLS_ROOT`.            |
-| `icon_url`             | ❌        | string                | URL of the provider logo. Frontend uses this when set.                    |
+| `icon_url`             | ❌        | string                | URL of the provider logo (HTTPS, absolute, SVG/PNG recommended). Frontend renders as `<img>` with `referrerPolicy=no-referrer`. Must be accessible from the daemon host. |
 | `env`                  | ❌        | map<string,string>    | Extra env vars merged into the spawn (existing keys win).                 |
 | `min_cli_version`      | ❌        | semver                | Daemon warns at startup if the installed CLI is below this.               |
 | `launch_header`        | ❌        | string                | One-line "skeleton" of how the CLI is invoked, shown in the UI.           |
