@@ -155,13 +155,16 @@ func (t *FirtalCreateIssueTool) Call(ctx context.Context, args map[string]any) (
 		priority = p
 	}
 
+	// CEREBRO-PATCH(create-issue-user-author): TECH-3226 — human-invoke fallback.
+	cType, cID := "agent", t.tctx.AgentID
+	if t.tctx.UserID.Valid { cType, cID = "member", t.tctx.UserID }
 	params := db.CreateIssueParams{
 		WorkspaceID: t.tctx.WorkspaceID,
 		Title:       strings.TrimSpace(title),
 		Status:      status,
 		Priority:    priority,
-		CreatorType: "agent",
-		CreatorID:   t.tctx.AgentID,
+		CreatorType: cType,
+		CreatorID:   cID,
 		Number:      number,
 		Position:    0,
 	}
@@ -1046,11 +1049,14 @@ func (t *FirtalAddCommentTool) Call(ctx context.Context, args map[string]any) (s
 	if err != nil {
 		return "", err
 	}
+	// CEREBRO-PATCH(add-comment-user-author): TECH-3226 — human-invoke fallback.
+	aType, aID := "agent", t.tctx.AgentID
+	if t.tctx.UserID.Valid { aType, aID = "member", t.tctx.UserID }
 	comment, err := t.queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: t.tctx.WorkspaceID,
-		AuthorType:  "agent",
-		AuthorID:    t.tctx.AgentID,
+		AuthorType:  aType,
+		AuthorID:    aID,
 		Content:     content,
 		Type:        "comment",
 	})
@@ -1145,14 +1151,17 @@ func (t *FirtalCreateProjectTool) Call(ctx context.Context, args map[string]any)
 	if p, ok := args["priority"].(string); ok && strings.TrimSpace(p) != "" {
 		priority = strings.TrimSpace(p)
 	}
+	// CEREBRO-PATCH(create-project-user-lead): TECH-3226 — human-invoke fallback.
+	lType, lID := pgtype.Text{String: "agent", Valid: t.tctx.AgentID.Valid}, t.tctx.AgentID
+	if t.tctx.UserID.Valid { lType, lID = pgtype.Text{String: "member", Valid: true}, t.tctx.UserID }
 	project, err := t.queries.CreateProject(ctx, db.CreateProjectParams{
 		WorkspaceID: t.tctx.WorkspaceID,
 		Title:       strings.TrimSpace(title),
 		Description: pgtype.Text{String: stringArg(args, "description"), Valid: stringArg(args, "description") != ""},
 		Status:      status,
 		Priority:    priority,
-		LeadType:    pgtype.Text{String: "agent", Valid: t.tctx.AgentID.Valid},
-		LeadID:      t.tctx.AgentID,
+		LeadType:    lType,
+		LeadID:      lID,
 	})
 	if err != nil {
 		return "", fmt.Errorf("create_project: %w", err)

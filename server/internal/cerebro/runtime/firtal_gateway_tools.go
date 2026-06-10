@@ -25,6 +25,10 @@ const firtalGatewayToolListCommentsLimit = firtalGatewayIssueCommentCap
 type ToolContext struct {
 	AgentID     pgtype.UUID
 	WorkspaceID pgtype.UUID
+	// CEREBRO-PATCH(toolctx-userid): TECH-3226 — originating user for human-invoke
+	// paths. When set, authorship tools (add_comment, create_issue, create_project)
+	// use "member" identity. Zero value = agent-only context (task token path).
+	UserID pgtype.UUID
 }
 
 // NewFirtalGatewayToolServer builds the in-process MCP server with the POC

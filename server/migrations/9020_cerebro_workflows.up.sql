@@ -71,6 +71,22 @@ CREATE INDEX IF NOT EXISTS idx_cerebro_workflow_workspace_enabled
 CREATE INDEX IF NOT EXISTS idx_cerebro_workflow_workspace_trigger
     ON cerebro_workflow (workspace_id, trigger_type) WHERE enabled = TRUE;
 
+-- If a previous failed run created cerebro_workflow_run without the workflow_id
+-- column, drop it so the CREATE TABLE below recreates it with the full schema.
+-- The table has no data at this stage (migration was never fully applied).
+DO $$
+BEGIN
+  IF EXISTS (
+      SELECT 1 FROM information_schema.tables WHERE table_name = 'cerebro_workflow_run'
+  ) AND NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'cerebro_workflow_run' AND column_name = 'workflow_id'
+  ) THEN
+      DROP TABLE IF EXISTS cerebro_workflow_idempotency_key CASCADE;
+      DROP TABLE IF EXISTS cerebro_workflow_run CASCADE;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS cerebro_workflow_run (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workflow_id     UUID NOT NULL REFERENCES cerebro_workflow(id) ON DELETE CASCADE,
