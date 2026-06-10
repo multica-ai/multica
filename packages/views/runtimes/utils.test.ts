@@ -229,16 +229,6 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(1.25 + 10, 5);
   });
 
-  it("prices the provider-prefixed xAI form (xai/grok-4)", () => {
-    const cost = estimateCost({
-      ...zeroUsage,
-      model: "xai/grok-4",
-      input_tokens: 1_000_000,
-      output_tokens: 1_000_000,
-    });
-    expect(cost).toBeCloseTo(1.25 + 2.5, 5);
-  });
-
   it("prices the provider-prefixed DeepSeek form (deepseek/deepseek-chat)", () => {
     const cost = estimateCost({
       ...zeroUsage,
@@ -504,22 +494,6 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.4 + 4.4, 5);
   });
 
-  it("prices glm-4.5-flash at the official Free tier ($0)", () => {
-    // z.ai currently ships Free tiers for the *-flash family; $0 is the
-    // literal price on the page, not a placeholder. Anything non-zero
-    // here would mean we mis-copied a paid SKU's number into the row.
-    expect(isModelPriced("glm-4.5-flash")).toBe(true);
-    expect(isModelPriced("glm-4.7-flash")).toBe(true);
-    expect(
-      estimateCost({
-        ...zeroUsage,
-        model: "glm-4.5-flash",
-        input_tokens: 1_000_000,
-        output_tokens: 1_000_000,
-      }),
-    ).toBe(0);
-  });
-
   it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
     // opencode + OpenRouter route IDs through as `<provider>/<model>`.
     // canonicalCandidates strips the prefix; without this the rows above
@@ -528,7 +502,6 @@ describe("estimateCost", () => {
     expect(isModelPriced("deepseek/deepseek-v4-flash")).toBe(true);
     expect(isModelPriced("moonshotai/kimi-k2.6")).toBe(true);
     expect(isModelPriced("zhipuai/glm-5.1")).toBe(true);
-    expect(isModelPriced("zhipuai/glm-4.5-air")).toBe(true);
   });
 });
 
@@ -566,10 +539,9 @@ describe("isModelPriced", () => {
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
   });
 
-  it("recognises provider-prefixed OpenAI, Google, xAI and DeepSeek IDs", () => {
+  it("recognises provider-prefixed OpenAI, Google and DeepSeek IDs", () => {
     expect(isModelPriced("openai/gpt-4o")).toBe(true);
     expect(isModelPriced("google/gemini-2.5-pro")).toBe(true);
-    expect(isModelPriced("xai/grok-4")).toBe(true);
     expect(isModelPriced("deepseek/deepseek-chat")).toBe(true);
   });
 

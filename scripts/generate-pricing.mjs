@@ -69,33 +69,6 @@ async function loadModelsDev() {
   let pricedCount = 0;
   let skippedNoCost = 0;
 
-  // Extra entries for aliases that OpenCode uses but models.dev does not
-  // list directly. Each entry shares the same pricing as its canonical SKU.
-  // Source: https://docs.x.ai/docs/models
-  const extraEntries = [
-    { key: "xai/grok-4", input: 1.25, output: 2.5, cache_read: 0.2, cache_write: 1.25 },
-    { key: "xai/grok-3-mini", input: 1.25, output: 2.5, cache_read: 0.2, cache_write: 1.25 },
-    { key: "grok-4", input: 1.25, output: 2.5, cache_read: 0.2, cache_write: 1.25 },
-    { key: "grok-3-mini", input: 1.25, output: 2.5, cache_read: 0.2, cache_write: 1.25 },
-    // Zhipu GLM entries missing from models.dev (free flash tiers + older
-    // variants still referenced by runtime usage data).
-    // Source: https://docs.z.ai/guides/overview/pricing
-    { key: "glm-5-turbo", input: 1.2, output: 4.0, cache_read: 0.24, cache_write: 1.2 },
-    { key: "glm-4.7-flashx", input: 0.07, output: 0.4, cache_read: 0.01, cache_write: 0.07 },
-    { key: "glm-4.7-flash", input: 0, output: 0, cache_read: 0, cache_write: 0 },
-    { key: "glm-4.5", input: 0.6, output: 2.2, cache_read: 0.11, cache_write: 0.6 },
-    { key: "glm-4.5-x", input: 2.2, output: 8.9, cache_read: 0.45, cache_write: 2.2 },
-    { key: "glm-4.5-air", input: 0.2, output: 1.1, cache_read: 0.03, cache_write: 0.2 },
-    { key: "glm-4.5-airx", input: 1.1, output: 4.5, cache_read: 0.22, cache_write: 1.1 },
-    { key: "glm-4.5-flash", input: 0, output: 0, cache_read: 0, cache_write: 0 },
-  ];
-  for (const e of extraEntries) {
-    if (!rows.has(e.key)) {
-      rows.set(e.key, e);
-      pricedCount++;
-    }
-  }
-
   for (const provider of ALLOWED_PROVIDERS) {
     const prov = db[provider];
     if (!prov) continue;
