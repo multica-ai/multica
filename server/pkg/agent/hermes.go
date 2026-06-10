@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -338,6 +339,23 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/prompt failed: %v", err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// The agent no longer knows the session we resumed.
+					// Hermes echoes the requested id back from
+					// session/resume even when the session is gone, so
+					// resolveResumedSessionID can't catch this — it only
+					// surfaces here, at prompt time. Return an empty
+					// SessionID so the daemon's resume-failure fallback
+					// retries with a fresh session and stores the
+					// replacement id; keeping the stale id makes every
+					// future dispatch on this (agent, issue) fail the
+					// same way.
+					b.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
+						"backend", "hermes",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 			}
 		} else {
 			// The prompt completed. Check if we got a promptDone result
@@ -607,6 +625,44 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	}
 }
 
+// acpRPCError is a JSON-RPC error frame returned by the agent process.
+// It renders exactly like the flat string handleResponse used to build
+// with fmt.Errorf, so logs and surfaced task errors are unchanged, but
+// keeps the code and message structured so callers can branch on the
+// error class (see isACPSessionNotFound) instead of parsing text.
+type acpRPCError struct {
+	Method  string
+	Code    int
+	Message string
+	Data    string
+}
+
+func (e *acpRPCError) Error() string {
+	if e.Data != "" {
+		return fmt.Sprintf("%s: %s (code=%d, data=%s)", e.Method, e.Message, e.Code, e.Data)
+	}
+	return fmt.Sprintf("%s: %s (code=%d)", e.Method, e.Message, e.Code)
+}
+
+// isACPSessionNotFound reports whether err is the agent rejecting a
+// session id it no longer knows. Runtimes signal this as JSON-RPC
+// -32603 (Internal error) with wording that varies — Hermes says
+// "Session not found", Kiro puts "No session found with id ..." in
+// `data` — so the code alone is not discriminating and the message
+// text is matched too.
+func isACPSessionNotFound(err error) bool {
+	var rpcErr *acpRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	if rpcErr.Code != -32603 {
+		return false
+	}
+	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
+	return strings.Contains(text, "session not found") ||
+		strings.Contains(text, "no session found")
+}
+
 func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 	var id int
 	if err := json.Unmarshal(raw["id"], &id); err != nil {
@@ -651,11 +707,7 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 				detail = string(rpcErr.Data)
 			}
 		}
-		if detail != "" {
-			pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d, data=%s)", pr.method, rpcErr.Message, rpcErr.Code, detail)}
-		} else {
-			pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d)", pr.method, rpcErr.Message, rpcErr.Code)}
-		}
+		pr.ch <- rpcResult{err: &acpRPCError{Method: pr.method, Code: rpcErr.Code, Message: rpcErr.Message, Data: detail}}
 	} else {
 		// If this is a prompt response, extract usage and stop reason.
 		if pr.method == "session/prompt" {

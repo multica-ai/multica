@@ -307,6 +307,19 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kimi session/prompt failed: %v", err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// See the hermes backend: the runtime echoes the
+					// requested id back from session/resume even when
+					// the session is gone, so the stale id only fails
+					// here, at prompt time. Empty SessionID lets the
+					// daemon's resume-failure fallback retry fresh and
+					// store the replacement id.
+					b.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
+						"backend", "kimi",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 			}
 		} else {
 			select {
