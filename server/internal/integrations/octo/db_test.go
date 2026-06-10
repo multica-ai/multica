@@ -864,9 +864,17 @@ func newTask(t *testing.T, wsID, agentID, userID pgtype.UUID) pgtype.UUID {
 		t.Fatalf("create issue: %v", err)
 	}
 	var taskID pgtype.UUID
+	// agent_task_queue.runtime_id is NOT NULL; reuse the agent's runtime
+	// (the fixture wires every agent to one) so the insert satisfies the
+	// constraint.
+	var runtimeID pgtype.UUID
 	if err := testPool.QueryRow(ctx,
-		`INSERT INTO agent_task_queue (agent_id, issue_id) VALUES ($1, $2) RETURNING id`,
-		agentID, issueID).Scan(&taskID); err != nil {
+		`SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load agent runtime_id: %v", err)
+	}
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id) VALUES ($1, $2, $3) RETURNING id`,
+		agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("create agent_task_queue: %v", err)
 	}
 	return taskID
