@@ -265,6 +265,36 @@ func TestPrepareOpenclawConfigKeyMissingTreatedAsEmpty(t *testing.T) {
 	}
 }
 
+func TestPrepareOpenclawConfigPathNotFoundTreatedAsEmptyAgentsList(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	userConfigPath := filepath.Join(t.TempDir(), "wujieai.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: userConfigPath},
+		"config get agents.list --json": {err: errors.New("openclaw config get agents.list --json: exit status 1 (stderr: Config path not found: agents.list)")},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	if _, present := got["agents"].(map[string]any)["list"]; present {
+		t.Errorf("agents.list should be omitted when config path is missing, got %v", got["agents"])
+	}
+	if got["agents"].(map[string]any)["defaults"].(map[string]any)["workspace"] != workDir {
+		t.Errorf("defaults.workspace not set when agents.list path missing")
+	}
+}
+
 // TestPrepareOpenclawConfigFreshInstallNoOnDiskConfig — the only legitimate
 // "synthesize minimal" case. `openclaw config file` reports a path (the
 // default) but the file does not exist yet. We emit a wrapper with the
@@ -346,6 +376,82 @@ func TestPrepareOpenclawConfigExpandsTilde(t *testing.T) {
 	wantRoot := filepath.Join(fakeHome, ".openclaw")
 	if result.IncludeRoot != wantRoot {
 		t.Errorf("IncludeRoot = %q, want %q (must be expanded absolute dirname)", result.IncludeRoot, wantRoot)
+	}
+}
+
+func TestPrepareOpenclawConfigIgnoresDoctorWarningsFromConfigFile(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	if err := os.MkdirAll(filepath.Join(fakeHome, ".openclaw"), 0o755); err != nil {
+		t.Fatalf("mkdir home/.openclaw: %v", err)
+	}
+	realPath := filepath.Join(fakeHome, ".openclaw", "openclaw.json")
+	if err := os.WriteFile(realPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	warningPath := filepath.Join(t.TempDir(), "runs.sqlite.migrated")
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: "\x1b[33mDoctor warnings\x1b[0m\n" +
+			"- Left migrated task registry sidecar in place because archive already exists: " + warningPath + "\n" +
+			"~/.openclaw/openclaw.json\n"},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	include := got["$include"].([]any)
+	if include[0] != realPath {
+		t.Errorf("$include[0] = %v, want %q (doctor warnings must not be parsed as the config path)", include[0], realPath)
+	}
+}
+
+func TestPrepareWujieclawConfigExpandsOpenclawHomeFromConfigFile(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	wujieaiHome := filepath.Join(fakeHome, ".wujieai")
+	if err := os.MkdirAll(wujieaiHome, 0o755); err != nil {
+		t.Fatalf("mkdir home/.wujieai: %v", err)
+	}
+	realPath := filepath.Join(wujieaiHome, "wujieai.json")
+	if err := os.WriteFile(realPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: "$OPENCLAW_HOME/wujieai.json\n"},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+		OpenclawBin: stub.bin,
+		Provider:    "wujieclaw",
+	})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	include := got["$include"].([]any)
+	if include[0] != realPath {
+		t.Errorf("$include[0] = %v, want %q (wujieclaw reports config file via $OPENCLAW_HOME)", include[0], realPath)
+	}
+	if result.IncludeRoot != wujieaiHome {
+		t.Errorf("IncludeRoot = %q, want %q", result.IncludeRoot, wujieaiHome)
 	}
 }
 

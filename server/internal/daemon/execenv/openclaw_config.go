@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -32,6 +33,8 @@ const openclawUserSnapshotFile = "openclaw-user-snapshot.json"
 // setup. The CLI is fast (<200ms normal); 5s leaves headroom for a cold
 // node start without letting a hung CLI stall task dispatch indefinitely.
 const openclawCLITimeout = 5 * time.Second
+
+var openclawANSIEscapePattern = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 
 // OpenclawConfigPrep is the input to prepareOpenclawConfig. Only OpenclawBin
 // is meaningful in production — Timeout is here for tests that need a tight
@@ -370,9 +373,16 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	if err != nil {
 		return "", false, err
 	}
-	path := strings.TrimSpace(out)
-	if path == "" {
-		return "", false, fmt.Errorf("`openclaw config file` returned empty output")
+	path, err := openclawConfigPathFromOutput(out)
+	if err != nil {
+		return "", false, err
+	}
+	if strings.Contains(path, "$") {
+		expanded, missing := expandOpenclawConfigPathEnv(path)
+		if missing != "" {
+			return "", false, fmt.Errorf("expand $%s in openclaw config path %q: environment variable is not set", missing, path)
+		}
+		path = expanded
 	}
 	if path == "~" || strings.HasPrefix(path, "~/") {
 		home, herr := os.UserHomeDir()
@@ -399,6 +409,39 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 		return "", false, fmt.Errorf("openclaw config path %s is a directory, not a file", path)
 	}
 	return path, true, nil
+}
+
+func openclawConfigPathFromOutput(out string) (string, error) {
+	if strings.TrimSpace(openclawANSIEscapePattern.ReplaceAllString(out, "")) == "" {
+		return "", fmt.Errorf("`openclaw config file` returned empty output")
+	}
+	lines := strings.Split(out, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(openclawANSIEscapePattern.ReplaceAllString(lines[i], ""))
+		if candidate == "" {
+			continue
+		}
+		candidate = strings.Trim(candidate, `"'`)
+		if candidate == "~" || strings.HasPrefix(candidate, "~/") || strings.HasPrefix(candidate, "$") || filepath.IsAbs(candidate) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("`openclaw config file` returned no whole-line config path in output %q", strings.TrimSpace(openclawANSIEscapePattern.ReplaceAllString(out, "")))
+}
+
+func expandOpenclawConfigPathEnv(path string) (string, string) {
+	missing := ""
+	expanded := os.Expand(path, func(key string) string {
+		value, ok := os.LookupEnv(key)
+		if !ok || value == "" {
+			if missing == "" {
+				missing = key
+			}
+			return ""
+		}
+		return value
+	})
+	return expanded, missing
 }
 
 // openclawResolvedFullConfig fetches the user's fully resolved openclaw
@@ -562,14 +605,15 @@ func openclawManagedMcpServers(raw json.RawMessage) (map[string]any, bool, error
 // for path simply isn't set, as opposed to a real failure (bad config,
 // CLI bug, missing binary). The CLI's "key not found" exit text has varied
 // across versions, so we match on a handful of substrings rather than the
-// exit code alone.
+// exit code alone. Matching is case-insensitive to tolerate CLI wording
+// changes (e.g. "Path not found" → "Config path not found").
 func isOpenclawKeyMissing(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "No value at ") ||
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no value at ") ||
 		strings.Contains(msg, "not set") ||
 		strings.Contains(msg, "missing key") ||
-		strings.Contains(msg, "Path not found")
+		strings.Contains(msg, "path not found")
 }
