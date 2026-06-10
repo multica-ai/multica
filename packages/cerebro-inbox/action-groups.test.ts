@@ -176,18 +176,56 @@ describe("classifyInboxAction — chats and channels", () => {
       classifyInboxAction({ kind: "channel", channel: { id: "ch-1", unread_count: 2 } }, ctx()),
     ).toBe("act_now");
   });
+
+  it("puts a read channel where I sent the last message in Pending", () => {
+    expect(
+      classifyInboxAction(
+        { kind: "channel", channel: { id: "ch-1", unread_count: 0, last_message: { author_type: "member", author_id: USER } } },
+        ctx(),
+      ),
+    ).toBe("pending");
+  });
+
+  it("puts a read channel where an agent sent the last message in Pending", () => {
+    expect(
+      classifyInboxAction(
+        { kind: "channel", channel: { id: "ch-1", unread_count: 0, last_message: { author_type: "agent", author_id: "agent-99" } } },
+        ctx(),
+      ),
+    ).toBe("pending");
+  });
+
+  it("puts a read channel where another member sent the last message in Done", () => {
+    expect(
+      classifyInboxAction(
+        { kind: "channel", channel: { id: "ch-1", unread_count: 0, last_message: { author_type: "member", author_id: "other-user" } } },
+        ctx(),
+      ),
+    ).toBe("calm");
+  });
+
+  it("puts a read channel with no last_message in Done", () => {
+    expect(
+      classifyInboxAction(
+        { kind: "channel", channel: { id: "ch-1", unread_count: 0, last_message: null } },
+        ctx(),
+      ),
+    ).toBe("calm");
+  });
 });
 
 describe("ordering + bucketize adapter", () => {
-  it("orders categories Unread → Reminders → Running → Done → Waiting", () => {
-    expect(INBOX_ACTION_ORDER).toEqual(["act_now", "reminders", "watching", "calm", "waiting"]);
+  it("orders categories Unread → Reminders → Running → Pending → Done → Waiting", () => {
+    expect(INBOX_ACTION_ORDER).toEqual(["act_now", "reminders", "watching", "pending", "calm", "waiting"]);
     expect(inboxActionOrderIndex("act_now")).toBeLessThan(inboxActionOrderIndex("reminders"));
     expect(inboxActionOrderIndex("reminders")).toBeLessThan(inboxActionOrderIndex("watching"));
-    expect(inboxActionOrderIndex("reminders")).toBeLessThan(inboxActionOrderIndex("waiting"));
+    expect(inboxActionOrderIndex("watching")).toBeLessThan(inboxActionOrderIndex("pending"));
+    expect(inboxActionOrderIndex("pending")).toBeLessThan(inboxActionOrderIndex("calm"));
+    expect(inboxActionOrderIndex("calm")).toBeLessThan(inboxActionOrderIndex("waiting"));
   });
 
   it("returns key, localized label, and sort order from bucketizeInboxAction", () => {
-    const labels = { act_now: "Unread", reminders: "Reminders", watching: "Running", waiting: "Waiting", calm: "Done" };
+    const labels = { act_now: "Unread", reminders: "Reminders", watching: "Running", pending: "Pending", waiting: "Waiting", calm: "Done" };
     const bucket = bucketizeInboxAction(
       notif({ type: "mentioned", severity: "action_required", read: false }),
       ctx(),
@@ -197,7 +235,7 @@ describe("ordering + bucketize adapter", () => {
   });
 
   it("places Reminders right below Unread", () => {
-    const labels = { act_now: "Unread", reminders: "Reminders", watching: "Running", waiting: "Waiting", calm: "Done" };
+    const labels = { act_now: "Unread", reminders: "Reminders", watching: "Running", pending: "Pending", waiting: "Waiting", calm: "Done" };
     const bucket = bucketizeInboxAction(
       notif({ type: "reminder", read: false }),
       ctx(),

@@ -19,13 +19,14 @@
 
 import type { InboxItem, InboxItemType } from "@multica/core/types";
 
-export type InboxActionCategory = "act_now" | "reminders" | "watching" | "waiting" | "calm";
+export type InboxActionCategory = "act_now" | "reminders" | "watching" | "pending" | "waiting" | "calm";
 
 /** Render order, top → bottom. Drives group sorting (not alphabetical). */
 export const INBOX_ACTION_ORDER: InboxActionCategory[] = [
   "act_now",
   "reminders",
   "watching",
+  "pending",
   "calm",
   "waiting",
 ];
@@ -73,7 +74,14 @@ export interface InboxActionContext {
 export type InboxActionEntry =
   | { kind: "notif"; item: InboxItem }
   | { kind: "chat"; session: { id: string; has_unread?: boolean } }
-  | { kind: "channel"; channel: { id: string; unread_count: number } };
+  | {
+      kind: "channel";
+      channel: {
+        id: string;
+        unread_count: number;
+        last_message?: { author_type: "member" | "agent"; author_id: string } | null;
+      };
+    };
 
 function classifyNotif(item: InboxItem, ctx: InboxActionContext): InboxActionCategory {
   // 1. Reminders and date-arrival items get their own bucket (FIR-2445),
@@ -118,7 +126,16 @@ export function classifyInboxAction(
     case "channel":
       // Channel unread counts are literal; mention state no longer changes the
       // bucket label because the bucket itself is named Unread.
-      return entry.channel.unread_count > 0 ? "act_now" : "calm";
+      if (entry.channel.unread_count > 0) return "act_now";
+      // A read channel is Pending when we sent the last message (waiting for a
+      // reply) or when an agent sent it (still in flight). It is Done only when
+      // another human had the last word — we've seen their response.
+      if (entry.channel.last_message != null) {
+        const { author_type, author_id } = entry.channel.last_message;
+        if (author_type === "agent" || (author_type === "member" && author_id === ctx.userId))
+          return "pending";
+      }
+      return "calm";
     default:
       // Enum drift downgrades, not crashes (see API Response Compatibility).
       return "calm";

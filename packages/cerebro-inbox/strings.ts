@@ -62,10 +62,11 @@ type StringTable = {
   comment_remind_failed: string;
   // FIR-2115 — "Group by → Action" bucket headers. English in every locale by
   // product decision. Names follow the agreed product wording: Unread,
-  // Reminders, Running, Done, Waiting.
+  // Reminders, Running, Pending, Done, Waiting.
   action_act_now: string;
   action_reminders: string;
   action_watching: string;
+  action_pending: string;
   action_waiting: string;
   action_calm: string;
   // FIR-2385 — private-agent run-request row.
@@ -80,6 +81,7 @@ const actionLabels = {
   action_act_now: "Unread",
   action_reminders: "Reminders",
   action_watching: "Running",
+  action_pending: "Pending",
   action_waiting: "Waiting",
   action_calm: "Done",
 } as const;
@@ -262,6 +264,7 @@ export function useInboxActionGroupLabels(): Record<InboxActionCategory, string>
     act_now: s.action_act_now,
     reminders: s.action_reminders,
     watching: s.action_watching,
+    pending: s.action_pending,
     waiting: s.action_waiting,
     calm: s.action_calm,
   };
