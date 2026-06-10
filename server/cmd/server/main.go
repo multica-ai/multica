@@ -337,14 +337,24 @@ func main() {
 		}
 
 		// Existing user: sync name/email if they changed in Casdoor.
-		needUpdate := false
-		if name != "" && user.Name != name {
-			needUpdate = true
+		syncName := name != "" && user.Name != name
+		syncEmail := email != "" && user.Email != email
+
+		// Guard against unique-key violations: if another user already owns
+		// this email (e.g. a pre-existing local account), skip the email sync.
+		if syncEmail {
+			existing, err := queries.GetUserByEmail(ctx, email)
+			if err == nil && existing.ID != user.ID {
+				slog.Warn("casdoor email already owned by another user, skipping email sync",
+					"user_id", util.UUIDToString(user.ID),
+					"existing_user_id", util.UUIDToString(existing.ID),
+					"email", email,
+				)
+				syncEmail = false
+			}
 		}
-		if email != "" && user.Email != email {
-			needUpdate = true
-		}
-		if needUpdate {
+
+		if syncName || syncEmail {
 			if _, updErr := queries.UpdateUserNameAndEmail(ctx, db.UpdateUserNameAndEmailParams{
 				ID:    user.ID,
 				Name:  name,
@@ -356,7 +366,7 @@ func main() {
 					"error", updErr,
 				)
 			} else {
-				slog.Info("casdoor: synced user profile", "user_id", util.UUIDToString(user.ID), "subject_id", subjectID, "name", name)
+				slog.Info("casdoor: synced user profile", "user_id", util.UUIDToString(user.ID), "subject_id", subjectID, "name", name, "email_synced", syncEmail)
 			}
 		}
 		return util.UUIDToString(user.ID), nil
