@@ -91,10 +91,20 @@ SELECT * FROM lark_installation
 WHERE workspace_id = $1 AND agent_id = $2;
 
 -- name: GetLarkInstallationByAppID :one
--- Used by the OAuth callback to detect re-install vs first-install,
--- and by the inbound dispatcher to route an event payload (which only
--- carries app_id) to its installation row.
+-- Returns the (single) installation row for an app_id. With the partial
+-- unique index (migration 119), revoked history rows may coexist, so
+-- callers that need an active installation must use
+-- GetActiveLarkInstallationByAppID instead.
 SELECT * FROM lark_installation WHERE app_id = $1;
+
+-- name: GetActiveLarkInstallationByAppID :one
+-- Same lookup as GetLarkInstallationByAppID but scoped to active rows
+-- only. The partial unique index (migration 119) guarantees at most one
+-- active row per app_id, so this always returns zero or one row.
+-- Used by:
+--   - the inbound dispatcher to route events to their installation,
+--   - the registration service to detect re-bind conflicts.
+SELECT * FROM lark_installation WHERE app_id = $1 AND status = 'active';
 
 -- name: ListLarkInstallationsByWorkspace :many
 SELECT * FROM lark_installation

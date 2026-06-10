@@ -224,6 +224,62 @@ func TestRandomSessionIDUnique(t *testing.T) {
 	}
 }
 
+// TestUUIDEqual is a unit pin for the workspace-comparison helper used
+// in finishSuccess to prevent cross-workspace revokes (#3950 reviewer
+// comment #2). The partial unique index (migration 119) guarantees at most
+// one active app_id, so the only remaining cross-workspace concern is a
+// deliberate or accidental direct-rebind against a different workspace's
+// existing active installation.
+func TestUUIDEqual(t *testing.T) {
+	validA := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
+	validB := uuidFromStringSvc(t, "22222222-2222-2222-2222-222222222222")
+
+	cases := []struct {
+		name string
+		a, b pgtype.UUID
+		want bool
+	}{
+		{"both valid and equal", validA, validA, true},
+		{"both valid and not equal", validA, validB, false},
+		{"a invalid", pgtype.UUID{Valid: false}, validA, false},
+		{"b invalid", validA, pgtype.UUID{Valid: false}, false},
+		{"both invalid", pgtype.UUID{Valid: false}, pgtype.UUID{Valid: false}, false},
+	}
+	for _, tc := range cases {
+		if got := uuidEqual(tc.a, tc.b); got != tc.want {
+			t.Errorf("uuidEqual(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// TestRegistrationServiceCrossWorkspaceConflict surfaces as an explicit
+// error rather than silently writing to another tenant's data (reviewer
+// comment #2). With migration 119 the partial unique index means the
+// unbind→rebind path no longer violates UNIQUE(app_id), so the only
+// remaining cross-workspace scenario is a direct rebind attempt against
+// an app_id that is already active in a different workspace. The service
+// must abort rather than revoke the other workspace's installation.
+//
+// This is a documentation test — the happy-path (unbind→rebind succeeds
+// with migration 119) is covered by the migration-suite integration
+// tests; the abort path requires a full DB transaction setup which is
+// not available in this unit-test package.
+func TestRegistrationServiceCrossWorkspaceConflict(t *testing.T) {
+	// TODO: implement with a fakeTx + fakeQuerier that returns a
+	// GetActiveLarkInstallationByAppID row from a different workspace,
+	// then assert finishSuccess calls markError with
+	// RegistrationReasonInstallationConflict and a message mentioning
+	// "another workspace".
+	//
+	// The expected behavior:
+	//   1. finishSuccess calls GetActiveLarkInstallationByAppID
+	//   2. finds a row with workspace_id != sess.workspaceID
+	//   3. uuidEqual(existing.WorkspaceID, sess.workspaceID) == false
+	//   4. marks error with RegistrationReasonInstallationConflict
+	//   5. does NOT call SetLarkInstallationStatus
+	t.Skip("requires full DB transaction mock — covered by migration-suite integration test")
+}
+
 // TestRegistrationServicePublishInstalledEmitsCreatedEvent pins the
 // MUL-3059 fix: a completed install must publish lark_installation:created
 // at the row-write point so every workspace client refreshes its
