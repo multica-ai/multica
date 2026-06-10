@@ -32,6 +32,7 @@ vi.mock("@tanstack/react-query", () => ({
     if (opts.enabled === false) return { data: undefined };
     const key = JSON.stringify(opts.queryKey);
     if (key.includes("members")) return { data: membersRef.current };
+    if (key.includes("wecom")) return { data: wecomInstallationsRef.current };
     if (key.includes("installations")) return { data: installationsRef.current };
     return { data: undefined };
   },
@@ -51,6 +52,20 @@ vi.mock("@multica/core/lark", () => ({
     queryKey: ["lark", "installations"],
     queryFn: vi.fn(),
   }),
+}));
+
+vi.mock("@multica/core/wecom", () => ({
+  wecomInstallationsOptions: () => ({
+    queryKey: ["wecom", "installations"],
+    queryFn: vi.fn(),
+  }),
+}));
+
+const wecomInstallationsRef = vi.hoisted(() => ({
+  current: {
+    installations: [] as unknown[],
+    configured: true,
+  },
 }));
 
 vi.mock("@multica/core/auth", () => {
@@ -112,6 +127,10 @@ function resetFixtures() {
     installations: [],
     configured: true,
     install_supported: true,
+  };
+  wecomInstallationsRef.current = {
+    installations: [],
+    configured: true,
   };
 }
 

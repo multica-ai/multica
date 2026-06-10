@@ -136,7 +136,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </p>
           ) : !canManage ? (
             <p className="text-xs text-muted-foreground">
-              {t(($) => $.tab_body.integrations.members_note)}
+              {t(($) => $.tab_body.integrations.wecom_members_note)}
             </p>
           ) : wecomInstall ? (
             <p className="text-xs text-muted-foreground">
