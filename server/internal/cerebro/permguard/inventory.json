@@ -1347,6 +1347,10 @@
     {
       "id": "PUT /api/workspaces/{id}/tool-policy",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/workspaces/{id}/wakeup-settings",
+      "gate": "workspace_admin"
     }
   ],
   "mcp": [
