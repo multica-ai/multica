@@ -6,18 +6,27 @@ import type { Attachment as AttachmentRecord } from "@multica/core/types";
 
 const {
   getAttachmentTextContentMock,
+  getBaseUrlMock,
   downloadMock,
   openExternalMock,
   openByUrlMock,
 } = vi.hoisted(() => ({
   getAttachmentTextContentMock: vi.fn(),
+  // Default: empty base URL so existing tests render site-relative URLs
+  // through the proxy (i.e. exactly the way the web app behaves). The
+  // absolutize-specific suite below overrides this to simulate Desktop /
+  // mobile webview, where the renderer's origin does NOT proxy /api.
+  getBaseUrlMock: vi.fn(() => ""),
   downloadMock: vi.fn(),
   openExternalMock: vi.fn(),
   openByUrlMock: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { getAttachmentTextContent: getAttachmentTextContentMock },
+  api: {
+    getAttachmentTextContent: getAttachmentTextContentMock,
+    getBaseUrl: getBaseUrlMock,
+  },
   PreviewTooLargeError: class extends Error {},
   PreviewUnsupportedError: class extends Error {},
 }));
@@ -107,6 +116,7 @@ function makeRecord(overrides: Partial<AttachmentRecord> = {}): AttachmentRecord
     filename: "shot.png",
     url: "https://cdn.example.test/att-1.png",
     download_url: "https://cdn.example.test/att-1.png?Signature=s",
+    markdown_url: "https://cdn.example.test/api/attachments/att-1/download",
     content_type: "image/png",
     size_bytes: 1024,
     created_at: "2026-05-13T00:00:00Z",
@@ -124,6 +134,10 @@ function renderWithQuery(ui: ReactElement) {
 beforeEach(() => {
   vi.clearAllMocks();
   resolverState.attachments = [];
+  // Default to "no proxy override" — site-relative URLs stay as-is, mirroring
+  // the web app's same-origin proxy. Tests that simulate Desktop / mobile
+  // webview override per-case via getBaseUrlMock.mockReturnValue(...).
+  getBaseUrlMock.mockReturnValue("");
 });
 
 afterEach(() => {
@@ -240,28 +254,41 @@ describe("Attachment — image dispatch", () => {
     expect(screen.queryByTitle("Download")).toBeNull();
   });
 
-  it("stable /api/attachments/<id>/download download_url falls through to the freshly-signed record.url for token-mode loadability (MUL-3130)", () => {
-    // Pinned behavior: when an attachment record carries the default
-    // proxy-mode download_url (a bare /api/attachments/<id>/download
-    // path, which does NOT load as a native <img>/<video> src in
-    // token-mode clients because they can't attach Authorization
-    // headers), the renderer must fall through to record.url. On the
-    // LocalStorage backend record.url carries a freshly-minted
-    // /uploads/<key>?exp&sig query whose signature IS the auth, so
-    // the image loads regardless of how the client is authenticated.
-    // pickInlineMediaURL implements this fallback (attachment.tsx).
-    const signedStorageURL =
-      "/uploads/workspaces/ws-1/freshly-signed.png?exp=99&sig=fresh";
+  it("stable /api/attachments/<id>/download download_url falls through to the durable record.markdown_url for native <img> loadability (MUL-3192)", () => {
+    // After MUL-3192, pickInlineMediaURL prefers `record.markdown_url`
+    // (the server-chosen durable URL — public CDN passthrough or absolute
+    // API endpoint) over the raw `record.url` (which can be a private
+    // bucket URL on S3 / R2 / MinIO presign deployments). The signed
+    // download_url stays the highest-priority pick when present, but the
+    // unsigned `/api/attachments/<id>/download` shape now defers to
+    // markdown_url instead of record.url.
     const att = makeRecord({
-      url: signedStorageURL,
-      // bare API path — no signature query, so pickInlineMediaURL
-      // skips download_url and uses record.url.
+      // Raw private-bucket URL — must NOT be the rendered src.
+      url: "https://prod.s3.amazonaws.com/key.png",
+      markdown_url: "https://api.multica.test/api/attachments/att-1/download",
+      // bare API path on download_url — no signature query.
       download_url: "/api/attachments/att-1/download",
     });
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
     const img = document.querySelector("img");
-    expect(img?.getAttribute("src")).toBe(signedStorageURL);
-    expect(img?.getAttribute("src")).not.toContain("/api/attachments/");
+    expect(img?.getAttribute("src")).toBe(
+      "https://api.multica.test/api/attachments/att-1/download",
+    );
+    expect(img?.getAttribute("src")).not.toContain("prod.s3.amazonaws.com");
+  });
+
+  it("legacy backend (no markdown_url on record) still falls back to record.url", () => {
+    // A backend old enough to predate MUL-3192 omits markdown_url; the
+    // fallback chain bottoms out on record.url, preserving render
+    // behaviour for legacy attachment metadata in the cache.
+    const att = makeRecord({
+      url: "https://cdn.example.test/legacy.png",
+      markdown_url: "",
+      download_url: "/api/attachments/att-1/download",
+    });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("https://cdn.example.test/legacy.png");
   });
 });
 
@@ -328,5 +355,122 @@ describe("Attachment — file-card dispatch", () => {
     // Preview/Download chrome is hidden while uploading.
     expect(screen.queryByTitle("Preview")).toBeNull();
     expect(screen.queryByTitle("Download")).toBeNull();
+  });
+});
+
+// MUL-3192 — Desktop quick-create: site-relative `/api/attachments/<id>/
+// download` and `/uploads/<key>` URLs only resolve in environments where the
+// document origin proxies them to the API host (web via Next.js rewrites).
+// In Electron desktop the renderer origin is `file://`, so the same path
+// can't load. The Attachment renderer runs the picked URL through an
+// absolutize pass that prefixes `apiBaseUrl` when one is configured.
+describe("Attachment — absolutize site-relative URLs (MUL-3192)", () => {
+  it("prefixes site-relative /api/attachments/<id>/download with apiBaseUrl in Desktop-like environments", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "/api/attachments/abc-1/download",
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://api.example.test/api/attachments/abc-1/download",
+    );
+  });
+
+  it("absolutizes the legacy site-relative /uploads/<key> when record.markdown_url is empty (legacy backend)", () => {
+    // Legacy compat: a backend old enough to predate MUL-3192 omits
+    // markdown_url, so pickInlineMediaURL falls through to record.url.
+    // For LocalStorage with no LOCAL_UPLOAD_BASE_URL configured that's
+    // a site-relative `/uploads/<key>` — the absolutize pass at the
+    // renderer's edge prefixes the apiBaseUrl so Desktop's file:// origin
+    // doesn't resolve it to file:///uploads/...
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    const att = makeRecord({
+      url: "/uploads/ws-1/abc.png",
+      markdown_url: "",
+      download_url: "/api/attachments/att-1/download",
+    });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://api.example.test/uploads/ws-1/abc.png",
+    );
+  });
+
+  it("strips a trailing slash on apiBaseUrl so the prefixed URL has exactly one separator", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test/");
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "/api/attachments/abc-2/download",
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://api.example.test/api/attachments/abc-2/download",
+    );
+  });
+
+  it("leaves absolute https URLs untouched even when apiBaseUrl is set", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "https://cdn.other.test/foo.png",
+          filename: "foo.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("https://cdn.other.test/foo.png");
+  });
+
+  it("leaves blob: URLs untouched (in-flight upload preview)", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "blob:https://app.local/abc-123",
+          filename: "in-flight.png",
+          forceKind: "image",
+          // uploading=true would hide the toolbar, but the src normalization
+          // path runs regardless — keep it false so we still mount the <img>.
+        }}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("blob:https://app.local/abc-123");
+  });
+
+  it("is a no-op when apiBaseUrl is empty (web app same-origin proxy)", () => {
+    getBaseUrlMock.mockReturnValue("");
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "/api/attachments/abc-3/download",
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+    const img = document.querySelector("img");
+    // Persisted markdown URL stays site-relative — Next.js rewrite proxies
+    // /api/* to the API host, so the relative path loads through the same
+    // origin as the rendered HTML.
+    expect(img?.getAttribute("src")).toBe("/api/attachments/abc-3/download");
   });
 });
