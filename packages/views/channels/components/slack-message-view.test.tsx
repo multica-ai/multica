@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import type { TimelineEntry } from "@multica/core/types";
 
 const mockOpenReminder = vi.hoisted(() => vi.fn());
+const mockUseCommentReminder = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
@@ -25,12 +26,15 @@ vi.mock("@multica/cerebro-channels", () => ({
 }));
 
 vi.mock("@multica/cerebro-inbox", () => ({
-  useCommentReminder: () => ({
-    enabled: true,
-    label: "Remind me",
-    openReminder: mockOpenReminder,
-    dialog: <div data-testid="reminder-dialog" />,
-  }),
+  useCommentReminder: (issueId: string, options?: { forceEnabled?: boolean }) => {
+    mockUseCommentReminder(issueId, options);
+    return {
+      enabled: true,
+      label: "Remind me",
+      openReminder: mockOpenReminder,
+      dialog: <div data-testid="reminder-dialog" />,
+    };
+  },
 }));
 
 vi.mock("../../common/actor-avatar", () => ({
@@ -193,6 +197,7 @@ function entry(overrides: Partial<TimelineEntry> = {}): TimelineEntry {
 describe("SlackMessageView message actions", () => {
   beforeEach(() => {
     mockOpenReminder.mockClear();
+    mockUseCommentReminder.mockClear();
   });
 
   afterEach(() => {
@@ -218,6 +223,30 @@ describe("SlackMessageView message actions", () => {
     await user.click(screen.getByRole("menuitem", { name: /remind me/i }));
 
     expect(mockOpenReminder).toHaveBeenCalledWith("m1", "Remember this later");
+    expect(mockUseCommentReminder).toHaveBeenCalledWith("channel-1", {
+      forceEnabled: true,
+    });
+  });
+
+  it("keeps the mobile actions bar anchored inside the viewport", () => {
+    render(
+      <SlackMessageView
+        channelId="channel-1"
+        topLevel={[entry()]}
+        repliesByParent={new Map()}
+        currentUserId="me"
+        onOpenThread={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleReaction={vi.fn()}
+      />,
+    );
+
+    const moreActions = screen.getByLabelText("More actions");
+    const actionsBar = moreActions.parentElement?.parentElement;
+
+    expect(actionsBar).toHaveClass("left-2");
+    expect(actionsBar).toHaveClass("sm:right-4");
   });
 
   it("opens the same actions menu on touch long-press", () => {

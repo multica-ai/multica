@@ -12,8 +12,12 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { CerebroCommentReminderSheet } from "./components/cerebro-comment-reminder-sheet";
 import { useCerebroInboxStrings } from "./strings";
 
-export function useCommentReminder(issueId: string) {
-  const enabled = useFeatureFlag("cerebro_comment_reminders");
+export function useCommentReminder(
+  issueId: string,
+  options: { forceEnabled?: boolean } = {},
+) {
+  const flagEnabled = useFeatureFlag("cerebro_comment_reminders");
+  const enabled = options.forceEnabled || flagEnabled;
   const strings = useCerebroInboxStrings();
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState<{ commentId: string; content: string } | null>(null);

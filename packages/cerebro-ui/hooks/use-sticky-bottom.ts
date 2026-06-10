@@ -82,6 +82,7 @@ export function useStickyBottom(
       if (lockRef.current) return
       if (stickRef.current) {
         el.scrollTop = el.scrollHeight
+        setHasNewBelow(false)
       } else {
         // Content grew below the viewport while we're not stuck → notify caller.
         setHasNewBelow(true)
@@ -117,6 +118,7 @@ export function useStickyBottom(
       : el.scrollTop > 0 && measure()
     stickRef.current = initiallyAt
     setIsAtBottom(initiallyAt)
+    if (initiallyAt) setHasNewBelow(false)
 
     return () => {
       el.removeEventListener("scroll", onScroll)
