@@ -400,6 +400,7 @@ export function SearchCommand() {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
+        // First batch: active issues + projects (fast, excludes archived)
         const [issueRes, projectRes] = await Promise.all([
           api.searchIssues({
             q: q.trim(),
@@ -414,12 +415,30 @@ export function SearchCommand() {
             signal: controller.signal,
           }),
         ]);
-        if (!controller.signal.aborted) {
-          setResults({
-            issues: issueRes.issues,
-            projects: projectRes.projects,
-          });
-          setIsLoading(false);
+        if (controller.signal.aborted) return;
+        setResults({
+          issues: issueRes.issues,
+          projects: projectRes.projects,
+        });
+        setIsLoading(false);
+
+        // Second batch: archived issues (appended after active results shown)
+        const archivedRes = await api.searchIssues({
+          q: q.trim(),
+          limit: 20,
+          include_closed: true,
+          include_archived: true,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        // Only append archived issues not already in results
+        const activeIds = new Set(issueRes.issues.map((i) => i.id));
+        const newArchived = archivedRes.issues.filter((i) => !activeIds.has(i.id));
+        if (newArchived.length > 0) {
+          setResults((prev) => ({
+            ...prev,
+            issues: [...prev.issues, ...newArchived],
+          }));
         }
       } catch {
         if (!controller.signal.aborted) {

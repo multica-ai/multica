@@ -5,6 +5,11 @@ import { BarChart3, ChevronDown, FolderKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -126,13 +131,13 @@ function Segmented<T extends string | number>({
   options: readonly { label: string; value: T }[];
 }) {
   return (
-    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+    <div className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-md bg-muted p-0.5">
       {options.map((o) => (
         <button
           key={String(o.value)}
           type="button"
           onClick={() => onChange(o.value)}
-          className={`rounded-sm px-2.5 py-1 text-xs font-medium transition-colors ${
+          className={`rounded-sm px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
             o.value === value
               ? "bg-background text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground"
@@ -665,15 +670,81 @@ function TrendBlock({
 // Which metric ranks the leaderboard. Drives row order, progress bar
 // width, and which column header is emphasised — keeping the three in
 // lockstep so the user always sees what the ranking actually measures.
-type LeaderboardSort = "tokens" | "cost" | "time" | "tasks";
+type LeaderboardSort = "processedTokens" | "nonCachedTokens" | "cachedTokens" | "cost" | "time" | "tasks";
 type LeaderboardTab = "agent" | "member";
+type LeaderboardMetricRow = {
+  tokens: number;
+  nonCachedTokens: number;
+  cachedTokens: number;
+  cost: number;
+  seconds: number;
+  taskCount: number;
+};
+type TokenBreakdownRow = Pick<
+  AgentDashboardRow,
+  "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens"
+>;
 
-const SORT_METRIC: Record<LeaderboardSort, (r: { tokens: number; cost: number; seconds: number; taskCount: number }) => number> = {
-  tokens: (r) => r.tokens,
+const SORT_METRIC: Record<LeaderboardSort, (r: LeaderboardMetricRow) => number> = {
+  processedTokens: (r) => r.tokens,
+  nonCachedTokens: (r) => r.nonCachedTokens,
+  cachedTokens: (r) => r.cachedTokens,
   cost: (r) => r.cost,
   time: (r) => r.seconds,
   tasks: (r) => r.taskCount,
 };
+
+function tokenValueForSort(row: LeaderboardMetricRow, sortBy: LeaderboardSort): number {
+  switch (sortBy) {
+    case "nonCachedTokens":
+      return row.nonCachedTokens;
+    case "cachedTokens":
+      return row.cachedTokens;
+    default:
+      return row.tokens;
+  }
+}
+
+function TokenBreakdown({
+  row,
+  value,
+}: {
+  row: TokenBreakdownRow;
+  value: number;
+}) {
+  const { t } = useT("usage");
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-block cursor-default underline decoration-dotted underline-offset-2">
+            {formatTokens(value)}
+          </span>
+        }
+      />
+      <TooltipContent side="top" className="w-44 text-xs">
+        <div className="space-y-1">
+          <div className="flex justify-between gap-3">
+            <span>{t(($) => $.leaderboard.breakdown_input)}</span>
+            <span className="tabular-nums">{formatTokens(row.inputTokens)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>{t(($) => $.leaderboard.breakdown_output)}</span>
+            <span className="tabular-nums">{formatTokens(row.outputTokens)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>{t(($) => $.leaderboard.breakdown_cache_read)}</span>
+            <span className="tabular-nums">{formatTokens(row.cacheReadTokens)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>{t(($) => $.leaderboard.breakdown_cache_write)}</span>
+            <span className="tabular-nums">{formatTokens(row.cacheWriteTokens)}</span>
+          </div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 // Sentinel matching utils.ts SYSTEM_OWNER — agents without an ownerId are
 // grouped under this key.
@@ -692,7 +763,7 @@ function Leaderboard({
 }) {
   const { t } = useT("usage");
   const [tab, setTab] = useState<LeaderboardTab>("agent");
-  const [sortBy, setSortBy] = useState<LeaderboardSort>("tokens");
+  const [sortBy, setSortBy] = useState<LeaderboardSort>("processedTokens");
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
 
   const memberRows = useMemo(() => aggregateByMember(rows), [rows]);
@@ -709,7 +780,9 @@ function Leaderboard({
 
   const sortOptions = useMemo(
     () => [
-      { value: "tokens" as const, label: t(($) => $.leaderboard.header_tokens) },
+      { value: "processedTokens" as const, label: t(($) => $.leaderboard.header_processed_tokens) },
+      { value: "nonCachedTokens" as const, label: t(($) => $.leaderboard.header_non_cached_tokens) },
+      { value: "cachedTokens" as const, label: t(($) => $.leaderboard.header_cached_tokens) },
       { value: "cost" as const, label: t(($) => $.leaderboard.header_cost) },
       { value: "time" as const, label: t(($) => $.leaderboard.header_time) },
       { value: "tasks" as const, label: t(($) => $.leaderboard.header_tasks) },
@@ -740,6 +813,15 @@ function Leaderboard({
   // see "this is what the bar is measuring" at a glance.
   const colClass = (key: LeaderboardSort) =>
     `text-right ${sortBy === key ? "text-foreground" : "text-muted-foreground"}`;
+
+  const tokenHeader =
+    sortBy === "nonCachedTokens"
+      ? t(($) => $.leaderboard.header_non_cached_tokens)
+      : sortBy === "cachedTokens"
+        ? t(($) => $.leaderboard.header_cached_tokens)
+        : t(($) => $.leaderboard.header_processed_tokens);
+  const tokenColumnActive =
+    sortBy === "processedTokens" || sortBy === "nonCachedTokens" || sortBy === "cachedTokens";
 
   const caption =
     tab === "agent"
@@ -772,10 +854,10 @@ function Leaderboard({
           </p>
         ) : (
           <>
-            <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
+            <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
               <span>{t(($) => $.leaderboard.header_agent)}</span>
               <span />
-              <span className={colClass("tokens")}>{t(($) => $.leaderboard.header_tokens)}</span>
+              <span className={tokenColumnActive ? "text-right text-foreground" : "text-right text-muted-foreground"}>{tokenHeader}</span>
               <span className={colClass("cost")}>{t(($) => $.leaderboard.header_cost)}</span>
               <span className={colClass("time")}>{t(($) => $.leaderboard.header_time)}</span>
               <span className={colClass("tasks")}>{t(($) => $.leaderboard.header_tasks)}</span>
@@ -784,12 +866,13 @@ function Leaderboard({
               {sortedRows.map((row) => {
                 const agent = agents.find((a) => a.id === row.agentId);
                 const value = SORT_METRIC[sortBy](row);
+                const tokenValue = tokenValueForSort(row, sortBy);
                 const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
                 const displayName = row.displayName ?? agent?.name ?? row.agentId;
                 return (
                   <div
                     key={row.agentId}
-                    className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2"
+                    className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2"
                   >
                     <div className="flex min-w-0 items-center gap-2">
                       <ActorAvatar
@@ -809,9 +892,9 @@ function Leaderboard({
                       />
                     </div>
                     <div
-                      className={`text-right text-xs tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                      className={`text-right text-xs tabular-nums ${tokenColumnActive ? "font-medium text-foreground" : "text-muted-foreground"}`}
                     >
-                      {formatTokens(row.tokens)}
+                      <TokenBreakdown row={row} value={tokenValue} />
                     </div>
                     <div
                       className={`text-right tabular-nums ${sortBy === "cost" ? "text-sm font-medium" : "text-xs text-muted-foreground"}`}
@@ -840,10 +923,10 @@ function Leaderboard({
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
+          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
             <span>{t(($) => $.leaderboard.header_member)}</span>
             <span />
-            <span className={colClass("tokens")}>{t(($) => $.leaderboard.header_tokens)}</span>
+            <span className={tokenColumnActive ? "text-right text-foreground" : "text-right text-muted-foreground"}>{tokenHeader}</span>
             <span className={colClass("cost")}>{t(($) => $.leaderboard.header_cost)}</span>
             <span className={colClass("time")}>{t(($) => $.leaderboard.header_time)}</span>
             <span className={colClass("tasks")}>{t(($) => $.leaderboard.header_tasks)}</span>
@@ -851,6 +934,7 @@ function Leaderboard({
           <div className="divide-y">
             {sortedMemberRows.map((mRow) => {
               const value = SORT_METRIC[sortBy](mRow);
+              const tokenValue = tokenValueForSort(mRow, sortBy);
               const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
               const isExpanded = expandedMember === mRow.ownerId;
               const actorType = mRow.ownerId === SYSTEM_OWNER ? "system" : "member";
@@ -866,7 +950,7 @@ function Leaderboard({
                         setExpandedMember(isExpanded ? null : mRow.ownerId);
                       }
                     }}
-                    className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/40 transition-colors"
+                    className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/40 transition-colors"
                   >
                     <div className="flex min-w-0 items-center gap-2">
                       <ActorAvatar
@@ -888,9 +972,9 @@ function Leaderboard({
                       />
                     </div>
                     <div
-                      className={`text-right text-xs tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                      className={`text-right text-xs tabular-nums ${tokenColumnActive ? "font-medium text-foreground" : "text-muted-foreground"}`}
                     >
-                      {formatTokens(mRow.tokens)}
+                      <TokenBreakdown row={mRow} value={tokenValue} />
                     </div>
                     <div
                       className={`text-right tabular-nums ${sortBy === "cost" ? "text-sm font-medium" : "text-xs text-muted-foreground"}`}
@@ -930,7 +1014,7 @@ function Leaderboard({
                           return (
                             <div
                               key={row.agentId}
-                              className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 py-1.5"
+                              className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 py-1.5"
                             >
                               <div className="flex min-w-0 items-center gap-2 pl-2">
                                 <ActorAvatar
@@ -950,7 +1034,7 @@ function Leaderboard({
                                 />
                               </div>
                               <div className="text-right text-xs tabular-nums text-muted-foreground">
-                                {formatTokens(row.tokens)}
+                                <TokenBreakdown row={row} value={tokenValueForSort(row, sortBy)} />
                               </div>
                               <div className="text-right text-xs tabular-nums text-muted-foreground">
                                 ${row.cost.toFixed(2)}

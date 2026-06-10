@@ -37,7 +37,7 @@ func init() {
 	claudeSessionHookCmd.Flags().IntVar(&claudeSessionHookPort, "port", 0, "Claude hook receiver port")
 }
 
-func (claudeLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, _ string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
+func (claudeLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
 	if len(args) == 0 {
 		return 1, fmt.Errorf("missing Claude command")
 	}

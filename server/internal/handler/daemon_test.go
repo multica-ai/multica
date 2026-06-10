@@ -504,6 +504,53 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 }
 
+func TestDaemonRegister_DefaultNameUsesWujieClawBrandName(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const daemonID = "test-daemon-wujieclaw-brand"
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    daemonID,
+		"device_name":  "qa-host",
+		"runtimes": []map[string]any{
+			{"type": "wujieclaw", "version": "9.9.9", "status": "online"},
+		},
+	}, testWorkspaceID, daemonID)
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	runtimes, ok := resp["runtimes"].([]any)
+	if !ok || len(runtimes) != 1 {
+		t.Fatalf("expected one runtime in response, got %v", resp)
+	}
+	rt := runtimes[0].(map[string]any)
+	runtimeID := rt["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	if got := rt["name"].(string); got != "WujieClaw (qa-host)" {
+		t.Fatalf("response runtime name = %q, want WujieClaw (qa-host)", got)
+	}
+
+	var storedName string
+	if err := testPool.QueryRow(context.Background(), `SELECT name FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&storedName); err != nil {
+		t.Fatalf("load stored runtime name: %v", err)
+	}
+	if storedName != "WujieClaw (qa-host)" {
+		t.Fatalf("stored runtime name = %q, want WujieClaw (qa-host)", storedName)
+	}
+}
+
 func TestDaemonRegister_WithDaemonToken_WorkspaceMismatch(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

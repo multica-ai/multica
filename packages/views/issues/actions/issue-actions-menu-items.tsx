@@ -4,6 +4,8 @@ import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowDown,
   ArrowUp,
   Calendar,
@@ -108,7 +110,7 @@ export function IssueActionsMenuItems({
     openCreateSubIssue,
     openSetParent,
     openAddChild,
-    openDeleteConfirm,
+      openDeleteConfirm,
   } = actions;
 
   // Subscribe to the issue's task list so the cache is warm by the time the
@@ -300,14 +302,28 @@ export function IssueActionsMenuItems({
 
       <P.Separator />
 
+      {/* Archive actions — only available for terminal issues */}
+      {!issue.archived_at && (issue.status === "done" || issue.status === "cancelled") && (
+        <P.Item onClick={actions.openArchiveConfirm}>
+          <Archive className="h-3.5 w-3.5" />
+          {t(($) => $.actions.archive_issue)}
+        </P.Item>
+      )}
+      {issue.archived_at && (
+        <P.Item onClick={actions.openUnarchiveConfirm}>
+          <ArchiveRestore className="h-3.5 w-3.5" />
+          {t(($) => $.actions.unarchive_issue)}
+        </P.Item>
+      )}
+
       {canDelete && (
-      <P.Item
-        variant="destructive"
-        onClick={() => openDeleteConfirm({ onDeletedNavigateTo })}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-        {t(($) => $.actions.delete_issue)}
-      </P.Item>
+        <P.Item
+          variant="destructive"
+          onClick={() => openDeleteConfirm({ onDeletedNavigateTo })}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {t(($) => $.actions.delete_issue)}
+        </P.Item>
       )}
     </>
   );

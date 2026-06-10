@@ -366,6 +366,7 @@ func main() {
 	go runDBStatsLogger(sweepCtx, pool)
 	go uploadCleanupHandler.RunAttachmentUploadCleanup(sweepCtx, 0)
 	go runUsageHourlyRollup(sweepCtx, pool)
+	go runIssueAutoArchive(sweepCtx, queries, bus)
 
 	// Lark inbound supervisor: holds the §4.4 WS lease per installation
 	// and runs the EventConnector for each. Nil when the Lark master

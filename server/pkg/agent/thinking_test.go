@@ -634,6 +634,70 @@ func TestApplyCodexReasoningEffort_PreservesPreExistingConfig(t *testing.T) {
 	}
 }
 
+func TestApplyCodexServiceTier_ThreePoints(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		tier string
+	}{
+		{"empty-tier-is-noop", ""},
+		{"fast", "fast"},
+		{"default", "default"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			startParams := map[string]any{
+				"model":  "gpt-5.5",
+				"cwd":    "/work",
+				"config": map[string]any{"model_reasoning_effort": "high"},
+			}
+			applyCodexServiceTier(startParams, tc.tier)
+			assertCodexServiceTier(t, "thread/start", startParams, tc.tier)
+			if cfg, _ := startParams["config"].(map[string]any); cfg["model_reasoning_effort"] != "high" {
+				t.Fatalf("thread/start service_tier clobbered config: %+v", startParams)
+			}
+
+			resumeParams := map[string]any{
+				"threadId": "thr_prior",
+				"cwd":      "/work",
+				"model":    "gpt-5.5",
+			}
+			applyCodexServiceTier(resumeParams, tc.tier)
+			assertCodexServiceTier(t, "thread/resume", resumeParams, tc.tier)
+
+			turnParams := map[string]any{
+				"threadId": "thr_x",
+				"input":    []map[string]any{{"type": "text", "text": "hi"}},
+			}
+			applyCodexServiceTier(turnParams, tc.tier)
+			assertCodexServiceTier(t, "turn/start", turnParams, tc.tier)
+		})
+	}
+}
+
+func assertCodexServiceTier(t *testing.T, method string, params map[string]any, want string) {
+	t.Helper()
+	got, has := params["service_tier"]
+	if want == "" {
+		if has {
+			t.Errorf("%s: empty tier must not emit service_tier, got %v", method, got)
+		}
+		return
+	}
+	if !has {
+		t.Fatalf("%s: missing service_tier for tier=%q (params=%+v)", method, want, params)
+	}
+	if got != want {
+		t.Errorf("%s: service_tier = %v, want %q", method, got, want)
+	}
+}
+
+func TestApplyCodexServiceTier_NilParamsSafe(t *testing.T) {
+	t.Parallel()
+	applyCodexServiceTier(nil, "fast")
+}
+
 // ── End-to-end: build*Args + thinking_level wiring ───────────────────
 
 func TestBuildClaudeArgs_InjectsEffort(t *testing.T) {

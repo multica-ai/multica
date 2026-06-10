@@ -205,5 +205,20 @@
       "error_unknown": "提交失败，请重试。",
       "sub_issue_of": "作为 {{identifier}} 的子 issue"
     }
+  },
+  "archive_issue": {
+    "title": "归档 Issue",
+    "description": "此 Issue 将被归档并从默认视图中隐藏。你可以随时取消归档。",
+    "cancel": "取消",
+    "confirm": "归档",
+    "archiving": "归档中...",
+    "toast_archived": "Issue 已归档",
+    "toast_archive_failed": "归档 Issue 失败",
+    "unarchive_title": "取消归档",
+    "unarchive_description": "此 Issue 将恢复到默认视图中。",
+    "unarchive_confirm": "取消归档",
+    "unarchiving": "取消归档中...",
+    "toast_unarchived": "Issue 已取消归档",
+    "toast_unarchive_failed": "取消归档 Issue 失败"
   }
 }

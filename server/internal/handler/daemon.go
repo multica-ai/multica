@@ -317,9 +317,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		name := strings.TrimSpace(runtime.Name)
 		if name == "" {
-			name = provider
+			name = runtimeProviderDisplayName(provider)
 			if req.DeviceName != "" {
-				name = fmt.Sprintf("%s (%s)", provider, req.DeviceName)
+				name = fmt.Sprintf("%s (%s)", name, req.DeviceName)
 			}
 		}
 		deviceInfo := strings.TrimSpace(req.DeviceName)
@@ -429,6 +429,18 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"repos_version": repoResp.ReposVersion,
 		"settings":      repoResp.Settings,
 	})
+}
+
+func runtimeProviderDisplayName(provider string) string {
+	switch provider {
+	case "wujieclaw":
+		return "WujieClaw"
+	default:
+		if provider == "" {
+			return "Runtime"
+		}
+		return strings.ToUpper(provider[:1]) + provider[1:]
+	}
 }
 
 // mergeLegacyRuntimes folds every runtime row keyed on a prior hostname-derived
@@ -1181,6 +1193,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			allSkills = append(allSkills, extra...)
 		}
 
+		serviceTier := ""
+		if runtime.Provider == "codex" {
+			serviceTier = agent.ServiceTier.String
+		}
 		resp.Agent = &TaskAgentData{
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
@@ -1194,6 +1210,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			McpConfig:     mcpConfig,
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
+			ServiceTier:   serviceTier,
 			RuntimeConfig: agent.RuntimeConfig,
 		}
 

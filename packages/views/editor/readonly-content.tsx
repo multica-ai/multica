@@ -16,7 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useCallback, useMemo, useRef, useState } from "react";
+import { isValidElement, memo, useState, useMemo, useRef } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -28,8 +28,9 @@ import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
-import { toHtml } from "hast-util-to-html";
-import { Copy, Check } from "lucide-react";
+import { toJsxRuntime } from "hast-util-to-jsx-runtime";
+import { jsx, jsxs, Fragment } from "react/jsx-runtime";
+import { Check, Copy, Trash2 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
@@ -60,7 +61,6 @@ const lowlight = createLowlight(common);
 // Anchored to whole class tokens so `language-htmlbars` / `language-mermaidx`
 // don't accidentally match and lose their <pre> wrapper.
 const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
-
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
 // ---------------------------------------------------------------------------
@@ -193,24 +193,44 @@ function ReadonlyLink({
 
 function CodeBlockHeader({ language, code }: { language?: string; code: string }) {
   const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [code]);
+
+  const handleCopy = async () => {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be unavailable in readonly contexts.
+    }
+  };
+
   return (
     <div className="code-block-header flex select-none items-center justify-between rounded-t-md border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
-      <span>{language || "code"}</span>
-      <button
-        type="button"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={handleCopy}
-        className="pointer-events-auto flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
-        title="Copy code"
-      >
-        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        <span>{copied ? "Copied" : "Copy"}</span>
-      </button>
+      <span>{language || "text"}</span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={handleCopy}
+          className="pointer-events-auto flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
+          title="Copy code"
+          aria-label="Copy code"
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          className="flex h-6 w-6 cursor-default items-center justify-center rounded text-muted-foreground opacity-60"
+          title="Delete"
+          aria-label="Delete"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -307,19 +327,21 @@ function buildComponents(): Partial<Components> {
         return <code {...props}>{codeText || children}</code>;
       }
 
-      // Block code — highlight with lowlight, output hljs classes
       const code = codeText || String(children).replace(/\n$/, "");
+
+      // Block code — highlight with lowlight, render as React elements
+      // (not dangerouslySetInnerHTML) so DOM stays stable across re-renders
+      // and browser text selection is never destroyed.
       try {
         const tree = lang
           ? lowlight.highlight(lang, code)
           : lowlight.highlightAuto(code);
-        const html = toHtml(tree);
-        if (html) {
+        if (tree.children.length > 0) {
+          const highlighted = toJsxRuntime(tree, { jsx, jsxs, Fragment });
           return (
-            <code
-              className={cn("hljs", lang && `language-${lang}`)}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
+            <code className={cn("hljs", lang && `language-${lang}`)}>
+              {highlighted}
+            </code>
           );
         }
       } catch {
@@ -337,7 +359,16 @@ function buildComponents(): Partial<Components> {
     // renderer above so the outer `<pre>` does not wrap them — this is the
     // standard two-layer pattern used to escape react-markdown's default
     // `<pre><code>` envelope.
-    pre: ({ children, node }) => {
+    pre: ({ node, children }) => {
+      // react-markdown calls `pre` BEFORE invoking the `code` renderer —
+      // `children` is the unrendered `<code>` element from the AST. So we
+      // identify "this block was meant to be unwrapped" by inspecting the
+      // child's className (`language-mermaid`, `language-html`), not by
+      // checking `children.type === MermaidDiagram`, which never matches.
+      //
+      // Match by exact class token: a substring `includes("language-html")`
+      // would also fire on neighboring languages like `language-htmlbars`
+      // and silently strip their <pre> wrapper.
       if (isValidElement(children)) {
         const childProps = children.props as { className?: string };
         if (PRE_UNWRAP_RE.test(childProps.className ?? "")) {
@@ -405,8 +436,6 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 
-  // Components map is now static — all attachment-aware logic lives in
-  // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
   const components = useMemo(() => buildComponents(), []);
 
   return (

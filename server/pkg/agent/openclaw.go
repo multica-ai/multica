@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -86,13 +87,17 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// openclaw writes its --json output to stdout. Stderr carries log
 	// overflow (security warnings, tool errors, etc.) — capture it via a
 	// log writer so it surfaces in daemon logs without being fed into the
-	// JSON parser.
+	// JSON parser. We also buffer the tail of stderr so that when the
+	// process fails with no parseable stdout we can surface the real
+	// error (e.g. "Unknown agent id") instead of the opaque
+	// "openclaw returned no parseable output".
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
+	stderrCapture := newCapturingLogWriter(b.cfg.Logger, "[openclaw:stderr] ", 2048)
+	cmd.Stderr = stderrCapture
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -131,6 +136,15 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		} else if exitErr != nil && scanResult.status == "completed" {
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
+		}
+
+		// When stdout yielded no parseable output and the process exited
+		// with an error, enrich the generic message with the tail of
+		// stderr so the user sees the real cause (e.g. "Unknown agent id").
+		if scanResult.errMsg == openclawNoParseableOutput && exitErr != nil {
+			if tail := stderrCapture.tail(); tail != "" {
+				scanResult.errMsg = fmt.Sprintf("%s (stderr: %s)", openclawNoParseableOutput, tail)
+			}
 		}
 
 		b.cfg.Logger.Info("openclaw finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
@@ -687,3 +701,51 @@ type openclawMeta struct {
 	DurationMs int64          `json:"durationMs"`
 	AgentMeta  map[string]any `json:"agentMeta"`
 }
+
+// capturingLogWriter is a logWriter that also retains the tail of stderr
+// so callers can surface the real error when stdout yields nothing useful.
+type capturingLogWriter struct {
+	logger *slog.Logger
+	prefix string
+	maxLen int
+	mu     sync.Mutex
+	buf    []byte
+}
+
+func newCapturingLogWriter(logger *slog.Logger, prefix string, maxLen int) *capturingLogWriter {
+	return &capturingLogWriter{logger: logger, prefix: prefix, maxLen: maxLen}
+}
+
+func (w *capturingLogWriter) Write(p []byte) (int, error) {
+	text := strings.TrimSpace(string(p))
+	if text != "" {
+		w.logger.Debug(w.prefix + text)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > w.maxLen {
+		w.buf = w.buf[len(w.buf)-w.maxLen:]
+	}
+	return len(p), nil
+}
+
+// tail returns the buffered tail of stderr, trimmed to a single line
+// suitable for embedding in a user-facing error message.
+func (w *capturingLogWriter) tail() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	s := strings.TrimSpace(string(w.buf))
+	// Strip ANSI escape codes for clean error output.
+	s = ansiRe.ReplaceAllString(s, "")
+	// Keep only the last line — that's usually the actionable error.
+	if idx := strings.LastIndex(s, "\n"); idx >= 0 {
+		s = strings.TrimSpace(s[idx+1:])
+	}
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)

@@ -141,6 +141,7 @@
     "section_integrations": "外部集成",
     "prop_runtime": "运行时",
     "prop_model": "模型",
+    "prop_service_tier": "服务档位",
     "prop_thinking": "思考",
     "prop_visibility": "可见性",
     "prop_allowed_users": "白名单用户",
@@ -152,6 +153,17 @@
     "prop_updated": "更新时间",
     "stream_tooltip": "流输出 · {{value}}",
     "approval_tooltip": "审批 · {{value}}",
+    "service_tier_tooltip": "Codex Fast mode · {{value}}",
+    "service_tier_value": {
+      "": "跟随本地 Codex 配置",
+      "default": "Standard",
+      "fast": "Fast"
+    },
+    "service_tier_description": {
+      "": "使用本地 Codex CLI 中配置的服务档位。",
+      "default": "使用标准 Codex 服务档位。",
+      "fast": "对支持的运行使用 Codex Fast mode。"
+    },
     "stream_value": {
       "on": "开启",
       "off": "关闭"

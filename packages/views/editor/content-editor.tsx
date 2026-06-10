@@ -98,6 +98,7 @@ interface ContentEditorProps {
   debounceMs?: number;
   onSubmit?: () => void;
   onBlur?: () => void;
+  onExternalSyncAccepted?: (markdown: string) => void;
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
   showBubbleMenu?: boolean;
@@ -178,6 +179,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       debounceMs = 300,
       onSubmit,
       onBlur,
+      onExternalSyncAccepted,
       onUploadFile,
       showBubbleMenu = true,
       submitOnEnter = false,
@@ -195,9 +197,15 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
+    const onExternalSyncAcceptedRef = useRef(onExternalSyncAccepted);
     const onUploadFileRef = useRef(onUploadFile);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
+    // When the editor fires onUpdate (debounced save), we set this flag to
+    // protect the editor content from external defaultValue syncs until the
+    // cache confirms our write.  This prevents the editor from being
+    // overwritten by cache rollback + refetch after a 409 Conflict.
+    const suppressSyncRef = useRef(false);
 
     // Current workspace slug kept in a ref so the click handler always sees the
     // latest value without recreating the editor. Used by openLink to prefix
@@ -210,6 +218,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
+    onExternalSyncAcceptedRef.current = onExternalSyncAccepted;
     onUploadFileRef.current = onUploadFile;
     mentionContextItemsRef.current = mentionContextItems ?? [];
 
@@ -244,7 +253,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             });
           }
         }
-        lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
+        const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
+        lastEmittedRef.current = md;
+        onExternalSyncAcceptedRef.current?.(md);
       },
       content: mountChunked ? "" : initialContent,
       contentType: mountChunked
@@ -271,6 +282,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
           if (md === lastEmittedRef.current) return;
           lastEmittedRef.current = md;
+          suppressSyncRef.current = true;
           onUpdateRef.current?.(md);
         }, debounceMs);
       },
@@ -333,11 +345,30 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // here avoids overwriting unsaved local edits.
       if (isDirty) return;
 
+      // Guard 2.5: suppress-sync — the editor just emitted content via
+      // onUpdate (a debounced save).  The next defaultValue sync that matches
+      // our emitted content confirms the save was accepted and clears the
+      // flag.  While the flag is set, any external sync (cache rollback from
+      // a 409 rejection, or a refetch of a different server value) must not
+      // overwrite the editor.
+      if (suppressSyncRef.current) {
+        const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
+        const incomingNormalized = stripBlobUrls(incoming).trimEnd();
+        if (incomingNormalized === current) {
+          suppressSyncRef.current = false;
+          onExternalSyncAcceptedRef.current?.(incomingNormalized);
+        }
+        return;
+      }
+
       const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
       const incomingNormalized = stripBlobUrls(incoming).trimEnd();
       // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
       // when the cache reflects a write this same editor just emitted.
-      if (incomingNormalized === current) return;
+      if (incomingNormalized === current) {
+        onExternalSyncAcceptedRef.current?.(incomingNormalized);
+        return;
+      }
 
       // Guard 4: `emitUpdate: false`. Tiptap v3's setContent defaults to
       // `emitUpdate: true`; without this we would re-trigger onUpdate →
@@ -369,6 +400,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       });
 
       lastEmittedRef.current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+      onExternalSyncAcceptedRef.current?.(lastEmittedRef.current);
     }, [defaultValue, editor]);
 
     useImperativeHandle(ref, () => ({

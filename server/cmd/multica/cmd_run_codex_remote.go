@@ -25,7 +25,7 @@ const (
 	codexProposedPlanInputKind = "codex_proposed_plan"
 )
 
-func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPrompt string, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
+func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
 	if err := validateCodexRemoteArgs(args[1:]); err != nil {
 		return 1, err
 	}
@@ -36,20 +36,44 @@ func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPr
 	}
 	defer stopCodexSidecarCommand(appServer)
 
-	proxy, err := newCodexRemoteProxy(upstreamURL, reporter, usageReporter, initialPrompt)
+	systemPrompt := codexLocalRunSystemPrompt(env.IssueID)
+	proxy, err := newCodexRemoteProxy(upstreamURL, reporter, usageReporter, systemPrompt)
 	if err != nil {
 		return 1, err
 	}
 	defer proxy.Close(context.Background())
 
-	childArgs := append([]string{"--remote", proxy.URL()}, args[1:]...)
-	if strings.TrimSpace(initialPrompt) != "" {
-		childArgs = append(childArgs, initialPrompt)
-	}
+	childArgs := codexRemoteChildArgs(args, proxy.URL())
 	child := exec.Command(args[0], childArgs...)
 	child.Dir = cwd
 	child.Env = localCLIProcessEnv(os.Environ(), env)
 	return runLocalRunPTYCommand(child, "")
+}
+
+func codexRemoteChildArgs(args []string, remoteURL string) []string {
+	return append([]string{"--remote", remoteURL}, args[1:]...)
+}
+
+func codexLocalRunSystemPrompt(issueID string) string {
+	issueID = strings.TrimSpace(issueID)
+	var b strings.Builder
+	b.WriteString("Multica local run context:\n")
+	b.WriteString("You can read the Multica issue bound to this local run when the user explicitly asks about it. This is context access, not a startup task.\n\n")
+	if issueID != "" {
+		fmt.Fprintf(&b, "Bound Multica issue ID: %s\n\n", issueID)
+		b.WriteString("Read-only commands for this bound issue:\n")
+		fmt.Fprintf(&b, "- Get issue details: multica issue get %s --output json\n", issueID)
+		fmt.Fprintf(&b, "- Get issue comments: multica issue comment list %s --output json\n\n", issueID)
+	} else {
+		b.WriteString("No bound Multica issue ID was provided in the local run environment.\n\n")
+	}
+	b.WriteString("Use those commands only when the user clearly asks about the current or bound Multica issue, issue details, issue status, issue description, task background, issue comments, what was said in comments, or previous discussion in the Multica issue.\n\n")
+	b.WriteString("Do not use those commands for ordinary greetings, food, preferences, casual chat, slash commands, exit commands, local command output, or general coding questions that do not mention the Multica issue.\n\n")
+	b.WriteString("If the user says comments and clearly means code comments, git commit messages, GitHub PR comments, or GitHub issue comments, do not assume they mean the bound Multica issue.\n\n")
+	b.WriteString("After reading the issue or comments, answer only the user's current question. Do not offer next-step menus, ask what to do next, or suggest modifying, assigning, labeling, or changing priority unless explicitly asked.\n\n")
+	b.WriteString("For later unrelated questions, answer normally and do not continue summarizing the issue. If the user asks whether you remember issue comments, answer from conversation history when sufficient; read comments again only if fresh details are needed.\n\n")
+	b.WriteString("When reading comments, ignore local command pseudo-messages such as local-command-caveat, command-name, and local-command-stdout unless the user explicitly asks about local command output.\n")
+	return b.String()
 }
 
 func validateCodexRemoteArgs(args []string) error {
@@ -179,15 +203,17 @@ type codexRemoteProxy struct {
 	wg          sync.WaitGroup
 }
 
-func newCodexRemoteProxy(upstreamURL string, reporter *localRunReporter, usageReporter *localRunUsageReporter, bootstrapPrompt string) (*codexRemoteProxy, error) {
+func newCodexRemoteProxy(upstreamURL string, reporter *localRunReporter, usageReporter *localRunUsageReporter, developerInstructions string) (*codexRemoteProxy, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
+	mapper := newCodexAppServerMapper(reporter, usageReporter)
+	mapper.developerInstructions = developerInstructions
 	p := &codexRemoteProxy{
 		upstreamURL: upstreamURL,
 		listener:    ln,
-		mapper:      newCodexAppServerMapper(reporter, usageReporter, bootstrapPrompt),
+		mapper:      mapper,
 		conns:       make(map[*websocket.Conn]struct{}),
 	}
 	mux := http.NewServeMux()
@@ -329,6 +355,9 @@ func (p *codexRemoteProxy) copyMessages(src, dst *websocket.Conn, dstWriteMu *sy
 			return
 		}
 		if messageType == websocket.TextMessage {
+			if clientToServer {
+				payload = p.mapper.rewriteClientMessage(payload)
+			}
 			p.mapper.Observe(clientToServer, payload)
 		}
 		dstWriteMu.Lock()
@@ -341,19 +370,19 @@ func (p *codexRemoteProxy) copyMessages(src, dst *websocket.Conn, dstWriteMu *sy
 }
 
 type codexAppServerMapper struct {
-	mu             sync.Mutex
-	reporter       *localRunReporter
-	usageReporter  *localRunUsageReporter
-	bootstrap      string
-	pending        map[string]codexPendingRequest
-	turnComment    map[string]bool
-	deltas         map[string]string
-	turnUsage      map[string]localCLIUsage
-	usageTotals    map[string]localCLIUsage
-	threadModel    map[string]string
-	turnModel      map[string]string
-	activeThreadID string
-	activeTurnID   string
+	mu                    sync.Mutex
+	reporter              *localRunReporter
+	usageReporter         *localRunUsageReporter
+	developerInstructions string
+	pending               map[string]codexPendingRequest
+	turnComment           map[string]bool
+	deltas                map[string]string
+	turnUsage             map[string]localCLIUsage
+	usageTotals           map[string]localCLIUsage
+	threadModel           map[string]string
+	turnModel             map[string]string
+	activeThreadID        string
+	activeTurnID          string
 }
 
 type codexPendingRequest struct {
@@ -361,11 +390,10 @@ type codexPendingRequest struct {
 	params map[string]any
 }
 
-func newCodexAppServerMapper(reporter *localRunReporter, usageReporter *localRunUsageReporter, bootstrapPrompt string) *codexAppServerMapper {
+func newCodexAppServerMapper(reporter *localRunReporter, usageReporter *localRunUsageReporter) *codexAppServerMapper {
 	return &codexAppServerMapper{
 		reporter:      reporter,
 		usageReporter: usageReporter,
-		bootstrap:     bootstrapPrompt,
 		pending:       make(map[string]codexPendingRequest),
 		turnComment:   make(map[string]bool),
 		deltas:        make(map[string]string),
@@ -386,6 +414,46 @@ func (m *codexAppServerMapper) Observe(clientToServer bool, payload []byte) {
 		return
 	}
 	m.observeServerMessage(msg)
+}
+
+func (m *codexAppServerMapper) rewriteClientMessage(payload []byte) []byte {
+	if strings.TrimSpace(m.developerInstructions) == "" {
+		return payload
+	}
+	var msg map[string]any
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return payload
+	}
+	method := stringValue(msg["method"])
+	if method != "thread/start" && method != "thread/resume" {
+		return payload
+	}
+	params, _ := msg["params"].(map[string]any)
+	if params == nil {
+		params = map[string]any{}
+		msg["params"] = params
+	}
+	params["developerInstructions"] = appendCodexDeveloperInstructions(
+		stringValue(params["developerInstructions"]),
+		m.developerInstructions,
+	)
+	rewritten, err := json.Marshal(msg)
+	if err != nil {
+		return payload
+	}
+	return rewritten
+}
+
+func appendCodexDeveloperInstructions(existing, addition string) string {
+	existing = strings.TrimSpace(existing)
+	addition = strings.TrimSpace(addition)
+	if addition == "" {
+		return existing
+	}
+	if existing == "" {
+		return addition
+	}
+	return existing + "\n\n" + addition
 }
 
 func (m *codexAppServerMapper) observeClientMessage(msg map[string]any) {
@@ -605,7 +673,7 @@ func (m *codexAppServerMapper) recordStartedItem(params map[string]any) {
 func (m *codexAppServerMapper) recordUserMessage(threadID, turnID, itemID string, item map[string]any) {
 	content := strings.TrimSpace(codexAppServerItemText(item))
 	slash, isSlash := parseSlashInput(content)
-	commentable := content != "" && !m.isBootstrap(content) && (!isSlash || slash.Args != "")
+	commentable := content != "" && (!isSlash || slash.Args != "")
 	m.mu.Lock()
 	m.turnComment[turnID] = commentable
 	m.mu.Unlock()
@@ -873,22 +941,6 @@ func (m *codexAppServerMapper) post(msg localCLIMessage) {
 	msg.Output = redact.Text(strings.TrimSpace(msg.Output))
 	msg.Input = redactInputMap(msg.Input)
 	m.reporter.Post(msg)
-}
-
-func (m *codexAppServerMapper) isBootstrap(content string) bool {
-	if strings.TrimSpace(m.bootstrap) == "" {
-		return false
-	}
-	candidate := normalizeCapturedUserText(content)
-	bootstrap := normalizeCapturedUserText(m.bootstrap)
-	if candidate == "" || bootstrap == "" {
-		return false
-	}
-	if candidate == bootstrap {
-		return true
-	}
-	return strings.Contains(candidate, "You are assigned to Multica issue") &&
-		strings.Contains(candidate, "Assigned issue ID:")
 }
 
 func codexRPCID(v any) string {

@@ -706,6 +706,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			"approvalsReviewer": codexApprovalsReviewer(codexApprovalPolicy(c.onApproval)),
 		}
 		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
+		applyCodexServiceTier(turnParams, opts.ServiceTier)
 		_, err = c.request(runCtx, "turn/start", turnParams)
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
@@ -894,6 +895,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 			"approvalsReviewer":     approvalsReviewer,
 		}
 		applyCodexReasoningEffort(resumeParams, opts.ThinkingLevel)
+		applyCodexServiceTier(resumeParams, opts.ServiceTier)
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
@@ -924,6 +926,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"persistExtendedHistory": true,
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
+	applyCodexServiceTier(startParams, opts.ServiceTier)
 	startResult, err := c.request(ctx, "thread/start", startParams)
 	if err != nil {
 		return "", false, fmt.Errorf("codex thread/start failed: %w", err)
@@ -985,6 +988,13 @@ func applyCodexReasoningEffort(params map[string]any, level string) {
 	}
 	cfg["model_reasoning_effort"] = level
 	params["config"] = cfg
+}
+
+func applyCodexServiceTier(params map[string]any, tier string) {
+	if params == nil || tier == "" {
+		return
+	}
+	params["service_tier"] = tier
 }
 
 func resetTimer(timer *time.Timer, d time.Duration) {

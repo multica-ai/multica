@@ -12,6 +12,8 @@ type ModalType =
   | "issue-set-parent"
   | "issue-add-child"
   | "issue-delete-confirm"
+  | "issue-archive-confirm"
+  | "issue-unarchive-confirm"
   | "issue-backlog-agent-hint"
   | null;
 

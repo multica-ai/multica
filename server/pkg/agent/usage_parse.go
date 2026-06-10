@@ -92,6 +92,7 @@ func tokenUsageFromFlatMap(data map[string]any) TokenUsage {
 	u.OutputTokens += tokenUsageInt64FirstOf(data,
 		"reasoning_output_tokens", "reasoningOutputTokens",
 		"thought_tokens", "thoughtTokens",
+		"thinking_tokens", "thinkingTokens",
 		"reasoning_tokens", "reasoningTokens",
 		"reasoning",
 	)
@@ -110,6 +111,7 @@ func tokenUsageFromFlatMap(data map[string]any) TokenUsage {
 		u.OutputTokens += tokenUsageInt64FirstOf(details,
 			"reasoning_tokens", "reasoningTokens",
 			"thought_tokens", "thoughtTokens",
+			"thinking_tokens", "thinkingTokens",
 		)
 	}
 	return u

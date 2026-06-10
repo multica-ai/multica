@@ -144,12 +144,47 @@
     "section_integrations": "연동",
     "prop_runtime": "런타임",
     "prop_model": "모델",
+    "prop_service_tier": "서비스 티어",
     "prop_thinking": "추론",
     "prop_visibility": "공개 범위",
+    "prop_allowed_users": "허용된 사용자",
     "prop_concurrency": "동시 실행",
+    "prop_stream": "스트림",
+    "prop_approval": "승인",
     "prop_owner": "소유자",
     "prop_created": "생성일",
     "prop_updated": "수정일",
+    "stream_tooltip": "스트림 · {{value}}",
+    "approval_tooltip": "승인 · {{value}}",
+    "service_tier_tooltip": "Codex Fast mode · {{value}}",
+    "service_tier_value": {
+      "": "로컬 Codex 설정 따르기",
+      "default": "Standard",
+      "fast": "Fast"
+    },
+    "service_tier_description": {
+      "": "로컬 Codex CLI에 설정된 서비스 티어를 사용합니다.",
+      "default": "표준 Codex 서비스 티어를 사용합니다.",
+      "fast": "지원되는 실행에 Codex Fast mode를 사용합니다."
+    },
+    "stream_value": {
+      "on": "켜기",
+      "off": "끄기"
+    },
+    "stream_description": {
+      "on": "로컬 에이전트 실행 스트림을 수집하고 표시합니다.",
+      "off": "로컬 실행 스트림을 표시하지 않고 실행합니다."
+    },
+    "approval_value": {
+      "auto": "자동",
+      "prompt": "나에게 묻기",
+      "deny": "거부"
+    },
+    "approval_description": {
+      "auto": "런타임 작업을 자동으로 승인합니다.",
+      "prompt": "명령 실행 또는 파일 수정 전에 묻습니다.",
+      "deny": "런타임 작업을 자동으로 거부합니다."
+    },
     "no_description_placeholder": "설명 없음",
     "change_avatar_aria": "아바타 변경",
     "avatar_updated_toast": "아바타를 업데이트했습니다",
@@ -159,6 +194,13 @@
     "rename_required": "이름은 필수입니다",
     "edit_description_title": "설명 수정",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
+    "allowed_users_title": "허용된 사용자",
+    "allowed_users_none": "사용자 없음",
+    "allowed_users_count": "사용자 {{count}}명",
+    "allowed_users_empty": "다른 사용자가 없습니다",
+    "allowed_users_loading": "로딩 중",
+    "allowed_users_search_placeholder": "사용자 검색",
+    "allowed_users_no_results": "일치하는 사용자가 없습니다",
     "save": "저장",
     "cancel": "취소"
   },

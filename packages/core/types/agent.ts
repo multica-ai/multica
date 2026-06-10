@@ -4,6 +4,8 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+export type AgentServiceTier = "" | "default" | "fast";
+
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
 // only the runtime owner and workspace admins can bind agents to it;
@@ -244,6 +246,12 @@ export interface Agent {
    * (MUL-2339).
    */
   thinking_level?: string;
+  /**
+   * Codex-only service tier override. Empty string means "follow local Codex
+   * config"; "default" explicitly uses the standard tier; "fast" enables
+   * Codex Fast mode. Non-Codex responses omit the field.
+   */
+  service_tier?: AgentServiceTier;
   owner_id: string | null;
   allowed_user_ids?: string[];
   skills: AgentSkillSummary[];
@@ -303,6 +311,8 @@ export interface CreateAgentRequest {
   model?: string;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
   thinking_level?: string;
+  /** Optional Codex service tier override. See `Agent.service_tier`. */
+  service_tier?: AgentServiceTier;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
@@ -417,6 +427,14 @@ export interface UpdateAgentRequest {
    *     runtime's provider enum, rejected with 400 if not recognised
    */
   thinking_level?: string;
+  /**
+   * Codex-only service tier override. Tri-state semantics (OPE-2421):
+   *   - field omitted → no change
+   *   - "" → clear the override; Codex follows local config
+   *   - "default" → explicitly use the standard service tier
+   *   - "fast" → enable Codex Fast mode
+   */
+  service_tier?: AgentServiceTier;
 }
 
 /**

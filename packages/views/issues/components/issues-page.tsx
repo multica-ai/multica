@@ -46,6 +46,7 @@ export function IssuesPage() {
   const sortBy = useIssueViewStore((s) => s.sortBy);
   const sortDirection = useIssueViewStore((s) => s.sortDirection);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
+  const showArchived = useIssueViewStore((s) => s.showArchived);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
@@ -56,6 +57,7 @@ export function IssuesPage() {
     const base: IssueListFilter = {};
     if (scope === "members") base.assignee_types = ["member"];
     if (scope === "agents") base.assignee_types = ["agent", "squad"];
+    if (showArchived) base.include_archived = true;
     return buildIssueListServerFilter(
       base,
       {
@@ -81,6 +83,7 @@ export function IssuesPage() {
     scope,
     statusFilters,
     visibleStatuses,
+    showArchived,
   ]);
 
   const sort = useMemo(

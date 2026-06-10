@@ -37,6 +37,7 @@ import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
+  formatRuntimeName,
   isSelfHealingRuntime,
   isVersionNewer,
   pctChange,
@@ -206,7 +207,8 @@ export function createRuntimeColumns({
 // ---------------------------------------------------------------------------
 
 function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
-  const { base: baseName } = splitRuntimeName(runtime.name);
+  const displayName = formatRuntimeName(runtime.name, runtime.provider);
+  const { base: baseName } = splitRuntimeName(displayName);
   return (
     <div className="flex min-w-0 items-center gap-2">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center">

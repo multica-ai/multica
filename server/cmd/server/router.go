@@ -381,6 +381,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
 	daemonHub.SetHeartbeatHandler(h.HandleDaemonWSHeartbeat)
+	daemonHub.SetNotificationDeliveryResultHandler(h.HandleNotificationDeliveryResult)
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
@@ -761,6 +762,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
+								r.Patch("/archive", h.ArchiveIssue)
+								r.Patch("/unarchive", h.UnarchiveIssue)
 					r.Get("/children", h.ListChildIssues)
 					r.Post("/clear-history", h.ClearIssueHistory)
 					r.Get("/labels", h.ListLabelsForIssue)

@@ -1591,21 +1591,6 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	cid := uuidToString(comment.ID)
 	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
 
-	// Trigger agents for newly added mentions (OPE-1434).
-	newMentions := util.DiffMentions(existing.Content, req.Content)
-	if len(newMentions) > 0 {
-		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
-		if err == nil {
-			var parentComment *db.Comment
-			if existing.ParentID.Valid {
-				if p, err := h.Queries.GetComment(r.Context(), existing.ParentID); err == nil {
-					parentComment = &p
-				}
-			}
-			h.enqueueNewlyMentionedAgentTasks(r.Context(), issue, comment, parentComment, actorType, actorID, newMentions)
-		}
-	}
-
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 

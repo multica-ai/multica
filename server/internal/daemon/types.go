@@ -112,6 +112,7 @@ type AgentData struct {
 	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
 	Model         string            `json:"model,omitempty"`
 	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	ServiceTier   string            `json:"service_tier,omitempty"`
 	Visibility    string            `json:"visibility,omitempty"`
 	OwnerID       string            `json:"owner_id,omitempty"`
 	RuntimeConfig json.RawMessage   `json:"runtime_config,omitempty"`

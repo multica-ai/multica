@@ -1189,11 +1189,15 @@ func createNotificationBindingForUser(t *testing.T, userID, provider string) str
 	t.Helper()
 
 	var bindingID string
+	metadata := "{}"
+	if provider == "openclaw_weixin" {
+		metadata = `{"channel":"openclaw-weixin"}`
+	}
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO external_account_binding (
 			user_id, provider, external_user_id, display_name, status, metadata
 		)
-		VALUES ($1, $2, $3, $4, 'active', '{}'::jsonb)
+		VALUES ($1, $2, $3, $4, 'active', $5::jsonb)
 		ON CONFLICT (user_id, provider)
 		DO UPDATE SET
 			external_user_id = EXCLUDED.external_user_id,
@@ -1201,7 +1205,7 @@ func createNotificationBindingForUser(t *testing.T, userID, provider string) str
 			status = EXCLUDED.status,
 			metadata = EXCLUDED.metadata
 		RETURNING id
-	`, userID, provider, provider+"-external-user", "Bound "+provider).Scan(&bindingID); err != nil {
+	`, userID, provider, provider+"-external-user", "Bound "+provider, metadata).Scan(&bindingID); err != nil {
 		t.Fatalf("createNotificationBindingForUser: %v", err)
 	}
 	return bindingID
@@ -2537,6 +2541,106 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 	}
 	if weixinDeliveryCount != 1 {
 		t.Fatalf("expected exactly 1 openclaw_weixin delivery (dedup), got %d", weixinDeliveryCount)
+	}
+}
+
+func TestNotification_OpenclawWeixinSubscriberAgentComment(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	recipientEmail := "notif-openclaw-agent-comment@multica.ai"
+	recipientID := createTestUser(t, recipientEmail)
+	t.Cleanup(func() { cleanupTestUser(t, recipientEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, recipientID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_delivery WHERE notification_event_id IN (SELECT id FROM notification_event WHERE issue_id = $1)`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_event WHERE issue_id = $1`, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	agentID := "00000000-0000-0000-0000-0a6e17000001"
+	addTestSubscriber(t, issueID, "member", recipientID, "creator")
+	addTestSubscriber(t, issueID, "agent", agentID, "assignee")
+
+	bindingID := createNotificationBindingForUser(t, recipientID, "openclaw_weixin")
+	enableNotificationPreferenceForUser(t, recipientID, "openclaw_weixin", "replied", bindingID)
+
+	commentID := "00000000-0000-0000-0000-0a6e17000002"
+	commentContent := "agent implementation update"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "agent", agentID, commentContent, "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         commentID,
+				IssueID:    issueID,
+				AuthorType: "agent",
+				AuthorID:   agentID,
+				Content:    commentContent,
+				Type:       "comment",
+			},
+			"issue_title":  "openclaw agent comment",
+			"issue_status": "in_progress",
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, recipientID)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 inbox item for agent new_comment, got %d", len(items))
+	}
+	if items[0].Type != "new_comment" {
+		t.Fatalf("expected inbox item type new_comment, got %q", items[0].Type)
+	}
+
+	var newCommentEvent *db.NotificationEvent
+	for _, event := range notificationEventsForRecipient(t, queries, recipientID) {
+		if util.UUIDToString(event.IssueID) == issueID && event.Type == "new_comment" && util.UUIDToString(event.CommentID) == commentID {
+			eventCopy := event
+			newCommentEvent = &eventCopy
+			break
+		}
+	}
+	if newCommentEvent == nil {
+		t.Fatal("expected new_comment notification_event for agent comment subscriber")
+	}
+
+	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(newCommentEvent.ID))
+	var foundWeixin bool
+	for _, delivery := range deliveries {
+		if delivery.Channel != "openclaw_weixin" {
+			continue
+		}
+		foundWeixin = true
+		if delivery.Status != "pending" {
+			t.Fatalf("expected openclaw_weixin delivery status pending, got %q", delivery.Status)
+		}
+		var payload struct {
+			WechatID string `json:"wechat_id"`
+			Channel  string `json:"channel"`
+		}
+		if err := json.Unmarshal(delivery.PayloadSnapshot, &payload); err != nil {
+			t.Fatalf("unmarshal openclaw_weixin payload: %v", err)
+		}
+		if payload.WechatID == "" {
+			t.Fatal("expected openclaw_weixin payload to include wechat_id")
+		}
+		if payload.Channel != "openclaw-weixin" {
+			t.Fatalf("expected openclaw-weixin channel in payload, got %q", payload.Channel)
+		}
+	}
+	if !foundWeixin {
+		t.Fatal("expected openclaw_weixin delivery for agent new_comment subscriber")
 	}
 }
 

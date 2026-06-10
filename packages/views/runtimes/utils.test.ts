@@ -9,6 +9,8 @@ import {
   collectUnmappedModels,
   computeCostInWindow,
   estimateCost,
+  formatProviderName,
+  formatRuntimeName,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -83,6 +85,31 @@ describe("isSelfHealingRuntime", () => {
   });
 });
 
+describe("formatProviderName", () => {
+  it("uses the branded WujieClaw casing", () => {
+    expect(formatProviderName("wujieclaw")).toBe("WujieClaw");
+  });
+
+  it("falls back to title-casing unknown providers", () => {
+    expect(formatProviderName("openclaw")).toBe("Openclaw");
+  });
+});
+
+describe("formatRuntimeName", () => {
+  it("normalizes legacy WujieClaw default runtime names", () => {
+    expect(formatRuntimeName("Wujieclaw", "wujieclaw")).toBe("WujieClaw");
+    expect(formatRuntimeName("Wujieclaw (qa-host)", "wujieclaw")).toBe(
+      "WujieClaw (qa-host)",
+    );
+  });
+
+  it("preserves custom runtime names", () => {
+    expect(formatRuntimeName("ops-wujieclaw", "wujieclaw")).toBe(
+      "ops-wujieclaw",
+    );
+  });
+});
+
 describe("estimateCost", () => {
   it("prices the canonical Anthropic Sonnet 4.6 SKU", () => {
     const cost = estimateCost({
@@ -93,6 +120,19 @@ describe("estimateCost", () => {
     });
     // 1M × $3 input + 1M × $15 output = $18.
     expect(cost).toBeCloseTo(18, 5);
+  });
+
+  it("prices cache reads and writes with their own Anthropic token rates", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-sonnet-4-6",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    // 1M × ($3 input + $15 output + $0.30 cache read + $3.75 cache write).
+    expect(cost).toBeCloseTo(22.05, 5);
   });
 
   it("prices a Codex CLI session reporting gpt-5-codex", () => {

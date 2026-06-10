@@ -127,16 +127,6 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
             <Maximize2 className="h-3.5 w-3.5" />
           </button>
         )}
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setPreviewOpen(true)}
-          className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          title={t(($) => $.attachment.preview)}
-          aria-label={t(($) => $.attachment.preview)}
-        >
-          <Maximize2 className="h-3.5 w-3.5" />
-        </button>
         {slug && (
           <button
             type="button"

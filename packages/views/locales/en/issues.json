@@ -4,7 +4,9 @@
     "breadcrumb_workspace_fallback": "Workspace",
     "empty_title": "No issues yet",
     "empty_hint": "Create an issue to get started.",
-    "move_failed": "Failed to move issue"
+    "move_failed": "Failed to move issue",
+    "show_archived": "Show archived",
+    "hide_archived": "Hide archived"
   },
   "status": {
     "backlog": "Backlog",
@@ -215,6 +217,7 @@
     "cmdf_toast_title": "Find on page only covers what's visible",
     "cmdf_toast_description": "The timeline is virtualized — ⌘F can't see off-screen comments. Full in-app search is coming.",
     "update_failed": "Failed to update issue",
+    "description_conflict": "The description was modified by someone else while you were editing. Your changes are preserved — please review and resolve the conflict manually.",
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link",
     "clear_history": "Clear history",
@@ -421,7 +424,9 @@
     "create_sub_issue": "Create sub-issue",
     "set_parent_issue": "Set parent issue...",
     "add_sub_issue": "Add sub-issue...",
-    "delete_issue": "Delete issue"
+    "delete_issue": "Delete issue",
+    "archive_issue": "Archive issue",
+    "unarchive_issue": "Unarchive issue"
   },
   "pickers": {
     "filter_options_aria": "Filter options",

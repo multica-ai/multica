@@ -534,7 +534,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue:archived", "issue:unarchived", "issue_labels:changed", "issue_metadata:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -597,6 +597,24 @@ export function useRealtimeSync(
       if (wsId) {
         onIssueDeleted(qc, wsId, issue_id);
         onInboxIssueDeleted(qc, wsId, issue_id);
+      }
+    });
+
+    const unsubIssueArchived = ws.on("issue:archived", (p) => {
+      const { issue } = p as IssueUpdatedPayload;
+      if (!issue?.id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) {
+        onIssueDeleted(qc, wsId, issue.id);
+      }
+    });
+
+    const unsubIssueUnarchived = ws.on("issue:unarchived", (p) => {
+      const { issue } = p as IssueUpdatedPayload;
+      if (!issue) return;
+      const wsId = getCurrentWsId();
+      if (wsId) {
+        onIssueCreated(qc, wsId, issue);
       }
     });
 
@@ -1114,6 +1132,8 @@ export function useRealtimeSync(
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
+      unsubIssueArchived();
+      unsubIssueUnarchived();
       unsubIssueLabelsChanged();
       unsubIssueMetadataChanged();
       unsubInboxNew();

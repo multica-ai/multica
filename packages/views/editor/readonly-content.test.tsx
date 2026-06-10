@@ -55,6 +55,7 @@ vi.mock("../i18n", () => ({
           copy_code: "Copy code",
           show_preview: "Show preview",
           show_source: "Show source",
+          fullscreen: "Fullscreen",
         },
         mermaid: {
           rendering: "Rendering diagram...",
@@ -327,6 +328,45 @@ describe("ReadonlyContent issue mention Markdown", () => {
   });
 });
 
+describe("ReadonlyContent highlight Markdown", () => {
+  // `==text==` is lowered to a raw <mark> by highlightToHtml; rehype-raw turns
+  // it into an element and the sanitize schema must whitelist <mark> or it gets
+  // stripped. These guard both halves of that contract.
+  it("renders ==text== as a <mark> element", () => {
+    const { container } = render(<ReadonlyContent content={"a ==hi== b"} />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    expect(mark?.textContent).toBe("hi");
+  });
+
+  it("keeps inner Markdown formatting inside a highlight", () => {
+    const { container } = render(<ReadonlyContent content={"==**bold**=="} />);
+    expect(container.querySelector("mark strong")).not.toBeNull();
+  });
+
+  it("does not highlight == inside inline code", () => {
+    const { container } = render(<ReadonlyContent content={"`a ==b== c`"} />);
+    expect(container.querySelector("mark")).toBeNull();
+    expect(container.querySelector("code")?.textContent).toBe("a ==b== c");
+  });
+
+  // Boundary regressions (Emacs review, PR #3661).
+
+  it("wraps the whole span when an inner == lives in inline code", () => {
+    const { container } = render(<ReadonlyContent content={"==a `b==c` d=="} />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    // inner `==` stays inside the code, not consumed as the closing fence
+    expect(mark?.querySelector("code")?.textContent).toBe("b==c");
+    expect(mark?.textContent).toBe("a b==c d");
+  });
+
+  it("does not highlight across a blank line", () => {
+    const { container } = render(<ReadonlyContent content={"==a\n\nb=="} />);
+    expect(container.querySelector("mark")).toBeNull();
+  });
+});
+
 describe("ReadonlyContent code styling", () => {
   const literalCode = "uv run --extra dev pytest -q";
 
@@ -361,9 +401,35 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
-  it("keeps readonly code block chrome separate from selectable code text", () => {
+  it("renders code blocks with syntax highlighting as stable React elements (not dangerouslySetInnerHTML)", () => {
+    const codeText = [
+      "const url = \"http://wujieai.com\";",
+      "const user = \"@agent\";",
+    ].join("\n");
     const { container } = render(
-      <ReadonlyContent content={["```bash", "pnpm test", "```"].join("\n")} />,
+      <ReadonlyContent content={["```javascript", codeText, "```"].join("\n")} />,
+    );
+
+    const blockCode = container.querySelector("pre code");
+
+    expect(blockCode?.textContent).toBe(codeText);
+    // Should have hljs spans for syntax highlighting (not plain text)
+    expect(blockCode?.querySelector("span.hljs-keyword")).not.toBeNull();
+    // Should NOT use dangerouslySetInnerHTML (no __html attribute on any child)
+    expect(blockCode?.innerHTML).not.toBe("");
+  });
+
+  it("keeps readonly code block chrome separate from selectable code text", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    const { container, getByTitle } = render(
+      <ReadonlyContent
+        content={["```bash", "pnpm test", "```"].join("\n")}
+      />,
     );
 
     const wrapper = container.querySelector(".code-block-wrapper");
@@ -371,13 +437,37 @@ describe("ReadonlyContent code styling", () => {
     const pre = container.querySelector("pre");
     const copyButton = screen.getByTitle("Copy code");
 
+    expect(wrapper).not.toBeNull();
     expect(wrapper?.className).toContain("select-text");
     expect(header?.className).toContain("select-none");
     expect(pre?.className).toContain("select-text");
     expect(copyButton.className).toContain("pointer-events-auto");
+    expect(wrapper?.querySelector("pre code.language-bash")).not.toBeNull();
+    expect(wrapper?.textContent).toContain("bash");
+
+    const deleteButton = getByTitle("Delete");
+    expect(deleteButton).toBeDisabled();
+    expect(deleteButton).toHaveAttribute("aria-disabled", "true");
+    expect(deleteButton.className).toContain("cursor-default");
 
     const mouseDown = fireEvent.mouseDown(copyButton);
     expect(mouseDown).toBe(false);
+
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("pnpm test");
+    });
+  });
+
+  it("labels code fences without an explicit language as text", () => {
+    const { container } = render(
+      <ReadonlyContent content={["```", "plain text", "```"].join("\n")} />,
+    );
+
+    expect(container.querySelector(".code-block-header")?.textContent).toContain(
+      "text",
+    );
   });
 
   it("keeps editor code literal by disabling font ligatures", () => {
@@ -386,9 +476,32 @@ describe("ReadonlyContent code styling", () => {
     expect(codeCss).toContain(".rich-text-editor code");
     expect(codeCss).toContain(".rich-text-editor pre");
     expect(codeCss).toContain(".rich-text-editor pre code");
+    expect(codeCss).toContain("display: block;");
+    expect(codeCss).toContain("min-width: max-content;");
     expect(codeCss).toContain("font-variant-ligatures: none;");
     expect(codeCss).toContain('font-feature-settings: "liga" 0;');
     expect(codeCss).toContain("user-select: text;");
+  });
+});
+
+describe("ReadonlyContent slash command rendering", () => {
+  it("renders slash skill links as slash command pills", () => {
+    const { container } = render(
+      <ReadonlyContent content="[/deploy](slash://skill/abc-123)" />,
+    );
+
+    const pill = container.querySelector(".slash-command");
+    expect(pill).not.toBeNull();
+    expect(pill?.textContent).toBe("/deploy");
+  });
+
+  it("does not affect regular links", () => {
+    const { container } = render(
+      <ReadonlyContent content="[docs](https://example.com)" />,
+    );
+
+    expect(container.querySelector(".slash-command")).toBeNull();
+    expect(container.querySelector("a")).not.toBeNull();
   });
 });
 
@@ -458,7 +571,7 @@ describe("ReadonlyContent Mermaid rendering", () => {
 
     const button = await waitFor(() => {
       const found = container.querySelector<HTMLButtonElement>(
-        ".mermaid-diagram-toolbar button",
+        ".code-block-header button[aria-label='Open Mermaid diagram fullscreen']",
       );
       expect(found).not.toBeNull();
       return found!;
@@ -527,7 +640,7 @@ describe("ReadonlyContent HTML block rendering", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle("Preview"));
+    fireEvent.click(screen.getByTitle("Fullscreen"));
     const frames = document.querySelectorAll<HTMLIFrameElement>("iframe");
     expect(frames.length).toBe(2);
     expect(frames[1]?.getAttribute("sandbox")).toBe("allow-scripts");

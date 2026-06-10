@@ -941,6 +941,40 @@ func TestPrepareEnvironmentOpenclawWiresConfigPath(t *testing.T) {
 	}
 }
 
+func TestPrepareEnvironmentWujieClawWiresConfigPath(t *testing.T) {
+	wsRoot := t.TempDir()
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: filepath.Join(t.TempDir(), "absent.json")},
+	})
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: wsRoot,
+		WorkspaceID:    "ws-1",
+		TaskID:         "44444444-2222-3333-4444-555555555555",
+		AgentName:      "scout",
+		Provider:       "wujieclaw",
+		OpenclawBin:    stub.bin,
+		Task: TaskContextForEnv{
+			IssueID: "issue-1",
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if env.OpenclawConfigPath == "" {
+		t.Fatal("Prepare(wujieclaw) did not set OpenclawConfigPath")
+	}
+	got := mustReadJSON(t, env.OpenclawConfigPath)
+	workspace := got["agents"].(map[string]any)["defaults"].(map[string]any)["workspace"]
+	if workspace != env.WorkDir {
+		t.Errorf("agents.defaults.workspace = %v, want %q", workspace, env.WorkDir)
+	}
+	if len(stub.calls) == 0 {
+		t.Fatal("Prepare(wujieclaw) did not use the configured OpenclawBin")
+	}
+}
+
 // TestPrepareEnvironmentOpenclawWiresIncludeRoot — when the user has an
 // on-disk active config (the common non-fresh-install case), Prepare must
 // surface the active config's dirname on the Environment so the daemon

@@ -49,6 +49,12 @@ type OpenclawConfigPrep struct {
 	// Null / empty means inherit the user's global config — same three-state
 	// semantics codex uses (`hasManagedCodexMcpConfig`).
 	McpConfig json.RawMessage
+	// Provider is the runtime provider type ("openclaw" or "wujieclaw").
+	// When "wujieclaw", CLI invocations inject OPENCLAW_HOME /
+	// OPENCLAW_STATE_DIR / OPENCLAW_CONFIG_PATH pointing at ~/.wujieai
+	// so the config introspection reads wujieclaw's own config, not
+	// openclaw's global one.
+	Provider string
 }
 
 // OpenclawConfigResult is what prepareOpenclawConfig returns to its callers
@@ -126,6 +132,19 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = openclawCLITimeout
+	}
+	// For wujieclaw, inject isolation env vars so all CLI calls read
+	// wujieclaw's config (~/.wujieai) instead of openclaw's (~/.openclaw).
+	// The env is set at process level and restored on return.
+	if opts.Provider == "wujieclaw" {
+		if home, herr := os.UserHomeDir(); herr == nil {
+			wujieaiHome := filepath.Join(home, ".wujieai")
+			restore := snapshotEnv("OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH")
+			defer restore()
+			os.Setenv("OPENCLAW_HOME", wujieaiHome)
+			os.Setenv("OPENCLAW_STATE_DIR", wujieaiHome)
+			os.Setenv("OPENCLAW_CONFIG_PATH", filepath.Join(wujieaiHome, "wujieai.json"))
+		}
 	}
 
 	activePath, exists, err := openclawActiveConfigPath(bin, timeout)
@@ -442,6 +461,24 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, error
 // openclaw CLI. Production points at execOpenclawCLI; tests swap in a stub
 // to avoid spawning a real binary. Production code never reassigns it.
 var openclawExec = execOpenclawCLI
+
+// snapshotEnv captures the current values of the given env keys and returns a
+// restore function that resets them. Missing keys are deleted on restore.
+func snapshotEnv(keys ...string) func() {
+	saved := make(map[string]string, len(keys))
+	for _, k := range keys {
+		saved[k] = os.Getenv(k)
+	}
+	return func() {
+		for k, v := range saved {
+			if v == "" {
+				os.Unsetenv(k)
+			} else {
+				os.Setenv(k, v)
+			}
+		}
+	}
+}
 
 // execOpenclawCLI executes an openclaw subcommand and returns its stdout.
 // The daemon's environment is inherited so OPENCLAW_CONFIG_PATH /

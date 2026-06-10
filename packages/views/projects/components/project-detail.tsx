@@ -136,6 +136,7 @@ export function ProjectIssuesContent({
   sort,
   ganttIssues,
   scopedLabelFilters,
+  isFetchingNewFilter,
 }: {
   projectId: string;
   projectIssues: Issue[];
@@ -147,6 +148,7 @@ export function ProjectIssuesContent({
   sort?: IssueSortParam;
   ganttIssues: Issue[];
   scopedLabelFilters?: string[];
+  isFetchingNewFilter?: boolean;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -230,7 +232,7 @@ export function ProjectIssuesContent({
   // but non-empty project would surface a misleading "no issues" CTA.
   // For Board/List the bucketed cache really is the ground truth,
   // so an empty result means an empty project.
-  if (viewMode !== "gantt" && viewMode !== "swimlane" && projectIssues.length === 0) {
+  if (viewMode !== "gantt" && viewMode !== "swimlane" && projectIssues.length === 0 && !isFetchingNewFilter) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -328,6 +330,7 @@ export function ProjectIssuesSurface({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const showArchived = useViewStore((s) => s.showArchived);
   // `projectViewStore` is shared between Project Detail routes. Keep the
   // selected labels inside the current Project's visible Global + Project scope
   // before those ids hit server filters.
@@ -345,9 +348,11 @@ export function ProjectIssuesSurface({
     return BOARD_STATUSES;
   }, [statusFilters]);
   const serverFilter = useMemo<IssueListFilter>(
-    () =>
-      buildIssueListServerFilter(
-        filter,
+    () => {
+      const base: IssueListFilter = { ...filter };
+      if (showArchived) base.include_archived = true;
+      return buildIssueListServerFilter(
+        base,
         {
           statusFilters,
           priorityFilters,
@@ -357,7 +362,8 @@ export function ProjectIssuesSurface({
           labelFilters: scopedLabelFilters,
         },
         visibleStatuses,
-      ),
+      );
+    },
     [
       assigneeFilters,
       creatorFilters,
@@ -365,6 +371,7 @@ export function ProjectIssuesSurface({
       includeNoAssignee,
       scopedLabelFilters,
       priorityFilters,
+      showArchived,
       statusFilters,
       visibleStatuses,
     ],
@@ -425,6 +432,7 @@ export function ProjectIssuesSurface({
   // would otherwise be blamed for an empty Board cache, even though it has
   // its own (potentially non-empty) scheduled cache.
   const projectIssues = usesGantt ? ganttIssues : bucketedIssues;
+  const isFetchingNewFilter = statusIssuesQuery.isFetching && statusIssuesQuery.isPlaceholderData;
 
   return (
     <>
@@ -440,6 +448,7 @@ export function ProjectIssuesSurface({
         sort={sort}
         ganttIssues={ganttIssues}
         scopedLabelFilters={scopedLabelFilters}
+        isFetchingNewFilter={isFetchingNewFilter}
       />
       <BatchActionToolbar />
     </>

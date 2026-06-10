@@ -8,6 +8,10 @@ const (
 	EventIssueDeleted         = "issue:deleted"
 	EventIssueMetadataChanged = "issue_metadata:changed"
 
+	// Issue archive events
+	EventIssueArchived   = "issue:archived"
+	EventIssueUnarchived = "issue:unarchived"
+
 	// Comment events
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
@@ -30,15 +34,15 @@ const (
 	// subscribes by `task:` prefix and invalidates the workspace task
 	// snapshot, so the granularity here is "what does the user want to see
 	// change" — not "every internal status flip".
-	EventTaskQueued                  = "task:queued"                    // ∅ → queued (enqueue / retry create)
-	EventTaskDispatch                = "task:dispatch"                  // queued → dispatched (daemon claim)
-	EventTaskRunning                 = "task:running"                   // dispatched → running (daemon started)
-	EventTaskWaitingLocalDirectory   = "task:waiting_local_directory"   // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
-	EventTaskProgress                = "task:progress"
-	EventTaskCompleted               = "task:completed"                 // running → completed
-	EventTaskFailed                  = "task:failed"                    // running → failed
-	EventTaskMessage                 = "task:message"
-	EventTaskCancelled               = "task:cancelled"                 // * → cancelled
+	EventTaskQueued                = "task:queued"                  // ∅ → queued (enqueue / retry create)
+	EventTaskDispatch              = "task:dispatch"                // queued → dispatched (daemon claim)
+	EventTaskRunning               = "task:running"                 // dispatched → running (daemon started)
+	EventTaskWaitingLocalDirectory = "task:waiting_local_directory" // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
+	EventTaskProgress              = "task:progress"
+	EventTaskCompleted             = "task:completed" // running → completed
+	EventTaskFailed                = "task:failed"    // running → failed
+	EventTaskMessage               = "task:message"
+	EventTaskCancelled             = "task:cancelled" // * → cancelled
 
 	// Inbox events
 	EventInboxNew           = "inbox:new"
@@ -123,6 +127,10 @@ const (
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
 	EventDaemonRegister      = "daemon:register"
 	EventDaemonTaskAvailable = "daemon:task_available"
+
+	// Notification delivery events (server <-> daemon)
+	EventNotificationDeliver        = "notification:deliver"
+	EventNotificationDeliveryResult = "notification:delivery_result"
 
 	// Chat retry progress event (daemon -> server -> clients)
 	EventChatRetryProgress = "chat:retry_progress"

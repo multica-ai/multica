@@ -80,6 +80,8 @@ type MessageKindRecorder interface {
 	RecordDaemonWSMessageReceived(kind string)
 }
 
+type NotificationDeliveryResultHandler func(ctx context.Context, identity ClientIdentity, payload protocol.NotificationDeliveryResultPayload) error
+
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
 // best-effort wakeup hints; the daemon still uses HTTP claim for correctness.
 type Hub struct {
@@ -94,6 +96,9 @@ type Hub struct {
 
 	kindMu       sync.RWMutex
 	kindRecorder MessageKindRecorder
+
+	notificationMu       sync.RWMutex
+	onNotificationResult NotificationDeliveryResultHandler
 }
 
 func NewHub() *Hub {
@@ -125,6 +130,15 @@ func (h *Hub) SetHeartbeatHandler(fn HeartbeatHandler) {
 	h.hbMu.Unlock()
 }
 
+func (h *Hub) SetNotificationDeliveryResultHandler(fn NotificationDeliveryResultHandler) {
+	if h == nil {
+		return
+	}
+	h.notificationMu.Lock()
+	h.onNotificationResult = fn
+	h.notificationMu.Unlock()
+}
+
 func (h *Hub) heartbeatHandler() HeartbeatHandler {
 	h.hbMu.RLock()
 	defer h.hbMu.RUnlock()
@@ -150,6 +164,12 @@ func (h *Hub) messageKindRecorder() MessageKindRecorder {
 	h.kindMu.RLock()
 	defer h.kindMu.RUnlock()
 	return h.kindRecorder
+}
+
+func (h *Hub) notificationDeliveryResultHandler() NotificationDeliveryResultHandler {
+	h.notificationMu.RLock()
+	defer h.notificationMu.RUnlock()
+	return h.onNotificationResult
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity ClientIdentity) {
@@ -413,9 +433,29 @@ func (c *client) handleFrame(raw []byte) {
 	switch msg.Type {
 	case protocol.EventDaemonHeartbeat:
 		c.handleHeartbeatFrame(msg.Payload)
+	case protocol.EventNotificationDeliveryResult:
+		c.handleNotificationDeliveryResultFrame(msg.Payload)
 	default:
 		// Unknown app messages are intentionally ignored for forward
 		// compatibility with future daemon → server message types.
+	}
+}
+
+func (c *client) handleNotificationDeliveryResultFrame(raw json.RawMessage) {
+	handler := c.hub.notificationDeliveryResultHandler()
+	if handler == nil {
+		return
+	}
+	var payload protocol.NotificationDeliveryResultPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		slog.Debug("daemon websocket notification delivery result invalid payload", "error", err, "daemon_id", c.identity.DaemonID)
+		return
+	}
+	if err := handler(context.Background(), c.identity, payload); err != nil {
+		slog.Warn("daemon websocket notification delivery result handler failed",
+			"error", err,
+			"daemon_id", c.identity.DaemonID,
+			"delivery_id", payload.DeliveryID)
 	}
 }
 

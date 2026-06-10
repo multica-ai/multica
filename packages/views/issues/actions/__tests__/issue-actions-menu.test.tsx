@@ -252,6 +252,8 @@ describe("IssueActionsMenuItems", () => {
             openSetParent: vi.fn(),
             openAddChild: vi.fn(),
             openDeleteConfirm: vi.fn(),
+            openArchiveConfirm: vi.fn(),
+            openUnarchiveConfirm: vi.fn(),
           }}
         />,
       ),

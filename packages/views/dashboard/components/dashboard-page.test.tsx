@@ -59,12 +59,19 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
     cleanup();
   });
 
-  // The `tz` segment is the last element of every dashboard key
-  // (see dashboardKeys in @multica/core/dashboard/queries).
-  function tzSegments(): unknown[] {
+  // The `tz` segment is the last element of the timezone-aware dashboard
+  // keys. Local runner rollups are not timezone-sliced server-side and keep
+  // stable keys when preferences change.
+  function tzAwareKeys(): unknown[][] {
     return queryKeys
       .filter((k) => k[0] === "dashboard")
-      .map((k) => k[k.length - 1]);
+      .filter((k) =>
+        ["daily", "by-agent", "agent-runtime", "runtime-daily"].includes(String(k[2])),
+      );
+  }
+
+  function tzSegments(): unknown[] {
+    return tzAwareKeys().map((k) => k[k.length - 1]);
   }
 
   it("uses the stored timezone in every dashboard query key", () => {
@@ -79,14 +86,14 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
   it("flips the query key when the stored timezone changes", () => {
     tzRef.current = "UTC";
     renderWithI18n(<DashboardPage />);
-    const utcKeys = queryKeys.filter((k) => k[0] === "dashboard");
+    const utcKeys = tzAwareKeys();
 
     queryKeys.length = 0;
     cleanup();
 
     tzRef.current = "Asia/Tokyo";
     renderWithI18n(<DashboardPage />);
-    const tokyoKeys = queryKeys.filter((k) => k[0] === "dashboard");
+    const tokyoKeys = tzAwareKeys();
 
     expect(utcKeys.length).toBe(tokyoKeys.length);
     expect(utcKeys.length).toBeGreaterThan(0);

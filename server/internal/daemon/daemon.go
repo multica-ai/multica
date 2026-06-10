@@ -797,7 +797,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		}
 		d.setAgentVersion(name, version)
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
-		displayName := strings.ToUpper(name[:1]) + name[1:]
+		displayName := runtimeDisplayName(name)
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
@@ -833,6 +833,18 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
 	return resp, nil
+}
+
+func runtimeDisplayName(provider string) string {
+	switch provider {
+	case "wujieclaw":
+		return "WujieClaw"
+	default:
+		if provider == "" {
+			return "Runtime"
+		}
+		return strings.ToUpper(provider[:1]) + provider[1:]
+	}
 }
 
 // detectLocalTimezone returns an IANA zone name for the daemon host.
@@ -2598,11 +2610,15 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kiro", "kimi":
+	case "openclaw", "wujieclaw", "kiro", "kimi":
 		return true
 	default:
 		return false
 	}
+}
+
+func isOpenclawCompatibleProvider(provider string) bool {
+	return provider == "openclaw" || provider == "wujieclaw"
 }
 
 func effectiveTaskRunMode(provider, requestedRunMode string) string {
@@ -2778,7 +2794,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
 	openclawBin := ""
-	if provider == "openclaw" {
+	if isOpenclawCompatibleProvider(provider) {
 		openclawBin = entry.Path
 	}
 	// Resolve any local_directory assignment again here so runTask can plumb
@@ -2941,6 +2957,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.OpenclawConfigPath != "" {
 		agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
 	}
+	// WujieClaw isolation: point at ~/.wujieai so it never reads/writes
+	// the global OpenClaw directories (~/.openclaw). Only injected when
+	// the user hasn't already set them (the blocklist prevents custom_env
+	// from overriding these, so this is the authoritative source).
+	if provider == "wujieclaw" {
+		if home, err := os.UserHomeDir(); err == nil {
+			wujieaiHome := filepath.Join(home, ".wujieai")
+			if _, set := agentEnv["OPENCLAW_HOME"]; !set {
+				agentEnv["OPENCLAW_HOME"] = wujieaiHome
+			}
+			if _, set := agentEnv["OPENCLAW_STATE_DIR"]; !set {
+				agentEnv["OPENCLAW_STATE_DIR"] = wujieaiHome
+			}
+		}
+	}
 	// Grant the wrapper config permission to $include the user's active
 	// config across directories. OpenClaw's $include defaults to confining
 	// resolution to the wrapper's own directory; without this, the
@@ -3007,8 +3038,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		model = entry.Model
 	}
 	thinkingLevel := ""
+	serviceTier := ""
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
+		if provider == "codex" {
+			serviceTier = task.Agent.ServiceTier
+		}
 	}
 	// Per-model guard: the server validates the literal token against the
 	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
@@ -3047,6 +3082,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
+		ServiceTier:               serviceTier,
 	}
 	if capability.ResumeSession {
 		execOpts.ResumeSessionID = task.PriorSessionID
@@ -3920,7 +3956,9 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME",
+		"OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS",
+		"OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_GATEWAY_PORT":
 		return true
 	}
 	return false
