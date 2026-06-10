@@ -25,7 +25,8 @@ import (
 // stripped separately by filterCodexCustomConfigOverrides because they
 // share the `-c` flag with legitimate non-MCP overrides like `-c model=…`.
 var codexBlockedArgs = map[string]blockedArgMode{
-	"--listen": blockedWithValue, // stdio:// transport for daemon communication
+	"--listen":  blockedWithValue, // stdio:// transport for daemon communication
+	"--add-dir": blockedWithValue, // daemon controls sandbox writable roots
 }
 
 // codexStderrTailBytes bounds the stderr tail captured for inclusion in
@@ -82,7 +83,14 @@ type codexBackend struct {
 }
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{"app-server", "--listen", "stdio://"}
+	args := make([]string, 0, 5+len(opts.AdditionalWritableDirs)*2+len(opts.ExtraArgs)+len(opts.CustomArgs))
+	for _, dir := range opts.AdditionalWritableDirs {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		args = append(args, "--add-dir", dir)
+	}
+	args = append(args, "app-server", "--listen", "stdio://")
 	extra := filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger)
 	custom := filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger)
 	// Only claim ownership of the `mcp_servers` namespace when the agent
