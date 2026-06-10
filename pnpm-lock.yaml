@@ -1802,6 +1802,9 @@ importers:
 
   packages/cerebro-feature-flags:
     dependencies:
+      '@multica/cerebro-wakeup':
+        specifier: workspace:*
+        version: link:../cerebro-wakeup
       '@multica/core':
         specifier: workspace:*
         version: link:../core

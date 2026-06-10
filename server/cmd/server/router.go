@@ -971,6 +971,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/cost-optimization/holdout", costOptimizationHandler.ListHoldout)
 					// CEREBRO-PATCH(cerebro-display-currency-routes): FIR-40 workspace display currency + cached rate (any member).
 					r.Get("/display-currency", displayCurrencyHandler.Get)
+					// CEREBRO-PATCH(cerebro-wakeup-settings-routes): TECH-3298 self-wakeup limits read (any member).
+					r.Get("/wakeup-settings", cerebroWakeupHandler.GetSettings)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
 					r.Get("/groups", cerebroGroupsHandler.List)
 					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 workspace role list (member-level).
@@ -1054,6 +1056,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/cost-optimization/holdout/{key}", costOptimizationHandler.DeleteHoldout)
 					// CEREBRO-PATCH(cerebro-display-currency-routes): FIR-40 set workspace display currency (admin/owner only).
 					r.Put("/display-currency", displayCurrencyHandler.SetCurrency)
+					// CEREBRO-PATCH(cerebro-wakeup-settings-routes): TECH-3298 set self-wakeup limits (admin/owner only).
+					r.Put("/wakeup-settings", cerebroWakeupHandler.SetSettings)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval decisions + intake seam (admin/owner only).
 					r.Post("/approvals/intake", cerebroApprovalsHandler.Intake)
 					r.Post("/approvals/{approvalId}/approve", cerebroApprovalsHandler.Approve)

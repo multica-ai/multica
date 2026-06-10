@@ -99,7 +99,8 @@ import { StatusIcon } from "./status-icon";
 // CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related sidebar section.
 import { DependenciesSection } from "./dependencies-section";
 // CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3176 — wakeup list + cancel, now from the cerebro-wakeup extension package.
-import { CerebroWakeupSection } from "@multica/cerebro-wakeup";
+// CEREBRO-PATCH(cerebro-wakeup-note): TECH-3298 — wakeup timeline action note.
+import { CerebroWakeupSection, WakeupNote, isWakeupEntry } from "@multica/cerebro-wakeup";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
 // CEREBRO-PATCH(issue-detail-status-model): FIR-1550 provide the issue's project status-model presentation to status surfaces
 import { CerebroStatusModelProvider } from "@multica/cerebro-status-models/views";
@@ -2397,6 +2398,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               {timelineView.groups.map((group) => {
                 if (group.type === "comment") {
                   const entry = group.entries[0]!;
+                  // CEREBRO-PATCH(cerebro-wakeup-note): TECH-3298 — render an
+                  // agent wakeup as a collapsible action note, not a comment card.
+                  if (isWakeupEntry(entry)) {
+                    return (
+                      <div key={entry.id} id={`comment-${entry.id}`}>
+                        <WakeupNote entry={entry} timeAgo={timeAgo} />
+                      </div>
+                    );
+                  }
                   const isResolved = !!entry.resolved_at;
                   const isExpanded = expandedResolved.has(entry.id);
                   if (isResolved && !isExpanded) {

@@ -914,10 +914,12 @@ type CerebroWorkspaceGrantAudit struct {
 }
 
 type CerebroWorkspaceSetting struct {
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	DisplayCurrency string             `json:"display_currency"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	UpdatedBy       pgtype.UUID        `json:"updated_by"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	DisplayCurrency          string             `json:"display_currency"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy                pgtype.UUID        `json:"updated_by"`
+	WakeupMaxSelfPerIssue    int32              `json:"wakeup_max_self_per_issue"`
+	WakeupMinIntervalMinutes int32              `json:"wakeup_min_interval_minutes"`
 }
 
 type ChatMessage struct {

@@ -1,4 +1,6 @@
-export type CommentType = "comment" | "status_change" | "progress_update" | "system";
+// CEREBRO-PATCH(wakeup-comment-type): TECH-3298 — agent wakeups render as a
+// small collapsible action note (type "wakeup") instead of a full comment.
+export type CommentType = "comment" | "status_change" | "progress_update" | "system" | "wakeup";
 
 // `system` is used by platform-generated rows (e.g. the parent-issue
 // child-done notification, MUL-2538). System rows carry a zero UUID for

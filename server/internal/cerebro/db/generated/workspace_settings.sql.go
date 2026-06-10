@@ -12,19 +12,32 @@ import (
 )
 
 const getCerebroWorkspaceSettings = `-- name: GetCerebroWorkspaceSettings :one
-SELECT workspace_id, display_currency, updated_at, updated_by
+SELECT workspace_id, display_currency, wakeup_max_self_per_issue,
+       wakeup_min_interval_minutes, updated_at, updated_by
 FROM cerebro_workspace_settings
 WHERE workspace_id = $1
 `
 
+type GetCerebroWorkspaceSettingsRow struct {
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	DisplayCurrency          string             `json:"display_currency"`
+	WakeupMaxSelfPerIssue    int32              `json:"wakeup_max_self_per_issue"`
+	WakeupMinIntervalMinutes int32              `json:"wakeup_min_interval_minutes"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy                pgtype.UUID        `json:"updated_by"`
+}
+
 // The per-workspace settings row. Missing row -> the handler applies the
-// default (USD), so callers treat pgx.ErrNoRows as "use default", not an error.
-func (q *Queries) GetCerebroWorkspaceSettings(ctx context.Context, workspaceID pgtype.UUID) (CerebroWorkspaceSetting, error) {
+// default (USD + the wakeup-limit defaults), so callers treat pgx.ErrNoRows as
+// "use default", not an error.
+func (q *Queries) GetCerebroWorkspaceSettings(ctx context.Context, workspaceID pgtype.UUID) (GetCerebroWorkspaceSettingsRow, error) {
 	row := q.db.QueryRow(ctx, getCerebroWorkspaceSettings, workspaceID)
-	var i CerebroWorkspaceSetting
+	var i GetCerebroWorkspaceSettingsRow
 	err := row.Scan(
 		&i.WorkspaceID,
 		&i.DisplayCurrency,
+		&i.WakeupMaxSelfPerIssue,
+		&i.WakeupMinIntervalMinutes,
 		&i.UpdatedAt,
 		&i.UpdatedBy,
 	)
@@ -49,5 +62,38 @@ type UpsertCerebroWorkspaceDisplayCurrencyParams struct {
 // Set (or change) the workspace display currency. One row per workspace.
 func (q *Queries) UpsertCerebroWorkspaceDisplayCurrency(ctx context.Context, arg UpsertCerebroWorkspaceDisplayCurrencyParams) error {
 	_, err := q.db.Exec(ctx, upsertCerebroWorkspaceDisplayCurrency, arg.WorkspaceID, arg.DisplayCurrency, arg.UpdatedBy)
+	return err
+}
+
+const upsertCerebroWorkspaceWakeupLimits = `-- name: UpsertCerebroWorkspaceWakeupLimits :exec
+INSERT INTO cerebro_workspace_settings (
+    workspace_id, wakeup_max_self_per_issue, wakeup_min_interval_minutes,
+    updated_at, updated_by
+)
+VALUES ($1, $2, $3, now(), $4)
+ON CONFLICT (workspace_id) DO UPDATE
+SET wakeup_max_self_per_issue = EXCLUDED.wakeup_max_self_per_issue,
+    wakeup_min_interval_minutes = EXCLUDED.wakeup_min_interval_minutes,
+    updated_at = now(),
+    updated_by = EXCLUDED.updated_by
+`
+
+type UpsertCerebroWorkspaceWakeupLimitsParams struct {
+	WorkspaceID              pgtype.UUID `json:"workspace_id"`
+	WakeupMaxSelfPerIssue    int32       `json:"wakeup_max_self_per_issue"`
+	WakeupMinIntervalMinutes int32       `json:"wakeup_min_interval_minutes"`
+	UpdatedBy                pgtype.UUID `json:"updated_by"`
+}
+
+// TECH-3298: set (or change) the per-workspace self-wakeup limits. Only the two
+// wakeup columns are touched on conflict so an existing display_currency choice
+// is preserved.
+func (q *Queries) UpsertCerebroWorkspaceWakeupLimits(ctx context.Context, arg UpsertCerebroWorkspaceWakeupLimitsParams) error {
+	_, err := q.db.Exec(ctx, upsertCerebroWorkspaceWakeupLimits,
+		arg.WorkspaceID,
+		arg.WakeupMaxSelfPerIssue,
+		arg.WakeupMinIntervalMinutes,
+		arg.UpdatedBy,
+	)
 	return err
 }

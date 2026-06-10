@@ -254,8 +254,34 @@ func (q *Queries) ClaimPendingIssueStatusWakeups(ctx context.Context, arg ClaimP
 	return items, nil
 }
 
-const createCerebroAgentWakeup = `-- name: CreateCerebroAgentWakeup :one
+const countActiveWakeupsForAgentIssue = `-- name: CountActiveWakeupsForAgentIssue :one
 
+SELECT count(*)
+FROM cerebro_agent_wakeup
+WHERE workspace_id = $1
+  AND agent_id = $2
+  AND issue_id = $3
+  AND state <> 'cancelled'
+`
+
+type CountActiveWakeupsForAgentIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// Cerebro agent wakeups: agent-requested future re-entry points.
+// TECH-3298: how many non-cancelled wakeups this agent already has on this
+// issue. Dispatched (already-fired) ones count toward the budget so the cap is
+// "how many times total an agent may wake itself on one issue".
+func (q *Queries) CountActiveWakeupsForAgentIssue(ctx context.Context, arg CountActiveWakeupsForAgentIssueParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveWakeupsForAgentIssue, arg.WorkspaceID, arg.AgentID, arg.IssueID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createCerebroAgentWakeup = `-- name: CreateCerebroAgentWakeup :one
 INSERT INTO cerebro_agent_wakeup (
     workspace_id, agent_id, issue_id, prompt, trigger_type,
     fire_at, watch_issue_id, watch_status, created_by_id
@@ -278,7 +304,6 @@ type CreateCerebroAgentWakeupParams struct {
 	CreatedByID  pgtype.UUID        `json:"created_by_id"`
 }
 
-// Cerebro agent wakeups: agent-requested future re-entry points.
 func (q *Queries) CreateCerebroAgentWakeup(ctx context.Context, arg CreateCerebroAgentWakeupParams) (CerebroAgentWakeup, error) {
 	row := q.db.QueryRow(ctx, createCerebroAgentWakeup,
 		arg.WorkspaceID,
@@ -443,6 +468,54 @@ func (q *Queries) MarkWakeupFailed(ctx context.Context, arg MarkWakeupFailedPara
 	return err
 }
 
+const maxActiveTimeWakeupFireAtForAgentIssue = `-- name: MaxActiveTimeWakeupFireAtForAgentIssue :one
+SELECT max(fire_at)::timestamptz AS max_fire_at
+FROM cerebro_agent_wakeup
+WHERE workspace_id = $1
+  AND agent_id = $2
+  AND issue_id = $3
+  AND trigger_type = 'time'
+  AND state IN ('pending', 'claimed')
+`
+
+type MaxActiveTimeWakeupFireAtForAgentIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// TECH-3298: the latest scheduled fire time among this agent's still-active
+// time wakeups on this issue, used to enforce the minimum gap between two
+// time-based wakeups. NULL when the agent has no pending/claimed time wakeup.
+func (q *Queries) MaxActiveTimeWakeupFireAtForAgentIssue(ctx context.Context, arg MaxActiveTimeWakeupFireAtForAgentIssueParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, maxActiveTimeWakeupFireAtForAgentIssue, arg.WorkspaceID, arg.AgentID, arg.IssueID)
+	var max_fire_at pgtype.Timestamptz
+	err := row.Scan(&max_fire_at)
+	return max_fire_at, err
+}
+
+const postponeWakeup = `-- name: PostponeWakeup :exec
+UPDATE cerebro_agent_wakeup
+SET state = 'pending',
+    trigger_type = 'time',
+    fire_at = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type PostponeWakeupParams struct {
+	ID     pgtype.UUID        `json:"id"`
+	FireAt pgtype.Timestamptz `json:"fire_at"`
+}
+
+// Resets a claimed wakeup back to pending as a time trigger, firing after the
+// given delay. Used when dispatch conditions aren't met (active task on issue
+// or agent runtime offline).
+func (q *Queries) PostponeWakeup(ctx context.Context, arg PostponeWakeupParams) error {
+	_, err := q.db.Exec(ctx, postponeWakeup, arg.ID, arg.FireAt)
+	return err
+}
+
 const releaseWakeupToPending = `-- name: ReleaseWakeupToPending :exec
 UPDATE cerebro_agent_wakeup
 SET state = 'pending',
@@ -456,24 +529,5 @@ WHERE id = $1
 // is released back to pending so it resumes firing once the type is re-enabled.
 func (q *Queries) ReleaseWakeupToPending(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, releaseWakeupToPending, id)
-	return err
-}
-
-const postponeWakeup = `-- name: PostponeWakeup :exec
-UPDATE cerebro_agent_wakeup
-SET state = 'pending',
-    trigger_type = 'time',
-    fire_at = $2,
-    updated_at = now()
-WHERE id = $1
-`
-
-type PostponeWakeupParams struct {
-	ID        pgtype.UUID        `json:"id"`
-	NewFireAt pgtype.Timestamptz `json:"new_fire_at"`
-}
-
-func (q *Queries) PostponeWakeup(ctx context.Context, arg PostponeWakeupParams) error {
-	_, err := q.db.Exec(ctx, postponeWakeup, arg.ID, arg.NewFireAt)
 	return err
 }

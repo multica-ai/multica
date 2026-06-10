@@ -3947,6 +3947,29 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-wakeup-settings): TECH-3298 per-workspace self-wakeup
+  // limits (max wakeups per issue + minimum gap between two time wakeups).
+  async getWakeupSettings(wsId: string): Promise<{
+    max_self_per_issue: number;
+    min_interval_minutes: number;
+  }> {
+    return this.fetch(`/api/workspaces/${wsId}/wakeup-settings`);
+  }
+
+  async setWakeupSettings(
+    wsId: string,
+    maxSelfPerIssue: number,
+    minIntervalMinutes: number,
+  ): Promise<{ max_self_per_issue: number; min_interval_minutes: number }> {
+    return this.fetch(`/api/workspaces/${wsId}/wakeup-settings`, {
+      method: "PUT",
+      body: JSON.stringify({
+        max_self_per_issue: maxSelfPerIssue,
+        min_interval_minutes: minIntervalMinutes,
+      }),
+    });
+  }
+
   // CEREBRO-PATCH(workspace-logo-generate): FIR-2580 AI workspace-logo generation (up to 5 square icon variants).
   async generateWorkspaceLogos(
     workspaceId: string,

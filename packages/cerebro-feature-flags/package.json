@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@multica/cerebro-wakeup": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "sonner": "^2.0.7"

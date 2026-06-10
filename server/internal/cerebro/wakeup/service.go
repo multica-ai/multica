@@ -26,6 +26,16 @@ const (
 	StatePending    = "pending"
 	StateDispatched = "dispatched"
 
+	// commentTypeWakeup tags the dispatch comment so the frontend renders it as
+	// a small collapsible action note instead of a full comment card (TECH-3298).
+	commentTypeWakeup = "wakeup"
+
+	// Self-wakeup limit defaults, applied when a workspace has no settings row.
+	// Mirrors cerebro_workspace_settings column defaults (migration 9071) and the
+	// values agreed on TECH-3298.
+	defaultMaxSelfWakeupsPerIssue = 8
+	defaultMinWakeupIntervalMin   = 5
+
 	// postponeDelay is how long to wait before retrying a wakeup that couldn't
 	// fire because the issue had an active task or the agent runtime was offline.
 	postponeDelay = 5 * time.Minute
@@ -99,6 +109,12 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 	// pending row that never fires.
 	if !s.triggerTypeEnabled(ctx, workspaceID, req.TriggerType) {
 		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("wakeup trigger_type %q is disabled for this workspace", req.TriggerType)
+	}
+
+	// TECH-3298: enforce the per-workspace self-wakeup limits so a single agent
+	// can't flood one issue with rapid self-wakeups.
+	if err := s.enforceSelfWakeupLimits(ctx, workspaceID, req); err != nil {
+		return cerebrodb.CerebroAgentWakeup{}, err
 	}
 
 	return s.Cerebro.CreateCerebroAgentWakeup(ctx, cerebrodb.CreateCerebroAgentWakeupParams{
@@ -243,8 +259,8 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  "system",
 		AuthorID:    util.MustParseUUID("00000000-0000-0000-0000-000000000000"),
-		Content:     "**Wakeup:** " + row.Prompt,
-		Type:        "comment",
+		Content:     buildWakeupCommentContent(row.TriggerType, row.Prompt),
+		Type:        commentTypeWakeup,
 	})
 	if err != nil {
 		return fmt.Errorf("create wakeup comment: %w", err)
@@ -275,11 +291,75 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	return nil
 }
 
+// buildWakeupCommentContent encodes the trigger sub-type as a leading inline
+// tag the frontend strips for display, followed by the agent's own note. The
+// tag lets the wakeup note render its type ("Time-based wakeup") and keeps the
+// note itself as the expandable body. The agent receives this same string as
+// its task trigger summary, where the short tag is harmless.
+func buildWakeupCommentContent(triggerType, prompt string) string {
+	return "[wakeup:" + triggerType + "] " + prompt
+}
+
+// selfWakeupLimits resolves the per-workspace self-wakeup limits, falling back
+// to the defaults when no settings row exists or the lookup fails (never block
+// a wakeup on a transient settings read).
+func (s *Service) selfWakeupLimits(ctx context.Context, workspaceID pgtype.UUID) (maxPerIssue int, minInterval time.Duration) {
+	maxPerIssue = defaultMaxSelfWakeupsPerIssue
+	minInterval = time.Duration(defaultMinWakeupIntervalMin) * time.Minute
+	if s.Cerebro == nil {
+		return
+	}
+	settings, err := s.Cerebro.GetCerebroWorkspaceSettings(ctx, workspaceID)
+	if err != nil {
+		return
+	}
+	if settings.WakeupMaxSelfPerIssue > 0 {
+		maxPerIssue = int(settings.WakeupMaxSelfPerIssue)
+	}
+	if settings.WakeupMinIntervalMinutes > 0 {
+		minInterval = time.Duration(settings.WakeupMinIntervalMinutes) * time.Minute
+	}
+	return
+}
+
+// enforceSelfWakeupLimits caps how many wakeups an agent may stack on one issue
+// and the minimum gap between two time-based wakeups. Errors here surface to the
+// agent as a 400 from the create handler, so the messages are plain and actionable.
+func (s *Service) enforceSelfWakeupLimits(ctx context.Context, workspaceID pgtype.UUID, req CreateRequest) error {
+	maxPerIssue, minInterval := s.selfWakeupLimits(ctx, workspaceID)
+
+	count, err := s.Cerebro.CountActiveWakeupsForAgentIssue(ctx, cerebrodb.CountActiveWakeupsForAgentIssueParams{
+		WorkspaceID: workspaceID,
+		AgentID:     req.AgentID,
+		IssueID:     req.IssueID,
+	})
+	if err == nil && int(count) >= maxPerIssue {
+		return fmt.Errorf("wakeup limit reached: this agent already has %d wakeups on this issue (max %d per issue)", count, maxPerIssue)
+	}
+
+	// The minimum gap only applies to time wakeups (the only type with a
+	// schedulable fire time). status/CI wakeups fire on external events.
+	if req.TriggerType == TriggerTime && req.FireAt.Valid && minInterval > 0 {
+		lastFire, err := s.Cerebro.MaxActiveTimeWakeupFireAtForAgentIssue(ctx, cerebrodb.MaxActiveTimeWakeupFireAtForAgentIssueParams{
+			WorkspaceID: workspaceID,
+			AgentID:     req.AgentID,
+			IssueID:     req.IssueID,
+		})
+		if err == nil && lastFire.Valid {
+			earliest := lastFire.Time.Add(minInterval)
+			if req.FireAt.Time.Before(earliest) {
+				return fmt.Errorf("wakeups must be at least %d minutes apart: this agent already has a wakeup at %s on this issue", int(minInterval.Minutes()), lastFire.Time.UTC().Format(time.RFC3339))
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Service) postpone(ctx context.Context, row cerebrodb.CerebroAgentWakeup) error {
 	newFireAt := pgtype.Timestamptz{Time: time.Now().Add(postponeDelay), Valid: true}
 	if err := s.Cerebro.PostponeWakeup(ctx, cerebrodb.PostponeWakeupParams{
-		ID:        row.ID,
-		NewFireAt: newFireAt,
+		ID:     row.ID,
+		FireAt: newFireAt,
 	}); err != nil {
 		return fmt.Errorf("postpone wakeup: %w", err)
 	}

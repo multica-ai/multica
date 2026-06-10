@@ -1,5 +1,28 @@
 -- Cerebro agent wakeups: agent-requested future re-entry points.
 
+-- name: CountActiveWakeupsForAgentIssue :one
+-- TECH-3298: how many non-cancelled wakeups this agent already has on this
+-- issue. Dispatched (already-fired) ones count toward the budget so the cap is
+-- "how many times total an agent may wake itself on one issue".
+SELECT count(*)
+FROM cerebro_agent_wakeup
+WHERE workspace_id = $1
+  AND agent_id = $2
+  AND issue_id = $3
+  AND state <> 'cancelled';
+
+-- name: MaxActiveTimeWakeupFireAtForAgentIssue :one
+-- TECH-3298: the latest scheduled fire time among this agent's still-active
+-- time wakeups on this issue, used to enforce the minimum gap between two
+-- time-based wakeups. NULL when the agent has no pending/claimed time wakeup.
+SELECT max(fire_at)::timestamptz AS max_fire_at
+FROM cerebro_agent_wakeup
+WHERE workspace_id = $1
+  AND agent_id = $2
+  AND issue_id = $3
+  AND trigger_type = 'time'
+  AND state IN ('pending', 'claimed');
+
 -- name: CreateCerebroAgentWakeup :one
 INSERT INTO cerebro_agent_wakeup (
     workspace_id, agent_id, issue_id, prompt, trigger_type,

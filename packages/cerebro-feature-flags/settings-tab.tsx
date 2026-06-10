@@ -1,5 +1,6 @@
 "use client";
 
+import type { ComponentType } from "react";
 import { Lock } from "lucide-react";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Label } from "@multica/ui/components/ui/label";
@@ -7,6 +8,7 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentMember } from "@multica/core/permissions";
+import { WakeupLimitsSettings } from "@multica/cerebro-wakeup";
 import { CEREBRO_FLAG_GROUPS, flagsForGroup, type CerebroFlagKey } from "./registry";
 import {
   useFeatureFlag,
@@ -15,6 +17,14 @@ import {
   useSetWorkspaceFeatureFlagMutation,
 } from "./api";
 import { useFlagLocked, useWorkspaceFlagValue } from "./store";
+
+// Per-feature inline settings. A cerebro feature can attach extra controls that
+// render under its toggle, so everything for that feature lives in one place in
+// the Cerebro features tab. Add a feature's settings component here keyed by its
+// flag; the row renders it whenever the feature is enabled. TECH-3298.
+const FLAG_SETTINGS: Partial<Record<CerebroFlagKey, ComponentType>> = {
+  cerebro_wakeup_time: WakeupLimitsSettings,
+};
 
 function FlagRow({
   flagKey,
@@ -35,6 +45,9 @@ function FlagRow({
 
   // Owner has forced this flag on for the whole team and locked it.
   const forcedForTeam = locked && workspaceValue === true;
+
+  // Optional inline settings for this feature, shown only while it's enabled.
+  const SettingsComponent = FLAG_SETTINGS[flagKey];
 
   const handlePersonalChange = (next: boolean) => {
     personalMutation.mutate(
@@ -95,6 +108,12 @@ function FlagRow({
               onCheckedChange={handleTeamLockChange}
               aria-label={`Force ${label} on for the whole workspace`}
             />
+          </div>
+        )}
+
+        {SettingsComponent && enabled && (
+          <div className="mt-3 border-t pt-3">
+            <SettingsComponent />
           </div>
         )}
       </CardContent>
