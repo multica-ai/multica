@@ -17,21 +17,25 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-// Human-readable countdown until a hold expires ("in 5h 23m", "in 12m", "soon").
+// Human-readable countdown until a hold expires, using Intl.RelativeTimeFormat
+// so the output matches the active UI locale.
 // Returns null when holdUntil is null/undefined so callers can gate on truthiness.
 // `now` defaults to Date.now() but can be injected for testability.
+// `soon` is the caller-supplied translation of the "expired/imminent" label.
 export function formatHoldUntil(
   holdUntil: string | null | undefined,
   now: number = Date.now(),
+  locale: string = "en",
+  soon: string = "soon",
 ): string | null {
   if (!holdUntil) return null;
   const diffMs = new Date(holdUntil).getTime() - now;
-  if (diffMs <= 0) return "soon";
+  if (diffMs <= 0) return soon;
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "always", style: "short" });
   const minutes = Math.ceil(diffMs / 60_000);
   const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  if (hours > 0) return mins > 0 ? `in ${hours}h ${mins}m` : `in ${hours}h`;
-  return `in ${minutes}m`;
+  if (hours > 0) return rtf.format(hours, "hour");
+  return rtf.format(minutes, "minute");
 }
 
 // Turns the back-end's `device_info` string ("MacBook-Pro · darwin-amd64",
