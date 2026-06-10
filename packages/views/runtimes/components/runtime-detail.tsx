@@ -7,6 +7,7 @@ import {
   Cpu,
   Globe,
   Lock,
+  PauseCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -39,7 +40,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { formatLastSeen } from "../utils";
+import { formatHoldUntil, formatLastSeen, isSelfHealingRuntime } from "../utils";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
@@ -280,6 +281,17 @@ function HeroCard({
               {t(($) => $.detail.last_seen, { when: lastSeen })}
             </span>
           </div>
+          {runtime.hold_until && (
+            <div className="mt-2 flex items-center gap-1.5 rounded-md bg-warning/10 px-2 py-1.5 text-xs text-warning">
+              <PauseCircle className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                {t(($) => $.health.on_hold.label)} —{" "}
+                {t(($) => $.health.on_hold.resumes_in, {
+                  time: formatHoldUntil(runtime.hold_until) ?? "soon",
+                })}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

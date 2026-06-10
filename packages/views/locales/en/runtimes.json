@@ -80,6 +80,11 @@
     "about_to_gc": {
       "label": "About to GC",
       "description": "Offline 6+ days. Auto-deleted at 7 days unless it reconnects."
+    },
+    "on_hold": {
+      "label": "On hold",
+      "resumes_in": "Resumes {{time}}",
+      "tooltip": "This runtime is paused — tasks are queued and will resume automatically."
     }
   },
   "detail": {

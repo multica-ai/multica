@@ -17,6 +17,19 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
+// Human-readable countdown until a hold expires ("in 5h 23m", "in 12m", "soon").
+// Returns null when holdUntil is null/undefined so callers can gate on truthiness.
+export function formatHoldUntil(holdUntil: string | null | undefined): string | null {
+  if (!holdUntil) return null;
+  const diffMs = new Date(holdUntil).getTime() - Date.now();
+  if (diffMs <= 0) return "soon";
+  const minutes = Math.ceil(diffMs / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours > 0) return mins > 0 ? `in ${hours}h ${mins}m` : `in ${hours}h`;
+  return `in ${minutes}m`;
+}
+
 // Compound-unit relative timestamp ("2m 14s ago", "1d 4h ago", "6d 19h ago")
 // — gives the user enough precision to tell "just lost" from "long lost"
 // at a glance without forcing them to mouse-over for a full timestamp.
