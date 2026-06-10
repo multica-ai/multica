@@ -8,13 +8,14 @@
 # Usage:
 #   ./build-images.sh [--no-push] [--registry REG] [--tag TAG] [image…]
 #
-# Defaults: registry=ghcr.io/chrissnell, tag=$(git rev-parse --short HEAD).
+# Defaults: registry=registry.chrissnell.com/multica, tag=$(git rev-parse --short HEAD).
+# Override with --registry ghcr.io/chrissnell to use the old public registry.
 # With no image args, builds backend/web/postgres/controller. Pass `runtime`
 # explicitly to build the runtime base + runtime-claude images (Plan C).
 
 set -euo pipefail
 
-REGISTRY="${REGISTRY:-ghcr.io/chrissnell}"
+REGISTRY="${REGISTRY:-registry.chrissnell.com/multica}"
 TAG="${TAG:-$(git rev-parse --short HEAD)}"
 # K8s nodes are amd64; default to that even when building on Apple Silicon.
 PLATFORM="${PLATFORM:-linux/amd64}"
