@@ -502,6 +502,82 @@ type NotificationPreference struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OctoBindingToken struct {
+	TokenHash      string             `json:"token_hash"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	OctoUid        string             `json:"octo_uid"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type OctoChatSessionBinding struct {
+	ID              pgtype.UUID        `json:"id"`
+	ChatSessionID   pgtype.UUID        `json:"chat_session_id"`
+	InstallationID  pgtype.UUID        `json:"installation_id"`
+	OctoChannelID   string             `json:"octo_channel_id"`
+	OctoChannelType int16              `json:"octo_channel_type"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type OctoInboundAudit struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	OctoChannelID  pgtype.Text        `json:"octo_channel_id"`
+	OctoMessageID  pgtype.Text        `json:"octo_message_id"`
+	DropReason     string             `json:"drop_reason"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+}
+
+type OctoInboundDedup struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	MessageID      string             `json:"message_id"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	ClaimToken     pgtype.UUID        `json:"claim_token"`
+}
+
+type OctoInstallation struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	BotTokenEncrypted []byte             `json:"bot_token_encrypted"`
+	RobotID           string             `json:"robot_id"`
+	BotName           string             `json:"bot_name"`
+	OwnerUid          string             `json:"owner_uid"`
+	ApiUrl            string             `json:"api_url"`
+	WsUrl             string             `json:"ws_url"`
+	InstallerUserID   pgtype.UUID        `json:"installer_user_id"`
+	Status            string             `json:"status"`
+	WsLeaseToken      pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt  pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstalledAt       pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OctoOutboundMessage struct {
+	ID             pgtype.UUID        `json:"id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	OctoChannelID  string             `json:"octo_channel_id"`
+	OctoMessageID  string             `json:"octo_message_id"`
+	OctoMessageSeq int64              `json:"octo_message_seq"`
+	Status         string             `json:"status"`
+	LastEditedAt   pgtype.Timestamptz `json:"last_edited_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type OctoUserBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	MulticaUserID  pgtype.UUID        `json:"multica_user_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	OctoUid        string             `json:"octo_uid"`
+	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+}
+
 type PersonalAccessToken struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
