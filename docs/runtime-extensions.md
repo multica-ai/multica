@@ -69,7 +69,8 @@ as a registered runtime in the workspace settings.
 | `command.args`         | ❌        | string[]              | Args appended to every invocation (e.g. `["--acp"]`).                      |
 | `command.blocked_args` | ❌        | map<string,string>    | Keys: flag names. Values: `"value"` (flag has value) / `"flag"` (boolean).|
 | `capabilities`         | ❌        | object                | See [Capabilities](#capabilities).                                        |
-| `models`               | ❌        | object[]              | Static model list. Each `{id, label?, default?, thinking?[]}`.            |
+| `models`               | ❌        | object[]              | Static model list (fallback). Each `{id, label?, default?, thinking?[]}`. |
+| `models_discovery`     | ❌        | object                | Dynamic model discovery config. See [Model Discovery](#model-discovery).  |
 | `pricing`              | ❌        | map<modelID,pricing>  | `{ input, output, cacheRead?, cacheWrite? }` per million tokens.          |
 | `config_file`          | ❌        | string                | E.g. `"AGENTS.md"`, `"CLAUDE.md"`, `""` to skip config injection.         |
 | `skills_root`          | ❌        | string                | Manifest skills root; exported as `MULTICA_AGENT_SKILLS_ROOT`.            |
@@ -105,6 +106,78 @@ forwarding path.
 > If you flip a capability `true` and the spawn still doesn't carry the
 > param, double-check `command.blocked_args` — a manifest can block its own
 > daemon-managed flag by mistake.
+
+### Model Discovery
+
+Dynamic model discovery lets the daemon query your CLI for the current
+model list at runtime — no manifest update needed when models change.
+
+```jsonc
+{
+  "models_discovery": {
+    "method": "cli",             // "cli" (stream-json) or "acp" (acp-stdio)
+    "cli": {
+      "args": ["--list-models", "--format", "json"],
+      "timeout_seconds": 15      // default 15s
+    },
+    "cache_ttl_seconds": 120     // default 60s
+  },
+  "models": [...]                // static fallback when discovery fails
+}
+```
+
+**CLI discovery** (`method: "cli"`): the daemon runs
+`<command.executable> <models_discovery.cli.args>` and parses stdout as:
+
+```json
+{
+  "models": [
+    {
+      "id": "model-id",
+      "label": "Display Name",
+      "default": true,
+      "thinking": {
+        "supported_levels": [{"value":"low","label":"Low"},{"value":"high","label":"High"}],
+        "default_level": "high"
+      },
+      "pricing": {"input": 3.0, "output": 15.0, "cacheRead": 0.3}
+    }
+  ]
+}
+```
+
+Each model's `pricing` field is optional; when present it updates the
+pricing table the daemon reports to the frontend.
+
+**ACP discovery** (`method: "acp"`): the daemon does the standard
+`initialize` → `session/new` handshake and reads models from the
+`result.models.availableModels` array in the session/new response.
+Per-model `pricing` is extracted the same way.
+
+**Fallback**: when discovery fails (timeout, parse error, CLI not
+found), the static `models` array is used instead. A warning is logged
+but the runtime stays functional.
+
+**Auto-inference**: if `method` is omitted, the daemon infers it from
+the manifest's `transport`: `stream-json` → `"cli"`, `acp-stdio` →
+`"acp"`.
+
+### Agent-level overrides
+
+Each agent can override certain manifest fields without editing the
+global `runtime.json`. Set these keys in the agent's metadata (via the
+agent settings UI):
+
+| Metadata key | Overrides | Notes |
+|---|---|---|
+| `skills_root_override` | `skills_root` | Per-agent skills directory |
+| `config_file_override` | `config_file` | E.g. use `"CLAUDE.md"` instead of `"AGENTS.md"` |
+| `icon_url_override` | `icon_url` | Cosmetic; shows a different logo for this agent |
+| `blocked_args_override` | `blocked_args` | Append-only merge; cannot remove manifest-level blocks |
+
+Overrides are applied at task-spawn time before building the backend
+command line. The manifest remains the default for all agents that
+don't set an override.
 
 ---
 

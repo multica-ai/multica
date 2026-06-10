@@ -1498,11 +1498,22 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		return
 	}
 
-	// For external runtime extensions, use the static model list from
-	// the manifest if available. This avoids calling agent.ListModels()
-	// which only knows about built-in providers.
-	if entry.IsExternal && len(entry.Models) > 0 {
+	// Three-way dispatch for external runtime extensions:
+	//  1. Dynamic discovery (CLI or ACP) when models_discovery is configured
+	//  2. Static models array from manifest (fallback)
+	//  3. Empty list (no discovery, no static)
+	// Built-in providers always go through agent.ListModels().
+	switch {
+	case entry.IsExternal && entry.ModelsDiscovery != nil:
+		d.discoverExternalModels(ctx, rt, requestID, entry)
+		return
+	case entry.IsExternal && len(entry.Models) > 0:
 		d.reportExternalModels(ctx, rt, requestID, entry.Models)
+		return
+	case entry.IsExternal:
+		d.reportModelListResult(ctx, rt, requestID, map[string]any{
+			"status": "completed", "models": []any{}, "supported": true,
+		})
 		return
 	}
 
@@ -2742,6 +2753,56 @@ func capabilitiesForBackend(entry AgentEntry) agent.ConfigCapabilities {
 	}
 }
 
+// applyAgentRuntimeOverrides mutates `entry` in place, applying per-agent
+// overrides from the agent metadata. This lets each agent customize its
+// runtime's behaviour without editing the global manifest file:
+//
+//   - "skills_root_override"  → entry.SkillsRoot
+//   - "config_file_override"  → entry.ConfigFile
+//   - "icon_url_override"     → entry.IconURL   (cosmetic only)
+//   - "blocked_args_override" → merged into entry.BlockedArgs (append-only)
+//
+// Keys not present in metadata are no-ops. Zero-value strings are
+// treated as "clear the override" (use the manifest default).
+func applyAgentRuntimeOverrides(entry *AgentEntry, metadata map[string]any) {
+	if len(metadata) == 0 {
+		return
+	}
+	if v, ok := metadata["skills_root_override"].(string); ok && v != "" {
+		entry.SkillsRoot = v
+	}
+	if v, ok := metadata["config_file_override"].(string); ok && v != "" {
+		entry.ConfigFile = v
+	}
+	if v, ok := metadata["icon_url_override"].(string); ok && v != "" {
+		entry.IconURL = v
+	}
+	// blocked_args_override: append-only merge. An agent can add extra
+	// blocked args but cannot remove ones the manifest declared. This
+	// prevents a compromised agent config from unblocking protocol flags
+	// a manifest author intentionally sealed.
+	if raw, ok := metadata["blocked_args_override"]; ok {
+		switch ba := raw.(type) {
+		case map[string]any:
+			if entry.BlockedArgs == nil {
+				entry.BlockedArgs = make(map[string]string)
+			}
+			for k, v := range ba {
+				if s, ok := v.(string); ok {
+					entry.BlockedArgs[k] = s
+				}
+			}
+		case map[string]string:
+			if entry.BlockedArgs == nil {
+				entry.BlockedArgs = make(map[string]string)
+			}
+			for k, v := range ba {
+				entry.BlockedArgs[k] = v
+			}
+		}
+	}
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -3065,6 +3126,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if _, exists := agentEnv[k]; !exists {
 			agentEnv[k] = v
 		}
+	}
+	// Agent-level overrides: the per-agent settings UI can override certain
+	// manifest-level fields (skills_root, config_file, blocked_args). These
+	// are stored in the Agent metadata and delivered through the task claim.
+	// We apply them AFTER manifest env but BEFORE building the backend so
+	// they take effect for this task.
+	if entry.IsExternal && task.Agent != nil {
+		applyAgentRuntimeOverrides(&entry, task.Agent.Metadata)
 	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,

@@ -15,22 +15,49 @@ import (
 //
 // Schema version: v1
 type RuntimeManifest struct {
-	ID            string                    `json:"id"`
-	Name          string                    `json:"name"`
-	Version       string                    `json:"version"`
-	Description   string                    `json:"description,omitempty"`
-	Provider      string                    `json:"provider"`
-	Transport     string                    `json:"transport"`     // "acp-stdio" or "stream-json"
-	LaunchHeader  string                    `json:"launch_header,omitempty"`
-	Command       RuntimeManifestCommand    `json:"command"`
-	Capabilities  *RuntimeManifestCaps      `json:"capabilities,omitempty"`
-	Models        []RuntimeManifestModel    `json:"models,omitempty"`
-	ConfigFile    string                    `json:"config_file,omitempty"`    // "AGENTS.md", "CLAUDE.md", "" to skip
-	SkillsRoot    string                    `json:"skills_root,omitempty"`    // relative to home or absolute
-	IconURL       string                    `json:"icon_url,omitempty"`       // remote URL for the provider icon
-	Pricing       map[string]RuntimePricing `json:"pricing,omitempty"`
-	MinCLIVersion string                    `json:"min_cli_version,omitempty"` // e.g. "0.2.0"
-	Env           map[string]string         `json:"env,omitempty"`
+	ID              string                    `json:"id"`
+	Name            string                    `json:"name"`
+	Version         string                    `json:"version"`
+	Description     string                    `json:"description,omitempty"`
+	Provider        string                    `json:"provider"`
+	Transport       string                    `json:"transport"`     // "acp-stdio" or "stream-json"
+	LaunchHeader    string                    `json:"launch_header,omitempty"`
+	Command         RuntimeManifestCommand    `json:"command"`
+	Capabilities    *RuntimeManifestCaps      `json:"capabilities,omitempty"`
+	Models          []RuntimeManifestModel    `json:"models,omitempty"`
+	ModelsDiscovery *ModelsDiscoveryConfig    `json:"models_discovery,omitempty"`
+	ConfigFile      string                    `json:"config_file,omitempty"`    // "AGENTS.md", "CLAUDE.md", "" to skip
+	SkillsRoot      string                    `json:"skills_root,omitempty"`    // relative to home or absolute
+	IconURL         string                    `json:"icon_url,omitempty"`       // remote URL for the provider icon
+	Pricing         map[string]RuntimePricing `json:"pricing,omitempty"`
+	MinCLIVersion   string                    `json:"min_cli_version,omitempty"` // e.g. "0.2.0"
+	Env             map[string]string         `json:"env,omitempty"`
+}
+
+// ModelsDiscoveryConfig declares how the runtime discovers available models
+// at runtime (via CLI command or ACP session/new handshake). When present,
+// the daemon prefers dynamic discovery over the static `models` array;
+// the static list serves as a fallback if discovery fails.
+type ModelsDiscoveryConfig struct {
+	// Method is "cli" or "acp". When omitted, auto-inferred from the
+	// manifest transport: stream-json → "cli", acp-stdio → "acp".
+	Method string `json:"method,omitempty"`
+	// CLI is populated when method="cli" (stream-json transports).
+	CLI *CLIDiscoveryConfig `json:"cli,omitempty"`
+	// CacheTTLSeconds controls how long a successful discovery result is
+	// cached. 0 or omitted → use daemon default (60s).
+	CacheTTLSeconds int `json:"cache_ttl_seconds,omitempty"`
+}
+
+// CLIDiscoveryConfig holds configuration for CLI-based model discovery.
+// The daemon shells out to `command.executable <args>` and parses stdout
+// as a JSON object containing a `models` array.
+type CLIDiscoveryConfig struct {
+	// Args appended to command.executable for model discovery.
+	// Example: ["--list-models", "--format", "json"]
+	Args []string `json:"args"`
+	// TimeoutSeconds caps the CLI execution. 0 → 15s default.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
 // RuntimeManifestCommand describes how to launch the ACP-compatible CLI.
@@ -96,26 +123,27 @@ func (m RuntimeManifest) ToAgentEntry() AgentEntry {
 		transport = "acp-stdio"
 	}
 	return AgentEntry{
-		Path:          m.Command.Executable,
-		Transport:     transport,
-		ExtraArgs:     append([]string(nil), m.Command.Args...),
-		ACPArgs:       append([]string(nil), m.Command.Args...),
-		IsExternal:    true,
-		LaunchHeader:  m.LaunchHeader,
-		ConfigFile:    m.ConfigFile,
-		SkillsRoot:    m.SkillsRoot,
-		IconURL:       m.IconURL,
-		Models:        manifestModelsToAgentModels(m.Models),
-		Pricing:       m.Pricing,
-		ManifestName:  m.Name,
-		ManifestID:    m.ID,
-		Provider:      m.Provider,
-		Description:   m.Description,
-		Version:       m.Version,
-		MinCLIVersion: m.MinCLIVersion,
-		BlockedArgs:   copyStringMap(m.Command.BlockedArgs),
-		Env:           copyStringMap(m.Env),
-		rawCaps:       m.Capabilities,
+		Path:            m.Command.Executable,
+		Transport:       transport,
+		ExtraArgs:       append([]string(nil), m.Command.Args...),
+		ACPArgs:         append([]string(nil), m.Command.Args...),
+		IsExternal:      true,
+		LaunchHeader:    m.LaunchHeader,
+		ConfigFile:      m.ConfigFile,
+		SkillsRoot:      m.SkillsRoot,
+		IconURL:         m.IconURL,
+		Models:          manifestModelsToAgentModels(m.Models),
+		Pricing:         m.Pricing,
+		ManifestName:    m.Name,
+		ManifestID:      m.ID,
+		Provider:        m.Provider,
+		Description:     m.Description,
+		Version:         m.Version,
+		MinCLIVersion:   m.MinCLIVersion,
+		BlockedArgs:     copyStringMap(m.Command.BlockedArgs),
+		Env:             copyStringMap(m.Env),
+		ModelsDiscovery: resolveModelsDiscovery(m.ModelsDiscovery, transport),
+		rawCaps:         m.Capabilities,
 	}
 }
 
@@ -128,6 +156,31 @@ func copyStringMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// resolveModelsDiscovery normalises the user-supplied discovery config,
+// inferring the method from transport when omitted.
+func resolveModelsDiscovery(cfg *ModelsDiscoveryConfig, transport string) *ModelsDiscoveryConfig {
+	if cfg == nil {
+		return nil
+	}
+	// Copy so we don't mutate the parsed manifest.
+	out := *cfg
+	if out.Method == "" {
+		switch transport {
+		case "stream-json":
+			out.Method = "cli"
+		case "acp-stdio":
+			out.Method = "acp"
+		}
+	}
+	if out.CLI != nil && out.CLI.TimeoutSeconds <= 0 {
+		out.CLI.TimeoutSeconds = 15
+	}
+	if out.CacheTTLSeconds <= 0 {
+		out.CacheTTLSeconds = 60
+	}
+	return &out
 }
 
 func manifestModelsToAgentModels(models []RuntimeManifestModel) []AgentModel {

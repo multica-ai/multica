@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
-import { providerSupportsMcpConfig } from "@multica/core/agents";
+import { isTabVisibleForRuntime } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import {
@@ -143,7 +143,7 @@ export function AgentOverviewPane({
   const larkConfigured = larkListing?.configured === true;
 
   // The MCP tab is only shown when the agent's runtime backend actually
-  // consumes mcp_config — see providerSupportsMcpConfig. We default to
+  // consumes mcp_config. We default to
   // showing it when the runtime row hasn't loaded yet so a slow fetch
   // can't transiently flicker the tab off and then on.
   //
@@ -157,13 +157,11 @@ export function AgentOverviewPane({
   // backend currently reads, so surfacing the tab would let users save values
   // their runtime ignores — same anti-footgun rationale as the MCP gate.
   const visibleTabs = useMemo(() => {
-    const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
     const showRuntimeConfig = runtime ? runtime.provider === "openclaw" : false;
     return detailTabs.filter((tab) => {
-      if (tab.id === "mcp_config") return showMcp;
       if (tab.id === "integrations") return larkConfigured;
       if (tab.id === "runtime_config") return showRuntimeConfig;
-      return true;
+      return isTabVisibleForRuntime(tab.id, runtime);
     });
   }, [runtime, larkConfigured]);
 
