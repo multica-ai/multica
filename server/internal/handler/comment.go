@@ -1316,11 +1316,11 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 	return parentComment.AuthorType == "member"
 }
 
-// enqueueMentionedAgentTasks parses @agent mentions from comment content and
-// enqueues a task for each mentioned agent. When parentComment is non-nil
-// (i.e. the comment is a reply), mentions from the parent (thread root) are
-// also included so that agents mentioned in the top-level comment are
-// re-triggered by subsequent replies in the same thread — unless the reply
+// computeMentionedAgentCommentTriggers parses @agent mentions from comment
+// content and returns a trigger for each mentioned agent. When parentComment
+// is non-nil (i.e. the comment is a reply), mentions from the parent (thread
+// root) are also included so that agents mentioned in the top-level comment
+// are re-triggered by subsequent replies in the same thread — unless the reply
 // explicitly @mentions only non-agent entities (members, issues), which
 // signals the user is talking to other people and not the agent.
 // Skips agents with on_mention trigger disabled, and private agents mentioned
@@ -1332,11 +1332,6 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // dedupe and the natural queued/dispatched coalescing of the task queue.
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
-	triggers := h.computeMentionedAgentCommentTriggers(ctx, issue, comment.Content, parentComment, authorType, authorID)
-	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
-}
-
 func (h *Handler) computeMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string) []commentAgentTrigger {
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(content)

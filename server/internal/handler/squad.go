@@ -905,13 +905,6 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 
 // ── Squad Trigger Logic ─────────────────────────────────────────────────────
 
-// shouldEnqueueSquadLeaderOnComment returns true if the shared comment trigger
-// computation would wake the issue's assigned squad leader.
-func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue db.Issue, commentContent, authorType, authorID string) bool {
-	_, ok := h.computeAssignedSquadLeaderCommentTrigger(ctx, issue, commentContent, authorType, authorID)
-	return ok
-}
-
 // lastTaskWasLeader returns true when the agent's most recent task on the
 // issue was enqueued in the squad-leader role. Used by the self-trigger
 // guards to tell apart a comment posted while the agent was acting as
