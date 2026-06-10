@@ -195,7 +195,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				if err != nil {
 					slog.Warn("daemon_auth: Casdoor JWT parse failed", "path", r.URL.Path, "error", err)
 				} else {
-					multicaUserID, err := resolver(r.Context(), userInfo.SubjectID)
+					multicaUserID, err := resolver(r.Context(), userInfo.SubjectID, userInfo.Name, userInfo.Email)
 					if err != nil {
 						slog.Warn("daemon_auth: Casdoor subject resolution failed", "path", r.URL.Path, "subject", userInfo.SubjectID, "error", err)
 					} else if multicaUserID == "" {

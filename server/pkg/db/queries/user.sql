@@ -87,3 +87,14 @@ UPDATE multica_user SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: UpdateUserNameAndEmail :one
+-- Syncs name and email from an external identity provider (Casdoor).
+-- Called by the SubjectResolver when the JWT claims differ from the
+-- locally stored profile.
+UPDATE multica_user SET
+    name = $2,
+    email = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
