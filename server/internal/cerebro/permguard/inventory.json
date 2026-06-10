@@ -409,6 +409,10 @@
       "gate": "cerebro_agent_access"
     },
     {
+      "id": "POST /api/agents/{id}/tools/{name}/invoke",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/artifact-folders/",
       "gate": "workspace_member"
     },
