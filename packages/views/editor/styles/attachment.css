@@ -10,7 +10,14 @@
 .image-figure {
   position: relative;
   display: inline-block;
+  /* CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — prevent pasted images from expanding the message column. */
+  max-width: 100%;
   margin: 0.75rem 0;
+}
+
+.image-node {
+  display: inline-block;
+  max-width: 100%;
 }
 
 .image-figure[data-clickable="true"] {

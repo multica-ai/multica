@@ -213,10 +213,27 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   // scroll to bottom on open; surface "Ny besked"-pille when scrolled up.
   const scrollRef = useRef<HTMLDivElement>(null);
   const { hasNewBelow, scrollToBottom } = useStickyBottom(scrollRef);
+  // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — keep latest channel messages visible on open and after sending.
+  const openedChannelRef = useRef<string | null>(null);
+  const lastOwnMessageRef = useRef<string | null>(null);
+  const latestTopLevel = topLevel[topLevel.length - 1] ?? null;
+  const latestOwnTopLevelId =
+    latestTopLevel?.actor_type === "member" && latestTopLevel.actor_id === userId
+      ? latestTopLevel.id
+      : null;
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [channelId]);
+    if (!el || topLevel.length === 0) return;
+    if (openedChannelRef.current !== channelId) {
+      el.scrollTop = el.scrollHeight;
+      openedChannelRef.current = channelId;
+    }
+  }, [channelId, topLevel.length]);
+  useLayoutEffect(() => {
+    if (!latestOwnTopLevelId || lastOwnMessageRef.current === latestOwnTopLevelId) return;
+    lastOwnMessageRef.current = latestOwnTopLevelId;
+    scrollToBottom(false);
+  }, [latestOwnTopLevelId, scrollToBottom]);
 
   // CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — on a narrow
   // viewport the side-by-side message + thread layout squeezes both columns

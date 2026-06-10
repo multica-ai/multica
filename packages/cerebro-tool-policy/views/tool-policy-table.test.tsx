@@ -226,7 +226,12 @@ describe("ToolPolicyTable (capability catalog)", () => {
     const user = userEvent.setup();
     renderTable("agent");
     const table = await tableBody();
-    await user.click(screen.getByRole("button", { name: /MCP · Slack/ }));
+    const classFilter = screen.getByRole("combobox", { name: "Filter by class" });
+    expect(classFilter).toHaveTextContent("All classes");
+    expect(classFilter).not.toHaveTextContent("__all__");
+    await user.click(classFilter);
+    await user.click(await screen.findByRole("option", { name: /MCP · Slack/ }));
+    expect(classFilter).toHaveTextContent("MCP · Slack");
     expect(table.getByText("Post Slack message")).toBeInTheDocument();
     expect(table.queryByText("Restart deploy")).not.toBeInTheDocument();
   });

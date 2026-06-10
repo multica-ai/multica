@@ -1236,6 +1236,20 @@ export function InboxPage() {
 
   // CEREBRO-PATCH(cerebro-focus-list-inbox): TECH-2947 — gate on feature flag.
   const focusListEnabled = useFeatureFlag("cerebro_focus_list");
+  // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — keep the desktop inbox shell stable while notifications load.
+  const inboxListSkeleton = (
+    <div className="space-y-1 p-2">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+          <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 
   const listBody = (
     <div>
@@ -1245,7 +1259,9 @@ export function InboxPage() {
           onIssueOpen={(issueId) => setSelectedKey("issue", issueId)}
         />
       )}
-      {filteredEntries.length === 0 ? (
+      {loading ? (
+        inboxListSkeleton
+      ) : filteredEntries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm">
@@ -1565,38 +1581,6 @@ export function InboxPage() {
     );
   }
 
-  if (loading) {
-    return (
-      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-        <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
-          <div className="flex flex-col border-r h-full">
-            <div className="flex h-12 shrink-0 items-center border-b px-4">
-              <Skeleton className="h-5 w-16" />
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                  <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-3/4" />
-                    <Skeleton className="h-3 w-1/2" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel id="detail" minSize="40%">
-          <div className="p-6">
-            <Skeleton className="h-6 w-48" />
-            <Skeleton className="mt-4 h-4 w-32" />
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    );
-  }
-
   return (
     <>
       <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
@@ -1611,7 +1595,12 @@ export function InboxPage() {
         <ResizableHandle />
         <ResizablePanel id="detail" minSize="40%">
           <div className="flex flex-col min-h-0 h-full">
-            {detailContent ?? (
+            {loading ? (
+              <div className="p-6">
+                <Skeleton className="h-6 w-48" />
+                <Skeleton className="mt-4 h-4 w-32" />
+              </div>
+            ) : detailContent ?? (
               <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
                 <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
                 <p className="text-sm">

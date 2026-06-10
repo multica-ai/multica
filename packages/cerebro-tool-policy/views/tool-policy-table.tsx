@@ -38,6 +38,12 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@multica/ui/components/ui/select";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -609,32 +615,52 @@ function FilterBar({
   onShowInherited: (v: boolean) => void;
   editLayerLabel: string;
 }) {
+  const selectedClass = Array.from(classes)[0] ?? "__all__";
+  const selectedClassLabel =
+    selectedClass === "__all__" ? "All classes" : selectedClass;
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3">
-      <div className="relative w-full max-w-xs">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => onSearch(e.target.value)}
-          placeholder="Filter tools by name or class…"
-          className="h-9 pl-9"
-          aria-label="Filter tools"
-        />
-      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative w-full sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            placeholder="Filter tools by name or class…"
+            className="h-9 pl-9"
+            aria-label="Filter tools"
+          />
+        </div>
 
-      <FilterGroup label="Class">
-        {facets.map((facet) => (
-          <FilterChip
-            key={facet.category}
-            active={classes.has(facet.category)}
-            onClick={() => onToggleClass(facet.category)}
-          >
-            <span>{facet.category}</span>
-            <SpreadBar facet={facet} />
-            <span className="font-mono text-[10px] text-muted-foreground">{facet.count}</span>
-          </FilterChip>
-        ))}
-      </FilterGroup>
+        <Select
+          value={selectedClass}
+          onValueChange={(value) => {
+            if (!value) return;
+            if (value === "__all__") {
+              if (classes.size > 0) onToggleClass(selectedClass);
+              return;
+            }
+            if (classes.has(value)) return;
+            if (selectedClass !== "__all__") onToggleClass(selectedClass);
+            onToggleClass(value);
+          }}
+        >
+          <SelectTrigger className="h-9 w-full sm:w-56" aria-label="Filter by class">
+            <span data-slot="select-value" className="flex flex-1 text-left">
+              {selectedClassLabel}
+            </span>
+          </SelectTrigger>
+          <SelectContent align="start">
+            <SelectItem value="__all__">All classes</SelectItem>
+            {facets.map((facet) => (
+              <SelectItem key={facet.category} value={facet.category}>
+                {facet.category} ({facet.count})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       <FilterGroup label="Side effect">
         {SIDE_EFFECTS.map((effect) => (
@@ -708,22 +734,6 @@ function FilterChip({
     >
       {children}
     </button>
-  );
-}
-
-// SpreadBar is the little allow/ask/deny distribution strip on a class chip.
-function SpreadBar({ facet }: { facet: ClassFacet }) {
-  const total = facet.count || 1;
-  return (
-    <span className="inline-flex h-1 w-6 overflow-hidden rounded-full bg-border">
-      {facet.allow > 0 && (
-        <span className="bg-emerald-500" style={{ flex: facet.allow / total }} />
-      )}
-      {facet.ask > 0 && <span className="bg-amber-500" style={{ flex: facet.ask / total }} />}
-      {facet.deny > 0 && (
-        <span className="bg-destructive" style={{ flex: facet.deny / total }} />
-      )}
-    </span>
   );
 }
 

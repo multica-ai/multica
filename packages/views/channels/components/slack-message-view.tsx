@@ -6,8 +6,8 @@
 // live in the ThreadSidePanel.
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { Copy, ListPlus, MessageSquare, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { BellRing, Copy, ListPlus, MessageSquare, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -51,6 +51,7 @@ import { useT } from "../../i18n";
 import { CreateIssueFromMessageDialog } from "./cerebro-create-issue-from-message";
 // CEREBRO-PATCH(channel-message-cost-badge-import): FIR-39 per-comment cost badge on channel messages.
 import { CommentCostBadge } from "@multica/cerebro-channels";
+import { useCommentReminder } from "@multica/cerebro-inbox";
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
@@ -147,9 +148,12 @@ const MessageRow = memo(function MessageRow({
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [createIssueOpen, setCreateIssueOpen] = useState(false); // CEREBRO-PATCH(channels-create-issue-from-message): TECH-2909
+  const [actionsOpen, setActionsOpen] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { uploadWithToast } = useFileUpload(api);
+  const reminder = useCommentReminder(channelId);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
     enabled: editing,
@@ -161,6 +165,24 @@ const MessageRow = memo(function MessageRow({
   const canDelete = isOwn;
   const isTemp = entry.id.startsWith("temp-");
   const reactions = entry.reactions ?? [];
+  // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — expose message actions on mobile and add channel reminders.
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearLongPressTimer, [clearLongPressTimer]);
+
+  const startLongPress = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (isTemp || editing || event.pointerType === "mouse") return;
+    clearLongPressTimer();
+    longPressTimerRef.current = setTimeout(() => {
+      setActionsOpen(true);
+      longPressTimerRef.current = null;
+    }, 500);
+  }, [clearLongPressTimer, editing, isTemp]);
 
   const startEdit = useCallback(() => {
     cancelledRef.current = false;
@@ -189,6 +211,15 @@ const MessageRow = memo(function MessageRow({
 
   return (
     <div
+      onPointerDown={startLongPress}
+      onPointerUp={clearLongPressTimer}
+      onPointerCancel={clearLongPressTimer}
+      onPointerLeave={clearLongPressTimer}
+      onContextMenu={(event) => {
+        if (isTemp || editing) return;
+        event.preventDefault();
+        setActionsOpen(true);
+      }}
       className={cn(
         "group/msg relative flex gap-2.5 px-4 py-0.5 hover:bg-accent/30 transition-colors",
         "before:absolute before:inset-x-0 before:-top-3 before:h-3 before:content-['']", // CEREBRO-PATCH(channels-msg-hover-gap-fix): TECH-2909
@@ -223,7 +254,7 @@ const MessageRow = memo(function MessageRow({
         )}
       </div>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-hidden">
         {!continuation && (
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold">
@@ -289,7 +320,7 @@ const MessageRow = memo(function MessageRow({
             {isDragOver && <FileDropOverlay />}
           </div>
         ) : (
-          <div className="text-sm leading-snug text-foreground/90">
+          <div className="text-sm leading-snug text-foreground/90 wrap-anywhere">
             <ReadonlyContent
               content={entry.content ?? ""}
               attachments={entry.attachments}
@@ -340,7 +371,12 @@ const MessageRow = memo(function MessageRow({
       </div>
 
       {!isTemp && !editing && (
-        <div className="absolute -top-3 right-4 hidden items-center gap-0.5 rounded-md border bg-background shadow-sm group-hover/msg:flex">
+        <div
+          className={cn(
+            "absolute -top-3 right-4 items-center gap-0.5 rounded-md border bg-background shadow-sm",
+            actionsOpen ? "flex" : "hidden sm:group-hover/msg:flex sm:focus-within:flex",
+          )}
+        >
           <QuickEmojiPicker
             onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
             align="end"
@@ -361,7 +397,7 @@ const MessageRow = memo(function MessageRow({
             </TooltipTrigger>
             <TooltipContent side="top">Reply in thread</TooltipContent>
           </Tooltip>
-          <DropdownMenu>
+          <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
             <DropdownMenuTrigger
               render={
                 <Button
@@ -391,6 +427,12 @@ const MessageRow = memo(function MessageRow({
                   Opret issue
                 </DropdownMenuItem>
               )}
+              {reminder.enabled && (
+                <DropdownMenuItem onClick={() => reminder.openReminder(entry.id, entry.content ?? "")}>
+                  <BellRing className="h-3.5 w-3.5" />
+                  {reminder.label}
+                </DropdownMenuItem>
+              )}
               {(canEdit || canDelete) && (
                 <>
                   <DropdownMenuSeparator />
@@ -415,6 +457,7 @@ const MessageRow = memo(function MessageRow({
           </DropdownMenu>
         </div>
       )}
+      {reminder.dialog}
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
