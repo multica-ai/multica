@@ -39,6 +39,8 @@ ARG KOTLIN_VERSION
 ARG GOLANGCI_LINT_VERSION
 ARG KTLINT_VERSION
 ARG PNPM_VERSION
+ARG KUBECTL_VERSION
+ARG HELM_VERSION
 # Android SDK/NDK component versions don't need a per-file pin (they rarely
 # bump). Defaults stay in-Dockerfile and can be overridden via --build-arg.
 ARG ANDROID_CMDLINE_TOOLS_VERSION=13114758
@@ -50,7 +52,9 @@ RUN test -n "$RUST_VERSION"             || { echo "RUST_VERSION build arg is req
     && test -n "$KOTLIN_VERSION"        || { echo "KOTLIN_VERSION build arg is required" >&2; exit 1; } \
     && test -n "$GOLANGCI_LINT_VERSION" || { echo "GOLANGCI_LINT_VERSION build arg is required" >&2; exit 1; } \
     && test -n "$KTLINT_VERSION"        || { echo "KTLINT_VERSION build arg is required" >&2; exit 1; } \
-    && test -n "$PNPM_VERSION"          || { echo "PNPM_VERSION build arg is required" >&2; exit 1; }
+    && test -n "$PNPM_VERSION"          || { echo "PNPM_VERSION build arg is required" >&2; exit 1; } \
+    && test -n "$KUBECTL_VERSION"       || { echo "KUBECTL_VERSION build arg is required" >&2; exit 1; } \
+    && test -n "$HELM_VERSION"          || { echo "HELM_VERSION build arg is required" >&2; exit 1; }
 
 # Base apt packages: VCS, SSH, build/debug tooling, common dev utilities,
 # JDK 17 for Kotlin/Android Gradle Plugin 8.x.
@@ -172,6 +176,18 @@ RUN corepack enable \
     && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
     && corepack prepare "yarn@stable" --activate
 
+# ── Kubernetes CLI tooling (kubectl + helm) ───────────────────────────
+RUN curl -fsSL "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+       -o /usr/local/bin/kubectl \
+    && chmod +x /usr/local/bin/kubectl \
+    && kubectl version --client \
+    && curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" \
+       | tar -xz -C /tmp \
+    && mv /tmp/linux-amd64/helm /usr/local/bin/helm \
+    && rm -rf /tmp/linux-amd64 \
+    && chmod +x /usr/local/bin/helm \
+    && helm version --short
+
 # Non-root user the daemon and agents run as.
 RUN groupadd -g 1001 multica \
     && useradd -m -u 1001 -g 1001 -s /bin/bash multica
@@ -206,4 +222,6 @@ RUN multica version || true \
     && pnpm --version \
     && yarn --version \
     && sdkmanager --version \
-    && test -d "$ANDROID_NDK_HOME"
+    && test -d "$ANDROID_NDK_HOME" \
+    && kubectl version --client \
+    && helm version --short
