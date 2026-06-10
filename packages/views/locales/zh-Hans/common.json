@@ -5,6 +5,7 @@
   "confirm": "确认",
   "loading": "加载中...",
   "time": {
+    "never": "从未",
     "just_now": "刚刚",
     "minutes_ago": "{{count}} 分钟前",
     "hours_ago": "{{count}} 小时前",

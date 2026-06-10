@@ -83,6 +83,7 @@
     },
     "on_hold": {
       "label": "On hold",
+      "soon": "soon",
       "resumes_in": "Resumes {{time}}",
       "tooltip": "This runtime is paused — tasks are queued and will resume automatically."
     }

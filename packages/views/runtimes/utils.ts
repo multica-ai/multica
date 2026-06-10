@@ -17,47 +17,48 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-// Human-readable countdown until a hold expires ("in 5h 23m", "in 12m", "soon").
+// Human-readable countdown until a hold expires, using Intl.RelativeTimeFormat
+// so the output matches the active UI locale.
 // Returns null when holdUntil is null/undefined so callers can gate on truthiness.
 // `now` defaults to Date.now() but can be injected for testability.
+// `soon` is the caller-supplied translation of the "expired/imminent" label.
 export function formatHoldUntil(
   holdUntil: string | null | undefined,
   now: number = Date.now(),
+  locale: string = "en",
+  soon: string = "soon",
 ): string | null {
   if (!holdUntil) return null;
   const diffMs = new Date(holdUntil).getTime() - now;
-  if (diffMs <= 0) return "soon";
+  if (diffMs <= 0) return soon;
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "always", style: "short" });
   const minutes = Math.ceil(diffMs / 60_000);
   const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  if (hours > 0) return mins > 0 ? `in ${hours}h ${mins}m` : `in ${hours}h`;
-  return `in ${minutes}m`;
+  if (hours > 0) return rtf.format(hours, "hour");
+  return rtf.format(minutes, "minute");
 }
 
-// Compound-unit relative timestamp ("2m 14s ago", "1d 4h ago", "6d 19h ago")
-// — gives the user enough precision to tell "just lost" from "long lost"
-// at a glance without forcing them to mouse-over for a full timestamp.
-export function formatLastSeen(lastSeenAt: string | null): string {
-  if (!lastSeenAt) return "Never";
+// Locale-aware relative timestamp using Intl.RelativeTimeFormat.
+// `locale` should be the active i18n language (e.g. i18n.language from useT).
+// `never` and `justNow` are caller-supplied translations for the two edge cases
+// that Intl.RelativeTimeFormat cannot express.
+export function formatLastSeen(
+  lastSeenAt: string | null,
+  locale: string = "en",
+  { never = "never", justNow = "just now" }: { never?: string; justNow?: string } = {},
+): string {
+  if (!lastSeenAt) return never;
   const diffMs = Date.now() - new Date(lastSeenAt).getTime();
-  if (diffMs < 5_000) return "Just now";
-
+  if (diffMs < 5_000) return justNow;
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "always", style: "short" });
   const seconds = Math.floor(diffMs / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
-
-  if (minutes < 1) return `${seconds}s ago`;
-  if (hours < 1) {
-    const s = seconds % 60;
-    return s > 0 ? `${minutes}m ${s}s ago` : `${minutes}m ago`;
-  }
-  if (days < 1) {
-    const m = minutes % 60;
-    return m > 0 ? `${hours}h ${m}m ago` : `${hours}h ago`;
-  }
-  const h = hours % 24;
-  return h > 0 ? `${days}d ${h}h ago` : `${days}d ago`;
+  if (minutes < 1) return rtf.format(-seconds, "second");
+  if (hours < 1) return rtf.format(-minutes, "minute");
+  if (days < 1) return rtf.format(-hours, "hour");
+  return rtf.format(-days, "day");
 }
 
 // Turns the back-end's `device_info` string ("MacBook-Pro · darwin-amd64",
