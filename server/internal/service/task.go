@@ -1518,14 +1518,17 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	s.captureTaskFailed(ctx, task)
 
 	// Session limit: place the runtime on hold before auto-retry so the
-	// retried task won't be claimed until the hold lifts.
+	// retried task won't be claimed until the hold lifts. When the reset time
+	// is unparseable no hold is placed, and MaybeRetryFailedTask then declines
+	// to retry (gated on runtimeOnHold) so the task can't hot-loop.
 	if failureReason == "session_limit" && task.RuntimeID.Valid {
 		s.HoldRuntimeIfSessionLimit(ctx, task.RuntimeID, task.ID, errMsg)
 	}
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
-	// runtime_recovery, session_limit). The helper itself enforces attempt < max_attempts
-	// and only triggers for issue/chat tasks.
+	// runtime_recovery, session_limit). The helper enforces attempt < max_attempts,
+	// only triggers for issue/chat tasks, and for session_limit additionally
+	// requires the runtime to be on hold.
 	retried, _ := s.MaybeRetryFailedTask(ctx, task)
 
 	// Skip the per-failure system comment when we'll immediately retry —
@@ -1621,6 +1624,19 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		reason = parent.FailureReason.String
 	}
 	if !retryableReasons[reason] {
+		return nil, nil
+	}
+	// session_limit is only safe to auto-retry once the runtime is on hold.
+	// The retry clone carries the same runtime_id, and every claim path skips
+	// held runtimes, so the retry waits for the reset instead of being
+	// re-dispatched immediately. If the runtime is not held — e.g. the reset
+	// time was unparseable so HoldRuntimeIfSessionLimit placed no hold — the
+	// retry would be claimed at once and hot-loop the task until max_attempts.
+	if reason == "session_limit" && !s.runtimeOnHold(ctx, parent.RuntimeID) {
+		slog.Warn("session_limit auto-retry skipped: runtime not on hold",
+			"task_id", util.UUIDToString(parent.ID),
+			"runtime_id", util.UUIDToString(parent.RuntimeID),
+		)
 		return nil, nil
 	}
 	if parent.Attempt >= parent.MaxAttempts {

@@ -10,7 +10,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
-	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // HoldRuntime places a runtime on hold until the given reset time. While on
@@ -51,20 +50,28 @@ func (s *TaskService) HoldRuntime(ctx context.Context, runtimeID pgtype.UUID, re
 	return nil
 }
 
-// HoldRuntimeIfSessionLimit classifies the error message, and when it
-// indicates a session limit with a parseable reset time, places the runtime
-// on hold until that time. Bundles the Classify + ParseSessionLimitResetTime
-// + HoldRuntime chain so callers cannot accidentally hold a runtime without
-// first verifying the reset time is parseable (which would leave the runtime
-// stuck on hold indefinitely).
+// HoldRuntimeIfSessionLimit places the runtime on hold until the session
+// limit's reset time. The caller must have already classified errMsg as a
+// session-limit failure; the helper only extracts the reset time and applies
+// the hold, so it cannot accidentally hold a runtime without a bounded
+// hold_until (which would leave the runtime stuck on hold indefinitely).
 //
-// Returns true when the runtime was placed on hold, false otherwise.
+// Returns true when the runtime was placed on hold, false otherwise. A false
+// return means no bounded hold could be applied — currently only when the
+// reset time is unparseable — and the caller must NOT auto-retry the task in
+// that case, otherwise the retry is claimed immediately and hot-loops until
+// max_attempts.
 func (s *TaskService) HoldRuntimeIfSessionLimit(ctx context.Context, runtimeID, taskID pgtype.UUID, errMsg string) bool {
-	if taskfailure.Classify(errMsg) != taskfailure.ReasonSessionLimit {
-		return false
-	}
 	resetTime, ok := ParseSessionLimitResetTime(errMsg)
 	if !ok {
+		// Classified as session_limit but the reset time is unparseable, so we
+		// cannot bound the hold. Surface it instead of degrading silently: the
+		// task is left un-retried rather than hot-looping, and an unparseable
+		// reset time means the upstream message format likely drifted.
+		slog.Warn("session limit detected but reset time unparseable; runtime not held",
+			"runtime_id", util.UUIDToString(runtimeID),
+			"task_id", util.UUIDToString(taskID),
+		)
 		return false
 	}
 	if err := s.HoldRuntime(ctx, runtimeID, "session_limit", resetTime); err != nil {
@@ -76,6 +83,27 @@ func (s *TaskService) HoldRuntimeIfSessionLimit(ctx context.Context, runtimeID, 
 		return false
 	}
 	return true
+}
+
+// runtimeOnHold reports whether the runtime currently has an active hold
+// (hold_until set and in the future). It is the gate for auto-retrying
+// session_limit failures: the retry is only safe once the runtime is held,
+// otherwise the requeued task is claimed immediately and hot-loops. A missing
+// runtime or read error is treated as "not held" so the caller fails closed
+// (no retry) rather than risking a hot-loop.
+func (s *TaskService) runtimeOnHold(ctx context.Context, runtimeID pgtype.UUID) bool {
+	if !runtimeID.Valid {
+		return false
+	}
+	rt, err := s.Queries.GetAgentRuntime(ctx, runtimeID)
+	if err != nil {
+		slog.Warn("failed to read runtime hold state for retry gating",
+			"runtime_id", util.UUIDToString(runtimeID),
+			"error", err,
+		)
+		return false
+	}
+	return rt.HoldUntil.Valid && rt.HoldUntil.Time.After(time.Now())
 }
 
 // ResumeRuntime clears the hold on a runtime, allowing tasks to be
