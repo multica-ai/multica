@@ -59,7 +59,7 @@ func (s *TaskService) HoldRuntime(ctx context.Context, runtimeID pgtype.UUID, re
 // stuck on hold indefinitely).
 //
 // Returns true when the runtime was placed on hold, false otherwise.
-func (s *TaskService) HoldRuntimeIfSessionLimit(ctx context.Context, runtimeID pgtype.UUID, errMsg string) bool {
+func (s *TaskService) HoldRuntimeIfSessionLimit(ctx context.Context, runtimeID, taskID pgtype.UUID, errMsg string) bool {
 	if taskfailure.Classify(errMsg) != taskfailure.ReasonSessionLimit {
 		return false
 	}
@@ -70,6 +70,7 @@ func (s *TaskService) HoldRuntimeIfSessionLimit(ctx context.Context, runtimeID p
 	if err := s.HoldRuntime(ctx, runtimeID, "session_limit", resetTime); err != nil {
 		slog.Warn("failed to hold runtime after session limit",
 			"runtime_id", util.UUIDToString(runtimeID),
+			"task_id", util.UUIDToString(taskID),
 			"error", err,
 		)
 		return false
