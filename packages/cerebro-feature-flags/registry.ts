@@ -640,10 +640,10 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   },
   {
     key: "cerebro_comment_target_guard",
-    label: "Require a target on agent comments",
+    label: "Require a recipient on agent comments",
     group: "issues",
     description:
-      "Reject an agent-authored comment that mentions no target at all — it must point at a person, an agent, or an issue (e.g. MUL-123). An issue link counts and has no side effect, so an agent can always satisfy the rule without waking another agent; member comments are never affected. Off restores the prior behaviour (agent comments with no target allowed). FIR-2674.",
+      "Reject an agent-authored comment that addresses no recipient — it must point at a person, an agent, or a squad. A bare issue link (e.g. MUL-123) no longer counts: it points at a case, not a person, so it never satisfies the rule. Member comments are never affected. Off restores the prior behaviour (agent comments with no recipient allowed). FIR-2674.",
   },
   {
     key: "cerebro_firtal_welcome",

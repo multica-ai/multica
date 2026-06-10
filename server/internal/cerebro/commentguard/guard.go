@@ -3,11 +3,11 @@
 //
 // Agents used to post comments with no addressee, so a reader could not tell
 // who a comment was for. This guard rejects an agent-authored comment that
-// references no target at all. A "target" is any mention: a member, an agent,
-// a squad, or an issue. An issue link (mention://issue/...) counts and has no
-// side effect, so an agent can always satisfy the rule without waking another
-// agent — only an agent mention triggers a run, so the guard never forces a
-// loop. Member-authored comments are never gated.
+// addresses no recipient. A "recipient" is a member, an agent, a squad, or an
+// @all mention. An issue link (mention://issue/...) does NOT count: it points
+// at a case, not a person, so agents were satisfying the rule with a bare
+// MUL-123 link while still addressing no one — exactly the behaviour the guard
+// exists to stop (TECH-3279). Member-authored comments are never gated.
 //
 // The guard is gated by the cerebro feature flag cerebro_comment_target_guard,
 // exactly like every other cerebro extension (registry.ts). It is resolved per
@@ -33,7 +33,7 @@ import (
 
 // MissingTargetMessage is returned to the caller (e.g. the CLI an agent posts
 // through) when a comment is rejected, so the agent can re-post with a target.
-const MissingTargetMessage = "comment must mention a target — a person, an agent, or an issue (e.g. MUL-123). Comments with no target are not allowed (FIR-2674)."
+const MissingTargetMessage = "comment must mention a recipient — a person, an agent, or a squad. A bare issue link (e.g. MUL-123) does not count; address someone (FIR-2674)."
 
 // OwnerMentionOnSubIssueMessage is returned when an agent on a sub-issue tries
 // to @mention the user the task was started for directly (TECH-3099).
@@ -53,9 +53,9 @@ const SplitSessionMessage = "This task session already posted on the parent issu
 const FlagCommentTargetGuard = "cerebro_comment_target_guard"
 
 // TECH-3099: three additional sub-issue guard flags (all default OFF).
-const FlagSubIssueNoOwnerMention  = "cerebro_sub_issue_no_owner_mention"
+const FlagSubIssueNoOwnerMention = "cerebro_sub_issue_no_owner_mention"
 const FlagSubIssueRequireAgentTag = "cerebro_sub_issue_require_agent_tag"
-const FlagSubIssueNoSplitSession  = "cerebro_sub_issue_no_split_session"
+const FlagSubIssueNoSplitSession = "cerebro_sub_issue_no_split_session"
 
 // flagReader is the subset of the cerebro Queries the guard needs to resolve
 // its feature flags. Satisfied by *cerebrodb.Queries; the interface keeps the
@@ -80,7 +80,8 @@ func New(flags flagReader) *Service { return &Service{flags: flags} }
 // Only agent-authored comments are ever gated, and only when the
 // cerebro_comment_target_guard flag is ON for the workspace. content must
 // already have had bare issue identifiers (e.g. "MUL-123") expanded into
-// mention links, so plain issue references count as a target.
+// mention links — but issue mentions do not satisfy the rule (TECH-3279); the
+// expansion only keeps parsing consistent with the rest of the comment pipeline.
 //
 // Additional sub-issue checks (TECH-3099) are enabled via their own flags:
 //   - isSubIssue: whether the target issue has a parent (parent_issue_id != nil)
@@ -107,8 +108,9 @@ func (s *Service) RejectComment(
 		return "", true
 	}
 
-	// Base check: comment must mention at least one target.
-	if len(util.ParseMentions(content)) == 0 {
+	// Base check: comment must address at least one recipient. An issue link
+	// does not count — it points at a case, not a person (TECH-3279).
+	if !hasRecipient(content) {
 		return MissingTargetMessage, false
 	}
 
@@ -129,6 +131,19 @@ func (s *Service) RejectComment(
 	}
 
 	return "", true
+}
+
+// hasRecipient reports whether content addresses at least one recipient — a
+// member, an agent, a squad, or @all. An issue mention (mention://issue/...)
+// does NOT count: it points at a case, not a person, so it cannot satisfy the
+// rule that every agent comment must be addressed to someone (TECH-3279).
+func hasRecipient(content string) bool {
+	for _, m := range util.ParseMentions(content) {
+		if m.Type != "issue" {
+			return true
+		}
+	}
+	return false
 }
 
 // mentionsOwner reports whether content contains a member mention whose ID

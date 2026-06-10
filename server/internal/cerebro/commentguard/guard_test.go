@@ -60,7 +60,8 @@ func TestRejectCommentFlagOn(t *testing.T) {
 		{"agent with no target rejected", "agent", "work is done", false},
 		{"agent with empty content rejected", "agent", "", false},
 		{"agent with member mention passes", "agent", "done [@Jesper](mention://member/b0edd870-4ea2-4638-a193-5c20f55170e6)", true},
-		{"agent with issue link passes", "agent", "see [MUL-123](mention://issue/10fb2c2c-1ec4-449d-a081-b690ef70eb17)", true},
+		{"agent with only an issue link rejected", "agent", "see [MUL-123](mention://issue/10fb2c2c-1ec4-449d-a081-b690ef70eb17)", false},
+		{"agent with issue link plus a recipient passes", "agent", "see [MUL-123](mention://issue/10fb2c2c-1ec4-449d-a081-b690ef70eb17) [@Jesper](mention://member/b0edd870-4ea2-4638-a193-5c20f55170e6)", true},
 		{"agent with agent mention passes", "agent", "[@Tine](mention://agent/8bfccab3-89ea-40cc-b57d-c7eabaa30f50) please test", true},
 		{"agent with squad mention passes", "agent", "[@Squad](mention://squad/8bfccab3-89ea-40cc-b57d-c7eabaa30f50)", true},
 		{"agent with all mention passes", "agent", "[@all](mention://all/all)", true},
@@ -113,10 +114,10 @@ func TestRejectCommentNilSafe(t *testing.T) {
 // allSubIssueFlags builds a fakeFlags with all guard flags on.
 func allSubIssueFlags() fakeFlags {
 	return fakeFlags{flags: map[string]bool{
-		FlagCommentTargetGuard:       true,
-		FlagSubIssueNoOwnerMention:   true,
-		FlagSubIssueRequireAgentTag:  true,
-		FlagSubIssueNoSplitSession:   true,
+		FlagCommentTargetGuard:      true,
+		FlagSubIssueNoOwnerMention:  true,
+		FlagSubIssueRequireAgentTag: true,
+		FlagSubIssueNoSplitSession:  true,
 	}}
 }
 
@@ -125,6 +126,12 @@ const agentID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 const issueRef = "[MUL-1](mention://issue/cccccccc-cccc-cccc-cccc-cccccccccccc)"
 const agentMention = "[@Tine](mention://agent/" + agentID + ")"
 const ownerMention = "[@Jesper](mention://member/" + ownerUserID + ")"
+
+// memberMention is a non-owner member — a valid recipient that satisfies the
+// base "must address someone" check without tagging an agent, so it lets the
+// sub-issue checks be exercised in isolation (TECH-3279 moved the base check
+// ahead of them, so a bare issue ref no longer reaches the sub-issue checks).
+const memberMention = "[@Other](mention://member/dddddddd-dddd-dddd-dddd-dddddddddddd)"
 
 // TestSubIssueNoOwnerMention — check 1.
 func TestSubIssueNoOwnerMention(t *testing.T) {
@@ -165,9 +172,9 @@ func TestSubIssueRequireAgentTag(t *testing.T) {
 	g := New(allSubIssueFlags())
 	ws := testWorkspaceID(t)
 
-	// Sub-issue with no agent mention → rejected.
+	// Sub-issue with a recipient but no agent mention → rejected by check 2.
 	msg, ok := g.RejectComment(context.Background(), ws, "agent",
-		issueRef, // only an issue ref, no agent mention
+		memberMention, // a recipient (passes base check) but no agent mention
 		true, []string{ownerUserID}, false)
 	if ok {
 		t.Fatalf("sub-issue without agent tag must be rejected")
@@ -184,9 +191,10 @@ func TestSubIssueRequireAgentTag(t *testing.T) {
 		t.Fatalf("sub-issue with agent tag must pass check 2")
 	}
 
-	// Top-level issue with no agent mention → passes (check 2 only applies to sub-issues).
+	// Top-level issue with a recipient but no agent mention → passes (check 2
+	// only applies to sub-issues).
 	_, ok = g.RejectComment(context.Background(), ws, "agent",
-		issueRef,
+		memberMention,
 		false, []string{ownerUserID}, false)
 	if !ok {
 		t.Fatalf("top-level issue without agent tag must pass")
@@ -242,9 +250,10 @@ func TestSubIssueChecksFlagOff(t *testing.T) {
 		t.Fatalf("owner mention must pass when sub-issue flag is off")
 	}
 
-	// Sub-issue with no agent tag → passes (require_agent_tag flag is off).
+	// Sub-issue with a recipient but no agent tag → passes (require_agent_tag
+	// flag is off; base check is satisfied by the member mention).
 	_, ok = g.RejectComment(context.Background(), ws, "agent",
-		issueRef,
+		memberMention,
 		true, []string{ownerUserID}, false)
 	if !ok {
 		t.Fatalf("missing agent tag must pass when sub-issue flag is off")
