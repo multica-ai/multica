@@ -3599,18 +3599,34 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	case "completed":
 		if result.Output == "" {
 			// The agent completed successfully but produced no text output.
-			// This is valid — the agent may have done all its work via tool
-			// calls (e.g. posting comments via CLI, pushing code). Treat as
-			// a normal completion so the task is not incorrectly marked as
-			// blocked.
-			return TaskResult{
-				Status:    "completed",
-				Comment:   "",
-				SessionID: result.SessionID,
-				WorkDir:   env.WorkDir,
-				EnvRoot:   env.RootDir,
-				Usage:     usageEntries,
-			}, nil
+			// Before treating this as a valid empty completion, attempt an
+			// export fallback for backends that support SessionExporter (opencode).
+			// may not stream text events over NDJSON even though the
+			// response is stored in the session DB. See #3922.
+			if result.SessionID != "" {
+				if exporter, ok := backend.(agent.SessionExporter); ok {
+					exported, exportErr := exporter.ExportSession(ctx, result.SessionID)
+					if exportErr != nil {
+						taskLog.Warn("session export fallback failed", "error", exportErr, "session_id", result.SessionID)
+					} else if exported != "" {
+						taskLog.Info("session export fallback recovered output", "bytes", len(exported), "session_id", result.SessionID)
+						result.Output = exported
+					}
+				}
+			}
+			if result.Output == "" {
+				// Still empty after fallback (or not an opencode backend).
+				// This is valid — the agent may have done all its work via
+				// tool calls (e.g. posting comments via CLI, pushing code).
+				return TaskResult{
+					Status:    "completed",
+					Comment:   "",
+					SessionID: result.SessionID,
+					WorkDir:   env.WorkDir,
+					EnvRoot:   env.RootDir,
+					Usage:     usageEntries,
+				}, nil
+			}
 		}
 		// Detect "poisoned" terminal output: the agent didn't reach a real
 		// conclusion but emitted a known fallback marker (iteration limit,
