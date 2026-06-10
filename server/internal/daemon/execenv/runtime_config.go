@@ -457,9 +457,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
 	b.WriteString("### Squad maintenance\n")
 	b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
-	b.WriteString(cerebroArtifactBrief()) // CEREBRO-PATCH(runtime-config-artifact-brief): adds Documents & Artifacts section to Available Commands
-	b.WriteString(cerebroWakeupBrief())   // CEREBRO-PATCH(cerebro-wakeup-brief): TECH-3013 adds Agent Wakeup section to Available Commands
-	b.WriteString(cerebroChatBrief())     // CEREBRO-PATCH(cerebro-chat-brief): TECH-3183 adds Chat Reply section to Available Commands
+	b.WriteString(cerebroArtifactBrief())  // CEREBRO-PATCH(runtime-config-artifact-brief): adds Documents & Artifacts section to Available Commands
+	b.WriteString(cerebroWakeupBrief())    // CEREBRO-PATCH(cerebro-wakeup-brief): TECH-3013 adds Agent Wakeup section to Available Commands
+	b.WriteString(cerebroChatBrief())      // CEREBRO-PATCH(cerebro-chat-brief): TECH-3183 adds Chat Reply section to Available Commands
+	b.WriteString(cerebroChannelsBrief()) // CEREBRO-PATCH(tech-3255-channels-brief): TECH-3255 adds Channels & DMs and Agent Usage sections to Available Commands
 
 	// Comment Formatting guardrail for ALL providers. The MUL-2904
 	// duplicate-comment loop happened because an agent inlined a backtick-wrapped
