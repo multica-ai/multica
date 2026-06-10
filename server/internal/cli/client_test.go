@@ -279,7 +279,7 @@ func TestUploadFileWithURL(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		client := NewAPIClient(srv.URL, "ws-1", "test-token")
+		client := NewAPIClient(srv.URL, "", "test-token")
 		id, url, err := client.UploadFileWithURL(context.Background(), []byte("hello"), "test.txt")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -329,22 +329,92 @@ func TestUploadFileWithURL(t *testing.T) {
 		}
 	})
 
-	t.Run("workspace header sent", func(t *testing.T) {
+	t.Run("direct upload without attachment context", func(t *testing.T) {
 		var gotWorkspace string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			gotWorkspace = r.Header.Get("X-Workspace-ID")
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(AttachmentResponse{ID: "att-1", URL: "https://example.com"})
+		var putCalled bool
+		putServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			putCalled = true
+			if r.Method != http.MethodPut {
+				t.Errorf("expected PUT, got %s", r.Method)
+			}
+			if got := r.Header.Get("Content-Type"); got != "image/png" {
+				t.Errorf("expected signed Content-Type image/png, got %q", got)
+			}
+			data, _ := io.ReadAll(r.Body)
+			if string(data) != "png" {
+				t.Errorf("unexpected PUT body: %q", string(data))
+			}
+			w.WriteHeader(http.StatusOK)
 		}))
-		defer srv.Close()
+		defer putServer.Close()
 
-		client := NewAPIClient(srv.URL, "ws-abc", "test-token")
-		_, _, err := client.UploadFileWithURL(context.Background(), []byte("x"), "x.txt")
+		paths := make([]string, 0, 2)
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			paths = append(paths, r.URL.Path)
+			if ws := r.Header.Get("X-Workspace-ID"); ws != "" {
+				gotWorkspace = ws
+			}
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/attachments/upload/initiate":
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode initiate body: %v", err)
+				}
+				if body["filename"] != "avatar.png" {
+					t.Errorf("expected filename avatar.png, got %#v", body["filename"])
+				}
+				if body["content_type"] != "image/png" {
+					t.Errorf("expected content_type image/png, got %#v", body["content_type"])
+				}
+				if body["issue_id"] != nil {
+					t.Errorf("expected nil issue_id, got %#v", body["issue_id"])
+				}
+				if body["comment_id"] != nil {
+					t.Errorf("expected nil comment_id, got %#v", body["comment_id"])
+				}
+				if body["chat_session_id"] != nil {
+					t.Errorf("expected nil chat_session_id, got %#v", body["chat_session_id"])
+				}
+				json.NewEncoder(w).Encode(directUploadInitiateResponse{
+					UploadURL:   putServer.URL + "/object",
+					UploadToken: "token-1",
+					Headers:     map[string]string{"Content-Type": "image/png"},
+				})
+			case "/api/attachments/upload/complete":
+				var body map[string]string
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode complete body: %v", err)
+				}
+				if body["upload_token"] != "token-1" {
+					t.Errorf("expected upload_token token-1, got %q", body["upload_token"])
+				}
+				json.NewEncoder(w).Encode(AttachmentResponse{
+					ID:  "att-1",
+					URL: "https://example.com/avatar.png",
+				})
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
+		}))
+		defer apiServer.Close()
+
+		client := NewAPIClient(apiServer.URL, "ws-abc", "test-token")
+		id, url, err := client.UploadFileWithURL(context.Background(), []byte("png"), "avatar.png")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+		if !putCalled {
+			t.Fatal("expected direct PUT to be called")
+		}
+		if id != "att-1" || url != "https://example.com/avatar.png" {
+			t.Fatalf("unexpected result id=%q url=%q", id, url)
+		}
 		if gotWorkspace != "ws-abc" {
 			t.Errorf("expected X-Workspace-ID ws-abc, got %s", gotWorkspace)
+		}
+		if strings.Join(paths, ",") != "/api/attachments/upload/initiate,/api/attachments/upload/complete" {
+			t.Fatalf("unexpected API paths: %v", paths)
 		}
 	})
 

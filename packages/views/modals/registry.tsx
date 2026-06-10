@@ -9,6 +9,7 @@ import { FeedbackModal } from "./feedback";
 import { SetParentIssueModal } from "./set-parent-issue";
 import { AddChildIssueModal } from "./add-child-issue";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
+import { ArchiveIssueConfirmModal, UnarchiveIssueConfirmModal } from "./archive-issue-confirm";
 import { BacklogAgentHintModal } from "./backlog-agent-hint";
 
 export function ModalRegistry() {
@@ -30,13 +31,17 @@ export function ModalRegistry() {
     case "create-squad":
       return <CreateSquadModal onClose={close} />;
     case "feedback":
-      return <FeedbackModal onClose={close} />;
+      return <FeedbackModal onClose={close} data={data} />;
     case "issue-set-parent":
       return <SetParentIssueModal onClose={close} data={data} />;
     case "issue-add-child":
       return <AddChildIssueModal onClose={close} data={data} />;
     case "issue-delete-confirm":
       return <DeleteIssueConfirmModal onClose={close} data={data} />;
+    case "issue-archive-confirm":
+      return <ArchiveIssueConfirmModal onClose={close} data={data} />;
+    case "issue-unarchive-confirm":
+      return <UnarchiveIssueConfirmModal onClose={close} data={data} />;
     case "issue-backlog-agent-hint":
       return <BacklogAgentHintModal onClose={close} data={data} />;
     default:

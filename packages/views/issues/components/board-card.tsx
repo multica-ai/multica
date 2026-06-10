@@ -7,6 +7,7 @@ import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -28,10 +29,7 @@ import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
 function descriptionPreview(markdown: string): string {
@@ -279,7 +277,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                       trigger={
                         <span
                           className={`flex items-center gap-1 text-xs ${
-                            new Date(issue.due_date!) < new Date()
+                            isPastDateOnly(issue.due_date)
                               ? "text-destructive"
                               : "text-muted-foreground"
                           }`}
@@ -293,7 +291,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                 ) : (
                   <span
                     className={`flex shrink-0 items-center gap-1 text-xs ${
-                      new Date(issue.due_date!) < new Date()
+                      isPastDateOnly(issue.due_date)
                         ? "text-destructive"
                         : "text-muted-foreground"
                     }`}
@@ -332,6 +330,7 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
 
 export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress, disableSorting }: { issue: Issue; childProgress?: ChildProgress; disableSorting?: boolean }) {
   const p = useWorkspacePaths();
+  const isArchived = !!issue.archived_at;
   const {
     attributes,
     listeners,
@@ -343,7 +342,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
     id: issue.id,
     data: { status: issue.status },
     animateLayoutChanges,
-    disabled: disableSorting ? { droppable: true } : undefined,
+    disabled: disableSorting || isArchived ? true : undefined,
   });
 
   const style = {
@@ -358,13 +357,16 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
         style={style}
         {...attributes}
         {...listeners}
-        className={`group/card ${isDragging ? "opacity-30" : ""}`}
+        className={`group/card ${isDragging ? "opacity-30" : ""} ${isArchived ? "opacity-60" : ""}`}
       >
         <AppLink
           href={p.issueDetail(issue.identifier)}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <BoardCardContent issue={issue} editable childProgress={childProgress} />
+          <BoardCardContent issue={issue} editable={!isArchived} childProgress={childProgress} />
+          {isArchived && (
+            <div className="px-2.5 pb-2 pt-1 text-[11px] text-muted-foreground">Archived</div>
+          )}
         </AppLink>
       </div>
     </IssueActionsContextMenu>

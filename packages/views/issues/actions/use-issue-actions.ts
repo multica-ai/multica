@@ -8,9 +8,11 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
+import { ApiError } from "@multica/core/api";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
@@ -27,6 +29,8 @@ export interface UseIssueActionsResult {
   openSetParent: () => void;
   openAddChild: () => void;
   openDeleteConfirm: (opts?: { onDeletedNavigateTo?: string }) => void;
+  openArchiveConfirm: () => void;
+  openUnarchiveConfirm: () => void;
 }
 
 /**
@@ -84,16 +88,19 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       updateIssue.mutate(
         { id: issueId, ...updates },
         {
-          onError: (err) =>
+          onError: (err) => {
+            if (err instanceof ApiError && err.status === 409) {
+              toast.warning(t(($) => $.detail.description_conflict));
+              return;
+            }
             toast.error(
               err instanceof Error && err.message
                 ? err.message
                 : t(($) => $.detail.update_failed),
-            ),
+            );
+          },
         },
       );
-      // Hint: assigning an agent to a backlog issue won't trigger execution
-      // until the issue is moved to an active status.
       if (
         updates.assignee_type === "agent" &&
         updates.assignee_id &&
@@ -119,10 +126,9 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const copyLink = useCallback(async () => {
     if (!issueIdentifier) return;
     const url = navigation.getShareableUrl(paths.issueDetail(issueIdentifier));
-    try {
-      await navigator.clipboard.writeText(url);
+    if (await copyText(url)) {
       toast.success(t(($) => $.detail.link_copied));
-    } catch {
+    } else {
       toast.error(t(($) => $.detail.link_copy_failed));
     }
   }, [paths, issueIdentifier, navigation, t]);
@@ -170,6 +176,16 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     [openModal, issueId, issueIdentifier],
   );
 
+  const openArchiveConfirm = useCallback(() => {
+    if (!issueId) return;
+    openModal("issue-archive-confirm", { issueId, issueTitle });
+  }, [openModal, issueId, issueTitle]);
+
+  const openUnarchiveConfirm = useCallback(() => {
+    if (!issueId) return;
+    openModal("issue-unarchive-confirm", { issueId, issueTitle });
+  }, [openModal, issueId, issueTitle]);
+
   return {
     isPinned,
     canDelete,
@@ -181,5 +197,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openSetParent,
     openAddChild,
     openDeleteConfirm,
+    openArchiveConfirm,
+    openUnarchiveConfirm,
   };
 }

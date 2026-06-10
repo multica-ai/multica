@@ -11,6 +11,7 @@ import {
   Copy,
   FilePlus2,
   FolderKanban,
+  Plus,
   Maximize2,
   Minimize2,
   Play,
@@ -20,6 +21,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +36,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@multica/ui/components/ui/select";
+import { Input } from "@multica/ui/components/ui/input";
 import { TimeInput } from "@multica/ui/components/ui/time-input";
 import { TimezonePicker } from "./pickers/timezone-picker";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -82,6 +85,7 @@ export interface AutopilotInitial {
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
+  manual_options: string[];
 }
 
 export type AutopilotDialogProps =
@@ -150,6 +154,18 @@ const OUTPUT_MODE_ICONS: Record<AutopilotExecutionMode, typeof FilePlus2> = {
   create_issue: FilePlus2,
   run_only: Play,
 };
+
+function normalizeManualOptions(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
 
 // ---------------------------------------------------------------------------
 // Next-run computation (local approximation — server stores the authoritative value)
@@ -284,6 +300,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
   );
+  const [manualOptions, setManualOptions] = useState<string[]>(
+    normalizeManualOptions(initial.manual_options ?? []),
+  );
 
   const initialCfg: TriggerConfig = (() => {
     if (isCreate) {
@@ -378,6 +397,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          manual_options: normalizeManualOptions(manualOptions),
         });
         let triggerOk = true;
         let triggerErrMessage: string | null = null;
@@ -427,6 +447,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          manual_options: normalizeManualOptions(manualOptions),
         });
         let triggerOk = true;
         let triggerErrMessage: string | null = null;
@@ -587,10 +608,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         {/* Body: two columns (stacks on narrow screens via flex-wrap at container level) */}
         <div
           key={contentKey}
-          className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden"
+          className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden"
         >
           {/* Left: Runbook */}
-          <div className="flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
+          <div className="flex-none lg:flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
             <div className="px-6 pt-5 pb-3 shrink-0">
               <TitleEditor
                 autoFocus={isCreate}
@@ -611,8 +632,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               </span>
             </div>
 
-            <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col">
-              <div className="h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
+            <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col lg:h-full">
+              <div className="min-h-[200px] lg:min-h-0 lg:h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
                 <ContentEditor
                   defaultValue={initial.description ?? ""}
                   placeholder={t(($) => $.dialog.description_placeholder)}
@@ -625,7 +646,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           </div>
 
           {/* Right: Configuration */}
-          <aside className="w-full lg:w-[340px] shrink-0 overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
+          <aside className="w-full lg:w-[340px] shrink-0 overflow-visible lg:overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
             <AgentSection
               selectedType={assigneeType}
               selectedId={assigneeId}
@@ -635,6 +656,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             />
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
+
+            <ManualOptionsSection options={manualOptions} onChange={setManualOptions} />
 
             {executionMode === "create_issue" && (
               <ProjectSection
@@ -821,6 +844,84 @@ function OutputModeSection({
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function ManualOptionsSection({
+  options,
+  onChange,
+}: {
+  options: string[];
+  onChange: (options: string[]) => void;
+}) {
+  const { t } = useT("autopilots");
+  const [draft, setDraft] = useState("");
+
+  const addOption = () => {
+    const next = normalizeManualOptions([...options, draft]);
+    onChange(next);
+    setDraft("");
+  };
+
+  const removeOption = (option: string) => {
+    onChange(options.filter((item) => item !== option));
+  };
+
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_manual_options)}</SectionLabel>
+      <div className="space-y-2">
+        <div className="flex gap-1.5">
+          <Input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addOption();
+              }
+            }}
+            placeholder={t(($) => $.dialog.manual_option_placeholder)}
+            className="h-8 text-sm"
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            className="h-8 w-8 shrink-0"
+            onClick={addOption}
+            disabled={draft.trim().length === 0}
+            title={t(($) => $.dialog.manual_option_add)}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        </div>
+        {options.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {options.map((option) => (
+              <span
+                key={option}
+                className="inline-flex max-w-full items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs"
+              >
+                <span className="truncate">{option}</span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground"
+                  onClick={() => removeOption(option)}
+                  title={t(($) => $.dialog.manual_option_remove)}
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {t(($) => $.dialog.manual_options_empty)}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1114,12 +1215,11 @@ function WebhookCreatedPanel({
 
   const handleCopy = async () => {
     if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
+    if (await copyText(url)) {
       setCopied(true);
       toast.success(t(($) => $.trigger_row.url_copied));
       setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       toast.error(t(($) => $.trigger_row.url_copy_failed));
     }
   };

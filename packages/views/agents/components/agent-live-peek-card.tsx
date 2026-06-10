@@ -16,7 +16,7 @@ import type { AgentTask } from "@multica/core/types";
 import { AlertTriangle } from "lucide-react";
 import { AppLink } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
-import { workloadConfig } from "../presence";
+import { availabilityConfig, workloadConfig } from "../presence";
 
 interface AgentLivePeekCardProps {
   agentId: string;
@@ -73,8 +73,14 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
     .toUpperCase()
     .slice(0, 2);
 
+  // Archived wins over workload — a retired agent reads "Archived", never
+  // "Idle"/"Working". availability is the unified signal (see
+  // deriveAgentPresenceDetail); for archived it's set before any task scan.
+  const isArchived =
+    presence !== "loading" && presence.availability === "archived";
   const workload = presence === "loading" ? null : presence.workload;
   const workloadVisual = workload ? workloadConfig[workload] : null;
+  const archivedVisual = availabilityConfig.archived;
 
   return (
     <div className="flex flex-col gap-3 text-left">
@@ -91,7 +97,16 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{agent.name}</p>
           <div className="mt-0.5 inline-flex items-center gap-1.5">
-            {workloadVisual ? (
+            {isArchived ? (
+              <>
+                <archivedVisual.icon
+                  className={`h-3 w-3 shrink-0 ${archivedVisual.textClass}`}
+                />
+                <span className={`text-xs ${archivedVisual.textClass}`}>
+                  {t(($) => $.availability.archived)}
+                </span>
+              </>
+            ) : workloadVisual ? (
               <>
                 <workloadVisual.icon
                   className={`h-3 w-3 shrink-0 ${workloadVisual.textClass}`}

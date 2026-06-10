@@ -36,6 +36,9 @@ var capabilityRegistry = map[string]Capability{
 		ResumeSession:    true,
 		StructuredOutput: true,
 	},
+	"antigravity": {
+		ResumeSession: true,
+	},
 	"copilot": {
 		StreamDisplay:    true,
 		ToolCallStream:   true,
@@ -50,6 +53,10 @@ var capabilityRegistry = map[string]Capability{
 		StructuredOutput: true,
 	},
 	"openclaw": {
+		ResumeSession:    true,
+		StructuredOutput: true,
+	},
+	"wujieclaw": {
 		ResumeSession:    true,
 		StructuredOutput: true,
 	},
@@ -77,7 +84,16 @@ var capabilityRegistry = map[string]Capability{
 		ResumeSession:    true,
 		StructuredOutput: true,
 	},
+	"qoderclicn": {
+		StreamDisplay:    true,
+		ToolCallStream:   true,
+		ResumeSession:    true,
+		StructuredOutput: true,
+	},
 	"DeepSeek-TUI": {
+		StructuredOutput: true,
+	},
+	"mmx": {
 		StructuredOutput: true,
 	},
 }

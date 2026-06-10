@@ -89,6 +89,7 @@ function makeWorkspace(): Workspace {
     description: null,
     context: null,
     wiki_content: null,
+    avatar_url: null,
     settings: {},
     repos: [],
     issue_prefix: "OPE",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  fillTableColumnWidths,
   getIssueMentionId,
   parseMobileIssueLink,
   parseFileCardLine,
@@ -7,6 +8,38 @@ import {
   preprocessMobileMarkdown,
   resolveMobileFileCardUrl,
 } from "./markdown-utils";
+import { buildMobileIssueWebHref } from "../../navigation/issue-links";
+
+describe("mobile markdown table preview widths", () => {
+  it("expands narrow columns to fill the viewport", () => {
+    expect(fillTableColumnWidths({ maxWidth: 200, viewportWidth: 300, widths: [60, 90] })).toEqual([
+      135,
+      165,
+    ]);
+  });
+
+  it("does not shrink tables that are already wider than the viewport", () => {
+    expect(fillTableColumnWidths({ maxWidth: 300, viewportWidth: 300, widths: [180, 180] })).toEqual([
+      180,
+      180,
+    ]);
+  });
+
+  it("respects max column width while expanding", () => {
+    expect(fillTableColumnWidths({ maxWidth: 120, viewportWidth: 300, widths: [100, 80] })).toEqual([
+      120,
+      120,
+    ]);
+  });
+
+  it("handles empty columns and invalid viewport widths", () => {
+    expect(fillTableColumnWidths({ maxWidth: 200, viewportWidth: 300, widths: [] })).toEqual([]);
+    expect(fillTableColumnWidths({ maxWidth: 200, viewportWidth: 0, widths: [80, 80] })).toEqual([
+      80,
+      80,
+    ]);
+  });
+});
 
 describe("mobile markdown preprocessing", () => {
   it("recognizes upload file cards", () => {
@@ -104,10 +137,35 @@ describe("mobile markdown preprocessing", () => {
     });
   });
 
+  it("parses workspace-aware mobile scheme issue links", () => {
+    expect(
+      parseMobileIssueLink(
+        "wujieai-multicam://openharness/issues/OPE-744?comment=27a21862-583c-4680-a736-ae29f97f5e38",
+        ["https://multica.wujieai.com"],
+      ),
+    ).toEqual({
+      workspaceSlug: "openharness",
+      issueId: "OPE-744",
+      commentId: "27a21862-583c-4680-a736-ae29f97f5e38",
+    });
+  });
+
+  it("builds mobile issue web links with encoded comment params", () => {
+    expect(
+      buildMobileIssueWebHref({
+        baseUrl: "https://multica.wujieai.com/",
+        workspaceSlug: "open harness",
+        issueId: "OPE-744",
+        commentId: "comment id",
+      }),
+    ).toBe("https://multica.wujieai.com/open%20harness/issues/OPE-744?comment=comment%20id");
+  });
+
   it.each([
     "https://example.com/openharness/issues/OPE-744",
     "https://multica.wujieai.com/issues/OPE-744",
     "https://multica.wujieai.com/openharness/issues/OPE-744/properties",
+    "wujieai-multicam://issues/issue-1?commentId=comment-1",
     "multica://openharness/issues/OPE-744",
   ])("does not parse untrusted or unsupported issue links: %s", (href) => {
     expect(parseMobileIssueLink(href, ["https://multica.wujieai.com"])).toBeNull();

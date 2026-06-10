@@ -16,6 +16,14 @@ declare module "*.png" {
   const src: string | StaticImageAsset;
   export default src;
 }
+declare module "*.jpg" {
+  const src: string | StaticImageAsset;
+  export default src;
+}
+declare module "*.jpeg" {
+  const src: string | StaticImageAsset;
+  export default src;
+}
 declare module "*.svg" {
   const src: string | StaticImageAsset;
   export default src;

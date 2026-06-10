@@ -24,12 +24,8 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { RetryWithNoteDialog } from "./retry-with-note-dialog";
 import { useAgentColorMap } from "./task-agent-colors";
 
-// Mask gradient that fades the trigger-summary text into transparency at
-// the right edge. Mirrors the pattern used by the desktop tab bar
-// (apps/desktop/.../tab-bar.tsx) and the sidebar pin item
-// (packages/views/layout/app-sidebar.tsx) — gives the row a smooth
-// visual ramp toward the trailing actions instead of a hard truncate +
-// ellipsis cut.
+// Fade the trigger text before fixed-width metadata/actions so truncation does
+// not land as a hard visual edge.
 const TRIGGER_MASK_STYLE: React.CSSProperties = {
   maskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
   WebkitMaskImage:
@@ -45,13 +41,14 @@ const TRIGGER_MASK_STYLE: React.CSSProperties = {
 //     (sticky card stays as a header-only banner)
 //   - the standalone <TaskRunHistory> below the main content
 //
-// Row layout — three columns, left to right:
+// Row layout — simple left/right flex:
 //   1. Agent avatar (no status dot — agent availability is not the
 //      story here; the row's right column carries the task status)
-//   2. Trigger description (e.g. "From comment", "Autopilot", "Retry"),
-//      truncated with ellipsis when narrow
-//   3. Status + relative time, swapped to hover actions (cancel /
-//      transcript) on hover
+//   2. Trigger description flexes and truncates
+//   3. Status is a normal shrink-0 right column; on hover it is replaced
+//      in place by the action buttons (status is removed, not covered).
+//      Left text keeps flex-1 so the row never shows a mid-row gap. Do
+//      not use masks/padding gymnastics here.
 //
 // One query (`listTasksByIssue`) drives both buckets — the back-end
 // returns every status, the front-end filters into active vs past on the
@@ -278,9 +275,6 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
   cancelled: "text-muted-foreground",
 };
 
-// Time anchor depends on status. Active rows want "Started 2m ago" /
-// "Queued 30s ago" — what's happening now. Past rows want "5m ago" — when
-// the verdict landed.
 function activeTimeText(task: AgentTask, timeAgo: (dateStr: string) => string): string {
   if (task.status === "running" && task.started_at) {
     return timeAgo(task.started_at);
@@ -578,8 +572,6 @@ function RowShell({
   colorClass?: string;
   children: React.ReactNode;
 }) {
-  // `relative` so the absolute-positioned RowActions slot anchors to this
-  // row instead of an outer container.
   return (
     <div
       className={`group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40${
@@ -642,17 +634,12 @@ function TriggerText({ text, fullText, onClick }: { text: string; fullText?: str
 // Hover-only action slot — absolute-positioned over the row's right edge.
 // Status + time stay anchored in the layout; on hover the action buttons
 // fade in on top of them with a left-fading gradient backdrop, so the
-// status copy is gracefully covered (not hard-clipped) and the row
-// content never reflows. Mirrors the "actions sticky over content" idiom
-// used by GitHub PR rows, Linear issue rows, etc.
+// status copy is gracefully covered and the row content never reflows.
 function RowActions({ children }: { children: React.ReactNode }) {
   return (
     <div
       className={[
         "pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 pl-6 opacity-0 transition-opacity",
-        // The gradient backdrop blends the row's hover background (accent/40)
-        // from the right and fades to transparent on the left, so the
-        // status text underneath is dimmed gracefully rather than cut.
         "bg-gradient-to-l from-accent/95 via-accent/80 to-transparent",
         "group-hover:pointer-events-auto group-hover:opacity-100",
         "group-focus-within:pointer-events-auto group-focus-within:opacity-100",

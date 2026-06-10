@@ -108,6 +108,24 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("getConfig", () => {
+    it("drops malformed daemon setup URLs instead of throwing", async () => {
+      stubFetchJson({
+        cdn_domain: "cdn.example.com",
+        allow_signup: true,
+        daemon_server_url: { wrong: "shape" },
+        daemon_app_url: 123,
+        workspace_creation_disabled: false,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const config = await client.getConfig();
+      expect(config.cdn_domain).toBe("cdn.example.com");
+      expect(config.allow_signup).toBe(true);
+      expect(config.daemon_server_url).toBeUndefined();
+      expect(config.daemon_app_url).toBeUndefined();
+    });
+  });
+
   describe("listGroupedIssues", () => {
     it("falls back to empty groups when the response is malformed", async () => {
       stubFetchJson({ groups: "not-an-array" });
@@ -264,6 +282,67 @@ describe("ApiClient schema fallback", () => {
       const res = await client.listAutopilotDeliveries("ap-1");
       expect(res.deliveries).toHaveLength(1);
       expect(res.deliveries[0]?.status).toBe("quarantined");
+    });
+  });
+
+  describe("autopilots", () => {
+    it("defaults missing manual_options to [] on list responses", async () => {
+      stubFetchJson({
+        autopilots: [
+          {
+            id: "ap-1",
+            workspace_id: "ws-1",
+            title: "Deploy",
+            description: null,
+            assignee_type: "agent",
+            assignee_id: "agent-1",
+            status: "active",
+            execution_mode: "run_only",
+            issue_title_template: null,
+            created_by_type: "member",
+            created_by_id: "user-1",
+            last_run_at: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res.autopilots[0]?.manual_options).toEqual([]);
+    });
+
+    it("defaults missing manual_options to [] on detail responses", async () => {
+      stubFetchJson({
+        autopilot: {
+          id: "ap-1",
+          workspace_id: "ws-1",
+          title: "Deploy",
+          description: null,
+          assignee_type: "agent",
+          assignee_id: "agent-1",
+          status: "active",
+          execution_mode: "run_only",
+          issue_title_template: null,
+          created_by_type: "member",
+          created_by_id: "user-1",
+          last_run_at: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+        triggers: [],
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.getAutopilot("ap-1");
+      expect(res.autopilot.manual_options).toEqual([]);
+    });
+
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ autopilots: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res).toEqual({ autopilots: [], total: 0 });
     });
   });
 

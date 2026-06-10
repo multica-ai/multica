@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight,
@@ -30,12 +30,20 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -118,6 +126,74 @@ function CancelRunButton({ autopilotId, runId }: { autopilotId: string; runId: s
     >
       <Ban className="h-3.5 w-3.5" />
     </Button>
+  );
+}
+
+function ManualRunDialog({
+  open,
+  onOpenChange,
+  options,
+  pending,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  options: string[];
+  pending: boolean;
+  onConfirm: (option: string) => Promise<void>;
+}) {
+  const { t } = useT("autopilots");
+  const [selected, setSelected] = useState(options[0] ?? "");
+  const optionsKey = useMemo(() => options.join("\n"), [options]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (options.length === 0) {
+      setSelected("");
+      return;
+    }
+    setSelected((current) => (options.includes(current) ? current : options[0] ?? ""));
+  }, [open, options, optionsKey]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogTitle>{t(($) => $.manual_run.title)}</DialogTitle>
+        <div className="space-y-3">
+          <Select value={selected} onValueChange={(value) => value && setSelected(value)}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              disabled={pending}
+            >
+              {t(($) => $.manual_run.cancel)}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => selected && onConfirm(selected)}
+              disabled={pending || !selected}
+            >
+              {pending ? t(($) => $.manual_run.running) : t(($) => $.manual_run.confirm)}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -314,12 +390,11 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
 
   const handleCopy = async () => {
     if (!webhookUrl) return;
-    try {
-      await navigator.clipboard.writeText(webhookUrl);
+    if (await copyText(webhookUrl)) {
       setCopied(true);
       toast.success(t(($) => $.trigger_row.url_copied));
       setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       toast.error(t(($) => $.trigger_row.url_copy_failed));
     }
   };
@@ -616,6 +691,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [manualRunDialogOpen, setManualRunDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -667,14 +743,25 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   }
 
   const { autopilot, triggers } = data;
+  const manualOptions = autopilot.manual_options ?? [];
 
-  const handleRunNow = async () => {
+  const triggerRun = async (trigger_payload?: string) => {
     try {
-      await triggerAutopilot.mutateAsync(autopilotId);
+      await triggerAutopilot.mutateAsync(
+        trigger_payload ? { id: autopilotId, trigger_payload } : autopilotId,
+      );
       toast.success(t(($) => $.detail.toast_triggered));
     } catch (e: any) {
       toast.error(e?.message || t(($) => $.detail.toast_trigger_failed));
     }
+  };
+
+  const handleRunNow = async () => {
+    if (manualOptions.length > 0) {
+      setManualRunDialogOpen(true);
+      return;
+    }
+    await triggerRun();
   };
 
   const handleDelete = async () => {
@@ -718,7 +805,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 }
               />
               <span className={cn(
-                "text-xs font-medium",
+                "text-xs font-medium hidden sm:inline",
                 autopilot.status === "active" ? "text-emerald-500" :
                 autopilot.status === "paused" ? "text-amber-500" :
                 "text-muted-foreground",
@@ -730,15 +817,27 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         }
         actions={
           <>
-            <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
-              <Pencil className="h-3.5 w-3.5 mr-1" />
-              {t(($) => $.detail.edit)}
+            <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.edit)}>
+              <Pencil className="h-3.5 w-3.5 sm:mr-1" />
+              <span className="hidden sm:inline">{t(($) => $.detail.edit)}</span>
             </Button>
-            <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
-              <Play className="h-3.5 w-3.5 mr-1" />
-              {triggerAutopilot.isPending
-                ? t(($) => $.detail.running)
-                : t(($) => $.detail.run_now)}
+            <Button
+              size="sm"
+              onClick={handleRunNow}
+              disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+              className="px-2 sm:px-2.5"
+              aria-label={triggerAutopilot.isPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
+            >
+              {triggerAutopilot.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5 sm:mr-1" />
+              )}
+              <span className="hidden sm:inline">
+                {triggerAutopilot.isPending
+                  ? t(($) => $.detail.running)
+                  : t(($) => $.detail.run_now)}
+              </span>
             </Button>
           </>
         }
@@ -795,6 +894,25 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                   </div>
                 </div>
               )}
+              <div className="col-span-2">
+                <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_manual_options)}</label>
+                <div className="mt-1">
+                  {manualOptions.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {manualOptions.map((option) => (
+                        <span
+                          key={option}
+                          className="rounded-md border bg-muted px-2 py-0.5 text-xs text-foreground"
+                        >
+                          {option}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">{t(($) => $.detail.manual_options_empty)}</span>
+                  )}
+                </div>
+              </div>
               {autopilot.description && (
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_prompt)}</label>
@@ -893,10 +1011,21 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
+            manual_options: manualOptions,
           }}
           triggers={triggers}
         />
       )}
+      <ManualRunDialog
+        open={manualRunDialogOpen}
+        onOpenChange={setManualRunDialogOpen}
+        options={manualOptions}
+        pending={triggerAutopilot.isPending}
+        onConfirm={async (option) => {
+          await triggerRun(option);
+          setManualRunDialogOpen(false);
+        }}
+      />
       <AlertDialog
         open={deleteConfirmOpen}
         onOpenChange={(v) => { if (!v && !deleting) setDeleteConfirmOpen(false); }}

@@ -7,7 +7,7 @@
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.archived_at, i.number, i.project_id, i.metadata
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -399,3 +399,122 @@ UPDATE issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
+
+-- name: ArchiveIssue :one
+UPDATE issue SET
+    archived_at = now(),
+    archived_by = $2
+WHERE id = $1 AND workspace_id = $3
+RETURNING *;
+
+-- name: UnarchiveIssue :one
+UPDATE issue SET
+    archived_at = NULL,
+    archived_by = NULL
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
+-- name: ListArchivedIssues :many
+-- List issues that have been archived (archived_at IS NOT NULL)
+-- Follows the same filtering pattern as ListIssues but only includes archived issues
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.archived_at, i.number, i.project_id, i.metadata
+FROM issue i
+WHERE i.workspace_id = $1
+  AND i.archived_at IS NOT NULL
+  AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
+  AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
+  AND (COALESCE(cardinality(sqlc.narg('priorities')::text[]), 0) = 0 OR i.priority = ANY(sqlc.narg('priorities')::text[]))
+  AND (COALESCE(cardinality(sqlc.narg('assignee_types')::text[]), 0) = 0 OR i.assignee_type = ANY(sqlc.narg('assignee_types')::text[]))
+  AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
+  AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('assignee_pairs')::text[]), 0) = 0
+      AND sqlc.narg('include_no_assignee')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_assignee')::boolean IS TRUE AND i.assignee_id IS NULL)
+    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY(sqlc.narg('assignee_pairs')::text[]))
+  )
+  AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
+  AND (
+    COALESCE(cardinality(sqlc.narg('creator_pairs')::text[]), 0) = 0
+    OR (i.creator_type || ':' || i.creator_id::text) = ANY(sqlc.narg('creator_pairs')::text[])
+  )
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('project_ids')::uuid[]), 0) = 0
+      AND sqlc.narg('include_no_project')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_project')::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY(sqlc.narg('project_ids')::uuid[]))
+  )
+  AND (
+    COALESCE(cardinality(sqlc.narg('label_ids')::uuid[]), 0) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM issue_to_label itl
+      WHERE itl.issue_id = i.id
+        AND itl.label_id = ANY(sqlc.narg('label_ids')::uuid[])
+    )
+  )
+  AND (sqlc.narg('archived_by')::uuid IS NULL OR i.archived_by = sqlc.narg('archived_by'))
+ORDER BY i.archived_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: CountArchivedIssues :one
+SELECT count(*) FROM issue i
+WHERE i.workspace_id = $1
+  AND i.archived_at IS NOT NULL
+  AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
+  AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
+  AND (COALESCE(cardinality(sqlc.narg('priorities')::text[]), 0) = 0 OR i.priority = ANY(sqlc.narg('priorities')::text[]))
+  AND (COALESCE(cardinality(sqlc.narg('assignee_types')::text[]), 0) = 0 OR i.assignee_type = ANY(sqlc.narg('assignee_types')::text[]))
+  AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
+  AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('assignee_pairs')::text[]), 0) = 0
+      AND sqlc.narg('include_no_assignee')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_assignee')::boolean IS TRUE AND i.assignee_id IS NULL)
+    OR (i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY(sqlc.narg('assignee_pairs')::text[]))
+  )
+  AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
+  AND (
+    COALESCE(cardinality(sqlc.narg('creator_pairs')::text[]), 0) = 0
+    OR (i.creator_type || ':' || i.creator_id::text) = ANY(sqlc.narg('creator_pairs')::text[])
+  )
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (
+    (
+      COALESCE(cardinality(sqlc.narg('project_ids')::uuid[]), 0) = 0
+      AND sqlc.narg('include_no_project')::boolean IS NOT TRUE
+    )
+    OR (sqlc.narg('include_no_project')::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY(sqlc.narg('project_ids')::uuid[]))
+  )
+  AND (
+    COALESCE(cardinality(sqlc.narg('label_ids')::uuid[]), 0) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM issue_to_label itl
+      WHERE itl.issue_id = i.id
+        AND itl.label_id = ANY(sqlc.narg('label_ids')::uuid[])
+    )
+  )
+  AND (sqlc.narg('archived_by')::uuid IS NULL OR i.archived_by = sqlc.narg('archived_by'));
+
+-- name: SelectAutoArchiveCandidates :many
+-- Find terminal-state issues (done, cancelled) that have not been updated for
+-- more than 30 days and are not yet archived. Used by the background
+-- auto-archive sweeper.
+SELECT id, workspace_id, number
+FROM issue
+WHERE status IN ('done', 'cancelled')
+  AND archived_at IS NULL
+  AND updated_at < now() - interval '30 days'
+ORDER BY updated_at ASC
+LIMIT @max_per_tick;

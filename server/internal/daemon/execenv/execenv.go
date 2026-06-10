@@ -40,7 +40,7 @@ type PrepareParams struct {
 	AgentName      string // for git branch naming only
 	Provider       string // agent provider (determines runtime config and skill injection paths)
 	CodexVersion   string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin    string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	OpenclawBin    string // resolved OpenClaw-compatible CLI path (only used when Provider is openclaw-compatible); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Only OpenClaw consumes it here today; other
@@ -61,11 +61,13 @@ type PrepareParams struct {
 type TaskContextForEnv struct {
 	IssueID                 string
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
+	TriggerThreadID         string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
 	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
 	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
 	AgentID                 string // unique ID of the dispatched agent
 	AgentName               string
+	AgentDescription        string
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills             []SkillContextForEnv
 	Repos                   []RepoContextForEnv     // workspace repos available for checkout
@@ -134,12 +136,12 @@ type Environment struct {
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
-	// config (set only for openclaw provider). The daemon exports this as
-	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
+	// config (set only for OpenClaw-compatible providers). The daemon exports
+	// this as OPENCLAW_CONFIG_PATH on the subprocess so its native skill
 	// scanner pins workspaceDir to WorkDir.
 	OpenclawConfigPath string
 	// OpenclawIncludeRoot is the directory of the user's active OpenClaw
-	// config (set only for openclaw provider with an on-disk user config).
+	// config (set only for OpenClaw-compatible providers with an on-disk user config).
 	// The daemon must prepend it to OPENCLAW_INCLUDE_ROOTS so OpenClaw is
 	// allowed to follow the wrapper's `$include` link out of envRoot into
 	// the user's config — by default OpenClaw confines `$include` to the
@@ -237,16 +239,17 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
-	// For OpenClaw, synthesize a per-task config that pins workspace to
+	// For OpenClaw-compatible runtimes, synthesize a per-task config that pins workspace to
 	// workDir. The skill scanner then reads {workDir}/skills/ (written by
 	// writeContextFiles above). Fail closed on errors: a malformed user
-	// config that the openclaw CLI can't read is a real problem and
+	// config that the CLI can't read is a real problem and
 	// silently degrading to a minimal config would mask it by booting
-	// OpenClaw without the agents / providers / API keys it expects.
-	if params.Provider == "openclaw" {
+	// without the agents / providers / API keys it expects.
+	if isOpenclawCompatibleProvider(params.Provider) {
 		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
 			McpConfig:   params.McpConfig,
+			Provider:    params.Provider,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
@@ -266,7 +269,7 @@ type ReuseParams struct {
 	WorkDir      string
 	Provider     string
 	CodexVersion string // only used when Provider == "codex"
-	OpenclawBin  string // only used when Provider == "openclaw"; empty = PATH lookup
+	OpenclawBin  string // only used when Provider is openclaw-compatible; empty = PATH lookup
 	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
 	// freshly-saved managed set re-materialises into the wrapper before the
 	// task starts — without this a stale wrapper from a prior run would keep
@@ -308,6 +311,40 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		logger:         logger,
 	}
 
+	// Roll back the previous dispatch's sidecar writes before refreshing.
+	// On reuse the workdir still holds the prior run's issue_context.md and
+	// skill directories; without clearing them first, writeSkillFiles sees
+	// its own earlier output occupying the canonical slug and falls back to
+	// a collision-free sibling (issue-review, issue-review-multica,
+	// issue-review-multica-2, …), accumulating a fresh duplicate on every
+	// re-dispatch to the same issue. allocateCollisionFreeSkillDir exists to
+	// dodge *user*-owned skill dirs (the local_directory flow), not our own
+	// prior writes, so we undo them via the prior manifest first and let the
+	// refresh below re-create each skill at its natural slug. This also brings
+	// the standard providers in line with the Codex path, where
+	// hydrateCodexSkills already wipes its skills dir before re-hydrating.
+	//
+	// Two steps, in order:
+	//   1. removeReusedManagedSkillDirs reclaims the platform's own skill
+	//      directories even when a prior-run agent left a file inside one.
+	//      CleanupSidecars alone can't do this — it preserves any recorded dir
+	//      the agent populated (correct on the local_directory teardown path),
+	//      which would otherwise keep the canonical slug occupied and push the
+	//      refresh back to issue-review-multica.
+	//   2. CleanupSidecars rolls back the remaining sidecar files
+	//      (issue_context.md, project resources) and the manifest itself.
+	//
+	// No-op when RootDir is empty (legacy local_directory reuse, which the
+	// daemon skips anyway) or when no prior manifest exists (older build).
+	if env.RootDir != "" {
+		if err := removeReusedManagedSkillDirs(env.RootDir, skillsDirPath(params.WorkDir, params.Provider)); err != nil {
+			logger.Warn("execenv: reclaim managed skill dirs on reuse failed", "error", err)
+		}
+		if err := CleanupSidecars(env.RootDir); err != nil {
+			logger.Warn("execenv: roll back prior sidecars on reuse failed", "error", err)
+		}
+	}
+
 	// Refresh context files (issue_context.md, skills). Reuse tracks a
 	// fresh manifest under env.RootDir so a later CleanupSidecars sees
 	// the up-to-date list of writes (an old manifest from a prior run
@@ -346,16 +383,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	// Refresh the per-task OpenClaw config on reuse — the user may have
+	// Refresh the per-task OpenClaw-compatible config on reuse — the user may have
 	// added/removed agents or rotated providers since the prior task ran,
 	// and the workspace override always re-targets the current workDir.
 	// Fail closed: a user config that can no longer be parsed should block
-	// reuse rather than degrade to a minimal config that boots OpenClaw
+	// reuse rather than degrade to a minimal config that boots the runtime
 	// without the registered agents.
-	if params.Provider == "openclaw" {
+	if isOpenclawCompatibleProvider(params.Provider) {
 		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
 			McpConfig:   params.McpConfig,
+			Provider:    params.Provider,
 		})
 		if err != nil {
 			logger.Warn("execenv: refresh openclaw config failed", "error", err)
@@ -367,6 +405,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 
 	logger.Info("execenv: reusing env", "workdir", params.WorkDir)
 	return env
+}
+
+func isOpenclawCompatibleProvider(provider string) bool {
+	return provider == "openclaw" || provider == "wujieclaw"
 }
 
 // hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with

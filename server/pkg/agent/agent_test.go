@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestNewReturnsClaudeBackend(t *testing.T) {
@@ -49,6 +50,21 @@ func TestNewReturnsAntigravityBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsWujieClawBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("wujieclaw", Config{})
+	if err != nil {
+		t.Fatalf("New(wujieclaw) error: %v", err)
+	}
+	backend, ok := b.(*openclawBackend)
+	if !ok {
+		t.Fatalf("expected *openclawBackend, got %T", b)
+	}
+	if backend.cfg.ExecutablePath != "wujieclaw" {
+		t.Fatalf("ExecutablePath = %q, want wujieclaw", backend.cfg.ExecutablePath)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
@@ -83,7 +99,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor", "DeepSeek-TUI",
-		"gemini", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"gemini", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "wujieclaw", "qoderclicn",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {
@@ -103,12 +119,31 @@ func TestCapabilityRegistryCoversSupportedBackends(t *testing.T) {
 	t.Parallel()
 
 	supported := []string{
-		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes",
-		"gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity",
+		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "wujieclaw", "hermes",
+		"gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity", "qoderclicn",
 	}
 	for _, provider := range supported {
 		if _, ok := CapabilityFor(provider); !ok {
 			t.Fatalf("CapabilityFor(%q) missing registry entry", provider)
+		}
+	}
+}
+
+func TestRunContextZeroTimeoutHasNoDeadline(t *testing.T) {
+	t.Parallel()
+	// A zero (or negative) timeout must NOT impose a wall-clock deadline:
+	// liveness is delegated to the daemon's inactivity watchdog so an actively
+	// streaming long-running session is never killed merely for running long
+	// (MUL-3064).
+	for _, d := range []time.Duration{0, -time.Second} {
+		ctx, cancel := runContext(context.Background(), d)
+		if _, ok := ctx.Deadline(); ok {
+			cancel()
+			t.Fatalf("runContext(%s) imposed a deadline; want none", d)
+		}
+		cancel()
+		if ctx.Err() == nil {
+			t.Fatalf("runContext(%s): context should be cancelled after cancel()", d)
 		}
 	}
 }
@@ -146,10 +181,11 @@ func TestStreamDisplayGating(t *testing.T) {
 	}
 
 	streamProviders := map[string]bool{
-		"claude":   true,
-		"codex":    true,
-		"copilot":  true,
-		"opencode": true,
+		"claude":     true,
+		"codex":      true,
+		"copilot":    true,
+		"opencode":   true,
+		"qoderclicn": true,
 	}
 
 	for _, name := range RegisteredProviders() {
@@ -190,5 +226,20 @@ func TestCapabilityRegistryNoDriftFromSupportedBackends(t *testing.T) {
 		if !backendSet[p] {
 			t.Errorf("capability registry entry %q not in supported backends", p)
 		}
+	}
+}
+
+func TestRunContextPositiveTimeoutHasDeadline(t *testing.T) {
+	t.Parallel()
+	// A positive timeout keeps the hard wall-clock deadline (the opt-in
+	// absolute cap operators can still set via MULTICA_AGENT_TIMEOUT).
+	ctx, cancel := runContext(context.Background(), time.Hour)
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("runContext(1h) should impose a deadline")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > time.Hour+time.Minute {
+		t.Fatalf("unexpected deadline remaining: %s", remaining)
 	}
 }

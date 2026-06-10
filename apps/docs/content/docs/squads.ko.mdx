@@ -123,6 +123,7 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 | `multica squad delete <id>` | 보관(소프트 삭제) — 할당된 이슈를 리더에게 이전 |
 | `multica squad member list <id>` | 스쿼드의 멤버 목록 표시 |
 | `multica squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | 멤버 추가(owner / admin) |
+| `multica squad member set-role <id> --member-id <uuid> --member-type agent\|member --role "..."` | 멤버를 제거하지 않고 역할 변경 |
 | `multica squad member remove <id> --member-id <uuid> --type agent\|member` | 멤버 제거(리더는 제거할 수 없습니다 — 먼저 리더를 변경하세요) |
 | `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 리더 에이전트가 매 턴 종료 시 기록 |
 

@@ -132,7 +132,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Codex:     writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
-// For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from {workDir}/skills/ via per-task openclaw-config.json that pins agents.defaults.workspace)
+// For OpenClaw/WujieClaw: writes {workDir}/AGENTS.md  (skills discovered natively from {workDir}/skills/ via per-task openclaw-config.json that pins agents.defaults.workspace)
 // For Hermes:   writes {workDir}/AGENTS.md  (skills fall back to .agent_context/skills/; AGENTS.md points there)
 // For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
 // For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from .pi/skills/)
@@ -163,7 +163,7 @@ func runtimeConfigPath(workDir, provider string) string {
 		return filepath.Join(workDir, "CLAUDE.md")
 	case "codebuddy":
 		return filepath.Join(workDir, "CODEBUDDY.md")
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity":
+	case "codex", "copilot", "opencode", "openclaw", "wujieclaw", "hermes", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity":
 		return filepath.Join(workDir, "AGENTS.md")
 	case "gemini":
 		return filepath.Join(workDir, "GEMINI.md")
@@ -366,10 +366,95 @@ func buildLocalPreviewInstructions(ctx TaskContextForEnv) string {
 	return b.String()
 }
 
+type roleMetadataNormalization struct {
+	Frontmatter  string
+	Instructions string
+}
+
+func normalizeRoleMetadata(ctx TaskContextForEnv) roleMetadataNormalization {
+	instructions := ctx.AgentInstructions
+	// The merge layer has already flattened system, personal, and agent
+	// instructions. Keep that order intact; only lift the role metadata
+	// contract so providers see it immediately after Agent Identity.
+	if frontmatter, remainder, ok := extractRoleFrontmatter(instructions); ok {
+		return roleMetadataNormalization{
+			Frontmatter:  strings.TrimRight(frontmatter, " \t\r\n"),
+			Instructions: strings.TrimLeft(remainder, " \t\r\n"),
+		}
+	}
+
+	name := strings.TrimSpace(ctx.AgentName)
+	if name == "" {
+		return roleMetadataNormalization{
+			Instructions: instructions,
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "name: %s\n", yamlEscapeInline(name))
+	if desc := strings.TrimSpace(ctx.AgentDescription); desc != "" {
+		fmt.Fprintf(&b, "description: %s\n", yamlEscapeInline(desc))
+	}
+	b.WriteString("---")
+	return roleMetadataNormalization{
+		Frontmatter:  b.String(),
+		Instructions: instructions,
+	}
+}
+
+func extractRoleFrontmatter(content string) (frontmatter, remainder string, ok bool) {
+	cursor := 0
+	for {
+		idx := strings.Index(content[cursor:], "---")
+		if idx < 0 {
+			return "", content, false
+		}
+		start := cursor + idx
+		if start != 0 && content[start-1] != '\n' && content[start-1] != '\r' {
+			cursor = start + len("---")
+			continue
+		}
+		bodyStart, ok := frontmatterBodyStart(content[start:])
+		if !ok {
+			cursor = start + len("---")
+			continue
+		}
+
+		afterOpen := start + bodyStart
+		closeRel := strings.Index(content[afterOpen:], "\n---")
+		if closeRel < 0 {
+			return "", content, false
+		}
+		closeStart := afterOpen + closeRel + 1
+		closeEnd := closeStart + len("---")
+		if closeEnd < len(content) {
+			switch content[closeEnd] {
+			case '\r':
+				if closeEnd+1 < len(content) && content[closeEnd+1] == '\n' {
+					closeEnd += 2
+				} else {
+					closeEnd++
+				}
+			case '\n':
+				closeEnd++
+			}
+		}
+
+		if !hasFrontmatterName(content[afterOpen:closeStart]) {
+			cursor = closeEnd
+			continue
+		}
+
+		return content[start:closeEnd], content[:start] + content[closeEnd:], true
+	}
+}
+
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
+	roleMetadata := normalizeRoleMetadata(ctx)
 
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
@@ -385,14 +470,24 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			}
 			b.WriteString("\n\n")
 		}
-		if ctx.AgentInstructions != "" {
-			b.WriteString(ctx.AgentInstructions)
+		if roleMetadata.Frontmatter != "" {
+			b.WriteString(roleMetadata.Frontmatter)
 			b.WriteString("\n\n")
 		}
-	} else if ctx.AgentInstructions != "" {
+		if roleMetadata.Instructions != "" {
+			b.WriteString(roleMetadata.Instructions)
+			b.WriteString("\n\n")
+		}
+	} else if roleMetadata.Frontmatter != "" || roleMetadata.Instructions != "" {
 		b.WriteString("## Agent Identity\n\n")
-		b.WriteString(ctx.AgentInstructions)
-		b.WriteString("\n\n")
+		if roleMetadata.Frontmatter != "" {
+			b.WriteString(roleMetadata.Frontmatter)
+			b.WriteString("\n\n")
+		}
+		if roleMetadata.Instructions != "" {
+			b.WriteString(roleMetadata.Instructions)
+			b.WriteString("\n\n")
+		}
 	}
 
 	// Requesting User block: human-supplied self-description for the user the
@@ -460,38 +555,47 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
 	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
-	// Available Commands lists `multica issue comment add` neutrally —
-	// three input modes, pick what fits.
-	// The previous "MUST pipe via stdin" mandate (#1795 / #1851) was
-	// originally a Codex-specific fix for codex emitting literal `\n`
-	// escapes inside `--content "..."`, but it landed in this global
-	// section and ended up steering every provider at stdin, which then
-	// burned non-ASCII bytes on Windows where the agent's shell layer
-	// (typically PowerShell) re-encodes the pipe through an ASCII /
-	// non-UTF-8 codepage and drops non-representable bytes as `?`
-	// (issues #2198 / #2236 / #2376).
+	// Available Commands lists `multica issue comment add` with all three input
+	// modes, but the menu entry now actively steers agents away from inlining
+	// `--content` for agent-authored bodies. The prescriptive form-by-platform
+	// guidance lives in the "## Comment Formatting" section below.
 	//
-	// Strong "MUST" wording lives in the Codex-Specific section below
-	// where it actually belongs; non-Codex providers handle inline
-	// escaping correctly and can pick whichever flag suits their
-	// content. The `--content-file` line in the menu doubles as a
-	// pointer at the Windows-safe path.
-	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. Pick the input mode that preserves your content; run `multica issue comment add --help` for details.\n")
+	// Two distinct shell-layer hazards motivate this, and both bite an inlined
+	// body before the CLI ever runs:
+	//   - Backtick / `$()` command substitution, `$VAR` expansion, and quote /
+	//     newline mangling on Linux/macOS shells. A backtick-wrapped token in
+	//     the body is executed and silently deleted, corrupting the stored
+	//     comment and triggering a retry loop (MUL-2904 / OKK-497).
+	//   - Non-ASCII bytes dropped as `?` on Windows, where the shell layer
+	//     (typically PowerShell) re-encodes a stdin pipe through an ASCII /
+	//     non-UTF-8 codepage (issues #2198 / #2236 / #2376) — which is why
+	//     Windows uses `--content-file`, not stdin.
+	// Because the corruption is shell-driven, the guardrail is provider-agnostic.
+	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. For agent-authored bodies, do NOT inline `--content` — the shell can rewrite backticks, `$()`, quotes, or newlines before the CLI sees them; use the platform-correct non-inline mode shown in ## Comment Formatting below. Run `multica issue comment add --help` for details.\n")
 	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
 	b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
+	b.WriteString("### Squad maintenance\n")
+	b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
 
-	if provider == "codex" {
-		b.WriteString("## Codex-Specific Comment Formatting\n\n")
-		if runtimeGOOS == "windows" {
-			b.WriteString("Codex often follows the per-turn reply command literally. On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
-			b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
-			b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
-		} else {
-			b.WriteString("Codex often follows the per-turn reply command literally. For issue comments, always use `--content-stdin` with a HEREDOC, even for short single-line replies. ")
-			b.WriteString("Never use inline `--content` for agent-authored comments. Keep the same `--parent` value from the trigger comment when replying. ")
-			b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
-		}
+	// Comment Formatting guardrail for ALL providers. The MUL-2904
+	// duplicate-comment loop happened because an agent inlined a backtick-wrapped
+	// table name into `--content "..."`; the shell ran it as a command
+	// substitution, silently deleted it, and the model retried forever. Because
+	// the corruption is shell-driven, not provider-driven, this directive is not
+	// scoped to Codex — every agent-authored comment must avoid inline
+	// `--content`. The platform split mirrors BuildCommentReplyInstructions:
+	// Windows → file (stdin pipes drop non-ASCII), Linux/macOS → quoted HEREDOC
+	// over stdin (the quoted delimiter blocks backtick / `$()` / `$VAR`).
+	b.WriteString("## Comment Formatting\n\n")
+	if runtimeGOOS == "windows" {
+		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
+		b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
+		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
+	} else {
+		b.WriteString("For issue comments, always use `--content-stdin` with a HEREDOC, even for short single-line replies — use a quoted delimiter (`<<'COMMENT'`) so the shell does not expand backticks, `$()`, or `$VAR` inside the body. `--content-file <path>` works too. ")
+		b.WriteString("Never use inline `--content` for agent-authored comments: unescaped backticks, `$()`, `$VAR`, or quotes in the body are rewritten by the shell before the CLI receives them. Keep the same `--parent` value from the trigger comment when replying. ")
+		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	}
 
 	b.WriteString(buildLocalPreviewInstructions(ctx))
@@ -544,6 +648,14 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- **Write on exit.** Sparingly. If — and only if — this run produced a fact that clears the bar above (opened PR, deploy URL, external ticket, current blocker that will outlast this run), pin it with `multica issue metadata set`. If a key you saw on entry is now stale (e.g. `pipeline_status=waiting_review` but the PR has merged), overwrite it with the new value or `multica issue metadata delete` it. Don't let metadata rot — that recreates the comment-archaeology problem this feature is meant to solve. Stale-key cleanup is still expected even when you add nothing new.\n")
 		b.WriteString("- **What NOT to pin.** No secrets, tokens, or API keys. No logs, long quotes, or description / comment summaries — that's what description and comments are for. No runtime bookkeeping (`attempts`, run timestamps, agent ids) — metadata is the agent's editorial notebook, not a run log. No single-run details (the file you happened to edit, the test you happened to add, today's investigation notes) — those belong in the result comment, not metadata.\n")
 		b.WriteString("- **Recommended keys** (reuse these names so queries stay consistent across the workspace; coin a new key only when none fits): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`. Use snake_case ASCII. The list is short on purpose — most issues only need 1-2 of these pinned, not the full set.\n\n")
+	}
+
+	isAssignmentTriggered := ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" && ctx.TriggerCommentID == ""
+	if isAssignmentTriggered {
+		b.WriteString("## Instruction Precedence\n\n")
+		b.WriteString("Agent Identity instructions have priority over the assignment workflow below. ")
+		b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
+		b.WriteString("Never treat this runtime workflow as permission to change issue status, investigate, implement, or otherwise act beyond your Agent Identity.\n\n")
 	}
 
 	b.WriteString("### Workflow\n\n")
@@ -617,11 +729,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
 		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
-		if hint := BuildNewCommentsHint(ctx.IssueID, ctx.TriggerCommentID, ctx.NewCommentsSince, ctx.NewCommentCount); hint != "" {
+		if hint := BuildNewCommentsHint(ctx.IssueID, ctx.TriggerCommentID, ctx.TriggerThreadID, ctx.NewCommentsSince, ctx.NewCommentCount); hint != "" {
 			b.WriteString("3. " + hint)
 		} else if ctx.PriorSessionResumed {
-			b.WriteString("3. " + BuildResumedCommentsHint(ctx.IssueID, ctx.TriggerCommentID))
-		} else if cold := BuildColdCommentsHint(ctx.IssueID, ctx.TriggerCommentID); cold != "" {
+			b.WriteString("3. " + BuildResumedCommentsHint(ctx.IssueID, ctx.TriggerCommentID, ctx.TriggerThreadID))
+		} else if cold := BuildColdCommentsHint(ctx.IssueID, ctx.TriggerCommentID, ctx.TriggerThreadID); cold != "" {
 			b.WriteString("3. " + cold)
 		} else {
 			fmt.Fprintf(&b, "3. Catch up on comments — read with `multica issue comment list %s --output json` (long issue? `--recent 20`).\n", ctx.IssueID)
@@ -640,20 +752,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
-		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
+		b.WriteString("You are responsible for managing the issue status throughout your work, unless your Agent Identity forbids issue status changes.\n\n")
 		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
 		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
 		fmt.Fprintf(&b, "3. Run `multica issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions. When the flat dump is too large to ingest in one shot, treat `--recent 20 --output json` plus the `--before` / `--before-id` cursor (from the stderr `Next thread cursor:` line) as a paging strategy: keep walking older threads until you have read enough history to satisfy this mandatory step. `--recent` is a way to read the full history page-by-page, not a shortcut that replaces it.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "4. Run `multica issue status %s in_progress`\n", ctx.IssueID)
-		b.WriteString("5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
+		fmt.Fprintf(&b, "4. Run `multica issue status %s in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.\n", ctx.IssueID)
+		b.WriteString("5. Complete the task within your Agent Identity boundaries. Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action; if your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered.\n")
 		if ctx.IsSquadLeader {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
 		} else {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: post it with `multica issue comment add %s` using the platform-correct non-inline mode from ## Comment Formatting (never inline `--content`). Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		}
 		b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
-		fmt.Fprintf(&b, "8. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "9. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+		fmt.Fprintf(&b, "8. When done, run `multica issue status %s in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "9. If blocked, run `multica issue status %s blocked` unless your Agent Identity forbids issue status changes. Post a comment explaining the blocker unless your Agent Identity forbids issue comments.\n\n", ctx.IssueID)
 	}
 
 	// Sub-issue creation semantics — the only piece of the old Parent /
@@ -675,10 +787,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			// Claude and CodeBuddy discover skills natively from
 			// .claude/skills/ resp. .codebuddy/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, DeepSeek,
-			// and Antigravity discover skills natively from their respective paths.
-			// For OpenClaw, the daemon also writes a per-task openclaw-config.json
+		case "codex", "copilot", "opencode", "openclaw", "wujieclaw", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity":
+			// Codex, Copilot, OpenCode, OpenClaw, WujieClaw, Pi, Cursor, Kimi, Kiro,
+			// DeepSeek, and Antigravity discover skills natively from their respective paths.
+			// For OpenClaw-compatible runtimes, the daemon also writes a per-task openclaw-config.json
 			// (exported via OPENCLAW_CONFIG_PATH) that pins agents.defaults.workspace
 			// to the task workdir so the CLI's scanner picks up {workDir}/skills/.
 			// Antigravity inherits Gemini CLI’s workspace skill layout —
@@ -693,7 +805,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		}
 		for _, skill := range ctx.AgentSkills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+			// Emit the skill's one-line description alongside its name so the
+			// brief carries a "when to load" trigger signal. Claude-family
+			// providers get this natively from frontmatter discovery; providers
+			// without native discovery (hermes/default) only ever see this
+			// list, so a bare name gives them no signal for on-demand loading.
+			if desc := strings.TrimSpace(skill.Description); desc != "" {
+				fmt.Fprintf(&b, "- **%s** — %s\n", skill.Name, desc)
+			} else {
+				fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+			}
 		}
 		b.WriteString("\n")
 	}

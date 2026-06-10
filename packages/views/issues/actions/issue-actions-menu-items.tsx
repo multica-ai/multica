@@ -4,6 +4,8 @@ import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowDown,
   ArrowUp,
   Calendar,
@@ -19,6 +21,7 @@ import {
   UserMinus,
 } from "lucide-react";
 import type { AgentTask, Issue } from "@multica/core/types";
+import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
 import { api } from "@multica/core/api";
 import {
   ALL_STATUSES,
@@ -42,6 +45,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSeparator,
 } from "@multica/ui/components/ui/context-menu";
+import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
 import { useT } from "../../i18n";
 
@@ -106,15 +110,8 @@ export function IssueActionsMenuItems({
     openCreateSubIssue,
     openSetParent,
     openAddChild,
-    openDeleteConfirm,
+      openDeleteConfirm,
   } = actions;
-
-  const now = () => new Date();
-  const inDays = (days: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() + days);
-    return d.toISOString();
-  };
 
   // Subscribe to the issue's task list so the cache is warm by the time the
   // user clicks "Copy local workdir path". The query only fires while the
@@ -141,10 +138,10 @@ export function IssueActionsMenuItems({
       toast.error(t(($) => $.detail.workdir_path_unavailable));
       return;
     }
-    navigator.clipboard.writeText(latestWorkDir).then(
-      () => toast.success(t(($) => $.detail.workdir_path_copied)),
-      () => toast.error(t(($) => $.detail.workdir_path_copy_failed)),
-    );
+    void copyText(latestWorkDir).then((ok) => {
+      if (ok) toast.success(t(($) => $.detail.workdir_path_copied));
+      else toast.error(t(($) => $.detail.workdir_path_copy_failed));
+    });
   }, [tasks, t]);
 
   return (
@@ -208,13 +205,13 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.start_date)}
         </P.SubTrigger>
         <P.SubContent>
-          <P.Item onClick={() => updateField({ start_date: now().toISOString() })}>
+          <P.Item onClick={() => updateField({ start_date: todayDateOnly() })}>
             {t(($) => $.actions.start_today)}
           </P.Item>
-          <P.Item onClick={() => updateField({ start_date: inDays(1) })}>
+          <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(1) })}>
             {t(($) => $.actions.start_tomorrow)}
           </P.Item>
-          <P.Item onClick={() => updateField({ start_date: inDays(7) })}>
+          <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(7) })}>
             {t(($) => $.actions.start_next_week)}
           </P.Item>
           {issue.start_date && (
@@ -235,13 +232,13 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.due_date)}
         </P.SubTrigger>
         <P.SubContent>
-          <P.Item onClick={() => updateField({ due_date: now().toISOString() })}>
+          <P.Item onClick={() => updateField({ due_date: todayDateOnly() })}>
             {t(($) => $.actions.due_today)}
           </P.Item>
-          <P.Item onClick={() => updateField({ due_date: inDays(1) })}>
+          <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(1) })}>
             {t(($) => $.actions.due_tomorrow)}
           </P.Item>
-          <P.Item onClick={() => updateField({ due_date: inDays(7) })}>
+          <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(7) })}>
             {t(($) => $.actions.due_next_week)}
           </P.Item>
           {issue.due_date && (
@@ -305,14 +302,28 @@ export function IssueActionsMenuItems({
 
       <P.Separator />
 
+      {/* Archive actions — only available for terminal issues */}
+      {!issue.archived_at && (issue.status === "done" || issue.status === "cancelled") && (
+        <P.Item onClick={actions.openArchiveConfirm}>
+          <Archive className="h-3.5 w-3.5" />
+          {t(($) => $.actions.archive_issue)}
+        </P.Item>
+      )}
+      {issue.archived_at && (
+        <P.Item onClick={actions.openUnarchiveConfirm}>
+          <ArchiveRestore className="h-3.5 w-3.5" />
+          {t(($) => $.actions.unarchive_issue)}
+        </P.Item>
+      )}
+
       {canDelete && (
-      <P.Item
-        variant="destructive"
-        onClick={() => openDeleteConfirm({ onDeletedNavigateTo })}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-        {t(($) => $.actions.delete_issue)}
-      </P.Item>
+        <P.Item
+          variant="destructive"
+          onClick={() => openDeleteConfirm({ onDeletedNavigateTo })}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {t(($) => $.actions.delete_issue)}
+        </P.Item>
       )}
     </>
   );

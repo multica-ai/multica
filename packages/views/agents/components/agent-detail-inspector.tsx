@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import type {
   Agent,
   AgentRuntime,
+  AgentServiceTier,
   MemberWithUser,
   UpdateAgentAllowedPrincipalsRequest,
 } from "@multica/core/types";
@@ -50,6 +51,7 @@ import {
 import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
+import { ServiceTierPicker } from "./inspector/service-tier-picker";
 import { SkillAttach } from "./inspector/skill-attach";
 import {
   StreamPicker,
@@ -57,6 +59,7 @@ import {
 } from "./inspector/stream-picker";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
+import { LarkAgentBindButton } from "../../settings/components/lark-tab";
 
 interface InspectorProps {
   agent: Agent;
@@ -83,6 +86,12 @@ interface InspectorProps {
   allowedPrincipalsLoading?: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   onUpdateAllowedPrincipals: (data: UpdateAgentAllowedPrincipalsRequest) => Promise<void>;
+  /**
+   * Focus the overview pane's Integrations tab. The inspector's Lark status
+   * row is read-only and deep-links here; Manage / Disconnect live in the
+   * tab so the destructive action exists in exactly one place.
+   */
+  onShowIntegrations: () => void;
 }
 
 /**
@@ -110,13 +119,20 @@ export function AgentDetailInspector({
   allowedPrincipalsLoading = false,
   onUpdate,
   onUpdateAllowedPrincipals,
+  onShowIntegrations,
 }: InspectorProps) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
   const isOnline = runtime?.status === "online";
+  const isCodexRuntime = runtime?.provider === "codex";
   const approvalPolicy = resolveApprovalPolicy(agent);
   const streamMode = resolveStreamMode(agent);
+
+  const updateServiceTier = (serviceTier: AgentServiceTier) => {
+    if (!isCodexRuntime) return Promise.resolve();
+    return update({ service_tier: serviceTier });
+  };
 
   const updateRuntimeConfig = (next: {
     streamMode?: StreamMode;
@@ -174,6 +190,15 @@ export function AgentDetailInspector({
             onChange={(m) => update({ model: m })}
           />
         </PropRow>
+        {isCodexRuntime && (
+          <PropRow label={t(($) => $.inspector.prop_service_tier)} interactive={false}>
+            <ServiceTierPicker
+              value={agent.service_tier ?? ""}
+              canEdit={canEdit}
+              onChange={updateServiceTier}
+            />
+          </PropRow>
+        )}
         <ThinkingPropRow
           runtimeId={agent.runtime_id}
           runtimeOnline={!!isOnline}
@@ -276,6 +301,31 @@ export function AgentDetailInspector({
           <SkillAttach agent={agent} canEdit={canEdit} />
         </div>
       </div>
+
+      {/* Integrations — surfaces external-channel bind entry points
+          (Lark Bot today; Slack / Discord in the future). The bind
+          button self-hides when the server-side device-flow install
+          capability gate is closed, so this section may render empty
+          on deployments without a configured Lark app — that's
+          intentional and matches the "don't surface a flow that will
+          fail" guarantee. We only mount it for editors: viewers
+          shouldn't see a CTA they can't action. */}
+      {canEdit && (
+        <div className="flex flex-col px-5 py-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {t(($) => $.inspector.section_integrations)}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <LarkAgentBindButton
+              agentId={agent.id}
+              agentName={agent.name}
+              onShowConnectedDetails={onShowIntegrations}
+            />
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -922,6 +972,10 @@ function PresenceBadge({
   presence: AgentPresenceDetail | null | undefined;
 }) {
   const { t } = useT("agents");
+  // Archived is carried by the unified presence (deriveAgentPresenceDetail
+  // sets availability="archived" before any runtime/task scan), so the
+  // normal path below renders the gray "Archived" badge with no special
+  // case here — same single source of truth as every other status surface.
   if (!presence) {
     return (
       <span className="inline-flex h-5 w-20 animate-pulse rounded-md bg-muted" />

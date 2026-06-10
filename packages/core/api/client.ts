@@ -76,6 +76,7 @@ import type {
   Attachment,
   ChatSession,
   ChatMessage,
+  ChatMessagesPage,
   ChatPendingTask,
   PendingChatTasksResponse,
   SendChatMessageResponse,
@@ -127,6 +128,7 @@ import type {
   AutopilotRun,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
+  TriggerAutopilotRequest,
   CreateAutopilotTriggerRequest,
   UpdateAutopilotTriggerRequest,
   ListAutopilotsResponse,
@@ -167,6 +169,10 @@ import type {
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
   GiteeWebhookConfig,
+  ListLarkInstallationsResponse,
+  BeginLarkInstallResponse,
+  LarkInstallStatusResponse,
+  RedeemLarkBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -179,6 +185,8 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  MobilePushRegistrationResponse,
+  UpsertMobilePushRegistrationRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -193,6 +201,8 @@ import { parseWithFallback } from "./schema";
 import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
+  AutopilotResponseSchema,
+  AutopilotRunResponseSchema,
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
@@ -210,16 +220,22 @@ import {
   EMPTY_AGENT_RUN_DETAIL,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  EMPTY_AUTOPILOT,
+  EMPTY_AUTOPILOT_RUN,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
+  EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
   EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_DISCOVER_IMPORT_SKILLS_RESPONSE,
+  EMPTY_GET_AUTOPILOT_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_LABELS_RESPONSE,
+  EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE,
+  EMPTY_LIST_AUTOPILOTS_RESPONSE,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD,
@@ -229,10 +245,15 @@ import {
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
+  AppConfigSchema,
+  type AppConfigResponse,
   GroupedIssuesResponseSchema,
+  GetAutopilotResponseSchema,
   DiscoverImportSkillsResponseSchema,
   IssueLabelsResponseSchema,
   LabelSchema,
+  ListAutopilotRunsResponseSchema,
+  ListAutopilotsResponseSchema,
   ListIssuesResponseSchema,
   ListLabelsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
@@ -263,6 +284,8 @@ import {
   EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+  EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE,
+  MobilePushRegistrationResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -783,6 +806,8 @@ export class ApiClient {
     if (params?.scheduled) search.set("scheduled", "true");
     if (params?.sort_by) search.set("sort", params.sort_by);
     if (params?.sort_direction) search.set("direction", params.sort_direction);
+    if (params?.archived) search.set("archived", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
@@ -826,11 +851,12 @@ export class ApiClient {
     });
   }
 
-  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
+  async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; include_archived?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     return this.fetch(`/api/issues/search?${search}`, params.signal ? { signal: params.signal } : undefined);
   }
 
@@ -910,6 +936,14 @@ export class ApiClient {
 
   async deleteIssue(id: string): Promise<void> {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
+  }
+
+  async archiveIssue(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/archive`, { method: "PATCH" });
+  }
+
+  async unarchiveIssue(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/unarchive`, { method: "PATCH" });
   }
 
   async batchUpdateIssues(issueIds: string[], updates: UpdateIssueRequest): Promise<{ updated: number }> {
@@ -1934,9 +1968,43 @@ export class ApiClient {
     return this.fetch("/api/inbox/archive-completed", { method: "POST" });
   }
 
+  async upsertMobilePushRegistration(
+    request: UpsertMobilePushRegistrationRequest,
+  ): Promise<MobilePushRegistrationResponse> {
+    const response = await this.fetch("/api/me/mobile-push/registrations", {
+      method: "PUT",
+      body: JSON.stringify(request),
+    });
+    return parseWithFallback(
+      response,
+      MobilePushRegistrationResponseSchema,
+      EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE,
+      { endpoint: "PUT /api/me/mobile-push/registrations" },
+    );
+  }
+
+  async disableMobilePushRegistration(
+    installationId: string,
+    provider = "getui",
+  ): Promise<void> {
+    const search = new URLSearchParams({ provider });
+    await this.fetch(
+      `/api/me/mobile-push/registrations/${encodeURIComponent(installationId)}?${search}`,
+      { method: "DELETE" },
+    );
+  }
+
   // Notification preferences
-  async getNotificationPreferences(): Promise<NotificationPreferenceResponse> {
-    return this.fetch("/api/notification-preferences");
+  //
+  // `workspaceSlug` overrides the default `X-Workspace-Slug` header (which
+  // follows the active workspace) so a caller can read a SPECIFIC workspace's
+  // preferences — e.g. honoring the mute setting of the workspace an inbox
+  // notification came from while the user is viewing a different one (#3766).
+  async getNotificationPreferences(workspaceSlug?: string): Promise<NotificationPreferenceResponse> {
+    return this.fetch(
+      "/api/notification-preferences",
+      workspaceSlug ? { headers: { "X-Workspace-Slug": workspaceSlug } } : undefined,
+    );
   }
 
   async updateNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferenceResponse> {
@@ -1947,22 +2015,11 @@ export class ApiClient {
   }
 
   // App Config
-  async getConfig(): Promise<{
-    cdn_domain: string;
-    allow_signup: boolean;
-    google_client_id?: string;
-    google_ios_client_id?: string;
-    dingtalk_client_id?: string;
-    dingtalk_oauth_scope?: string;
-    hide_email_login?: boolean;
-    posthog_key?: string;
-    posthog_host?: string;
-    analytics_environment?: string;
-    // Self-host gate (#3433). Optional because older servers omit the field
-    // entirely; consumers must default to false.
-    workspace_creation_disabled?: boolean;
-  }> {
-    return this.fetch("/api/config");
+  async getConfig(): Promise<AppConfigResponse> {
+    const raw = await this.fetch<unknown>("/api/config");
+    return parseWithFallback<AppConfigResponse>(raw, AppConfigSchema, EMPTY_APP_CONFIG, {
+      endpoint: "GET /api/config",
+    });
   }
 
   // Workspaces
@@ -1981,7 +2038,7 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; wiki_content?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; wiki_content?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -2507,6 +2564,37 @@ export class ApiClient {
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
   }
 
+  async listChatMessagesPage(
+    sessionId: string,
+    params: { before?: { created_at: string; id: string } | null; limit?: number } = {},
+  ): Promise<ChatMessagesPage> {
+    const limit = params.limit ?? 50;
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (params.before) {
+      query.set("before_created_at", params.before.created_at);
+      query.set("before_id", params.before.id);
+    }
+    try {
+      return await this.fetch(
+        `/api/chat/sessions/${sessionId}/messages/page?${query.toString()}`,
+      );
+    } catch (err) {
+      // Deployment-order compatibility: a backend deployed before this endpoint
+      // existed returns 404 for the unknown route. Fall back to the legacy
+      // full-list endpoint so chat never white-screens regardless of whether
+      // the server or the client deploys first. Only the initial (cursorless)
+      // page falls back — the legacy endpoint returns every message at once, so
+      // the fallback page reports has_more: false and there is no follow-up
+      // request to translate. A 404 on a cursor request is an unexpected state
+      // and propagates instead of duplicating the whole list.
+      if (err instanceof ApiError && err.status === 404 && !params.before) {
+        const messages = await this.listChatMessages(sessionId);
+        return { messages, limit, has_more: false, next_cursor: null };
+      }
+      throw err;
+    }
+  }
+
   async sendChatMessage(
     sessionId: string,
     content: string,
@@ -2850,53 +2938,81 @@ export class ApiClient {
   async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/autopilots?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
+    return parseWithFallback(raw, ListAutopilotsResponseSchema, EMPTY_LIST_AUTOPILOTS_RESPONSE, {
+      endpoint: "GET /api/autopilots",
+    }) as ListAutopilotsResponse;
   }
 
   async getAutopilot(id: string): Promise<GetAutopilotResponse> {
-    return this.fetch(`/api/autopilots/${id}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}`);
+    return parseWithFallback(raw, GetAutopilotResponseSchema, EMPTY_GET_AUTOPILOT_RESPONSE, {
+      endpoint: "GET /api/autopilots/:id",
+    }) as GetAutopilotResponse;
   }
 
   async createAutopilot(data: CreateAutopilotRequest): Promise<Autopilot> {
-    return this.fetch("/api/autopilots", {
+    const raw = await this.fetch<unknown>("/api/autopilots", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, AutopilotResponseSchema, EMPTY_AUTOPILOT, {
+      endpoint: "POST /api/autopilots",
+    }) as Autopilot;
   }
 
   async updateAutopilot(id: string, data: UpdateAutopilotRequest): Promise<Autopilot> {
-    return this.fetch(`/api/autopilots/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, AutopilotResponseSchema, { ...EMPTY_AUTOPILOT, id }, {
+      endpoint: "PATCH /api/autopilots/:id",
+    }) as Autopilot;
   }
 
   async deleteAutopilot(id: string): Promise<void> {
     await this.fetch(`/api/autopilots/${id}`, { method: "DELETE" });
   }
 
-  async triggerAutopilot(id: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${id}/trigger`, { method: "POST" });
+  async triggerAutopilot(id: string, data?: TriggerAutopilotRequest): Promise<AutopilotRun> {
+    const init: RequestInit = { method: "POST" };
+    if (data) {
+      init.body = JSON.stringify(data);
+    }
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/trigger`, init);
+    return parseWithFallback(raw, AutopilotRunResponseSchema, { ...EMPTY_AUTOPILOT_RUN, autopilot_id: id }, {
+      endpoint: "POST /api/autopilots/:id/trigger",
+    }) as AutopilotRun;
   }
 
   async listAutopilotRuns(id: string, params?: { limit?: number; offset?: number }): Promise<ListAutopilotRunsResponse> {
     const search = new URLSearchParams();
     if (params?.limit) search.set("limit", params.limit.toString());
     if (params?.offset) search.set("offset", params.offset.toString());
-    return this.fetch(`/api/autopilots/${id}/runs?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/runs?${search}`);
+    return parseWithFallback(raw, ListAutopilotRunsResponseSchema, EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE, {
+      endpoint: "GET /api/autopilots/:id/runs",
+    }) as ListAutopilotRunsResponse;
   }
 
   // Returns a single run including its full trigger_payload. List responses
   // omit trigger_payload to keep them small (a webhook envelope can be
   // up to 256 KiB × limit rows), so the detail view fetches via this route.
   async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    return parseWithFallback(raw, AutopilotRunResponseSchema, { ...EMPTY_AUTOPILOT_RUN, id: runId, autopilot_id: autopilotId }, {
+      endpoint: "GET /api/autopilots/:id/runs/:runId",
+    }) as AutopilotRun;
   }
 
   async cancelAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}/cancel`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/runs/${runId}/cancel`, {
       method: "POST",
     });
+    return parseWithFallback(raw, AutopilotRunResponseSchema, { ...EMPTY_AUTOPILOT_RUN, id: runId, autopilot_id: autopilotId }, {
+      endpoint: "POST /api/autopilots/:id/runs/:runId/cancel",
+    }) as AutopilotRun;
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
@@ -3064,6 +3180,47 @@ export class ApiClient {
   async deleteGiteeWebhookConfig(workspaceId: string, configId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/gitee/webhook-configs/${configId}`, {
       method: "DELETE",
+    });
+  }
+
+  // Lark integration
+  async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);
+  }
+
+  async beginLarkInstall(
+    workspaceId: string,
+    agentId: string,
+    region: "feishu" | "lark",
+  ): Promise<BeginLarkInstallResponse> {
+    // The user picks the cloud explicitly in the UI ("Bind to Feishu"
+    // vs "Bind to Lark"), and the backend POSTs the device-flow `begin`
+    // against the corresponding accounts host (accounts.feishu.cn vs
+    // accounts.larksuite.com) so the QR renders against the right
+    // cloud up front. Empty / omitted region still resolves to Feishu
+    // server-side (RegionOrDefault) — we surface region as a required
+    // arg here so every call site is forced to make a deliberate
+    // choice rather than silently defaulting to mainland.
+    const search = new URLSearchParams({ agent_id: agentId, region });
+    return this.fetch(`/api/workspaces/${workspaceId}/lark/install/begin?${search.toString()}`, {
+      method: "POST",
+    });
+  }
+
+  async getLarkInstallStatus(workspaceId: string, sessionId: string): Promise<LarkInstallStatusResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/lark/install/${sessionId}/status`);
+  }
+
+  async deleteLarkInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/lark/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemLarkBindingToken(token: string): Promise<RedeemLarkBindingTokenResponse> {
+    return this.fetch(`/api/lark/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
     });
   }
 }

@@ -8,10 +8,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -32,16 +36,17 @@ type AutopilotResponse struct {
 	// AssigneeType is "agent" or "squad". Path A from MUL-2429: when set
 	// to "squad", AssigneeID points at squad(id) rather than agent(id) and
 	// dispatch resolves to squad.leader_id at run time.
-	AssigneeType       string  `json:"assignee_type"`
-	AssigneeID         string  `json:"assignee_id"`
-	Status             string  `json:"status"`
-	ExecutionMode      string  `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
-	CreatedByType      string  `json:"created_by_type"`
-	CreatedByID        string  `json:"created_by_id"`
-	LastRunAt          *string `json:"last_run_at"`
-	CreatedAt          string  `json:"created_at"`
-	UpdatedAt          string  `json:"updated_at"`
+	AssigneeType       string   `json:"assignee_type"`
+	AssigneeID         string   `json:"assignee_id"`
+	Status             string   `json:"status"`
+	ExecutionMode      string   `json:"execution_mode"`
+	IssueTitleTemplate *string  `json:"issue_title_template"`
+	ManualOptions      []string `json:"manual_options"`
+	CreatedByType      string   `json:"created_by_type"`
+	CreatedByID        string   `json:"created_by_id"`
+	LastRunAt          *string  `json:"last_run_at"`
+	CreatedAt          string   `json:"created_at"`
+	UpdatedAt          string   `json:"updated_at"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -122,6 +127,7 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		Status:             a.Status,
 		ExecutionMode:      a.ExecutionMode,
 		IssueTitleTemplate: textToPtr(a.IssueTitleTemplate),
+		ManualOptions:      normalizeResponseStringSlice(a.ManualOptions),
 		CreatedByType:      a.CreatedByType,
 		CreatedByID:        uuidToString(a.CreatedByID),
 		LastRunAt:          timestampToPtr(a.LastRunAt),
@@ -231,6 +237,13 @@ func runToResponseSlim(r db.AutopilotRun) AutopilotRunResponse {
 	return resp
 }
 
+func normalizeResponseStringSlice(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
+}
+
 // ── Request types ───────────────────────────────────────────────────────────
 
 type CreateAutopilotRequest struct {
@@ -239,22 +252,34 @@ type CreateAutopilotRequest struct {
 	ProjectID   *string `json:"project_id"`
 	// AssigneeType is optional and defaults to "agent" — preserves backward
 	// compatibility with desktop clients shipped before MUL-2429.
-	AssigneeType       *string `json:"assignee_type"`
-	AssigneeID         string  `json:"assignee_id"`
-	ExecutionMode      string  `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
+	AssigneeType       *string  `json:"assignee_type"`
+	AssigneeID         string   `json:"assignee_id"`
+	ExecutionMode      string   `json:"execution_mode"`
+	IssueTitleTemplate *string  `json:"issue_title_template"`
+	ManualOptions      []string `json:"manual_options"`
 }
 
 type UpdateAutopilotRequest struct {
-	Title              *string `json:"title"`
-	Description        *string `json:"description"`
-	ProjectID          *string `json:"project_id"`
-	AssigneeType       *string `json:"assignee_type"`
-	AssigneeID         *string `json:"assignee_id"`
-	Status             *string `json:"status"`
-	ExecutionMode      *string `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
+	Title              *string  `json:"title"`
+	Description        *string  `json:"description"`
+	ProjectID          *string  `json:"project_id"`
+	AssigneeType       *string  `json:"assignee_type"`
+	AssigneeID         *string  `json:"assignee_id"`
+	Status             *string  `json:"status"`
+	ExecutionMode      *string  `json:"execution_mode"`
+	IssueTitleTemplate *string  `json:"issue_title_template"`
+	ManualOptions      []string `json:"manual_options"`
 }
+
+type TriggerAutopilotRequest struct {
+	TriggerPayload *string `json:"trigger_payload"`
+}
+
+const (
+	manualOptionsMaxCount  = 50
+	manualOptionMaxRunes   = 128
+	manualPayloadFieldName = "trigger_payload"
+)
 
 type CreateAutopilotTriggerRequest struct {
 	Kind           string  `json:"kind"`
@@ -405,6 +430,11 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	manualOptions, err := normalizeManualOptions(req.ManualOptions)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
@@ -449,6 +479,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		Description:        ptrToText(req.Description),
 		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
 		ProjectID:          projectID,
+		ManualOptions:      manualOptions,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
@@ -457,6 +488,13 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	resp := autopilotToResponse(autopilot)
 	h.publish(protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AutopilotCreated(
+		userID,
+		workspaceID,
+		uuidToString(autopilot.ID),
+		"manual",
+		"manual",
+	))
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -521,6 +559,14 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ProjectID = projectID
+	}
+	if _, ok := rawFields["manual_options"]; ok {
+		manualOptions, err := normalizeManualOptions(req.ManualOptions)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.ManualOptions = manualOptions
 	}
 	// assignee_type and assignee_id are validated as a pair: switching
 	// between agent and squad without supplying a new id would leave the
@@ -841,6 +887,53 @@ func isValidAutopilotAssigneeType(t string) bool {
 	}
 }
 
+func normalizeManualOptions(options []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(options))
+	normalized := make([]string, 0, len(options))
+	for _, raw := range options {
+		option := strings.TrimSpace(raw)
+		if option == "" {
+			continue
+		}
+		if err := validateManualOption(option); err != nil {
+			return nil, err
+		}
+		if _, ok := seen[option]; ok {
+			continue
+		}
+		seen[option] = struct{}{}
+		normalized = append(normalized, option)
+	}
+	if len(normalized) > manualOptionsMaxCount {
+		return nil, fmt.Errorf("manual_options supports at most %d options", manualOptionsMaxCount)
+	}
+	return normalized, nil
+}
+
+func validateManualOption(option string) error {
+	if option == "" {
+		return fmt.Errorf("manual_options cannot contain empty values")
+	}
+	if count := len([]rune(option)); count > manualOptionMaxRunes {
+		return fmt.Errorf("manual_options values must be at most %d characters", manualOptionMaxRunes)
+	}
+	for _, r := range option {
+		if r == '\n' || r == '\r' || unicode.IsControl(r) {
+			return fmt.Errorf("manual_options values cannot contain control characters")
+		}
+	}
+	return nil
+}
+
+func manualPayloadAllowed(options []string, payload string) bool {
+	for _, option := range options {
+		if payload == option {
+			return true
+		}
+	}
+	return false
+}
+
 // validateAutopilotAssignee checks that the assignee (agent or squad) exists
 // in the given workspace, and for squad assignees that the squad's leader
 // agent is in a workable state at create / update time. Writes an HTTP error
@@ -888,6 +981,13 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 		}
 		if leader.ArchivedAt.Valid {
 			writeError(w, http.StatusUnprocessableEntity, "squad leader is archived; pick a different squad or rotate the leader before assigning autopilot")
+			return false
+		}
+		// Private-leader gate: the member configuring the autopilot must have
+		// access to the private leader, same as validateAssigneePair.
+		actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(workspaceID))
+		if !h.canAccessPrivateAgent(r.Context(), leader, actorType, actorID, util.UUIDToString(workspaceID)) {
+			writeError(w, http.StatusForbidden, "cannot assign autopilot to squad with private leader")
 			return false
 		}
 		return true
@@ -1368,12 +1468,46 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var req TriggerAutopilotRequest
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+	if len(strings.TrimSpace(string(bodyBytes))) > 0 {
+		if err := json.Unmarshal(bodyBytes, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	var payload []byte
+	if len(autopilot.ManualOptions) > 0 {
+		if req.TriggerPayload == nil || *req.TriggerPayload == "" {
+			writeError(w, http.StatusBadRequest, manualPayloadFieldName+" is required")
+			return
+		}
+		if !manualPayloadAllowed(autopilot.ManualOptions, *req.TriggerPayload) {
+			writeError(w, http.StatusBadRequest, manualPayloadFieldName+" must match one of manual_options")
+			return
+		}
+		encoded, err := json.Marshal(*req.TriggerPayload)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode trigger payload")
+			return
+		}
+		payload = encoded
+	} else if req.TriggerPayload != nil && *req.TriggerPayload != "" {
+		writeError(w, http.StatusBadRequest, manualPayloadFieldName+" is only valid when manual_options are configured")
+		return
+	}
+
 	run, err := h.AutopilotService.DispatchAutopilot(
 		r.Context(),
 		autopilot,
 		pgtype.UUID{},
 		"manual",
-		nil,
+		payload,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())

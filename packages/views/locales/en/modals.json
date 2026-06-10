@@ -205,5 +205,20 @@
       "error_unknown": "Failed to submit. Try again.",
       "sub_issue_of": "Sub-issue of {{identifier}}"
     }
+  },
+  "archive_issue": {
+    "title": "Archive issue",
+    "description": "This issue will be archived and hidden from the default view. You can unarchive it later.",
+    "cancel": "Cancel",
+    "confirm": "Archive",
+    "archiving": "Archiving...",
+    "toast_archived": "Issue archived",
+    "toast_archive_failed": "Failed to archive issue",
+    "unarchive_title": "Unarchive issue",
+    "unarchive_description": "This issue will be restored to the default view.",
+    "unarchive_confirm": "Unarchive",
+    "unarchiving": "Unarchiving...",
+    "toast_unarchived": "Issue unarchived",
+    "toast_unarchive_failed": "Failed to unarchive issue"
   }
 }

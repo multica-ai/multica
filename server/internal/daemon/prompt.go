@@ -17,6 +17,19 @@ func BuildPrompt(task Task) string {
 }
 
 func BuildPromptWithRunMode(task Task, runMode string) string {
+	return BuildPromptWithRunModeAndProvider(task, runMode, "")
+}
+
+// injected by execenv.InjectRuntimeConfig. The provider string is threaded
+// through to comment-triggered tasks' per-turn reply template; that template
+// is provider-agnostic now (Linux/macOS → quoted-HEREDOC stdin, Windows →
+// file) because the shell-layer corruption it guards against is not specific
+// to any one provider (MUL-2904).
+func BuildPromptWithProvider(task Task, provider string) string {
+	return BuildPromptWithRunModeAndProvider(task, protocol.ResolveTaskRunMode(task.Context), provider)
+}
+
+func BuildPromptWithRunModeAndProvider(task Task, runMode, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
@@ -24,7 +37,7 @@ func BuildPromptWithRunMode(task Task, runMode string) string {
 		return buildChannelMentionPrompt(task)
 	}
 	if task.TriggerCommentID != "" {
-		return buildCommentPrompt(task, runMode)
+		return buildCommentPrompt(task, runMode, provider)
 	}
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
@@ -191,7 +204,7 @@ func buildQuickCreatePrompt(task Task) string {
 // The reply instructions (including the current TriggerCommentID as --parent)
 // are re-emitted on every turn so resumed sessions cannot carry forward a
 // previous turn's --parent UUID.
-func buildCommentPrompt(task Task, runMode string) string {
+func buildCommentPrompt(task Task, runMode, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	writeLanguageInstruction(&b)
@@ -223,16 +236,16 @@ func buildCommentPrompt(task Task, runMode string) string {
 	// injected, so don't force a duplicate thread read. Cold path: read the
 	// triggering thread, not the flat timeline. Final fallback (no trigger id,
 	// shouldn't happen here): plain read.
-	if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.NewCommentsSince, task.NewCommentCount); hint != "" {
+	if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount); hint != "" {
 		b.WriteString(hint)
 	} else if task.PriorSessionID != "" {
-		b.WriteString(execenv.BuildResumedCommentsHint(task.IssueID, task.TriggerCommentID))
-	} else if cold := execenv.BuildColdCommentsHint(task.IssueID, task.TriggerCommentID); cold != "" {
+		b.WriteString(execenv.BuildResumedCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID))
+	} else if cold := execenv.BuildColdCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID); cold != "" {
 		b.WriteString(cold)
 	} else {
 		fmt.Fprintf(&b, "Read the discussion: `multica issue comment list %s --output json` (long issue? use `--recent 20`).\n\n", task.IssueID)
 	}
-	b.WriteString(execenv.BuildCommentReplyInstructions(runMode, task.IssueID, task.TriggerCommentID))
+	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
 
@@ -243,6 +256,37 @@ func buildChatPrompt(task Task) string {
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
 	writeLanguageInstruction(&b)
 	writeRetryInstruction(&b, task)
+	if task.Agent != nil && len(task.Agent.Skills) > 0 {
+		refs := ExtractSlashSkills(task.ChatMessage)
+		if len(refs) > 0 {
+			agentSkills := make(map[string]string, len(task.Agent.Skills))
+			for _, s := range task.Agent.Skills {
+				agentSkills[s.ID] = s.Name
+			}
+
+			selected := make([]string, 0, len(refs))
+			seen := make(map[string]struct{}, len(refs))
+			for _, ref := range refs {
+				name, ok := agentSkills[ref.ID]
+				if !ok {
+					continue
+				}
+				if _, ok := seen[ref.ID]; ok {
+					continue
+				}
+				seen[ref.ID] = struct{}{}
+				selected = append(selected, name)
+			}
+
+			if len(selected) > 0 {
+				b.WriteString("Explicitly selected skills:\n")
+				for _, name := range selected {
+					fmt.Fprintf(&b, "- %s\n", name)
+				}
+				b.WriteString("\n")
+			}
+		}
+	}
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments

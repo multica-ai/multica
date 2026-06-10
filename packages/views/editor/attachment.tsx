@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { useT } from "../i18n";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
@@ -61,6 +62,13 @@ export type AttachmentInput =
       contentType?: string;
       /** Editor in-flight state. Renders a loader placeholder. */
       uploading?: boolean;
+      /**
+       * Intrinsic pixel dimensions. Rendered as `<img width height>` so the
+       * browser reserves the box before the image decodes — prevents the
+       * layout shift that would otherwise push the caret out of view on paste.
+       */
+      width?: number;
+      height?: number;
       /**
        * Structural hint from the call site: "this slot is definitionally an
        * image / file / ...". Bypasses `getPreviewKind` autodetect, which
@@ -97,6 +105,8 @@ interface Normalized {
   attachmentId?: string;
   record?: AttachmentRecord;
   uploading: boolean;
+  width?: number;
+  height?: number;
 }
 
 function normalize(
@@ -121,6 +131,8 @@ function normalize(
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
+    width: input.width,
+    height: input.height,
   };
 }
 
@@ -202,6 +214,8 @@ export function Attachment({
           src={state.url}
           alt={state.filename}
           uploading={state.uploading}
+          width={state.width}
+          height={state.height}
           editable={editable}
           selected={selected}
           onView={openPreview}
@@ -261,6 +275,8 @@ interface ImageAttachmentViewProps {
   src: string;
   alt: string;
   uploading: boolean;
+  width?: number;
+  height?: number;
   editable?: boolean;
   selected?: boolean;
   onView: () => void;
@@ -274,6 +290,8 @@ function ImageAttachmentView({
   src,
   alt,
   uploading,
+  width,
+  height,
   editable,
   selected,
   onView,
@@ -285,10 +303,9 @@ function ImageAttachmentView({
   const { t } = useT("editor");
 
   const handleCopyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(src);
+    if (await copyText(src)) {
       toast.success(t(($) => $.image.link_copied));
-    } catch {
+    } else {
       toast.error(t(($) => $.image.copy_link_failed));
     }
   };
@@ -319,6 +336,8 @@ function ImageAttachmentView({
         <img
           src={src || undefined}
           alt={alt}
+          width={width}
+          height={height}
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
         />

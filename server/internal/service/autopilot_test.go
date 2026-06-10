@@ -41,6 +41,9 @@ func TestBuildIssueDescription_NoTriggerPayload(t *testing.T) {
 	if strings.Contains(got.String, "Webhook event") {
 		t.Fatalf("description must not mention webhook for non-webhook source: %q", got.String)
 	}
+	if strings.Contains(got.String, "Trigger payload") {
+		t.Fatalf("description must not include a payload block when none was provided: %q", got.String)
+	}
 }
 
 func TestBuildIssueDescription_UsesTriggerTimezone(t *testing.T) {
@@ -105,13 +108,20 @@ func TestBuildIssueDescription_WithWebhookPayload(t *testing.T) {
 	if !strings.Contains(got.String, "Webhook event: github.pull_request.opened") {
 		t.Fatalf("description should include webhook event line: %q", got.String)
 	}
+	if !strings.Contains(got.String, "Trigger source: webhook") {
+		t.Fatalf("description should include unified trigger source: %q", got.String)
+	}
+	if !strings.Contains(got.String, "Trigger payload:") {
+		t.Fatalf("description should include unified trigger payload block: %q", got.String)
+	}
 	if !strings.Contains(got.String, "\"number\": 7") && !strings.Contains(got.String, "\"number\":7") {
 		t.Fatalf("description should include payload json: %q", got.String)
 	}
 	// Italic schedule line must come before the webhook block.
 	idxItalic := strings.Index(got.String, "*Autopilot run triggered")
 	idxWebhook := strings.Index(got.String, "Webhook event")
-	if idxItalic < 0 || idxWebhook < 0 || idxItalic > idxWebhook {
+	idxTriggerPayload := strings.Index(got.String, "Trigger payload")
+	if idxItalic < 0 || idxWebhook < 0 || idxTriggerPayload < 0 || idxItalic > idxTriggerPayload || idxTriggerPayload > idxWebhook {
 		t.Fatalf("italic line should appear before webhook block: %q", got.String)
 	}
 }
@@ -131,15 +141,22 @@ func TestBuildIssueDescription_WebhookSourceMissingEnvelope(t *testing.T) {
 	}
 }
 
-func TestBuildIssueDescription_NonWebhookSourceWithPayloadIgnored(t *testing.T) {
-	// Manual / schedule with a payload should not get a webhook block.
+func TestBuildIssueDescription_NonWebhookSourceWithPayloadIncluded(t *testing.T) {
+	// Manual / schedule payloads use the unified trigger block, not the
+	// webhook-specific event block.
 	s := &AutopilotService{}
 	ap := db.Autopilot{Description: pgtype.Text{String: "thing", Valid: true}}
-	run := db.AutopilotRun{Source: "manual", TriggerPayload: []byte(`{"event":"x.y"}`), TriggeredAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}}
+	run := db.AutopilotRun{Source: "manual", TriggerPayload: []byte(`"production"`), TriggeredAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}}
 
 	got := s.buildIssueDescription(ap, run, "UTC")
 	if strings.Contains(got.String, "Webhook event") {
 		t.Fatalf("non-webhook source should not include webhook block: %q", got.String)
+	}
+	if !strings.Contains(got.String, "Trigger source: manual") {
+		t.Fatalf("manual source should be visible: %q", got.String)
+	}
+	if !strings.Contains(got.String, "\"production\"") {
+		t.Fatalf("manual payload should be visible: %q", got.String)
 	}
 }
 

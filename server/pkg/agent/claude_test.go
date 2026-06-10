@@ -271,6 +271,49 @@ func TestClaudePermissionNotGrantedMatcherIgnoresNormalOutput(t *testing.T) {
 	}
 }
 
+func TestClaudePermissionNotGrantedMatcherIgnoresSourceCode(t *testing.T) {
+	t.Parallel()
+
+	source := `func isClaudePermissionNotGranted(s string) bool {
+	return strings.Contains(s, "Claude requested permissions") &&
+		strings.Contains(s, "you haven't granted it yet")
+}`
+
+	if isClaudePermissionNotGranted(source) {
+		t.Fatal("source code containing guard literals should not match permission-not-granted text")
+	}
+}
+
+func TestClaudePermissionNotGrantedMatcherIgnoresStringLiteral(t *testing.T) {
+	t.Parallel()
+
+	source := `Content: mustMarshal(t, "Claude requested permissions to write to /tmp/example.txt, but you haven't granted it yet."),`
+
+	if isClaudePermissionNotGranted(source) {
+		t.Fatal("source string literal containing permission text should not match permission-not-granted text")
+	}
+}
+
+func TestClaudePermissionNotGrantedMatcherIgnoresMarkdownCodeBlock(t *testing.T) {
+	t.Parallel()
+
+	markdown := "The daemon currently checks this fixture:\n\n```text\nClaude requested permissions to write to /tmp/example.txt, but you haven't granted it yet.\n```\n"
+
+	if isClaudePermissionNotGranted(markdown) {
+		t.Fatal("markdown code block containing permission text should not match permission-not-granted text")
+	}
+}
+
+func TestClaudePermissionNotGrantedMatcherIgnoresInlineDiagnosticQuote(t *testing.T) {
+	t.Parallel()
+
+	diagnostic := "The issue describes `Claude requested permissions to write to /tmp/example.txt` and `you haven't granted it yet` as trigger phrases."
+
+	if isClaudePermissionNotGranted(diagnostic) {
+		t.Fatal("inline diagnostic quotes containing trigger phrases should not match permission-not-granted text")
+	}
+}
+
 func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 	t.Parallel()
 
@@ -650,6 +693,57 @@ func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	}
 }
 
+func TestFilterCustomArgsStripsShellQuotes(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.Default()
+
+	// Single-quoted inline value: --deny-tool='write' → --deny-tool=write
+	result := filterCustomArgs([]string{"--deny-tool='write'"}, nil, logger)
+	if len(result) != 1 || result[0] != "--deny-tool=write" {
+		t.Fatalf("expected [--deny-tool=write], got %v", result)
+	}
+
+	// Double-quoted inline value: --deny-tool="write" → --deny-tool=write
+	result = filterCustomArgs([]string{`--deny-tool="write"`}, nil, logger)
+	if len(result) != 1 || result[0] != "--deny-tool=write" {
+		t.Fatalf("expected [--deny-tool=write], got %v", result)
+	}
+
+	// Standalone quoted value: 'write' → write
+	result = filterCustomArgs([]string{"'write'"}, nil, logger)
+	if len(result) != 1 || result[0] != "write" {
+		t.Fatalf("expected [write], got %v", result)
+	}
+
+	// Non-flag assignments may use quotes semantically (for example Codex
+	// `-c model="o3"`), so they must survive unchanged.
+	result = filterCustomArgs([]string{`model="o3"`}, nil, logger)
+	if len(result) != 1 || result[0] != `model="o3"` {
+		t.Fatalf("expected [model=\"o3\"], got %v", result)
+	}
+
+	// Unquoted arg passes through unchanged
+	result = filterCustomArgs([]string{"--deny-tool=write"}, nil, logger)
+	if len(result) != 1 || result[0] != "--deny-tool=write" {
+		t.Fatalf("expected [--deny-tool=write], got %v", result)
+	}
+
+	// Mismatched quotes are not stripped
+	result = filterCustomArgs([]string{"--flag='val\""}, nil, logger)
+	if len(result) != 1 || result[0] != "--flag='val\"" {
+		t.Fatalf("mismatched quotes should not be stripped, got %v", result)
+	}
+
+	// Blocked flag with quoted value: the blocking still fires, the unquoted
+	// form passes the flag-match, and the arg is dropped.
+	blocked := map[string]blockedArgMode{"--output-format": blockedWithValue}
+	result = filterCustomArgs([]string{"--output-format='json'", "--verbose"}, blocked, logger)
+	if len(result) != 1 || result[0] != "--verbose" {
+		t.Fatalf("quoted blocked flag should still be dropped, got %v", result)
+	}
+}
+
 func TestBuildClaudeArgsPassesThroughCustomArgs(t *testing.T) {
 	t.Parallel()
 
@@ -746,12 +840,29 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 		"PATH=/usr/bin",
 		"CLAUDECODE=1",
 		"CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDE_CODE_EXECPATH=/opt/claude",
+		"CLAUDE_CODE_SESSION_ID=abc123",
+		"CLAUDE_CODE_SSE_PORT=9999",
 		"CLAUDECODEX=keep-me",
+		"CLAUDE_CODE_GIT_BASH_PATH=C:\\Program Files\\Git\\bin\\bash.exe",
+		"CLAUDE_CODE_USE_BEDROCK=1",
+		"CLAUDE_CODE_TMPDIR=/custom/tmp",
 	}, map[string]string{"FOO": "bar"})
 
+	// Internal runtime/session markers must be stripped so the child does not
+	// inherit the parent's identity or transport.
+	filteredOut := []string{
+		"CLAUDECODE=1",
+		"CLAUDE_CODE_ENTRYPOINT=cli",
+		"CLAUDE_CODE_EXECPATH=/opt/claude",
+		"CLAUDE_CODE_SESSION_ID=abc123",
+		"CLAUDE_CODE_SSE_PORT=9999",
+	}
 	for _, entry := range env {
-		if entry == "CLAUDECODE=1" || entry == "CLAUDE_CODE_ENTRYPOINT=cli" {
-			t.Fatalf("expected CLAUDECODE vars to be filtered, got %v", env)
+		for _, banned := range filteredOut {
+			if entry == banned {
+				t.Fatalf("expected internal Claude Code marker %q to be filtered, got %v", banned, env)
+			}
 		}
 	}
 
@@ -765,6 +876,19 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 	}
 	if !found["CLAUDECODEX=keep-me"] {
 		t.Fatalf("expected unrelated env vars to be preserved, got %v", env)
+	}
+	// User-facing CLAUDE_CODE_* config must reach the child — stripping
+	// CLAUDE_CODE_GIT_BASH_PATH is what broke Claude Code on Windows (#3671).
+	if !found["CLAUDE_CODE_GIT_BASH_PATH=C:\\Program Files\\Git\\bin\\bash.exe"] {
+		t.Fatalf("expected CLAUDE_CODE_GIT_BASH_PATH to be preserved, got %v", env)
+	}
+	if !found["CLAUDE_CODE_USE_BEDROCK=1"] {
+		t.Fatalf("expected CLAUDE_CODE_USE_BEDROCK to be preserved, got %v", env)
+	}
+	// CLAUDE_CODE_TMPDIR is a documented user-configurable temp-dir override, not
+	// an internal per-session marker, so it must reach the child.
+	if !found["CLAUDE_CODE_TMPDIR=/custom/tmp"] {
+		t.Fatalf("expected CLAUDE_CODE_TMPDIR to be preserved, got %v", env)
 	}
 	if !found["FOO=bar"] {
 		t.Fatalf("expected extra env var to be appended, got %v", env)
@@ -924,14 +1048,15 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
-	// Fake claude binary: drains stdin so writeClaudeInput succeeds, writes a
-	// canonical V8-abort line to stderr, then exits non-zero before emitting
-	// any stream-json to stdout. This is the exact failure mode that motivated
-	// PR #1674 — without sampling stderrBuf.Tail() after cmd.Wait() returns,
-	// Result.Error would be a useless "exit status 3".
+	// Fake claude binary: reads the initial stdin frame so writeClaudeInput
+	// succeeds, writes a canonical V8-abort line to stderr, then exits
+	// non-zero before emitting any stream-json to stdout. This is the exact
+	// failure mode that motivated PR #1674 — without sampling stderrBuf.Tail()
+	// after cmd.Wait() returns, Result.Error would be a useless
+	// "exit status 3".
 	fakePath := filepath.Join(t.TempDir(), "claude")
 	script := "#!/bin/sh\n" +
-		"cat >/dev/null\n" +
+		"IFS= read -r _\n" +
 		"echo \"FATAL ERROR: V8 abort: assertion failed\" >&2\n" +
 		"exit 3\n"
 	writeTestExecutable(t, fakePath, []byte(script))
@@ -983,7 +1108,7 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 
 	fakePath := filepath.Join(t.TempDir(), "claude")
 	script := "#!/bin/sh\n" +
-		"cat >/dev/null\n" +
+		"IFS= read -r _\n" +
 		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-result-usage\"}'\n" +
 		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-result-usage\",\"result\":\"done\",\"modelUsage\":{\"zhipu/coding-plan\":{\"inputTokens\":123,\"outputTokens\":45,\"cacheReadInputTokens\":7,\"cacheCreationInputTokens\":11,\"costUSD\":0.01}}}'\n"
 	writeTestExecutable(t, fakePath, []byte(script))
@@ -1018,6 +1143,132 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestGoSDKParseUsage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		raw          map[string]any
+		defaultModel string
+		want         map[string]TokenUsage
+	}{
+		{
+			name: "flat snake_case",
+			raw: map[string]any{
+				"input_tokens":                float64(100),
+				"output_tokens":               float64(50),
+				"cache_read_input_tokens":     float64(30),
+				"cache_creation_input_tokens": float64(20),
+			},
+			defaultModel: "claude-sonnet-4-6",
+			want: map[string]TokenUsage{
+				"claude-sonnet-4-6": {InputTokens: 100, OutputTokens: 50, CacheReadTokens: 30, CacheWriteTokens: 20},
+			},
+		},
+		{
+			name: "flat camelCase",
+			raw: map[string]any{
+				"inputTokens":              float64(101),
+				"outputTokens":             float64(51),
+				"cacheReadInputTokens":     float64(31),
+				"cacheCreationInputTokens": float64(21),
+			},
+			defaultModel: "claude-opus-4-7",
+			want: map[string]TokenUsage{
+				"claude-opus-4-7": {InputTokens: 101, OutputTokens: 51, CacheReadTokens: 31, CacheWriteTokens: 21},
+			},
+		},
+		{
+			name: "nested usage",
+			raw: map[string]any{
+				"usage": map[string]any{
+					"inputTokens":              float64(102),
+					"outputTokens":             float64(52),
+					"cacheReadInputTokens":     float64(32),
+					"cacheCreationInputTokens": float64(22),
+				},
+			},
+			defaultModel: "claude-haiku-4-5",
+			want: map[string]TokenUsage{
+				"claude-haiku-4-5": {InputTokens: 102, OutputTokens: 52, CacheReadTokens: 32, CacheWriteTokens: 22},
+			},
+		},
+		{
+			name: "modelUsage wins",
+			raw: map[string]any{
+				"input_tokens": float64(999),
+				"modelUsage": map[string]any{
+					"claude-sonnet-4-6": map[string]any{
+						"inputTokens":              float64(103),
+						"outputTokens":             float64(53),
+						"cacheReadInputTokens":     float64(33),
+						"cacheCreationInputTokens": float64(23),
+					},
+					"claude-opus-4-7": map[string]any{
+						"usage": map[string]any{
+							"input_tokens":                float64(104),
+							"output_tokens":               float64(54),
+							"cache_read_input_tokens":     float64(34),
+							"cache_creation_input_tokens": float64(24),
+						},
+					},
+				},
+			},
+			defaultModel: "fallback",
+			want: map[string]TokenUsage{
+				"claude-sonnet-4-6": {InputTokens: 103, OutputTokens: 53, CacheReadTokens: 33, CacheWriteTokens: 23},
+				"claude-opus-4-7":   {InputTokens: 104, OutputTokens: 54, CacheReadTokens: 34, CacheWriteTokens: 24},
+			},
+		},
+		{
+			name: "reasoning counts as output",
+			raw: map[string]any{
+				"inputTokens":           float64(105),
+				"outputTokens":          float64(55),
+				"reasoningOutputTokens": float64(5),
+				"output_token_details": map[string]any{
+					"reasoningTokens": float64(3),
+				},
+			},
+			defaultModel: "claude-reasoning",
+			want: map[string]TokenUsage{
+				"claude-reasoning": {InputTokens: 105, OutputTokens: 63},
+			},
+		},
+		{
+			name: "thinking counts as output",
+			raw: map[string]any{
+				"inputTokens":    float64(106),
+				"outputTokens":   float64(56),
+				"thinkingTokens": float64(7),
+				"output_token_details": map[string]any{
+					"thinkingTokens": float64(2),
+				},
+			},
+			defaultModel: "claude-thinking",
+			want: map[string]TokenUsage{
+				"claude-thinking": {InputTokens: 106, OutputTokens: 65},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := make(map[string]TokenUsage)
+			goSDKParseUsage(tc.raw, tc.defaultModel, got)
+			if len(got) != len(tc.want) {
+				t.Fatalf("usage length = %d, want %d: %+v", len(got), len(tc.want), got)
+			}
+			for model, want := range tc.want {
+				if got[model] != want {
+					t.Fatalf("%s usage = %+v, want %+v (all=%+v)", model, got[model], want, got)
+				}
+			}
+		})
 	}
 }
 

@@ -176,6 +176,29 @@ type DaemonHeartbeatPendingLocalSkillImport struct {
 	SkillKey string `json:"skill_key"`
 }
 
+// NotificationDeliverPayload is sent from server to daemon to ask the daemon
+// to execute a local notification delivery command.
+type NotificationDeliverPayload struct {
+	DeliveryID      string `json:"delivery_id,omitempty"`
+	Channel         string `json:"channel"`
+	Type            string `json:"type"`
+	WechatID        string `json:"wechat_id"`
+	OpenClawChannel string `json:"openclaw_channel,omitempty"`
+	Content         string `json:"content"`
+	Title           string `json:"title,omitempty"`
+	Link            string `json:"link,omitempty"`
+}
+
+// NotificationDeliveryResultPayload is sent from daemon to server after a
+// local notification delivery command finishes.
+type NotificationDeliveryResultPayload struct {
+	DeliveryID string `json:"delivery_id"`
+	Channel    string `json:"channel"`
+	Success    bool   `json:"success"`
+	Error      string `json:"error,omitempty"`
+	Output     string `json:"output,omitempty"`
+}
+
 // ChatRetryProgressPayload is broadcast when daemon retries a message due to rate limit.
 type ChatRetryProgressPayload struct {
 	ChatSessionID string `json:"chat_session_id"`

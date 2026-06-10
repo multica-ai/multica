@@ -8,8 +8,8 @@
   "input": {
     "placeholder_no_agent": "채팅을 시작하려면 에이전트를 만드세요",
     "placeholder_archived": "보관된 세션입니다",
-    "placeholder_named": "{{name}}에게 할 일을 알려주세요...",
-    "placeholder_default": "할 일을 알려주세요...",
+    "placeholder_named": "{{name}}에게 메시지 보내기…",
+    "placeholder_default": "메시지 입력…",
     "send_tooltip": "보내기",
     "stop_tooltip": "중지"
   },
@@ -26,7 +26,8 @@
     "process_steps_other": "단계 {{count}}개",
     "copy_action": "복사",
     "copied_toast": "복사했습니다",
-    "copy_failed_toast": "복사 실패"
+    "copy_failed_toast": "복사 실패",
+    "loading_older": "이전 메시지를 불러오는 중…"
   },
   "session_history": {
     "untitled": "제목 없음",
@@ -38,6 +39,21 @@
     },
     "row_delete_aria": "채팅 세션 삭제",
     "row_rename_aria": "채팅 세션 이름 변경",
+    "row_stop_aria": "현재 실행 중지",
+    "stop_action": "중지",
+    "row_subtitle": {
+      "working": "작업 중",
+      "completed": "완료됨",
+      "new_reply": "새 답변"
+    },
+    "stop_dialog": {
+      "title": "이 실행을 중지할까요?",
+      "description_with_title": "\"{{title}}\"의 현재 에이전트 작업을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
+      "description_default": "현재 에이전트 작업을 취소합니다. 이미 생성된 내용은 채팅에 남습니다.",
+      "cancel": "계속 실행",
+      "confirm": "실행 중지",
+      "confirming": "중지하는 중..."
+    },
     "delete_dialog": {
       "title": "채팅 세션 삭제",
       "description_with_title": "\"{{title}}\"과(와) 메시지가 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
@@ -61,9 +77,8 @@
     "my_agents": "내 에이전트",
     "others": "기타",
     "no_agents": "에이전트 없음",
-    "active_group": "활성",
-    "archived_group_one": "보관된 채팅 {{count}}개",
-    "archived_group_other": "보관된 채팅 {{count}}개"
+    "history_group": "채팅 기록",
+    "agent_filter_placeholder": "에이전트 검색..."
   },
   "empty_state": {
     "first_time_title": "에이전트와 채팅하기",
@@ -79,17 +94,6 @@
     "list_open": "열린 작업을 우선순위별로 정리해 줘",
     "summarize_today": "오늘 내가 한 일을 요약해 줘",
     "plan_next": "다음에 할 일을 계획해 줘"
-  },
-  "context_anchor": {
-    "tooltip_disabled": "이 페이지에서는 Multica에 공유할 내용이 없습니다",
-    "tooltip_off": "Multica에 현재 보고 있는 페이지 알려주기",
-    "tooltip_on_issue": "Multica가 {{label}}을(를) 보고 있음을 알고 있습니다 · 클릭해서 끄기",
-    "tooltip_on_project": "Multica가 프로젝트 \"{{label}}\"을(를) 보고 있음을 알고 있습니다 · 클릭해서 끄기",
-    "card_tooltip_issue_with_subtitle": "Multica가 {{label}}을(를) 보고 있음을 알고 있습니다 — {{subtitle}}",
-    "card_tooltip_issue": "Multica가 {{label}}을(를) 보고 있음을 알고 있습니다",
-    "card_tooltip_project": "Multica가 프로젝트 \"{{label}}\"을(를) 보고 있음을 알고 있습니다",
-    "aria_stop": "현재 페이지 공유 중지",
-    "aria_start": "현재 페이지를 Multica에 공유"
   },
   "no_agent_banner": "채팅을 시작하려면 에이전트가 필요합니다.",
   "offline_banner": {

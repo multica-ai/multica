@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -97,10 +97,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildClaudeArgs(opts, b.cfg.Logger)
 
@@ -145,12 +142,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("claude stdin pipe: %w", err)
 	}
-	closeStdin := func() {
-		if stdin != nil {
-			_ = stdin.Close()
-			stdin = nil
-		}
-	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	// Capture stderr into both the daemon log (as before) and a bounded tail
 	// buffer so we can include the last few KB in Result.Error when claude
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
@@ -168,24 +161,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
-	if err := writeClaudeInput(stdin, prompt); err != nil {
-		// claude almost certainly died during startup (broken pipe). The
-		// real reason is sitting in stderrBuf — surface it the same way the
-		// post-handshake error path does, otherwise the daemon log is the
-		// only place that knows whether it was a V8 abort, a missing native
-		// module, or anything else. cmd.Wait() flushes os/exec's stderr
-		// copy goroutine, so stderrBuf.Tail() is safe to read.
-		closeStdin()
-		cancel()
-		_ = cmd.Wait()
-		return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
-	}
-	// In auto mode (no approval callback), close stdin immediately — Claude
-	// won't send control_requests with bypassPermissions. In prompt/deny mode,
-	// keep stdin open so we can write control_response messages back.
-	if opts.OnApproval == nil {
-		closeStdin()
-	}
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -194,6 +169,29 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
+
+	// writeClaudeInput runs in its own goroutine so it cannot deadlock
+	// against the stdout reader. With --verbose --output-format stream-json
+	// the CLI emits a startup banner before reading its first stdin frame;
+	// if nothing is draining stdout while we write the prompt, claude blocks
+	// writing stdout, never reads stdin, and our Write blocks until runCtx
+	// fires. The field symptom is "write |1: The pipe has been ended."
+	// surfacing exactly at the per-task timeout when the kill invalidates
+	// the still-blocked pipe.
+	//
+	// Keep stdin open after the initial user message. Claude's stream-json
+	// protocol can emit control_request events mid-run and expects matching
+	// control_response frames on the same input stream; closing stdin here
+	// leaves the child stuck waiting for a response until its own fallback
+	// timeout.
+	writeDone := make(chan error, 1)
+	go func() {
+		err := writeClaudeInput(stdin, prompt)
+		if err != nil {
+			closeStdin()
+		}
+		writeDone <- err
+	}()
 
 	go func() {
 		defer cancel()
@@ -216,6 +214,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
 			<-runCtx.Done()
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
@@ -260,7 +259,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 				emitDisplayEvent(opts.TraceCallback, "status", "Claude", "running", nil)
 			case "result":
-				closeStdin()
 				sessionID = msg.SessionID
 				if msg.ResultText != "" {
 					output.Reset()
@@ -282,6 +280,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					opts.TraceCallback("normalized", content, "")
 				}
 				emitDisplayEvent(opts.TraceCallback, "status", "Claude", finalStatus, map[string]any{"error": finalError})
+				closeStdin()
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -305,24 +304,39 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 		}
 
+		closeStdin()
+
 		// Wait for process exit
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
+		// writeDone is buffered (cap 1) and the writer always sends — by the
+		// time cmd has exited, the prompt write has either succeeded, hit a
+		// broken pipe, or been unblocked by the kill that ended cmd.
+		writeErr := <-writeDone
 
 		if permissionBlocked {
 			// Keep the explicit blocked result set above. Claude can sometimes
 			// report "permission not granted" as tool output instead of a
 			// control_request in print/stream-json mode; cancelling prevents it
 			// from spending more turns retrying an approval we cannot answer.
-		} else if runCtx.Err() == context.DeadlineExceeded {
-			finalStatus = "timeout"
-			finalError = fmt.Sprintf("claude timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+		} else {
+			switch {
+			case runCtx.Err() == context.DeadlineExceeded:
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("claude timed out after %s", timeout)
+			case runCtx.Err() == context.Canceled:
+				finalStatus = "aborted"
+				finalError = "execution cancelled"
+			case writeErr != nil && finalStatus == "completed" && sessionID == "":
+				// No result event landed and the prompt write failed — claude
+				// died before reading the prompt. Surface the write error; the
+				// stderr tail attached below carries the real reason.
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("write claude input: %v", writeErr)
+			case exitErr != nil && finalStatus == "completed":
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+			}
 		}
 
 		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
@@ -455,8 +469,92 @@ func (b *claudeBackend) handleUser(
 }
 
 func isClaudePermissionNotGranted(s string) bool {
-	return strings.Contains(s, "Claude requested permissions") &&
-		strings.Contains(s, "you haven't granted it yet")
+	if !strings.Contains(s, "Claude requested permissions") ||
+		!strings.Contains(s, "you haven't granted it yet") {
+		return false
+	}
+
+	for _, text := range claudePermissionCandidateTexts(s) {
+		if hasClaudePermissionNotGrantedLine(text) {
+			return true
+		}
+	}
+	return false
+}
+
+func claudePermissionCandidateTexts(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+
+	if trimmed[0] == '"' {
+		var decoded string
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+			return []string{decoded}
+		}
+	}
+
+	if trimmed[0] == '[' {
+		var blocks []struct {
+			Text    string `json:"text,omitempty"`
+			Content string `json:"content,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &blocks); err == nil {
+			candidates := make([]string, 0, len(blocks))
+			for _, block := range blocks {
+				if strings.TrimSpace(block.Text) != "" {
+					candidates = append(candidates, block.Text)
+				}
+				if strings.TrimSpace(block.Content) != "" {
+					candidates = append(candidates, block.Content)
+				}
+			}
+			if len(candidates) > 0 {
+				return candidates
+			}
+		}
+	}
+
+	return []string{raw}
+}
+
+func hasClaudePermissionNotGrantedLine(text string) bool {
+	inFence := false
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || trimmed == "" {
+			continue
+		}
+		if isClaudePermissionNotGrantedLine(trimmed) {
+			return true
+		}
+	}
+	return false
+}
+
+func isClaudePermissionNotGrantedLine(line string) bool {
+	if !strings.HasPrefix(line, "Claude requested permissions to ") ||
+		!strings.Contains(line, "you haven't granted it yet") {
+		return false
+	}
+	if strings.Contains(line, "strings.Contains") ||
+		strings.Contains(line, "isClaudePermissionNotGranted") ||
+		strings.Contains(line, "`Claude requested permissions") ||
+		strings.Contains(line, "Claude requested permissions`") ||
+		strings.Contains(line, `"Claude requested permissions`) ||
+		strings.Contains(line, `Claude requested permissions"`) ||
+		strings.Contains(line, "`you haven't granted it yet") ||
+		strings.Contains(line, "you haven't granted it yet`") ||
+		strings.Contains(line, `"you haven't granted it yet`) ||
+		strings.Contains(line, `you haven't granted it yet"`) {
+		return false
+	}
+	return true
 }
 
 func (b *claudeBackend) handleControlRequest(ctx context.Context, msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }, onApproval ApprovalCallback) {
@@ -792,10 +890,36 @@ func mergeEnv(base []string, extra map[string]string) []string {
 	return env
 }
 
+// isFilteredChildEnvKey reports whether an inherited env var is an internal
+// Claude Code runtime/session marker that must NOT leak into the spawned child
+// (otherwise the child mistakes itself for a nested or resumed session, or
+// inherits the parent's exec path / transport).
+//
+// It must NOT strip the user-facing CLAUDE_CODE_* configuration namespace
+// (CLAUDE_CODE_GIT_BASH_PATH, CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX,
+// CLAUDE_CODE_MAX_OUTPUT_TOKENS, CLAUDE_CODE_TMPDIR, ...): users set those
+// deliberately and the child needs them. Blanket-stripping the whole prefix is
+// what broke Windows — CLAUDE_CODE_GIT_BASH_PATH was silently removed, so Claude
+// Code could not find bash.exe and exited immediately. Strip internal markers by
+// exact name and let every other CLAUDE_CODE_* var through.
+//
+// The denylist holds only undocumented, per-process runtime markers. Anything in
+// the public env-vars reference (https://code.claude.com/docs/en/env-vars) is
+// user config and stays out of this list — including CLAUDE_CODE_TMPDIR, a
+// documented temp-dir override under which Claude Code creates its own
+// per-session subdir, so inheriting it is harmless.
 func isFilteredChildEnvKey(key string) bool {
-	return key == "CLAUDECODE" ||
-		strings.HasPrefix(key, "CLAUDECODE_") ||
-		strings.HasPrefix(key, "CLAUDE_CODE_")
+	switch key {
+	case "CLAUDECODE", // "1" when running inside Claude Code
+		"CLAUDE_CODE_ENTRYPOINT", // entrypoint marker (cli/sdk-cli/...)
+		"CLAUDE_CODE_EXECPATH",   // path to the running CLI binary
+		"CLAUDE_CODE_SESSION_ID", // per-session identifier
+		"CLAUDE_CODE_SSE_PORT":   // IDE-extension transport port
+		return true
+	}
+	// CLAUDECODE_* (no underscore between CLAUDE and CODE) is wholly internal;
+	// keep stripping it. The user-facing config namespace is CLAUDE_CODE_*.
+	return strings.HasPrefix(key, "CLAUDECODE_")
 }
 
 // blockedArgMode specifies whether a blocked arg takes a value or is standalone.
@@ -812,18 +936,24 @@ const (
 // only block args that would break the communication protocol, not every
 // possible dangerous flag. Workspace members are trusted to configure agents
 // sensibly, same as with custom_env.
+//
+// Shell quoting is stripped from each arg before processing: users commonly
+// type custom_args in config fields using shell syntax (e.g.
+// --deny-tool='write'). Since the daemon spawns processes directly without a
+// shell, those quotes would otherwise be passed literally to the child process,
+// which typically rejects them as unrecognised flag values.
 func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *slog.Logger) []string {
 	if len(args) == 0 {
 		return args
 	}
 	filtered := make([]string, 0, len(args))
 	skip := false
-	for _, arg := range args {
+	for _, raw := range args {
 		if skip {
 			skip = false
 			continue
 		}
-		// Check if this arg is a blocked flag or starts with "blockedFlag=".
+		arg := unshellQuoteArg(raw)
 		flag := arg
 		hasInlineValue := false
 		if idx := strings.Index(arg, "="); idx > 0 {
@@ -842,6 +972,44 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 		filtered = append(filtered, arg)
 	}
 	return filtered
+}
+
+// unshellQuoteArg strips a single layer of shell-style single or double quotes
+// from an argument. It handles two forms:
+//
+//   - --flag='value' or --flag="value" → --flag=value
+//   - 'standalone' or "standalone"     → standalone
+//
+// Only flag-style args (`-x=…`, `--flag=…`) get inline value unquoting. Plain
+// assignment syntax like `model="o3"` is left alone because the quotes may be
+// semantic for the child process (for example Codex `-c model="o3"`). Only
+// matching outer quotes are stripped; no escape processing is done.
+func unshellQuoteArg(arg string) string {
+	if strings.HasPrefix(arg, "-") {
+		if idx := strings.Index(arg, "="); idx > 0 {
+			value := arg[idx+1:]
+			if unquoted, ok := stripSurroundingQuotes(value); ok {
+				return arg[:idx+1] + unquoted
+			}
+			return arg
+		}
+	}
+	if unquoted, ok := stripSurroundingQuotes(arg); ok {
+		return unquoted
+	}
+	return arg
+}
+
+// stripSurroundingQuotes removes a matching outer pair of single or double
+// quotes from s and returns (unquoted, true). Returns (s, false) if s does not
+// start and end with the same quote character.
+func stripSurroundingQuotes(s string) (string, bool) {
+	if len(s) >= 2 {
+		if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
+			return s[1 : len(s)-1], true
+		}
+	}
+	return s, false
 }
 
 // writeMcpConfigToTemp writes raw MCP config JSON to a temporary file and returns

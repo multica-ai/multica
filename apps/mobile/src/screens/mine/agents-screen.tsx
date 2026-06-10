@@ -96,11 +96,14 @@ const statusMeta: Record<AgentStatus, { color: string; muted?: boolean }> = {
 const taskStatusMeta: Record<AgentTask["status"], { color: string }> = {
   queued: { color: colors.mutedForeground },
   dispatched: { color: colors.info },
+  waiting_local_directory: { color: colors.warning },
   running: { color: colors.success },
   completed: { color: colors.success },
   failed: { color: colors.destructive },
   cancelled: { color: colors.mutedForeground },
 };
+
+const defaultTaskStatusMeta = { color: colors.mutedForeground };
 
 export function AgentsScreen() {
   const { t } = useTranslation();
@@ -736,7 +739,7 @@ function TasksTab({ agent, workspaceId }: { agent: Agent; workspaceId: string })
 
 function TaskRow({ task, onPress }: { task: AgentTask; onPress?: () => void }) {
   const { t } = useTranslation();
-  const meta = taskStatusMeta[task.status];
+  const meta = taskStatusMeta[task.status] ?? defaultTaskStatusMeta;
   const content = (
     <>
       <View style={[styles.taskStatusDot, { backgroundColor: meta.color }]} />

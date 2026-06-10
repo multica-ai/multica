@@ -4,6 +4,8 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+export type AgentServiceTier = "" | "default" | "fast";
+
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
 // only the runtime owner and workspace admins can bind agents to it;
@@ -215,11 +217,13 @@ export interface Agent {
    */
   custom_env_key_count?: number;
   /**
-   * MCP server configuration forwarded to the runtime CLI (Claude's
-   * `--mcp-config`). The shape is opaque to the platform — whatever
-   * JSON the CLI accepts, the daemon writes to disk verbatim. `null`
-   * (or the field omitted on legacy backends) means no config; the
-   * daemon falls back to the CLI's own default. MUL-2764.
+   * MCP server configuration forwarded to runtimes that consume
+   * `agent.mcp_config` (see providerSupportsMcpConfig). Each backend
+   * materialises it in the runtime-native place: Claude flags, Codex
+   * config.toml, ACP session params, OpenCode env config, OpenClaw
+   * wrapper config, etc. `null` (or the field omitted on legacy backends)
+   * means no managed config; the daemon falls back to the CLI's own
+   * default. MUL-2764.
    *
    * When the caller can't see secrets (an agent actor, or a non-owner
    * non-admin), the server replaces the value with `null` and sets
@@ -250,6 +254,12 @@ export interface Agent {
    * (MUL-2339).
    */
   thinking_level?: string;
+  /**
+   * Codex-only service tier override. Empty string means "follow local Codex
+   * config"; "default" explicitly uses the standard tier; "fast" enables
+   * Codex Fast mode. Non-Codex responses omit the field.
+   */
+  service_tier?: AgentServiceTier;
   owner_id: string | null;
   allowed_user_ids?: string[];
   skills: AgentSkillSummary[];
@@ -309,6 +319,8 @@ export interface CreateAgentRequest {
   model?: string;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
   thinking_level?: string;
+  /** Optional Codex service tier override. See `Agent.service_tier`. */
+  service_tier?: AgentServiceTier;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
@@ -406,8 +418,8 @@ export interface UpdateAgentRequest {
    *   - field omitted → no change
    *   - `null` → clear the column; the daemon falls back to the CLI's
    *     built-in default at launch
-   *   - object → replace the stored JSON verbatim; the platform does
-   *     not validate the shape (MCP CLI accepts whatever it accepts)
+   *   - object → replace the stored JSON verbatim; runtime backends
+   *     validate / translate it according to their own MCP integration
    */
   mcp_config?: unknown | null;
   visibility?: AgentVisibility;
@@ -423,6 +435,14 @@ export interface UpdateAgentRequest {
    *     runtime's provider enum, rejected with 400 if not recognised
    */
   thinking_level?: string;
+  /**
+   * Codex-only service tier override. Tri-state semantics (OPE-2421):
+   *   - field omitted → no change
+   *   - "" → clear the override; Codex follows local config
+   *   - "default" → explicitly use the standard service tier
+   *   - "fast" → enable Codex Fast mode
+   */
+  service_tier?: AgentServiceTier;
 }
 
 /**
@@ -797,7 +817,7 @@ export interface RuntimeModel {
   default?: boolean;
   /**
    * Per-model reasoning/effort catalog discovered by the daemon. Currently
-   * populated for claude and codex runtimes only; omitted (or undefined)
+   * populated for claude, codex, and opencode runtimes; omitted (or undefined)
    * for every other provider, which the UI treats as "no thinking-level
    * picker for this model". See MUL-2339.
    */

@@ -125,6 +125,7 @@ describe("ApiClient", () => {
     await client.updateAutopilot("ap-1", { status: "paused", project_id: null });
     await client.deleteAutopilot("ap-1");
     await client.triggerAutopilot("ap-1");
+    await client.triggerAutopilot("ap-1", { trigger_payload: "production" });
     await client.listAutopilotRuns("ap-1", { limit: 10, offset: 20 });
     await client.createAutopilotTrigger("ap-1", {
       kind: "schedule",
@@ -161,6 +162,11 @@ describe("ApiClient", () => {
       },
       { url: "https://api.example.test/api/autopilots/ap-1", method: "DELETE" },
       { url: "https://api.example.test/api/autopilots/ap-1/trigger", method: "POST" },
+      {
+        url: "https://api.example.test/api/autopilots/ap-1/trigger",
+        method: "POST",
+        body: JSON.stringify({ trigger_payload: "production" }),
+      },
       { url: "https://api.example.test/api/autopilots/ap-1/runs?limit=10&offset=20", method: "GET" },
       {
         url: "https://api.example.test/api/autopilots/ap-1/triggers",
@@ -429,6 +435,68 @@ describe("ApiClient", () => {
       await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
         PreviewUnsupportedError,
       );
+    });
+  });
+
+  describe("listChatMessagesPage deployment-order fallback", () => {
+    const jsonResponse = (body: unknown, status: number, statusText = "") =>
+      new Response(JSON.stringify(body), {
+        status,
+        statusText,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    it("falls back to the legacy full-list endpoint when the paged route 404s", async () => {
+      const legacy = [
+        { id: "m1", role: "user", content: "hi", created_at: "2026-06-01T00:00:00Z" },
+        { id: "m2", role: "assistant", content: "yo", created_at: "2026-06-01T00:00:01Z" },
+      ];
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404, "Not Found"))
+        .mockResolvedValueOnce(jsonResponse(legacy, 200));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const page = await client.listChatMessagesPage("session-1", { limit: 50 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0]![0]).toBe(
+        "https://api.example.test/api/chat/sessions/session-1/messages/page?limit=50",
+      );
+      expect(fetchMock.mock.calls[1]![0]).toBe(
+        "https://api.example.test/api/chat/sessions/session-1/messages",
+      );
+      expect(page).toEqual({ messages: legacy, limit: 50, has_more: false, next_cursor: null });
+    });
+
+    it("does NOT fall back on a cursor request — a 404 there propagates", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: "not found" }, 404, "Not Found"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.listChatMessagesPage("session-1", {
+          before: { created_at: "2026-06-01T00:00:00Z", id: "m1" },
+        }),
+      ).rejects.toBeInstanceOf(ApiError);
+      // Only the paged request fires; no legacy full-list call that would duplicate messages.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("propagates non-404 errors instead of masking them with the legacy list", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: "boom" }, 500, "Internal Server Error"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listChatMessagesPage("session-1")).rejects.toMatchObject({
+        status: 500,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 

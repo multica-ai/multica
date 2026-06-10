@@ -55,6 +55,18 @@ func asciiFilenameFallback(name string) string {
 	return "download"
 }
 
+func ContentDisposition(contentType, filename string) string {
+	disposition := "attachment"
+	if isInlineContentType(contentType) {
+		disposition = "inline"
+	}
+	return contentDisposition(disposition, filename)
+}
+
+func AttachmentContentDisposition(filename string) string {
+	return contentDisposition("attachment", filename)
+}
+
 // isInlineContentType returns true for media types that browsers should
 // display inline (images, video, audio, PDF). Everything else triggers a
 // download via Content-Disposition: attachment.

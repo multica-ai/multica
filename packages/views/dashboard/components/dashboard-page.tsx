@@ -1,9 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { BarChart3, ChevronDown, FolderKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -12,7 +17,7 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   dashboardUsageDailyOptions,
@@ -60,6 +65,7 @@ import {
   formatDuration,
   mergeDailyRunTimeRows,
   mergeAgentDashboardRows,
+  aggregateByMember,
   type AgentDashboardRow,
 } from "../utils";
 
@@ -125,13 +131,13 @@ function Segmented<T extends string | number>({
   options: readonly { label: string; value: T }[];
 }) {
   return (
-    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+    <div className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-md bg-muted p-0.5">
       {options.map((o) => (
         <button
           key={String(o.value)}
           type="button"
           onClick={() => onChange(o.value)}
-          className={`rounded-sm px-2.5 py-1 text-xs font-medium transition-colors ${
+          className={`rounded-sm px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
             o.value === value
               ? "bg-background text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground"
@@ -178,6 +184,7 @@ export function DashboardPage() {
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
@@ -357,8 +364,9 @@ export function DashboardPage() {
         runTimeRows,
         localTokenRows,
         localRunTimeByRunnerRows,
+        agents,
       ),
-    [agentTokenRows, runTimeRows, localTokenRows, localRunTimeByRunnerRows],
+    [agentTokenRows, runTimeRows, localTokenRows, localRunTimeByRunnerRows, agents],
   );
 
   return (
@@ -464,6 +472,7 @@ export function DashboardPage() {
               <Leaderboard
                 rows={agentRows}
                 agents={agents}
+                members={members}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
             </>
@@ -661,30 +670,119 @@ function TrendBlock({
 // Which metric ranks the leaderboard. Drives row order, progress bar
 // width, and which column header is emphasised — keeping the three in
 // lockstep so the user always sees what the ranking actually measures.
-type LeaderboardSort = "tokens" | "cost" | "time" | "tasks";
+type LeaderboardSort = "processedTokens" | "nonCachedTokens" | "cachedTokens" | "cost" | "time" | "tasks";
+type LeaderboardTab = "agent" | "member";
+type LeaderboardMetricRow = {
+  tokens: number;
+  nonCachedTokens: number;
+  cachedTokens: number;
+  cost: number;
+  seconds: number;
+  taskCount: number;
+};
+type TokenBreakdownRow = Pick<
+  AgentDashboardRow,
+  "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens"
+>;
 
-const SORT_METRIC: Record<LeaderboardSort, (r: AgentDashboardRow) => number> = {
-  tokens: (r) => r.tokens,
+const SORT_METRIC: Record<LeaderboardSort, (r: LeaderboardMetricRow) => number> = {
+  processedTokens: (r) => r.tokens,
+  nonCachedTokens: (r) => r.nonCachedTokens,
+  cachedTokens: (r) => r.cachedTokens,
   cost: (r) => r.cost,
   time: (r) => r.seconds,
   tasks: (r) => r.taskCount,
 };
 
+function tokenValueForSort(row: LeaderboardMetricRow, sortBy: LeaderboardSort): number {
+  switch (sortBy) {
+    case "nonCachedTokens":
+      return row.nonCachedTokens;
+    case "cachedTokens":
+      return row.cachedTokens;
+    default:
+      return row.tokens;
+  }
+}
+
+function TokenBreakdown({
+  row,
+  value,
+}: {
+  row: TokenBreakdownRow;
+  value: number;
+}) {
+  const { t } = useT("usage");
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-block cursor-default underline decoration-dotted underline-offset-2">
+            {formatTokens(value)}
+          </span>
+        }
+      />
+      <TooltipContent side="top" className="w-44 text-xs">
+        <div className="space-y-1">
+          <div className="flex justify-between gap-3">
+            <span>{t(($) => $.leaderboard.breakdown_input)}</span>
+            <span className="tabular-nums">{formatTokens(row.inputTokens)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>{t(($) => $.leaderboard.breakdown_output)}</span>
+            <span className="tabular-nums">{formatTokens(row.outputTokens)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>{t(($) => $.leaderboard.breakdown_cache_read)}</span>
+            <span className="tabular-nums">{formatTokens(row.cacheReadTokens)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>{t(($) => $.leaderboard.breakdown_cache_write)}</span>
+            <span className="tabular-nums">{formatTokens(row.cacheWriteTokens)}</span>
+          </div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// Sentinel matching utils.ts SYSTEM_OWNER — agents without an ownerId are
+// grouped under this key.
+const SYSTEM_OWNER = "__system__";
+
 function Leaderboard({
   rows,
   agents,
+  members,
   lessThanMinuteLabel,
 }: {
   rows: AgentDashboardRow[];
   agents: { id: string; name: string }[];
+  members: { user_id: string; name: string }[];
   lessThanMinuteLabel: string;
 }) {
   const { t } = useT("usage");
-  const [sortBy, setSortBy] = useState<LeaderboardSort>("tokens");
+  const [tab, setTab] = useState<LeaderboardTab>("agent");
+  const [sortBy, setSortBy] = useState<LeaderboardSort>("processedTokens");
+  const [expandedMember, setExpandedMember] = useState<string | null>(null);
+
+  const memberRows = useMemo(() => aggregateByMember(rows), [rows]);
+
+  // Resolve member display name from user_id, falling back to "System" for
+  // unowned agents.
+  const memberName = useMemo(() => {
+    const map = new Map(members.map((m) => [m.user_id, m.name] as const));
+    return (ownerId: string) =>
+      ownerId === SYSTEM_OWNER
+        ? t(($) => $.leaderboard.system_group)
+        : map.get(ownerId) ?? ownerId;
+  }, [members, t]);
 
   const sortOptions = useMemo(
     () => [
-      { value: "tokens" as const, label: t(($) => $.leaderboard.header_tokens) },
+      { value: "processedTokens" as const, label: t(($) => $.leaderboard.header_processed_tokens) },
+      { value: "nonCachedTokens" as const, label: t(($) => $.leaderboard.header_non_cached_tokens) },
+      { value: "cachedTokens" as const, label: t(($) => $.leaderboard.header_cached_tokens) },
       { value: "cost" as const, label: t(($) => $.leaderboard.header_cost) },
       { value: "time" as const, label: t(($) => $.leaderboard.header_time) },
       { value: "tasks" as const, label: t(($) => $.leaderboard.header_tasks) },
@@ -700,88 +798,258 @@ function Leaderboard({
     return rows.toSorted((a, b) => metric(b) - metric(a));
   }, [rows, sortBy]);
 
+  const sortedMemberRows = useMemo(() => {
+    const metric = SORT_METRIC[sortBy];
+    return memberRows.toSorted((a, b) => metric(b) - metric(a));
+  }, [memberRows, sortBy]);
+
   const maxValue = useMemo(() => {
     const metric = SORT_METRIC[sortBy];
-    return sortedRows.reduce((m, r) => Math.max(m, metric(r)), 0);
-  }, [sortedRows, sortBy]);
+    const source = tab === "agent" ? sortedRows : sortedMemberRows;
+    return source.reduce((m, r) => Math.max(m, metric(r)), 0);
+  }, [sortedRows, sortedMemberRows, sortBy, tab]);
 
   // Active column gets foreground text; others stay muted. Helps the user
   // see "this is what the bar is measuring" at a glance.
   const colClass = (key: LeaderboardSort) =>
     `text-right ${sortBy === key ? "text-foreground" : "text-muted-foreground"}`;
 
+  const tokenHeader =
+    sortBy === "nonCachedTokens"
+      ? t(($) => $.leaderboard.header_non_cached_tokens)
+      : sortBy === "cachedTokens"
+        ? t(($) => $.leaderboard.header_cached_tokens)
+        : t(($) => $.leaderboard.header_processed_tokens);
+  const tokenColumnActive =
+    sortBy === "processedTokens" || sortBy === "nonCachedTokens" || sortBy === "cachedTokens";
+
+  const caption =
+    tab === "agent"
+      ? t(($) => $.leaderboard.caption, { count: rows.length })
+      : t(($) => $.leaderboard.caption_member, { count: memberRows.length });
+
   return (
     <div className="rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 pt-4 pb-3">
-        <h4 className="text-sm font-semibold">{t(($) => $.leaderboard.title)}</h4>
+        <div className="flex items-center gap-3">
+          <h4 className="text-sm font-semibold">{t(($) => $.leaderboard.title)}</h4>
+          <Segmented
+            value={tab}
+            onChange={setTab}
+            options={[
+              { label: t(($) => $.leaderboard.tab_agent), value: "agent" as const },
+              { label: t(($) => $.leaderboard.tab_member), value: "member" as const },
+            ]}
+          />
+        </div>
         <div className="flex items-center gap-3">
           <Segmented value={sortBy} onChange={setSortBy} options={sortOptions} />
-          <span className="text-xs text-muted-foreground">
-            {t(($) => $.leaderboard.caption, { count: rows.length })}
-          </span>
+          <span className="text-xs text-muted-foreground">{caption}</span>
         </div>
       </div>
-      {sortedRows.length === 0 ? (
+      {tab === "agent" ? (
+        sortedRows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-xs text-muted-foreground">
+            {t(($) => $.leaderboard.no_data)}
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
+              <span>{t(($) => $.leaderboard.header_agent)}</span>
+              <span />
+              <span className={tokenColumnActive ? "text-right text-foreground" : "text-right text-muted-foreground"}>{tokenHeader}</span>
+              <span className={colClass("cost")}>{t(($) => $.leaderboard.header_cost)}</span>
+              <span className={colClass("time")}>{t(($) => $.leaderboard.header_time)}</span>
+              <span className={colClass("tasks")}>{t(($) => $.leaderboard.header_tasks)}</span>
+            </div>
+            <div className="divide-y">
+              {sortedRows.map((row) => {
+                const agent = agents.find((a) => a.id === row.agentId);
+                const value = SORT_METRIC[sortBy](row);
+                const tokenValue = tokenValueForSort(row, sortBy);
+                const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+                const displayName = row.displayName ?? agent?.name ?? row.agentId;
+                return (
+                  <div
+                    key={row.agentId}
+                    className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <ActorAvatar
+                        actorType={row.source === "local" ? "member" : "agent"}
+                        actorId={row.source === "local" ? (row.ownerId ?? row.agentId) : row.agentId}
+                        size={22}
+                        enableHoverCard={row.source === "agent"}
+                      />
+                      <span className="cursor-pointer truncate text-sm font-medium">
+                        {displayName}
+                      </span>
+                    </div>
+                    <div className="relative h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div
+                      className={`text-right text-xs tabular-nums ${tokenColumnActive ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                    >
+                      <TokenBreakdown row={row} value={tokenValue} />
+                    </div>
+                    <div
+                      className={`text-right tabular-nums ${sortBy === "cost" ? "text-sm font-medium" : "text-xs text-muted-foreground"}`}
+                    >
+                      ${row.cost.toFixed(2)}
+                    </div>
+                    <div
+                      className={`text-right text-xs tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                    >
+                      {formatDuration(row.seconds, lessThanMinuteLabel)}
+                    </div>
+                    <div
+                      className={`text-right text-xs tabular-nums ${sortBy === "tasks" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                    >
+                      {row.taskCount}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )
+      ) : sortedMemberRows.length === 0 ? (
         <p className="px-4 py-8 text-center text-xs text-muted-foreground">
           {t(($) => $.leaderboard.no_data)}
         </p>
       ) : (
         <>
-          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
-            <span>{t(($) => $.leaderboard.header_agent)}</span>
+          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
+            <span>{t(($) => $.leaderboard.header_member)}</span>
             <span />
-            <span className={colClass("tokens")}>{t(($) => $.leaderboard.header_tokens)}</span>
+            <span className={tokenColumnActive ? "text-right text-foreground" : "text-right text-muted-foreground"}>{tokenHeader}</span>
             <span className={colClass("cost")}>{t(($) => $.leaderboard.header_cost)}</span>
             <span className={colClass("time")}>{t(($) => $.leaderboard.header_time)}</span>
             <span className={colClass("tasks")}>{t(($) => $.leaderboard.header_tasks)}</span>
           </div>
           <div className="divide-y">
-            {sortedRows.map((row) => {
-              const agent = agents.find((a) => a.id === row.agentId);
-              const value = SORT_METRIC[sortBy](row);
+            {sortedMemberRows.map((mRow) => {
+              const value = SORT_METRIC[sortBy](mRow);
+              const tokenValue = tokenValueForSort(mRow, sortBy);
               const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
-              const displayName = row.displayName ?? agent?.name ?? row.agentId;
+              const isExpanded = expandedMember === mRow.ownerId;
+              const actorType = mRow.ownerId === SYSTEM_OWNER ? "system" : "member";
               return (
-                <div
-                  key={row.agentId}
-                  className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <ActorAvatar
-                      actorType={row.source === "local" ? "member" : "agent"}
-                      actorId={row.source === "local" ? (row.ownerId ?? row.agentId) : row.agentId}
-                      size={22}
-                      enableHoverCard={row.source === "agent"}
-                    />
-                    <span className="cursor-pointer truncate text-sm font-medium">
-                      {displayName}
-                    </span>
-                  </div>
-                  <div className="relative h-2 overflow-hidden rounded-full bg-muted">
+                <div key={mRow.ownerId}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setExpandedMember(isExpanded ? null : mRow.ownerId)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setExpandedMember(isExpanded ? null : mRow.ownerId);
+                      }
+                    }}
+                    className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/40 transition-colors"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <ActorAvatar
+                        actorType={actorType}
+                        actorId={mRow.ownerId === SYSTEM_OWNER ? "" : mRow.ownerId}
+                        size={22}
+                      />
+                      <span className="truncate text-sm font-medium">
+                        {memberName(mRow.ownerId)}
+                      </span>
+                      <ChevronDown
+                        className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                      />
+                    </div>
+                    <div className="relative h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
                     <div
-                      className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
-                      style={{ width: `${pct}%` }}
-                    />
+                      className={`text-right text-xs tabular-nums ${tokenColumnActive ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                    >
+                      <TokenBreakdown row={mRow} value={tokenValue} />
+                    </div>
+                    <div
+                      className={`text-right tabular-nums ${sortBy === "cost" ? "text-sm font-medium" : "text-xs text-muted-foreground"}`}
+                    >
+                      ${mRow.cost.toFixed(2)}
+                    </div>
+                    <div
+                      className={`text-right text-xs tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                    >
+                      {formatDuration(mRow.seconds, lessThanMinuteLabel)}
+                    </div>
+                    <div
+                      className={`text-right text-xs tabular-nums ${sortBy === "tasks" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                    >
+                      {mRow.taskCount}
+                    </div>
                   </div>
+                  {/* Collapsible agent detail panel */}
                   <div
-                    className={`text-right text-xs tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                    className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+                      isExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                    }`}
                   >
-                    {formatTokens(row.tokens)}
-                  </div>
-                  <div
-                    className={`text-right tabular-nums ${sortBy === "cost" ? "text-sm font-medium" : "text-xs text-muted-foreground"}`}
-                  >
-                    ${row.cost.toFixed(2)}
-                  </div>
-                  <div
-                    className={`text-right text-xs tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}
-                  >
-                    {formatDuration(row.seconds, lessThanMinuteLabel)}
-                  </div>
-                  <div
-                    className={`text-right text-xs tabular-nums ${sortBy === "tasks" ? "font-medium text-foreground" : "text-muted-foreground"}`}
-                  >
-                    {row.taskCount}
+                    <div className="overflow-hidden">
+                      <div className="border-t bg-muted/20 px-4 py-2 space-y-1">
+                        {mRow.agents.toSorted(
+                          (a, b) => SORT_METRIC[sortBy](b) - SORT_METRIC[sortBy](a),
+                        ).map((row) => {
+                          const agent = agents.find((a) => a.id === row.agentId);
+                          const displayName = row.displayName ?? agent?.name ?? row.agentId;
+                          const agentValue = SORT_METRIC[sortBy](row);
+                          const memberMaxValue = mRow.agents.reduce(
+                            (max, r) => Math.max(max, SORT_METRIC[sortBy](r)),
+                            0,
+                          );
+                          const agentPct = memberMaxValue > 0 ? (agentValue / memberMaxValue) * 100 : 0;
+                          return (
+                            <div
+                              key={row.agentId}
+                              className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_6rem_5rem_5rem_4rem] items-center gap-3 py-1.5"
+                            >
+                              <div className="flex min-w-0 items-center gap-2 pl-2">
+                                <ActorAvatar
+                                  actorType={row.source === "local" ? "member" : "agent"}
+                                  actorId={row.source === "local" ? (row.ownerId ?? row.agentId) : row.agentId}
+                                  size={18}
+                                  enableHoverCard={row.source === "agent"}
+                                />
+                                <span className="truncate text-xs text-muted-foreground">
+                                  {displayName}
+                                </span>
+                              </div>
+                              <div className="relative h-1.5 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-chart-2 transition-[width] duration-300 ease-out"
+                                  style={{ width: `${agentPct}%` }}
+                                />
+                              </div>
+                              <div className="text-right text-xs tabular-nums text-muted-foreground">
+                                <TokenBreakdown row={row} value={tokenValueForSort(row, sortBy)} />
+                              </div>
+                              <div className="text-right text-xs tabular-nums text-muted-foreground">
+                                ${row.cost.toFixed(2)}
+                              </div>
+                              <div className="text-right text-xs tabular-nums text-muted-foreground">
+                                {formatDuration(row.seconds, lessThanMinuteLabel)}
+                              </div>
+                              <div className="text-right text-xs tabular-nums text-muted-foreground">
+                                {row.taskCount}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );

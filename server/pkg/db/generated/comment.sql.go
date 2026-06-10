@@ -203,6 +203,52 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 	return i, err
 }
 
+const getLatestAgentCommentSince = `-- name: GetLatestAgentCommentSince :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at, resolved_at, resolved_by_type, resolved_by_id FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND author_type = 'agent'
+  AND author_id = $3
+  AND created_at >= $4
+  AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestAgentCommentSinceParams struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetLatestAgentCommentSince(ctx context.Context, arg GetLatestAgentCommentSinceParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getLatestAgentCommentSince,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.AuthorID,
+		arg.CreatedAt,
+	)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.DeletedAt,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+	)
+	return i, err
+}
+
 const getThreadRoot = `-- name: GetThreadRoot :one
 WITH RECURSIVE root_of AS (
     SELECT c.id, c.parent_id
@@ -224,12 +270,9 @@ type GetThreadRootParams struct {
 
 // Returns the thread-root comment for @comment_id by walking parent_id up to
 // the row whose parent_id IS NULL. For a root comment it returns that comment
-// itself. Used at the write boundary to flatten replies: every new reply stores
-// the thread root as its parent_id, so the comment tree never exceeds depth 1.
-// This enforces the 2-level threading model the product and UI already assume
-// (a root + a flat list of replies, like Linear/Slack) at insert time, so every
-// reader can treat a reply's parent_id AS its thread root without re-walking the
-// tree. Cycle-safe under the PK constraint (a comment cannot be its own ancestor).
+// itself. Used when callers need thread-level behavior while parent_id remains
+// the exact direct parent of a reply. Cycle-safe under the PK constraint (a
+// comment cannot be its own ancestor).
 func (q *Queries) GetThreadRoot(ctx context.Context, arg GetThreadRootParams) (Comment, error) {
 	row := q.db.QueryRow(ctx, getThreadRoot, arg.CommentID, arg.WorkspaceID)
 	var i Comment
@@ -830,10 +873,9 @@ type ListThreadCommentsForIssueRow struct {
 }
 
 // Returns the root of the thread containing @anchor_id plus every descendant
-// (recursive — defends against any future deeper nesting; today's data is two
-// layers because the CreateComment path collapses replies to root, but the
-// schema does not enforce that). @anchor_id may itself be a root or a reply.
-// Output is chronological so it can be fed straight to the agent.
+// (recursive — supports real reply-to-reply nesting). @anchor_id may itself be
+// a root or any reply in the thread. Output is chronological so it can be fed
+// straight to the agent.
 func (q *Queries) ListThreadCommentsForIssue(ctx context.Context, arg ListThreadCommentsForIssueParams) ([]ListThreadCommentsForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listThreadCommentsForIssue,
 		arg.RowLimit,

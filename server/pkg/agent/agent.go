@@ -1,7 +1,8 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, OpenClaw,
-// Hermes, Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek, Antigravity). It mirrors
-// the happy-cli AgentBackend pattern, translated to idiomatic Go.
+// WujieClaw, Hermes, Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek, Antigravity,
+// qoderclicn, mmx). It mirrors the happy-cli AgentBackend pattern, translated to
+// idiomatic Go.
 package agent
 
 import (
@@ -88,7 +89,7 @@ type ExecOptions struct {
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
 	ResumeSessionID           string           // if non-empty, resume a previous agent session
-	ExtraArgs                 []string         // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	ExtraArgs                 []string         // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude, codex, and qoderclicn backends only
 	CustomArgs                []string         // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage  // if non-nil, MCP server config to pass via --mcp-config
 	OnApproval                ApprovalCallback // nil = auto-approve (default behaviour)
@@ -98,13 +99,32 @@ type ExecOptions struct {
 	ClaudeUseSDKBridge        bool             // route Claude execution through the Agent SDK bridge
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
-	// medium|high|xhigh"). Empty means "use the runtime/model default" —
+	// medium|high|xhigh", OpenCode's model variant names). Empty means
+	// "use the runtime/model default" —
 	// every backend that consumes this skips its --effort / reasoning_effort
 	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude and codex backends only; other backends ignore the
+	// by the claude, codex, and opencode backends; other backends ignore the
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	// ServiceTier is a Codex-only service tier override. Empty means "do not
+	// override; let the local Codex config/default decide". The Codex backend
+	// passes non-empty values through to app-server as service_tier; other
+	// backends intentionally ignore it.
+	ServiceTier string
+}
+
+// runContext derives the execution context for an agent subprocess from the
+// configured per-run timeout. A positive timeout imposes a hard wall-clock
+// deadline; a zero (or negative) timeout imposes NO deadline, leaving liveness
+// entirely to the daemon's inactivity watchdog so a session that keeps emitting
+// events is never killed merely for running long (MUL-3064). The caller owns
+// the returned CancelFunc and must call it to release resources.
+func runContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(ctx, timeout)
+	}
+	return context.WithCancel(ctx)
 }
 
 // Session represents a running agent execution.
@@ -162,13 +182,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, cbc, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, deepseek, agy)
+	ExecutablePath string            // path to CLI binary (claude, cbc, codex, copilot, opencode, openclaw, wujieclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, deepseek, agy, qoderclicn, mmx)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "wujieclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity", "qoderclicn", "mmx".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -187,6 +207,11 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &opencodeBackend{cfg: cfg}, nil
 	case "openclaw":
 		return &openclawBackend{cfg: cfg}, nil
+	case "wujieclaw":
+		if cfg.ExecutablePath == "" {
+			cfg.ExecutablePath = "wujieclaw"
+		}
+		return &openclawBackend{cfg: cfg}, nil
 	case "hermes":
 		return &hermesBackend{cfg: cfg}, nil
 	case "gemini":
@@ -203,16 +228,20 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &deepseekBackend{cfg: cfg}, nil
 	case "antigravity":
 		return &antigravityBackend{cfg: cfg}, nil
+	case "qoderclicn":
+		return &qoderclicnBackend{cfg: cfg}, nil
+	case "mmx":
+		return &mmxBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, wujieclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity, qoderclicn, mmx)", agentType)
 	}
 }
 
 // SupportedBackends returns the set of agent types accepted by New.
 func SupportedBackends() []string {
 	return []string{
-		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw",
-		"hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity",
+		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "wujieclaw",
+		"hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity", "qoderclicn", "mmx",
 	}
 }
 
@@ -245,8 +274,11 @@ var launchHeaders = map[string]string{
 	"kimi":         "kimi acp",
 	"kiro":         "kiro-cli acp",
 	"openclaw":     "openclaw agent (json)",
+	"wujieclaw":    "wujieclaw agent (json)",
 	"opencode":     "opencode run (json)",
 	"pi":           "pi (json mode)",
+	"qoderclicn":   "qoderclicn (stream-json)",
+	"mmx":          "mmx text chat (json)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

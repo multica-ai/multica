@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -782,7 +783,7 @@ func TestNotification_DueDateChanged(t *testing.T) {
 	addTestSubscriber(t, issueID, "member", testUserID, "creator")
 	addTestSubscriber(t, issueID, "member", sub1ID, "assignee")
 
-	dueDate := "2026-04-15T00:00:00Z"
+	dueDate := "2026-04-15"
 	bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: testWorkspaceID,
@@ -843,7 +844,7 @@ func TestNotification_StartDateChanged(t *testing.T) {
 	addTestSubscriber(t, issueID, "member", testUserID, "creator")
 	addTestSubscriber(t, issueID, "member", sub1ID, "assignee")
 
-	startDate := "2026-04-01T00:00:00Z"
+	startDate := "2026-04-01"
 	bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: testWorkspaceID,
@@ -1188,13 +1189,23 @@ func createNotificationBindingForUser(t *testing.T, userID, provider string) str
 	t.Helper()
 
 	var bindingID string
+	metadata := "{}"
+	if provider == "openclaw_weixin" {
+		metadata = `{"channel":"openclaw-weixin"}`
+	}
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO external_account_binding (
 			user_id, provider, external_user_id, display_name, status, metadata
 		)
-		VALUES ($1, $2, $3, $4, 'active', '{}'::jsonb)
+		VALUES ($1, $2, $3, $4, 'active', $5::jsonb)
+		ON CONFLICT (user_id, provider)
+		DO UPDATE SET
+			external_user_id = EXCLUDED.external_user_id,
+			display_name = EXCLUDED.display_name,
+			status = EXCLUDED.status,
+			metadata = EXCLUDED.metadata
 		RETURNING id
-	`, userID, provider, provider+"-external-user", "Bound "+provider).Scan(&bindingID); err != nil {
+	`, userID, provider, provider+"-external-user", "Bound "+provider, metadata).Scan(&bindingID); err != nil {
 		t.Fatalf("createNotificationBindingForUser: %v", err)
 	}
 	return bindingID
@@ -1212,6 +1223,199 @@ func enableNotificationPreferenceForUser(t *testing.T, userID, channel, eventTyp
 		DO UPDATE SET enabled = EXCLUDED.enabled, binding_id = EXCLUDED.binding_id
 	`, userID, channel, eventType, bindingID); err != nil {
 		t.Fatalf("enableNotificationPreferenceForUser: %v", err)
+	}
+}
+
+func upsertNotificationPreferenceForUser(t *testing.T, userID string, prefs map[string]string) {
+	t.Helper()
+
+	preferences, err := json.Marshal(prefs)
+	if err != nil {
+		t.Fatalf("marshal notification preferences: %v", err)
+	}
+	queries := db.New(testPool)
+	if _, err := queries.UpsertNotificationPreference(context.Background(), db.UpsertNotificationPreferenceParams{
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
+		UserID:      util.MustParseUUID(userID),
+		Preferences: preferences,
+	}); err != nil {
+		t.Fatalf("UpsertNotificationPreference: %v", err)
+	}
+}
+
+func createMobilePushRegistrationForUser(t *testing.T, userID, installationID, platform, provider string) db.MobilePushRegistration {
+	t.Helper()
+
+	queries := db.New(testPool)
+	registration, err := queries.UpsertMobilePushRegistration(context.Background(), db.UpsertMobilePushRegistrationParams{
+		UserID:           util.MustParseUUID(userID),
+		InstallationID:   installationID,
+		Platform:         platform,
+		Provider:         provider,
+		ProviderClientID: "cid-" + installationID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertMobilePushRegistration: %v", err)
+	}
+	return registration
+}
+
+func createNotificationEventForMobilePushTest(t *testing.T, queries *db.Queries, userID, issueID, commentID, notificationType string) db.NotificationEvent {
+	t.Helper()
+
+	var commentUUID pgtype.UUID
+	if commentID != "" {
+		commentUUID = util.MustParseUUID(commentID)
+	}
+	event, err := queries.CreateNotificationEvent(context.Background(), db.CreateNotificationEventParams{
+		WorkspaceID:     util.MustParseUUID(testWorkspaceID),
+		RecipientUserID: util.MustParseUUID(userID),
+		Type:            notificationType,
+		Severity:        "info",
+		IssueID:         util.MustParseUUID(issueID),
+		CommentID:       commentUUID,
+		ActorType:       util.StrToText("member"),
+		ActorID:         util.MustParseUUID(testUserID),
+		Title:           "mobile push issue",
+		Body:            util.StrToText("mobile push body"),
+		Link:            util.StrToText("http://localhost:3000/test/issues/1"),
+		Details:         []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateNotificationEvent: %v", err)
+	}
+	return event
+}
+
+func TestRecordMobilePushDeliveries(t *testing.T) {
+	tests := []struct {
+		name           string
+		platform       string
+		provider       string
+		disable        bool
+		mutedPrefs     map[string]string
+		preexisting    bool
+		expectedMobile int
+	}{
+		{name: "enabled android getui registration", platform: "android", provider: "getui", expectedMobile: 1},
+		{name: "enabled ios apns registration", platform: "ios", provider: "apns", expectedMobile: 1},
+		{name: "disabled registration", platform: "android", provider: "getui", disable: true, expectedMobile: 0},
+		{name: "non android registration", platform: "ios", provider: "getui", expectedMobile: 0},
+		{name: "non getui registration", platform: "android", provider: "apns", expectedMobile: 0},
+		{name: "muted notification group", platform: "android", provider: "getui", mutedPrefs: map[string]string{"comments": "muted"}, expectedMobile: 0},
+		{name: "deduplicates existing comment delivery", platform: "android", provider: "getui", preexisting: true, expectedMobile: 1},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queries := db.New(testPool)
+			recipientEmail := fmt.Sprintf("mobile-push-%d@multica.ai", i)
+			recipientID := createTestUser(t, recipientEmail)
+			t.Cleanup(func() { cleanupTestUser(t, recipientEmail) })
+
+			issueID := createTestIssue(t, testWorkspaceID, testUserID)
+			t.Cleanup(func() {
+				cleanupInboxForIssue(t, issueID)
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_delivery WHERE notification_event_id IN (SELECT id FROM notification_event WHERE issue_id = $1)`, issueID)
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_event WHERE issue_id = $1`, issueID)
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM mobile_push_registration WHERE user_id = $1`, recipientID)
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_preference WHERE user_id = $1`, recipientID)
+				cleanupTestIssue(t, issueID)
+			})
+
+			commentID := fmt.Sprintf("00000000-0000-0000-0000-1512000000%02d", i)
+			if _, err := testPool.Exec(context.Background(), `
+				INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`, commentID, issueID, testWorkspaceID, "member", testUserID, "mobile push mention", "comment"); err != nil {
+				t.Fatalf("insert comment: %v", err)
+			}
+
+			registration := createMobilePushRegistrationForUser(t, recipientID, fmt.Sprintf("install-%d", i), tt.platform, tt.provider)
+			if tt.disable {
+				if _, err := testPool.Exec(context.Background(), `UPDATE mobile_push_registration SET enabled = false WHERE id = $1`, util.UUIDToString(registration.ID)); err != nil {
+					t.Fatalf("disable mobile_push_registration: %v", err)
+				}
+			}
+			if tt.mutedPrefs != nil {
+				upsertNotificationPreferenceForUser(t, recipientID, tt.mutedPrefs)
+			}
+
+			event := createNotificationEventForMobilePushTest(t, queries, recipientID, issueID, commentID, "mentioned")
+			payloadSnapshot := []byte(`{"type":"mentioned","title":"mobile push issue","body":"mobile push body"}`)
+			if tt.preexisting {
+				if _, err := queries.CreateTargetedNotificationDelivery(context.Background(), db.CreateTargetedNotificationDeliveryParams{
+					NotificationEventID: event.ID,
+					Channel:             "mobile_push",
+					TargetType:          "mobile_push_registration",
+					TargetID:            registration.ID,
+					Status:              "pending",
+					PayloadSnapshot:     payloadSnapshot,
+				}); err != nil {
+					t.Fatalf("CreateTargetedNotificationDelivery: %v", err)
+				}
+			}
+
+			recordMobilePushDeliveries(context.Background(), queries, recipientID, event, payloadSnapshot)
+
+			deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(event.ID))
+			mobileCount := 0
+			for _, delivery := range deliveries {
+				if delivery.Channel == "mobile_push" {
+					mobileCount++
+					if delivery.TargetType != "mobile_push_registration" {
+						t.Fatalf("expected target_type mobile_push_registration, got %q", delivery.TargetType)
+					}
+					if !delivery.TargetID.Valid || util.UUIDToString(delivery.TargetID) != util.UUIDToString(registration.ID) {
+						t.Fatalf("expected target_id %q, got %q", util.UUIDToString(registration.ID), util.UUIDToString(delivery.TargetID))
+					}
+				}
+			}
+			if mobileCount != tt.expectedMobile {
+				t.Fatalf("expected %d mobile_push deliveries, got %d", tt.expectedMobile, mobileCount)
+			}
+		})
+	}
+}
+
+func TestRecordMobilePushDeliveries_CreatesGetuiAndAPNSTargets(t *testing.T) {
+	queries := db.New(testPool)
+	recipientEmail := "mobile-push-dual@multica.ai"
+	recipientID := createTestUser(t, recipientEmail)
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_delivery WHERE notification_event_id IN (SELECT id FROM notification_event WHERE issue_id = $1)`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_event WHERE issue_id = $1`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM mobile_push_registration WHERE user_id = $1`, recipientID)
+		cleanupTestIssue(t, issueID)
+		cleanupTestUser(t, recipientEmail)
+	})
+
+	commentID := "00000000-0000-0000-0000-151299000001"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", testUserID, "mobile push dual", "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	getuiRegistration := createMobilePushRegistrationForUser(t, recipientID, "dual-android", "android", "getui")
+	apnsRegistration := createMobilePushRegistrationForUser(t, recipientID, "dual-ios", "ios", "apns")
+	event := createNotificationEventForMobilePushTest(t, queries, recipientID, issueID, commentID, "mentioned")
+	payloadSnapshot := []byte(`{"type":"mentioned","title":"mobile push issue","body":"mobile push body"}`)
+
+	recordMobilePushDeliveries(context.Background(), queries, recipientID, event, payloadSnapshot)
+
+	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(event.ID))
+	targets := map[string]bool{}
+	for _, delivery := range deliveries {
+		if delivery.Channel == "mobile_push" && delivery.TargetID.Valid {
+			targets[util.UUIDToString(delivery.TargetID)] = true
+		}
+	}
+	if len(targets) != 2 || !targets[util.UUIDToString(getuiRegistration.ID)] || !targets[util.UUIDToString(apnsRegistration.ID)] {
+		t.Fatalf("expected getui and apns targets, got %#v", targets)
 	}
 }
 
@@ -2264,141 +2468,355 @@ func TestNotification_DingTalkTaskCompletedIndependentOfMentioned(t *testing.T) 
 // openclaw_weixin delivery is created — the mention path is deduped by the subscriber
 // path's delivery which shares the same comment_id.
 func TestNotification_OpenclawWeixinDedup_SubscriberAndMention(t *testing.T) {
-queries := db.New(testPool)
-bus := newNotificationBus(t, queries)
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
 
-// Create a user who will be both subscriber and mentioned
-recipientEmail := "notif-dedup-sub-mention@multica.ai"
-recipientID := createTestUser(t, recipientEmail)
-t.Cleanup(func() { cleanupTestUser(t, recipientEmail) })
+	// Create a user who will be both subscriber and mentioned
+	recipientEmail := "notif-dedup-sub-mention@multica.ai"
+	recipientID := createTestUser(t, recipientEmail)
+	t.Cleanup(func() { cleanupTestUser(t, recipientEmail) })
 
-issueID := createTestIssue(t, testWorkspaceID, testUserID)
-t.Cleanup(func() {
-cleanupInboxForIssue(t, issueID)
-cleanupTestIssue(t, issueID)
-})
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
 
-// Recipient is a subscriber
-addTestSubscriber(t, issueID, "member", recipientID, "assignee")
+	// Recipient is a subscriber
+	addTestSubscriber(t, issueID, "member", recipientID, "assignee")
 
-// Enable openclaw_weixin for both "replied" (new_comment) and "mentioned"
-bindingID := createNotificationBindingForUser(t, recipientID, "openclaw_weixin")
-enableNotificationPreferenceForUser(t, recipientID, "openclaw_weixin", "replied", bindingID)
-enableNotificationPreferenceForUser(t, recipientID, "openclaw_weixin", "mentioned", bindingID)
+	// Enable openclaw_weixin for both "replied" (new_comment) and "mentioned"
+	bindingID := createNotificationBindingForUser(t, recipientID, "openclaw_weixin")
+	enableNotificationPreferenceForUser(t, recipientID, "openclaw_weixin", "replied", bindingID)
+	enableNotificationPreferenceForUser(t, recipientID, "openclaw_weixin", "mentioned", bindingID)
 
-commentID := "00000000-0000-0000-0000-de00de000001"
-commentContent := "hello [@Recipient](mention://member/" + recipientID + ") check this"
+	commentID := "00000000-0000-0000-0000-de00de000001"
+	commentContent := "hello [@Recipient](mention://member/" + recipientID + ") check this"
 
-if _, err := testPool.Exec(context.Background(), `
+	if _, err := testPool.Exec(context.Background(), `
 INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 `, commentID, issueID, testWorkspaceID, "member", testUserID, commentContent, "comment"); err != nil {
-t.Fatalf("insert comment: %v", err)
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         commentID,
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    commentContent,
+				Type:       "comment",
+			},
+			"issue_title":  "dedup sub+mention test",
+			"issue_status": "todo",
+		},
+	})
+
+	// Should get 2 inbox items (one new_comment from subscriber, one mentioned)
+	inboxItems := inboxItemsForRecipient(t, queries, recipientID)
+	if len(inboxItems) != 2 {
+		t.Fatalf("expected 2 inbox items (new_comment + mentioned), got %d", len(inboxItems))
+	}
+
+	// But only ONE openclaw_weixin delivery across all notification events
+	allEvents := notificationEventsForRecipient(t, queries, recipientID)
+	weixinDeliveryCount := 0
+	for _, ne := range allEvents {
+		if util.UUIDToString(ne.IssueID) != issueID {
+			continue
+		}
+		deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
+		for _, d := range deliveries {
+			if d.Channel == "openclaw_weixin" {
+				weixinDeliveryCount++
+			}
+		}
+	}
+	if weixinDeliveryCount != 1 {
+		t.Fatalf("expected exactly 1 openclaw_weixin delivery (dedup), got %d", weixinDeliveryCount)
+	}
 }
 
-bus.Publish(events.Event{
-Type:        protocol.EventCommentCreated,
-WorkspaceID: testWorkspaceID,
-ActorType:   "member",
-ActorID:     testUserID,
-Payload: map[string]any{
-"comment": handler.CommentResponse{
-ID:         commentID,
-IssueID:    issueID,
-AuthorType: "member",
-AuthorID:   testUserID,
-Content:    commentContent,
-Type:       "comment",
-},
-"issue_title":  "dedup sub+mention test",
-"issue_status": "todo",
-},
-})
+func TestNotification_OpenclawWeixinSubscriberAgentComment(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
 
-// Should get 2 inbox items (one new_comment from subscriber, one mentioned)
-inboxItems := inboxItemsForRecipient(t, queries, recipientID)
-if len(inboxItems) != 2 {
-t.Fatalf("expected 2 inbox items (new_comment + mentioned), got %d", len(inboxItems))
-}
+	recipientEmail := "notif-openclaw-agent-comment@multica.ai"
+	recipientID := createTestUser(t, recipientEmail)
+	t.Cleanup(func() { cleanupTestUser(t, recipientEmail) })
 
-// But only ONE openclaw_weixin delivery across all notification events
-allEvents := notificationEventsForRecipient(t, queries, recipientID)
-weixinDeliveryCount := 0
-for _, ne := range allEvents {
-deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
-for _, d := range deliveries {
-if d.Channel == "openclaw_weixin" {
-weixinDeliveryCount++
-}
-}
-}
-if weixinDeliveryCount != 1 {
-t.Fatalf("expected exactly 1 openclaw_weixin delivery (dedup), got %d", weixinDeliveryCount)
-}
+	issueID := createTestIssue(t, testWorkspaceID, recipientID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_delivery WHERE notification_event_id IN (SELECT id FROM notification_event WHERE issue_id = $1)`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM notification_event WHERE issue_id = $1`, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	agentID := "00000000-0000-0000-0000-0a6e17000001"
+	addTestSubscriber(t, issueID, "member", recipientID, "creator")
+	addTestSubscriber(t, issueID, "agent", agentID, "assignee")
+
+	bindingID := createNotificationBindingForUser(t, recipientID, "openclaw_weixin")
+	enableNotificationPreferenceForUser(t, recipientID, "openclaw_weixin", "replied", bindingID)
+
+	commentID := "00000000-0000-0000-0000-0a6e17000002"
+	commentContent := "agent implementation update"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "agent", agentID, commentContent, "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         commentID,
+				IssueID:    issueID,
+				AuthorType: "agent",
+				AuthorID:   agentID,
+				Content:    commentContent,
+				Type:       "comment",
+			},
+			"issue_title":  "openclaw agent comment",
+			"issue_status": "in_progress",
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, recipientID)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 inbox item for agent new_comment, got %d", len(items))
+	}
+	if items[0].Type != "new_comment" {
+		t.Fatalf("expected inbox item type new_comment, got %q", items[0].Type)
+	}
+
+	var newCommentEvent *db.NotificationEvent
+	for _, event := range notificationEventsForRecipient(t, queries, recipientID) {
+		if util.UUIDToString(event.IssueID) == issueID && event.Type == "new_comment" && util.UUIDToString(event.CommentID) == commentID {
+			eventCopy := event
+			newCommentEvent = &eventCopy
+			break
+		}
+	}
+	if newCommentEvent == nil {
+		t.Fatal("expected new_comment notification_event for agent comment subscriber")
+	}
+
+	deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(newCommentEvent.ID))
+	var foundWeixin bool
+	for _, delivery := range deliveries {
+		if delivery.Channel != "openclaw_weixin" {
+			continue
+		}
+		foundWeixin = true
+		if delivery.Status != "pending" {
+			t.Fatalf("expected openclaw_weixin delivery status pending, got %q", delivery.Status)
+		}
+		var payload struct {
+			WechatID string `json:"wechat_id"`
+			Channel  string `json:"channel"`
+		}
+		if err := json.Unmarshal(delivery.PayloadSnapshot, &payload); err != nil {
+			t.Fatalf("unmarshal openclaw_weixin payload: %v", err)
+		}
+		if payload.WechatID == "" {
+			t.Fatal("expected openclaw_weixin payload to include wechat_id")
+		}
+		if payload.Channel != "openclaw-weixin" {
+			t.Fatalf("expected openclaw-weixin channel in payload, got %q", payload.Channel)
+		}
+	}
+	if !foundWeixin {
+		t.Fatal("expected openclaw_weixin delivery for agent new_comment subscriber")
+	}
 }
 
 // TestNotification_OpenclawWeixinDedup_TaskFailed verifies that task_failed subscriber
-// notification and the explicit IM delivery share the same comment_id, resulting in
-// only one openclaw_weixin delivery when the recipient is a subscriber.
+// notification and the explicit IM delivery still result in only one openclaw_weixin
+// delivery when the recipient is a subscriber.
 func TestNotification_OpenclawWeixinDedup_TaskFailed(t *testing.T) {
-queries := db.New(testPool)
-bus := newNotificationBus(t, queries)
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
 
-issueID := createTestIssue(t, testWorkspaceID, testUserID)
-t.Cleanup(func() {
-cleanupInboxForIssue(t, issueID)
-cleanupTestIssue(t, issueID)
-})
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
 
-agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
+	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
 
-// Creator is a subscriber
-addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	// Creator is a subscriber
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
 
-// Enable openclaw_weixin for task_failed
-bindingID := createNotificationBindingForUser(t, testUserID, "openclaw_weixin")
-enableNotificationPreferenceForUser(t, testUserID, "openclaw_weixin", "task_failed", bindingID)
+	// Enable openclaw_weixin for task_failed
+	bindingID := createNotificationBindingForUser(t, testUserID, "openclaw_weixin")
+	enableNotificationPreferenceForUser(t, testUserID, "openclaw_weixin", "task_failed", bindingID)
 
-// Insert a fake agent comment so lastAgentCommentID is found
-agentCommentID := "00000000-0000-0000-0000-de00de000002"
-if _, err := testPool.Exec(context.Background(), `
+	// Insert a fake historical agent comment. The task event should not reuse it as
+	// a dedup anchor unless that comment was created by the current task run.
+	agentCommentID := "00000000-0000-0000-0000-de00de000002"
+	if _, err := testPool.Exec(context.Background(), `
 INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 `, agentCommentID, issueID, testWorkspaceID, "agent", agentID, "agent result", "comment"); err != nil {
-t.Fatalf("insert agent comment: %v", err)
+		t.Fatalf("insert agent comment: %v", err)
+	}
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
+			"agent_id": agentID,
+			"issue_id": issueID,
+			"status":   "failed",
+		},
+	})
+
+	// Should get 1 inbox item (task_failed from subscriber)
+	inboxItems := inboxItemsForRecipient(t, queries, testUserID)
+	if len(inboxItems) != 1 {
+		t.Fatalf("expected 1 inbox item (task_failed), got %d", len(inboxItems))
+	}
+
+	// Should have only ONE openclaw_weixin delivery (deduped)
+	allEvents := notificationEventsForRecipient(t, queries, testUserID)
+	weixinDeliveryCount := 0
+	for _, ne := range allEvents {
+		if util.UUIDToString(ne.IssueID) != issueID {
+			continue
+		}
+		deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
+		for _, d := range deliveries {
+			if d.Channel == "openclaw_weixin" {
+				weixinDeliveryCount++
+			}
+		}
+	}
+	if weixinDeliveryCount != 1 {
+		t.Fatalf("expected exactly 1 openclaw_weixin delivery for task_failed (dedup), got %d", weixinDeliveryCount)
+	}
 }
 
-bus.Publish(events.Event{
-Type:        protocol.EventTaskFailed,
-WorkspaceID: testWorkspaceID,
-ActorType:   "system",
-ActorID:     "",
-Payload: map[string]any{
-"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
-"agent_id": agentID,
-"issue_id": issueID,
-"status":   "failed",
-},
-})
+func TestNotification_OpenclawWeixinTaskCompletedIgnoresStaleAgentCommentDelivery(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
 
-// Should get 1 inbox item (task_failed from subscriber)
-inboxItems := inboxItemsForRecipient(t, queries, testUserID)
-if len(inboxItems) != 1 {
-t.Fatalf("expected 1 inbox item (task_failed), got %d", len(inboxItems))
-}
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id::text, runtime_id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
 
-// Should have only ONE openclaw_weixin delivery (deduped)
-allEvents := notificationEventsForRecipient(t, queries, testUserID)
-weixinDeliveryCount := 0
-for _, ne := range allEvents {
-deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
-for _, d := range deliveries {
-if d.Channel == "openclaw_weixin" {
-weixinDeliveryCount++
-}
-}
-}
-if weixinDeliveryCount != 1 {
-t.Fatalf("expected exactly 1 openclaw_weixin delivery for task_failed (dedup), got %d", weixinDeliveryCount)
-}
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	bindingID := createNotificationBindingForUser(t, testUserID, "openclaw_weixin")
+	enableNotificationPreferenceForUser(t, testUserID, "openclaw_weixin", "task_completed", bindingID)
+
+	staleAgentCommentID := "00000000-0000-0000-0000-de00de000003"
+	if _, err := testPool.Exec(context.Background(), `
+INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now() - interval '5 minutes')
+`, staleAgentCommentID, issueID, testWorkspaceID, "agent", agentID, "previous agent result", "comment"); err != nil {
+		t.Fatalf("insert stale agent comment: %v", err)
+	}
+
+	staleEvent, err := queries.CreateNotificationEvent(context.Background(), db.CreateNotificationEventParams{
+		WorkspaceID:     parseUUID(testWorkspaceID),
+		RecipientUserID: parseUUID(testUserID),
+		Type:            "task_completed",
+		Severity:        "info",
+		IssueID:         parseUUID(issueID),
+		CommentID:       parseUUID(staleAgentCommentID),
+		ActorType:       util.StrToText("agent"),
+		ActorID:         parseUUID(agentID),
+		Title:           "old task completed",
+		Body:            util.StrToText("old body"),
+		Link:            pgtype.Text{},
+		Details:         emptyDetails,
+	})
+	if err != nil {
+		t.Fatalf("CreateNotificationEvent stale: %v", err)
+	}
+	if _, err := queries.CreateNotificationDelivery(context.Background(), db.CreateNotificationDeliveryParams{
+		NotificationEventID: staleEvent.ID,
+		Channel:             "openclaw_weixin",
+		Status:              "sent",
+		AttemptCount:        1,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     emptyDetails,
+		SentAt:              pgtype.Timestamptz{},
+	}); err != nil {
+		t.Fatalf("CreateNotificationDelivery stale: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, started_at, completed_at, result)
+VALUES ($1, $2, $3, 'completed', now() - interval '1 minute', now(), '{"notification_summary":"fresh completion"}'::jsonb)
+RETURNING id::text
+`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskCompleted,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"task_id":  taskID,
+			"agent_id": agentID,
+			"issue_id": issueID,
+			"status":   "completed",
+		},
+	})
+
+	allEvents := notificationEventsForRecipient(t, queries, testUserID)
+	weixinDeliveryCount := 0
+	freshTaskCompletedWithComment := 0
+	for _, ne := range allEvents {
+		if util.UUIDToString(ne.IssueID) != issueID {
+			continue
+		}
+		deliveries := notificationDeliveriesForEvent(t, queries, util.UUIDToString(ne.ID))
+		for _, d := range deliveries {
+			if d.Channel == "openclaw_weixin" {
+				weixinDeliveryCount++
+			}
+		}
+		if ne.Type == "task_completed" && ne.CommentID.Valid && util.UUIDToString(ne.CommentID) == staleAgentCommentID {
+			freshTaskCompletedWithComment++
+		}
+	}
+	if weixinDeliveryCount != 2 {
+		t.Fatalf("expected stale + fresh openclaw_weixin deliveries, got %d", weixinDeliveryCount)
+	}
+	if freshTaskCompletedWithComment != 1 {
+		t.Fatalf("expected only the stale event to use stale comment_id, got %d task_completed events with that comment_id", freshTaskCompletedWithComment)
+	}
 }

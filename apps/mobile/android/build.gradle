@@ -17,6 +17,7 @@ allprojects {
     google()
     mavenCentral()
     maven { url 'https://www.jitpack.io' }
+    maven { url "https://mvn.getui.com/nexus/content/repositories/releases/" }
   }
 }
 

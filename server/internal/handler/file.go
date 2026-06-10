@@ -10,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"path"
 	"sort"
@@ -40,6 +42,17 @@ const directUploadTTL = 30 * time.Minute
 const multipartUploadTTL = 24 * time.Hour
 const minMultipartPartSize = 5 << 20 // 5 MB, except for the final part
 const maxMultipartParts = 10000
+
+const defaultAttachmentDownloadURLTTL = 30 * time.Minute
+
+type attachmentDownloadMode string
+
+const (
+	attachmentDownloadModeAuto       attachmentDownloadMode = "auto"
+	attachmentDownloadModeCloudFront attachmentDownloadMode = "cloudfront"
+	attachmentDownloadModePresign    attachmentDownloadMode = "presign"
+	attachmentDownloadModeProxy      attachmentDownloadMode = "proxy"
+)
 
 // maxPreviewTextSize caps the body the preview proxy will load into memory
 // for text-based types. Anything larger returns 413 and the UI falls back
@@ -159,18 +172,22 @@ type directUploadClaims struct {
 }
 
 func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
+	id := uuidToString(a.ID)
 	remappedURL := h.Storage.RemapURL(a.Url)
 	resp := AttachmentResponse{
-		ID:           uuidToString(a.ID),
+		ID:           id,
 		WorkspaceID:  uuidToString(a.WorkspaceID),
 		UploaderType: a.UploaderType,
 		UploaderID:   uuidToString(a.UploaderID),
 		Filename:     a.Filename,
 		URL:          remappedURL,
-		DownloadURL:  remappedURL,
+		DownloadURL:  attachmentDownloadPath(id),
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	if h.CFSigner != nil {
+		resp.DownloadURL = h.CFSigner.SignedURL(remappedURL, time.Now().Add(h.attachmentDownloadURLTTL()))
 	}
 	if a.IssueID.Valid {
 		s := uuidToString(a.IssueID)
@@ -189,6 +206,37 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		resp.ChatMessageID = &s
 	}
 	return resp
+}
+
+func attachmentDownloadPath(id string) string {
+	return "/api/attachments/" + id + "/download"
+}
+
+func normalizeAttachmentDownloadMode(raw string) (attachmentDownloadMode, bool) {
+	switch attachmentDownloadMode(strings.ToLower(strings.TrimSpace(raw))) {
+	case "", attachmentDownloadModeAuto:
+		return attachmentDownloadModeAuto, true
+	case attachmentDownloadModeCloudFront:
+		return attachmentDownloadModeCloudFront, true
+	case attachmentDownloadModePresign:
+		return attachmentDownloadModePresign, true
+	case attachmentDownloadModeProxy:
+		return attachmentDownloadModeProxy, true
+	default:
+		return attachmentDownloadModeAuto, false
+	}
+}
+
+func (h *Handler) attachmentDownloadMode() attachmentDownloadMode {
+	mode, _ := normalizeAttachmentDownloadMode(h.cfg.AttachmentDownloadMode)
+	return mode
+}
+
+func (h *Handler) attachmentDownloadURLTTL() time.Duration {
+	if h.cfg.AttachmentDownloadURLTTL > 0 {
+		return h.cfg.AttachmentDownloadURLTTL
+	}
+	return defaultAttachmentDownloadURLTTL
 }
 
 // groupAttachments loads attachments for multiple comments and groups them by comment ID.
@@ -1221,20 +1269,29 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
+	att, ok := h.loadAttachmentForRequest(w, r)
+	if !ok {
+		return
+	}
+
+	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+}
+
+func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Request) (db.Attachment, bool) {
 	attachmentID := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
-		return
+		return db.Attachment{}, false
 	}
 
 	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
 	if !ok {
-		return
+		return db.Attachment{}, false
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
-		return
+		return db.Attachment{}, false
 	}
 
 	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
@@ -1243,12 +1300,143 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
+		return db.Attachment{}, false
+	}
+
+	return att, true
+}
+
+// ---------------------------------------------------------------------------
+// DownloadAttachment — GET /api/attachments/{id}/download
+// ---------------------------------------------------------------------------
+
+func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
+	att, ok := h.loadAttachmentForRequest(w, r)
+	if !ok {
+		return
+	}
+	if h.Storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage not configured")
 		return
 	}
 
-	resp := h.attachmentToResponse(att)
-	resp.DownloadURL = h.signedDownloadURL(att.Url)
-	writeJSON(w, http.StatusOK, resp)
+	key := h.Storage.KeyFromURL(att.Url)
+	switch h.resolveAttachmentDownloadMode(att.Url) {
+	case attachmentDownloadModeCloudFront:
+		if h.CFSigner == nil {
+			writeError(w, http.StatusInternalServerError, "cloudfront attachment downloads are not configured")
+			return
+		}
+		http.Redirect(
+			w,
+			r,
+			h.CFSigner.SignedURLWithContentDisposition(
+				h.Storage.RemapURL(att.Url),
+				storage.AttachmentContentDisposition(att.Filename),
+				time.Now().Add(h.attachmentDownloadURLTTL()),
+			),
+			http.StatusFound,
+		)
+	case attachmentDownloadModePresign:
+		presigner, ok := h.Storage.(storage.DownloadPresigner)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "attachment storage does not support presigned downloads")
+			return
+		}
+		signedURL, err := presigner.PresignGetWithContentDisposition(
+			r.Context(),
+			key,
+			h.attachmentDownloadURLTTL(),
+			storage.AttachmentContentDisposition(att.Filename),
+		)
+		if err != nil {
+			slog.Error("failed to presign attachment download", "id", uuidToString(att.ID), "key", key, "error", err)
+			writeError(w, http.StatusBadGateway, "failed to create download URL")
+			return
+		}
+		http.Redirect(w, r, signedURL, http.StatusFound)
+	case attachmentDownloadModeProxy:
+		h.proxyAttachmentDownload(w, r, att, key)
+	default:
+		writeError(w, http.StatusInternalServerError, "invalid attachment download mode")
+	}
+}
+
+func (h *Handler) resolveAttachmentDownloadMode(rawURL string) attachmentDownloadMode {
+	switch h.attachmentDownloadMode() {
+	case attachmentDownloadModeCloudFront:
+		return attachmentDownloadModeCloudFront
+	case attachmentDownloadModePresign:
+		return attachmentDownloadModePresign
+	case attachmentDownloadModeProxy:
+		return attachmentDownloadModeProxy
+	}
+	if h.CFSigner != nil {
+		return attachmentDownloadModeCloudFront
+	}
+	if shouldProxyAttachmentURL(rawURL) {
+		return attachmentDownloadModeProxy
+	}
+	if _, ok := h.Storage.(storage.DownloadPresigner); ok {
+		return attachmentDownloadModePresign
+	}
+	return attachmentDownloadModeProxy
+}
+
+func shouldProxyAttachmentURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return true
+	}
+	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(u.Hostname()), "."))
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if !strings.Contains(host, ".") {
+		return true
+	}
+	switch {
+	case strings.HasSuffix(host, ".local"),
+		strings.HasSuffix(host, ".localdomain"),
+		strings.HasSuffix(host, ".internal"),
+		strings.HasSuffix(host, ".lan"),
+		strings.HasSuffix(host, ".home"),
+		strings.HasSuffix(host, ".docker"):
+		return true
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return addr.IsLoopback() ||
+			addr.IsPrivate() ||
+			addr.IsLinkLocalUnicast() ||
+			addr.IsLinkLocalMulticast() ||
+			addr.IsUnspecified()
+	}
+	return false
+}
+
+func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string) {
+	reader, err := h.Storage.GetReader(r.Context(), key)
+	if err != nil {
+		slog.Error("failed to open attachment for download", "id", uuidToString(att.ID), "key", key, "error", err)
+		writeError(w, http.StatusNotFound, "attachment object not found")
+		return
+	}
+	defer reader.Close()
+
+	if att.ContentType != "" {
+		w.Header().Set("Content-Type", att.ContentType)
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	if att.SizeBytes >= 0 {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", att.SizeBytes))
+	}
+	w.Header().Set("Content-Disposition", storage.ContentDisposition(att.ContentType, att.Filename))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if _, err := io.Copy(w, reader); err != nil {
+		slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1262,64 +1450,25 @@ type previewURLResponse struct {
 }
 
 func (h *Handler) GetAttachmentPreviewURL(w http.ResponseWriter, r *http.Request) {
-	attachmentID := chi.URLParam(r, "id")
-	workspaceID := h.resolveWorkspaceID(r)
-	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspace_id is required")
-		return
-	}
-
-	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
+	att, ok := h.loadAttachmentForRequest(w, r)
 	if !ok {
-		return
-	}
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
-	if !ok {
-		return
-	}
-
-	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
-		ID:          attUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "attachment not found")
 		return
 	}
 
 	signed := h.signedPreviewURL(att)
-	expires := time.Now().Add(30 * time.Minute).Unix()
+	expires := time.Now().Add(h.attachmentDownloadURLTTL()).Unix()
 	writeJSON(w, http.StatusOK, previewURLResponse{URL: signed, ExpiresAt: expires})
 }
 
-// signedDownloadURL returns a presigned/signed URL for the given raw storage URL.
-// Falls back to returning the raw URL when no signing is configured.
-func (h *Handler) signedDownloadURL(rawURL string) string {
-	if h.CFSigner != nil {
-		cdnURL := h.Storage.RemapURL(rawURL)
-		return h.CFSigner.SignedURL(cdnURL, time.Now().Add(30*time.Minute))
-	}
-	// CDN domain set without CloudFront signer → public-read CDN; just remap.
-	if h.Storage.CdnDomain() != "" {
-		return h.Storage.RemapURL(rawURL)
-	}
-	if ps, ok := h.Storage.(storage.PresignedGetStorage); ok {
-		key := h.Storage.KeyFromURL(rawURL)
-		if key != "" {
-			if signed, err := ps.PresignedGetURL(context.Background(), key, 30*time.Minute); err == nil {
-				return signed
-			}
-		}
-	}
-	return rawURL
-}
-
 func (h *Handler) signedPreviewURL(att db.Attachment) string {
+	if h.Storage == nil {
+		return att.Url
+	}
 	if h.CFSigner != nil {
 		cdnURL := h.Storage.RemapURL(att.Url)
-		return h.CFSigner.SignedURL(cdnURL, time.Now().Add(30*time.Minute))
+		return h.CFSigner.SignedURL(cdnURL, time.Now().Add(h.attachmentDownloadURLTTL()))
 	}
-	// CDN domain set without CloudFront signer → public-read CDN; just remap.
+	// CDN domain set without CloudFront signer: public-read CDN; just remap.
 	if h.Storage.CdnDomain() != "" {
 		return h.Storage.RemapURL(att.Url)
 	}
@@ -1328,16 +1477,21 @@ func (h *Handler) signedPreviewURL(att db.Attachment) string {
 		return att.Url
 	}
 	if ps, ok := h.Storage.(storage.PresignedInlineGetStorage); ok {
-		if signed, err := ps.PresignedInlineGetURL(context.Background(), key, att.ContentType, att.Filename, 30*time.Minute); err == nil {
+		if signed, err := ps.PresignedInlineGetURL(context.Background(), key, att.ContentType, att.Filename, h.attachmentDownloadURLTTL()); err == nil {
 			return signed
 		}
 	}
 	if ps, ok := h.Storage.(storage.PresignedGetStorage); ok {
-		if signed, err := ps.PresignedGetURL(context.Background(), key, 30*time.Minute); err == nil {
+		if signed, err := ps.PresignedGetURL(context.Background(), key, h.attachmentDownloadURLTTL()); err == nil {
 			return signed
 		}
 	}
-	return att.Url
+	if ps, ok := h.Storage.(storage.Presigner); ok {
+		if signed, err := ps.PresignGet(context.Background(), key, h.attachmentDownloadURLTTL()); err == nil {
+			return signed
+		}
+	}
+	return h.Storage.RemapURL(att.Url)
 }
 
 // ---------------------------------------------------------------------------
@@ -1346,40 +1500,21 @@ func (h *Handler) signedPreviewURL(att db.Attachment) string {
 // Streams the raw bytes of a text-previewable attachment back to the client.
 // Exists to (a) bypass CloudFront CORS (not configured) and (b) bypass
 // Content-Disposition: attachment which Chromium honors for iframe document
-// loads. Media types (image/video/audio/pdf) intentionally do NOT go through
-// this endpoint — clients render them directly from the CloudFront signed
-// download_url, which already serves them with Content-Disposition: inline
-// (see storage/util.go isInlineContentType).
+// loads. Media types (image/video/audio/pdf) intentionally use download_url
+// instead. Metadata download_url keeps CloudFront/S3's media preview behavior;
+// the explicit /download route signs redirects as attachment downloads and
+// proxy mode streams with the same media-type policy as storage uploads.
 //
 // Hard cap: 2 MB. Larger files return 413. Anything outside the text
 // whitelist returns 415.
 // ---------------------------------------------------------------------------
 
 func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
-	attachmentID := chi.URLParam(r, "id")
-	workspaceID := h.resolveWorkspaceID(r)
-	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspace_id is required")
-		return
-	}
-
-	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
+	att, ok := h.loadAttachmentForRequest(w, r)
 	if !ok {
 		return
 	}
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
-	if !ok {
-		return
-	}
-
-	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
-		ID:          attUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "attachment not found")
-		return
-	}
+	attachmentID := uuidToString(att.ID)
 
 	if !isTextPreviewable(att.ContentType, att.Filename) {
 		writeError(w, http.StatusUnsupportedMediaType, "preview not supported for this file type")

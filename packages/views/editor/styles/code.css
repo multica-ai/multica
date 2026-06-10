@@ -33,10 +33,14 @@ pre.rich-text-editor {
   padding: 0.75rem 1rem;
   margin: 0.75rem 0;
   overflow-x: auto;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .rich-text-editor pre code,
 pre.rich-text-editor code {
+  display: block;
+  min-width: max-content;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0;
   background: none;
@@ -45,6 +49,14 @@ pre.rich-text-editor code {
   padding: 0;
   font-size: 0.8125rem;
   line-height: 1.6;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rich-text-editor pre code *,
+pre.rich-text-editor code * {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* Syntax highlighting — lowlight (hljs) */

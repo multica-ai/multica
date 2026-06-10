@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import { Button } from "@multica/ui/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip"
 import { cn } from '@multica/ui/lib/utils'
+import { copyText } from '../lib/clipboard'
 import {
   CODE_LIGATURE_CLASS,
   CODE_LIGATURE_DESCENDANT_CLASS,
@@ -134,19 +135,16 @@ export function CodeBlock({
   }, [code, resolvedLang])
 
   const handleCopy = React.useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(code)
+    if (await copyText(code)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy code:', err)
     }
   }, [code])
 
   // Terminal mode: raw monospace with minimal styling
   if (mode === 'terminal') {
     return (
-      <pre className={cn('font-mono text-sm whitespace-pre-wrap', CODE_LIGATURE_CLASS, className)}>
+      <pre className={cn('font-mono text-sm whitespace-pre-wrap select-text', CODE_LIGATURE_CLASS, className)}>
         <code className={cn('font-mono', CODE_LIGATURE_CLASS)}>{code}</code>
       </pre>
     )
@@ -156,7 +154,7 @@ export function CodeBlock({
   if (mode === 'minimal') {
     if (isLoading || !highlighted) {
       return (
-        <pre className={cn('font-mono text-sm whitespace-pre-wrap', CODE_LIGATURE_CLASS, className)}>
+        <pre className={cn('font-mono text-sm whitespace-pre-wrap select-text', CODE_LIGATURE_CLASS, className)}>
           <code className={cn('font-mono', CODE_LIGATURE_CLASS)}>{code}</code>
         </pre>
       )
@@ -165,7 +163,7 @@ export function CodeBlock({
     return (
       <div
         className={cn(
-          'font-mono text-sm [&_pre]:!bg-transparent [&_pre]:!p-0 [&_pre]:whitespace-pre-wrap [&_pre]:break-all [&_code]:!bg-transparent [&_code]:font-mono [&_pre]:font-mono',
+          'select-text font-mono text-sm [&_pre]:!bg-transparent [&_pre]:!p-0 [&_pre]:whitespace-pre-wrap [&_pre]:break-all [&_pre]:select-text [&_code]:!bg-transparent [&_code]:font-mono [&_code]:select-text [&_pre]:font-mono',
           CODE_LIGATURE_CLASS,
           CODE_LIGATURE_DESCENDANT_CLASS,
           className
@@ -179,12 +177,12 @@ export function CodeBlock({
   return (
     <div
       className={cn(
-        'relative group rounded-lg overflow-hidden border bg-muted/30 mb-4 last:mb-0',
+        'relative group rounded-lg overflow-hidden border bg-muted/30 mb-4 select-text last:mb-0',
         className
       )}
     >
       {/* Language label + copy button */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/50 border-b text-xs">
+      <div className="flex select-none items-center justify-between border-b bg-muted/50 px-3 py-1.5 text-xs">
         <span className="text-muted-foreground font-medium uppercase tracking-wide">
           {resolvedLang !== 'text' ? resolvedLang : t(($) => $.plain_text)}
         </span>
@@ -194,6 +192,7 @@ export function CodeBlock({
               <Button
                 variant="ghost"
                 size="icon-xs"
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={handleCopy}
                 className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
                 aria-label={t(($) => $.copy_code)}
@@ -211,15 +210,15 @@ export function CodeBlock({
       </div>
 
       {/* Code content */}
-      <div className="p-3 overflow-x-auto">
+      <div className="overflow-x-auto p-3 select-text">
         {isLoading || !highlighted ? (
-          <pre className={cn('font-mono text-sm whitespace-pre-wrap break-all', CODE_LIGATURE_CLASS)}>
+          <pre className={cn('font-mono text-sm whitespace-pre-wrap break-all select-text', CODE_LIGATURE_CLASS)}>
             <code className={cn('font-mono', CODE_LIGATURE_CLASS)}>{code}</code>
           </pre>
         ) : (
           <div
             className={cn(
-              'font-mono text-sm [&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:whitespace-pre-wrap [&_pre]:break-all [&_code]:!bg-transparent [&_code]:font-mono [&_pre]:font-mono',
+              'select-text font-mono text-sm [&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:whitespace-pre-wrap [&_pre]:break-all [&_pre]:select-text [&_code]:!bg-transparent [&_code]:font-mono [&_code]:select-text [&_pre]:font-mono',
               CODE_LIGATURE_CLASS,
               CODE_LIGATURE_DESCENDANT_CLASS
             )}

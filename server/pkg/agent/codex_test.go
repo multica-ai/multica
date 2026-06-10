@@ -1111,6 +1111,80 @@ func TestCodexStartOrResumeThreadPromptPassesPolicyOnResume(t *testing.T) {
 	}
 }
 
+func TestCodexStartOrResumeThreadPassesServiceTier(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_fast"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["service_tier"] != "fast" {
+					t.Errorf("thread/start service_tier = %v, want fast", params["service_tier"])
+				}
+				if cfg, ok := params["config"].(map[string]any); ok {
+					if _, leaked := cfg["service_tier"]; leaked {
+						t.Errorf("service_tier must be top-level, leaked into config: %+v", cfg)
+					}
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(context.Background(), ExecOptions{Cwd: "/work", ServiceTier: "fast"}, slog.Default())
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_fast" {
+		t.Errorf("threadID = %q, want thr_fast", threadID)
+	}
+	if resumed {
+		t.Error("resumed should be false")
+	}
+}
+
+func TestCodexStartOrResumeThreadPassesServiceTierOnResume(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/resume",
+			result: json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["service_tier"] != "default" {
+					t.Errorf("thread/resume service_tier = %v, want default", params["service_tier"])
+				}
+				if cfg, ok := params["config"].(map[string]any); ok {
+					if _, leaked := cfg["service_tier"]; leaked {
+						t.Errorf("service_tier must be top-level, leaked into config: %+v", cfg)
+					}
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior", ServiceTier: "default"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_prior" {
+		t.Errorf("threadID = %q, want thr_prior", threadID)
+	}
+	if !resumed {
+		t.Error("expected resumed=true")
+	}
+}
+
 func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 	t.Parallel()
 
@@ -2201,5 +2275,157 @@ func TestHasManagedCodexMcpConfig(t *testing.T) {
 				t.Fatalf("hasManagedCodexMcpConfig(%q) = %v, want %v", string(tc.raw), got, tc.want)
 			}
 		})
+	}
+}
+
+// TestExtractThreadEffectiveConfig verifies parsing of model/modelProvider/
+// reasoningEffort from thread/start and thread/resume JSON-RPC responses.
+// Missing fields default to empty strings.
+func TestExtractThreadEffectiveConfig(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		result json.RawMessage
+		want   threadEffectiveConfig
+	}{
+		{
+			name:   "empty result",
+			result: json.RawMessage(`{}`),
+			want:   threadEffectiveConfig{},
+		},
+		{
+			name:   "thread with model and provider",
+			result: json.RawMessage(`{"thread":{"id":"thr_1","model":"gpt-5.5","modelProvider":"p2"}}`),
+			want:   threadEffectiveConfig{Model: "gpt-5.5", ModelProvider: "p2"},
+		},
+		{
+			name:   "thread with reasoning effort",
+			result: json.RawMessage(`{"thread":{"id":"thr_2","model":"o3","reasoningEffort":"high"}}`),
+			want:   threadEffectiveConfig{Model: "o3", ReasoningEffort: "high"},
+		},
+		{
+			name:   "all fields populated",
+			result: json.RawMessage(`{"thread":{"id":"thr_3","model":"gpt-5.5","modelProvider":"p2","reasoningEffort":"medium"}}`),
+			want:   threadEffectiveConfig{Model: "gpt-5.5", ModelProvider: "p2", ReasoningEffort: "medium"},
+		},
+		{
+			name:   "only thread id (legacy)",
+			result: json.RawMessage(`{"thread":{"id":"thr_4"}}`),
+			want:   threadEffectiveConfig{},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := extractThreadEffectiveConfig(tc.result)
+			if got != tc.want {
+				t.Errorf("extractThreadEffectiveConfig() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexStartOrResumeThreadResumesWithProviderChange verifies that
+// thread/resume with a response containing modelProvider=p2 succeeds
+// and returns resumed=true. Provider switches must not break the
+// resume path (OPE-2047 regression guard).
+func TestCodexStartOrResumeThreadResumesWithProviderChange(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/resume",
+			result: json.RawMessage(`{"thread":{"id":"thr_prior","model":"gpt-5.5","modelProvider":"p2","reasoningEffort":"medium"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["threadId"] != "thr_prior" {
+					t.Errorf("threadId = %v, want thr_prior", params["threadId"])
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_prior" {
+		t.Errorf("threadID = %q, want thr_prior", threadID)
+	}
+	if !resumed {
+		t.Error("expected resumed=true when thread/resume succeeded with provider change")
+	}
+}
+
+// TestCodexStartOrResumeThreadStartsWithEffectiveConfig verifies that
+// thread/start also processes a response containing model/modelProvider
+// without error.
+func TestCodexStartOrResumeThreadStartsWithEffectiveConfig(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_new","model":"gpt-5.5","modelProvider":"p1"}}`),
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_new" {
+		t.Errorf("threadID = %q, want thr_new", threadID)
+	}
+	if resumed {
+		t.Error("expected resumed=false for fresh thread/start")
+	}
+}
+
+// TestCodexStartOrResumeThreadResumesWithMinimalResponse verifies backward
+// compatibility: a thread/resume response that only carries thread.id
+// (no model/modelProvider/reasoningEffort fields) still works correctly.
+func TestCodexStartOrResumeThreadResumesWithMinimalResponse(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/resume",
+			result: json.RawMessage(`{"thread":{"id":"thr_minimal"}}`),
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_minimal"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_minimal" {
+		t.Errorf("threadID = %q, want thr_minimal", threadID)
+	}
+	if !resumed {
+		t.Error("expected resumed=true for minimal response with only thread.id")
 	}
 }

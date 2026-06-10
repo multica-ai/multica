@@ -8,7 +8,7 @@ import {
 } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type AgentsScope = "mine" | "all";
+export type AgentsScope = "mine" | "all" | "default";
 
 export interface AgentsViewState {
   scope: AgentsScope;

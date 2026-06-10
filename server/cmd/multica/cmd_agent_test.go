@@ -238,6 +238,18 @@ func TestAgentUpdateDoesNotExposeCustomEnvFlags(t *testing.T) {
 	}
 }
 
+// TestAgentCreateDoesNotExposeFromTemplate guards against re-adding the
+// `--from-template` flag. It was an untaught, immature CLI surface that
+// short-circuited before body assembly — silently dropping sibling create
+// flags like --mcp-config / --custom-env — and was removed. The agent-template
+// backend API still exists but has no CLI surface; manual `agent create` is the
+// only supported CLI creation path.
+func TestAgentCreateDoesNotExposeFromTemplate(t *testing.T) {
+	if agentCreateCmd.Flag("from-template") != nil {
+		t.Error("agent create must NOT expose --from-template; it was removed as an untaught CLI surface that silently dropped sibling flags")
+	}
+}
+
 // TestParseCustomEnvErrorSanitization guards against future changes
 // re-introducing %w wrapping of json.Unmarshal errors. Those errors
 // can surface short fragments of the input, which — for a flag that
@@ -500,6 +512,264 @@ func TestResolveCustomEnv(t *testing.T) {
 	})
 }
 
+// freshMcpConfigCmd returns a standalone cobra.Command with the three
+// --mcp-config* flags registered identically to `agent create` / `agent
+// update`, so resolveMcpConfig-shaped tests can mutate flag state without
+// leaking across subtests.
+func freshMcpConfigCmd() *cobra.Command {
+	c := &cobra.Command{Use: "x"}
+	c.Flags().String("mcp-config", "", "")
+	c.Flags().Bool("mcp-config-stdin", false, "")
+	c.Flags().String("mcp-config-file", "", "")
+	return c
+}
+
+func TestParseMcpConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		want    string // expected raw JSON; ignored when wantErr
+		wantErr bool
+	}{
+		{name: "object with servers", raw: `{"mcpServers":{"shortcut":{"command":"npx"}}}`, want: `{"mcpServers":{"shortcut":{"command":"npx"}}}`},
+		{name: "explicit empty object is a valid empty set", raw: `{}`, want: `{}`},
+		{name: "null clears", raw: `null`, want: `null`},
+		{name: "null with surrounding whitespace clears", raw: "  null\n", want: `null`},
+		{name: "empty string errors", raw: ``, wantErr: true},
+		{name: "whitespace only errors", raw: `   `, wantErr: true},
+		{name: "not JSON", raw: `command=npx`, wantErr: true},
+		{name: "top-level array rejected", raw: `[{"a":1}]`, wantErr: true},
+		{name: "top-level string rejected", raw: `"oops"`, wantErr: true},
+		{name: "top-level number rejected", raw: `42`, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseMcpConfig(tc.raw)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseMcpConfig(%q): expected error, got nil (result=%s)", tc.raw, got)
+				}
+				if !strings.Contains(err.Error(), "--mcp-config") {
+					t.Fatalf("parseMcpConfig(%q): error should mention --mcp-config, got %v", tc.raw, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseMcpConfig(%q): unexpected error: %v", tc.raw, err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("parseMcpConfig(%q) = %s, want %s", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseMcpConfigErrorSanitization mirrors the parseCustomEnv check:
+// mcp_config carries secret material (MCP entries embed API tokens), so a
+// json.Unmarshal failure must never echo fragments of the input.
+func TestParseMcpConfigErrorSanitization(t *testing.T) {
+	secretish := `{"mcpServers":{"x":{"env":{"TOKEN":verySensitiveValue}}}}` // invalid JSON, unquoted value
+	_, err := parseMcpConfig(secretish)
+	if err == nil {
+		t.Fatal("expected parse error for invalid JSON")
+	}
+	msg := err.Error()
+	for _, leak := range []string{"TOKEN", "verySensitiveValue", "mcpServers"} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("parseMcpConfig error leaked input fragment %q: %q", leak, msg)
+		}
+	}
+}
+
+// TestResolveMcpConfig exercises the input-channel resolver: inline flag,
+// stdin, file, the `null` clear sentinel, mutual exclusion, and the
+// "not supplied" path.
+func TestResolveMcpConfig(t *testing.T) {
+	t.Run("not supplied", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || ok || got != nil {
+			t.Fatalf("unset flags: got=%s ok=%v err=%v", got, ok, err)
+		}
+	})
+
+	t.Run("inline object", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		if err := cmd.Flags().Set("mcp-config", `{"mcpServers":{}}`); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("inline: ok=%v err=%v", ok, err)
+		}
+		if string(got) != `{"mcpServers":{}}` {
+			t.Fatalf("inline: got %s", got)
+		}
+	})
+
+	t.Run("inline null clears", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config", `null`)
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("null: ok=%v err=%v", ok, err)
+		}
+		if string(got) != `null` {
+			t.Fatalf("null: got %s, want null", got)
+		}
+	})
+
+	t.Run("stdin", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString(`{"mcpServers":{"a":{}}}`))
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("stdin: ok=%v err=%v", ok, err)
+		}
+		if string(got) != `{"mcpServers":{"a":{}}}` {
+			t.Fatalf("stdin: got %s", got)
+		}
+	})
+
+	t.Run("file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "mcp.json")
+		if err := os.WriteFile(path, []byte(`{"mcpServers":{"b":{}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("file: ok=%v err=%v", ok, err)
+		}
+		if string(got) != `{"mcpServers":{"b":{}}}` {
+			t.Fatalf("file: got %s", got)
+		}
+	})
+
+	t.Run("mutually exclusive: inline + stdin", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config", `{}`)
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual-exclusion error, got %v", err)
+		}
+	})
+
+	// Empty stdin almost always means an upstream failure, not a deliberate
+	// clear — it must error rather than silently wipe a secret-bearing field.
+	t.Run("stdin: empty input errors", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString(""))
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-stdin") || !strings.Contains(err.Error(), "null") {
+			t.Fatalf("expected --mcp-config-stdin empty-input error mentioning 'null', got %v", err)
+		}
+	})
+
+	t.Run("file: missing path surfaces filesystem error", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", filepath.Join(t.TempDir(), "nope.json"))
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-file") {
+			t.Fatalf("expected --mcp-config-file error, got %v", err)
+		}
+	})
+}
+
+// TestAgentCreateAndUpdateExposeMcpConfigFlags guarantees the secret-safe
+// --mcp-config-stdin / --mcp-config-file alternatives stay wired up on both
+// commands that accept MCP input. Unlike custom_env, mcp_config IS updatable
+// via `agent update` (it has no dedicated audited endpoint), so both surfaces
+// must expose all three channels.
+func TestAgentCreateAndUpdateExposeMcpConfigFlags(t *testing.T) {
+	for _, flag := range []string{"mcp-config", "mcp-config-stdin", "mcp-config-file"} {
+		if agentCreateCmd.Flag(flag) == nil {
+			t.Fatalf("agent create must expose --%s", flag)
+		}
+		if agentUpdateCmd.Flag(flag) == nil {
+			t.Fatalf("agent update must expose --%s", flag)
+		}
+	}
+	// The --mcp-config help text must warn that argv is visible to shell
+	// history / 'ps' — the same foot-gun the custom-env flags warn about.
+	for _, c := range []struct {
+		name  string
+		usage string
+	}{
+		{"agent create", agentCreateCmd.Flag("mcp-config").Usage},
+		{"agent update", agentUpdateCmd.Flag("mcp-config").Usage},
+	} {
+		low := strings.ToLower(c.usage)
+		if !strings.Contains(low, "shell history") || !strings.Contains(low, "'ps'") {
+			t.Fatalf("%s --mcp-config usage must warn about shell history and 'ps' exposure; got: %q", c.name, c.usage)
+		}
+	}
+}
+
+func TestAgentSkillsAddCallsAdditiveEndpoint(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotBody map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "skill-a", "name": "Skill A", "description": ""},
+			{"id": "skill-b", "name": "Skill B", "description": ""},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().StringSlice("skill-ids", nil, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	if err := cmd.Flags().Set("skill-ids", "skill-a,skill-b"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runAgentSkillsAdd(cmd, []string{"agent-123"}); err != nil {
+		t.Fatalf("runAgentSkillsAdd: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/api/agents/agent-123/skills/add" {
+		t.Fatalf("path = %q, want additive endpoint", gotPath)
+	}
+	if !reflect.DeepEqual(gotBody["skill_ids"], []string{"skill-a", "skill-b"}) {
+		t.Fatalf("skill_ids body = %v", gotBody["skill_ids"])
+	}
+}
+
+func TestAgentSkillsAddRequiresSkillIDs(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().StringSlice("skill-ids", nil, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+
+	err := runAgentSkillsAdd(cmd, []string{"agent-123"})
+	if err == nil || !strings.Contains(err.Error(), "--skill-ids is required") {
+		t.Fatalf("expected required --skill-ids error, got %v", err)
+	}
+}
+
 // TestAgentAvatarHappyPath verifies the full flow: agent pre-check, file upload,
 // and avatar update all succeed.
 func TestAgentAvatarHappyPath(t *testing.T) {
@@ -508,6 +778,19 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 	if err := os.WriteFile(pngPath, []byte("fake-png-data"), 0o644); err != nil {
 		t.Fatalf("write test png: %v", err)
 	}
+
+	var putCalled bool
+	putServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		putCalled = true
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		if got := r.Header.Get("Content-Type"); got != "image/png" {
+			t.Errorf("expected signed Content-Type image/png, got %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer putServer.Close()
 
 	var gotPaths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -533,7 +816,24 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 			} else {
 				t.Errorf("unexpected method: %s", r.Method)
 			}
-		case "/api/upload-file":
+		case "/api/attachments/upload/initiate":
+			if r.Method != http.MethodPost {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["content_type"] != "image/png" {
+				t.Errorf("unexpected content_type: %v", body["content_type"])
+			}
+			if body["issue_id"] != nil || body["comment_id"] != nil || body["chat_session_id"] != nil {
+				t.Errorf("expected unbound avatar upload context, got: %v", body)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"upload_url":   putServer.URL + "/object",
+				"upload_token": "token-1",
+				"headers":      map[string]string{"Content-Type": "image/png"},
+			})
+		case "/api/attachments/upload/complete":
 			if r.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", r.Method)
 			}
@@ -563,8 +863,11 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 		t.Fatalf("runAgentAvatar: %v", err)
 	}
 
-	if len(gotPaths) != 3 {
-		t.Fatalf("expected 3 API calls, got %d: %v", len(gotPaths), gotPaths)
+	if !putCalled {
+		t.Fatal("expected direct PUT to be called")
+	}
+	if strings.Join(gotPaths, ",") != "/api/agents/agent-123,/api/attachments/upload/initiate,/api/attachments/upload/complete,/api/agents/agent-123" {
+		t.Fatalf("unexpected API paths: %v", gotPaths)
 	}
 }
 
@@ -678,7 +981,7 @@ func TestAgentAvatarUploadFailure(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/agents/agent-123":
 			json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
-		case "/api/upload-file":
+		case "/api/attachments/upload/initiate":
 			w.WriteHeader(http.StatusInternalServerError)
 			io.WriteString(w, "upload failed")
 		default:
@@ -716,6 +1019,14 @@ func TestAgentAvatarUpdateFailure(t *testing.T) {
 		t.Fatalf("write test png: %v", err)
 	}
 
+	putServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer putServer.Close()
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/agents/agent-123":
@@ -725,7 +1036,12 @@ func TestAgentAvatarUpdateFailure(t *testing.T) {
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
-		case "/api/upload-file":
+		case "/api/attachments/upload/initiate":
+			json.NewEncoder(w).Encode(map[string]any{
+				"upload_url":   putServer.URL + "/object",
+				"upload_token": "token-1",
+			})
+		case "/api/attachments/upload/complete":
 			json.NewEncoder(w).Encode(map[string]any{
 				"id":  "att-456",
 				"url": "https://cdn.example.com/avatars/agent-123.png",

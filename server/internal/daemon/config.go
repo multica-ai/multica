@@ -16,37 +16,51 @@ import (
 )
 
 const (
-	DefaultServerURL                      = "ws://localhost:8080/ws"
-	DefaultPollInterval                   = 3 * time.Second
-	DefaultHeartbeatInterval              = 15 * time.Second
-	DefaultAgentTimeout                   = 2 * time.Hour
+	DefaultServerURL         = "ws://localhost:8080/ws"
+	DefaultPollInterval      = 30 * time.Second
+	DefaultHeartbeatInterval = 15 * time.Second
+	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
+	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdogs
+	// (DefaultAgentIdleWatchdog / DefaultAgentToolWatchdog), so a session that keeps emitting events is
+	// never killed merely for running long (MUL-3064). Operators who want a
+	// hard ceiling for cost/resource control can set MULTICA_AGENT_TIMEOUT.
+	DefaultAgentTimeout                   = 0
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
 	// on a stuck child process (e.g. `docker ps` against a frozen dockerd),
-	// in which case `cmd.Wait()` never returns and the task sits at "running"
-	// for its full DefaultAgentTimeout (2 h). The previous 5 min default
+	// in which case `cmd.Wait()` never returns. With no wall-clock cap
+	// (DefaultAgentTimeout = 0) such a run would otherwise sit at "running"
+	// forever, so this watchdog is its sole liveness net. The previous 5 min default
 	// killed legitimate long assistant outputs (e.g. RFC-length writeups)
 	// where the model streams a single message for many minutes without any
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
-	DefaultAgentIdleWatchdog     = 30 * time.Minute
-	DefaultRuntimeName           = "Local Agent"
-	DefaultWorkspaceSyncInterval = 30 * time.Second
-	DefaultHealthPort            = 19514
-	DefaultMaxConcurrentTasks    = 20
-	DefaultGCInterval            = 1 * time.Hour
-	DefaultGCTTL                 = 5 * 24 * time.Hour  // 5 days
-	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
-	DefaultGCArtifactTTL         = 12 * time.Hour      // 12h — drop regenerable artifacts on completed but still-open issues
-
-	// Rate Limit retry configuration
-	DefaultRateLimitInitialDelay   = 5 * time.Second // 5 seconds
-	DefaultRateLimitMaxRetries     = 6               // max 6 retries
-	DefaultRateLimitBackoffFactor  = 2.0             // exponential backoff
-	DefaultAutoUpdateCheckInterval = 6 * time.Hour   // how often the daemon polls GitHub for a newer CLI release
+	DefaultAgentIdleWatchdog = 30 * time.Minute
+	// DefaultAgentToolWatchdog bounds how long a single tool call may stay in
+	// flight (tool_use emitted, no tool_result and no other message) before the
+	// idle watchdog force-stops the run. The idle watchdog ignores its normal
+	// window while a tool is in flight, because a real build/install/test
+	// legitimately runs silently for many minutes — but with no wall-clock cap
+	// (DefaultAgentTimeout = 0) a backend that emits tool_use and never the
+	// matching tool_result would otherwise run forever. This is the backstop for
+	// that stuck-tool case (MUL-3064). Set MULTICA_AGENT_TOOL_WATCHDOG=0 to
+	// disable, in which case an in-flight tool never force-stops the run.
+	DefaultAgentToolWatchdog       = 2 * time.Hour
+	DefaultRuntimeName             = "Local Agent"
+	DefaultWorkspaceSyncInterval   = 30 * time.Second
+	DefaultHealthPort              = 19514
+	DefaultMaxConcurrentTasks      = 20
+	DefaultGCInterval              = 1 * time.Hour
+	DefaultGCTTL                   = 5 * 24 * time.Hour  // 5 days
+	DefaultGCOrphanTTL             = 30 * 24 * time.Hour // 30 days
+	DefaultGCArtifactTTL           = 12 * time.Hour      // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultRateLimitInitialDelay   = 5 * time.Second     // 5 seconds
+	DefaultRateLimitMaxRetries     = 6                   // max 6 retries
+	DefaultRateLimitBackoffFactor  = 2.0                 // exponential backoff
+	DefaultAutoUpdateCheckInterval = 6 * time.Hour       // how often the daemon polls GitHub for a newer CLI release
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -68,7 +82,7 @@ type Config struct {
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	ConfigPath                     string                // explicit config path (empty = profile/default resolution)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, wujieclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity, qoderclicn, mmx
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	LocalNotificationEnabled       bool                  // enable local system notifications after task completion/failure
@@ -89,6 +103,7 @@ type Config struct {
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
 	ClaudeArgs                     []string
 	CodeBuddyArgs                  []string
 	CodexArgs                      []string
@@ -105,11 +120,13 @@ type RateLimitConfig struct {
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
-	ServerURL                      string
-	WorkspacesRoot                 string
-	PollInterval                   time.Duration
-	HeartbeatInterval              time.Duration
-	AgentTimeout                   time.Duration
+	ServerURL         string
+	WorkspacesRoot    string
+	PollInterval      time.Duration
+	HeartbeatInterval time.Duration
+	// AgentTimeout is a pointer so an explicit `--agent-timeout 0` (no cap) is
+	// distinguishable from "flag not passed". nil = use env/default.
+	AgentTimeout                   *time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	MaxConcurrentTasks             int
 	DaemonID                       string
@@ -217,6 +234,19 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL"); ok {
 		agents["openclaw"] = e
 	}
+	// WujieClaw: prefer the correctly-spelled env vars; fall back to the
+	// legacy typo (MULTICA_WUJECLAW_*) for backward compatibility.
+	if e, ok := probe("MULTICA_WUJIECLAW_PATH", "wujieclaw", "MULTICA_WUJIECLAW_MODEL"); ok {
+		// Also check the legacy typo model env var when the correctly-spelled
+		// one is empty, so existing setups that only set MULTICA_WUJECLAW_MODEL
+		// keep working.
+		if e.Model == "" {
+			e.Model = strings.TrimSpace(os.Getenv("MULTICA_WUJECLAW_MODEL"))
+		}
+		agents["wujieclaw"] = e
+	} else if e, ok := probe("MULTICA_WUJECLAW_PATH", "wujieclaw", "MULTICA_WUJECLAW_MODEL"); ok {
+		agents["wujieclaw"] = e
+	}
 	if e, ok := probe("MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {
 		agents["hermes"] = e
 	}
@@ -255,8 +285,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
 		agents["antigravity"] = e
 	}
+	if e, ok := probe("MULTICA_QODERCLICN_PATH", "qoderclicn", "MULTICA_QODERCLICN_MODEL"); ok {
+		agents["qoderclicn"] = e
+	}
+	if e, ok := probe("MULTICA_MMX_PATH", "mmx", "MULTICA_MMX_MODEL"); ok {
+		agents["mmx"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, DeepSeek-TUI (deepseek-tui), or agy and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, wujieclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, DeepSeek-TUI (deepseek-tui), agy, qoderclicn, or mmx and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -299,8 +335,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	if overrides.AgentTimeout > 0 {
-		agentTimeout = overrides.AgentTimeout
+	if overrides.AgentTimeout != nil {
+		agentTimeout = *overrides.AgentTimeout
 	}
 
 	codexSemanticInactivityTimeout, err := durationFromEnv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", DefaultCodexSemanticInactivityTimeout)
@@ -315,6 +351,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// route 0 through durationFromEnv so the operator can opt out without
 	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
 	agentIdleWatchdog, err := durationFromEnv("MULTICA_AGENT_IDLE_WATCHDOG", DefaultAgentIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// MULTICA_AGENT_TOOL_WATCHDOG=0 disables the in-flight-tool backstop; any
+	// positive duration overrides DefaultAgentToolWatchdog.
+	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", DefaultAgentToolWatchdog)
 	if err != nil {
 		return Config{}, err
 	}
@@ -352,15 +395,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// server uses these at register time to merge any pre-UUID runtime rows
 	// for this machine into the new UUID-keyed row and delete the stale ones.
 	legacyDaemonIDs := LegacyDaemonIDs(host, profile)
-	// Pre-change (#1220) daemon identity was stored per profile, which means
-	// the same machine could end up with multiple leftover daemon.id files
-	// — e.g. ~/.multica/daemon.id (default) plus ~/.multica/profiles/<x>/
-	// daemon.id. Surface those UUIDs so the server can merge their runtime
-	// rows into the canonical machine UUID. Fatal-free: a broken profiles
-	// dir shouldn't block startup.
-	if uuids, err := LegacyDaemonUUIDs(); err == nil {
-		legacyDaemonIDs = append(legacyDaemonIDs, uuids...)
-	}
 	// Strip anything that collides with the resolved daemon_id (e.g. when
 	// the user explicitly pins MULTICA_DAEMON_ID=<hostname>, or when the
 	// canonical id was itself promoted from a pre-change profile file).
@@ -492,6 +526,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
+		AgentToolWatchdog:              agentToolWatchdog,
 		ClaudeArgs:                     claudeArgs,
 		CodeBuddyArgs:                  codebuddyArgs,
 		CodexArgs:                      codexArgs,
@@ -647,9 +682,9 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // list to pre-fetch canonical paths for every known agent in a single shell
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
-	"claude", "cbc", "codex", "opencode", "openclaw", "hermes",
+	"claude", "cbc", "codex", "opencode", "openclaw", "wujieclaw", "hermes",
 	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
-	"deepseek-tui", "deepseek", "agy",
+	"deepseek-tui", "deepseek", "agy", "qoderclicn",
 }
 
 var codexDesktopAppBundlePaths = func() []string {

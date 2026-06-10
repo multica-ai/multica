@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -88,14 +90,13 @@ const modelCacheTTL = 60 * time.Second
 // ListModels returns the models supported by the given agent provider.
 // For providers with a known static catalog it returns the baked-in
 // list; for providers with a CLI discovery mechanism (opencode, pi,
-// openclaw) it shells out with caching and falls back to the static
+// openclaw, wujieclaw) it shells out with caching and falls back to the static
 // list on failure.
 //
-// For claude and codex, the static catalog is augmented with per-model
-// thinking-level options discovered from the local CLI (see
-// discoverClaudeThinking / discoverCodexThinking). Discovery failures
-// silently leave Thinking == nil on each entry, which the UI treats
-// as "no picker for this model" rather than blocking model selection.
+// For claude, codex, and opencode, the catalog is augmented with per-model
+// thinking-level options discovered from the local CLI. Discovery failures
+// silently leave Thinking == nil on each entry, which the UI treats as
+// "no picker for this model" rather than blocking model selection.
 //
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
@@ -120,6 +121,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		// an empty catalog so the daemon's model_list endpoint succeeds
 		// without populating a misleading dropdown.
 		return []Model{}, nil
+	case "qoderclicn":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverQoderclicnModels(ctx, executablePath)
+		})
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -145,16 +150,16 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			return discoverDeepseekModels(ctx, executablePath)
 		})
 	case "opencode":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
 		})
 	case "pi":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverPiModels(ctx, executablePath)
 		})
-	case "openclaw":
+	case "openclaw", "wujieclaw":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverOpenclawAgents(ctx, executablePath)
+			return discoverOpenclawAgents(ctx, providerType, executablePath)
 		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
@@ -197,10 +202,26 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 		return nil, err
 	}
 
+	// Don't cache an empty result. Zero models is almost always a transient
+	// failure (discovery CLI timeout, not-logged-in, network blip) rather than
+	// a runtime that genuinely has no models; caching it would keep the picker
+	// blank for the full TTL even after the cause clears. Skipping the cache
+	// lets the next request retry immediately. See #3729.
+	if len(models) == 0 {
+		return models, nil
+	}
+
 	modelCacheMu.Lock()
 	modelCache[key] = modelCacheEntry{models: models, expiresAt: time.Now().Add(modelCacheTTL)}
 	modelCacheMu.Unlock()
 	return models, nil
+}
+
+func discoveryCacheKey(providerType, executablePath string) string {
+	if executablePath == "" {
+		return providerType
+	}
+	return providerType + ":" + executablePath
 }
 
 // ── Static catalogs ──
@@ -297,6 +318,20 @@ func cursorStaticModels() []Model {
 	}
 }
 
+func qoderclicnStaticModels() []Model {
+	return []Model{
+		{ID: "Auto", Label: "Auto", Default: true},
+		{ID: "Qwen3.7-Max", Label: "Qwen3.7 Max"},
+		{ID: "Qwen3.7-Plus", Label: "Qwen3.7 Plus"},
+		{ID: "Qwen3.6-Flash", Label: "Qwen3.6 Flash"},
+		{ID: "DeepSeek-V4-Pro", Label: "DeepSeek V4 Pro"},
+		{ID: "DeepSeek-V4-Flash", Label: "DeepSeek V4 Flash"},
+		{ID: "GLM-5.1", Label: "GLM-5.1"},
+		{ID: "Kimi-K2.6", Label: "Kimi K2.6"},
+		{ID: "MiniMax-M2.7", Label: "MiniMax M2.7"},
+	}
+}
+
 // copilotStaticModels — fallback used when GitHub Copilot CLI is
 // missing on PATH or the user hasn't logged in. Normal operation
 // goes through discoverCopilotModels(), which speaks ACP to the
@@ -372,9 +407,12 @@ func isOpenAIReasoningSeriesID(id string) bool {
 
 // ── Dynamic discovery ──
 
-// discoverOpenCodeModels runs `opencode models` and parses its tabular
-// output. The CLI prints `provider/model` rows; we emit them verbatim
-// as IDs so what the user sees matches what `--model` accepts.
+// discoverOpenCodeModels runs `opencode models --verbose` and parses its
+// output. The CLI prints `provider/model` rows, followed by JSON metadata
+// when verbose mode is enabled; we emit IDs verbatim so what the user sees
+// matches what `--model` accepts, and project any model `variants` into the
+// thinking-level picker because OpenCode's `run --variant` flag is its
+// provider-specific reasoning-effort surface.
 // On any failure (CLI missing, parse error, timeout) we fall back to
 // an empty list so the creatable UI still works.
 func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model, error) {
@@ -384,53 +422,205 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Newer opencode (1.15+) syncs its hosted free-model catalog over the
+	// network on `opencode models`, which can take ~6s; the previous 5s cap
+	// timed out and returned an empty list, so the runtime showed online but
+	// the model picker was empty. See multica-ai/multica#3627.
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	cmd := exec.CommandContext(runCtx, executablePath, "models", "--verbose")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
-	if err != nil {
+	// Parse whatever the verbose command printed, even on a non-zero exit — a
+	// stale config entry can make `opencode models` exit non-zero while still
+	// listing the resolvable catalog (mirrors the pi path; see #3729/#3627).
+	out, _ := cmd.Output()
+	models := parseOpenCodeModels(string(out))
+	if len(models) == 0 {
+		// Verbose yielded nothing usable (unsupported flag, error text, or an
+		// empty list). Retry the plain command, which omits the per-model JSON
+		// but still prints the IDs.
+		cmd = exec.CommandContext(runCtx, executablePath, "models")
+		hideAgentWindow(cmd)
+		out, _ = cmd.Output()
+		models = parseOpenCodeModels(string(out))
+	}
+	if len(models) == 0 {
 		return []Model{}, nil
 	}
-	return parseOpenCodeModels(string(out)), nil
+	return models, nil
 }
 
 // parseOpenCodeModels accepts the `opencode models` text output and
-// extracts IDs. Output format (v0.x): a header row followed by rows
-// whose first whitespace-delimited field is `provider/model`.
+// extracts IDs. Non-verbose output is one `provider/model` row per line.
+// Verbose output appends a pretty-printed JSON object after each ID; when
+// that object contains `variants`, each enabled variant becomes a thinking
+// level that the backend later passes through `opencode run --variant`.
 func parseOpenCodeModels(output string) []Model {
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lines := strings.Split(output, "\n")
 	var models []Model
-	seen := map[string]bool{}
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	indexByID := map[string]int{}
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
-		first := strings.Fields(line)
-		if len(first) == 0 {
+		id := parseOpenCodeModelIDLine(line)
+		if id == "" {
 			continue
 		}
-		id := first[0]
-		if !strings.Contains(id, "/") {
+		idx, seen := indexByID[id]
+		if !seen {
+			provider := ""
+			if slash := strings.Index(id, "/"); slash > 0 {
+				provider = id[:slash]
+			}
+			idx = len(models)
+			indexByID[id] = idx
+			models = append(models, Model{ID: id, Label: id, Provider: provider})
+		}
+
+		next := i + 1
+		for next < len(lines) && strings.TrimSpace(lines[next]) == "" {
+			next++
+		}
+		if next >= len(lines) || !strings.HasPrefix(strings.TrimSpace(lines[next]), "{") {
 			continue
 		}
-		// Skip the header row (opencode prints e.g. PROVIDER/MODEL in caps).
-		if id == strings.ToUpper(id) {
-			continue
+		raw, resumeAt := collectOpenCodeModelJSON(lines, next)
+		if json.Valid(raw) {
+			annotateOpenCodeModelMetadata(&models[idx], raw)
 		}
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		provider := ""
-		if i := strings.Index(id, "/"); i > 0 {
-			provider = id[:i]
-		}
-		models = append(models, Model{ID: id, Label: id, Provider: provider})
+		i = resumeAt - 1
 	}
 	return models
+}
+
+func parseOpenCodeModelIDLine(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return ""
+	}
+	id := fields[0]
+	if strings.HasPrefix(id, `"`) || strings.HasPrefix(id, "{") || strings.HasPrefix(id, "[") {
+		return ""
+	}
+	if !strings.Contains(id, "/") {
+		return ""
+	}
+	// Skip header rows such as PROVIDER/MODEL.
+	if id == strings.ToUpper(id) {
+		return ""
+	}
+	return id
+}
+
+func collectOpenCodeModelJSON(lines []string, start int) ([]byte, int) {
+	var b strings.Builder
+	for i := start; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if i > start && parseOpenCodeModelIDLine(line) != "" {
+			return []byte(b.String()), i
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(lines[i])
+		if json.Valid([]byte(b.String())) {
+			return []byte(b.String()), i + 1
+		}
+	}
+	return []byte(b.String()), len(lines)
+}
+
+type opencodeModelMetadata struct {
+	Reasoning bool                            `json:"reasoning"`
+	Variants  map[string]opencodeModelVariant `json:"variants"`
+}
+
+type opencodeModelVariant struct {
+	Disabled        bool            `json:"disabled"`
+	ReasoningEffort string          `json:"reasoningEffort"`
+	Thinking        json.RawMessage `json:"thinking"`
+}
+
+var opencodeVariantLabel = map[string]string{
+	"none":    "None",
+	"minimal": "Minimal",
+	"low":     "Low",
+	"medium":  "Medium",
+	"high":    "High",
+	"xhigh":   "Extra high",
+	"max":     "Max",
+}
+
+var opencodeVariantOrder = map[string]int{
+	"none":    0,
+	"minimal": 1,
+	"low":     2,
+	"medium":  3,
+	"high":    4,
+	"xhigh":   5,
+	"max":     6,
+}
+
+func annotateOpenCodeModelMetadata(model *Model, raw []byte) {
+	var meta opencodeModelMetadata
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return
+	}
+	if !meta.Reasoning && !openCodeVariantsLookReasoning(meta.Variants) {
+		return
+	}
+	levels := openCodeThinkingLevelsFromVariants(meta.Variants)
+	if len(levels) == 0 {
+		return
+	}
+	model.Thinking = &ModelThinking{SupportedLevels: levels}
+}
+
+func openCodeVariantsLookReasoning(variants map[string]opencodeModelVariant) bool {
+	for name, variant := range variants {
+		if _, known := opencodeVariantOrder[name]; known {
+			return true
+		}
+		if variant.ReasoningEffort != "" || len(variant.Thinking) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func openCodeThinkingLevelsFromVariants(variants map[string]opencodeModelVariant) []ThinkingLevel {
+	if len(variants) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(variants))
+	for value, variant := range variants {
+		if value == "" || variant.Disabled {
+			continue
+		}
+		values = append(values, value)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		left, leftKnown := opencodeVariantOrder[values[i]]
+		right, rightKnown := opencodeVariantOrder[values[j]]
+		if leftKnown && rightKnown {
+			return left < right
+		}
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		return values[i] < values[j]
+	})
+	levels := make([]ThinkingLevel, 0, len(values))
+	for _, value := range values {
+		label, ok := opencodeVariantLabel[value]
+		if !ok {
+			label = strings.Title(strings.ReplaceAll(value, "-", " ")) //nolint:staticcheck
+		}
+		levels = append(levels, ThinkingLevel{Value: value, Label: label})
+	}
+	return levels
 }
 
 // discoverPiModels runs `pi --list-models` and parses its output.
@@ -443,14 +633,20 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Newer pi fetches its catalog from each configured provider over the
+	// network, so discovery time scales with provider count — a multi-provider
+	// setup measured ~4.6-4.8s, right at the old 5s cap. When jitter pushed it
+	// over, the daemon killed the command before it printed anything and the
+	// model picker came back empty while the runtime stayed online. 15s matches
+	// the opencode discovery cap (see #3729, same class as #3627).
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
 	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
-	if err != nil {
+	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
 		return []Model{}, nil
 	}
 	text := string(stdout)
@@ -475,6 +671,14 @@ func parsePiModels(output string) []Model {
 		if line == "" {
 			continue
 		}
+		// pi interleaves human-readable diagnostics with the catalog when an
+		// agent config references stale patterns — e.g.
+		//   Warning: No models match pattern "opencode-go/mimo-v2-omni"
+		// Skip them before field-splitting; otherwise prose tokens are coined
+		// into bogus models like `No/models` or `Warning/`. See #3729.
+		if isPiDiscoveryNoise(line) {
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
@@ -494,6 +698,12 @@ func parsePiModels(output string) []Model {
 		} else {
 			continue
 		}
+		// A real id has a non-empty provider and model on both sides of the
+		// slash. Drop anything that doesn't (e.g. a stray `something:` token),
+		// a cheap structural backstop on top of the diagnostic filter above.
+		if slash := strings.Index(id, "/"); slash <= 0 || slash == len(id)-1 {
+			continue
+		}
 		if seen[id] {
 			continue
 		}
@@ -505,6 +715,98 @@ func parsePiModels(output string) []Model {
 		models = append(models, Model{ID: id, Label: id, Provider: provider})
 	}
 	return models
+}
+
+// discoverQoderclicnModels runs `qoderclicn --model-list` and parses its
+// line-oriented catalog. On any failure, return a conservative static
+// fallback so model selection remains usable when the CLI is unavailable or
+// the account is not logged in.
+func discoverQoderclicnModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "qoderclicn"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return qoderclicnStaticModels(), nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "--model-list")
+	hideAgentWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return qoderclicnStaticModels(), nil
+	}
+	models := parseQoderclicnModels(string(out))
+	if len(models) == 0 {
+		return qoderclicnStaticModels(), nil
+	}
+	return models, nil
+}
+
+// parseQoderclicnModels accepts `qoderclicn --model-list` output:
+//
+//	MODEL
+//	Auto
+//	Qwen3.7-Max
+//	...
+//
+// qoderclicn does not group by upstream provider, so Provider is left empty.
+func parseQoderclicnModels(output string) []Model {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var models []Model
+	seen := map[string]bool{}
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.EqualFold(line, "model") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		id := fields[0]
+		if !isOpenclawIdentifier(id) {
+			continue
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		models = append(models, Model{
+			ID:      id,
+			Label:   qoderclicnModelLabel(id),
+			Default: strings.EqualFold(id, "auto"),
+		})
+	}
+	return models
+}
+
+func qoderclicnModelLabel(id string) string {
+	if strings.EqualFold(id, "auto") {
+		return "Auto"
+	}
+	return strings.ReplaceAll(id, "-", " ")
+}
+
+// isPiDiscoveryNoise reports whether a `pi --list-models` line is a diagnostic
+// message rather than a catalog row. pi prints these alongside the table when
+// an agent config references stale provider/model patterns, e.g.
+//
+//	Warning: No models match pattern "opencode-go/mimo-v2-omni"
+//
+// The `Warning:` prefix is not guaranteed across versions, so the unmatched-
+// pattern message is also matched on its own. These are prose, not
+// `provider model` rows; without skipping them the field splitter coins bogus
+// models like `No/models`. See #3729.
+func isPiDiscoveryNoise(line string) bool {
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, "no models match pattern") {
+		return true
+	}
+	return strings.HasPrefix(lower, "warning:") ||
+		strings.HasPrefix(lower, "error:") ||
+		strings.HasPrefix(lower, "info:")
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,
@@ -934,12 +1236,15 @@ func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, 
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return cursorStaticModels(), nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// 15s to match the other network-backed discovery paths (pi/opencode/ACP);
+	// cursor-agent fetches its frequently-changing catalog, so a tight cap can
+	// time out and fall back to the minimal static list. See #3729.
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
 	hideAgentWindow(cmd)
 	out, err := cmd.Output()
-	if err != nil {
+	if err != nil && len(out) == 0 {
 		return cursorStaticModels(), nil
 	}
 	models := parseCursorModels(string(out))
@@ -1008,7 +1313,7 @@ func parseCursorModels(output string) []Model {
 	return models
 }
 
-// discoverOpenclawAgents enumerates the pre-registered OpenClaw
+// discoverOpenclawAgents enumerates the pre-registered OpenClaw-compatible
 // agents (which is where model selection actually lives in the
 // OpenClaw world — each agent is bound to a model at `agents add`
 // time). It tries structured JSON output first, falling back to a
@@ -1016,9 +1321,9 @@ func parseCursorModels(output string) []Model {
 // headers. On any ambiguity we return an empty list and let the
 // creatable dropdown handle manual entry — a silently-wrong
 // enumeration would be worse than none.
-func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model, error) {
+func discoverOpenclawAgents(ctx context.Context, providerType, executablePath string) ([]Model, error) {
 	if executablePath == "" {
-		executablePath = "openclaw"
+		executablePath = providerType
 	}
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
@@ -1035,11 +1340,14 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	} {
 		cmd := exec.CommandContext(runCtx, executablePath, jsonArgs...)
 		hideAgentWindow(cmd)
+		if providerType == "wujieclaw" {
+			cmd.Env = wujieclawIsolationEnv()
+		}
 		out, err := cmd.Output()
-		if err != nil {
+		if err != nil && len(out) == 0 {
 			continue
 		}
-		if models, ok := parseOpenclawAgentsJSON(out); ok {
+		if models, ok := parseOpenclawAgentsJSON(out, providerType); ok {
 			return models, nil
 		}
 	}
@@ -1049,11 +1357,14 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	// the wrong tokens produces nonsense entries like "Identity:".
 	cmd := exec.CommandContext(runCtx, executablePath, "agents", "list")
 	hideAgentWindow(cmd)
+	if providerType == "wujieclaw" {
+		cmd.Env = wujieclawIsolationEnv()
+	}
 	out, err := cmd.Output()
-	if err != nil {
+	if err != nil && len(out) == 0 {
 		return []Model{}, nil
 	}
-	return parseOpenclawAgents(string(out)), nil
+	return parseOpenclawAgents(string(out), providerType), nil
 }
 
 // openclawAgentEntry is the shape parseOpenclawAgentsJSON expects
@@ -1075,28 +1386,29 @@ type openclawAgentEntry struct {
 // output. It handles two common shapes: a top-level array, or an
 // object with an `agents` key whose value is an array. Returns
 // ok=false if the input isn't valid JSON in either shape.
-func parseOpenclawAgentsJSON(raw []byte) ([]Model, bool) {
+func parseOpenclawAgentsJSON(raw []byte, providerType ...string) ([]Model, bool) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
 		return nil, false
 	}
+	provider := openclawProviderName(providerType...)
 
 	var flat []openclawAgentEntry
 	if err := json.Unmarshal(raw, &flat); err == nil {
-		return openclawEntriesToModels(flat), true
+		return openclawEntriesToModels(flat, provider), true
 	}
 
 	var wrapped struct {
 		Agents []openclawAgentEntry `json:"agents"`
 	}
 	if err := json.Unmarshal(raw, &wrapped); err == nil && wrapped.Agents != nil {
-		return openclawEntriesToModels(wrapped.Agents), true
+		return openclawEntriesToModels(wrapped.Agents, provider), true
 	}
 
 	return nil, false
 }
 
-func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
+func openclawEntriesToModels(entries []openclawAgentEntry, provider string) []Model {
 	models := make([]Model, 0, len(entries))
 	seen := map[string]bool{}
 	for _, e := range entries {
@@ -1121,7 +1433,7 @@ func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
 		if e.Model != "" {
 			label = displayName + " (" + e.Model + ")"
 		}
-		models = append(models, Model{ID: id, Label: label, Provider: "openclaw"})
+		models = append(models, Model{ID: id, Label: label, Provider: provider})
 	}
 	return models
 }
@@ -1134,9 +1446,10 @@ func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
 // separated tokens, both made of safe identifier characters, and
 // neither ending in `:`. Anything else is discarded to avoid
 // surfacing "Identity:" or `◇` as selectable models.
-func parseOpenclawAgents(output string) []Model {
+func parseOpenclawAgents(output string, providerType ...string) []Model {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	provider := openclawProviderName(providerType...)
 	var models []Model
 	seen := map[string]bool{}
 	for scanner.Scan() {
@@ -1159,10 +1472,17 @@ func parseOpenclawAgents(output string) []Model {
 		models = append(models, Model{
 			ID:       name,
 			Label:    name + " (" + model + ")",
-			Provider: "openclaw",
+			Provider: provider,
 		})
 	}
 	return models
+}
+
+func openclawProviderName(providerType ...string) string {
+	if len(providerType) > 0 && strings.TrimSpace(providerType[0]) != "" {
+		return strings.TrimSpace(providerType[0])
+	}
+	return "openclaw"
 }
 
 // isOpenclawIdentifier reports whether s looks like a valid
@@ -1188,4 +1508,40 @@ func isOpenclawIdentifier(s string) bool {
 		}
 	}
 	return true
+}
+
+// wujieclawIsolationEnv returns an env slice that isolates the wujieclaw
+// CLI from the global OpenClaw directories. It inherits the current
+// process env and overrides OPENCLAW_HOME / OPENCLAW_STATE_DIR to
+// ~/.wujieai so model discovery reads wujieclaw's own config, not
+// openclaw's. The caller passes this as cmd.Env on the spawned
+// subprocess.
+func wujieclawIsolationEnv() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return os.Environ()
+	}
+	wujieaiHome := filepath.Join(home, ".wujieai")
+	env := os.Environ()
+	// Append (not replace) — the subprocess inherits everything and
+	// we only override the three isolation keys. Because os.Environ
+	// returns KEY=VALUE strings, duplicates are fine: the child's C
+	// runtime picks the first occurrence, so appending here means
+	// our override wins only if the key was NOT already present in
+	// the parent env. We want the opposite — always override — so
+	// we need to strip existing entries first.
+	filtered := env[:0]
+	for _, e := range env {
+		k := e[:strings.IndexByte(e, '=')]
+		if k == "OPENCLAW_HOME" || k == "OPENCLAW_STATE_DIR" || k == "OPENCLAW_CONFIG_PATH" {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	filtered = append(filtered,
+		"OPENCLAW_HOME="+wujieaiHome,
+		"OPENCLAW_STATE_DIR="+wujieaiHome,
+		"OPENCLAW_CONFIG_PATH="+filepath.Join(wujieaiHome, "wujieai.json"),
+	)
+	return filtered
 }

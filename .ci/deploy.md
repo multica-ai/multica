@@ -16,10 +16,10 @@
 ## Source of truth：仓库配置、ENV 与 Jenkins
 
 1. **OPS / Agent 发布必须优先遵循本文件**：执行 Multica 发布前先阅读 `.ci/deploy.md`，再触发 Jenkins 或修改 K8S。不要绕过本文件直接根据历史命令发布。
-2. **`k8s/bot/*.yaml` 管 desired baseline**：namespace、service、ingress、PVC、probes、resources、env 引用、secret key template 等基础配置由仓库维护。
+2. **`k8s/bot/*.yaml` 管 desired baseline**：namespace、service、ingress、PVC、probes、resources、非敏感固定 env 覆盖等基础配置由仓库维护。
 3. **Jenkins 管 release artifact**：backend/frontend 的线上 image tag 由 Jenkins 发布流程构建并通过 `kubectl set image` 注入。仓库 manifest 里的 image tag 是模板/默认值，不代表线上当前版本。不要把 `0.BUILD_NUMBER`、rollout timestamp、deployment revision、resourceVersion、live deploy annotations 等 transient 字段同步回仓库。
-4. **ENV 注入应显式流程化**：如果某次发布需要依赖 `.env.bot` 中声明的个性化 ENV，应在发布流程中先渲染 `k8s/bot/secret.yaml` 并 apply 到目标 namespace，再 rollout backend/frontend。Agent 不需要理解每个 ENV 的业务含义，但必须保证 `.env.bot` → `multica-bot-secrets` 的注入步骤可追踪、可验证。
-5. **Secret value 不进仓库**：仓库只保存 `secret.yaml` 的 key template；真实值来自 Jenkins credentials / 发布环境的 `.env.bot`。
+4. **`.env.bot` 是 bot ENV 的唯一 source of truth**：`multica-bot-secrets` 必须由 `k8s/bot/sync-env.mjs` 从 `.env.bot` 同步生成，不再维护 `secret.yaml` 或 manifest 内的 Secret key 白名单。新增 `.env.bot` key 后，下一次 ENV sync 应自动进入 backend/frontend 容器环境。
+5. **Secret value 不进仓库、不进日志**：真实值来自 Jenkins credentials / 发布环境的 `.env.bot`。Jenkins、OPS skills、Agent 日志只能输出 key 名、key 数量、Secret apply 结果和 rollout 结果，不能打印 Secret value、渲染后的 Secret manifest 或 `kubectl` 失败时可能包含 value 的完整输出。
 6. **live 经验回流要走小 diff**：如果线上手动调整被确认为 desired state（例如资源 limit），只同步对应字段，并说明原因；不要整份 live dump 覆盖仓库 YAML。
 
 ### ENV 注入建议流程
@@ -27,20 +27,30 @@
 当发布需要刷新环境变量时，Jenkins 应执行等价流程：
 
 ```bash
-set -a
-source .env.bot
-set +a
-envsubst < k8s/bot/secret.yaml | kubectl apply -n multica-bot -f -
-kubectl rollout restart deployment/backend -n multica-bot
-kubectl rollout status deployment/backend -n multica-bot --timeout=180s
+node k8s/bot/sync-env.mjs \
+  --env-file .env.bot \
+  --namespace multica-bot \
+  --secret multica-bot-secrets \
+  --rollout backend \
+  --rollout frontend \
+  --timeout 180s
 ```
 
 要求：
 
 - `.env.bot` 由 Jenkins credentials 或受控发布环境提供，不提交到 Git。
-- `secret.yaml` 新增/删除 key 必须走 PR。
-- 发布报告需要记录是否刷新 ENV、使用的 Jenkins credentials ID / 环境来源、目标 namespace，以及 rollout 结果。
+- `k8s/bot/backend.yaml` 和 `k8s/bot/frontend.yaml` 通过 `envFrom.secretRef` 注入 `multica-bot-secrets`。不要为新增 ENV 再逐项添加 `secretKeyRef`。如果容器必须覆盖同名 Secret key（例如 frontend 的 `PORT=3000`），只能在 manifest `env` 中保留这种非敏感固定运行时覆盖。
+- 发布报告需要记录是否刷新 ENV、使用的 Jenkins credentials ID / 环境来源、目标 namespace、key 数量、key 名列表，以及 backend/frontend rollout 结果。
 - 如果只发布镜像且 ENV 未变化，可以跳过 ENV apply，但要在发布报告中说明“ENV 未刷新”。
+
+#### OPS 后续同步边界
+
+仓库方案定稿后，OPS 需要同步 Jenkins stage / OPS skills 中仍指向旧路径的命令。边界如下：
+
+- prod/test 的 backend/frontend Jenkins Job：把旧的 `set -a && source .env.bot && set +a && envsubst < k8s/bot/secret.yaml | kubectl apply ...` 替换为上面的 `node k8s/bot/sync-env.mjs ...`。
+- 移除任何基于 `k8s/bot/secret.yaml`、`grep -E '^  [A-Z][A-Z0-9_]+:'` 或 manifest `secretKeyRef` 的 key 白名单逻辑。
+- ENV sync 后必须对 `deployment/backend` 和 `deployment/frontend` 执行 rollout restart/status；单独发布镜像且 ENV 未刷新时可沿用镜像发布流程。
+- OPS skills / Agent Instructions 需要同步这条命令、`.env.bot` source-of-truth 约束、frontend/backend 都受 ENV 影响的 rollout 规则，以及日志脱敏要求。
 
 ## 组件
 
@@ -103,16 +113,31 @@ FULL_SHA=$(git rev-parse HEAD)
 
 工作区如果有未提交变更，停止发布，不要自动 stash/reset。
 
-生成项目版本时要避免 nested git-describe tag。示例：
+生成项目版本时以当前已发布的 **git-describe-style release tag** 为基线，手动生成下一版，避免再次 `git describe` 时产生 nested tag。示例：
 
 ```bash
-PROJECT_VERSION=$(git describe --tags --long \
-  --match 'v[0-9]*' \
-  --exclude 'v[0-9]*-[0-9]*-g*' \
-  --exclude '*-k3s-*' \
-  --exclude '*-wj*' \
-  "$FULL_SHA")
+# 优先使用已经精确指向 FULL_SHA 的 release tag；否则基于最近的 release tag 手动累加 commit count。
+EXACT_RELEASE=$(git tag --points-at "$FULL_SHA" --list 'v[0-9]*.[0-9]*.[0-9]*-[0-9]*-g*' --sort=-v:refname | head -1)
+if [ -n "$EXACT_RELEASE" ]; then
+  PROJECT_VERSION="$EXACT_RELEASE"
+else
+  PREV_RELEASE=$(git tag --sort=-v:refname \
+    --list 'v[0-9]*.[0-9]*.[0-9]*-[0-9]*-g*' \
+    --merged "$FULL_SHA" | head -1)
+  if [ -z "$PREV_RELEASE" ]; then
+    echo "ERROR: no previous release tag found for $FULL_SHA"
+    exit 1
+  fi
+
+  BASE_VERSION=$(echo "$PREV_RELEASE" | sed -E 's/^v?([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+-g[0-9a-f]+$/\1/')
+  PREV_COUNT=$(echo "$PREV_RELEASE" | sed -E 's/^v?[0-9]+\.[0-9]+\.[0-9]+-([0-9]+)-g[0-9a-f]+$/\1/')
+  COMMITS_SINCE=$(git rev-list --count "$PREV_RELEASE..$FULL_SHA")
+  SHORT_SHA=$(git rev-parse --short=9 "$FULL_SHA")
+  PROJECT_VERSION="v${BASE_VERSION}-$((PREV_COUNT + COMMITS_SINCE))-g${SHORT_SHA}"
+fi
 ```
+
+例如当前最新 release tag 是 `v0.3.12-997-g911c9f8d3`，本次 `FULL_SHA` 在它之后新增 15 个 commit，则生成：`v0.3.12-1012-g<short-sha>`。
 
 规则：
 
@@ -133,21 +158,21 @@ test "$TAG_SHA" = "$FULL_SHA"
 ```
 
 - 禁止用 `git tag <tag> origin/main`、`git tag <tag> HEAD` 这类移动引用创建 release tag。必须显式使用已冻结的 `$FULL_SHA`。
-- 不要基于旧的 git-describe-style 发布 tag 再 describe 出嵌套版本，例如 `v0.3.2-...-100-gxxxx-1-gyyyy`。
+- 不要基于旧的 git-describe-style 发布 tag 再 describe 出嵌套版本，例如 `v0.3.2-...-100-gxxxx-1-gyyyy`；应按上方规则解析最近 release tag 并手动累加 commit count。
 
 #### 版本号倒退校验（强制 gate）
 
 ```bash
 # 提取 base version（v0.3.6-845-gb05b01d1c → 0.3.6）
-BASE_VERSION=$(echo "$PROJECT_VERSION" | grep -oP '^v?\K\d+\.\d+\.\d+')
+BASE_VERSION=$(echo "$PROJECT_VERSION" | sed -E 's/^v?([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+-g[0-9a-f]+$/\1/')
 PREV_RELEASE=$(git tag --sort=-v:refname \
   --list 'v[0-9]*.[0-9]*.[0-9]*-[0-9]*-g*' \
   --merged origin/main | head -1)
-PREV_BASE=$(echo "$PREV_RELEASE" | grep -oP '^v?\K\d+\.\d+\.\d+')
+PREV_BASE=$(echo "$PREV_RELEASE" | sed -E 's/^v?([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+-g[0-9a-f]+$/\1/')
 
 if [ -n "$PREV_BASE" ] && [ "$(printf '%s\n' "$PREV_BASE" "$BASE_VERSION" | sort -V | tail -1)" != "$BASE_VERSION" ]; then
   echo "ERROR: PROJECT_VERSION base ($BASE_VERSION) < previous release ($PREV_BASE). Version regression detected."
-  echo "This means git describe chose an older base tag. Check that --exclude patterns are applied."
+  echo "This means PROJECT_VERSION was generated from an older release baseline. Check release tag selection and commit-count calculation."
   exit 1
 fi
 ```
@@ -413,4 +438,3 @@ git push origin "refs/tags/$PROJECT_VERSION" --force
 
 4. Release 正文必须明确：发布过程中 main 前进的 commit 不属于本次已部署版本，将在下一次 release 中覆盖。
 5. 同步修正 AutoPilot / skill 的发布逻辑，确保后续 tag 创建总是使用冻结的 `FULL_SHA`。
-

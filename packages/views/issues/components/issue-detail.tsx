@@ -72,6 +72,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { Attachment, Issue, IssueStatus, IssuePriority, LocalPreview, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
@@ -93,6 +94,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -225,10 +227,7 @@ function SubscriberPopoverContent({
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
 type ActivityT = ReturnType<typeof useT<"issues">>["t"];
@@ -288,12 +287,12 @@ function formatActivity(
     }
     case "start_date_changed": {
       if (!details.to) return t(($) => $.activity.start_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.start_date_set, { date: formatted });
     }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.due_date_set, { date: formatted });
     }
     case "title_changed":
@@ -1180,11 +1179,28 @@ export function IssueDetail({
   ]);
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
+  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
   useEffect(() => {
     if (issue) {
       recordVisit(wsId, issue.id);
+      recordRecentContext(wsId, {
+        type: "issue",
+        id: issue.id,
+        label: issue.identifier,
+        subtitle: issue.title,
+        status: issue.status,
+      });
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!issue) return;
+    const parts = [issue.identifier, issue.title].filter(Boolean);
+    document.title = parts.length > 0 ? `${parts.join(" ")} | Multica` : "Multica";
+    return () => {
+      document.title = "Multica";
+    };
+  }, [issue?.identifier, issue?.title]);
 
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
@@ -1631,6 +1647,14 @@ export function IssueDetail({
   const handleUpdateField = actions.updateField;
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Description conflict detection baseline (OPE-2294). Stored in refs so the
+  // onUpdate callback always sees the freshest values without recapturing.
+  const descBaseUpdatedAtRef = useRef<string>("");
+  const descBaseValueRef = useRef<string>("");
+  const handleDescriptionExternalSyncAccepted = useCallback(() => {
+    descBaseUpdatedAtRef.current = issue?.updated_at ?? "";
+    descBaseValueRef.current = issue?.description ?? "";
+  }, [issue?.updated_at, issue?.description]);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
@@ -2560,8 +2584,13 @@ export function IssueDetail({
                 // issueId context), so we only save the description text here.
                 // Removing an attachment node from the body does NOT unlink or
                 // delete the attachment — only the attachment area delete does.
-                handleUpdateField({ description: md });
+                handleUpdateField({
+                  description: md,
+                  description_base_updated_at: descBaseUpdatedAtRef.current || undefined,
+                  description_base_value: descBaseValueRef.current ?? undefined,
+                });
               }}
+              onExternalSyncAccepted={handleDescriptionExternalSyncAccepted}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
               currentIssueId={resolvedId}

@@ -502,14 +502,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
 	semanticInactivityTimeout := opts.SemanticInactivityTimeout
 	if semanticInactivityTimeout == 0 {
 		semanticInactivityTimeout = defaultCodexSemanticInactivityTimeout
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	// Materialise the agent's MCP config into the per-task
 	// `$CODEX_HOME/config.toml`. Argv would be the simpler path, but
@@ -709,6 +706,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			"approvalsReviewer": codexApprovalsReviewer(codexApprovalPolicy(c.onApproval)),
 		}
 		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
+		applyCodexServiceTier(turnParams, opts.ServiceTier)
 		_, err = c.request(runCtx, "turn/start", turnParams)
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
@@ -897,9 +895,12 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 			"approvalsReviewer":     approvalsReviewer,
 		}
 		applyCodexReasoningEffort(resumeParams, opts.ThinkingLevel)
+		applyCodexServiceTier(resumeParams, opts.ServiceTier)
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
+				cfg := extractThreadEffectiveConfig(resumeResult)
+				logThreadEffectiveConfig(logger, "resumed", threadID, cfg)
 				return threadID, true, nil
 			}
 			logger.Warn("codex thread/resume returned no thread ID; falling back to thread/start", "prior_thread_id", priorThreadID)
@@ -925,6 +926,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"persistExtendedHistory": true,
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
+	applyCodexServiceTier(startParams, opts.ServiceTier)
 	startResult, err := c.request(ctx, "thread/start", startParams)
 	if err != nil {
 		return "", false, fmt.Errorf("codex thread/start failed: %w", err)
@@ -933,6 +935,8 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if threadID == "" {
 		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
 	}
+	cfg := extractThreadEffectiveConfig(startResult)
+	logThreadEffectiveConfig(logger, "started", threadID, cfg)
 	return threadID, false, nil
 }
 
@@ -984,6 +988,13 @@ func applyCodexReasoningEffort(params map[string]any, level string) {
 	}
 	cfg["model_reasoning_effort"] = level
 	params["config"] = cfg
+}
+
+func applyCodexServiceTier(params map[string]any, tier string) {
+	if params == nil || tier == "" {
+		return
+	}
+	params["service_tier"] = tier
 }
 
 func resetTimer(timer *time.Timer, d time.Duration) {
@@ -2124,6 +2135,53 @@ func extractThreadID(result json.RawMessage) string {
 		return ""
 	}
 	return r.Thread.ID
+}
+
+// threadEffectiveConfig holds the effective model configuration extracted from
+// a thread/start or thread/resume response. Only fields that are safe to log
+// are included — base_url and API keys are excluded.
+type threadEffectiveConfig struct {
+	Model           string
+	ModelProvider   string
+	ReasoningEffort string
+}
+
+// extractThreadEffectiveConfig reads the model, modelProvider, and
+// reasoningEffort from a thread/start or thread/resume JSON-RPC result.
+// Missing fields are left as empty strings.
+func extractThreadEffectiveConfig(result json.RawMessage) threadEffectiveConfig {
+	var r struct {
+		Thread struct {
+			Model           string `json:"model"`
+			ModelProvider   string `json:"modelProvider"`
+			ReasoningEffort string `json:"reasoningEffort"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return threadEffectiveConfig{}
+	}
+	return threadEffectiveConfig{
+		Model:           r.Thread.Model,
+		ModelProvider:   r.Thread.ModelProvider,
+		ReasoningEffort: r.Thread.ReasoningEffort,
+	}
+}
+
+// logThreadEffectiveConfig emits an info-level log with the effective
+// model/modelProvider/reasoningEffort from a thread operation. Deliberately
+// excludes base_url and API keys.
+func logThreadEffectiveConfig(logger *slog.Logger, op string, threadID string, cfg threadEffectiveConfig) {
+	attrs := []any{"thread_id", threadID}
+	if cfg.Model != "" {
+		attrs = append(attrs, "model", cfg.Model)
+	}
+	if cfg.ModelProvider != "" {
+		attrs = append(attrs, "model_provider", cfg.ModelProvider)
+	}
+	if cfg.ReasoningEffort != "" {
+		attrs = append(attrs, "reasoning_effort", cfg.ReasoningEffort)
+	}
+	logger.Info("codex thread "+op, attrs...)
 }
 
 func extractNestedString(m map[string]any, keys ...string) string {

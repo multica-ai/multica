@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "내 것",
-    "all": "전체"
+    "all": "전체",
+    "default": "기본값"
   },
   "sort": {
     "label_recent": "최근 활동",
@@ -25,7 +26,8 @@
     "all": "전체",
     "online": "온라인",
     "unstable": "불안정",
-    "offline": "오프라인"
+    "offline": "오프라인",
+    "archived": "보관됨"
   },
   "workload": {
     "working": "작업 중",
@@ -46,7 +48,18 @@
     "no_archived": "아직 보관된 에이전트가 없습니다.",
     "search_active": "\"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "search_active_filtered": "이 필터에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
-    "no_filter_match": "이 필터와 일치하는 에이전트가 없습니다."
+    "no_filter_match": "이 필터와 일치하는 에이전트가 없습니다.",
+    "search_runtime_filtered": "\"{{machine}}\"에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
+    "runtime_filtered": "\"{{machine}}\"에 에이전트가 없습니다."
+  },
+  "runtime_filter": {
+    "all": "모든 런타임",
+    "section_local": "로컬",
+    "section_remote": "원격",
+    "section_cloud": "클라우드",
+    "agent_count_one": "에이전트 {{count}}개",
+    "agent_count_other": "에이전트 {{count}}개",
+    "empty": "아직 기기가 없습니다"
   },
   "columns": {
     "agent": "에이전트",
@@ -128,14 +141,50 @@
     "section_properties": "속성",
     "section_details": "세부 정보",
     "section_skills": "스킬",
+    "section_integrations": "연동",
     "prop_runtime": "런타임",
     "prop_model": "모델",
+    "prop_service_tier": "서비스 티어",
     "prop_thinking": "추론",
     "prop_visibility": "공개 범위",
+    "prop_allowed_users": "허용된 사용자",
     "prop_concurrency": "동시 실행",
+    "prop_stream": "스트림",
+    "prop_approval": "승인",
     "prop_owner": "소유자",
     "prop_created": "생성일",
     "prop_updated": "수정일",
+    "stream_tooltip": "스트림 · {{value}}",
+    "approval_tooltip": "승인 · {{value}}",
+    "service_tier_tooltip": "Codex Fast mode · {{value}}",
+    "service_tier_value": {
+      "": "로컬 Codex 설정 따르기",
+      "default": "Standard",
+      "fast": "Fast"
+    },
+    "service_tier_description": {
+      "": "로컬 Codex CLI에 설정된 서비스 티어를 사용합니다.",
+      "default": "표준 Codex 서비스 티어를 사용합니다.",
+      "fast": "지원되는 실행에 Codex Fast mode를 사용합니다."
+    },
+    "stream_value": {
+      "on": "켜기",
+      "off": "끄기"
+    },
+    "stream_description": {
+      "on": "로컬 에이전트 실행 스트림을 수집하고 표시합니다.",
+      "off": "로컬 실행 스트림을 표시하지 않고 실행합니다."
+    },
+    "approval_value": {
+      "auto": "자동",
+      "prompt": "나에게 묻기",
+      "deny": "거부"
+    },
+    "approval_description": {
+      "auto": "런타임 작업을 자동으로 승인합니다.",
+      "prompt": "명령 실행 또는 파일 수정 전에 묻습니다.",
+      "deny": "런타임 작업을 자동으로 거부합니다."
+    },
     "no_description_placeholder": "설명 없음",
     "change_avatar_aria": "아바타 변경",
     "avatar_updated_toast": "아바타를 업데이트했습니다",
@@ -145,6 +194,13 @@
     "rename_required": "이름은 필수입니다",
     "edit_description_title": "설명 수정",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
+    "allowed_users_title": "허용된 사용자",
+    "allowed_users_none": "사용자 없음",
+    "allowed_users_count": "사용자 {{count}}명",
+    "allowed_users_empty": "다른 사용자가 없습니다",
+    "allowed_users_loading": "로딩 중",
+    "allowed_users_search_placeholder": "사용자 검색",
+    "allowed_users_no_results": "일치하는 사용자가 없습니다",
     "save": "저장",
     "cancel": "취소"
   },
@@ -196,6 +252,7 @@
     "environment": "환경",
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",
+    "integrations": "연동",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -296,7 +353,7 @@
       "save_failed_toast": "사용자 지정 인자를 저장하지 못했습니다"
     },
     "mcp_config": {
-      "intro": "런타임 CLI로 전달되는 MCP server configuration입니다(Claude는 --mcp-config, Codex는 $CODEX_HOME/config.toml, Hermes/Kimi/Kiro는 ACP mcpServers, OpenClaw는 task별 config wrapper). 그대로 저장되며 secret이 포함될 수 있으므로 에이전트 소유자와 워크스페이스 관리자만 읽을 수 있습니다. 비워두면 CLI 자체 기본값을 사용합니다. OpenClaw HTTP/SSE 항목은 Claude의 \"type\" 대신 OpenClaw의 필드명(예: \"transport\": \"streamable-http\")을 사용하세요.",
+      "intro": "런타임 CLI로 전달되는 MCP server configuration입니다(Claude는 --mcp-config, Codex는 $CODEX_HOME/config.toml, Hermes/Kimi/Kiro는 ACP mcpServers, OpenCode는 OPENCODE_CONFIG_CONTENT, OpenClaw는 task별 config wrapper). 그대로 저장되며 secret이 포함될 수 있으므로 에이전트 소유자와 워크스페이스 관리자만 읽을 수 있습니다. 비워두면 CLI 자체 기본값을 사용합니다. OpenClaw HTTP/SSE 항목은 Claude의 \"type\" 대신 OpenClaw의 필드명(예: \"transport\": \"streamable-http\")을 사용하세요.",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP config JSON editor",
       "clear_action": "지우기",
@@ -325,6 +382,10 @@
       "add_dialog_confirm_other": "스킬 {{count}}개 추가",
       "add_dialog_cancel": "취소",
       "add_failed_toast": "스킬을 추가하지 못했습니다"
+    },
+    "integrations": {
+      "intro": "이 에이전트를 외부 채팅 플랫폼에 연결해 팀원이 평소 사용하는 도구에서 바로 함께 작업할 수 있도록 합니다.",
+      "members_note": "에이전트에 Lark 봇을 연결할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
     },
     "activity": {
       "section_now": "현재",

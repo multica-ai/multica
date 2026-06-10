@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
@@ -118,6 +119,12 @@ func (c *APIClient) setHeaders(req *http.Request) {
 }
 
 // GetJSON performs a GET request and decodes the JSON response.
+//
+// On an HTTP error response (status >= 400) the returned error is a
+// *HTTPError so callers can use errors.As to inspect the status code
+// (for example to recognize a 404 from a server that does not expose a
+// given endpoint and degrade gracefully). The error string format
+// ("GET <path> returned <code>: <body>") is preserved by HTTPError.Error().
 func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
 	if err != nil {
@@ -133,7 +140,12 @@ func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("GET %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
+		return &HTTPError{
+			Method:     http.MethodGet,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(data)),
+		}
 	}
 	if out == nil {
 		return nil
@@ -361,6 +373,20 @@ const multipartUploadThresholdBytes = 64 << 20
 const multipartUploadPartSizeBytes = 16 << 20
 const multipartUploadMaxRetries = 3
 
+func uploadContentType(filename string) string {
+	if contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename))); contentType != "" {
+		return contentType
+	}
+	return "application/octet-stream"
+}
+
+func optionalUploadContextID(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
+}
+
 func (c *APIClient) uploadFileMultipart(ctx context.Context, fileData []byte, filename string, issueID string) (AttachmentResponse, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -409,15 +435,15 @@ func (c *APIClient) uploadFileMultipart(ctx context.Context, fileData []byte, fi
 }
 
 func (c *APIClient) uploadFileDirect(ctx context.Context, fileData []byte, filename string, issueID string) (AttachmentResponse, error) {
-	if issueID == "" {
+	if c.WorkspaceID == "" {
 		return AttachmentResponse{}, &HTTPError{Method: http.MethodPost, Path: "/api/attachments/upload/initiate", StatusCode: http.StatusNotImplemented, Body: "direct upload requires workspace attachment context"}
 	}
 	var initiate directUploadInitiateResponse
 	err := c.PostJSON(ctx, "/api/attachments/upload/initiate", map[string]any{
 		"filename":        filepath.Base(filename),
-		"content_type":    "application/octet-stream",
+		"content_type":    uploadContentType(filename),
 		"size_bytes":      int64(len(fileData)),
-		"issue_id":        issueID,
+		"issue_id":        optionalUploadContextID(issueID),
 		"comment_id":      nil,
 		"chat_session_id": nil,
 	}, &initiate)
@@ -510,16 +536,16 @@ func (c *APIClient) uploadMultipartPart(ctx context.Context, uploadURL string, h
 }
 
 func (c *APIClient) uploadFileMultipartDirect(ctx context.Context, fileData []byte, filename string, issueID string) (AttachmentResponse, error) {
-	if issueID == "" {
+	if c.WorkspaceID == "" {
 		return AttachmentResponse{}, &HTTPError{Method: http.MethodPost, Path: "/api/attachments/upload/multipart/initiate", StatusCode: http.StatusNotImplemented, Body: "multipart upload requires workspace attachment context"}
 	}
 	var initiate multipartUploadInitiateResponse
 	err := c.PostJSON(ctx, "/api/attachments/upload/multipart/initiate", map[string]any{
 		"filename":        filepath.Base(filename),
-		"content_type":    "application/octet-stream",
+		"content_type":    uploadContentType(filename),
 		"size_bytes":      int64(len(fileData)),
 		"part_size_bytes": int64(multipartUploadPartSizeBytes),
-		"issue_id":        issueID,
+		"issue_id":        optionalUploadContextID(issueID),
 		"comment_id":      nil,
 		"chat_session_id": nil,
 	}, &initiate)
@@ -634,7 +660,8 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 // Downloads are limited to 500 MB to match the upload size limit.
 //
 // The URL may be absolute (a signed CloudFront/S3 URL) or relative
-// (a server-relative path like "/uploads/...") depending on how the
+// (a server-relative path like "/api/attachments/{id}/download" or
+// "/uploads/...") depending on how the
 // server is configured. Relative URLs are resolved against the client's
 // BaseURL and sent with the standard auth headers; absolute URLs are
 // used as-is so that their query-string signatures are not disturbed.

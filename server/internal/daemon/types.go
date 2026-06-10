@@ -52,6 +52,7 @@ type Task struct {
 	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerThreadID         string                `json:"trigger_thread_id,omitempty"`         // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
 	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
@@ -110,6 +111,7 @@ type ChatAttachmentMeta struct {
 type AgentData struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name"`
+	Description   string            `json:"description,omitempty"`
 	Instructions  string            `json:"instructions"`
 	Skills        []SkillData       `json:"skills"`
 	CustomEnv     map[string]string `json:"custom_env,omitempty"`
@@ -117,6 +119,7 @@ type AgentData struct {
 	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
 	Model         string            `json:"model,omitempty"`
 	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	ServiceTier   string            `json:"service_tier,omitempty"`
 	Visibility    string            `json:"visibility,omitempty"`
 	OwnerID       string            `json:"owner_id,omitempty"`
 	RuntimeConfig json.RawMessage   `json:"runtime_config,omitempty"`
@@ -124,6 +127,7 @@ type AgentData struct {
 
 // SkillData represents a structured skill for task execution.
 type SkillData struct {
+	ID          string          `json:"id"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Content     string          `json:"content"`

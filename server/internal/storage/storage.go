@@ -58,3 +58,11 @@ type MultipartUploadStorage interface {
 	CompleteMultipartUpload(ctx context.Context, key string, uploadID string, parts []MultipartUploadPart) error
 	AbortMultipartUpload(ctx context.Context, key string, uploadID string) error
 }
+
+type Presigner interface {
+	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
+}
+
+type DownloadPresigner interface {
+	PresignGetWithContentDisposition(ctx context.Context, key string, ttl time.Duration, contentDisposition string) (string, error)
+}

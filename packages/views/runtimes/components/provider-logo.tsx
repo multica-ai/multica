@@ -158,17 +158,25 @@ function GeminiLogo({ className }: { className: string }) {
 
 // Antigravity (Google) — official mark, shipped as a PNG asset next to
 // this file. Different bundlers type the PNG import differently — Next.js
-// gives a StaticImageData object (.src), electron-vite + plain vite give
-// a string. Normalise via unknown so neither side's narrower type wins
-// and breaks the other's typecheck.
+// gives a StaticImageData object (.src), electron-vite + plain vite give a
+// string. WujieClaw follows the same static-asset pattern with the user-
+// provided JPEG logo.
 import antigravityLogo from "./antigravity-logo.png";
-const antigravityLogoSrc: string = (() => {
-  const asset = antigravityLogo as unknown;
+import wujieclawLogo from "./wujieclaw-logo.jpg";
+
+function assetSrc(asset: unknown): string {
   return typeof asset === "string" ? asset : (asset as { src: string }).src;
-})();
+}
+
+const antigravityLogoSrc = assetSrc(antigravityLogo);
+const wujieclawLogoSrc = assetSrc(wujieclawLogo);
 
 function AntigravityLogo({ className }: { className: string }) {
   return <img src={antigravityLogoSrc} alt="Antigravity" className={className} />;
+}
+
+function WujieClawLogo({ className }: { className: string }) {
+  return <img src={wujieclawLogoSrc} alt="WujieClaw" className={className} />;
 }
 
 // Kiro CLI — official icon sourced from kiro.dev/icon.svg.
@@ -210,6 +218,27 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// Qoder CLI CN — compact "Q" glyph for the qoderclicn provider key. The
+// runtime name intentionally follows the installed binary to avoid future
+// ambiguity with any separate international Qoder CLI.
+function QoderclicnLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#111827" />
+      <path
+        d="M12 5.4a6.1 6.1 0 1 0 0 12.2 6.1 6.1 0 0 0 0-12.2Zm0 2.4a3.7 3.7 0 1 1 0 7.4 3.7 3.7 0 0 1 0-7.4Z"
+        fill="#FFFFFF"
+      />
+      <path
+        d="M14.9 15.1 18.2 18"
+        stroke="#22D3EE"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -228,6 +257,8 @@ export function ProviderLogo({
       return <OpenCodeLogo className={className} />;
     case "openclaw":
       return <OpenClawLogo className={className} />;
+    case "wujieclaw":
+      return <WujieClawLogo className={className} />;
     case "hermes":
       return <HermesLogo className={className} />;
     case "pi":
@@ -244,6 +275,8 @@ export function ProviderLogo({
       return <GeminiLogo className={className} />;
     case "antigravity":
       return <AntigravityLogo className={className} />;
+    case "qoderclicn":
+      return <QoderclicnLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

@@ -257,6 +257,11 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"codex", "minimal", true},
 		{"codex", "xhigh", true},
 		{"codex", "max", false}, // Claude-only token rejected for Codex
+		{"opencode", "", true},
+		{"opencode", "max", true},
+		{"opencode", "fast-mode", true},  // custom opencode.json variant names are valid
+		{"opencode", ".hidden", false},   // reject suspicious / malformed names server-side
+		{"opencode", "bad value", false}, // spaces are not valid variant names
 		{"hermes", "", true},
 		{"hermes", "low", false}, // hermes has no thinking concept
 	}
@@ -368,6 +373,59 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 	if ok {
 		t.Errorf("unknown model must fail closed; got true")
+	}
+}
+
+func TestValidateThinkingLevel_OpenCodeEmptyModelUsesAdvertisedVariants(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	modelCacheMu.Lock()
+	delete(modelCache, "opencode")
+	modelCacheMu.Unlock()
+	defer func() {
+		modelCacheMu.Lock()
+		delete(modelCache, "opencode")
+		modelCacheMu.Unlock()
+	}()
+
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "opencode")
+	script := `#!/bin/sh
+if [ "$1" = "models" ]; then
+  cat <<'EOF'
+opencode/deepseek-v4
+{
+  "id": "deepseek-v4",
+  "reasoning": true,
+  "variants": {
+    "high": {},
+    "max": {}
+  }
+}
+EOF
+  exit 0
+fi
+echo "opencode 9.9.9"
+`
+	writeTestExecutable(t, fake, []byte(script))
+
+	ctx := context.Background()
+	ok, err := ValidateThinkingLevel(ctx, "opencode", fake, "", "max")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected empty-model opencode max to pass when any advertised model supports it")
+	}
+
+	ok, err = ValidateThinkingLevel(ctx, "opencode", fake, "", "xhigh")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ok {
+		t.Fatalf("xhigh should fail when no advertised OpenCode model exposes it")
 	}
 }
 
@@ -574,6 +632,70 @@ func TestApplyCodexReasoningEffort_PreservesPreExistingConfig(t *testing.T) {
 	if cfg["model_reasoning_effort"] != "high" {
 		t.Errorf("reasoning effort not injected: %+v", cfg)
 	}
+}
+
+func TestApplyCodexServiceTier_ThreePoints(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		tier string
+	}{
+		{"empty-tier-is-noop", ""},
+		{"fast", "fast"},
+		{"default", "default"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			startParams := map[string]any{
+				"model":  "gpt-5.5",
+				"cwd":    "/work",
+				"config": map[string]any{"model_reasoning_effort": "high"},
+			}
+			applyCodexServiceTier(startParams, tc.tier)
+			assertCodexServiceTier(t, "thread/start", startParams, tc.tier)
+			if cfg, _ := startParams["config"].(map[string]any); cfg["model_reasoning_effort"] != "high" {
+				t.Fatalf("thread/start service_tier clobbered config: %+v", startParams)
+			}
+
+			resumeParams := map[string]any{
+				"threadId": "thr_prior",
+				"cwd":      "/work",
+				"model":    "gpt-5.5",
+			}
+			applyCodexServiceTier(resumeParams, tc.tier)
+			assertCodexServiceTier(t, "thread/resume", resumeParams, tc.tier)
+
+			turnParams := map[string]any{
+				"threadId": "thr_x",
+				"input":    []map[string]any{{"type": "text", "text": "hi"}},
+			}
+			applyCodexServiceTier(turnParams, tc.tier)
+			assertCodexServiceTier(t, "turn/start", turnParams, tc.tier)
+		})
+	}
+}
+
+func assertCodexServiceTier(t *testing.T, method string, params map[string]any, want string) {
+	t.Helper()
+	got, has := params["service_tier"]
+	if want == "" {
+		if has {
+			t.Errorf("%s: empty tier must not emit service_tier, got %v", method, got)
+		}
+		return
+	}
+	if !has {
+		t.Fatalf("%s: missing service_tier for tier=%q (params=%+v)", method, want, params)
+	}
+	if got != want {
+		t.Errorf("%s: service_tier = %v, want %q", method, got, want)
+	}
+}
+
+func TestApplyCodexServiceTier_NilParamsSafe(t *testing.T) {
+	t.Parallel()
+	applyCodexServiceTier(nil, "fast")
 }
 
 // ── End-to-end: build*Args + thinking_level wiring ───────────────────

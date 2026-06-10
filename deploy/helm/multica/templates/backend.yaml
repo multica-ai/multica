@@ -1,4 +1,5 @@
 {{- $backendImageTag := default .Chart.AppVersion .Values.images.backend.tag -}}
+{{- if .Values.backend.uploads.persistence.enabled -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -7,7 +8,8 @@ metadata:
     {{- include "multica.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
-  accessModes: [ReadWriteOnce]
+  accessModes:
+    {{- toYaml .Values.backend.uploads.persistence.accessModes | nindent 4 }}
   resources:
     requests:
       storage: {{ .Values.backend.uploads.persistence.size | quote }}
@@ -15,6 +17,7 @@ spec:
   storageClassName: {{ . | quote }}
   {{- end }}
 ---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,8 +26,10 @@ metadata:
     {{- include "multica.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
-  # The backend entrypoint runs migrations before starting. Keep replicas at 1
-  # so two pods don't race on startup migrations.
+  # The backend entrypoint runs migrations before starting. Concurrent
+  # runs are protected by a Postgres advisory lock in cmd/migrate (see
+  # GitHub multica-ai/multica#3647), so multiple replicas no longer race;
+  # 1 is still the chart default (strategy: Recreate, no leader split).
   replicas: {{ .Values.backend.replicas }}
   strategy:
     type: Recreate
@@ -66,9 +71,11 @@ spec:
           env:
             - name: DATABASE_URL
               value: {{ include "multica.databaseUrl" . | quote }}
+          {{- if .Values.backend.uploads.persistence.enabled }}
           volumeMounts:
             - name: uploads
               mountPath: /app/data/uploads
+          {{- end }}
           # The entrypoint runs `./migrate up` before serving traffic. On a
           # cold cluster (Postgres still coming up) this can take minutes. The
           # startupProbe holds off liveness/readiness until /healthz is OK,
@@ -95,10 +102,12 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+      {{- if .Values.backend.uploads.persistence.enabled }}
       volumes:
         - name: uploads
           persistentVolumeClaim:
             claimName: {{ include "multica.backend.fullname" . }}-uploads
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

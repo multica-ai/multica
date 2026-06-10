@@ -78,12 +78,12 @@ export interface MarkdownProps {
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
-// and the mention:// protocol used for @mentions.
+// and Multica's internal mention/slash protocols.
 const sanitizeSchema = {
   ...defaultSchema,
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), 'mention'],
+    href: [...(defaultSchema.protocols?.href ?? []), 'mention', 'slash'],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -107,11 +107,12 @@ const sanitizeSchema = {
 }
 
 /**
- * Custom URL transform that allows mention:// protocol (used for @mentions)
- * while keeping the default security for all other URLs.
+ * Custom URL transform that allows Multica internal protocols while keeping
+ * the default security for all other URLs.
  */
 function urlTransform(url: string): string {
   if (url.startsWith('mention://')) return url
+  if (url.startsWith('slash://skill/')) return url
   return defaultUrlTransform(url)
 }
 
@@ -178,9 +179,9 @@ function createComponents(
     },
     // Links: Make clickable with callbacks, or render as mention
     a: ({ href, children }) => {
-      // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://all/all
+      // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://project/id, mention://all/all
       if (href?.startsWith('mention://')) {
-        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/)
+        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/)
         if (mentionMatch?.[1] && mentionMatch[2]) {
           const type = mentionMatch[1]
           const id = mentionMatch[2]
@@ -202,6 +203,14 @@ function createComponents(
         }
         return (
           <span className="text-primary font-semibold mx-0.5">
+            {children}
+          </span>
+        )
+      }
+
+      if (href?.startsWith('slash://skill/')) {
+        return (
+          <span className="slash-command text-primary font-semibold mx-0.5">
             {children}
           </span>
         )
@@ -263,10 +272,10 @@ function createComponents(
     return {
       ...baseComponents,
       // Inline code
-      code: ({ className, children, ...props }) => {
+      code: ({ className, children, node }) => {
         const match = /language-(\w+)/.exec(className || '')
         const isBlock =
-          'node' in props && props.node?.position?.start.line !== props.node?.position?.end.line
+          node?.position && node.position.start.line !== node.position.end.line
 
         // Block code - use CodeBlock with full mode
         if (match || isBlock) {
@@ -274,8 +283,8 @@ function createComponents(
           return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
         }
 
-        // Inline code
-        return <InlineCode>{children}</InlineCode>
+        // Inline code — force string to avoid rendering interactive elements
+        return <InlineCode>{String(children)}</InlineCode>
       },
       pre: ({ children }) => <>{children}</>,
       // Comfortable paragraph spacing
@@ -325,17 +334,17 @@ function createComponents(
   return {
     ...baseComponents,
     // Full code blocks with copy button
-    code: ({ className, children, ...props }) => {
+    code: ({ className, children, node }) => {
       const match = /language-(\w+)/.exec(className || '')
       const isBlock =
-        'node' in props && props.node?.position?.start.line !== props.node?.position?.end.line
+        node?.position && node.position.start.line !== node.position.end.line
 
       if (match || isBlock) {
         const code = String(children).replace(/\n$/, '')
         return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
       }
 
-      return <InlineCode>{children}</InlineCode>
+      return <InlineCode>{String(children)}</InlineCode>
     },
     pre: ({ children }) => <>{children}</>,
     // Rich paragraph spacing

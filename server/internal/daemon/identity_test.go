@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -154,10 +153,11 @@ func TestEnsureDaemonID_RegeneratesCorruptFile(t *testing.T) {
 	}
 }
 
-func TestLegacyDaemonUUIDs_ScansProfileDirs(t *testing.T) {
+func TestLegacyDaemonUUIDs_AlwaysReturnsNil(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
+	// Set up multiple profile daemon.id files (active identities in the new design).
 	uuidA := uuid.Must(uuid.NewV7()).String()
 	uuidB := uuid.Must(uuid.NewV7()).String()
 	for name, id := range map[string]string{"prod": uuidA, "desktop-multica": uuidB} {
@@ -170,24 +170,13 @@ func TestLegacyDaemonUUIDs_ScansProfileDirs(t *testing.T) {
 		}
 	}
 
-	// A profile directory with a corrupt file must be skipped, not fail.
-	corruptDir := filepath.Join(home, ".multica", "profiles", "corrupt")
-	if err := os.MkdirAll(corruptDir, 0o755); err != nil {
-		t.Fatalf("mkdir corrupt: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(corruptDir, "daemon.id"), []byte("not-a-uuid"), 0o600); err != nil {
-		t.Fatalf("seed corrupt: %v", err)
-	}
-
+	// LegacyDaemonUUIDs must NOT return these active profile IDs.
 	got, err := LegacyDaemonUUIDs()
 	if err != nil {
 		t.Fatalf("LegacyDaemonUUIDs: %v", err)
 	}
-	sort.Strings(got)
-	want := []string{uuidA, uuidB}
-	sort.Strings(want)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("LegacyDaemonUUIDs = %v, want %v", got, want)
+	if got != nil {
+		t.Fatalf("LegacyDaemonUUIDs should return nil (deprecated), got %v", got)
 	}
 }
 
@@ -201,6 +190,38 @@ func TestLegacyDaemonUUIDs_MissingProfilesDirIsNil(t *testing.T) {
 	}
 	if ids != nil {
 		t.Fatalf("expected nil on missing profiles dir, got %v", ids)
+	}
+}
+
+func TestLegacyDaemonUUIDs_DoesNotCausesCrossProfileMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Simulate two active profiles with their own daemon.id
+	profileA := "default"
+	profileB := "member"
+	idA, err := EnsureDaemonID("", "")
+	if err != nil {
+		t.Fatalf("EnsureDaemonID default: %v", err)
+	}
+	idB, err := EnsureDaemonID(profileB, "")
+	if err != nil {
+		t.Fatalf("EnsureDaemonID member: %v", err)
+	}
+
+	// LegacyDaemonUUIDs must not return either active daemon ID
+	legacyUUIDs, err := LegacyDaemonUUIDs()
+	if err != nil {
+		t.Fatalf("LegacyDaemonUUIDs: %v", err)
+	}
+
+	for _, legacyID := range legacyUUIDs {
+		if legacyID == idA {
+			t.Fatalf("LegacyDaemonUUIDs returned active %s profile daemon_id %s", profileA, idA)
+		}
+		if legacyID == idB {
+			t.Fatalf("LegacyDaemonUUIDs returned active %s profile daemon_id %s", profileB, idB)
+		}
 	}
 }
 

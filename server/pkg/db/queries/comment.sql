@@ -15,6 +15,17 @@ WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3 AND deleted_at IS 
 ORDER BY created_at ASC, id ASC
 LIMIT $4;
 
+-- name: GetLatestAgentCommentSince :one
+SELECT * FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND author_type = 'agent'
+  AND author_id = $3
+  AND created_at >= $4
+  AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: ListRootCommentsForIssue :many
 -- Top-level comments only, in issue chronological order, each annotated with
 -- per-thread orientation stats: reply_count (number of descendants) and
@@ -113,10 +124,9 @@ ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: ListThreadCommentsForIssue :many
 -- Returns the root of the thread containing @anchor_id plus every descendant
--- (recursive — defends against any future deeper nesting; today's data is two
--- layers because the CreateComment path collapses replies to root, but the
--- schema does not enforce that). @anchor_id may itself be a root or a reply.
--- Output is chronological so it can be fed straight to the agent.
+-- (recursive — supports real reply-to-reply nesting). @anchor_id may itself be
+-- a root or any reply in the thread. Output is chronological so it can be fed
+-- straight to the agent.
 WITH RECURSIVE root_of AS (
     -- Walk up from the anchor until parent_id IS NULL.
     SELECT c.id, c.parent_id
@@ -324,12 +334,9 @@ WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
 -- name: GetThreadRoot :one
 -- Returns the thread-root comment for @comment_id by walking parent_id up to
 -- the row whose parent_id IS NULL. For a root comment it returns that comment
--- itself. Used at the write boundary to flatten replies: every new reply stores
--- the thread root as its parent_id, so the comment tree never exceeds depth 1.
--- This enforces the 2-level threading model the product and UI already assume
--- (a root + a flat list of replies, like Linear/Slack) at insert time, so every
--- reader can treat a reply's parent_id AS its thread root without re-walking the
--- tree. Cycle-safe under the PK constraint (a comment cannot be its own ancestor).
+-- itself. Used when callers need thread-level behavior while parent_id remains
+-- the exact direct parent of a reply. Cycle-safe under the PK constraint (a
+-- comment cannot be its own ancestor).
 WITH RECURSIVE root_of AS (
     SELECT c.id, c.parent_id
     FROM comment c

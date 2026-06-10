@@ -1,5 +1,10 @@
 #!/bin/sh
 # Multica CLI installer — https://multica.wujieai.com
+#
+# SYNC NOTICE: This file shares login/daemon logic with scripts/install.sh.
+# Both must default to multica.wujieai.com and include login_and_start_daemon().
+# Run `make sync-install-scripts` to verify invariants.
+#
 # Usage:
 #   curl -fsSL https://multica.wujieai.com/install.sh | sh
 #   curl -fsSL https://multica.wujieai.com/install.sh | sh -s -- --version 0.3.1-514-gc59dc875
@@ -367,6 +372,23 @@ restart_daemon() {
     fi
 }
 
+# --- Login and start daemon ---
+login_and_start_daemon() {
+    local multica_bin="${INSTALL_DIR}/multica"
+
+    echo ""
+    info "Opening browser login for ${SERVER_URL}..."
+    info "Complete authorization in the browser, then return here."
+    if "$multica_bin" login 2>/dev/null; then
+        ok "Login successful"
+    else
+        warn "Login did not complete. You can try again later: multica login"
+        return 0
+    fi
+
+    restart_daemon
+}
+
 # --- Print summary ---
 print_summary() {
     local multica_bin="${INSTALL_DIR}/multica"
@@ -377,10 +399,6 @@ print_summary() {
     printf "  Version:  %s\n" "$("$multica_bin" version 2>/dev/null || echo "v${VERSION}")"
     printf "  Binary:   %s\n" "${INSTALL_DIR}/multica"
     printf "  Server:   %s\n" "$SERVER_URL"
-    echo ""
-    echo "  Next step: Log in to your Multica account:"
-    echo ""
-    echo "    multica login"
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
@@ -435,7 +453,7 @@ main() {
         "${INSTALL_DIR}/multica" config set update_manifest_url "$MANIFEST_URL" 2>/dev/null || true
         ok "Update manifest set to test channel: ${MANIFEST_URL}"
     fi
-    restart_daemon
+    login_and_start_daemon
     print_summary
 }
 

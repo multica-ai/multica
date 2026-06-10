@@ -15,12 +15,11 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
-	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -46,8 +45,10 @@ type IssueResponse struct {
 	Position      float64 `json:"position"`
 	StartDate     *string `json:"start_date"`
 	DueDate       *string `json:"due_date"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
+	ArchivedAt   *string `json:"archived_at"`
+	ArchivedBy   *string `json:"archived_by"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -86,10 +87,12 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		StartDate:     timestampToPtr(i.StartDate),
-		DueDate:       timestampToPtr(i.DueDate),
+		StartDate:     dateToPtr(i.StartDate),
+		DueDate:       dateToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		ArchivedAt:    timestampToPtr(i.ArchivedAt),
+		ArchivedBy:    uuidToPtr(i.ArchivedBy),
 		Metadata:      parseIssueMetadata(i.Metadata),
 		SourceChannelID: uuidToPtr(i.SourceChannelID),
 		SourceThreadID:  uuidToPtr(i.SourceThreadID),
@@ -115,10 +118,11 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		StartDate:     timestampToPtr(i.StartDate),
-		DueDate:       timestampToPtr(i.DueDate),
+		StartDate:     dateToPtr(i.StartDate),
+		DueDate:       dateToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
+		ArchivedAt:    timestampToPtr(i.ArchivedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
 	}
 }
@@ -174,8 +178,8 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		StartDate:     timestampToPtr(i.StartDate),
-		DueDate:       timestampToPtr(i.DueDate),
+		StartDate:     dateToPtr(i.StartDate),
+		DueDate:       dateToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
@@ -367,7 +371,7 @@ type searchResult struct {
 // It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, includeArchived bool) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -436,6 +440,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	if !includeClosed {
 		whereClause += " AND i.status NOT IN ('done', 'cancelled')"
+	}
+	if !includeArchived {
+		whereClause += " AND i.archived_at IS NULL"
 	}
 
 	// --- ORDER BY clause ---
@@ -607,6 +614,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
@@ -615,7 +623,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	terms := splitSearchTerms(q)
 	queryNum, hasNum := parseQueryNumber(q)
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, includeArchived)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -922,12 +930,15 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	offset := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
 			limit = v
 		}
 	}
+	if limit > 100 {
+		limit = 100
+	}
 	if o := r.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
 			offset = v
 		}
 	}
@@ -1040,6 +1051,17 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
+
+		// Archived filter: default excludes archived issues.
+		// include_archived=true → no filter (show all issues regardless of archive status).
+		// archived=true → only archived issues.
+		if r.URL.Query().Get("include_archived") == "true" {
+			// No filter — show both archived and non-archived.
+		} else if r.URL.Query().Get("archived") == "true" {
+			where = append(where, "i.archived_at IS NOT NULL")
+		} else {
+			where = append(where, "i.archived_at IS NULL")
+		}
 	if involvesUserFilter.Valid {
 		ref := addArg(involvesUserFilter)
 		where = append(where, fmt.Sprintf(`(
@@ -1093,7 +1115,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-	       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+	       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.archived_at, i.number, i.project_id, i.metadata
 	FROM issue i
 	WHERE %s
 	ORDER BY %s
@@ -1127,6 +1149,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			&row.DueDate,
 			&row.CreatedAt,
 			&row.UpdatedAt,
+			&row.ArchivedAt,
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
@@ -2189,19 +2212,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		parentIssueID = id
-		// Validate parent exists in the same workspace.
-		parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-			ID:          parentIssueID,
-			WorkspaceID: wsUUID,
-		})
-		if err != nil || !parent.ID.Valid {
-			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
-			return
-		}
-		if req.ProjectID == nil {
-			projectID = parent.ProjectID
-		}
 	}
+	// Cross-workspace parent / project existence is enforced inside
+	// IssueService.Create (atomically with the create), so every entry
+	// point — HTTP, Lark, future MCP — gets the same boundary check
+	// without duplicating the lookup here.
 
 	if !projectID.Valid {
 		writeError(w, http.StatusBadRequest, "project_id is required")
@@ -2230,81 +2245,24 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		labelIDs = dedup
 	}
 
-	var startDate pgtype.Timestamptz
+	var startDate pgtype.Date
 	if req.StartDate != nil && *req.StartDate != "" {
-		t, err := time.Parse(time.RFC3339, *req.StartDate)
+		d, err := util.ParseCalendarDate(*req.StartDate)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+			writeError(w, http.StatusBadRequest, "invalid start_date format, expected YYYY-MM-DD")
 			return
 		}
-		startDate = pgtype.Timestamptz{Time: t, Valid: true}
+		startDate = d
 	}
 
-	var dueDate pgtype.Timestamptz
+	var dueDate pgtype.Date
 	if req.DueDate != nil && *req.DueDate != "" {
-		t, err := time.Parse(time.RFC3339, *req.DueDate)
+		d, err := util.ParseCalendarDate(*req.DueDate)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339")
+			writeError(w, http.StatusBadRequest, "invalid due_date format, expected YYYY-MM-DD")
 			return
 		}
-		dueDate = pgtype.Timestamptz{Time: t, Valid: true}
-	}
-
-	// Use a transaction to atomically guard against active duplicates,
-	// increment the workspace issue counter, and create the issue.
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create issue")
-		return
-	}
-	defer tx.Rollback(r.Context())
-
-	qtx := h.Queries.WithTx(tx)
-	labelRows := make([]db.IssueLabel, 0, len(labelIDs))
-	for _, labelID := range labelIDs {
-		label, err := qtx.GetLabel(r.Context(), db.GetLabelParams{
-			ID: labelID, WorkspaceID: wsUUID,
-		})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusNotFound, "label not found")
-				return
-			}
-			slog.Warn("GetLabel in CreateIssue failed", append(logger.RequestAttrs(r), "error", err, "label_id", uuidToString(labelID))...)
-			writeError(w, http.StatusInternalServerError, "failed to create issue")
-			return
-		}
-		labelRows = append(labelRows, label)
-	}
-	for _, label := range labelRows {
-		if label.ProjectID.Valid && (!projectID.Valid || label.ProjectID != projectID) {
-			writeError(w, http.StatusBadRequest, "label is not available for this issue's project")
-			return
-		}
-	}
-
-	duplicate, foundDuplicate, err := issueguard.LockAndFindActiveDuplicate(r.Context(), qtx, wsUUID, projectID, parentIssueID, req.Title, req.AllowDuplicate)
-	if err != nil {
-		slog.Warn("duplicate issue guard failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to create issue")
-		return
-	}
-	if foundDuplicate {
-		prefix := h.getIssuePrefix(r.Context(), duplicate.WorkspaceID)
-		existing := issueToResponse(duplicate, prefix)
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"code":  "active_duplicate_issue",
-			"error": duplicateIssueMessage(existing),
-			"issue": existing,
-		})
-		return
-	}
-
-	issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
-	if err != nil {
-		slog.Warn("increment issue counter failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to create issue")
-		return
+		dueDate = d
 	}
 
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
@@ -2336,79 +2294,95 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		originID = oid
 	}
 
-	newPosition, err := issueposition.NextTopPosition(r.Context(), tx, wsUUID, status)
-	if err != nil {
-		slog.Warn("get next issue position failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "status", status)...)
-		writeError(w, http.StatusInternalServerError, "failed to create issue")
-		return
+	// Prefix is workspace-level; pre-compute once so both the broadcast
+	// payload builder and the HTTP response share the same value.
+	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+
+	// Analytics agent ID: assignee agent when the issue is being assigned
+	// to an agent, otherwise the creator agent for agent-authored issues.
+	// Resolved here (not in the service) because creator identity is HTTP-side.
+	analyticsAgentID := ""
+	if assigneeType.Valid && assigneeType.String == "agent" {
+		analyticsAgentID = uuidToString(assigneeID)
+	}
+	if creatorType == "agent" && analyticsAgentID == "" {
+		analyticsAgentID = actualCreatorID
 	}
 
-	var issue db.Issue
-	if originType.Valid {
-		issue, err = qtx.CreateIssueWithOrigin(r.Context(), db.CreateIssueWithOriginParams{
-			WorkspaceID:   wsUUID,
-			Title:         req.Title,
-			Description:   ptrToText(req.Description),
-			Status:        status,
-			Priority:      priority,
-			AssigneeType:  assigneeType,
-			AssigneeID:    assigneeID,
-			CreatorType:   creatorType,
-			CreatorID:     parseUUID(actualCreatorID),
-			ParentIssueID: parentIssueID,
-			Position:      newPosition,
-			StartDate:     startDate,
-			DueDate:       dueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			OriginType:    originType,
-			OriginID:      originID,
+	buildAttachmentResponses := func(atts []db.Attachment) []AttachmentResponse {
+		if len(atts) == 0 {
+			return nil
+		}
+		out := make([]AttachmentResponse, len(atts))
+		for i, a := range atts {
+			out[i] = h.attachmentToResponse(a)
+		}
+		return out
+	}
+
+	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
+		WorkspaceID:    wsUUID,
+		Title:          req.Title,
+		Description:    ptrToText(req.Description),
+		Status:         status,
+		Priority:       priority,
+		AssigneeType:   assigneeType,
+		AssigneeID:     assigneeID,
+		CreatorType:    creatorType,
+		CreatorID:      parseUUID(actualCreatorID),
+		ParentIssueID:  parentIssueID,
+		ProjectID:      projectID,
+		StartDate:      startDate,
+		DueDate:        dueDate,
+		OriginType:     originType,
+		OriginID:       originID,
+		AttachmentIDs:  attachmentIDs,
+		LabelIDs:       labelIDs,
+		AllowDuplicate: req.AllowDuplicate,
+	}, service.IssueCreateOpts{
+		ActorID:          actualCreatorID,
+		AnalyticsAgentID: analyticsAgentID,
+		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
+		BroadcastPayload: func(issue db.Issue, atts []db.Attachment) map[string]any {
+			payload := issueToResponse(issue, prefix)
+			payload.Attachments = buildAttachmentResponses(atts)
+			return map[string]any{"issue": payload}
+		},
+	})
+
+	if errors.Is(err, service.ErrActiveDuplicate) {
+		dup := *res.DuplicateIssue
+		existing := issueToResponse(dup, h.getIssuePrefix(r.Context(), dup.WorkspaceID))
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code":  "active_duplicate_issue",
+			"error": duplicateIssueMessage(existing),
+			"issue": existing,
 		})
-	} else {
-		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-			WorkspaceID:   wsUUID,
-			Title:         req.Title,
-			Description:   ptrToText(req.Description),
-			Status:        status,
-			Priority:      priority,
-			AssigneeType:  assigneeType,
-			AssigneeID:    assigneeID,
-			CreatorType:   creatorType,
-			CreatorID:     parseUUID(actualCreatorID),
-			ParentIssueID: parentIssueID,
-			Position:      newPosition,
-			StartDate:     startDate,
-			DueDate:       dueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-		})
+		return
+	}
+	if errors.Is(err, service.ErrParentIssueNotFound) {
+		writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+		return
+	}
+	if errors.Is(err, service.ErrProjectNotFound) {
+		writeError(w, http.StatusBadRequest, "project not found in this workspace")
+		return
+	}
+	if errors.Is(err, service.ErrIssueLabelNotFound) {
+		writeError(w, http.StatusNotFound, "label not found")
+		return
+	}
+	if errors.Is(err, service.ErrIssueLabelProjectMismatch) {
+		writeError(w, http.StatusBadRequest, "label is not available for this issue's project")
+		return
 	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
 		return
 	}
-	for _, labelID := range labelIDs {
-		if err := qtx.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
-			IssueID:     issue.ID,
-			LabelID:     labelID,
-			WorkspaceID: issue.WorkspaceID,
-		}); err != nil {
-			slog.Warn("AttachLabelToIssue in CreateIssue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID), "label_id", uuidToString(labelID))...)
-			writeError(w, http.StatusInternalServerError, "failed to create issue")
-			return
-		}
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create issue")
-		return
-	}
-
-	// Link any pre-uploaded attachments to this issue.
-	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
-	}
+	issue := res.Issue
+	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	// Link the issue back to its source channel thread (OPE-1943) if produced
 	// from one, and reflow a "created from thread" note into that thread.
@@ -2416,8 +2390,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		h.linkIssueToThread(r.Context(), &issue, strings.TrimSpace(*req.SourceThreadID))
 	}
 
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	resp.Attachments = buildAttachmentResponses(res.Attachments)
 	if len(labelIDs) > 0 {
 		labels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 		if labels == nil {
@@ -2425,77 +2399,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Labels = &labels
 	}
-
-	// Fetch linked attachments so they appear in the response.
-	if len(attachmentIDs) > 0 {
-		attachments, err := h.Queries.ListAttachmentsByIssue(r.Context(), db.ListAttachmentsByIssueParams{
-			IssueID:     issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err == nil && len(attachments) > 0 {
-			resp.Attachments = make([]AttachmentResponse, len(attachments))
-			for i, a := range attachments {
-				resp.Attachments[i] = h.attachmentToResponse(a)
-			}
-		}
-	}
-
-	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
-	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{
-		"issue":      resp,
-		"app_origin": requestAppOrigin(r),
-	})
-	analyticsActorID := actualCreatorID
-	analyticsAgentID := ""
-	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" {
-		analyticsAgentID = uuidToString(issue.AssigneeID)
-	}
-	if creatorType == "agent" {
-		analyticsActorID = "agent:" + actualCreatorID
-		if analyticsAgentID == "" {
-			analyticsAgentID = actualCreatorID
-		}
-	}
-	analyticsSource := analytics.SourceManual
-	analyticsTaskID := ""
-	analyticsAutopilotRunID := ""
-	if originType.Valid {
-		switch originType.String {
-		case "quick_create":
-			analyticsSource = analytics.SourceManual
-			analyticsTaskID = uuidToString(originID)
-		case "autopilot":
-			analyticsSource = analytics.SourceAutopilot
-			analyticsAutopilotRunID = uuidToString(originID)
-		default:
-			slog.Warn("analytics: unknown issue origin type",
-				"origin_type", originType.String,
-				"issue_id", uuidToString(issue.ID),
-			)
-		}
-	}
-	h.Analytics.Capture(analytics.IssueCreated(
-		analyticsActorID,
-		workspaceID,
-		uuidToString(issue.ID),
-		analyticsAgentID,
-		analyticsTaskID,
-		analyticsAutopilotRunID,
-		analyticsSource,
-	))
-
-	// Enqueue agent task when an agent-assigned issue is created.
-	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
-		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
-		}
-		// Squad assigned at creation: trigger the squad leader (skipping
-		// backlog, same parking-lot semantics as agent assignment).
-		if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
-			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, creatorType, actualCreatorID)
-		}
-	}
-
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -2516,6 +2419,12 @@ type UpdateIssueRequest struct {
 	// editor's preview Eye keeps working past a refresh. Existing bindings
 	// are idempotent — re-sending the same id is a no-op.
 	AttachmentIDs []string `json:"attachment_ids"`
+	// Description conflict detection (OPE-2294). When both description and these
+	// baseline fields are provided, the server checks for concurrent edits before
+	// accepting the update. CLI and old callers that omit these fields are
+	// unaffected — the update proceeds with the existing behaviour.
+	DescriptionBaseUpdatedAt *string `json:"description_base_updated_at"`
+	DescriptionBaseValue     *string `json:"description_base_value"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -2596,26 +2505,26 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["start_date"]; ok {
 		if req.StartDate != nil && *req.StartDate != "" {
-			t, err := time.Parse(time.RFC3339, *req.StartDate)
+			d, err := util.ParseCalendarDate(*req.StartDate)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
+				writeError(w, http.StatusBadRequest, "invalid start_date format, expected YYYY-MM-DD")
 				return
 			}
-			params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+			params.StartDate = d
 		} else {
-			params.StartDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
+			params.StartDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
 		if req.DueDate != nil && *req.DueDate != "" {
-			t, err := time.Parse(time.RFC3339, *req.DueDate)
+			d, err := util.ParseCalendarDate(*req.DueDate)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339")
+				writeError(w, http.StatusBadRequest, "invalid due_date format, expected YYYY-MM-DD")
 				return
 			}
-			params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
+			params.DueDate = d
 		} else {
-			params.DueDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
+			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
 	if _, ok := rawFields["parent_issue_id"]; ok {
@@ -2698,6 +2607,34 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		projectTouched = true
 	}
 
+	// Description conflict detection (OPE-2294).
+	// Only active when the caller sends both a new description AND a baseline
+	// timestamp — old clients / CLI are unaffected.
+	if req.Description != nil && req.DescriptionBaseUpdatedAt != nil && *req.DescriptionBaseUpdatedAt != "" {
+		baseTime, err := time.Parse(time.RFC3339, *req.DescriptionBaseUpdatedAt)
+		if err == nil {
+			serverUpdatedAt := prevIssue.UpdatedAt.Time.UTC()
+			if !serverUpdatedAt.Equal(baseTime) {
+				serverDescValue := ""
+				if serverDesc := textToPtr(prevIssue.Description); serverDesc != nil {
+					serverDescValue = *serverDesc
+				}
+				baseDescValue := ""
+				if req.DescriptionBaseValue != nil {
+					baseDescValue = *req.DescriptionBaseValue
+				}
+				if serverDescValue != baseDescValue {
+					writeJSON(w, http.StatusConflict, map[string]any{
+						"error":       "description_conflict",
+						"description": serverDescValue,
+						"updated_at":  prevIssue.UpdatedAt.Time.UTC().Format(time.RFC3339),
+					})
+					return
+				}
+			}
+		}
+	}
+
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update issue")
@@ -2765,10 +2702,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
-	prevStartDate := timestampToPtr(prevIssue.StartDate)
+	prevStartDate := dateToPtr(prevIssue.StartDate)
 	startDateChanged := prevStartDate != resp.StartDate && (prevStartDate == nil) != (resp.StartDate == nil) ||
 		(prevStartDate != nil && resp.StartDate != nil && *prevStartDate != *resp.StartDate)
-	prevDueDate := timestampToPtr(prevIssue.DueDate)
+	prevDueDate := dateToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
@@ -2849,7 +2786,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// loops in PR #2918). The helper guards on transition + parent state and
 	// fails best-effort.
 	if statusChanged {
-		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2927,9 +2864,9 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		if err != nil || leader.ArchivedAt.Valid {
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
 		}
-		actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID)
-		if actorType != "agent" && !memberCanSelectSquadAgent(leader, requestUserID(r)) {
-			return http.StatusForbidden, "squad leader must be one of your agents or a workspace agent"
+		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+		if !h.canAccessPrivateAgent(ctx, leader, actorType, actorID, workspaceID) {
+			return http.StatusForbidden, "cannot assign to squad with private leader"
 		}
 		return 0, ""
 	default:
@@ -3221,24 +3158,24 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := rawUpdates["start_date"]; ok {
 			if req.Updates.StartDate != nil && *req.Updates.StartDate != "" {
-				t, err := time.Parse(time.RFC3339, *req.Updates.StartDate)
+				d, err := util.ParseCalendarDate(*req.Updates.StartDate)
 				if err != nil {
 					continue
 				}
-				params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+				params.StartDate = d
 			} else {
-				params.StartDate = pgtype.Timestamptz{Valid: false}
+				params.StartDate = pgtype.Date{Valid: false}
 			}
 		}
 		if _, ok := rawUpdates["due_date"]; ok {
 			if req.Updates.DueDate != nil && *req.Updates.DueDate != "" {
-				t, err := time.Parse(time.RFC3339, *req.Updates.DueDate)
+				d, err := util.ParseCalendarDate(*req.Updates.DueDate)
 				if err != nil {
 					continue
 				}
-				params.DueDate = pgtype.Timestamptz{Time: t, Valid: true}
+				params.DueDate = d
 			} else {
-				params.DueDate = pgtype.Timestamptz{Valid: false}
+				params.DueDate = pgtype.Date{Valid: false}
 			}
 		}
 
@@ -3420,7 +3357,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Platform-driven parent notification, mirrored from UpdateIssue
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
-			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 		}
 
 		updated++
@@ -3610,4 +3547,91 @@ func (h *Handler) actorDisplayName(ctx context.Context, actorType, actorID, user
 		return user.Name
 	}
 	return "Member"
+}
+
+// ---------------------------------------------------------------------------
+// Issue Archive/Unarchive
+// ---------------------------------------------------------------------------
+
+// ArchiveIssue archives an issue (soft delete)
+func (h *Handler) ArchiveIssue(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	// Check if the issue is already archived
+	if issue.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "issue is already archived")
+		return
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+	userID := requestUserID(r)
+
+	// Update the issue to archive it
+	archivedIssue, err := h.Queries.ArchiveIssue(r.Context(), db.ArchiveIssueParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		ArchivedBy:  parseUUID(userID),
+	})
+	if err != nil {
+		slog.Warn("archive issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to archive issue")
+		return
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), archivedIssue.WorkspaceID)
+	resp := issueToResponse(archivedIssue, prefix)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	slog.Info("issue archived", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
+	h.publish(protocol.EventIssueArchived, workspaceID, actorType, actorID, map[string]any{
+		"issue":      resp,
+		"app_origin": requestAppOrigin(r),
+	})
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// UnarchiveIssue unarchives an issue
+func (h *Handler) UnarchiveIssue(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	// Check if the issue is not archived
+	if !issue.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "issue is not archived")
+		return
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+	userID := requestUserID(r)
+
+	// Update the issue to unarchive it
+	unarchivedIssue, err := h.Queries.UnarchiveIssue(r.Context(), db.UnarchiveIssueParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("unarchive issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to unarchive issue")
+		return
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), unarchivedIssue.WorkspaceID)
+	resp := issueToResponse(unarchivedIssue, prefix)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
+	slog.Info("issue unarchived", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
+	h.publish(protocol.EventIssueUnarchived, workspaceID, actorType, actorID, map[string]any{
+		"issue":      resp,
+		"app_origin": requestAppOrigin(r),
+	})
+
+	writeJSON(w, http.StatusOK, resp)
 }

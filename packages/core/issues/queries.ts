@@ -1,4 +1,4 @@
-import { queryOptions, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, keepPreviousData, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   GroupedIssuesResponse,
@@ -104,6 +104,8 @@ export type IssueListFilter = Pick<
   | "label_ids"
   | "involves_user_id"
   | "priorities"
+  | "archived"
+  | "include_archived"
 > & {
   statuses?: readonly IssueStatus[];
 };
@@ -288,6 +290,7 @@ export function issueListOptions(
     queryKey: issueKeys.listFiltered(wsId, requestFilter, sort),
     queryFn: () => fetchFirstPages(requestFilter, sort),
     select: flattenIssueBuckets,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -331,6 +334,7 @@ export function myIssueListOptions(
         ? fetchAllMyFirstPages(userId, filter, sort)
         : fetchFirstPages(filter, sort),
     select: flattenIssueBuckets,
+    placeholderData: keepPreviousData,
   });
 }
 

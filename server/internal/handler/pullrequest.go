@@ -72,6 +72,11 @@ func (h *Handler) ProcessPullRequestEvent(ctx context.Context, evt NormalizedPRE
 		slog.Warn("pr: upsert failed", "err", err, "provider", evt.Provider)
 		return
 	}
+	if evt.Provider == "github" && evt.State == "merged" && evt.MergedAt != nil && h.Metrics != nil {
+		if openSeconds := evt.MergedAt.Sub(evt.CreatedAt).Seconds(); openSeconds > 0 {
+			h.Metrics.ObserveGithubPRMergeSeconds(openSeconds)
+		}
+	}
 
 	workspaceID := uuidToString(evt.WorkspaceID)
 	resp := githubPullRequestToResponse(pr)
@@ -114,7 +119,7 @@ func (h *Handler) ProcessPullRequestEvent(ctx context.Context, evt NormalizedPRE
 
 	// Broadcast PR change to the workspace.
 	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
-		"pull_request":   resp,
+		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
 }

@@ -4,7 +4,9 @@
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有 issue",
     "empty_hint": "创建一个 issue 开始使用。",
-    "move_failed": "移动 issue 失败"
+    "move_failed": "移动 issue 失败",
+    "show_archived": "显示已归档",
+    "hide_archived": "隐藏已归档"
   },
   "status": {
     "backlog": "待规划",
@@ -213,6 +215,7 @@
     "cmdf_toast_title": "页面内查找仅覆盖可见区",
     "cmdf_toast_description": "评论列表已虚拟滚动,⌘F 找不到视口外的评论。完整应用内搜索即将推出。",
     "update_failed": "更新 issue 失败",
+    "description_conflict": "描述已被他人修改，您的更改已保留 — 请手动检查并解决冲突。",
     "link_copied": "已复制链接",
     "link_copy_failed": "复制链接失败",
     "clear_history": "清空历史",
@@ -291,8 +294,6 @@
     "reply_count_other": "{{count}} 条回复",
     "leave_comment_placeholder": "留下评论...",
     "send_tooltip": "发送",
-    "expand_tooltip": "展开",
-    "collapse_tooltip": "收起",
     "resolve": {
       "resolve_action": "标记为已解决",
       "unresolve_action": "重新打开",
@@ -304,9 +305,7 @@
     }
   },
   "reply": {
-    "placeholder": "回复...",
-    "expand_tooltip": "展开",
-    "collapse_tooltip": "收起"
+    "placeholder": "回复..."
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体正在工作",
@@ -414,7 +413,9 @@
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",
     "add_sub_issue": "添加子 issue...",
-    "delete_issue": "删除 issue"
+    "delete_issue": "删除 issue",
+    "archive_issue": "归档 Issue",
+    "unarchive_issue": "取消归档 Issue"
   },
   "pickers": {
     "filter_options_aria": "筛选选项",
