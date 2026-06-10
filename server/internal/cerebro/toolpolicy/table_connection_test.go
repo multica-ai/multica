@@ -3,6 +3,8 @@ package toolpolicy
 import (
 	"context"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // TestDeniedConnectionTools_AgentDenyProducesToken seeds an MCP connection with
@@ -350,5 +352,69 @@ func TestApiConnection_EndpointRowsNotRuntimeDenied(t *testing.T) {
 	}
 	if len(tokens) != 0 {
 		t.Fatalf("expected no MCP tokens for an API connection, got %v", tokens)
+	}
+}
+
+// TestConnectionToolDenied checks the firtal-gateway always-on resolver: a tool
+// denied as a connection tool for one agent resolves true for that agent only,
+// and other tools / other agents resolve false.
+func TestConnectionToolDenied(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(11)
+	other := uuidByte(12)
+	const conn = "customer-service-mcp"
+	const toolKey = "connection:" + conn
+
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, tools, enabled)
+		VALUES ($1, $2, $3, 'mcp_http', 'http://internal:3000',
+		        '[{"name":"draft_reply"},{"name":"lookup_order"}]'::jsonb, true)
+	`, tpTestWorkspaceID, conn, "Customer Service MCP"); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping gateway deny test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1`, tpTestWorkspaceID)
+	})
+
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID:     tpTestWorkspaceID,
+		ToolKey:         toolKey,
+		Layer:           LayerAgent,
+		SubjectID:       agent,
+		Setting:         SettingDeny,
+		ResourcePattern: "draft_reply",
+	}); err != nil {
+		t.Fatalf("set agent deny: %v", err)
+	}
+
+	var zero pgtype.UUID
+	cases := []struct {
+		name   string
+		ag     pgtype.UUID
+		tool   string
+		denied bool
+	}{
+		{"denied tool for denied agent", agent, "draft_reply", true},
+		{"other tool same agent", agent, "lookup_order", false},
+		{"denied tool different agent", other, "draft_reply", false},
+		{"empty tool", agent, "", false},
+	}
+	for _, c := range cases {
+		got, err := s.ConnectionToolDenied(ctx, tpTestWorkspaceID, zero, c.ag, zero, c.tool)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got != c.denied {
+			t.Fatalf("%s: got denied=%v want %v", c.name, got, c.denied)
+		}
 	}
 }

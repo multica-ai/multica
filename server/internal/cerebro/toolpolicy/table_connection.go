@@ -243,6 +243,47 @@ func endpointMethodTools(raw []byte) []connectionTool {
 	return tools
 }
 
+// ConnectionToolDenied reports whether a tool named toolName is denied as a
+// connection tool for the given chain context — i.e. any "connection:<name>"
+// capability has an effective Deny on resource_pattern == toolName, resolved
+// through Workspace › Runtime › Agent › Group › User. It is the firtal-gateway
+// half of TECH-3156: that runtime dispatches connection tools server-side (e.g.
+// the customer-service MCP tools), bypassing the daemon's --disallowedTools, so
+// the gateway must consult this directly before dispatch.
+//
+// A connection name is intentionally NOT required: the gateway only has the bare
+// tool name (e.g. "draft_reply"), so we match the deny by resource_pattern. A
+// missing workspace_connection table or no rows means "not denied" (allow).
+func (s *Store) ConnectionToolDenied(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, toolName string) (bool, error) {
+	if toolName == "" {
+		return false, nil
+	}
+	// Reuse the canonical resolver so the gateway path is identical to the daemon
+	// path: DeniedConnectionTools already folds the connection-wide row (TECH-3180)
+	// AND per-tool rows through the full Workspace › Runtime › Agent › Group › User
+	// chain, returning "mcp__<connection>__<tool>" tokens for every effective Deny.
+	tokens, err := s.DeniedConnectionTools(ctx, TableQuery{
+		WorkspaceID: workspaceID,
+		RuntimeID:   runtimeID,
+		AgentID:     agentID,
+		UserID:      userID,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, tok := range tokens {
+		// Token shape is mcp__<connection>__<tool>; the tool is the segment after
+		// the connection (split on the first "__" after the prefix, as Claude Code
+		// and the persona hook do).
+		rest := strings.TrimPrefix(tok, "mcp__")
+		_, tool, ok := strings.Cut(rest, "__")
+		if ok && tool == toolName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // DeniedConnectionTools resolves, for the given chain context, every MCP
 // connection tool whose effective verdict is Deny, and returns them as Claude
 // Code --disallowedTools tokens ("mcp__<connection>__<tool>"). The daemon passes
