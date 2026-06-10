@@ -928,15 +928,6 @@ var excluded = map[string]string{
 	"POST /api/contact-sales":                "pre-auth — public marketing form",
 	"POST /api/runtime-setup/exchange":       "bootstrap — exchanges a single-use setup token before a daemon has a user session",
 
-	// tool-execution seam — server-side execution of an already-granted tool for
-	// an external runtime (firtal-local). Not a separately-governable capability:
-	// the handler runs the cascade tool-grant gate internally per call
-	// (tool_executor_invoker.go GetCascadeEnabledToolsForAgent → ErrToolNotPermitted),
-	// and the task-scope middleware binds it to the caller's own agent
-	// (AllowTaskScopeForAgent). The governed surface is the per-tool grant itself,
-	// owned by update_agent's "PUT /api/agents/{id}/tools/{name}/" (TECH-3226).
-	"POST /api/agents/{id}/tools/{name}/invoke": "tool-execution seam — runs the cascade tool-grant gate internally per call; per-tool grant is the governed surface (owned by update_agent), and task scope restricts it to the caller's own agent (TECH-3226)",
-
 	// billing — external Stripe checkout/portal, human-actor only.
 	"POST /api/cloud-billing/checkout-sessions": "billing — external Stripe, human-actor only",
 	"POST /api/cloud-billing/portal-sessions":   "billing — external Stripe, human-actor only",
