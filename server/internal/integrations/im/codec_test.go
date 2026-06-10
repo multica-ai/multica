@@ -68,14 +68,14 @@ func TestEncodeVarLen_Golden(t *testing.T) {
 }
 
 func TestEncoderDecoder_RoundTrip(t *testing.T) {
-	e := &Encoder{}
+	e := &encoder{}
 	e.PutByte(0xAB)
 	e.WriteUint16(0x1234)
 	e.WriteUint32(0xDEADBEEF)
 	e.WriteUint64(0x0102030405060708)
 	e.WriteString("héllo") // multibyte: byte length != char length
 
-	d := NewDecoder(e.Bytes())
+	d := newDecoder(e.Bytes())
 	if b, _ := d.ReadByte(); b != 0xAB {
 		t.Errorf("byte: got %x", b)
 	}
@@ -94,7 +94,7 @@ func TestEncoderDecoder_RoundTrip(t *testing.T) {
 }
 
 func TestDecoder_OutOfBounds(t *testing.T) {
-	d := NewDecoder([]byte{0x01})
+	d := newDecoder([]byte{0x01})
 	if _, err := d.ReadUint32(); err == nil {
 		t.Error("expected out-of-bounds error reading u32 from 1-byte buffer")
 	}
@@ -102,7 +102,7 @@ func TestDecoder_OutOfBounds(t *testing.T) {
 
 func TestDecoder_ReadString_OversizedLength(t *testing.T) {
 	// Declares length 0xFFFF but has no body — must error, not over-read.
-	d := NewDecoder([]byte{0xFF, 0xFF})
+	d := newDecoder([]byte{0xFF, 0xFF})
 	if _, err := d.ReadString(); err == nil {
 		t.Error("expected error for oversized declared string length")
 	}

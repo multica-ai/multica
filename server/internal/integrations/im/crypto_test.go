@@ -71,7 +71,11 @@ func TestECDHSharedSecretParity(t *testing.T) {
 
 func TestAESDecrypt_Golden(t *testing.T) {
 	// The wire payload is the bytes of the base64 ciphertext string.
-	out, err := aesDecrypt([]byte(goldenCipherB64), goldenAESKey, goldenAESIV)
+	block, err := newAESBlock(goldenAESKey)
+	if err != nil {
+		t.Fatalf("newAESBlock: %v", err)
+	}
+	out, err := aesDecrypt([]byte(goldenCipherB64), block, goldenAESIV)
 	if err != nil {
 		t.Fatalf("aesDecrypt: %v", err)
 	}

@@ -92,3 +92,53 @@ func TestMarkDisconnect_FiresOnceWhenConnected(t *testing.T) {
 		t.Errorf("OnDisconnected fired %d times, want 1", disconnects)
 	}
 }
+
+// TestNextBackoff_Growth verifies the reconnect backoff: each call increments
+// the attempt counter, the returned delay stays within the ±25% jitter band of
+// the expected exponential value, and large attempt counts are clamped to
+// reconnectMaxDelay (the math.Pow overflow guard) instead of overflowing.
+func TestNextBackoff_Growth(t *testing.T) {
+	s := NewSocket(SocketOptions{})
+
+	// Early attempts: delay ≈ base * 2^attempt, within [0.75x, 1.25x].
+	for attempt := 0; attempt < 4; attempt++ {
+		if s.reconnectAttempts != attempt {
+			t.Fatalf("before call: reconnectAttempts = %d, want %d", s.reconnectAttempts, attempt)
+		}
+		base := float64(reconnectBaseDelay) * pow2(attempt)
+		expected := base
+		if expected > float64(reconnectMaxDelay) {
+			expected = float64(reconnectMaxDelay)
+		}
+		got := float64(s.nextBackoff())
+		lo, hi := expected*0.75, expected*1.25
+		if got < lo || got > hi {
+			t.Errorf("attempt %d: backoff %v outside [%v, %v]", attempt, time.Duration(got), time.Duration(lo), time.Duration(hi))
+		}
+		if s.reconnectAttempts != attempt+1 {
+			t.Errorf("attempt %d: reconnectAttempts not incremented (= %d)", attempt, s.reconnectAttempts)
+		}
+	}
+
+	// A very large attempt count must clamp to ~reconnectMaxDelay (±25%) rather
+	// than overflow float64/Duration.
+	s.reconnectAttempts = 100
+	got := s.nextBackoff()
+	lo := time.Duration(float64(reconnectMaxDelay) * 0.75)
+	hi := time.Duration(float64(reconnectMaxDelay) * 1.25)
+	if got < lo || got > hi {
+		t.Errorf("large-attempt backoff %v outside clamp band [%v, %v]", got, lo, hi)
+	}
+	if got <= 0 {
+		t.Errorf("backoff must stay positive, got %v", got)
+	}
+}
+
+// pow2 returns 2^n as a float64 without importing math into the test.
+func pow2(n int) float64 {
+	r := 1.0
+	for i := 0; i < n; i++ {
+		r *= 2
+	}
+	return r
+}
