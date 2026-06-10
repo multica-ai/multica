@@ -13,10 +13,9 @@ import {
 import { configStore } from "../config";
 import { workspaceKeys } from "../workspace/queries";
 import { createLogger } from "../logger";
-import { defaultStorage } from "./storage";
+// import { defaultStorage } from "./storage";
 import { setCurrentWorkspace } from "./workspace-storage";
 import type { ClientIdentity } from "./types";
-import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
 
 const logger = createLogger("auth");
@@ -25,7 +24,6 @@ export function AuthInitializer({
   children,
   onLogin,
   onLogout,
-  storage = defaultStorage,
   cookieAuth,
   casdoorMode,
   identity,
@@ -33,7 +31,6 @@ export function AuthInitializer({
   children: ReactNode;
   onLogin?: () => void;
   onLogout?: () => void;
-  storage?: StorageAdapter;
   cookieAuth?: boolean;
   casdoorMode?: boolean;
   identity?: ClientIdentity;
@@ -56,6 +53,7 @@ export function AuthInitializer({
         configStore.getState().setAuthConfig({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
+          appEnv: cfg.app_env,
           casdoorEnabled: cfg.casdoor_enabled,
           casdoorLoginUrl: cfg.casdoor_login_url,
         });
@@ -120,11 +118,14 @@ export function AuthInitializer({
       return;
     }
 
-    // Token mode: read from localStorage (Electron / legacy).
-    const token = storage.getItem("multica_token");
+    // Token mode: only accept cs-cloud token from desktop bridge.
+    const token =
+      typeof window !== "undefined"
+        ? (window as unknown as { desktopAPI?: { coStrictToken?: string } }).desktopAPI?.coStrictToken
+        : undefined;
     if (!token) {
-      onLogout?.();
-      useAuthStore.setState({ isLoading: false });
+      logger.error("coStrict token not found — auth failed");
+      onAuthFailure();
       return;
     }
 
@@ -133,15 +134,12 @@ export function AuthInitializer({
     Promise.all([api.getMe(), api.listWorkspaces()])
       .then(([user, wsList]) => {
         onAuthSuccess(user);
-        // Seed React Query cache so the URL-driven layout can resolve the
-        // slug without a second fetch.
         qc.setQueryData(workspaceKeys.list(), wsList);
       })
       .catch((err) => {
-        logger.error("auth init failed", err);
+        logger.error("coStrict auth init failed", err);
         api.setToken(null);
         setCurrentWorkspace(null, null);
-        storage.removeItem("multica_token");
         onAuthFailure();
       });
   }, []);

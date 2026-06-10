@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/costrictauth"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -664,24 +665,37 @@ func (d *Daemon) deregisterRuntimes() {
 	}
 }
 
-// resolveAuth loads the auth token from the CLI config for the active profile.
+// resolveAuth loads the auth token.  Priority:
+//   1. ~/.multica/config.json  (explicit PAT / legacy token)
+//   2. ~/.costrict/share/auth.json  (csc auth login)
 func (d *Daemon) resolveAuth() error {
+	// 1. Prefer explicit multica CLI config (test-environment PAT, legacy token).
 	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
 	}
-	if cfg.Token == "" {
-		loginHint := "'multica login'"
-		if d.cfg.Profile != "" {
-			loginHint = fmt.Sprintf("'multica login --profile %s'", d.cfg.Profile)
-		}
-		d.logger.Warn("not authenticated — run " + loginHint + " to authenticate, then restart the daemon")
-		return fmt.Errorf("not authenticated: run %s first", loginHint)
+	if cfg.Token != "" {
+		d.client.SetToken(cfg.Token)
+		d.logger.Info("authenticated via CLI config")
+		d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_source", "cli_config", "token_len", len(cfg.Token))
+		return nil
 	}
-	d.client.SetToken(cfg.Token)
-	d.logger.Info("authenticated")
-	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
-	return nil
+
+	// 2. Fall back to costrict auth.json (csc auth login).
+	cred, _ := costrictauth.LoadCredentials()
+	if cred != nil && cred.AccessToken != "" {
+		d.client.SetToken(cred.AccessToken)
+		d.logger.Info("authenticated via costrict auth")
+		d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_source", "costrict", "token_len", len(cred.AccessToken))
+		return nil
+	}
+
+	loginHint := "'multica login --token mul_...'"
+	if d.cfg.Profile != "" {
+		loginHint = fmt.Sprintf("'multica login --profile %s --token mul_...'", d.cfg.Profile)
+	}
+	d.logger.Warn("not authenticated — run " + loginHint + " to authenticate, then restart the daemon")
+	return fmt.Errorf("not authenticated: run %s first", loginHint)
 }
 
 // allRuntimeIDs returns all runtime IDs across all watched workspaces.

@@ -52,6 +52,16 @@ function fetchSystemLocale(): string {
   return arg?.split("=")[1] ?? "en";
 }
 
+function fetchCoStrictAuth(): { token?: string } {
+  try {
+    return ipcRenderer.sendSync("costrict:auth:get") as { token?: string };
+  } catch {
+    return {};
+  }
+}
+
+const coStrictAuth = fetchCoStrictAuth();
+
 const systemLocale = fetchSystemLocale();
 
 const desktopAPI = {
@@ -74,6 +84,8 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /** CoStrict access token read from ~/.costrict/share/auth.json at boot. */
+  coStrictToken: coStrictAuth.token,
   /** Listen for auth token delivered via deep link */
   onAuthToken: (callback: (token: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, token: string) =>

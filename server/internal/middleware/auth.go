@@ -30,6 +30,15 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// CasdoorAuth (stacked before Auth in the middleware chain) validates
+			// the zgsmAdminToken cookie and sets X-User-ID. When that header is
+			// already present we are already authenticated — skip the local token
+			// checks so the request does not fail with 401.
+			if r.Header.Get("X-User-ID") != "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
 				slog.Debug("auth: no token found", "path", r.URL.Path)

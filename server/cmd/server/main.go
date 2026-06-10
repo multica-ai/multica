@@ -302,15 +302,21 @@ func main() {
 
 	// subjectResolver maps a Casdoor subject_id (the "sub" claim) to a
 	// Multica user UUID. On first encounter the user is auto-provisioned
-	// with a placeholder name/email; the full profile arrives via the
-	// OAuth callback handler later.
-	subjectResolver := middleware.SubjectResolver(func(ctx context.Context, subjectID string) (string, error) {
+	// with the real name/email from the JWT claims. For existing users,
+	// the name and email are kept in sync with Casdoor.
+	subjectResolver := middleware.SubjectResolver(func(ctx context.Context, subjectID, name, email string) (string, error) {
 		user, err := queries.GetUserBySubjectID(ctx, pgtype.Text{String: subjectID, Valid: true})
 		if err != nil {
-			// Auto-provision: create a placeholder user and bind the subject.
+			// Auto-provision: use real name/email from JWT, fall back to placeholders.
+			if name == "" {
+				name = "casdoor-" + subjectID
+			}
+			if email == "" {
+				email = subjectID + "@casdoor.local"
+			}
 			user, err = queries.CreateUser(ctx, db.CreateUserParams{
-				Name:      "casdoor-" + subjectID,
-				Email:     subjectID + "@casdoor.local",
+				Name:      name,
+				Email:     email,
 				AvatarUrl: pgtype.Text{},
 			})
 			if err != nil {
@@ -326,7 +332,32 @@ func main() {
 					"error", setErr,
 				)
 			}
-			slog.Info("casdoor: auto-provisioned user", "user_id", util.UUIDToString(user.ID), "subject_id", subjectID)
+			slog.Info("casdoor: auto-provisioned user", "user_id", util.UUIDToString(user.ID), "subject_id", subjectID, "name", name)
+			return util.UUIDToString(user.ID), nil
+		}
+
+		// Existing user: sync name/email if they changed in Casdoor.
+		needUpdate := false
+		if name != "" && user.Name != name {
+			needUpdate = true
+		}
+		if email != "" && user.Email != email {
+			needUpdate = true
+		}
+		if needUpdate {
+			if _, updErr := queries.UpdateUserNameAndEmail(ctx, db.UpdateUserNameAndEmailParams{
+				ID:    user.ID,
+				Name:  name,
+				Email: email,
+			}); updErr != nil {
+				slog.Warn("failed to sync user profile from Casdoor",
+					"user_id", util.UUIDToString(user.ID),
+					"subject_id", subjectID,
+					"error", updErr,
+				)
+			} else {
+				slog.Info("casdoor: synced user profile", "user_id", util.UUIDToString(user.ID), "subject_id", subjectID, "name", name)
+			}
 		}
 		return util.UUIDToString(user.ID), nil
 	})
