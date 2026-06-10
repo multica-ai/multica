@@ -180,7 +180,7 @@ type ChatTaskEnqueuer interface {
 //     commit and Mark" window. See lark_inbound_message_dedup comment
 //     in 109_lark_integration.up.sql for the full invariant set.
 type DispatcherQueries interface {
-	GetLarkInstallationByAppID(ctx context.Context, appID string) (db.LarkInstallation, error)
+	GetActiveLarkInstallationByAppID(ctx context.Context, appID string) (db.LarkInstallation, error)
 	GetLarkUserBindingByOpenID(ctx context.Context, arg db.GetLarkUserBindingByOpenIDParams) (db.LarkUserBinding, error)
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	ClaimLarkInboundDedup(ctx context.Context, arg db.ClaimLarkInboundDedupParams) (db.LarkInboundMessageDedup, error)
@@ -290,7 +290,7 @@ func (d *Dispatcher) Handle(ctx context.Context, msg InboundMessage) (DispatchRe
 	//    branches run BEFORE the dedup claim because they have no
 	//    valid installation row to attach to — see the spec note on
 	//    lark_inbound_audit allowing a NULL installation_id.
-	inst, err := d.Queries.GetLarkInstallationByAppID(ctx, msg.AppID)
+	inst, err := d.Queries.GetActiveLarkInstallationByAppID(ctx, msg.AppID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			_ = d.Audit.RecordDrop(ctx, AuditDropParams{
@@ -303,9 +303,6 @@ func (d *Dispatcher) Handle(ctx context.Context, msg InboundMessage) (DispatchRe
 			return DispatchResult{Outcome: OutcomeDropped, DropReason: DropReasonInvalidEvent}, nil
 		}
 		return DispatchResult{}, fmt.Errorf("load installation: %w", err)
-	}
-	if InstallationStatus(inst.Status) != InstallationActive {
-		return d.drop(ctx, msg, inst.ID, DropReasonRevokedInstallation), nil
 	}
 
 	// 2. Two-phase dedup claim with owner fencing. Spec §4.3 puts this

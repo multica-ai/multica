@@ -68,7 +68,7 @@ func (f *fakeQueries) mintToken() pgtype.UUID {
 	return validUUID(0xA0 + f.nextTokenByte)
 }
 
-func (f *fakeQueries) GetLarkInstallationByAppID(ctx context.Context, appID string) (db.LarkInstallation, error) {
+func (f *fakeQueries) GetActiveLarkInstallationByAppID(ctx context.Context, appID string) (db.LarkInstallation, error) {
 	f.calledInstallation++
 	return f.installationByApp, f.installationErr
 }
