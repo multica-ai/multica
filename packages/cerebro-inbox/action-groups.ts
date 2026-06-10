@@ -68,6 +68,13 @@ export interface InboxActionContext {
   chatRunStates: ReadonlyMap<string, unknown>;
   /** Channel ids with an unread @mention for the viewing user. */
   mentionedChannels: ReadonlySet<string>;
+  /**
+   * Issue ids with a pending (scheduled) agent wakeup (TECH-3322). The agent
+   * isn't running right now, but it is queued to wake up later — so the item
+   * belongs in Running alongside the live runs, marked with a clock instead of
+   * the active pip.
+   */
+  wakeupIssueIds: ReadonlySet<string>;
 }
 
 /** Structural subset of the inbox page's MergedEntry we classify against. */
@@ -96,7 +103,14 @@ function classifyNotif(item: InboxItem, ctx: InboxActionContext): InboxActionCat
   //    before "waiting" so a running thread isn't mistaken for a stalled one.
   //    FIR-2326: a parent whose sub-issue is running counts as watching too,
   //    so the umbrella surfaces in Running even when its own row is idle.
-  if (item.issue_id && (ctx.issueRunStates.has(item.issue_id) || ctx.subIssueRunStates.has(item.issue_id)))
+  //    TECH-3322: a pending wakeup also counts as Running — the agent is
+  //    scheduled to come back to it, so it stays grouped with the live runs.
+  if (
+    item.issue_id &&
+    (ctx.issueRunStates.has(item.issue_id) ||
+      ctx.subIssueRunStates.has(item.issue_id) ||
+      ctx.wakeupIssueIds.has(item.issue_id))
+  )
     return "watching";
 
   // 4. Done is also literal for issue notifications. A read item on an open

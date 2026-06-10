@@ -44,6 +44,7 @@ import {
   INBOX_ACTION_GROUP_BY_OPTION,
   bucketizeInboxAction,
   useInboxActionGroupLabels,
+  useInboxWakeupStates, // CEREBRO-PATCH(inbox-wakeup-running): TECH-3322 — pending wakeups → Running group + clock pip
   // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — anchor the open row until closed
   sortInboxEntriesPinned,
   pinnedBucketizer, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — freeze open row's group
@@ -265,6 +266,11 @@ export function InboxPage() {
     () => new Map((pendingChatTasksData?.tasks ?? []).map((task) => [task.chat_session_id, taskStatusToRunState(task.status)])),
     [pendingChatTasksData],
   );
+  // CEREBRO-PATCH(inbox-wakeup-running): TECH-3322 — issues with a pending agent
+  // wakeup (scheduled, not yet running) feed the Running group + the clock pip.
+  const wakeupRunningEnabled = useFeatureFlag("cerebro_inbox_wakeup_running");
+  const wakeupStates = useInboxWakeupStates(wsId, wakeupRunningEnabled);
+  const wakeupIssueIds = useMemo(() => new Set(wakeupStates.keys()), [wakeupStates]);
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const agentMap = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
@@ -1021,9 +1027,12 @@ export function InboxPage() {
     const item = entry.item;
     // CEREBRO-PATCH(inbox-sub-issue-run-pip): FIR-2326 — the issue's own run wins;
     // otherwise an orange "sub" pip flags a running sub-issue on the parent row.
+    // CEREBRO-PATCH(inbox-wakeup-running): TECH-3322 — a pending wakeup (no live
+    // run) shows a clock with the approximate next-run time; active runs win.
+    const wakeupHint = item.issue_id ? wakeupStates.get(item.issue_id) : undefined;
     const agentRunState = item.issue_id
       ? issueRunStates.get(item.issue_id) ??
-        (subIssueRunStates.has(item.issue_id) ? "sub" : undefined)
+        (subIssueRunStates.has(item.issue_id) ? "sub" : wakeupHint ? "scheduled" : undefined)
       : undefined;
     return (
       <InboxListItem
@@ -1031,6 +1040,7 @@ export function InboxPage() {
         item={item}
         isSelected={(item.issue_id ?? item.id) === selectedKey}
         agentRunState={agentRunState}
+        agentRunTitle={agentRunState === "scheduled" ? wakeupHint?.title : undefined}
         onClick={() => handleSelect(item)}
         onArchive={() => handleArchive(item.id)}
         // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — archived view wires
@@ -1046,7 +1056,7 @@ export function InboxPage() {
     (mode: GroupByMode, entry: MergedEntry): { key: string; label: string; isFallback: boolean; order?: number } => {
       // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action buckets live in cerebro-inbox
       if (mode === "action")
-        return bucketizeInboxAction(entry, { userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels }, actionGroupLabels);
+        return bucketizeInboxAction(entry, { userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels, wakeupIssueIds }, actionGroupLabels);
       if (mode === "project") {
         if (entry.kind === "notif" && entry.item.project_id) {
           const proj = projectMap.get(entry.item.project_id);
@@ -1119,7 +1129,7 @@ export function InboxPage() {
       return { key: "__none__", label: "", isFallback: true };
     },
     // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action bucketing reads run-state + mention signals
-    [projectMap, agentMap, typeLabels, userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels, actionGroupLabels],
+    [projectMap, agentMap, typeLabels, userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels, wakeupIssueIds, actionGroupLabels],
   );
 
   type Group = {

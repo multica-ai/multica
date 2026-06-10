@@ -22,6 +22,7 @@ export type CerebroFlagKey =
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
   | "cerebro_inbox_action_grouping"
+  | "cerebro_inbox_wakeup_running"
   | "cerebro_inbox_pinned_filter"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
@@ -145,6 +146,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
   cerebro_inbox_action_grouping: true,
+  cerebro_inbox_wakeup_running: true,
   cerebro_inbox_pinned_filter: true,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
@@ -440,6 +442,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Add a \"Group by → Action\" option to the inbox that buckets items by what to do next (Act now / Watching / Waiting / Calm) instead of by status. Default grouping for new users; switch it off or pick another grouping from the inbox's Group by menu.",
+  },
+  {
+    key: "cerebro_inbox_wakeup_running",
+    label: "Inbox wakeup → Running",
+    group: "inbox",
+    description:
+      "When an issue has a pending agent wakeup, show it in the inbox's \"Running\" action group and mark its row with a clock (the approximate next-run time) instead of the live agent pip. Off hides the clock and keeps wakeup-only issues out of Running.",
   },
   {
     key: "cerebro_inbox_pinned_filter",

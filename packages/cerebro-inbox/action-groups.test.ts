@@ -17,6 +17,7 @@ function ctx(overrides: Partial<InboxActionContext> = {}): InboxActionContext {
     subIssueRunStates: new Map(),
     chatRunStates: new Map(),
     mentionedChannels: new Set(),
+    wakeupIssueIds: new Set(),
     ...overrides,
   };
 }
@@ -76,6 +77,34 @@ describe("classifyInboxAction — notifications", () => {
       classifyInboxAction(
         notif({ issue_id: "parent-1", read: true, issue_status: "in_progress" }),
         ctx({ subIssueRunStates: new Map([["parent-1", "active"]]) }),
+      ),
+    ).toBe("watching");
+  });
+
+  // TECH-3322 — a pending wakeup (scheduled run) surfaces the issue in Running.
+  it("puts a read item under Watching when its issue has a pending wakeup", () => {
+    expect(
+      classifyInboxAction(
+        notif({ issue_id: "issue-7", read: true, issue_status: "in_progress" }),
+        ctx({ wakeupIssueIds: new Set(["issue-7"]) }),
+      ),
+    ).toBe("watching");
+  });
+
+  it("keeps a wakeup-scheduled but unread item in Unread (action wins over scheduled)", () => {
+    expect(
+      classifyInboxAction(
+        notif({ issue_id: "issue-7", read: false }),
+        ctx({ wakeupIssueIds: new Set(["issue-7"]) }),
+      ),
+    ).toBe("act_now");
+  });
+
+  it("surfaces a done issue in Watching when a wakeup is still pending on it", () => {
+    expect(
+      classifyInboxAction(
+        notif({ issue_id: "issue-7", read: true, issue_status: "done" }),
+        ctx({ wakeupIssueIds: new Set(["issue-7"]) }),
       ),
     ).toBe("watching");
   });
