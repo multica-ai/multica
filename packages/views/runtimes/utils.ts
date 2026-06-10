@@ -17,30 +17,17 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-// Compound-unit relative timestamp ("2m 14s ago", "1d 4h ago", "6d 19h ago")
-// — gives the user enough precision to tell "just lost" from "long lost"
-// at a glance without forcing them to mouse-over for a full timestamp.
-export function formatLastSeen(lastSeenAt: string | null): string {
-  if (!lastSeenAt) return "Never";
-  const diffMs = Date.now() - new Date(lastSeenAt).getTime();
-  if (diffMs < 5_000) return "Just now";
-
-  const seconds = Math.floor(diffMs / 1000);
-  const minutes = Math.floor(seconds / 60);
+// Human-readable countdown until a hold expires ("in 5h 23m", "in 12m", "soon").
+// Returns null when holdUntil is null/undefined so callers can gate on truthiness.
+export function formatHoldUntil(holdUntil: string | null | undefined): string | null {
+  if (!holdUntil) return null;
+  const diffMs = new Date(holdUntil).getTime() - Date.now();
+  if (diffMs <= 0) return "soon";
+  const minutes = Math.ceil(diffMs / 60_000);
   const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (minutes < 1) return `${seconds}s ago`;
-  if (hours < 1) {
-    const s = seconds % 60;
-    return s > 0 ? `${minutes}m ${s}s ago` : `${minutes}m ago`;
-  }
-  if (days < 1) {
-    const m = minutes % 60;
-    return m > 0 ? `${hours}h ${m}m ago` : `${hours}h ago`;
-  }
-  const h = hours % 24;
-  return h > 0 ? `${days}d ${h}h ago` : `${days}d ago`;
+  const mins = minutes % 60;
+  if (hours > 0) return mins > 0 ? `in ${hours}h ${mins}m` : `in ${hours}h`;
+  return `in ${minutes}m`;
 }
 
 // Turns the back-end's `device_info` string ("MacBook-Pro · darwin-amd64",

@@ -6,6 +6,7 @@ import {
   Globe,
   Loader2,
   MoreHorizontal,
+  PauseCircle,
   Pencil,
   Trash2,
 } from "lucide-react";
@@ -59,6 +60,7 @@ import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import {
   computeCostInWindow,
+  formatHoldUntil,
   pctChange,
 } from "../utils";
 import { splitRuntimeName } from "./runtime-machines";
@@ -328,23 +330,42 @@ function HealthCell({
   const health = deriveRuntimeHealth(runtime, now);
   const offline = health === "offline" || health === "about_to_gc";
   const lastSeen = runtime.last_seen_at ? timeAgo(runtime.last_seen_at) : null;
+  const holdTime = formatHoldUntil(runtime.hold_until);
   const active = workload.runningCount + workload.queuedCount;
 
   return (
-    <ListGridCell className="gap-1.5">
-      <HealthIcon health={health} />
-      <span className="block min-w-0 truncate text-xs">
-        {labelOf(health)}
-        {health !== "online" && lastSeen && (
-          <span className="text-muted-foreground"> · {lastSeen}</span>
-        )}
-        {!offline && active > 0 && (
-          <span className="text-muted-foreground">
-            {" · "}
-            {tAgents(($) => $.row.task_count, { count: active })}
-          </span>
-        )}
-      </span>
+    <ListGridCell className="flex-col items-start gap-0.5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <HealthIcon health={health} />
+        <span className="block min-w-0 truncate text-xs">
+          {labelOf(health)}
+          {health !== "online" && lastSeen && (
+            <span className="text-muted-foreground"> · {lastSeen}</span>
+          )}
+          {!offline && active > 0 && (
+            <span className="text-muted-foreground">
+              {" · "}
+              {tAgents(($) => $.row.task_count, { count: active })}
+            </span>
+          )}
+        </span>
+      </div>
+      {holdTime && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <div className="flex min-w-0 items-center gap-1">
+                <PauseCircle className="h-3 w-3 shrink-0 text-warning" />
+                <span className="truncate text-xs text-warning">
+                  {t(($) => $.health.on_hold.label)} ·{" "}
+                  {t(($) => $.health.on_hold.resumes_in, { time: holdTime })}
+                </span>
+              </div>
+            }
+          />
+          <TooltipContent>{t(($) => $.health.on_hold.tooltip)}</TooltipContent>
+        </Tooltip>
+      )}
     </ListGridCell>
   );
 }
