@@ -29,11 +29,12 @@ type ClientIdentity struct {
 }
 
 type client struct {
-	hub      *Hub
-	conn     *websocket.Conn
-	send     chan []byte
-	identity ClientIdentity
-	runtimes map[string]struct{}
+	hub                                *Hub
+	conn                               *websocket.Conn
+	send                               chan []byte
+	identity                           ClientIdentity
+	runtimes                           map[string]struct{}
+	supportsNotificationDeliveryResult bool
 
 	dedupMu  sync.Mutex
 	seenIDs  map[string]struct{}
@@ -333,6 +334,42 @@ func (h *Hub) SendToUser(userID string, data []byte) bool {
 	return delivered
 }
 
+// SendNotificationDeliveryToUser sends a local side-effecting notification to
+// a single daemon connection for userID. New daemons that advertise delivery
+// result support are preferred so the server can wait for a real ack; old
+// daemons remain eligible as a rolling-upgrade fallback.
+func (h *Hub) SendNotificationDeliveryToUser(userID string, data []byte) (bool, bool) {
+	if h == nil || userID == "" {
+		return false, false
+	}
+	h.mu.RLock()
+	delivered, supportsResult := h.sendNotificationDeliveryToUserLocked(userID, data, true)
+	if !delivered {
+		delivered, supportsResult = h.sendNotificationDeliveryToUserLocked(userID, data, false)
+	}
+	h.mu.RUnlock()
+	return delivered, supportsResult
+}
+
+func (h *Hub) sendNotificationDeliveryToUserLocked(userID string, data []byte, requireResultSupport bool) (bool, bool) {
+	for c := range h.clients {
+		if c.identity.UserID != userID {
+			continue
+		}
+		if c.supportsNotificationDeliveryResult != requireResultSupport {
+			continue
+		}
+		select {
+		case c.send <- data:
+			return true, c.supportsNotificationDeliveryResult
+		default:
+			// Try another connection. If all matching connections are backed up,
+			// the dispatcher will treat the delivery as not enqueued.
+		}
+	}
+	return false, false
+}
+
 func (h *Hub) register(c *client) {
 	h.mu.Lock()
 	h.clients[c] = true
@@ -486,6 +523,11 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 			"runtime_id", payload.RuntimeID)
 		return
 	}
+	c.hub.mu.Lock()
+	if c.hub.clients[c] {
+		c.supportsNotificationDeliveryResult = payload.SupportsNotificationDeliveryResult
+	}
+	c.hub.mu.Unlock()
 
 	// Intentionally do NOT wrap this ctx with WithTimeout. The handler
 	// reaches LocalSkill{List,Import}Store.PopPending, whose Redis Lua
