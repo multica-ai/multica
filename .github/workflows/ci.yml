@@ -53,7 +53,7 @@ jobs:
         # upstream mobile-verify workflow; @multica/mobile types intentionally
         # drift from cerebro-augmented core types until the mobile schemas are
         # aligned (follow-up issue). @multica/docs is no longer present in the fork.
-        run: pnpm exec turbo build typecheck test --concurrency=1 --filter='!@multica/mobile'
+        run: pnpm exec turbo build typecheck test --concurrency=1 --continue=dependencies-successful --filter='!@multica/mobile'
 
   backend:
     runs-on: ubuntu-latest

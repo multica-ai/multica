@@ -25,6 +25,7 @@ vi.mock("@multica/core/auth", () => {
 });
 
 vi.mock("@multica/core/platform", () => ({
+  registerForWorkspaceRehydration: () => () => {},
   setCurrentWorkspace: vi.fn(),
 }));
 
@@ -71,6 +72,10 @@ vi.mock("@multica/views/workspace/welcome-after-onboarding", () => ({
 
 vi.mock("@multica/views/layout", () => ({
   WorkspacePresencePrefetch: () => null,
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => false,
 }));
 
 // The point of this whole test: assert the desktop layout mounts the

@@ -36,6 +36,7 @@ function workspace(slug: string): Workspace {
     id: "ws-1",
     name: "Workspace",
     slug,
+    avatar_url: null,
     description: null,
     context: null,
     settings: {},
