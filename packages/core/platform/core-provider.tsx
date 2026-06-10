@@ -44,10 +44,15 @@ function initCore(
   setApiInstance(api);
   setSchemaLogger(createLogger("api-schema"));
 
-  // In token mode, hydrate token from storage.
+  // In token mode, hydrate token from cs-cloud bridge (desktop) first.
   if (!cookieAuth && !casdoorMode) {
-    const token = storage.getItem("multica_token");
-    if (token) api.setToken(token);
+    const costrictToken =
+      typeof window !== "undefined"
+        ? (window as unknown as { desktopAPI?: { coStrictToken?: string } }).desktopAPI?.coStrictToken
+        : undefined;
+    if (costrictToken) {
+      api.setToken(costrictToken);
+    }
   }
   // Workspace identity is URL-driven: the [workspaceSlug] layout resolves
   // the slug and calls setCurrentWorkspace(slug, wsId) on mount. The api
@@ -90,7 +95,6 @@ export function CoreProvider({
       <AuthInitializer
         onLogin={onLogin}
         onLogout={onLogout}
-        storage={storage}
         cookieAuth={cookieAuth}
         casdoorMode={casdoorMode}
         identity={identity}
