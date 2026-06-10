@@ -104,12 +104,29 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   // retries when the API fails (onError restores count; won't re-fire until count changes).
   const seenChannelRef = useRef<{ id: string; count: number } | null>(null);
 
+  // CEREBRO-PATCH(channel-unread-focus-guard): TECH-3300 — only auto-mark-read
+  // while the user is actually looking (tab visible + window focused). Before
+  // this, an incoming message was marked read the instant it arrived as long as
+  // the channel sat mounted in the inbox — even in a background tab — so the
+  // unread badge never appeared. Now a message that lands while you are away
+  // stays unread, and we retry the moment focus/visibility returns.
   useEffect(() => {
     if (!channelId || !channel || channel.unread_count === 0) return;
-    const last = seenChannelRef.current;
-    if (last?.id === channelId && last.count === channel.unread_count) return;
-    seenChannelRef.current = { id: channelId, count: channel.unread_count };
-    markChannelRead.mutate(channelId);
+    const count = channel.unread_count;
+    const markIfVisible = () => {
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      const last = seenChannelRef.current;
+      if (last?.id === channelId && last.count === count) return;
+      seenChannelRef.current = { id: channelId, count };
+      markChannelRead.mutate(channelId);
+    };
+    markIfVisible();
+    window.addEventListener("focus", markIfVisible);
+    document.addEventListener("visibilitychange", markIfVisible);
+    return () => {
+      window.removeEventListener("focus", markIfVisible);
+      document.removeEventListener("visibilitychange", markIfVisible);
+    };
   }, [channelId, channel, markChannelRead]);
 
   // CEREBRO-PATCH(channels-slack-message-view): JEH-1017 — produce {topLevel,

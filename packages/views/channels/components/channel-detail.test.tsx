@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Channel } from "@multica/core/types";
 
@@ -214,6 +214,10 @@ describe("ChannelDetail thread header", () => {
     mockMarkChannelRead.mockClear();
     mockArchive.mockClear();
     mockArchiveChannel.mockClear();
+    // CEREBRO-PATCH(channel-unread-focus-guard): jsdom reports hasFocus()=false
+    // by default; a real focused browser tab reports true. Default the spy to
+    // true so the auto-mark-read tests model a user who is actually looking.
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
   });
 
   it("renders channel title, description and participant stack (excluding self)", () => {
@@ -298,6 +302,25 @@ describe("ChannelDetail thread header", () => {
   it("does not call mark-channel-read when unread_count is 0", () => {
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
     expect(mockMarkChannelRead).not.toHaveBeenCalled();
+  });
+
+  // CEREBRO-PATCH(channel-unread-focus-guard): TECH-3300 — a message that
+  // arrives while the window is hidden/unfocused must stay unread.
+  it("does not mark read when the document is hidden, then fires on visibility", () => {
+    const hiddenSpy = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    const unread: Channel = { ...baseChannel, unread_count: 3 };
+    render(<ChannelDetail channelId="c1" initialChannel={unread} />);
+    expect(mockMarkChannelRead).not.toHaveBeenCalled();
+
+    // User returns to the tab → visibilitychange re-evaluates and marks read.
+    hiddenSpy.mockReturnValue("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(mockMarkChannelRead).toHaveBeenCalledWith("c1");
+    hiddenSpy.mockRestore();
   });
 
   it("opens the participants panel when the participant stack is clicked", async () => {
