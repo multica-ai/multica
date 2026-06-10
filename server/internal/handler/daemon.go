@@ -31,13 +31,12 @@ import (
 const awaitingInputInstructions = "## Input Request\n\n" +
 	"If you need user input before proceeding:\n\n" +
 	"1. Post a comment with your question: `multica issue comment add <issue-id> --content \"your question and options here (with recommended option)\"`\n" +
-	"2. Then respond ONLY with this JSON (no other text, the output JSON format must be valid.):\n\n" +
+	"2. Then use only this JSON as a response to end this task (no other text, the output JSON format must be valid.):\n\n" +
 	`{"status":"awaiting_input","question":"<your question>","options":["<option A>","<option B>",...],"recommended":"<recommended option>"}` + "\n\n" +
 	"- status: must be \"awaiting_input\"\n" +
 	"- question: your question to the user (same as the comment)\n" +
 	"- options: possible answers the user can choose from (at least 2)\n" +
 	"- recommended: your recommended option (must be one of the options values)\n\n" +
-	"3. Then finish this task directly.\n\n" +
 	"The user will reply to your comment, and you will be called again with their answer.\n"
 
 // ---------------------------------------------------------------------------
@@ -1149,7 +1148,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				if resp.Agent.Instructions != "" {
 					resp.Agent.Instructions += "\n\n"
 				}
-				resp.Agent.Instructions += "You must follow these instructions:\n<instructions>\n```\n" + pd.Content + "\n```\n</instructions>\n\n"
+				resp.Agent.Instructions += "You must follow these instructions:\n<instructions>\n```\n" +
+					pd.Content + "\n```\n" +
+					"\nIf the process generates output documents, please upload them as attachments in the comments.\n</instructions>\n\n"
 			}
 		}
 
