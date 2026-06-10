@@ -90,6 +90,14 @@ runtime:
   tokenSecretName: multica-token
   gitSshSecretName: multica-git-ssh
 
+  # Optional cluster-wide GitHub PAT for the `gh` CLI inside agent pods.
+  # When set, GH_TOKEN is injected from this Secret (key "token") into both
+  # daemon-mode and controller-mode worker pods. Leave "" to skip — `gh`
+  # simply won't be usable, the rest of the runtime is unaffected. Create
+  # the Secret out-of-band; the chart never templates a token value.
+  githubTokenSecretName: ""
+  githubTokenSecretKey: token
+
   # The single watched workspace for the daemon-mode runtime.
   workspaceId: ""
 

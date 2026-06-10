@@ -109,7 +109,7 @@ func EnsurePVC(ctx context.Context, k kubernetes.Interface, namespace string, r 
 // repo-cache PVC read-only at rc.MountPath and a per-task gitconfig ConfigMap
 // at /home/multica/.gitconfig whose url.<base>.insteadOf rewrites turn the
 // agent's plain `git clone <origin-url>` into a sub-second local file:// clone.
-func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, r Registered, t daemon.Task, imagePullSecret, pvc string, cb ClaudeBrokerOptions, rc RepoCacheOptions) (string, error) {
+func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, r Registered, t daemon.Task, imagePullSecret, pvc string, cb ClaudeBrokerOptions, rc RepoCacheOptions, gh GitHubTokenOptions) (string, error) {
 	payload, err := json.Marshal(t)
 	if err != nil {
 		return "", fmt.Errorf("marshal task: %w", err)
@@ -224,6 +224,22 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 		runtaskEnv = append(runtaskEnv,
 			corev1.EnvVar{Name: "MULTICA_REPOCACHE_DIR", Value: rc.MountPath},
 		)
+	}
+
+	// Cluster-wide GitHub PAT for the `gh` CLI baked into the runtime image.
+	// Optional — when SecretName is empty, no env var is added and `gh` simply
+	// can't authenticate. Mirrors the daemon-mode wiring in
+	// templates/runtime/daemon-deployment.yaml.
+	if gh.SecretName != "" {
+		runtaskEnv = append(runtaskEnv, corev1.EnvVar{
+			Name: "GH_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: gh.SecretName},
+					Key:                  gh.SecretKey,
+				},
+			},
+		})
 	}
 
 	if cb.Enabled {
