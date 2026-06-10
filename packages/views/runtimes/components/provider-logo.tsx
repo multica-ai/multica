@@ -163,6 +163,7 @@ function GeminiLogo({ className }: { className: string }) {
 // provided JPEG logo.
 import antigravityLogo from "./antigravity-logo.png";
 import wujieclawLogo from "./wujieclaw-logo.jpg";
+import mmxLogo from "./mmx-logo.png";
 
 function assetSrc(asset: unknown): string {
   return typeof asset === "string" ? asset : (asset as { src: string }).src;
@@ -170,6 +171,7 @@ function assetSrc(asset: unknown): string {
 
 const antigravityLogoSrc = assetSrc(antigravityLogo);
 const wujieclawLogoSrc = assetSrc(wujieclawLogo);
+const mmxLogoSrc = assetSrc(mmxLogo);
 
 function AntigravityLogo({ className }: { className: string }) {
   return <img src={antigravityLogoSrc} alt="Antigravity" className={className} />;
@@ -239,21 +241,11 @@ function QoderclicnLogo({ className }: { className: string }) {
   );
 }
 
-// MiniMax mmx — stylised "M" glyph for the mmx CLI provider.
-// Violet (#7C3AED) background with a white geometric M letterform.
+// MiniMax mmx — official MiniMax brand mark (filecdn.minimax.chat OG icon),
+// shipped as a PNG asset next to this file. Rendered via <img> rather
+// than inline SVG to preserve the official artwork.
 function MmxLogo({ className }: { className: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect width="24" height="24" rx="5" fill="#7C3AED" />
-      <path
-        d="M5.5 17V7L12 13.5L18.5 7V17"
-        stroke="#FFFFFF"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <img src={mmxLogoSrc} alt="MMX" className={className} />;
 }
 
 export function ProviderLogo({
