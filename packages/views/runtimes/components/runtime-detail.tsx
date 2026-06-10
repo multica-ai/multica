@@ -5,6 +5,7 @@ import {
   Bot,
   ChevronRight,
   Lock,
+  CirclePause,
   MoreHorizontal,
   Trash2,
 } from "@multica/ui/icons";
@@ -52,6 +53,7 @@ import {
 } from "../../layout/object-page";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
+import { formatHoldUntil } from "../utils";
 import { HealthBadge, HealthIcon, shortDaemonId, useHealthLabel } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
@@ -349,6 +351,17 @@ function RuntimeProperties({
           <span className="truncate">
             {health === "online" ? healthLabel(health) : `${healthLabel(health)} · ${lastSeen}`}
           </span>
+          {runtime.hold_until && (
+            <span className="flex items-center gap-1.5 rounded-md bg-warning/10 px-2 py-1 text-xs text-warning">
+              <CirclePause className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                {t(($) => $.health.on_hold.label)} —{" "}
+                {t(($) => $.health.on_hold.resumes_in, {
+                  time: formatHoldUntil(runtime.hold_until) ?? "soon",
+                })}
+              </span>
+            </span>
+          )}
         </ObjectProperty>
         <ObjectProperty label={t(($) => $.detail.fact_owner)}>
           {ownerMember ? (
