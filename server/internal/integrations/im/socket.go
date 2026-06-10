@@ -2,11 +2,13 @@ package im
 
 import (
 	"context"
+	"crypto/cipher"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/rand"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -88,7 +90,7 @@ type Socket struct {
 
 	dh            *dhKeyPair
 	serverVersion int
-	aesKey        string
+	aesBlock      cipher.Block
 	aesIV         string
 
 	tempBuffer  []byte
@@ -100,6 +102,11 @@ type Socket struct {
 	connected atomic.Bool
 	pingRetry atomic.Int32
 	writeMu   sync.Mutex
+
+	// ackHook, when non-nil, replaces the websocket RECVACK write in onRecv. It
+	// lets tests drive the inbound protocol path (decrypt dispatch, poison
+	// ack-and-drop, fail-map reset) without a live connection. Nil in production.
+	ackHook func(messageID string, messageSeq uint32)
 }
 
 // NewSocket creates a socket. Call Connect to start.
@@ -455,7 +462,7 @@ func (s *Socket) onPacket(conn *websocket.Conn, data []byte) error {
 		return nil
 	}
 
-	dec := NewDecoder(data)
+	dec := newDecoder(data)
 	if _, err := dec.ReadByte(); err != nil { // header byte
 		return fmt.Errorf("read header: %w", err)
 	}
@@ -480,7 +487,7 @@ func (s *Socket) onPacket(conn *websocket.Conn, data []byte) error {
 // onConnack derives the AES key/IV from the DH handshake. A failure here is
 // terminal for this connection (returned as an error) but whether to reconnect
 // depends on the reason code — set on needReconnect before returning.
-func (s *Socket) onConnack(dec *Decoder, hasServerVersion bool) error {
+func (s *Socket) onConnack(dec *decoder, hasServerVersion bool) error {
 	if hasServerVersion {
 		v, err := dec.ReadByte()
 		if err != nil {
@@ -518,7 +525,12 @@ func (s *Socket) onConnack(dec *Decoder, hasServerVersion bool) error {
 			s.needReconnect = true
 			return derr
 		}
-		s.aesKey = key
+		block, berr := newAESBlock(key)
+		if berr != nil {
+			s.needReconnect = true
+			return berr
+		}
+		s.aesBlock = block
 		s.aesIV = iv
 		s.connected.Store(true)
 		if s.opts.OnConnected != nil {
@@ -553,7 +565,7 @@ func (s *Socket) fireDisconnectAndError(err error) {
 // BotMessage to the application. Decrypt happens BEFORE the RECVACK so a
 // transient failure leaves the message un-acked for redelivery; a persistent
 // poison message is ack'd-and-dropped after maxDecryptRetries.
-func (s *Socket) onRecv(conn *websocket.Conn, dec *Decoder) error {
+func (s *Socket) onRecv(conn *websocket.Conn, dec *decoder) error {
 	settingByte, err := dec.ReadByte()
 	if err != nil {
 		return err
@@ -586,7 +598,7 @@ func (s *Socket) onRecv(conn *websocket.Conn, dec *Decoder) error {
 	if err != nil {
 		return err
 	}
-	messageID := fmt.Sprintf("%d", messageIDRaw)
+	messageID := strconv.FormatUint(messageIDRaw, 10)
 	messageSeq, err := dec.ReadUint32()
 	if err != nil {
 		return err
@@ -640,7 +652,7 @@ func (s *Socket) onRecv(conn *websocket.Conn, dec *Decoder) error {
 
 func (s *Socket) decryptPayload(encrypted []byte) (MessagePayload, error) {
 	var p MessagePayload
-	plain, err := aesDecrypt(encrypted, s.aesKey, s.aesIV)
+	plain, err := aesDecrypt(encrypted, s.aesBlock, s.aesIV)
 	if err != nil {
 		return p, err
 	}
@@ -651,6 +663,10 @@ func (s *Socket) decryptPayload(encrypted []byte) (MessagePayload, error) {
 }
 
 func (s *Socket) sendRecvack(conn *websocket.Conn, messageID string, messageSeq uint32) {
+	if s.ackHook != nil {
+		s.ackHook(messageID, messageSeq)
+		return
+	}
 	pkt, err := encodeRecvackPacket(messageID, messageSeq)
 	if err != nil {
 		s.logf("im: encode RECVACK failed for %s: %v", messageID, err)
@@ -661,7 +677,7 @@ func (s *Socket) sendRecvack(conn *websocket.Conn, messageID string, messageSeq 
 	}
 }
 
-func (s *Socket) onDisconnect(dec *Decoder) error {
+func (s *Socket) onDisconnect(dec *decoder) error {
 	_, _ = dec.ReadByte()   // reasonCode (unused)
 	_, _ = dec.ReadString() // reason (unused)
 	s.needReconnect = false

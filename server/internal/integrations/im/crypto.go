@@ -79,20 +79,24 @@ func deriveAESKeyIV(priv *ecdh.PrivateKey, serverKeyB64, salt string) (key strin
 
 var errBadCipher = errors.New("im: ciphertext not a multiple of block size")
 
+// newAESBlock builds a reusable AES cipher block from the derived key. The key
+// is fixed for the lifetime of a connection, so the block (which performs the
+// expensive key expansion) is created once in onConnack and reused for every
+// inbound message — cipher.NewCBCDecrypter on top of it is cheap.
+func newAESBlock(key string) (cipher.Block, error) {
+	return aes.NewCipher([]byte(key))
+}
+
 // aesDecrypt decrypts a RECV payload. The payload bytes are the base64-encoded
 // ciphertext (the wire carries base64 text); we decode then AES-CBC decrypt and
-// strip PKCS#7 padding.
-func aesDecrypt(payload []byte, key, iv string) ([]byte, error) {
+// strip PKCS#7 padding. block is the per-connection cipher built by newAESBlock.
+func aesDecrypt(payload []byte, block cipher.Block, iv string) ([]byte, error) {
 	ct, err := base64.StdEncoding.DecodeString(string(payload))
 	if err != nil {
 		return nil, fmt.Errorf("im: payload base64 decode: %w", err)
 	}
 	if len(ct) == 0 || len(ct)%aes.BlockSize != 0 {
 		return nil, errBadCipher
-	}
-	block, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		return nil, err
 	}
 	mode := cipher.NewCBCDecrypter(block, []byte(iv))
 	out := make([]byte, len(ct))

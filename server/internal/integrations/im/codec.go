@@ -26,68 +26,68 @@ const (
 	maxVarLenBytes = 4
 )
 
-// Encoder writes WuKongIM frame fields in big-endian order. Strings are
+// encoder writes WuKongIM frame fields in big-endian order. Strings are
 // length-prefixed with a uint16 byte count (UTF-8 bytes, not characters).
-type Encoder struct {
+type encoder struct {
 	buf []byte
 }
 
-func (e *Encoder) PutByte(b byte) {
+func (e *encoder) PutByte(b byte) {
 	e.buf = append(e.buf, b)
 }
 
-func (e *Encoder) WriteBytes(b []byte) {
+func (e *encoder) WriteBytes(b []byte) {
 	e.buf = append(e.buf, b...)
 }
 
-func (e *Encoder) WriteUint16(v uint16) {
+func (e *encoder) WriteUint16(v uint16) {
 	e.buf = binary.BigEndian.AppendUint16(e.buf, v)
 }
 
-func (e *Encoder) WriteUint32(v uint32) {
+func (e *encoder) WriteUint32(v uint32) {
 	e.buf = binary.BigEndian.AppendUint32(e.buf, v)
 }
 
 // WriteUint64 writes an 8-byte big-endian value. WuKongIM message IDs are
 // unsigned 64-bit, so callers pass them as uint64.
-func (e *Encoder) WriteUint64(v uint64) {
+func (e *encoder) WriteUint64(v uint64) {
 	e.buf = binary.BigEndian.AppendUint64(e.buf, v)
 }
 
 // WriteString writes a uint16 length prefix (UTF-8 byte count) followed by the
 // bytes. An empty string writes a zero length.
-func (e *Encoder) WriteString(s string) {
+func (e *encoder) WriteString(s string) {
 	b := []byte(s)
 	e.WriteUint16(uint16(len(b)))
 	e.buf = append(e.buf, b...)
 }
 
 // Bytes returns the accumulated frame.
-func (e *Encoder) Bytes() []byte {
+func (e *encoder) Bytes() []byte {
 	return e.buf
 }
 
-// Decoder reads WuKongIM frame fields. Every read is bounds-checked via require
+// decoder reads WuKongIM frame fields. Every read is bounds-checked via require
 // so a truncated or malformed packet returns an error instead of silently
 // reading zero (which would corrupt message IDs / seqs and break ack matching).
-type Decoder struct {
+type decoder struct {
 	data   []byte
 	offset int
 }
 
-// NewDecoder wraps a complete packet's bytes for field-by-field reading.
-func NewDecoder(data []byte) *Decoder {
-	return &Decoder{data: data}
+// newDecoder wraps a complete packet's bytes for field-by-field reading.
+func newDecoder(data []byte) *decoder {
+	return &decoder{data: data}
 }
 
-func (d *Decoder) require(n int) error {
+func (d *decoder) require(n int) error {
 	if d.offset+n > len(d.data) {
 		return fmt.Errorf("im decoder: out-of-bounds read (need %d byte(s) at offset %d, have %d)", n, d.offset, len(d.data))
 	}
 	return nil
 }
 
-func (d *Decoder) ReadByte() (byte, error) {
+func (d *decoder) ReadByte() (byte, error) {
 	if err := d.require(1); err != nil {
 		return 0, err
 	}
@@ -96,7 +96,7 @@ func (d *Decoder) ReadByte() (byte, error) {
 	return b, nil
 }
 
-func (d *Decoder) ReadUint16() (uint16, error) {
+func (d *decoder) ReadUint16() (uint16, error) {
 	if err := d.require(2); err != nil {
 		return 0, err
 	}
@@ -105,7 +105,7 @@ func (d *Decoder) ReadUint16() (uint16, error) {
 	return v, nil
 }
 
-func (d *Decoder) ReadUint32() (uint32, error) {
+func (d *decoder) ReadUint32() (uint32, error) {
 	if err := d.require(4); err != nil {
 		return 0, err
 	}
@@ -115,7 +115,7 @@ func (d *Decoder) ReadUint32() (uint32, error) {
 }
 
 // ReadUint64 reads an 8-byte big-endian unsigned integer.
-func (d *Decoder) ReadUint64() (uint64, error) {
+func (d *decoder) ReadUint64() (uint64, error) {
 	if err := d.require(8); err != nil {
 		return 0, err
 	}
@@ -127,7 +127,7 @@ func (d *Decoder) ReadUint64() (uint64, error) {
 // ReadString reads a uint16-length-prefixed UTF-8 string. The declared length
 // is validated against the remaining buffer so an oversized length field cannot
 // over-read and corrupt every subsequent field.
-func (d *Decoder) ReadString() (string, error) {
+func (d *decoder) ReadString() (string, error) {
 	n, err := d.ReadUint16()
 	if err != nil {
 		return "", err
@@ -145,7 +145,7 @@ func (d *Decoder) ReadString() (string, error) {
 
 // ReadRemaining returns all unread bytes from the current offset to the end
 // (the encrypted payload of a RECV packet).
-func (d *Decoder) ReadRemaining() []byte {
+func (d *decoder) ReadRemaining() []byte {
 	r := d.data[d.offset:]
 	d.offset = len(d.data)
 	return r
@@ -154,7 +154,7 @@ func (d *Decoder) ReadRemaining() []byte {
 // readVarLen reads an MQTT-style variable-length integer, used to skip the
 // remaining-length field of a packet that has already been framed. It enforces
 // the maxVarLenBytes cap.
-func (d *Decoder) readVarLen() (int, error) {
+func (d *decoder) readVarLen() (int, error) {
 	value := 0
 	multiplier := 1
 	for i := 0; i < maxVarLenBytes; i++ {

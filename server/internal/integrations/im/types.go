@@ -90,22 +90,44 @@ var knownPayloadFields = map[string]struct{}{
 }
 
 // UnmarshalJSON decodes the modeled fields and collects everything else into
-// Extra.
+// Extra. It scans the document once into a raw key→RawMessage map, decodes each
+// known field from its slice, and keeps the remainder as Extra — avoiding the
+// double full-document scan a separate alias decode would incur.
 func (p *MessagePayload) UnmarshalJSON(data []byte) error {
-	type alias MessagePayload
-	var a alias
-	if err := json.Unmarshal(data, &a); err != nil {
-		return err
-	}
-	*p = MessagePayload(a)
-
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+
+	type alias MessagePayload
+	var a alias
 	for k := range knownPayloadFields {
+		rawVal, ok := raw[k]
+		if !ok {
+			continue
+		}
+		var target any
+		switch k {
+		case "type":
+			target = &a.Type
+		case "content":
+			target = &a.Content
+		case "url":
+			target = &a.URL
+		case "name":
+			target = &a.Name
+		case "mention":
+			target = &a.Mention
+		case "reply":
+			target = &a.Reply
+		}
+		if err := json.Unmarshal(rawVal, target); err != nil {
+			return err
+		}
 		delete(raw, k)
 	}
+	*p = MessagePayload(a)
+
 	if len(raw) > 0 {
 		p.Extra = raw
 	}

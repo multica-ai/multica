@@ -38,7 +38,7 @@ type connectOptions struct {
 // encodeConnectPacket builds a CONNECT frame. Body field order is strict:
 // version, deviceFlag, deviceID, uid, token, clientTimestamp(int64), clientKey.
 func encodeConnectPacket(opts connectOptions) []byte {
-	body := &Encoder{}
+	body := &encoder{}
 	body.PutByte(opts.version)
 	body.PutByte(opts.deviceFlag)
 	body.WriteString(opts.deviceID)
@@ -62,7 +62,7 @@ func encodeRecvackPacket(messageID string, messageSeq uint32) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	body := &Encoder{}
+	body := &encoder{}
 	body.WriteUint64(id)
 	body.WriteUint32(messageSeq)
 	return frameWithBody(pktRecvack, body.Bytes()), nil
@@ -71,7 +71,7 @@ func encodeRecvackPacket(messageID string, messageSeq uint32) ([]byte, error) {
 // frameWithBody prepends the fixed header byte (packetType<<4 | flags=0) and the
 // variable-length body size to a packet body.
 func frameWithBody(t PacketType, body []byte) []byte {
-	frame := &Encoder{}
+	frame := &encoder{}
 	frame.PutByte(byte(t) << 4)
 	frame.WriteBytes(encodeVarLen(len(body)))
 	frame.WriteBytes(body)
