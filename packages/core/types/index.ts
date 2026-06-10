@@ -102,6 +102,12 @@ export type {
   RedeemLarkBindingTokenResponse,
 } from "./lark";
 export type {
+  WecomInstallation,
+  ListWecomInstallationsResponse,
+  CreateWecomInstallationRequest,
+  RedeemWecomBindingTokenResponse,
+} from "./wecom";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

@@ -223,6 +223,17 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 
 **注意：** `GITHUB_WEBHOOK_SECRET` 同时被复用为 install 流程里 state token 的签名密钥，所以运维只需要维护一个 secret。它**不是** GitHub App 的 *Client* secret——Client secret 是 OAuth 用的，和本集成无关。完整配置流程见 [GitHub 集成 → Self-Host 配置](/github-integration#self-host-配置)。
 
+## 企业微信集成
+
+[企业微信 Bot 接入](/wecom-bot-integration) 在设置 `MULTICA_WECOM_SECRET_KEY` 之前保持关闭。绑定链接依赖 `MULTICA_PUBLIC_URL`（用户可访问的前端地址，不是 Backend API 地址）。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_WECOM_SECRET_KEY` | 空 | Base64 编码的 32 字节密钥，加密 Bot / Corp Secret 落库。生成：`openssl rand -base64 32` |
+| `MULTICA_PUBLIC_URL` | 空 | 绑定页与 Bot 回复中的链接前缀，例如 `https://multica.example.com`（无尾斜杠）|
+
+完整流程、群聊会话模型与 Docker 部署见 [企业微信 Bot 接入](/wecom-bot-integration)。
+
 ## 用量统计
 
 默认上报到 Multica 官方 PostHog 实例。不想上报就把 `ANALYTICS_DISABLED=true`。

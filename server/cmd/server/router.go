@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -354,6 +355,66 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	} else {
 		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
 	}
+
+	if wecomKey, err := secretbox.LoadKey("MULTICA_WECOM_SECRET_KEY"); err == nil {
+		wecomBox, err := secretbox.New(wecomKey)
+		if err != nil {
+			slog.Error("wecom: secretbox.New failed; wecom integration disabled", "error", err)
+		} else {
+			wecomInstallSvc, err := wecom.NewInstallationService(queries, wecomBox)
+			if err != nil {
+				slog.Error("wecom: InstallationService init failed", "error", err)
+			} else {
+				h.WecomInstallations = wecomInstallSvc
+				h.WecomBindingTokens = wecom.NewBindingTokenService(queries, pool)
+				resolver := wecom.NewUserIDResolver()
+				auditLogger := wecom.NewAuditLogger(queries)
+				chatSvc := wecom.NewChatSessionService(queries, pool)
+				dispatcher := &wecom.Dispatcher{
+					Queries:      queries,
+					Chat:         chatSvc,
+					Audit:        auditLogger,
+					IssueService: h.IssueService,
+					TaskService:  h.TaskService,
+					Logger:       slog.Default(),
+				}
+				dispatcher.EnableRunBatching(wecom.DefaultChatRunBatchWindow)
+				credsProvider := wecom.CredentialsProviderFunc(func(inst db.WecomInstallation) (string, string, string, string, error) {
+					botSecret, err := wecomInstallSvc.DecryptBotSecret(inst)
+					if err != nil {
+						return "", "", "", "", err
+					}
+					corpSecret, err := wecomInstallSvc.DecryptCorpSecret(inst)
+					if err != nil {
+						return "", "", "", "", err
+					}
+					return inst.BotID, botSecret, inst.CorpID, corpSecret, nil
+				})
+				streamStore := wecom.NewOutboundStreamStore(queries)
+				streamRegistry := &wecom.HubStreamRegistry{}
+				factory := wecom.NewConnectorFactory(credsProvider, resolver, slog.Default(), streamRegistry, streamStore)
+				h.WecomHub = wecom.NewHub(queries, factory, dispatcher, wecom.HubConfig{})
+				streamRegistry.Hub = h.WecomHub
+				wecomPatcher := wecom.NewPatcher(queries, h.WecomHub, wecom.PatcherConfig{Logger: slog.Default()})
+				wecomPatcher.Register(bus)
+				replier := wecom.NewWecomOutcomeReplier(wecom.OutcomeReplierConfig{
+					BindingSvc: h.WecomBindingTokens,
+					PublicURL:  signupConfig.PublicURL,
+					Logger:     slog.Default(),
+				})
+				h.WecomHub.SetOutcomeReplier(replier)
+				h.WecomHub.SetBindingPromptConfig(h.WecomBindingTokens, signupConfig.PublicURL, "/wecom/bind")
+				dispatcher.FlushReply = replier.Reply
+				if signupConfig.PublicURL == "" {
+					slog.Warn("wecom: MULTICA_PUBLIC_URL not set; bot binding replies will omit the bind link")
+				} else {
+					slog.Info("wecom integration enabled", "public_url", signupConfig.PublicURL)
+				}
+			}
+		}
+	} else {
+		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
+	}
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -611,7 +672,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/lark/installations", h.ListLarkInstallations)
 				})
 				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/wecom/installations", h.ListWecomInstallations)
+				})
+				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Post("/wecom/installations", h.CreateWecomInstallation)
+					r.Delete("/wecom/installations/{installationId}", h.RevokeWecomInstallation)
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
 					// Device-flow scan-to-install. Begin opens a new
 					// registration session against Lark and returns
@@ -631,6 +698,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// the token only proves "this open_id requested binding," and
 		// is combined with the logged-in user to create the mapping.
 		r.Post("/api/lark/binding/redeem", h.RedeemLarkBindingToken)
+		r.Post("/api/wecom/binding/redeem", h.RedeemWecomBindingToken)
 
 		// User-scoped invitation routes (no workspace context required)
 		r.Get("/api/invitations", h.ListMyInvitations)

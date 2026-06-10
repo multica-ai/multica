@@ -6,6 +6,7 @@ import type { Agent } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
+import { wecomInstallationsOptions } from "@multica/core/wecom";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { useT } from "../../../i18n";
@@ -37,6 +38,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ...larkInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: wecomListing } = useQuery({
+    ...wecomInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -51,6 +56,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     listing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
     ) ?? false;
+  const wecomConfigured = wecomListing?.configured === true;
+  const wecomInstall = wecomListing?.installations.find(
+    (inst) => inst.agent_id === agent.id && inst.status === "active",
+  );
 
   return (
     <div className="space-y-6">
@@ -104,6 +113,39 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             // bot: the shared button renders the scan-to-bind CTA or the
             // already-connected "Manage in Lark" badge.
             <LarkAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <Webhook className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-sm font-medium">{ts(($) => $.wecom.section_title)}</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {ts(($) => $.wecom.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!wecomConfigured ? (
+            <p className="text-xs text-muted-foreground">
+              {ts(($) => $.wecom.not_enabled_title)}
+            </p>
+          ) : !canManage ? (
+            <p className="text-xs text-muted-foreground">
+              {t(($) => $.tab_body.integrations.members_note)}
+            </p>
+          ) : wecomInstall ? (
+            <p className="text-xs text-muted-foreground">
+              {ts(($) => $.wecom.connected_bots)}: Bot {wecomInstall.bot_id}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {ts(($) => $.wecom.connect_description)}
+            </p>
           )}
         </div>
       </section>

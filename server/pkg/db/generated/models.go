@@ -486,6 +486,85 @@ type LarkUserBinding struct {
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
 }
 
+type WecomBindingToken struct {
+	TokenHash      string             `json:"token_hash"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WecomUserid    string             `json:"wecom_userid"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type WecomChatSessionBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WecomChatID    string             `json:"wecom_chat_id"`
+	WecomChatType  string             `json:"wecom_chat_type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type WecomInboundAudit struct {
+	ID              pgtype.UUID        `json:"id"`
+	InstallationID  pgtype.UUID        `json:"installation_id"`
+	WecomChatID     pgtype.Text        `json:"wecom_chat_id"`
+	EventType       string             `json:"event_type"`
+	WecomMessageID  pgtype.Text        `json:"wecom_message_id"`
+	DropReason      string             `json:"drop_reason"`
+	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
+}
+
+type WecomInboundMessageDedup struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	MessageID      string             `json:"message_id"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	ClaimToken     pgtype.UUID        `json:"claim_token"`
+}
+
+type WecomInstallation struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	AgentID             pgtype.UUID        `json:"agent_id"`
+	BotID               string             `json:"bot_id"`
+	BotSecretEncrypted  []byte             `json:"bot_secret_encrypted"`
+	CorpID              string             `json:"corp_id"`
+	CorpSecretEncrypted []byte             `json:"corp_secret_encrypted"`
+	SelfBuildAgentID    pgtype.Text        `json:"self_build_agent_id"`
+	InstallerUserID     pgtype.UUID        `json:"installer_user_id"`
+	Status              string             `json:"status"`
+	WsLeaseToken        pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt    pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstalledAt         pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WecomOutboundStream struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	ReqID          string             `json:"req_id"`
+	StreamID       string             `json:"stream_id"`
+	WecomChatID    string             `json:"wecom_chat_id"`
+	WecomChatType  string             `json:"wecom_chat_type"`
+	Status         string             `json:"status"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WecomUserBinding struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	MulticaUserID   pgtype.UUID        `json:"multica_user_id"`
+	InstallationID  pgtype.UUID        `json:"installation_id"`
+	WecomUserid     string             `json:"wecom_userid"`
+	WecomOpenUserid pgtype.Text        `json:"wecom_open_userid"`
+	BoundAt         pgtype.Timestamptz `json:"bound_at"`
+}
+
 type Member struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
