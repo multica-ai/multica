@@ -459,6 +459,79 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 }
 
+func TestDaemonRegister_PreservesRuntimeExtensionMetadata(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	daemonID := "test-daemon-extension-metadata"
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    daemonID,
+		"device_name":  "extension-host",
+		"cli_version":  "0.3.18",
+		"runtimes": []map[string]any{
+			{
+				"name":            "Internal Agent (extension-host)",
+				"type":            "internal-agent",
+				"version":         "1.2.3",
+				"status":          "online",
+				"external":        true,
+				"transport":       "stream-json",
+				"icon_url":        "https://example.test/runtime.svg",
+				"description":     "Internal runtime extension",
+				"launch_header":   "internal-agent --json",
+				"capabilities":    map[string]any{"model_selection": true, "local_skills": true},
+				"pricing":         map[string]any{"internal-pro": map[string]any{"input": 3.0, "output": 15.0}},
+				"models":          []map[string]any{{"id": "internal-pro", "label": "Internal Pro", "default": true}},
+				"version_warning": "installed CLI 1.2.3 is below required minimum 1.4.0",
+				"min_cli_version": "1.4.0",
+			},
+		},
+	}, testWorkspaceID, daemonID)
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister extension: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode DaemonRegister response: %v", err)
+	}
+	runtimes, ok := resp["runtimes"].([]any)
+	if !ok || len(runtimes) != 1 {
+		t.Fatalf("DaemonRegister: expected one runtime in response, got %v", resp["runtimes"])
+	}
+	rt := runtimes[0].(map[string]any)
+	runtimeID := rt["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	if rt["external"] != true {
+		t.Fatalf("external = %v, want true", rt["external"])
+	}
+	if rt["icon_url"] != "https://example.test/runtime.svg" {
+		t.Fatalf("icon_url = %v", rt["icon_url"])
+	}
+	if rt["launch_header"] != "internal-agent --json" {
+		t.Fatalf("launch_header = %v", rt["launch_header"])
+	}
+	caps, _ := rt["capabilities"].(map[string]any)
+	if caps["model_selection"] != true || caps["local_skills"] != true {
+		t.Fatalf("capabilities not preserved: %v", rt["capabilities"])
+	}
+	models, _ := rt["models"].([]any)
+	if len(models) != 1 || models[0].(map[string]any)["id"] != "internal-pro" {
+		t.Fatalf("models not preserved: %v", rt["models"])
+	}
+	if rt["min_cli_version"] != "1.4.0" {
+		t.Fatalf("min_cli_version = %v", rt["min_cli_version"])
+	}
+}
+
 func TestDaemonRegister_WithDaemonToken_WorkspaceMismatch(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

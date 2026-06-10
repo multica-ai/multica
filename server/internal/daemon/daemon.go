@@ -789,6 +789,9 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		if entry.IsExternal {
 			rtPayload["external"] = true
 			rtPayload["transport"] = entry.Transport
+			if entry.LaunchHeader != "" {
+				rtPayload["launch_header"] = entry.LaunchHeader
+			}
 			if entry.IconURL != "" {
 				rtPayload["icon_url"] = entry.IconURL
 			}

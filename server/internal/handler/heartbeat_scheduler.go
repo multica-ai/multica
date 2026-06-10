@@ -34,7 +34,11 @@ type HeartbeatScheduler interface {
 	// back online (sync path immediately; batched path defers to the runtime's
 	// next beat, which will see status="offline" and take the sync branch in
 	// recordHeartbeat).
-	Schedule(ctx context.Context, rt db.AgentRuntime) error
+	//
+	// The bool return is true when this call synchronously restored an offline
+	// runtime to online, so callers can broadcast a cache-invalidation event
+	// without publishing every heartbeat.
+	Schedule(ctx context.Context, rt db.AgentRuntime) (bool, error)
 }
 
 // PassthroughHeartbeatScheduler is the synchronous, legacy-behavior scheduler.
@@ -49,20 +53,25 @@ func NewPassthroughHeartbeatScheduler(queries *db.Queries) *PassthroughHeartbeat
 	return &PassthroughHeartbeatScheduler{queries: queries}
 }
 
-func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRuntime) error {
+func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRuntime) (bool, error) {
+	restoreOnline := rt.Status != "online"
 	if rt.Status == "online" && rt.LastSeenAt.Valid {
 		rows, err := p.queries.TouchAgentRuntimeLastSeen(ctx, rt.ID)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if rows > 0 {
-			return nil
+			return false, nil
 		}
 		// Sweeper raced us to offline between the SELECT and this UPDATE.
 		// Fall through to MarkAgentRuntimeOnline to flip the row back.
+		restoreOnline = true
 	}
 	_, err := p.queries.MarkAgentRuntimeOnline(ctx, rt.ID)
-	return err
+	if err != nil {
+		return false, err
+	}
+	return restoreOnline, nil
 }
 
 // BatchedHeartbeatScheduler coalesces same-id Schedule calls within a tick
@@ -114,7 +123,7 @@ func NewBatchedHeartbeatScheduler(queries *db.Queries, tickInterval time.Duratio
 	}
 }
 
-func (b *BatchedHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRuntime) error {
+func (b *BatchedHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRuntime) (bool, error) {
 	// Status flip (offline→online) and never-seen rows must commit before
 	// returning so callers / dependent reads observe the new state. Only
 	// the hot "already online, bumping last_seen_at" case is batched.
@@ -124,7 +133,7 @@ func (b *BatchedHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRun
 	b.mu.Lock()
 	b.pending[rt.ID] = struct{}{}
 	b.mu.Unlock()
-	return nil
+	return false, nil
 }
 
 // Run drives periodic bulk flushes. Returns after Stop is called and the
