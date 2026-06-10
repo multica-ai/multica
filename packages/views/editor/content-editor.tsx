@@ -43,6 +43,12 @@ import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Attachment } from "@multica/core/types";
+import {
+  parseMarkdownChunked,
+  MARKDOWN_CHUNK_THRESHOLD,
+  type MarkdownManagerLike,
+} from "./utils/parse-markdown-chunked";
+import type { MentionItem } from "./extensions/mention-suggestion";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
@@ -112,6 +118,11 @@ interface ContentEditorProps {
    * prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
+  mentionMode?: "default" | "context";
+  mentionContextItems?: MentionItem[];
+  /** Enable the chat-only `/` skill picker. Defaults false. */
+  enableSlashCommands?: boolean;
   /**
    * Attachments referenced by this content. The download buttons on file
    * cards and images inside the editor look up an attachment by `url` and
@@ -174,6 +185,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       submitOnEnter = false,
       currentIssueId,
       disableMentions = false,
+      mentionMode = "default",
+      mentionContextItems,
+      enableSlashCommands = false,
       attachments,
       selectionQuoteActions,
     },
@@ -185,6 +199,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onBlurRef = useRef(onBlur);
     const onExternalSyncAcceptedRef = useRef(onExternalSyncAccepted);
     const onUploadFileRef = useRef(onUploadFile);
+    const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
     // When the editor fires onUpdate (debounced save), we set this flag to
     // protect the editor content from external defaultValue syncs until the
@@ -205,8 +220,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onBlurRef.current = onBlur;
     onExternalSyncAcceptedRef.current = onExternalSyncAccepted;
     onUploadFileRef.current = onUploadFile;
+    mentionContextItemsRef.current = mentionContextItems ?? [];
 
     const queryClient = useQueryClient();
+
+    const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
+    // parseMarkdownChunked). Small docs stay on the single-parse fast path.
+    const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
 
     const editor = useEditor({
       immediatelyRender: false,
@@ -214,12 +235,34 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
       onCreate: ({ editor: ed }) => {
+        // For large docs we mount empty (below) and parse in chunks here, so the
+        // O(n²) marked tokenizer never sees the whole document at once.
+        if (mountChunked) {
+          const manager = (
+            ed.storage as { markdown?: { manager?: MarkdownManagerLike } }
+          ).markdown?.manager;
+          if (manager) {
+            ed.commands.setContent(
+              parseMarkdownChunked(manager, initialContent),
+              { emitUpdate: false },
+            );
+          } else {
+            ed.commands.setContent(initialContent, {
+              emitUpdate: false,
+              contentType: "markdown",
+            });
+          }
+        }
         const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
         lastEmittedRef.current = md;
         onExternalSyncAcceptedRef.current?.(md);
       },
-      content: defaultValue ? preprocessMarkdown(defaultValue) : "",
-      contentType: defaultValue ? "markdown" : undefined,
+      content: mountChunked ? "" : initialContent,
+      contentType: mountChunked
+        ? undefined
+        : defaultValue
+          ? "markdown"
+          : undefined,
       extensions: createEditorExtensions({
         placeholder: placeholderText,
         queryClient,
@@ -227,6 +270,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onUploadFileRef,
         submitOnEnter,
         disableMentions,
+        mentionMode,
+        getMentionContextItems: () => mentionContextItemsRef.current,
+        enableSlashCommands,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
@@ -328,10 +374,22 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // `emitUpdate: true`; without this we would re-trigger onUpdate →
       // server save → self-write loop.
       const { from, to } = editor.state.selection;
-      editor.commands.setContent(incoming, {
-        emitUpdate: false,
-        contentType: "markdown",
-      });
+      // Same chunked path on WS-driven re-parse of a large description.
+      const manager =
+        incoming.length > MARKDOWN_CHUNK_THRESHOLD
+          ? (editor.storage as { markdown?: { manager?: MarkdownManagerLike } })
+              .markdown?.manager
+          : undefined;
+      if (manager) {
+        editor.commands.setContent(parseMarkdownChunked(manager, incoming), {
+          emitUpdate: false,
+        });
+      } else {
+        editor.commands.setContent(incoming, {
+          emitUpdate: false,
+          contentType: "markdown",
+        });
+      }
 
       // Clamp prior selection to the new doc size so the caret doesn't snap
       // to position 0 after ProseMirror replaces the document.

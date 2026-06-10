@@ -31,14 +31,18 @@ import TableRow from "@tiptap/extension-table-row";
 import TableHeader from "@tiptap/extension-table-header";
 import TableCell from "@tiptap/extension-table-cell";
 import { Table } from "@tiptap/extension-table";
+import { TaskList } from "@tiptap/extension-list";
 import { Markdown } from "@tiptap/markdown";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
-import { createMentionSuggestion } from "./mention-suggestion";
+import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
+import { SlashCommandExtension } from "./slash-command-extension";
+import { createSlashCommandSuggestion } from "./slash-command-suggestion";
 import { CodeBlockView } from "./code-block-view";
-import { PatchedListItem } from "./list-item";
+import { PatchedListItem, PatchedTaskItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createSubmitExtension } from "./submit-shortcut";
@@ -47,6 +51,7 @@ import { createFileUploadExtension } from "./file-upload";
 import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
+import { HighlightExtension } from "./highlight";
 
 const lowlight = createLowlight(common);
 
@@ -57,7 +62,7 @@ const LinkExtension = Link.extend({ inclusive: false }).configure({
   defaultProtocol: "https",
 });
 
-const ImageExtension = Image.extend({
+export const ImageExtension = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -67,10 +72,43 @@ const ImageExtension = Image.extend({
           attrs.uploading ? { "data-uploading": "" } : {},
         parseHTML: (el: HTMLElement) => el.hasAttribute("data-uploading"),
       },
+      // Intrinsic pixel dimensions, captured on upload (file-upload.ts). The
+      // browser uses width/height on <img> to compute aspect-ratio and reserve
+      // the box before the image decodes, so inserting an image causes no
+      // layout shift (and the post-insert scrollIntoView stays correct). Not
+      // serialized to markdown — `renderMarkdown` only emits src/alt/title — so
+      // round-trips stay clean.
+      width: {
+        default: null,
+        renderHTML: (attrs: Record<string, unknown>) =>
+          attrs.width ? { width: attrs.width as number } : {},
+        parseHTML: (el: HTMLElement) => {
+          const w = parseInt(el.getAttribute("width") || "", 10);
+          return Number.isFinite(w) ? w : null;
+        },
+      },
+      height: {
+        default: null,
+        renderHTML: (attrs: Record<string, unknown>) =>
+          attrs.height ? { height: attrs.height as number } : {},
+        parseHTML: (el: HTMLElement) => {
+          const h = parseInt(el.getAttribute("height") || "", 10);
+          return Number.isFinite(h) ? h : null;
+        },
+      },
     };
   },
   addNodeView() {
     return ReactNodeViewRenderer(ImageView);
+  },
+  renderMarkdown: (node: any) => {
+    const src = node.attrs?.src || "";
+    const alt = escapeMarkdownLabel(node.attrs?.alt || "");
+    const title = node.attrs?.title;
+    if (title) {
+      return `![${alt}](${src} "${title}")`;
+    }
+    return `![${alt}](${src})`;
   },
 }).configure({
   inline: false,
@@ -95,6 +133,11 @@ export interface EditorExtensionsOptions {
    * system prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  /** Override @ behavior for chat context suggestions. */
+  mentionMode?: "default" | "context";
+  getMentionContextItems?: () => MentionItem[];
+  /** When true, attach the `/` skill picker. Default false. */
+  enableSlashCommands?: boolean;
 }
 
 export function createEditorExtensions(
@@ -114,6 +157,13 @@ export function createEditorExtensions(
       listItem: false,
     }),
     PatchedListItem,
+    // Checkbox task lists: `- [ ]` / `- [x]`. TaskList + TaskItem ship their own
+    // markdown tokenizer / renderMarkdown, an input rule (typing `[] ` / `[x] `),
+    // and a checkbox NodeView. The taskList tokenizer is consulted before
+    // marked's built-in list tokenizer, so `- [ ]` becomes a task while a plain
+    // `- ` still falls through to PatchedListItem's bullet list.
+    TaskList,
+    PatchedTaskItem,
     CodeBlockLowlight.extend({
       addNodeView() {
         return ReactNodeViewRenderer(CodeBlockView);
@@ -130,6 +180,7 @@ export function createEditorExtensions(
     TableCell,
     BlockMathExtension,
     InlineMathExtension,
+    HighlightExtension,
     // 3-space indent so nested ordered lists survive CommonMark in ReadonlyContent.
     Markdown.configure({ indentation: { style: "space", size: 3 } }),
     // Make Cmd+C / Cmd+X / drag write Markdown source to clipboard text/plain
@@ -141,8 +192,15 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient) }
+          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems }) }
           : {}),
+    }),
+    SlashCommandExtension.configure({
+      HTMLAttributes: { class: "slash-command" },
+      suggestion:
+        options.enableSlashCommands && options.queryClient
+          ? createSlashCommandSuggestion(options.queryClient)
+          : { char: "/", allow: () => false },
     }),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),

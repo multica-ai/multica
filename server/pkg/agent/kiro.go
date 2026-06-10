@@ -54,10 +54,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	// `kiro-cli acp --trust-all-tools` auto-approves all tool permission
 	// requests, matching the daemon's auto-approve policy. The daemon also

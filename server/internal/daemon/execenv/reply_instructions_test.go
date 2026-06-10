@@ -42,13 +42,14 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 	}
 }
 
-// TestBuildCommentReplyInstructionsNonCodexLinux pins that every non-Codex
-// provider on Linux/macOS gets the lightweight pre-#1795 inline template.
-// The "MUST stdin" mandate was originally a Codex-specific fix that
-// #1795 / #1851 accidentally spread to every provider, breaking Windows
-// non-ASCII for all of them (#2198 / #2236 / #2376). Non-Codex providers
-// handle inline escaping correctly and the CLI server-decodes `\n` etc.,
-// so the inline template works on every non-Windows platform.
+// TestBuildCommentReplyInstructionsNonCodexLinux pins the MUL-2904 regression:
+// EVERY provider on Linux/macOS — not just Codex — gets the quoted-HEREDOC
+// `--content-stdin` template and is steered away from inline `--content "..."`.
+// The duplicate-comment loop on OKK-497 happened because an agent inlined a
+// backtick-wrapped table name into `--content`; the shell ran it as a command
+// substitution, silently deleted it, the stored comment no longer matched the
+// model's intent, and the model retried forever. The corruption is shell-driven,
+// so the guardrail cannot be scoped to one provider.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
@@ -66,7 +67,8 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 				got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 
 				for _, want := range []string{
-					"multica issue comment add " + issueID + " --parent " + triggerID + " --content \"...\"",
+					"cat <<'COMMENT' | multica issue comment add " + issueID + " --parent " + triggerID + " --content-stdin",
+					"Always use `--content-stdin`",
 					"do NOT reuse --parent values from previous turns",
 					"If you decide to reply",
 				} {
@@ -75,18 +77,11 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 					}
 				}
 
-				// Non-Codex / non-Windows providers must NOT receive the
-				// Codex-specific "MUST stdin" mandate or its HEREDOC
-				// template — that was the over-spread of #1795 / #1851.
-				for _, banned := range []string{
-					"Always use `--content-stdin`",
-					"<<'COMMENT'",
-					"--parent " + triggerID + " --content-stdin",
-					"--parent " + triggerID + " --content-file",
-				} {
-					if strings.Contains(got, banned) {
-						t.Errorf("%s reply instructions still steers at codex template: %q\n---\n%s", name, banned, got)
-					}
+				// The regression itself: agent-authored comments must never be
+				// steered at inline `--content "..."`, which the shell can
+				// rewrite (backticks / `$()` / quotes) before the CLI sees it.
+				if strings.Contains(got, "--content \"...\"") {
+					t.Errorf("%s reply instructions still offers the inline --content form\n---\n%s", name, got)
 				}
 			})
 		}
@@ -244,6 +239,68 @@ func TestInjectRuntimeConfigWindowsCommentTriggerHasNoStdin(t *testing.T) {
 			} {
 				if strings.Contains(s, banned) {
 					t.Errorf("%s still steers agent at stdin: %q\n---\n%s", fileName, banned, s)
+				}
+			}
+		})
+	}
+}
+
+// TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly pins the PR #3654
+// review fix: on Windows, the ASSIGNMENT-triggered brief must never *recommend*
+// `--content-stdin`. Unlike the comment-trigger path, the assignment workflow
+// has no BuildCommentReplyInstructions override, so an agent that follows the
+// "post your final results" step literally would pipe its final comment through
+// PowerShell and drop non-ASCII bytes (#2198 / #2236 / #2376). The OS-aware
+// ## Comment Formatting section (file-only on Windows) is the single source of
+// truth; the Available Commands entry and step 6 must defer to it, not re-offer
+// stdin. The flag synopsis may still *list* `--content-stdin` as available.
+//
+// Not parallel: mutates the package-level runtimeGOOS.
+func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+	runtimeGOOS = "windows"
+
+	// Assignment-triggered: IssueID set, no TriggerCommentID.
+	ctx := TaskContextForEnv{IssueID: "issue-1"}
+
+	for _, provider := range []string{"claude", "codex", "opencode"} {
+		t.Run(provider, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := InjectRuntimeConfig(dir, provider, ctx); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+			fileName := "CLAUDE.md"
+			if provider != "claude" {
+				fileName = "AGENTS.md"
+			}
+			data, err := os.ReadFile(filepath.Join(dir, fileName))
+			if err != nil {
+				t.Fatalf("read %s: %v", fileName, err)
+			}
+			s := string(data)
+
+			// The Windows Comment Formatting section is file-only.
+			for _, want := range []string{
+				"## Comment Formatting",
+				"On Windows, **always write the comment body to a UTF-8 file",
+				"do NOT pipe via `--content-stdin`",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing Windows file-only guidance %q\n---\n%s", fileName, want, s)
+				}
+			}
+
+			// No prose may RECOMMEND stdin on Windows. The flag synopsis may
+			// still list `--content-stdin`; only the prescriptive "file or
+			// stdin" phrasings are banned.
+			for _, banned := range []string{
+				"or `--content-stdin`",
+				"using `--content-file` or `--content-stdin`",
+				"use `--content-file <path>` or `--content-stdin`",
+			} {
+				if strings.Contains(s, banned) {
+					t.Errorf("%s recommends stdin on Windows: %q\n---\n%s", fileName, banned, s)
 				}
 			}
 		})

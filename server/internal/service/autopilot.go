@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueposition"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -185,8 +186,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		CreatorID:     leader.ID,
 		ParentIssueID: pgtype.UUID{},
 		Position:      newPosition,
-		StartDate:     pgtype.Timestamptz{},
-		DueDate:       pgtype.Timestamptz{},
+		StartDate:     pgtype.Date{},
+		DueDate:       pgtype.Date{},
 		Number:        issueNumber,
 		ProjectID:     ap.ProjectID,
 		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
@@ -231,6 +232,12 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// MUL-2429); agent-assigned autopilots go through the standard issue
 	// path. Both code paths land in agent_task_queue with agent_id = leader.
 	if ap.AssigneeType == "squad" {
+		// Fail-closed private-leader gate: if the leader is private, verify
+		// the autopilot creator still has access. This catches illegitimate
+		// configs that were saved before the save-time gate was added.
+		if leader.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, leader) {
+			return fmt.Errorf("autopilot creator cannot access private squad leader")
+		}
 		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, pgtype.UUID{}); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
@@ -291,6 +298,11 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	}
 	if !ready {
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, reason)}
+	}
+
+	// Fail-closed private-leader gate for squad autopilots.
+	if ap.AssigneeType == "squad" && agent.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, agent) {
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "creator cannot access private squad leader")}
 	}
 
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
@@ -724,7 +736,7 @@ func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run
 	// For PostHog the agent_id should be the agent that will actually run
 	// the work (the resolved leader for squad autopilots) so per-agent task
 	// counts line up with what daemons report.
-	s.TaskSvc.Analytics.Capture(analytics.IssueCreated(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.IssueCreated(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(issue.ID),
@@ -732,6 +744,7 @@ func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run
 		"",
 		util.UUIDToString(run.ID),
 		analytics.SourceAutopilot,
+		analytics.PlatformServer,
 	))
 }
 
@@ -739,11 +752,12 @@ func (s *AutopilotService) captureAutopilotRunStarted(ap db.Autopilot, run db.Au
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunStarted(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunStarted(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
+		triggerSource, // cadence proxy: see autopilot cadence note in metrics/labels_pr3.go
 		s.autopilotAssigneeAnalytics(ap),
 		triggerSource,
 	))
@@ -753,11 +767,12 @@ func (s *AutopilotService) captureAutopilotRunCompleted(ap db.Autopilot, run db.
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunCompleted(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunCompleted(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
+		run.Source,
 		s.autopilotAssigneeAnalytics(ap),
 		run.Source,
 		autopilotRunDurationMS(run),
@@ -771,11 +786,12 @@ func (s *AutopilotService) captureAutopilotRunFailed(ap db.Autopilot, run db.Aut
 	if reason == "" {
 		reason = "unknown"
 	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunFailed(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunFailed(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
+		triggerSource,
 		s.autopilotAssigneeAnalytics(ap),
 		triggerSource,
 		reason,
@@ -1051,4 +1067,26 @@ func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
 		return ""
 	}
 	return ws.IssuePrefix
+}
+
+// canCreatorAccessPrivateLeader checks whether the autopilot's creator still
+// has access to a private leader agent. Mirrors handler.canAccessPrivateAgent
+// logic: agent creators always pass; member creators must be the agent owner
+// or a workspace owner/admin. Returns false (fail-closed) on any lookup error.
+func (s *AutopilotService) canCreatorAccessPrivateLeader(ctx context.Context, ap db.Autopilot, leader db.Agent) bool {
+	if ap.CreatedByType == "agent" {
+		return true
+	}
+	creatorID := util.UUIDToString(ap.CreatedByID)
+	if util.UUIDToString(leader.OwnerID) == creatorID {
+		return true
+	}
+	member, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      ap.CreatedByID,
+		WorkspaceID: ap.WorkspaceID,
+	})
+	if err != nil {
+		return false
+	}
+	return member.Role == "owner" || member.Role == "admin"
 }

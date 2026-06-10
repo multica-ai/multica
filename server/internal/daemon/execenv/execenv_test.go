@@ -512,6 +512,222 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 	}
 }
 
+// TestReuseRefreshesSkillsWithoutDuplicating is the regression guard for
+// GitHub #3684: re-dispatching the same agent on the same issue goes through
+// the Reuse path, which must refresh skills in place rather than pile up
+// collision-free duplicates (issue-review, issue-review-multica,
+// issue-review-multica-2, …). Reuse rolls back the prior dispatch's writes
+// via its sidecar manifest before re-writing, so each skill lands at its
+// natural slug on every dispatch instead of dodging its own prior output.
+func TestReuseRefreshesSkillsWithoutDuplicating(t *testing.T) {
+	t.Parallel()
+
+	workspacesRoot := t.TempDir()
+	task := TaskContextForEnv{
+		IssueID: "reuse-skill-dedup",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Issue Review", Content: "Review the issue."},
+		},
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-reuse-dedup",
+		TaskID:         "11112222-3333-4444-5555-666677778888",
+		Provider:       "claude",
+		Task:           task,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	skillsDir := filepath.Join(env.WorkDir, ".claude", "skills")
+
+	// Re-dispatch twice on the same persistent workdir.
+	for i := 0; i < 2; i++ {
+		if reused := Reuse(ReuseParams{
+			WorkDir:  env.WorkDir,
+			Provider: "claude",
+			Task:     task,
+		}, testLogger()); reused == nil {
+			t.Fatalf("Reuse #%d returned nil", i+1)
+		}
+	}
+
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		t.Fatalf("read skills dir: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 1 || names[0] != "issue-review" {
+		t.Fatalf("after re-dispatch the skills dir = %v, want exactly [issue-review] with no -multica duplicates", names)
+	}
+
+	// The surviving skill keeps its natural slug in frontmatter, so the agent
+	// invokes `issue-review` and not a suffixed copy.
+	body, err := os.ReadFile(filepath.Join(skillsDir, "issue-review", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(body), "name: issue-review") {
+		t.Errorf("SKILL.md frontmatter should pin name: issue-review; got:\n%s", body)
+	}
+}
+
+// TestReuseReclaimsManagedSkillDirWithStrayAgentFile covers the edge case the
+// #3716 review surfaced: a prior-dispatch agent writes a file into the
+// platform's managed skill directory. CleanupSidecars on its own would keep
+// that now-non-empty directory, leaving the canonical slug occupied so the
+// next refresh dodges to issue-review-multica. Reuse must reclaim the
+// platform-owned skill directory so the refreshed skill stays at its natural
+// slug.
+func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
+	t.Parallel()
+
+	workspacesRoot := t.TempDir()
+	task := TaskContextForEnv{
+		IssueID: "reuse-stray-file",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Issue Review", Content: "Review the issue."},
+		},
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-reuse-stray",
+		TaskID:         "aaaabbbb-cccc-dddd-eeee-ffff00001111",
+		Provider:       "claude",
+		Task:           task,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	skillsDir := filepath.Join(env.WorkDir, ".claude", "skills")
+
+	// Prior-run agent drops scratch inside the managed skill directory.
+	stray := filepath.Join(skillsDir, "issue-review", "agent-notes.md")
+	if err := os.WriteFile(stray, []byte("agent scratch"), 0o644); err != nil {
+		t.Fatalf("seed stray agent file: %v", err)
+	}
+
+	if reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "claude",
+		Task:     task,
+	}, testLogger()); reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		t.Fatalf("read skills dir: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 1 || names[0] != "issue-review" {
+		t.Fatalf("after reuse with a stray agent file the skills dir = %v, want exactly [issue-review] with no -multica duplicate", names)
+	}
+
+	// The managed skill dir is platform-owned: reclaiming it drops the agent's
+	// stray scratch (matching the Codex path) and re-creates a clean SKILL.md.
+	if _, err := os.Stat(stray); !os.IsNotExist(err) {
+		t.Errorf("expected stray file under the managed skill dir to be reclaimed; stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(skillsDir, "issue-review", "SKILL.md")); err != nil {
+		t.Errorf("expected a refreshed SKILL.md at the canonical slug: %v", err)
+	}
+}
+
+// TestReuseSkillRefreshIsCanonicalAcrossProviders exercises the reuse skill
+// rollback (removeReusedManagedSkillDirs + CleanupSidecars + writeContextFiles
+// — the exact sequence Reuse runs) directly across the file-based providers,
+// including the stray-agent-file boundary. Driving the sequence rather than
+// full Reuse avoids the per-provider config setup (codex-home, openclaw
+// binary) while still covering each provider's skills-dir layout.
+func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"claude", "openclaw", "copilot", ""} {
+		provider := provider
+		name := provider
+		if name == "" {
+			name = "default"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			workDir := t.TempDir()
+			envRoot := t.TempDir()
+			task := TaskContextForEnv{
+				IssueID: "reuse-table",
+				AgentSkills: []SkillContextForEnv{
+					{Name: "Issue Review", Content: "v1"},
+				},
+			}
+
+			// First dispatch: write context + persist the manifest.
+			m1 := &sidecarManifest{}
+			if err := writeContextFiles(workDir, provider, task, m1); err != nil {
+				t.Fatalf("first writeContextFiles: %v", err)
+			}
+			if err := writeSidecarManifest(envRoot, m1); err != nil {
+				t.Fatalf("persist manifest: %v", err)
+			}
+
+			skillsDir := skillsDirPath(workDir, provider)
+			stray := filepath.Join(skillsDir, "issue-review", "agent-notes.md")
+			if err := os.WriteFile(stray, []byte("scratch"), 0o644); err != nil {
+				t.Fatalf("seed stray file: %v", err)
+			}
+
+			// Second dispatch: same rollback + refresh sequence Reuse runs.
+			task.AgentSkills[0].Content = "v2"
+			if err := removeReusedManagedSkillDirs(envRoot, skillsDirPath(workDir, provider)); err != nil {
+				t.Fatalf("removeReusedManagedSkillDirs: %v", err)
+			}
+			if err := CleanupSidecars(envRoot); err != nil {
+				t.Fatalf("CleanupSidecars: %v", err)
+			}
+			m2 := &sidecarManifest{}
+			if err := writeContextFiles(workDir, provider, task, m2); err != nil {
+				t.Fatalf("second writeContextFiles: %v", err)
+			}
+			if err := writeSidecarManifest(envRoot, m2); err != nil {
+				t.Fatalf("persist manifest #2: %v", err)
+			}
+
+			entries, err := os.ReadDir(skillsDir)
+			if err != nil {
+				t.Fatalf("read skills dir: %v", err)
+			}
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			if len(names) != 1 || names[0] != "issue-review" {
+				t.Fatalf("skills dir = %v, want exactly [issue-review]", names)
+			}
+			if _, err := os.Stat(stray); !os.IsNotExist(err) {
+				t.Errorf("stray agent file should be reclaimed; stat err = %v", err)
+			}
+			body, err := os.ReadFile(filepath.Join(skillsDir, "issue-review", "SKILL.md"))
+			if err != nil {
+				t.Fatalf("read refreshed SKILL.md: %v", err)
+			}
+			if !strings.Contains(string(body), "v2") {
+				t.Errorf("SKILL.md should carry refreshed content v2; got:\n%s", body)
+			}
+		})
+	}
+}
+
 func TestCleanupPreservesLogs(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
@@ -613,6 +829,7 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"multica issue status <id> <status>",
 		"multica issue comment add <issue-id>",
 		"multica issue comment add --help",
+		"multica squad member set-role <squad-id>",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing core command/help text %q\n---\n%s", want, s)
@@ -1345,22 +1562,16 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigAvailableCommandsIsNeutral pins that the core
-// Available Commands section lists comment input modes neutrally for every
-// non-Codex provider on every host OS, with no "MUST pipe via stdin" mandate.
-//
-// Background: #1795 / #1851 introduced "MUST pipe via stdin" /
-// `--description-stdin` directives in the global section to fix Codex's
-// habit of emitting literal `\n` inside `--content "..."` (MUL-1467).
-// That mandate landed in the all-provider section and ended up steering every
-// provider at stdin — which then broke non-ASCII bytes on Windows shells
-// (#2198 / #2236 / #2376). This rollback keeps the strong Codex-specific
-// mandate in the Codex-Specific section (pinned by
-// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin) and leaves the core global
-// command entry neutral.
+// TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic pins that the
+// "never inline --content for agent-authored comments" guardrail reaches EVERY
+// provider on every host OS — post-MUL-2904 the corruption is shell-driven, so
+// the directive is no longer Codex-scoped. The Available Commands entry still
+// lists all three input modes as available, and the legacy over-broad
+// `--description-stdin` / "MUST pipe via stdin" phrasings (#1795 / #1851, which
+// broke Windows non-ASCII) must NOT reappear.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
-func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
+func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	saved := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = saved })
 
@@ -1386,7 +1597,7 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 				}
 				s := string(data)
 
-				// Available Commands lists all three input modes as fact.
+				// Available Commands lists all three input modes as available.
 				for _, want := range []string{
 					"--content \"...\"",
 					"--content-stdin",
@@ -1397,16 +1608,28 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 					}
 				}
 
-				// "MUST pipe via stdin" must NOT appear in any non-Codex
-				// provider's runtime config: it was the over-spread of
-				// the Codex-specific fix.
+				// The provider-agnostic guardrail must now reach non-Codex
+				// providers too: a dedicated Comment Formatting section that
+				// bans inline `--content` for agent-authored comments.
+				for _, want := range []string{
+					"## Comment Formatting",
+					"Never use inline `--content` for agent-authored comments",
+				} {
+					if !strings.Contains(s, want) {
+						t.Errorf("%s missing provider-agnostic comment guardrail %q\n---\n%s", configFile, want, s)
+					}
+				}
+
+				// The legacy over-broad mandate (#1795 / #1851) must NOT
+				// reappear — it is what broke Windows non-ASCII for every
+				// provider.
 				for _, banned := range []string{
 					"MUST pipe via stdin",
 					"Agent-authored comments should always pipe content via stdin",
 					"use `--description-stdin` and pipe a HEREDOC",
 				} {
 					if strings.Contains(s, banned) {
-						t.Errorf("%s carries over-spread Codex mandate %q for non-Codex provider %s\n---\n%s", configFile, banned, provider, s)
+						t.Errorf("%s reintroduces over-broad legacy mandate %q for provider %s\n---\n%s", configFile, banned, provider, s)
 					}
 				}
 			})
@@ -1414,49 +1637,63 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin pins the
-// Codex-Specific Comment Formatting section's "MUST stdin" mandate on
-// non-Windows hosts. This is the MUL-1467 / #1795 / #1851 fix scoped
-// back to where it belongs.
+// TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin pins that the
+// "## Comment Formatting" section emits the quoted-HEREDOC stdin mandate on
+// non-Windows hosts for EVERY provider, not just Codex. Post-MUL-2904 the
+// guardrail is provider-agnostic because the corruption is shell-driven; the
+// quoted delimiter is what blocks backtick / `$()` substitution in the body.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
-func TestInjectRuntimeConfigCodexLinuxEmphasizesStdin(t *testing.T) {
+func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin(t *testing.T) {
 	saved := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = saved })
 	runtimeGOOS = "linux"
 
-	dir := t.TempDir()
-	if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{
-		IssueID:          "issue-1",
-		TriggerCommentID: "comment-1",
-	}); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("read AGENTS.md: %v", err)
-	}
-	s := string(data)
+	for _, provider := range []string{"codex", "claude", "opencode"} {
+		t.Run(provider, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := InjectRuntimeConfig(dir, provider, TaskContextForEnv{
+				IssueID:          "issue-1",
+				TriggerCommentID: "comment-1",
+			}); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+			fileName := "CLAUDE.md"
+			if provider != "claude" {
+				fileName = "AGENTS.md"
+			}
+			data, err := os.ReadFile(filepath.Join(dir, fileName))
+			if err != nil {
+				t.Fatalf("read %s: %v", fileName, err)
+			}
+			s := string(data)
 
-	for _, want := range []string{
-		"Codex-Specific Comment Formatting",
-		"always use `--content-stdin` with a HEREDOC",
-		"even for short single-line replies",
-		"Never use inline `--content` for agent-authored comments",
-		"Keep the same `--parent` value",
-		"do not rely on `\\n` escapes",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("AGENTS.md missing Codex multiline guidance %q\n---\n%s", want, s)
-		}
+			for _, want := range []string{
+				"## Comment Formatting",
+				"always use `--content-stdin` with a HEREDOC",
+				"even for short single-line replies",
+				"<<'COMMENT'",
+				"Never use inline `--content` for agent-authored comments",
+				"Keep the same `--parent` value",
+				"do not rely on `\\n` escapes",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing comment-formatting guidance %q\n---\n%s", fileName, want, s)
+				}
+			}
+			// The heading is no longer Codex-scoped.
+			if strings.Contains(s, "Codex-Specific Comment Formatting") {
+				t.Errorf("%s still carries the old Codex-scoped heading\n---\n%s", fileName, s)
+			}
+		})
 	}
 }
 
 // TestInjectRuntimeConfigCodexWindowsUsesContentFile pins that on Windows
-// the Codex-Specific section directs the agent at `--content-file` instead
-// of `--content-stdin`. PowerShell 5.1 / cmd.exe re-encode piped HEREDOC
-// bytes through the active console codepage and silently drop non-ASCII
-// as `?` before reaching `multica.exe` (#2198 / #2236 / #2376).
+// the Comment Formatting section directs the agent at `--content-file`
+// instead of `--content-stdin`. PowerShell 5.1 / cmd.exe re-encode piped
+// HEREDOC bytes through the active console codepage and silently drop
+// non-ASCII as `?` before reaching `multica.exe` (#2198 / #2236 / #2376).
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
@@ -3675,6 +3912,7 @@ func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
 	ctx := TaskContextForEnv{
 		IssueID:             issueID,
 		TriggerCommentID:    triggerID,
+		TriggerThreadID:     "thread-root-1",
 		PriorSessionResumed: true,
 	}
 	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
@@ -3689,9 +3927,10 @@ func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"Do not re-read comment history by default",
-		"Only if the resumed session is missing thread context",
-		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+		"active thread anchor `thread-root-1` and triggering comment ID `" + triggerID + "`",
+		"If your reply depends on thread context",
+		"do not rely only on resumed session memory",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("comment-triggered resumed Workflow missing %q\n---\n%s", want, s)

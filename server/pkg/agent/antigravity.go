@@ -39,10 +39,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	logFile, err := os.CreateTemp("", "multica-agy-log-*.log")
 	if err != nil {
@@ -216,9 +213,16 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 	args := []string{
 		"-p", prompt,
 		"--dangerously-skip-permissions",
-		"--print-timeout", antigravityFormatTimeout(timeout),
-		"--log-file", logPath,
 	}
+	// Only pass --print-timeout when a positive wall-clock cap is configured.
+	// timeout <= 0 means "no cap" (MUL-3064): agy then runs without its own
+	// print-timeout guillotine, matching every other backend's runContext
+	// semantics. Passing antigravityFormatTimeout(0) would clamp to 1s and kill
+	// the run almost immediately — the opposite of "no cap".
+	if timeout > 0 {
+		args = append(args, "--print-timeout", antigravityFormatTimeout(timeout))
+	}
+	args = append(args, "--log-file", logPath)
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--conversation", opts.ResumeSessionID)
 	}

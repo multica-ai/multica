@@ -5,6 +5,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
@@ -25,7 +26,9 @@ import {
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { labelListOptions } from "@multica/core/labels/queries";
@@ -36,6 +39,7 @@ import { ViewStoreProvider, useViewStore, useViewStoreApi } from "@multica/core/
 import { filterIssues } from "../../issues/utils/filter";
 import { buildIssueListServerFilter } from "../../issues/utils/server-filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
+import { filterRunningAssigneeGroups } from "./project-issue-filters";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
@@ -156,20 +160,39 @@ export function ProjectIssuesContent({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const effectiveLabelFilters = scopedLabelFilters ?? labelFilters;
-  const issues = projectIssues;
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of snapshot) {
+      if (task.status === "running" && task.issue_id) ids.add(task.issue_id);
+    }
+    return ids;
+  }, [snapshot]);
+
+  const issues = useMemo(
+    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters, agentRunningFilter, runningIssueIds }),
+    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds],
+  );
 
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters, agentRunningFilter, runningIssueIds }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds],
   );
 
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters],
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters, agentRunningFilter, runningIssueIds }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds],
+  );
+
+  const filteredAssigneeGroups = useMemo(
+    () => filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
+    [assigneeGroups, agentRunningFilter, runningIssueIds],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
@@ -234,8 +257,8 @@ export function ProjectIssuesContent({
     <div className="flex flex-col flex-1 min-h-0">
       {viewMode === "board" && (
         <BoardView
-          issues={assigneeGroups ? projectIssues : issues}
-          assigneeGroups={assigneeGroups}
+          issues={filteredAssigneeGroups ? filteredAssigneeGroups.flatMap((group) => group.issues) : issues}
+          assigneeGroups={filteredAssigneeGroups}
           assigneeGroupQueryKey={assigneeGroupQueryKey}
           assigneeGroupFilter={assigneeGroupFilter}
           visibleStatuses={visibleStatuses}
@@ -445,6 +468,19 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
+  useEffect(() => {
+    if (project) {
+      recordRecentContext(wsId, {
+        type: "project",
+        id: project.id,
+        label: project.title,
+        subtitle: project.description ?? undefined,
+        icon: project.icon,
+        projectStatus: project.status,
+      });
+    }
+  }, [project?.id, project?.title, project?.description, project?.icon, project?.status, recordRecentContext, wsId]);
   const projectScope = `project:${projectId}`;
   const projectFilter = useMemo<MyIssuesFilter>(
     () => ({ project_id: projectId }),
@@ -789,8 +825,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 />
                 <DropdownMenuContent align="end" className="w-auto">
                   <DropdownMenuItem onClick={() => {
-                    navigator.clipboard.writeText(window.location.href);
-                    toast.success(t(($) => $.detail.toast_link_copied));
+                    void copyText(window.location.href).then((ok) => {
+                      if (ok) toast.success(t(($) => $.detail.toast_link_copied));
+                    });
                   }}>
                     <Link2 className="h-3.5 w-3.5" />
                     {t(($) => $.detail.copy_link)}

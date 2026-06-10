@@ -1,0 +1,382 @@
+{
+  "step_header": {
+    "step_of": "ステップ {{current}} / {{total}}"
+  },
+  "welcome": {
+    "wordmark": "Multica へようこそ",
+    "headline_line1": "あなたの AI チームメイトを、",
+    "headline_line2": "ひとつの",
+    "headline_emphasis": "ワークスペースに。",
+    "lede": "同僚に仕事を任せるように作業を割り当てるだけ。エージェントがイシューを引き受け、ステータスを更新し、完了したらコメントします。",
+    "lede_web": "デスクトップ版にはランタイムが同梱されており、何もインストールする必要はありません。ご自身の CLI を接続するには、ウェブで続けてください。",
+    "lede_desktop": "完了するころには、実際のエージェントがあなたの最初のイシューに返信しています。",
+    "download_desktop": "デスクトップ版をダウンロード",
+    "continue_on_web": "ウェブで続ける",
+    "start_exploring": "探索を始める",
+    "skip_existing": "以前にやったことがあります",
+    "illustration_caption": "すべてのイシュー、すべてのスレッド、すべての判断を、チームとエージェントで共有。",
+    "illustration": {
+      "card1_actor_name": "あなた",
+      "card1_actor_initial": "N",
+      "card1_body_prefix": " 短いローンチ投稿の下書きをお願いできますか? ",
+      "card1_body_suffix": " のインタビュー結果を参考にしてください。",
+      "card1_mention_content": "@コンテンツエージェント",
+      "card1_mention_research": "@リサーチエージェント",
+      "card2_actor_name": "コンテンツエージェント",
+      "card2_body": "了解です。Research の引用をまとめ、「節約できた時間」の切り口で下書きを作成中です…",
+      "card3_actor_name": "リサーチエージェント",
+      "card3_body": "今週のユーザーインタビューをまとめました — 12 件の通話、4 つの繰り返し出たテーマ、3 つの引用候補。",
+      "card3_timestamp": "15 分前",
+      "card4_actor_name": "レビューエージェント",
+      "card4_body": "月曜の下書きをレビューし、トーンについて 4 件のメモを残しました。新しい下書きを待機中です。",
+      "card5_actor_name": "コーディングエージェント",
+      "card5_body_prefix": "エクスポート機能をリリースしました ",
+      "card5_body_suffix": " さんが指摘した点も対応済みです。プレビューリンクは PR にあります。",
+      "card5_mention_you": "@あなた",
+      "card5_timestamp": "たった今"
+    }
+  },
+  "common": {
+    "back": "戻る",
+    "continue": "続ける",
+    "skip": "スキップ",
+    "cancel": "キャンセル",
+    "close": "閉じる"
+  },
+  "source_backfill": {
+    "eyebrow": "ちょっと質問",
+    "lede": "登録時にお答えいただかなかった項目です。Multica がどんな方に役立っているかを把握するのに役立ちます。一問だけ、終わればすぐ作業に戻れます。",
+    "submit": "送信",
+    "hint_ready": "OK です。準備ができたら送信を押してください。"
+  },
+  "questions": {
+    "eyebrow_about_you": "あなたについて",
+    "source": {
+      "question": "Multica をどこで知りましたか?",
+      "friends_colleagues": "友人または同僚",
+      "search": "Google / 検索",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_misc": "その他の SNS",
+      "blog_newsletter": "ブログ / ニュースレター",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "職場で",
+      "event_conference": "カンファレンス / ミートアップ",
+      "dont_remember": "覚えていない",
+      "other": "その他",
+      "other_placeholder": "例: よく聴くポッドキャスト",
+      "social_github": "GitHub"
+    },
+    "role": {
+      "question": "あなたに最も近いのはどれですか?",
+      "engineer": "エンジニア / 開発者",
+      "product": "プロダクトマネージャー",
+      "designer": "デザイナー",
+      "founder": "創業者 / 経営層",
+      "marketing": "マーケティング / グロース",
+      "writer": "ライター / コンテンツ",
+      "research": "リサーチャー / アナリスト",
+      "ops": "オペレーション / プロジェクト管理",
+      "student": "学生 / 個人利用",
+      "other": "その他",
+      "other_placeholder": "例: 教師、サポートリード"
+    },
+    "use_case": {
+      "question": "Multica を何に使いたいですか?",
+      "ship_code": "AI エージェントとコードをリリース",
+      "manage_team": "チームのタスクを管理",
+      "personal_tasks": "自分のタスクを整理",
+      "plan_research": "計画、ブレインストーミング、リサーチ",
+      "write_publish": "執筆、編集、公開",
+      "automate_ops": "運用とワークフローの自動化",
+      "evaluate": "とりあえず試してみる",
+      "other": "その他",
+      "other_placeholder": "例: スタディグループの運営"
+    }
+  },
+  "option_card": {
+    "other_label": "その他",
+    "other_aria": "別の内容を入力"
+  },
+  "step_question": {
+    "hint_pick": "ひとつ選んで続けてください。答えたくない場合はスキップできます。",
+    "hint_continue": "いい感じです。準備ができたら「続ける」を押してください。"
+  },
+  "runtime_aside": {
+    "what_eyebrow": "エージェントランタイムとは?",
+    "what_prefix": "接続する「コンピュータ」を、私たちは内部的に ",
+    "what_term": "エージェントランタイム",
+    "what_suffix": " と呼んでいます。Claude Code や Codex などの AI コーディングツール 1 つと組み合わさる、コンピュータ上の小さなバックグラウンドプロセスです。1 つのツールに 1 つのエージェントランタイム。エージェントランタイムが、エージェントの引き受けたタスクを実際に実行します。",
+    "good_eyebrow": "知っておくと便利",
+    "swap_title": "いつでも切り替え",
+    "swap_body": "各エージェントのランタイムは単なる設定です。いつでも変更できます。",
+    "add_more_title": "あとで追加",
+    "add_more_body": "チームメイト用に別のコンピュータを接続したり、エージェントごとに専用のものを用意したりできます。",
+    "learn_more": "エージェントランタイムについて学ぶ →"
+  },
+  "cli_install": {
+    "copy_aria": "コピー",
+    "intro": "エージェントを実行するには、このコンピュータにエージェントランタイム(Claude Code、Codex、Cursor など)が必要です。サーバーやリモート開発環境でも動作します。",
+    "step1_label": "Multica CLI をインストール",
+    "step2_label": "デーモンを起動"
+  },
+  "cloud_waitlist": {
+    "intro_main": "クラウドランタイムはまだ提供されていません。メールアドレスを残していただければ、準備ができ次第ご連絡します。",
+    "intro_warning": "注意: ランタイムがないとエージェントはタスクを実行できません。今スキップすると、戻ってきてインストールするまでワークスペースは読み取り専用になります。",
+    "email_label": "メールアドレス",
+    "email_placeholder": "you@work.com",
+    "reason_label": "クラウドを使いたい理由",
+    "optional": "任意",
+    "reason_placeholder": "例: エージェントを 24 時間稼働させたい、チームが複数のデバイスで作業している など。",
+    "join": "ウェイトリストに登録",
+    "on_list": "登録済みです",
+    "success_toast": "ウェイトリストに登録しました。クラウドランタイムが利用可能になったらメールでお知らせします。",
+    "failed_toast": "ウェイトリストに登録できませんでした"
+  },
+  "first_issue": {
+    "error_title": "問題が発生しました",
+    "retry": "再試行",
+    "retry_failed": "再試行に失敗しました",
+    "finishing": "仕上げ中",
+    "opening": "もうすぐです — ワークスペースを開いています。"
+  },
+  "step_agent": {
+    "eyebrow": "最初のエージェント",
+    "headline": "最初のチームメイトに会いましょう。",
+    "lede_prefix": "あなたの回答からは ",
+    "lede_suffix": " が合っていそうです。4 つの中から自分に合うものを選んでください。どのテンプレートも最初のイシューをすぐに引き受けられる状態で用意されています。指示はあとでエージェント設定ページから調整できます。",
+    "footer_hint": "始めるにはエージェント 1 つで十分です。あとでサイドバーから追加できます。",
+    "create_action": "{{name}} を作成",
+    "create_failed": "エージェントを作成できませんでした",
+    "recommended_badge": "おすすめ",
+    "templates": {
+      "coding": {
+        "label": "コーディングエージェント",
+        "blurb": "コードを書き、リファクタリングし、リリースします。リポジトリを読みます。",
+        "instructions": "あなたはプロダクトチームの Coding Agent です。コーディングのイシューを引き受け、機能を実装し、バグを修正し、テストを書き、Pull request を開いてください。始める前にリポジトリを読み、既存のコード規約に従い、diff は焦点を絞ったものに保ってください。受け入れ基準が曖昧なときは確認の質問をしてください。"
+      },
+      "planning": {
+        "label": "プランニングエージェント",
+        "blurb": "作業を分解し、仕様を起草し、ボードを整理します。",
+        "instructions": "あなたは Planning Agent です。漠然としたアイデアや未着手のイシューを、スコープが定まった実行可能な作業に変えてください。サブタスクに分解し、受け入れ基準を書き、担当者と順序を提案します。スピードより明確さを優先してください。コンテキスト不足で行き詰まったら、推測せずに具体的な質問を 1 つしてください。"
+      },
+      "writing": {
+        "label": "ライティングエージェント",
+        "blurb": "下書き、要約、リサーチを行います。長文も得意です。",
+        "instructions": "あなたは Writing Agent です。ドキュメントを起草し、長い内容を要約し、必要に応じてウェブでトピックをリサーチしてください。アウトラインではなく、読者がそのまま使える完成した文章として出力を構成してください。資料を参照した場合は出典を引用してください。イシューでユーザーが定めたトーンに合わせてください。"
+      },
+      "assistant": {
+        "label": "アシスタント",
+        "blurb": "汎用型。タスクが不明確なときに頼れるデフォルトです。",
+        "instructions": "あなたは汎用のチームメイトです。軽めのコーディング、執筆、リサーチ、計画など多様なタスクをこなし、スコープについては実用的に判断してください。タスクが曖昧なときは、取りかかる前に確認の質問を 1 つしてください。網羅的な出力より、短く役立つ出力を基本としてください。"
+      }
+    },
+    "about_eyebrow": "エージェントとは",
+    "about_headline": "ワークスペースの中に住む AI のチームメイトです。",
+    "about_body": "エージェントは、他の同僚と同じようにすべての担当者ピッカーに表示されます。違いは、与えたランタイムの上でなら 24 時間働けることです。",
+    "ways_eyebrow": "エージェントとの働き方",
+    "way_assign_title": "イシューを割り当てる",
+    "way_assign_body": "タスクを引き受け、スレッドで報告します。",
+    "way_mention_title": "コメントで @メンション",
+    "way_mention_body": "会話に呼んで、すばやく意見をもらえます。",
+    "way_chat_title": "1 対 1 でチャット",
+    "way_chat_body": "イシューを作らずに、すばやく質問できます。",
+    "way_autopilot_title": "オートパイロットに設定",
+    "way_autopilot_body": "毎日のトリアージ、週次ダイジェスト、月次監査などをスケジュールに沿って実行します。",
+    "add_more_hint": "エージェントはいつでも追加できます。1 人の万能型より、専門エージェントの小さなチームのほうが優れています。",
+    "docs_link": "最初のエージェントを作成する →"
+  },
+  "welcome_after_onboarding": {
+    "loading_helper": "Helper を準備中…",
+    "error_title": "セットアップを完了できませんでした",
+    "error_generic": "問題が発生しました。もう一度お試しください。",
+    "retry": "もう一度試す",
+    "dismiss_error": "閉じる",
+    "error_close": "閉じる",
+    "user_context_heading": "私について",
+    "user_context_role_label": "役割",
+    "user_context_use_case_label": "Multica でやりたいこと",
+    "runtime": {
+      "greeting": "こんにちは、Multica へようこそ",
+      "subtitle": "私はあなたの最初の Agent アシスタントです。",
+      "capabilities": "Multica の使い方について、何でも聞いてください。ワークスペースでの作業を任せることもできます — イシューの作成、cron タスクの設定、新しいエージェントの構築など…",
+      "section_label": "まず取り組むタスクを 1 つ以上選んでください:",
+      "assign_empty": "1 つ以上選択",
+      "assign_count": "{{count}} 件のタスクを私に割り当てる →",
+      "assign_count_plural": "{{count}} 件のタスクを私に割り当てる →",
+      "cards": {
+        "intro": {
+          "subtitle": "Multica とは何か、何ができるのかを 1〜2 段落で説明します。"
+        },
+        "tour": {
+          "subtitle": "イシュー、エージェント、スクワッド、オートパイロットがどう連携するかをご案内します。"
+        },
+        "welcome_page": {
+          "subtitle": "あなたの役割に合わせた単一ファイルの HTML スライドデックを作成します。コピーしてブラウザで開けます。"
+        }
+      },
+      "success": {
+        "title": "準備完了!",
+        "subtitle": "少々お待ちを — {{agentName}} が対応中です ☕",
+        "tip_inbox": "進捗があると、インボックスに表示されます。",
+        "tip_chat": "ライブでチャットしたいときは、右下のチャットバブルをクリックしてください。",
+        "got_it": "了解 →"
+      }
+    },
+    "skip": {
+      "loading": "ワークスペースを準備中…",
+      "title": "Multica へようこそ!",
+      "subtitle": "次のステップを助けるために、2 つのタスクを追加しました。",
+      "got_it": "了解",
+      "status_in_progress": "進行中",
+      "status_todo": "未着手",
+      "cards": {
+        "install_runtime": {
+          "title": "ランタイムを接続",
+          "subtitle": "Codex または Kimi をインストールして、エージェントをオンラインにしましょう。"
+        },
+        "create_agent": {
+          "title": "最初のエージェントを作成",
+          "subtitle": "ランタイムがオンラインになったら、最初の Multica エージェントを作りましょう。"
+        }
+      }
+    }
+  },
+  "step_workspace": {
+    "eyebrow_first": "最初のワークスペース",
+    "eyebrow_resume": "続きから、または新規作成",
+    "headline_first": "ワークスペースに名前を付けましょう。",
+    "headline_resume": "{{name}} で続けるか、別のワークスペースを始めましょう。",
+    "lede_first": "ワークスペースは、イシュー、エージェント、プロジェクトが集まる場所です。あとでチームメイトを招待したり、ワークスペースを増やしたりできます。",
+    "lede_resume": "すでにあるワークスペースでセットアップを続けるか、別に新しいワークスペースを作成してください。いくつでもワークスペースに所属できます。",
+    "name_label": "ワークスペース名",
+    "name_placeholder": "Acme Inc、My Lab、Side Projects…",
+    "url_label": "URL",
+    "slug_placeholder": "acme",
+    "issue_prefix_label": "イシュープレフィックス",
+    "issue_prefix_prefix": "イシューは ",
+    "issue_prefix_suffix": " のように表示されます。あとで設定から変更できます。",
+    "create_new_title": "新しいワークスペースを作成",
+    "create_new_subtitle": "新しく始めましょう — 別の業務領域のための独立した場所です。",
+    "hint_opening": "{{name}} を開いています。",
+    "hint_creating": "{{name}} を作成しています。",
+    "hint_creating_pending": "{{name}} を作成中…",
+    "hint_creating_fallback": "ワークスペース",
+    "hint_name_first": "ワークスペースを作成するには名前を入力してください。",
+    "hint_pick": "ワークスペースを選ぶか、新しく始めてください。",
+    "cta_open": "{{name}} を開く",
+    "cta_create_named": "{{name}} を作成",
+    "cta_create_workspace": "ワークスペースを作成",
+    "cta_creating": "作成中…",
+    "slug_format_error": "使用できるのは小文字、数字、ハイフンのみです",
+    "slug_taken_error": "そのワークスペース URL はすでに使われています。",
+    "slug_reserved_error": "そのワークスペース URL は予約済みのため使用できません。",
+    "slug_conflict_toast": "別のワークスペース URL を選んでください",
+    "create_failed_toast": "ワークスペースを作成できませんでした",
+    "side_create_eyebrow": "ワークスペースの中にあるもの",
+    "side_existing_eyebrow": "あなたのワークスペース",
+    "side_things_eyebrow": "ここでできること",
+    "side_next_eyebrow": "次のステップ",
+    "side_preview_name": "あなたのワークスペース",
+    "side_preview_slug": "workspace",
+    "perk_assign": "同僚に任せるようにイシューをエージェントに割り当てる",
+    "perk_chat": "イシューを作らずにどのエージェントともチャット",
+    "perk_invite": "チームメイトを招待 — 招待した人にはこのワークスペースだけが見えます",
+    "perk_switch": "左上からいつでも他のワークスペースに切り替え",
+    "next_runtime": "エージェントが動く場所を用意するためにコンピュータを接続",
+    "next_agent": "接続したランタイムから Multica Helper を作成",
+    "next_starter": "次のステップのためにオンボーディングイシューを 1 つ開く",
+    "preview": {
+      "inbox_label": "インボックス",
+      "inbox_meta": "あなたの通知",
+      "issues_label": "イシュー",
+      "issues_meta": "共有のタスクボード",
+      "agents_label": "エージェント",
+      "agents_meta": "あなたの AI チームメイト",
+      "projects_label": "プロジェクト",
+      "projects_meta": "関連するイシューをまとめる",
+      "autopilot_label": "オートパイロット",
+      "autopilot_meta": "スケジュールされた自動化",
+      "runtimes_label": "ランタイム",
+      "runtimes_meta": "エージェントが動く場所",
+      "skills_label": "スキル",
+      "skills_meta": "再利用できるプレイブック",
+      "more_label": "その他",
+      "more_meta": "さらに多くの機能"
+    },
+    "creation_disabled_eyebrow": "ワークスペースの作成は無効です",
+    "creation_disabled_headline": "管理者に招待を依頼してください。",
+    "creation_disabled_lede": "この Multica インスタンスでは新しいワークスペースを作成できません。管理者からワークスペースに招待されたら、招待を承諾して更新し、続けてください。",
+    "creation_disabled_logout": "ログアウト",
+    "creation_disabled_eyebrow_resume": "あなたのワークスペース",
+    "creation_disabled_headline_resume": "{{name}} で続けましょう。",
+    "creation_disabled_lede_resume": "このインスタンスではワークスペースの作成が無効になっているため、既存のワークスペースへ続けて移動します。"
+  },
+  "step_runtime": {
+    "scanning_headline": "このコンピュータを接続中…",
+    "scanning_lede_prefix": "エージェントは、あなたがすでに持っている AI コーディングツールを通じて作業します — たとえば ",
+    "scanning_lede_suffix": " など。このコンピュータにインストール済みのものを確認しています。",
+    "found_headline": "このコンピュータが接続されました。エージェントランタイムを選んでください。",
+    "found_lede": "このコンピュータで見つかったエージェントランタイムです。最初のエージェントに使うものを 1 つ選んでください。あとで切り替えたり追加したりできます。",
+    "runtime_count_other": "エージェントランタイム {{count}} 個",
+    "status_all_online": "すべてオンライン",
+    "status_none_online": "オンラインなし",
+    "status_n_online": "{{count}} 個オンライン",
+    "online_label": "オンライン",
+    "offline_label": "オフライン",
+    "empty_headline": "このコンピュータではまだエージェントランタイムが見つかりません。",
+    "empty_lede_prefix": "エージェントランタイムとは、私たちが接続する AI コーディングツールです — たとえば ",
+    "empty_lede_suffix": " など。1 つインストールして更新するか、下から進む方法を選んでください。",
+    "empty_skip_title": "今はスキップ",
+    "empty_skip_subtitle": "読み取り専用モードでワークスペースに入ります。このコンピュータにエージェントランタイムが接続されるまでエージェントはタスクを実行できませんが、閲覧、計画、チームメイトの招待は可能です。",
+    "empty_skip_action": "スキップ",
+    "empty_waitlist_title": "クラウドコンピュータを使う",
+    "empty_waitlist_subtitle": "クラウドでコンピュータを動かします。まだ提供されていません。",
+    "empty_waitlist_action": "近日公開",
+    "skip": "今はスキップ",
+    "refresh": "更新",
+    "refreshing": "更新中…",
+    "hint_selected": "選択中: {{name}}",
+    "hint_pick": "続けるには、上でエージェントランタイムを選んでください。",
+    "hint_waiting": "最初の結果を待っています…",
+    "hint_skip_or_refresh": "インストール後に更新するか、スキップしてワークスペースに入ってください。",
+    "start_exploring": "探索を始める"
+  },
+  "step_platform": {
+    "eyebrow": "コンピュータを接続",
+    "headline": "エージェントを実行するコンピュータを接続しましょう。",
+    "lede": "エージェントは、Multica に接続した実際のコンピュータで実行されます。どう接続するかを選んでください。",
+    "hint_default": "接続方法を選んでください。スキップしてあとでコンピュータを接続することもできます。",
+    "hint_downloaded": "ダウンロードページでセットアップを完了したら、このタブに戻ってください。",
+    "download_title": "このコンピュータを使う",
+    "download_title_after": "ダウンロードページを開いています…",
+    "download_subtitle": "デスクトップアプリをインストールして、このコンピュータを接続します。設定不要 — 次のページでプラットフォームを選ぶだけです。",
+    "download_subtitle_after": "新しいタブで開きました。そこでインストーラーを選び、デスクトップでセットアップを完了してください。",
+    "download_button": "ダウンロード",
+    "cli_title": "ターミナルから接続",
+    "cli_subtitle": "サーバー、リモート開発環境、ヘッドレスなコンピュータを接続します。ターミナルが必要です。",
+    "cli_action": "手順を表示",
+    "cloud_title": "クラウドコンピュータを使う",
+    "cloud_subtitle": "クラウドでコンピュータを動かします。まだ提供されていません。",
+    "cloud_action": "近日公開",
+    "cli_dialog_title": "ターミナルから接続",
+    "cli_dialog_description": "デスクトップと同じ接続を、ターミナルからセットアップします。サーバー、リモート開発環境、ヘッドレスなコンピュータに使ってください。",
+    "cli_dialog_pick_hint": "上でコンピュータを選んでください。",
+    "cli_dialog_connect": "接続して続ける",
+    "runtimes_connected_other": "コンピュータ {{count}} 台を接続済み",
+    "live_listening": "ライブ · あなたのコンピュータを待っています",
+    "stage_normal_prefix": "上のコマンドを実行してください。 ",
+    "stage_normal_suffix": " のブラウザでのサインインが終わると、コンピュータが自動でここに表示されます(通常 10〜30 秒)。",
+    "stage_midway_prefix": "まだ待っています。 ",
+    "stage_midway_suffix": " が開いたブラウザタブを完了したか確認してください — コンピュータが接続される前にサインインの承認が必要です。",
+    "stage_slow_prefix": "いつもより時間がかかっています。 ",
+    "stage_slow_suffix": " を実行したターミナルにエラーがないか確認してください。",
+    "stage_stalled_prefix": "まだ何も届いていません。ターミナルに不慣れな場合は、",
+    "stage_stalled_term": "デスクトップ",
+    "stage_stalled_suffix": "のほうがスムーズです — ワンクリックでこのコンピュータが接続されます。このダイアログを閉じてデスクトップを選ぶか、スキップを押して続けてください。"
+  },
+  "errors": {
+    "skip_failed": "オンボーディングを完了できませんでした"
+  }
+}

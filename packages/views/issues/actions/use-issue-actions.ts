@@ -12,6 +12,7 @@ import { ApiError } from "@multica/core/api";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
@@ -125,10 +126,9 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const copyLink = useCallback(async () => {
     if (!issueIdentifier) return;
     const url = navigation.getShareableUrl(paths.issueDetail(issueIdentifier));
-    try {
-      await navigator.clipboard.writeText(url);
+    if (await copyText(url)) {
       toast.success(t(($) => $.detail.link_copied));
-    } catch {
+    } else {
       toast.error(t(($) => $.detail.link_copy_failed));
     }
   }, [paths, issueIdentifier, navigation, t]);

@@ -39,6 +39,7 @@ export function countAgentStatusFilters(
     online: 0,
     unstable: 0,
     offline: 0,
+    archived: 0,
   };
   let working = 0;
 

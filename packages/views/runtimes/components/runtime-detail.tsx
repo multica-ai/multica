@@ -37,7 +37,7 @@ import {
   formatRuntimeName,
   isSelfHealingRuntime,
 } from "../utils";
-import { HealthBadge, providerLabel } from "./shared";
+import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";

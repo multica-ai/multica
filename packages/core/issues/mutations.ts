@@ -8,6 +8,7 @@ import {
   type IssueListFilter,
   type IssueSortParam,
 } from "./queries";
+import { projectKeys } from "../projects/queries";
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -25,6 +26,7 @@ import {
   pruneDeletedIssueFromParentChildrenCaches,
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
+import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
 import { workspaceKeys } from "../workspace/queries";
 import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
@@ -223,6 +225,7 @@ export function useCreateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
 }
@@ -311,6 +314,12 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      if (
+        vars.status !== undefined ||
+        Object.prototype.hasOwnProperty.call(vars, "project_id")
+      ) {
+        qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this
@@ -401,6 +410,7 @@ export function useDeleteIssue() {
       }
     },
     onSuccess: (_data, id, ctx) => {
+      useRecentContextStore.getState().forgetContext(wsId, { type: "issue", id });
       cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadata);
     },
     onSettled: (_data, _err, _id, ctx) => {
@@ -408,6 +418,7 @@ export function useDeleteIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
   });
@@ -556,6 +567,12 @@ export function useBatchUpdateIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      if (
+        _vars.updates.status !== undefined ||
+        Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")
+      ) {
+        qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {
           qc.invalidateQueries({
@@ -635,7 +652,9 @@ export function useBatchDeleteIssues() {
     },
     onSuccess: (data, ids, ctx) => {
       if (data.deleted === ids.length) {
+        const { forgetContext } = useRecentContextStore.getState();
         for (const id of ids) {
+          forgetContext(wsId, { type: "issue", id });
           cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadataById.get(id));
         }
         return;
@@ -667,6 +686,7 @@ export function useBatchDeleteIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {
           parentIssueIds: Array.from(ctx.parentIssueIds),

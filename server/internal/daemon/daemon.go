@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/trace"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // ErrRepoNotConfigured is returned by ensureRepoReady when the requested repo
@@ -121,6 +122,7 @@ type Daemon struct {
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
 
 	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
 	// microseconds it takes to make a decision; ClaimTask itself runs without
@@ -645,6 +647,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Bind and serve the health port before the (potentially slow) preflight,
+	// so `daemon start` and the desktop see a live "starting" daemon instead
+	// of connection-refused while preflightAuth runs. preflightAuth's initial
+	// workspace sync detects every configured agent's version by exec'ing it,
+	// which on a cold cache with many agents takes ~20s. Liveness (port up) and
+	// readiness (status:"running") are reported separately: /health stays
+	// "starting" until d.ready is set after preflight, so a slow or *failing*
+	// preflight is never misreported as a started daemon. resolveAuth has
+	// already run, so a missing token still fails fast before we begin serving.
+	go d.serveHealth(ctx, healthLn, time.Now())
+
 	// Renew the PAT before the first API call, then do the initial
 	// workspace sync. Both steps live in preflightAuth so the ordering
 	// invariant (renew first) is enforced at one site instead of
@@ -679,8 +692,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
-	go d.serveHealth(ctx, healthLn, time.Now())
-	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal, health)")
+
+	// Preflight succeeded and the background loops are up: the daemon has
+	// registered its runtimes and can now claim and run tasks. Flip /health
+	// from "starting" to "running" — this is the signal `daemon start`'s
+	// readiness wait blocks on, so success is reported only after startup
+	// actually completed, not merely because the health port came up.
+	d.ready.Store(true)
+	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
 	return err
@@ -2249,7 +2268,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error"); failErr != nil {
+		startErrMsg := fmt.Sprintf("start task failed: %s", err.Error())
+		// MUL-2946: classify the wrapper error so the failure_reason
+		// column lands in the canonical refined taxonomy rather than
+		// the legacy coarse "agent_error" bucket. A start-task failure
+		// most commonly surfaces as ReasonAgentUnknown (no rule
+		// matches "start task failed: <…>"), but a future provider /
+		// network blip in the wrapper layer would still classify
+		// correctly without us touching this site.
+		if failErr := d.client.FailTask(ctx, task.ID, startErrMsg, "", "", taskfailure.Classify(startErrMsg).String()); failErr != nil {
 			taskLog.Error("fail task after start error", "error", failErr)
 		}
 		return
@@ -2304,7 +2331,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
+		// MUL-2946: route the bare error string through the canonical
+		// classifier so the failure_reason column reflects the actual
+		// shape of the failure (provider 5xx, network, process crash,
+		// …) rather than the coarse legacy "agent_error" bucket.
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		} else {
 			d.notifyTaskResult(ctx, taskLog, task, false, err.Error())
@@ -2499,7 +2530,16 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			return
 		}
 		taskLog.Error("complete task rejected by server, falling back to fail", "error", err)
-		if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
+		// MUL-2946: this fallback fires when a server-side complete
+		// callback was permanently rejected (4xx other than 408/429)
+		// — the agent itself succeeded, so the err here describes the
+		// server response rather than an agent failure. The classifier
+		// is unlikely to match anything in the server's error text and
+		// will land at ReasonAgentUnknown ("agent_error.unknown"),
+		// which is the canonical replacement for the legacy
+		// "agent_error" coarse bucket.
+		fallbackErrMsg := fmt.Sprintf("complete task failed: %s", err.Error())
+		if failErr := d.client.FailTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, taskfailure.Classify(fallbackErrMsg).String()); failErr != nil {
 			taskLog.Error("fail task fallback also failed", "error", failErr)
 		}
 	default:
@@ -2512,18 +2552,24 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		}
 		failureReason := result.FailureReason
 		if failureReason == "" {
-			failureReason = "agent_error"
-		}
-		// Apply unified taxonomy mapping before persisting.
-		taxonomyReason := MapToTaxonomy(failureReason)
-		// If the coarse mapping yields unknown but we have error text, try finer classification.
-		if taxonomyReason == TaxonomyUnknown && result.Comment != "" {
-			if finer := ClassifyErrorText(result.Comment); finer != "" {
-				taxonomyReason = finer
+			if result.Status == "cancelled" {
+				// "cancelled" is a deliberate non-failure terminal
+				// state masquerading as a failure_reason — preserved
+				// outside the canonical taxonomy so the UI can render
+				// it differently from a real failure.
+				failureReason = "cancelled"
+			} else {
+				// MUL-2946: classify the agent's comment text so the
+				// failure_reason lands in the refined taxonomy
+				// (provider_auth_or_access, context_overflow,
+				// process_failure, …) instead of the legacy coarse
+				// "agent_error" bucket. Empty comment lands in
+				// ReasonAgentUnknown.
+				failureReason = taskfailure.Classify(result.Comment).String()
 			}
 		}
-		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", taxonomyReason, "raw_reason", failureReason)
-		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, taxonomyReason); err != nil {
+		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
+		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
 	}
@@ -2699,6 +2745,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
+		TriggerThreadID:                  task.TriggerThreadID,
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",
@@ -2841,7 +2888,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}()
 	}
 
-	prompt := BuildPromptWithRunMode(task, effectiveRunMode)
+	prompt := BuildPromptWithRunModeAndProvider(task, effectiveRunMode, provider)
 
 	taskStart := time.Now()
 	traceRunID := newTraceRunID(taskStart)
@@ -3313,6 +3360,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			taskLog.Warn("agent failed with poisoned API error, classifying as blocked",
 				"failure_reason", failureReason,
 			)
+		} else {
+			// MUL-2946: classifyPoisonedError only matches the
+			// session-poisoning Anthropic 400 shape. Everything else
+			// falls through to taskfailure.Classify, which maps the
+			// raw error string to one of the 14 agent_error.*
+			// sub-reasons (provider auth, capacity, context overflow,
+			// runner crash, …) or to ReasonAgentUnknown. This keeps
+			// the failure_reason column in the canonical refined
+			// taxonomy at write time instead of waiting on the
+			// MUL-1949 offline backfill to re-classify after the
+			// fact.
+			failureReason = taskfailure.Classify(errMsg).String()
 		}
 		return TaskResult{
 			Status:        "blocked",
@@ -3344,15 +3403,21 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	}
 	taskLog.Debug("backend started, draining messages")
 
-	// Create an independent drain deadline so we don't block forever if the
-	// backend's internal timeout fails to produce a Result (e.g. scanner
-	// stuck on a hung stdout pipe). The extra 30 s gives the backend time
-	// to clean up after its own timeout fires.
-	drainTimeout := opts.Timeout + 30*time.Second
-	if opts.Timeout == 0 {
-		drainTimeout = 21 * time.Minute
+	// Bound the drain loop only when there is a wall-clock cap. With a positive
+	// opts.Timeout, give the drain a slightly longer deadline than the backend
+	// so it can still collect the backend's own timeout Result if the scanner
+	// is stuck on a hung stdout pipe (the extra 30 s covers cleanup after the
+	// backend's own deadline fires). With no cap (opts.Timeout <= 0) the
+	// inactivity watchdog is the only liveness net, so the drain must NOT
+	// impose its own deadline either — otherwise an actively streaming long run
+	// would be cut off here regardless of progress (MUL-3064).
+	var drainCtx context.Context
+	var drainCancel context.CancelFunc
+	if opts.Timeout > 0 {
+		drainCtx, drainCancel = context.WithTimeout(agentCtx, opts.Timeout+30*time.Second)
+	} else {
+		drainCtx, drainCancel = context.WithCancel(agentCtx)
 	}
-	drainCtx, drainCancel := context.WithTimeout(agentCtx, drainTimeout)
 	defer drainCancel()
 
 	var toolCount atomic.Int32
@@ -3367,12 +3432,18 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	// with a matching tool_result. A non-zero count means the agent is
 	// legitimately waiting on a tool (e.g. `npm install`, `docker build`)
 	// that may run far longer than the idle window without emitting any
-	// message — so the watchdog must not interpret that silence as a hang.
+	// message — so while a tool is in flight the watchdog applies the larger
+	// AgentToolWatchdog budget instead of treating that silence as a hang.
 	var inFlightTools atomic.Int32
 	var idleWatchdogFired atomic.Bool
+	// idleWatchdogThreshold records (as nanos) which silence budget actually
+	// tripped the watchdog — the idle window or the larger in-flight-tool
+	// window — so the failure message reports the real duration.
+	var idleWatchdogThreshold atomic.Int64
+	idleWatchdogThreshold.Store(int64(d.cfg.AgentIdleWatchdog))
 	idleWindow := d.cfg.AgentIdleWatchdog
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(agentCtx, idleWindow, &lastActivityAt, &inFlightTools, &idleWatchdogFired, agentCancel, session.Messages, taskLog, taskID)
+		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
 	}
 
 	go func() {
@@ -3579,7 +3650,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			// generic "agent_error" bucket the aborted path falls into.
 			result.Status = "idle_watchdog"
 			if result.Error == "" {
-				result.Error = idleWatchdogReason(idleWindow)
+				result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
 			}
 		}
 		return result, toolCount.Load(), nil
@@ -3591,7 +3662,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		if idleWatchdogFired.Load() {
 			return agent.Result{
 				Status: "idle_watchdog",
-				Error:  idleWatchdogReason(idleWindow),
+				Error:  idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load())),
 			}, toolCount.Load(), nil
 		}
 		// Distinguish external cancellation (e.g. server-initiated cancel
@@ -3620,24 +3691,28 @@ func idleWatchdogReason(window time.Duration) string {
 }
 
 // runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
-// been silent for at least window with no in-flight tool call. On firing, it
-// sets fired and calls cancel, which propagates to the agent subprocess (via
-// the ctx passed to backend.Execute) and to drainCtx. The check requires:
+// been silent past the applicable budget. On firing, it records the tripped
+// threshold, sets fired, and calls cancel, which propagates to the agent
+// subprocess (via the ctx passed to backend.Execute) and to drainCtx. The
+// silence budget depends on whether a tool call is in flight:
 //
-//  1. inFlightTools == 0 — the backend has emitted a tool_use whose
-//     matching tool_result hasn't arrived yet, meaning a real tool (e.g.
-//     `npm install`, `docker build`) is legitimately running. Long tool
-//     calls produce no messages between use and result; killing here would
-//     yank the agent mid-build. AND
-//  2. time since lastActivityAt exceeds window — the drain loop is single
-//     reader, so a stale stamp means no message has actually arrived; AND
-//  3. session.Messages buffer is empty — defensive against a hypothetical
-//     drain stall where unprocessed messages would still imply progress.
+//  1. No tool in flight — a silent backend is a hang after `window`.
+//  2. A tool in flight (tool_use with no matching tool_result yet) — a real
+//     tool (e.g. `npm install`, `docker build`) legitimately runs silently for
+//     many minutes, so the larger `toolWindow` applies instead. toolWindow <= 0
+//     keeps the historical behavior of never force-stopping while a tool is in
+//     flight. Without this in-flight budget a backend that emits tool_use and
+//     never the matching tool_result would run forever now that there is no
+//     wall-clock cap (MUL-3064).
+//
+// In both cases the watchdog also requires the session.Messages buffer to be
+// empty — a buffered-but-undrained message means the drain loop is behind, not
+// the backend.
 //
 // Tick interval is window/2 (floored at 30 s in production, but the floor only
 // kicks in for windows >= 1 min so tests can pass tiny windows like 50 ms and
 // see the watchdog fire within a few ticks).
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
 	interval := window / 2
 	if window >= time.Minute && interval < 30*time.Second {
 		interval = 30 * time.Second
@@ -3652,16 +3727,21 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window time.Duration,
 		case <-agentCtx.Done():
 			return
 		case <-ticker.C:
-			// In-flight tool call: the agent has emitted tool_use and
-			// the corresponding tool_result hasn't landed yet. A long
-			// build/install/test can sit here silently for many minutes
-			// — that is forward progress, not a hang.
-			if inFlightTools.Load() > 0 {
-				continue
+			// Pick the silence budget. A tool in flight is expected to be
+			// silent (a long build/install/test emits nothing between
+			// tool_use and tool_result), so it gets the larger toolWindow;
+			// toolWindow <= 0 disables the in-flight bound entirely.
+			threshold := window
+			toolInFlight := inFlightTools.Load() > 0
+			if toolInFlight {
+				if toolWindow <= 0 {
+					continue
+				}
+				threshold = toolWindow
 			}
 			last := time.Unix(0, lastActivityAt.Load())
 			idleFor := time.Since(last)
-			if idleFor < window {
+			if idleFor < threshold {
 				continue
 			}
 			// A buffered-but-undrained message means the drain loop is
@@ -3673,8 +3753,10 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window time.Duration,
 			taskLog.Warn("idle watchdog firing: no agent activity, force-stopping run",
 				"task", shortID(taskID),
 				"idle_for", idleFor.Round(time.Second).String(),
-				"threshold", window.String(),
+				"threshold", threshold.String(),
+				"tool_in_flight", toolInFlight,
 			)
+			firedThreshold.Store(int64(threshold))
 			fired.Store(true)
 			cancel()
 			return

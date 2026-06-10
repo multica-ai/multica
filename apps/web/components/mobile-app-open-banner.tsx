@@ -1,4 +1,4 @@
-type Locale = "en" | "zh-Hans" | "ko";
+type Locale = "en" | "zh-Hans" | "ko" | "ja";
 
 const COPY = {
   en: {
@@ -16,6 +16,13 @@ const COPY = {
     wechatDescription: "点击右上角菜单，选择在浏览器中打开后再打开 App。",
   },
   ko: {
+    title: "Have Multica installed?",
+    description: "Open this issue in the mobile app.",
+    action: "Open App",
+    wechatTitle: "Open in your browser",
+    wechatDescription: "Use the menu in the top right to open this page in your browser, then open the app.",
+  },
+  ja: {
     title: "Have Multica installed?",
     description: "Open this issue in the mobile app.",
     action: "Open App",

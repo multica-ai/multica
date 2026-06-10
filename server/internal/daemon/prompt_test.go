@@ -249,6 +249,111 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+func TestBuildChatPromptSlashSkills(t *testing.T) {
+	t.Run("injects selected skills block", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "please [/deploy](slash://skill/abc-123) this",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "abc-123", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if !strings.Contains(out, "Explicitly selected skills:\n- deploy\n") {
+			t.Fatalf("expected selected skills block, got:\n%s", out)
+		}
+		if !strings.Contains(out, "User message:\nplease [/deploy](slash://skill/abc-123) this") {
+			t.Fatalf("expected raw user message preserved, got:\n%s", out)
+		}
+	})
+
+	t.Run("ignores skills not belonging to agent", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/hacker-skill](slash://skill/evil-id)",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "good-id", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("should not inject block for unknown skill ID, got:\n%s", out)
+		}
+	})
+
+	t.Run("validates by ID not label", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/deploy](slash://skill/wrong-id)",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "real-id", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("matching label with wrong ID must not pass, got:\n%s", out)
+		}
+	})
+
+	t.Run("uses canonical name not label", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/spoofed-name](slash://skill/real-id)",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "real-id", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if !strings.Contains(out, "- deploy\n") {
+			t.Fatalf("expected canonical name 'deploy', got:\n%s", out)
+		}
+		if strings.Contains(out, "- spoofed-name\n") {
+			t.Fatalf("selected skills block must not use spoofed label, got:\n%s", out)
+		}
+		if !strings.Contains(out, "User message:\n[/spoofed-name](slash://skill/real-id)") {
+			t.Fatalf("expected raw user message with spoofed label preserved, got:\n%s", out)
+		}
+	})
+
+	t.Run("deduplicates skills", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/deploy](slash://skill/a) and [/deploy](slash://skill/a) again",
+			Agent: &AgentData{
+				Skills: []SkillData{{ID: "a", Name: "deploy"}},
+			},
+		}
+		out := buildChatPrompt(task)
+		if strings.Count(out, "- deploy") != 1 {
+			t.Fatalf("expected exactly 1 '- deploy', got:\n%s", out)
+		}
+	})
+
+	t.Run("omits block when no valid skills", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "just a normal message",
+			Agent:         &AgentData{Skills: []SkillData{{ID: "a", Name: "deploy"}}},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("should not inject block when no slash links, got:\n%s", out)
+		}
+	})
+
+	t.Run("omits block when agent has no skills", func(t *testing.T) {
+		task := Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "[/deploy](slash://skill/abc-123)",
+			Agent:         &AgentData{},
+		}
+		out := buildChatPrompt(task)
+		if strings.Contains(out, "Explicitly selected skills") {
+			t.Fatalf("should not inject block for agent with no skills, got:\n%s", out)
+		}
+	})
+}
+
 // TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
 // prompt (no trigger comment, no chat, no autopilot, no quick-create) also
 // teaches the agent about --recent as the long-issue-friendly alternative
@@ -310,6 +415,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	task := Task{
 		IssueID:               issueID,
 		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
 		TriggerCommentContent: "please look",
 		TriggerAuthorType:     "member",
 		NewCommentCount:       3,
@@ -326,7 +432,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 		t.Errorf("hint must discourage blindly reading every new comment, got:\n%s", out)
 	}
 	// Parent thread first: the --thread <trigger> read is the prioritized action.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --since "+since+" --output json") {
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --since "+since+" --output json") {
 		t.Errorf("hint must point at the triggering (parent) thread --since read first, got:\n%s", out)
 	}
 	if !strings.Contains(out, "--tail 30") {
@@ -351,6 +457,7 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	task := Task{
 		IssueID:               issueID,
 		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
 		TriggerCommentContent: "hi",
 		TriggerAuthorType:     "member",
 		NewCommentCount:       0,
@@ -360,7 +467,7 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	if strings.Contains(out, "new comment(s) since your last run") {
 		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
 	}
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
 	}
 }
@@ -374,6 +481,7 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	task := Task{
 		IssueID:               issueID,
 		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
 		TriggerCommentContent: "hi again",
 		TriggerAuthorType:     "member",
 		PriorSessionID:        "session-123",
@@ -385,9 +493,10 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"Do not re-read comment history by default",
-		"Only if the resumed session is missing thread context",
-		"multica issue comment list " + issueID + " --thread trigger-1 --tail 30 --output json",
+		"active thread anchor `thread-root-1` and triggering comment ID `trigger-1`",
+		"If your reply depends on thread context",
+		"do not rely only on resumed session memory",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("resumed/no-delta prompt missing %q\n--- output ---\n%s", want, out)

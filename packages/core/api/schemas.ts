@@ -33,6 +33,21 @@ import type {
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
+export interface AppConfigResponse {
+  cdn_domain: string;
+  allow_signup: boolean;
+  google_client_id?: string;
+  dingtalk_client_id?: string;
+  dingtalk_oauth_scope?: string;
+  hide_email_login?: boolean;
+  posthog_key?: string;
+  posthog_host?: string;
+  analytics_environment?: string;
+  daemon_server_url?: string;
+  daemon_app_url?: string;
+  workspace_creation_disabled?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
 // the issue detail page (timeline, comments, subscribers) and the issues
@@ -139,6 +154,44 @@ const TimelineEntrySchema = z.object({
 export const TimelineEntriesSchema = z.array(TimelineEntrySchema);
 
 export const EMPTY_TIMELINE_ENTRIES: TimelineEntry[] = [];
+
+const OptionalStringSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value : undefined),
+  z.string().optional(),
+);
+
+const BooleanWithDefaultSchema = (fallback: boolean) =>
+  z.preprocess(
+    (value) => (typeof value === "boolean" ? value : undefined),
+    z.boolean().default(fallback),
+  );
+
+export const AppConfigSchema = z.object({
+  cdn_domain: z.string().default(""),
+  allow_signup: BooleanWithDefaultSchema(true),
+  google_client_id: OptionalStringSchema,
+  dingtalk_client_id: OptionalStringSchema,
+  dingtalk_oauth_scope: OptionalStringSchema,
+  hide_email_login: BooleanWithDefaultSchema(false).optional(),
+  posthog_key: OptionalStringSchema,
+  posthog_host: OptionalStringSchema,
+  analytics_environment: OptionalStringSchema,
+  daemon_server_url: OptionalStringSchema,
+  daemon_app_url: OptionalStringSchema,
+  workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
+}).loose();
+
+export const EMPTY_APP_CONFIG: AppConfigResponse = {
+  cdn_domain: "",
+  allow_signup: true,
+  google_client_id: "",
+  dingtalk_client_id: "",
+  dingtalk_oauth_scope: "",
+  hide_email_login: false,
+  daemon_server_url: "",
+  daemon_app_url: "",
+  workspace_creation_disabled: false,
+};
 
 export const CommentSchema = z.object({
   id: z.string(),

@@ -72,16 +72,25 @@ import {
   countAgentStatusFilters,
   matchesAgentStatusFilter,
 } from "./agent-status-filter";
+import {
+  buildRuntimeMachines,
+} from "../../runtimes/components/runtime-machines";
+import { RuntimeMachineFilterDropdown } from "./runtime-machine-filter-dropdown";
 
 // Filter axes:
 //
-//   View         = active vs archived dataset. Archived is low-frequency,
-//                  accessed through a ghost link in the toolbar.
-//   Scope        = ownership lens (All vs Mine). Layer-1 segment.
-//   Status       = chip group that combines availability filters with the
-//                  actionable "working" workload filter. Availability still
-//                  answers "Can this agent take work right now?", while
-//                  working answers "Is a task currently running?".
+//   View           = active vs archived dataset. Archived is low-frequency,
+//                    accessed through a ghost link in the toolbar.
+//   Scope          = ownership lens (All vs Mine). Layer-1 segment.
+//   Runtime machine = "Which host is the agent bound to?" — dropdown
+//                    filter grouped by section (Local / Remote / Cloud).
+//                    Mirrors the machine grouping on the Runtimes page
+//                    so a user can drill from a machine into the agents
+//                    hosted on it.
+//   Status         = chip group that combines availability filters with the
+//                    actionable "working" workload filter. Availability still
+//                    answers "Can this agent take work right now?", while
+//                    working answers "Is a task currently running?".
 type View = "active" | "archived";
 type Scope = "all" | "mine" | "default";
 
@@ -94,8 +103,24 @@ const SORT_LABEL_KEY: Record<SortKey, "label_recent" | "label_name" | "label_run
   created: "label_created",
 };
 
+interface AgentsPageProps {
+  /** Desktop-only daemon id used to mark this machine in the runtime filter. */
+  localDaemonId?: string | null;
+  /** Desktop-only friendly device name for the local daemon. */
+  localMachineName?: string | null;
+  /**
+   * Desktop-only signal: this host always owns a local machine, even when
+   * no runtime has registered yet. When true, the filter includes a Local
+   * placeholder instead of hiding the section.
+   */
+  hasLocalMachine?: boolean;
+}
 
-export function AgentsPage() {
+export function AgentsPage({
+  localDaemonId,
+  localMachineName,
+  hasLocalMachine,
+}: AgentsPageProps = {}) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
@@ -128,6 +153,11 @@ export function AgentsPage() {
   const scope = useAgentsViewStore((s) => s.scope);
   const setScope = useAgentsViewStore((s) => s.setScope);
   const [statusFilter, setStatusFilter] = useState<AgentStatusFilter>("all");
+  // `null` means "all runtimes" (the default). When set, the value is a
+  // RuntimeMachine id from `buildRuntimeMachines` (the same grouping the
+  // Runtimes page uses), so the user can drill from a machine on that
+  // page into the agents bound to it.
+  const [runtimeMachineId, setRuntimeMachineId] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("recent");
   const [search, setSearch] = useState("");
   const [workspaceOnly, setWorkspaceOnly] = useState(false);
@@ -242,10 +272,74 @@ export function AgentsPage() {
     return inScope;
   }, [inScope, scope, workspaceOnly, view]);
 
-  // Final cut — status chip + search.
+  // Build the workspace's runtime machines (local / remote / cloud
+  // groupings) the same way the Runtimes page does, so the filter
+  // dropdown labels match the machines the user sees there.
+  const [machinesNow] = useState(() => Date.now());
+  const machines = useMemo(
+    () =>
+      buildRuntimeMachines(runtimes, {
+        now: machinesNow,
+        localDaemonId,
+        localMachineName,
+        currentUserId: currentUser?.id ?? null,
+        ensureLocalMachine: hasLocalMachine,
+      }),
+    [
+      runtimes,
+      machinesNow,
+      localDaemonId,
+      localMachineName,
+      currentUser?.id,
+      hasLocalMachine,
+    ],
+  );
+
+  // Reverse map: runtime_id → machine id.
+  const runtimeIdToMachineId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const machine of machines) {
+      for (const r of machine.runtimes) m.set(r.id, machine.id);
+    }
+    return m;
+  }, [machines]);
+
+  // Per-machine agent counts in `inScope`.
+  const agentCountByMachine = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of inScope) {
+      const machineId = runtimeIdToMachineId.get(a.runtime_id);
+      if (!machineId) continue;
+      counts.set(machineId, (counts.get(machineId) ?? 0) + 1);
+    }
+    return counts;
+  }, [inScope, runtimeIdToMachineId]);
+
+  // Auto-reset if selected machine is GC'd.
+  useEffect(() => {
+    if (
+      runtimeMachineId !== null &&
+      !machines.some((machine) => machine.id === runtimeMachineId)
+    ) {
+      setRuntimeMachineId(null);
+    }
+  }, [runtimeMachineId, machines]);
+
+  // Machine-scoped list: `inScope` narrowed by the selected runtime
+  // machine, but NOT by the status chip or search.
+  const inScopeOnMachine = useMemo(() => {
+    if (view !== "active") return afterWorkspaceFilter;
+    if (runtimeMachineId === null) return afterWorkspaceFilter;
+    return afterWorkspaceFilter.filter(
+      (a) => runtimeIdToMachineId.get(a.runtime_id) === runtimeMachineId,
+    );
+  }, [afterWorkspaceFilter, view, runtimeMachineId, runtimeIdToMachineId]);
+
+  // Final cut — status chip + search. Starts from `inScopeOnMachine`
+  // so a selected machine filter is already applied.
   const filteredAgents = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return afterWorkspaceFilter.filter((a) => {
+    return inScopeOnMachine.filter((a) => {
       // Status chip filter only applies to the Active view —
       // archived agents have no presence to match against.
       if (
@@ -265,15 +359,15 @@ export function AgentsPage() {
       }
       return true;
     });
-  }, [afterWorkspaceFilter, view, presenceMap, statusFilter, search]);
+  }, [inScopeOnMachine, view, presenceMap, statusFilter, search]);
 
   // Per-status counts for the chip badges. Computed against
-  // `afterWorkspaceFilter` (ignoring the status filter itself) so
-  // the numbers reflect "if I clicked this chip, this many agents would
-  // match" rather than collapsing to 0 for the unselected chips.
+  // `inScopeOnMachine` (ignoring the status filter itself) so
+  // the numbers reflect "if I clicked this chip, this many agents
+  // would match on the currently-selected machine".
   const statusCounts = useMemo(
-    () => countAgentStatusFilters(afterWorkspaceFilter, presenceMap),
-    [afterWorkspaceFilter, presenceMap],
+    () => countAgentStatusFilters(inScopeOnMachine, presenceMap),
+    [inScopeOnMachine, presenceMap],
   );
 
   const sortedAgents = useMemo(() => {
@@ -501,12 +595,21 @@ export function AgentsPage() {
                   onShowArchived={() => setView("archived")}
                 />
                 {scope !== "default" && (
-                  <StatusFilterRow
-                    value={statusFilter}
-                    onChange={setStatusFilter}
-                    counts={statusCounts}
-                    totalCount={afterWorkspaceFilter.length}
-                  />
+                  <>
+                    <StatusFilterRow
+                      value={statusFilter}
+                      onChange={setStatusFilter}
+                      counts={statusCounts}
+                      totalCount={inScopeOnMachine.length}
+                    />
+                    <RuntimeMachineFilterDropdown
+                      machines={machines}
+                      value={runtimeMachineId}
+                      onChange={setRuntimeMachineId}
+                      agentCountByMachine={agentCountByMachine}
+                      totalAgentCount={inScope.length}
+                    />
+                  </>
                 )}
               </>
             ) : (

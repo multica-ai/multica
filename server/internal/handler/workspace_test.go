@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -215,6 +216,90 @@ VALUES ($1, $2, 'owner')
 	}
 	if exists {
 		t.Fatal("workspace still exists after owner DELETE")
+	}
+}
+
+// TestUpdateWorkspace_AvatarURL covers the avatar_url field added to
+// UpdateWorkspaceRequest: a PATCH with avatar_url is persisted and surfaced
+// back on the response, and partial updates leave other fields untouched.
+// Route-level authorization (owner/admin) is enforced by middleware in
+// router.go; the handler test calls UpdateWorkspace directly to verify the
+// payload wiring.
+func TestUpdateWorkspace_AvatarURL(t *testing.T) {
+	ctx := context.Background()
+
+	const slug = "handler-tests-avatar-url"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	var wsID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO workspace (name, slug, description)
+VALUES ($1, $2, $3)
+RETURNING id
+`, "Handler Test Avatar URL", slug, "UpdateWorkspace avatar_url test").Scan(&wsID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO member (workspace_id, user_id, role)
+VALUES ($1, $2, 'owner')
+`, wsID, testUserID); err != nil {
+		t.Fatalf("create owner member: %v", err)
+	}
+
+	const avatarURL = "https://cdn.example.com/workspaces/abc/logo.png"
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"avatar_url": avatarURL,
+	})
+	req = withURLParam(req, "id", wsID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 from UpdateWorkspace, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp WorkspaceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.AvatarURL == nil || *resp.AvatarURL != avatarURL {
+		t.Fatalf("expected avatar_url %q in response, got %v", avatarURL, resp.AvatarURL)
+	}
+	if resp.Name != "Handler Test Avatar URL" {
+		t.Fatalf("name should be unchanged by avatar-only update, got %q", resp.Name)
+	}
+
+	var dbAvatar *string
+	if err := testPool.QueryRow(ctx, `SELECT avatar_url FROM workspace WHERE id = $1`, wsID).Scan(&dbAvatar); err != nil {
+		t.Fatalf("read avatar_url back: %v", err)
+	}
+	if dbAvatar == nil || *dbAvatar != avatarURL {
+		t.Fatalf("expected avatar_url %q persisted, got %v", avatarURL, dbAvatar)
+	}
+
+	// A follow-up update that doesn't include avatar_url must leave it alone.
+	w2 := httptest.NewRecorder()
+	req2 := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"description": "new description",
+	})
+	req2 = withURLParam(req2, "id", wsID)
+	testHandler.UpdateWorkspace(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 from second UpdateWorkspace, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	var resp2 WorkspaceResponse
+	if err := json.Unmarshal(w2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("decode second response: %v", err)
+	}
+	if resp2.AvatarURL == nil || *resp2.AvatarURL != avatarURL {
+		t.Fatalf("avatar_url should be preserved by partial update, got %v", resp2.AvatarURL)
 	}
 }
 
