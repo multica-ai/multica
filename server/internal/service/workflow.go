@@ -44,6 +44,7 @@ const (
 	NodeRunStatusFormatFailed    = "format_failed"
 	NodeRunStatusWorkerAssigned  = "worker_assigned"
 	NodeRunStatusWorking         = "working"
+	NodeRunStatusAwaitingInput   = "awaiting_input"
 	NodeRunStatusAwaitingCritic  = "awaiting_critic"
 	NodeRunStatusCriticReviewing = "critic_reviewing"
 	NodeRunStatusCriticApproved  = "critic_approved"
@@ -67,7 +68,8 @@ var validTransitions = map[string][]string{
 	NodeRunStatusFormatOk:        {NodeRunStatusWorkerAssigned, NodeRunStatusWorking, NodeRunStatusCancelled, NodeRunStatusSkipped},
 	NodeRunStatusFormatFailed:    {},
 	NodeRunStatusWorkerAssigned:  {NodeRunStatusWorking, NodeRunStatusCancelled, NodeRunStatusSkipped},
-	NodeRunStatusWorking:         {NodeRunStatusAwaitingCritic, NodeRunStatusFailed, NodeRunStatusCancelled},
+	NodeRunStatusWorking:         {NodeRunStatusAwaitingInput, NodeRunStatusAwaitingCritic, NodeRunStatusFailed, NodeRunStatusCancelled},
+	NodeRunStatusAwaitingInput:   {NodeRunStatusWorking, NodeRunStatusCancelled, NodeRunStatusSkipped},
 	NodeRunStatusAwaitingCritic:  {NodeRunStatusCriticReviewing, NodeRunStatusCancelled, NodeRunStatusSkipped},
 	NodeRunStatusCriticReviewing: {NodeRunStatusCriticApproved, NodeRunStatusCriticRework, NodeRunStatusCancelled},
 	NodeRunStatusCriticApproved:  {NodeRunStatusCompleted},
@@ -608,11 +610,11 @@ func (s *WorkflowService) ReviewNodeRun(ctx context.Context, nodeRunID pgtype.UU
 
 			// Always go through critic_rework first (state machine contract).
 			updated, err := qtx.SetWorkflowNodeRunCriticOutput(ctx, db.SetWorkflowNodeRunCriticOutputParams{
-				ID:             nr.ID,
-				CriticOutput:   nil,
-				CriticComment:  pgtype.Text{String: comment, Valid: comment != ""},
-				Status:         NodeRunStatusCriticRework,
-				RetryCount:     pgtype.Int4{Int32: newRetry, Valid: true},
+				ID:            nr.ID,
+				CriticOutput:  nil,
+				CriticComment: pgtype.Text{String: comment, Valid: comment != ""},
+				Status:        NodeRunStatusCriticRework,
+				RetryCount:    pgtype.Int4{Int32: newRetry, Valid: true},
 			})
 			if err != nil {
 				return fmt.Errorf("rework node run: %w", err)
@@ -819,14 +821,15 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Mult
 	// Build context with workflow info so the daemon prompt builder can
 	// include role + node + workflow context.
 	contextPayload := map[string]any{
-		"type":              "workflow",
-		"workflow_id":       util.UUIDToString(workflow.ID),
-		"workflow_title":    workflow.Title,
-		"workflow_run_id":   util.UUIDToString(run.ID),
-		"workflow_node_id":  util.UUIDToString(node.ID),
-		"node_title":        node.Title,
-		"node_run_id":       util.UUIDToString(nodeRun.ID),
-		"phase":             phase,
+		"type":                   "workflow",
+		"workflow_id":            util.UUIDToString(workflow.ID),
+		"workflow_title":         workflow.Title,
+		"workflow_run_id":        util.UUIDToString(run.ID),
+		"workflow_node_id":       util.UUIDToString(node.ID),
+		"node_title":             node.Title,
+		"node_run_id":            util.UUIDToString(nodeRun.ID),
+		"phase":                  phase,
+		"worker_can_await_input": phase == "worker",
 	}
 	contextJSON, err := json.Marshal(contextPayload)
 	if err != nil {
@@ -847,12 +850,12 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Mult
 
 	// Create workflow-bound agent task directly.
 	task, err := s.Queries.CreateWorkflowAgentTask(ctx, db.CreateWorkflowAgentTaskParams{
-		AgentID:            agentID,
-		RuntimeID:          taskRuntimeID,
-		Priority:           2, // medium
-		Context:            contextJSON,
-		WorkflowNodeRunID:  nodeRun.ID,
-		IssueID:            issueID,
+		AgentID:           agentID,
+		RuntimeID:         taskRuntimeID,
+		Priority:          2, // medium
+		Context:           contextJSON,
+		WorkflowNodeRunID: nodeRun.ID,
+		IssueID:           issueID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create workflow agent task: %w", err)
@@ -1042,6 +1045,59 @@ func (s *WorkflowService) HandleWorkflowTaskCompletion(ctx context.Context, task
 	switch ctxPayload.Phase {
 	case "worker":
 		if nodeRun.Status == NodeRunStatusWorking {
+			// Check for awaiting_input signal before normal worker completion.
+			if len(task.Result) > 0 {
+				var awaitingSignal struct {
+					Status      string   `json:"status"`
+					Question    string   `json:"question"`
+					Options     []string `json:"options"`
+					Recommended string   `json:"recommended"`
+				}
+				found := false
+				if json.Unmarshal(task.Result, &awaitingSignal) == nil &&
+					awaitingSignal.Status == "awaiting_input" {
+					found = true
+				}
+				if !found {
+					var completeReq struct {
+						Output string `json:"output"`
+					}
+					if json.Unmarshal(task.Result, &completeReq) == nil && completeReq.Output != "" {
+						if idx := strings.Index(completeReq.Output, "\"status\":\"awaiting_input\""); idx >= 0 {
+							jsonStr := extractJSONObject(completeReq.Output, idx)
+							if json.Unmarshal([]byte(jsonStr), &awaitingSignal) == nil &&
+								awaitingSignal.Status == "awaiting_input" {
+								found = true
+							} else {
+								found = true
+							}
+						}
+					}
+				}
+				if found {
+					// Store worker output and transition to awaiting_input.
+					if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+						updated, err := qtx.SetWorkflowNodeRunWorkerOutput(ctx, db.SetWorkflowNodeRunWorkerOutputParams{
+							ID:           nodeRun.ID,
+							WorkerOutput: task.Result,
+							Status:       NodeRunStatusAwaitingInput,
+						})
+						if err != nil {
+							return err
+						}
+						nodeRun = updated
+						return nil
+					}); err != nil {
+						return err
+					}
+					// Check if auto-reply is enabled for this workspace.
+					if s.autoReplyEnabled(ctx, nodeRun) {
+						return s.handleAutoReply(ctx, nodeRun, task)
+					}
+					return nil
+				}
+			}
+
 			// Transition to awaiting_critic with the task output as worker output.
 			if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 				updated, err := qtx.SetWorkflowNodeRunWorkerOutput(ctx, db.SetWorkflowNodeRunWorkerOutputParams{
@@ -1056,7 +1112,7 @@ func (s *WorkflowService) HandleWorkflowTaskCompletion(ctx context.Context, task
 				nodeRun = updated
 				return nil
 			}); err != nil {
-			return err
+				return err
 			}
 			if err := s.dispatchCritic(ctx, nodeRun); err != nil {
 				return fmt.Errorf("dispatch critic: %w", err)
@@ -1095,6 +1151,198 @@ func (s *WorkflowService) HandleWorkflowTaskCompletion(ctx context.Context, task
 	return nil
 }
 
+// ── Awaiting input helpers ──────────────────────────────────────────────────
+
+// autoReplyEnabled checks whether the workspace has workflow_auto_reply_enabled
+// set in its settings JSONB.
+func (s *WorkflowService) autoReplyEnabled(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) bool {
+	run, err := s.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID)
+	if err != nil {
+		return false
+	}
+	wf, err := s.Queries.GetWorkflow(ctx, run.WorkflowID)
+	if err != nil {
+		return false
+	}
+	ws, err := s.Queries.GetWorkspace(ctx, wf.WorkspaceID)
+	if err != nil {
+		return false
+	}
+	if len(ws.Settings) == 0 {
+		return false
+	}
+	var settings map[string]any
+	if json.Unmarshal(ws.Settings, &settings) != nil {
+		return false
+	}
+	enabled, _ := settings["workflow_auto_reply_enabled"].(bool)
+	return enabled
+}
+
+// handleAutoReply posts a system comment with the recommended option and
+// resumes the agent task.
+func (s *WorkflowService) handleAutoReply(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun, task db.MulticaAgentTaskQueue) error {
+	// Parse the awaiting_input signal to get the recommended option.
+	var signal struct {
+		Status      string   `json:"status"`
+		Question    string   `json:"question"`
+		Options     []string `json:"options"`
+		Recommended string   `json:"recommended"`
+	}
+	if json.Unmarshal(task.Result, &signal) != nil || signal.Recommended == "" {
+		return nil // Cannot auto-reply without a recommended option.
+	}
+
+	// Find the sub-issue for this node run.
+	run, err := s.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID)
+	if err != nil {
+		return err
+	}
+	wf, err := s.Queries.GetWorkflow(ctx, run.WorkflowID)
+	if err != nil {
+		return err
+	}
+	subIssue, err := s.Queries.GetIssueByOrigin(ctx, db.GetIssueByOriginParams{
+		WorkspaceID: wf.WorkspaceID,
+		OriginType:  pgtype.Text{String: "workflow", Valid: true},
+		OriginID:    nodeRun.ID,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Post a system comment with the auto-reply text.
+	commentContent := fmt.Sprintf("**%s**\n\nAuto-reply (recommended): %s", signal.Question, signal.Recommended)
+	s.createSystemComment(ctx, subIssue.ID, wf.WorkspaceID, commentContent)
+
+	// Transition awaiting_input → working and dispatch a resume agent task.
+	updated, err := s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusWorking)
+	if err != nil {
+		return err
+	}
+	return s.dispatchWorkerResume(ctx, *updated, signal.Recommended)
+}
+
+// ResumeNodeRunFromComment handles a user's manual reply to an awaiting_input
+// node. It transitions the node back to working and dispatches a resume task
+// with the user's reply content.
+func (s *WorkflowService) ResumeNodeRunFromComment(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun, comment db.MulticaComment) error {
+	// Transition awaiting_input → working.
+	if _, err := s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusWorking); err != nil {
+		return err
+	}
+	// Dispatch resume agent task with the user's reply content.
+	return s.dispatchWorkerResume(ctx, nodeRun, comment.Content)
+}
+
+// extractJSONObject attempts to extract a balanced JSON object from s starting
+// near startIdx (which should point at a `"status":"awaiting_input"` substring
+// inside a JSON object). It walks back to find the opening `{` and forward to
+// find the matching `}`, returning the substring. If no balanced object can be
+// found, it returns s[startIdx:] as a best-effort fallback.
+func extractJSONObject(s string, startIdx int) string {
+	// Walk back to find the opening brace.
+	openIdx := -1
+	for i := startIdx; i >= 0; i-- {
+		if s[i] == '{' {
+			openIdx = i
+			break
+		}
+	}
+	if openIdx < 0 {
+		return s[startIdx:]
+	}
+
+	// Walk forward, counting braces to find the matching close.
+	depth := 0
+	inString := false
+	escaped := false
+	for i := openIdx; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		if c == '"' {
+			inString = true
+		} else if c == '{' {
+			depth++
+		} else if c == '}' {
+			depth--
+			if depth == 0 {
+				return s[openIdx : i+1]
+			}
+		}
+	}
+	return s[startIdx:]
+}
+
+// dispatchWorkerResume dispatches a new agent task for the node run after a
+// user has replied to an awaiting_input pause. It carries the user's reply
+// in the context payload so the agent knows what was answered.
+func (s *WorkflowService) dispatchWorkerResume(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun, replyContent string) error {
+	// Reuse DispatchAgentTask but with the reply injected into context.
+	// We call the standard dispatchWorker which reads worker_type/worker_id
+	// and creates the task — but we override the context to include the reply.
+	node, err := s.Queries.GetWorkflowNode(ctx, nodeRun.WorkflowNodeID)
+	if err != nil {
+		return fmt.Errorf("get node: %w", err)
+	}
+
+	switch node.WorkerType {
+	case "human":
+		_, err := s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusWorkerAssigned)
+		return err
+	case "agent", "squad":
+		agentID := node.WorkerID
+		if node.WorkerType == "squad" && node.WorkerID.Valid {
+			if squad, err := s.Queries.GetSquad(ctx, node.WorkerID); err == nil {
+				agentID = squad.LeaderID
+			}
+		}
+		if !agentID.Valid {
+			_, err := s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusWorkerAssigned)
+			return err
+		}
+		task, err := s.DispatchAgentTask(ctx, nodeRun, "worker")
+		if err != nil {
+			return fmt.Errorf("dispatch agent task: %w", err)
+		}
+		if _, err := s.Queries.LinkNodeRunWorkerTask(ctx, db.LinkNodeRunWorkerTaskParams{
+			ID:                nodeRun.ID,
+			WorkerAgentTaskID: task.ID,
+		}); err != nil {
+			return fmt.Errorf("link worker task: %w", err)
+		}
+		_, err = s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusWorking)
+		return err
+	default:
+		return fmt.Errorf("unknown worker type: %s", node.WorkerType)
+	}
+}
+
+// createSystemComment posts a system-authored comment on an issue.
+func (s *WorkflowService) createSystemComment(ctx context.Context, issueID pgtype.UUID, workspaceID pgtype.UUID, content string) {
+	_, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issueID,
+		WorkspaceID: workspaceID,
+		AuthorType:  "system",
+		Content:     content,
+		Type:        "comment",
+	})
+	if err != nil {
+		slog.Warn("failed to create system comment for awaiting_input", "issue_id", util.UUIDToString(issueID), "error", err)
+	}
+}
+
 // ── WS event helpers ─────────────────────────────────────────────────────────
 
 func (s *WorkflowService) publishWorkflowEvent(eventType, workspaceID string, payload any) {
@@ -1109,18 +1357,18 @@ func (s *WorkflowService) publishWorkflowEvent(eventType, workspaceID string, pa
 // workflow event type constants — duplicated here to avoid circular imports
 // with protocol package when new events haven't been added yet.
 const (
-	EventWorkflowCreated       = "workflow:created"
-	EventWorkflowUpdated       = "workflow:updated"
-	EventWorkflowDeleted       = "workflow:deleted"
-	EventWorkflowRunStarted    = "workflow:run_started"
-	EventWorkflowRunCompleted  = "workflow:run_completed"
-	EventWorkflowRunFailed     = "workflow:run_failed"
-	EventWorkflowRunCancelled  = "workflow:run_cancelled"
-	EventWorkflowNodeRunStarted  = "workflow:node_run_started"
+	EventWorkflowCreated          = "workflow:created"
+	EventWorkflowUpdated          = "workflow:updated"
+	EventWorkflowDeleted          = "workflow:deleted"
+	EventWorkflowRunStarted       = "workflow:run_started"
+	EventWorkflowRunCompleted     = "workflow:run_completed"
+	EventWorkflowRunFailed        = "workflow:run_failed"
+	EventWorkflowRunCancelled     = "workflow:run_cancelled"
+	EventWorkflowNodeRunStarted   = "workflow:node_run_started"
 	EventWorkflowNodeRunCompleted = "workflow:node_run_completed"
-	EventWorkflowNodeRunFailed   = "workflow:node_run_failed"
-	EventWorkflowNodeRunBlocked  = "workflow:node_run_blocked"
-	EventWorkflowNodeRunReviewed = "workflow:node_run_reviewed"
+	EventWorkflowNodeRunFailed    = "workflow:node_run_failed"
+	EventWorkflowNodeRunBlocked   = "workflow:node_run_blocked"
+	EventWorkflowNodeRunReviewed  = "workflow:node_run_reviewed"
 )
 
 // ── Template management ──────────────────────────────────────────────────────
@@ -1177,18 +1425,18 @@ func (s *WorkflowService) CloneWorkflowFromTemplate(
 		oldToNew := make(map[string]pgtype.UUID, len(tmplNodes))
 		for _, node := range tmplNodes {
 			n, err := qtx.CreateWorkflowNode(ctx, db.CreateWorkflowNodeParams{
-				WorkflowID:         wf.ID,
-				Title:              node.Title,
-				Description:        textToPgText(node.Description),
-				PositionX:          node.PositionX,
-				PositionY:          node.PositionY,
-				FormatSchema:       node.FormatSchema,
-				WorkerType:         node.WorkerType,
-				WorkerID:           node.WorkerID,
-				CriticType:         node.CriticType,
-				CriticID:           node.CriticID,
-				CriticApiUrl:       node.CriticApiUrl,
-				SortOrder:          node.SortOrder,
+				WorkflowID:   wf.ID,
+				Title:        node.Title,
+				Description:  textToPgText(node.Description),
+				PositionX:    node.PositionX,
+				PositionY:    node.PositionY,
+				FormatSchema: node.FormatSchema,
+				WorkerType:   node.WorkerType,
+				WorkerID:     node.WorkerID,
+				CriticType:   node.CriticType,
+				CriticID:     node.CriticID,
+				CriticApiUrl: node.CriticApiUrl,
+				SortOrder:    node.SortOrder,
 			})
 			if err != nil {
 				return fmt.Errorf("clone node %s: %w", node.Title, err)

@@ -7,6 +7,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Switch } from "@multica/ui/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -120,6 +121,28 @@ export function WorkspaceTab() {
   const ownerCount = members.filter((m) => m.role === "owner").length;
   const isSoleOwner = isOwner && ownerCount <= 1;
   const isSoleMember = members.length <= 1;
+
+  // Workflow auto-reply toggle
+  const autoReplyEnabled =
+    (workspace?.settings as Record<string, unknown>)?.workflow_auto_reply_enabled === true;
+  const [autoReplySaving, setAutoReplySaving] = useState(false);
+
+  const handleAutoReplyToggle = async (enabled: boolean) => {
+    setAutoReplySaving(true);
+    try {
+      const merged = {
+        ...((workspace?.settings as Record<string, unknown>) ?? {}),
+        workflow_auto_reply_enabled: enabled,
+      };
+      await api.updateWorkspace(wsId, { settings: merged });
+      qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+      toast.success(t(($) => $.workspace.auto_reply_toast_saved));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.auto_reply_toast_failed));
+    } finally {
+      setAutoReplySaving(false);
+    }
+  };
 
   useEffect(() => {
     setName(workspace?.name ?? "");
@@ -303,6 +326,22 @@ export function WorkspaceTab() {
                 {t(($) => $.workspace.manage_hint)}
               </p>
             )}
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Workflow */}
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">{t(($) => $.workspace.auto_reply_title)}</h2>
+        <Card>
+          <CardContent className="flex items-center justify-between py-4">
+            <div className="text-sm text-muted-foreground">{t(($) => $.workspace.auto_reply_description)}</div>
+            <Switch
+              size="sm"
+              checked={autoReplyEnabled}
+              onCheckedChange={handleAutoReplyToggle}
+              disabled={autoReplySaving || !canManageWorkspace}
+            />
           </CardContent>
         </Card>
       </section>

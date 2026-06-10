@@ -170,6 +170,7 @@
       "format_failed": "格式失败",
       "worker_assigned": "已分配",
       "working": "执行中",
+      "awaiting_input": "等待输入",
       "awaiting_critic": "等待评审",
       "critic_reviewing": "评审中",
       "critic_approved": "评审通过",

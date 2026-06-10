@@ -71,7 +71,7 @@ export interface WorkflowCanvasProps {
   onNodeClick?: (nodeId: string) => void;
   onNodeCreate?: (type: string, x: number, y: number) => void;
   nodeStatusColors?: Record<string, string>;
-  nodeStatuses?: Record<string, { status: string; isRunning: boolean }>;
+  nodeStatuses?: Record<string, { status: string; isRunning: boolean; isAwaitingInput?: boolean }>;
   showMiniMap?: boolean;
 }
 
@@ -154,6 +154,7 @@ export function WorkflowCanvas({
               statusColor: nodeStatusColors?.[n.id],
               statusLabel: nodeStatuses?.[n.id]?.status,
               isRunning: nodeStatuses?.[n.id]?.isRunning ?? false,
+              isAwaitingInput: nodeStatuses?.[n.id]?.isAwaitingInput ?? false,
               isEditing: mode !== "view",
               shape,
               nodeColor,

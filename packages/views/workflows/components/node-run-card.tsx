@@ -21,6 +21,7 @@ const STATUS_COLOR: Record<string, string> = {
   format_failed: "bg-red-500/20 text-red-500",
   worker_assigned: "bg-amber-500/20 text-amber-500",
   working: "bg-blue-500/20 text-blue-500",
+  awaiting_input: "bg-cyan-500/20 text-cyan-500",
   awaiting_critic: "bg-amber-500/20 text-amber-500",
   critic_reviewing: "bg-purple-500/20 text-purple-500",
   critic_approved: "bg-emerald-500/20 text-emerald-500",

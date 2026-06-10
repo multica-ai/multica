@@ -360,7 +360,7 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 	}
 	// Validate the agent exists in the target workspace.
 	agent, err := h.Queries.GetAgent(r.Context(), agentUUID)
-	if err != nil || uuidToString(agent.WorkspaceID) != workspaceID {
+	if err != nil || (agent.WorkspaceID.Valid && uuidToString(agent.WorkspaceID) != workspaceID) {
 		slog.Debug("resolveActor: X-Agent-ID rejected, agent not found or workspace mismatch", "agent_id", agentID, "workspace_id", workspaceID)
 		return "member", userID
 	}

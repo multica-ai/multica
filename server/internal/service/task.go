@@ -1483,6 +1483,22 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		}
 	}
 
+	// For workflow node run tasks, use the workflow run's runtime instead
+	// of auto-resolving. Otherwise built-in agents may pick a different
+	// runtime (e.g. Claude instead of CSC) on rerun.
+	var overrideRuntimeID pgtype.UUID
+	if sourceTaskID.Valid {
+		if sourceTask, err := s.Queries.GetAgentTask(ctx, sourceTaskID); err == nil && sourceTask.WorkflowNodeRunID.Valid {
+			nodeRun, err := s.Queries.GetWorkflowNodeRun(ctx, sourceTask.WorkflowNodeRunID)
+			if err == nil {
+				run, err := s.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID)
+				if err == nil && run.RuntimeID.Valid {
+					overrideRuntimeID = run.RuntimeID
+				}
+			}
+		}
+	}
+
 	// Cancel only the target agent's active/queued tasks on this issue.
 	cancelled, err := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
 		IssueID: issueID,
@@ -1501,7 +1517,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, overrideRuntimeID)
 	if err != nil {
 		return nil, err
 	}
@@ -1522,10 +1538,10 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 // stays in sync; otherwise (squad member, prior assignee that has since been
 // reassigned, mention agent) we use the mention path with the same
 // force_fresh_session=true contract.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.MulticaIssue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.MulticaAgentTaskQueue, error) {
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.MulticaIssue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, overrideRuntimeID pgtype.UUID) (db.MulticaAgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, pgtype.UUID{})
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, overrideRuntimeID)
 	}
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true)
 }

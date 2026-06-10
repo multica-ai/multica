@@ -26,6 +26,20 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
+// awaitingInputInstructions is injected into workflow worker agent instructions
+// so the agent knows how to signal it needs user input.
+const awaitingInputInstructions = "## Input Request\n\n" +
+	"If you need user input before proceeding:\n\n" +
+	"1. Post a comment with your question: `multica issue comment add <issue-id> --content \"your question and options here (with recommended option)\"`\n" +
+	"2. Then respond ONLY with this JSON (no other text, the output JSON format must be valid.):\n\n" +
+	`{"status":"awaiting_input","question":"<your question>","options":["<option A>","<option B>",...],"recommended":"<recommended option>"}` + "\n\n" +
+	"- status: must be \"awaiting_input\"\n" +
+	"- question: your question to the user (same as the comment)\n" +
+	"- options: possible answers the user can choose from (at least 2)\n" +
+	"- recommended: your recommended option (must be one of the options values)\n\n" +
+	"3. Then finish this task directly.\n\n" +
+	"The user will reply to your comment, and you will be called again with their answer.\n"
+
 // ---------------------------------------------------------------------------
 // Daemon workspace ownership helpers
 // ---------------------------------------------------------------------------
@@ -1138,6 +1152,23 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.Agent.Instructions += "You must follow these instructions:\n<instructions>\n```\n" + pd.Content + "\n```\n</instructions>\n\n"
 			}
 		}
+
+		// Inject workflow awaiting_input format instructions for worker-phase tasks.
+		if task.WorkflowNodeRunID.Valid && len(task.Context) > 0 {
+			var wfCtx struct {
+				Phase               string `json:"phase"`
+				WorkerCanAwaitInput bool   `json:"worker_can_await_input"`
+			}
+			if json.Unmarshal(task.Context, &wfCtx) == nil &&
+				wfCtx.Phase == "worker" && wfCtx.WorkerCanAwaitInput {
+				if resp.Agent != nil && resp.Agent.Instructions != "" {
+					resp.Agent.Instructions += "\n\n"
+				}
+				if resp.Agent != nil {
+					resp.Agent.Instructions += awaitingInputInstructions
+				}
+			}
+		}
 	}
 
 	// Resolve the runtime owner's profile description so the daemon can
@@ -1290,7 +1321,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				if !task.TriggerCommentID.Valid && prior.RuntimeID == task.RuntimeID {
+				// Allow PriorSessionID for:
+				// - Non-comment-triggered tasks (original condition), OR
+				// - Workflow resume tasks (awaiting_input reply triggers)
+				isWorkflowResume := task.WorkflowNodeRunID.Valid && task.TriggerCommentID.Valid
+				if (!task.TriggerCommentID.Valid || isWorkflowResume) && prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {

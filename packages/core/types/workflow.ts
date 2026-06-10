@@ -19,7 +19,7 @@ export function parseNodeShape(formatSchema: unknown): NodeShape {
 }
 export type NodeRunStatus =
   | "pending" | "format_checking" | "format_ok" | "format_failed"
-  | "worker_assigned" | "working" | "awaiting_critic"
+  | "worker_assigned" | "working" | "awaiting_input" | "awaiting_critic"
   | "critic_reviewing" | "critic_approved" | "critic_rework"
   | "completed" | "failed" | "blocked" | "skipped" | "cancelled";
 export type WorkflowRunStatus = "running" | "completed" | "failed" | "cancelled";

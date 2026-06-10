@@ -10,6 +10,7 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   statusColor?: string;
   statusLabel?: string;
   isRunning?: boolean;
+  isAwaitingInput?: boolean;
   isEditing?: boolean;
   shape?: NodeShape;
   nodeColor?: string;
@@ -93,7 +94,7 @@ const SHAPE_RENDERERS: Record<NodeShape, React.FC<ShapeRendererProps>> = {
 
 function WorkflowNodeRenderer({ id, data, selected, width: nodeWidth, height: nodeHeight }: NodeProps) {
   const nodeData = data as unknown as WorkflowNodeData;
-  const { title, statusColor, statusLabel, isRunning, isEditing, shape, nodeColor, fontSize, onNodeSelect, onNodeResizeStart, onNodeResizeEnd } = nodeData;
+  const { title, statusColor, statusLabel, isRunning, isAwaitingInput, isEditing, shape, nodeColor, fontSize, onNodeSelect, onNodeResizeStart, onNodeResizeEnd } = nodeData;
   // Allow NodeResizer to override dimensions; fall back to shape defaults.
   const baseW = nodeWidth ?? (shape === "diamond" ? DIAMOND_SIZE : shape === "hexagon" ? HEXAGON_SIZE : NODE_WIDTH);
   const baseH = nodeHeight ?? (shape === "diamond" || shape === "hexagon"
@@ -148,6 +149,12 @@ function WorkflowNodeRenderer({ id, data, selected, width: nodeWidth, height: no
           {isRunning && (
             <svg className="animate-spin shrink-0" width="12" height="12" viewBox="0 0 12 12">
               <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18 8" className="text-primary" />
+            </svg>
+          )}
+          {isAwaitingInput && (
+            <svg className="animate-pulse shrink-0" width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.5" className="text-amber-400" />
+              <text x="6" y="8" textAnchor="middle" fontSize="7" fontWeight="bold" fill="currentColor" className="fill-amber-400">?</text>
             </svg>
           )}
           <span className="truncate font-medium" style={{ fontSize: fontSize ? `${fontSize}px` : undefined }}>{title}</span>

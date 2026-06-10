@@ -149,13 +149,14 @@ export function WorkflowDagViewer({
   }
 
   const nodeStatusColors: Record<string, string> = {};
-  const nodeStatuses: Record<string, { status: string; isRunning: boolean }> = {};
+  const nodeStatuses: Record<string, { status: string; isRunning: boolean; isAwaitingInput: boolean }> = {};
   const runningSet = new Set(["format_checking", "working", "critic_reviewing"]);
   for (const nr of nodeRuns) {
     nodeStatusColors[nr.workflow_node_id] = getStatusColor(nr.status);
     nodeStatuses[nr.workflow_node_id] = {
       status: getStatusLabel(nr.status),
       isRunning: runningSet.has(nr.status),
+      isAwaitingInput: nr.status === "awaiting_input",
     };
   }
 

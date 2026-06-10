@@ -137,6 +137,10 @@
     "manage_hint": "只有管理员和所有者可以修改工作区设置。",
     "toast_saved": "已保存工作区设置",
     "toast_save_failed": "保存工作区设置失败",
+    "auto_reply_title": "Workflow 自动回复",
+    "auto_reply_description": "使用推荐选项自动回复工作流 agent 的提问",
+    "auto_reply_toast_saved": "已保存自动回复设置",
+    "auto_reply_toast_failed": "保存自动回复设置失败",
     "danger_zone": "危险操作",
     "leave_title": "离开工作区",
     "leave_sole_owner": "你是唯一的所有者。请先把另一位成员升级为所有者，或者删除工作区。",
@@ -302,6 +306,10 @@
     "toast_saved": "已保存 Workflow 管理员",
     "toast_save_failed": "保存 Workflow 管理员失败",
     "permission_denied": "你没有管理 Workflow 管理员的权限。",
-    "empty_hint": "暂无成员。请先邀请成员加入工作区。"
+    "empty_hint": "暂无成员。请先邀请成员加入工作区。",
+    "auto_reply_title": "Workflow 自动回复",
+    "auto_reply_description": "使用推荐选项自动回复工作流 agent 的提问",
+    "auto_reply_toast_saved": "已保存自动回复设置",
+    "auto_reply_toast_failed": "保存自动回复设置失败"
   }
 }

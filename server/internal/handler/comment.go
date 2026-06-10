@@ -725,6 +725,26 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
+
+		// Workflow awaiting_input routing: if this comment is on a workflow
+		// sub-issue whose node run is in awaiting_input state, route it as a
+		// workflow resume task instead of the normal on_comment trigger.
+		if authorType == "member" &&
+			issue.OriginType.Valid && issue.OriginType.String == "workflow" &&
+			issue.OriginID.Valid {
+			nodeRun, nrErr := h.Queries.GetWorkflowNodeRun(r.Context(), issue.OriginID)
+			if nrErr == nil && nodeRun.Status == service.NodeRunStatusAwaitingInput {
+				// Route to workflow: resume the node run with the user reply.
+				if err := h.WorkflowService.ResumeNodeRunFromComment(r.Context(), nodeRun, comment); err != nil {
+					slog.Warn("resume workflow node from comment failed",
+						"node_run_id", nodeRun.ID.String(),
+						"error", err)
+				}
+				writeJSON(w, http.StatusCreated, resp)
+				return
+			}
+		}
+
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
 	// Also skip when the comment @mentions others but not the assignee agent —

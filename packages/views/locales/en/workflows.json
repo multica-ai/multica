@@ -171,6 +171,7 @@
       "format_failed": "Format Failed",
       "worker_assigned": "Worker Assigned",
       "working": "Working",
+      "awaiting_input": "Awaiting Input",
       "awaiting_critic": "Awaiting Critic",
       "critic_reviewing": "Critic Reviewing",
       "critic_approved": "Critic Approved",

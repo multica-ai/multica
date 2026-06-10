@@ -28,6 +28,7 @@ const STATUS_COLOR: Record<NodeRunStatus, string> = {
   format_failed: "rgba(239,68,68,0.3)",
   worker_assigned: "rgba(245,158,11,0.25)",
   working: "rgba(59,130,246,0.3)",
+  awaiting_input: "rgba(6,182,212,0.3)",
   awaiting_critic: "rgba(168,85,247,0.25)",
   critic_reviewing: "rgba(168,85,247,0.3)",
   critic_approved: "rgba(34,197,94,0.25)",
@@ -60,7 +61,7 @@ export function WorkflowRunPage({ workflowId, runId }: WorkflowRunPageProps) {
   const nodeRunByNodeId = new Map(nodeRuns.map((nr) => [nr.workflow_node_id, nr]));
 
   const nodeStatusColors: Record<string, string> = {};
-  const nodeStatuses: Record<string, { status: string; isRunning: boolean }> = {};
+  const nodeStatuses: Record<string, { status: string; isRunning: boolean; isAwaitingInput: boolean }> = {};
   for (const node of nodes) {
     const nr = nodeRunByNodeId.get(node.id);
     if (nr) {
@@ -69,6 +70,7 @@ export function WorkflowRunPage({ workflowId, runId }: WorkflowRunPageProps) {
       nodeStatuses[node.id] = {
         status: t(($) => ($.run.status as Record<string, string>)[s] ?? s),
         isRunning: RUNNING_STATES.has(s),
+        isAwaitingInput: s === "awaiting_input",
       };
     }
   }
