@@ -1713,6 +1713,10 @@
       "exempt": "read-only — wraps GET /api/agents/{id}/tasks"
     },
     {
+      "id": "agent usage",
+      "exempt": "read-only — wraps GET /api/dashboard/usage/by-agent"
+    },
+    {
       "id": "agent update",
       "gate": "via:PUT /api/agents/{id}/"
     },
@@ -2035,6 +2039,10 @@
     {
       "id": "channel list",
       "exempt": "read-only — wraps GET channel listing"
+    },
+    {
+      "id": "channel messages",
+      "exempt": "read-only — wraps GET /api/issues/{id}/comments for channel/DM messages"
     },
     {
       "id": "chat session list",
