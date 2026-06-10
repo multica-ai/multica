@@ -90,15 +90,12 @@ const clearExpiredHolds = `-- name: ClearExpiredHolds :many
 UPDATE agent_runtime
 SET hold_until = NULL, hold_reason = NULL, updated_at = now()
 WHERE hold_until IS NOT NULL AND hold_until <= now()
-RETURNING id, workspace_id, owner_id, daemon_id, provider
+RETURNING id, workspace_id
 `
 
 type ClearExpiredHoldsRow struct {
 	ID          pgtype.UUID `json:"id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Provider    string      `json:"provider"`
 }
 
 func (q *Queries) ClearExpiredHolds(ctx context.Context) ([]ClearExpiredHoldsRow, error) {
@@ -113,9 +110,6 @@ func (q *Queries) ClearExpiredHolds(ctx context.Context) ([]ClearExpiredHoldsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
-			&i.OwnerID,
-			&i.DaemonID,
-			&i.Provider,
 		); err != nil {
 			return nil, err
 		}
