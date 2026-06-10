@@ -872,20 +872,27 @@ var excluded = map[string]string{
 	// capability; there is no agent tool that opens or closes a PTY session.
 	"POST /api/cerebro/terminal/sessions":               "interactive-terminal — human opens a live agent session to watch/take over; UI-only, no agent tool equivalent",
 	"DELETE /api/cerebro/terminal/sessions/{sessionId}": "interactive-terminal — human closes a live agent session; UI-only, no agent tool equivalent",
-	"POST /api/invitations/{id}/accept":                 "self_only — caller accepting their own invitation",
-	"POST /api/invitations/{id}/decline":                "self_only — caller declining their own invitation",
-	"POST /api/persona/approvals/{id}/approve":          "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
-	"POST /api/persona/approvals/{id}/deny":             "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
-	"POST /api/channels/{id}/read":                      "self_only — caller marking a channel read",
-	"POST /api/lark/binding/redeem":                     "self_only — caller binding their own Lark open_id to their Multica account",
+
+	// agent tool execution — server-side tool executor for external runtimes
+	// (TECH-3226). Per-tool authorization is enforced inside the executor via the
+	// grant cascade (GetCascadeEnabledToolsForAgent → 403 ErrToolNotPermitted),
+	// not by gating this route; the route is workspace-member + own-agent scoped.
+	"POST /api/agents/{id}/tools/{name}/invoke": "tool-execution — per-tool authorization is enforced by the executor grant cascade (TECH-3226), not by gating the invoke route; route is workspace-member + own-agent scoped",
+
+	"POST /api/invitations/{id}/accept":        "self_only — caller accepting their own invitation",
+	"POST /api/invitations/{id}/decline":       "self_only — caller declining their own invitation",
+	"POST /api/persona/approvals/{id}/approve": "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
+	"POST /api/persona/approvals/{id}/deny":    "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
+	"POST /api/channels/{id}/read":             "self_only — caller marking a channel read",
+	"POST /api/lark/binding/redeem":            "self_only — caller binding their own Lark open_id to their Multica account",
 
 	// chat sessions — the caller's own AI chat, not an admin-governed action.
 	"POST /api/chat/sessions/":                             "personal-chat — caller's own AI chat session",
 	"PATCH /api/chat/sessions/{sessionId}/":                "personal-chat — caller's own AI chat session",
 	"DELETE /api/chat/sessions/{sessionId}/":               "personal-chat — caller's own AI chat session",
-	"POST /api/chat/sessions/{sessionId}/messages":       "personal-chat — caller's own AI chat session",
-	"POST /api/chat/sessions/{sessionId}/agent-message": "personal-chat — agent-initiated reply in the caller's own chat session; agent auth enforced in handler", // CEREBRO-PATCH(chat-agent-reply): TECH-3183
-	"POST /api/chat/sessions/{sessionId}/read":           "personal-chat — caller's own AI chat session",
+	"POST /api/chat/sessions/{sessionId}/messages":         "personal-chat — caller's own AI chat session",
+	"POST /api/chat/sessions/{sessionId}/agent-message":    "personal-chat — agent-initiated reply in the caller's own chat session; agent auth enforced in handler", // CEREBRO-PATCH(chat-agent-reply): TECH-3183
+	"POST /api/chat/sessions/{sessionId}/read":             "personal-chat — caller's own AI chat session",
 	"POST /api/chat/sessions/{sessionId}/convert-to-issue": "personal-chat — reached through the caller's own chat; the resulting create is gated by create_issue. PHASE-2 REQUIREMENT: enforcement must verify convert-to-issue actually routes through the create_issue gate, else it is an ungated create-bypass",
 
 	// daemon-token — runtime daemon callbacks; the daemon token binds the call to
