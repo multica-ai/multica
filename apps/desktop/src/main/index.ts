@@ -204,10 +204,14 @@ function createWindow(): void {
 
   // Window-level keyboard shortcuts. Calling preventDefault here prevents
   // both the renderer keydown AND the application menu accelerator, so
-  // anything we own here (reload-block, zoom) is the sole handler for
-  // that combination — no double-fire with the macOS default View menu.
+  // anything we own here (reload-block, zoom, tab-close) is the sole handler
+  // for that combination — no double-fire with the macOS default View menu.
   window.webContents.on("before-input-event", (event, input) => {
-    if (handleAppShortcut(input, window.webContents)) {
+    const result = handleAppShortcut(input, window.webContents);
+    if (result === "close-tab") {
+      event.preventDefault();
+      window.webContents.send("tab:close-active");
+    } else if (result) {
       event.preventDefault();
     }
   });
@@ -368,6 +372,11 @@ if (!gotTheLock) {
     // false configuration.
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
+    });
+
+    // Renderer requests window close (e.g. Cmd+W on last tab).
+    ipcMain.on("window:close", () => {
+      mainWindow?.close();
     });
 
     ipcMain.handle("file:download-url", (_event, url: string) => {

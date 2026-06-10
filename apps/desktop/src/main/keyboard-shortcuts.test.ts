@@ -150,3 +150,26 @@ describe("handleAppShortcut — unrelated keys pass through", () => {
     expect(handleAppShortcut(key("k", { meta: true }), wc, "darwin")).toBe(false);
   });
 });
+
+describe("handleAppShortcut — close tab (Cmd/Ctrl+W)", () => {
+  it('returns "close-tab" on Cmd+W (macOS)', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("w", { meta: true }), wc, "darwin")).toBe("close-tab");
+  });
+
+  it('returns "close-tab" on Cmd+W uppercase', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("W", { meta: true }), wc, "darwin")).toBe("close-tab");
+  });
+
+  it('returns "close-tab" on Ctrl+W (Linux/Windows)', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("w", { control: true }), wc, "linux")).toBe("close-tab");
+    expect(handleAppShortcut(key("w", { control: true }), wc, "win32")).toBe("close-tab");
+  });
+
+  it("does not trigger without Cmd/Ctrl modifier", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("w"), wc, "darwin")).toBe(false);
+  });
+});
