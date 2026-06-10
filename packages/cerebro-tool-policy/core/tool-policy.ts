@@ -11,6 +11,7 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, parseWithFallback } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { toast } from "sonner";
 import { z } from "zod";
 
 // --- types ------------------------------------------------------------------
@@ -229,6 +230,9 @@ export function useSetToolPolicy() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (body: SetToolPolicyRequest) => setToolPolicy(wsId, body),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to update permission");
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: toolPolicyKeys.all(wsId) });
     },
@@ -240,6 +244,9 @@ export function useClearToolPolicy() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (body: ClearToolPolicyRequest) => clearToolPolicy(wsId, body),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to clear permission");
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: toolPolicyKeys.all(wsId) });
     },
