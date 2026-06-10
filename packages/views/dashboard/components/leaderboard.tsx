@@ -51,12 +51,12 @@ const SCOPE_SORT_METRIC: Record<
   model: {
     tokens: (r) => (r as ModelDashboardRow).tokens,
     cost: (r) => (r as ModelDashboardRow).cost,
-    time: () => 0,
+    time: (r) => (r as ModelDashboardRow).seconds,
     tasks: (r) => (r as ModelDashboardRow).taskCount,
   },
   runtime: {
-    tokens: () => 0,
-    cost: () => 0,
+    tokens: (r) => (r as RuntimeDashboardRow).tokens,
+    cost: (r) => (r as RuntimeDashboardRow).cost,
     time: (r) => (r as RuntimeDashboardRow).seconds,
     tasks: (r) => (r as RuntimeDashboardRow).taskCount,
   },
@@ -88,7 +88,9 @@ export function Leaderboard({
   agents,
   deletedAgentCount,
   byModelUsage,
+  modelRunTime,
   runtimeRunTime,
+  runtimeUsage,
   runtimes,
   lessThanMinuteLabel,
 }: {
@@ -96,7 +98,9 @@ export function Leaderboard({
   agents: { id: string; name: string }[];
   deletedAgentCount: number;
   byModelUsage: import("@multica/core/types").DashboardUsageByModel[];
+  modelRunTime: import("@multica/core/types").DashboardModelRunTime[];
   runtimeRunTime: import("@multica/core/types").DashboardRuntimeRunTime[];
+  runtimeUsage: import("@multica/core/types").DashboardRuntimeUsage[];
   runtimes: { id: string; name: string }[];
   lessThanMinuteLabel: string;
 }) {
@@ -105,10 +109,13 @@ export function Leaderboard({
   const [sortBy, setSortBy] = useState<LeaderboardSort>("tokens");
   const [showAll, setShowAll] = useState(false);
 
-  const modelRows = useMemo(() => aggregateModelRows(byModelUsage), [byModelUsage]);
+  const modelRows = useMemo(
+    () => aggregateModelRows(byModelUsage, modelRunTime),
+    [byModelUsage, modelRunTime],
+  );
   const runtimeRows = useMemo(
-    () => aggregateRuntimeRows(runtimeRunTime),
-    [runtimeRunTime],
+    () => aggregateRuntimeRows(runtimeRunTime, runtimeUsage),
+    [runtimeRunTime, runtimeUsage],
   );
 
   const scopeOptions = useMemo(
@@ -274,25 +281,28 @@ export function Leaderboard({
                 const value = metric(row);
                 const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
                 if (scope === "model") {
+                  const r = row as ModelDashboardRow;
                   return (
                     <li
-                      key={(row as ModelDashboardRow).model}
+                      key={r.model}
                       className={`${LEADERBOARD_GRID} px-4 py-2`}
                       style={LEADERBOARD_GRID_STYLE}
                     >
                       <span className="truncate text-body font-medium">
-                        {(row as ModelDashboardRow).model}
+                        {r.model}
                       </span>
                       <ProgressBar pct={pct} />
                       <MetricCell active={sortBy === "tokens"}>
-                        {formatTokens((row as ModelDashboardRow).tokens)}
+                        {formatTokens(r.tokens)}
                       </MetricCell>
                       <MetricCell active={sortBy === "cost"} size="sm">
-                        ${(row as ModelDashboardRow).cost.toFixed(2)}
+                        ${r.cost.toFixed(2)}
                       </MetricCell>
-                      <MetricCell active={false}>—</MetricCell>
+                      <MetricCell active={sortBy === "time"}>
+                        {formatDuration(r.seconds, lessThanMinuteLabel)}
+                      </MetricCell>
                       <MetricCell active={sortBy === "tasks"}>
-                        {(row as ModelDashboardRow).taskCount}
+                        {r.taskCount}
                       </MetricCell>
                     </li>
                   );
@@ -310,8 +320,12 @@ export function Leaderboard({
                           r.runtimeId}
                       </span>
                       <ProgressBar pct={pct} />
-                      <MetricCell active={false}>—</MetricCell>
-                      <MetricCell active={false}>—</MetricCell>
+                      <MetricCell active={sortBy === "tokens"}>
+                        {r.tokens > 0 ? formatTokens(r.tokens) : "—"}
+                      </MetricCell>
+                      <MetricCell active={sortBy === "cost"} size="sm">
+                        {r.cost > 0 ? `$${r.cost.toFixed(2)}` : "—"}
+                      </MetricCell>
                       <MetricCell active={sortBy === "time"}>
                         {formatDuration(r.seconds, lessThanMinuteLabel)}
                       </MetricCell>
