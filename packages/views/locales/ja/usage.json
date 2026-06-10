@@ -40,13 +40,24 @@
   },
   "leaderboard": {
     "title": "リーダーボード",
+    "tab_agent": "エージェント順位",
+    "tab_member": "メンバー順位",
     "caption": "{{count}} 件のエージェント",
+    "caption_member": "{{count}} 人のメンバー",
     "header_agent": "エージェント",
-    "header_tokens": "トークン",
+    "header_member": "メンバー",
+    "header_processed_tokens": "処理済みトークン",
+    "header_non_cached_tokens": "非キャッシュトークン",
+    "header_cached_tokens": "キャッシュヒットトークン",
     "header_cost": "コスト",
     "header_time": "時間",
     "header_tasks": "タスク",
-    "no_data": "この期間にエージェントの活動はありません。"
+    "no_data": "この期間にエージェントの活動はありません。",
+    "system_group": "システム",
+    "breakdown_input": "入力",
+    "breakdown_output": "出力",
+    "breakdown_cache_read": "キャッシュ読み取り",
+    "breakdown_cache_write": "キャッシュ書き込み"
   },
   "empty": {
     "title": "まだ使用量はありません",
