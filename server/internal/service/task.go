@@ -2179,15 +2179,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// Session limit: place the runtime on hold before auto-retry so the
 	// retried task won't be claimed until the hold lifts.
 	if failureReason == "session_limit" && task.RuntimeID.Valid {
-		if resetTime, ok := ParseSessionLimitResetTime(errMsg); ok {
-			if err := s.HoldRuntime(ctx, task.RuntimeID, "session_limit", resetTime); err != nil {
-				slog.Warn("failed to hold runtime after session limit",
-					"runtime_id", util.UUIDToString(task.RuntimeID),
-					"task_id", util.UUIDToString(task.ID),
-					"error", err,
-				)
-			}
-		}
+		s.HoldRuntimeIfSessionLimit(ctx, task.RuntimeID, errMsg)
 	}
 
 	// The auto-retry child (if any) was created inside the transaction above so

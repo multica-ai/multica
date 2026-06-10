@@ -10,6 +10,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // HoldRuntime places a runtime on hold until the given reset time. While on
@@ -48,6 +49,32 @@ func (s *TaskService) HoldRuntime(ctx context.Context, runtimeID pgtype.UUID, re
 		},
 	})
 	return nil
+}
+
+// HoldRuntimeIfSessionLimit classifies the error message, and when it
+// indicates a session limit with a parseable reset time, places the runtime
+// on hold until that time. Bundles the Classify + ParseSessionLimitResetTime
+// + HoldRuntime chain so callers cannot accidentally hold a runtime without
+// first verifying the reset time is parseable (which would leave the runtime
+// stuck on hold indefinitely).
+//
+// Returns true when the runtime was placed on hold, false otherwise.
+func (s *TaskService) HoldRuntimeIfSessionLimit(ctx context.Context, runtimeID pgtype.UUID, errMsg string) bool {
+	if taskfailure.Classify(errMsg) != taskfailure.ReasonSessionLimit {
+		return false
+	}
+	resetTime, ok := ParseSessionLimitResetTime(errMsg)
+	if !ok {
+		return false
+	}
+	if err := s.HoldRuntime(ctx, runtimeID, "session_limit", resetTime); err != nil {
+		slog.Warn("failed to hold runtime after session limit",
+			"runtime_id", util.UUIDToString(runtimeID),
+			"error", err,
+		)
+		return false
+	}
+	return true
 }
 
 // ResumeRuntime clears the hold on a runtime, allowing tasks to be
