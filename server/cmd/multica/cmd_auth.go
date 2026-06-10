@@ -368,8 +368,8 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		return fmt.Errorf("invalid token format: must start with mul_")
 	}
 
-	authURL := resolveAuthBaseURL(cmd)
-	client := cli.NewAPIClient(authURL, "", token)
+	serverURL := resolveServerURL(cmd)
+	client := cli.NewAPIClient(serverURL, "", token)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -378,16 +378,15 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	}
-	if err := client.GetJSON(ctx, "/api/auth/me", &me); err != nil {
+	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
 		return fmt.Errorf("invalid token: %w", err)
 	}
 
-	serviceURL := resolveServerURL(cmd)
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	cfg.WorkspaceID = ""
 	cfg.Token = token
-	cfg.ServerURL = serviceURL
+	cfg.ServerURL = serverURL
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
@@ -398,14 +397,14 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 
 func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	token := resolveToken(cmd)
-	authURL := resolveAuthBaseURL(cmd)
+	serverURL := resolveServerURL(cmd)
 
 	if token == "" {
 		fmt.Fprintln(os.Stderr, "Not authenticated. Run 'csc auth login' to authenticate.")
 		return nil
 	}
 
-	client := cli.NewAPIClient(authURL, "", token)
+	client := cli.NewAPIClient(serverURL, "", token)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -414,7 +413,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		Name  string `json:"name"`
 		Email string `json:"email"`
 	}
-	if err := client.GetJSON(ctx, "/api/auth/me", &me); err != nil {
+	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
 		fmt.Fprintf(os.Stderr, "Token is invalid or expired: %v\nRun 'csc auth login' to re-authenticate.\n", err)
 		return nil
 	}
@@ -424,7 +423,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		prefix = prefix[:12] + "..."
 	}
 
-	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", authURL, me.Name, me.Email, prefix)
+	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", serverURL, me.Name, me.Email, prefix)
 	return nil
 }
 
