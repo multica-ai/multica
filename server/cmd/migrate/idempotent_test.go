@@ -134,6 +134,131 @@ func applyAll(ctx context.Context, pool *pgxpool.Pool, files []string) error {
 	return nil
 }
 
+// TestConstraintInvariants applies all migrations to a fresh database and then
+// asserts that known CHECK constraints include the full cerebro-extended value
+// set. This catches upstream migrations that drop and recreate a constraint
+// without including cerebro-added values — the failure mode from the
+// 111_issue_origin_lark_chat incident (SQLSTATE 23514 on deploy).
+//
+// When adding a new value to a constrained column:
+//  1. Add it here so CI fails until every migration that touches the constraint
+//     is patched to include the new value.
+//  2. Add the CEREBRO-PATCH marker to any upstream migration that resets the
+//     constraint, and document in docs/cerebro-patches.md.
+func TestConstraintInvariants(t *testing.T) {
+	ctx := context.Background()
+
+	baseURL := os.Getenv("DATABASE_URL")
+	if baseURL == "" {
+		baseURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+	}
+
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		t.Skipf("DATABASE_URL is not parseable: %v", err)
+	}
+
+	probe, err := pgxpool.New(ctx, baseURL)
+	if err != nil {
+		t.Skipf("Skipping constraint invariants test: could not open pool: %v", err)
+	}
+	if err := probe.Ping(ctx); err != nil {
+		probe.Close()
+		t.Skipf("Skipping constraint invariants test: database not reachable: %v", err)
+	}
+	probe.Close()
+
+	adminParsed := *parsed
+	adminParsed.Path = "/postgres"
+	adminURL := adminParsed.String()
+
+	adminPool, err := pgxpool.New(ctx, adminURL)
+	if err != nil {
+		t.Skipf("Skipping constraint invariants test: could not open admin pool: %v", err)
+	}
+	defer adminPool.Close()
+
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	testDBName := "multica_invariants_" + hex.EncodeToString(suffix)
+
+	if _, err := adminPool.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s", testDBName)); err != nil {
+		t.Fatalf("create test database: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = adminPool.Exec(context.Background(),
+			fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", testDBName))
+	})
+
+	testParsed := *parsed
+	testParsed.Path = "/" + testDBName
+	testURL := testParsed.String()
+
+	testPool, err := pgxpool.New(ctx, testURL)
+	if err != nil {
+		t.Fatalf("connect to test database: %v", err)
+	}
+	defer testPool.Close()
+
+	migrationsDir := findMigrationsDir(t)
+	files, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
+	if err != nil {
+		t.Fatalf("glob migrations: %v", err)
+	}
+	sort.Strings(files)
+
+	if err := applyAll(ctx, testPool, files); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+
+	// constraintValues queries pg_constraint for the named constraint and returns
+	// the raw CHECK definition string (e.g. "CHECK (col IN ('a','b','c'))").
+	constraintValues := func(t *testing.T, conname string) string {
+		t.Helper()
+		var def string
+		err := testPool.QueryRow(ctx,
+			`SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = $1`,
+			conname,
+		).Scan(&def)
+		if err != nil {
+			t.Fatalf("query constraint %q: %v", conname, err)
+		}
+		return def
+	}
+
+	assertContains := func(t *testing.T, conname, def, value string) {
+		t.Helper()
+		if !strings.Contains(def, "'"+value+"'") {
+			t.Errorf("constraint %q is missing value %q\ngot: %s\n\nIf a new origin_type value was added upstream, patch the relevant migration with CEREBRO-PATCH and add the value to this test.",
+				conname, value, def)
+		}
+	}
+
+	t.Run("issue_origin_type_check", func(t *testing.T) {
+		def := constraintValues(t, "issue_origin_type_check")
+		// Upstream values
+		assertContains(t, "issue_origin_type_check", def, "autopilot")
+		assertContains(t, "issue_origin_type_check", def, "quick_create")
+		assertContains(t, "issue_origin_type_check", def, "lark_chat")
+		// Cerebro-added values (9023, 9054) — upstream migrations must preserve these
+		assertContains(t, "issue_origin_type_check", def, "runtime_approval")
+		assertContains(t, "issue_origin_type_check", def, "agent_task")
+	})
+
+	t.Run("issue_subscriber_reason_check", func(t *testing.T) {
+		def := constraintValues(t, "issue_subscriber_reason_check")
+		assertContains(t, "issue_subscriber_reason_check", def, "creator")
+		assertContains(t, "issue_subscriber_reason_check", def, "assignee")
+		assertContains(t, "issue_subscriber_reason_check", def, "commenter")
+		assertContains(t, "issue_subscriber_reason_check", def, "mentioned")
+		assertContains(t, "issue_subscriber_reason_check", def, "manual")
+		// Cerebro-added value (9054)
+		assertContains(t, "issue_subscriber_reason_check", def, "triggered_agent")
+	})
+}
+
 func findMigrationsDir(t *testing.T) string {
 	t.Helper()
 	candidates := []string{
