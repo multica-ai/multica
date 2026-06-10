@@ -357,7 +357,7 @@ function RuntimeProperties({
               <span>
                 {t(($) => $.health.on_hold.label)} —{" "}
                 {t(($) => $.health.on_hold.resumes_in, {
-                  time: formatHoldUntil(runtime.hold_until) ?? "soon",
+                  time: formatHoldUntil(runtime.hold_until)!,
                 })}
               </span>
             </span>
