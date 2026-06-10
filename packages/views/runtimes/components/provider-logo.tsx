@@ -239,6 +239,23 @@ function QoderclicnLogo({ className }: { className: string }) {
   );
 }
 
+// MiniMax mmx — stylised "M" glyph for the mmx CLI provider.
+// Violet (#7C3AED) background with a white geometric M letterform.
+function MmxLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#7C3AED" />
+      <path
+        d="M5.5 17V7L12 13.5L18.5 7V17"
+        stroke="#FFFFFF"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -277,6 +294,8 @@ export function ProviderLogo({
       return <AntigravityLogo className={className} />;
     case "qoderclicn":
       return <QoderclicnLogo className={className} />;
+    case "mmx":
+      return <MmxLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
