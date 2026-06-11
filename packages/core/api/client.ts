@@ -105,6 +105,9 @@ import type {
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
+  ListOctoInstallationsResponse,
+  OctoInstallation,
+  RedeemOctoBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -2119,6 +2122,34 @@ export class ApiClient {
 
   async redeemLarkBindingToken(token: string): Promise<RedeemLarkBindingTokenResponse> {
     return this.fetch(`/api/lark/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  // Octo IM integration
+  async listOctoInstallations(workspaceId: string): Promise<ListOctoInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/octo/installations`);
+  }
+
+  async createOctoInstallation(
+    workspaceId: string,
+    params: { agent_id: string; bot_token: string; api_url?: string },
+  ): Promise<OctoInstallation> {
+    return this.fetch(`/api/workspaces/${workspaceId}/octo/installations`, {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async deleteOctoInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/octo/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemOctoBindingToken(token: string): Promise<RedeemOctoBindingTokenResponse> {
+    return this.fetch(`/api/octo/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
     });

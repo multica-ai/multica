@@ -83,6 +83,8 @@
     "./github/queries": "./github/queries.ts",
     "./lark": "./lark/index.ts",
     "./lark/queries": "./lark/queries.ts",
+    "./octo": "./octo/index.ts",
+    "./octo/queries": "./octo/queries.ts",
     "./feedback": "./feedback/index.ts",
     "./feedback/mutations": "./feedback/mutations.ts",
     "./realtime": "./realtime/index.ts",

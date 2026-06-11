@@ -102,6 +102,11 @@ export type {
   RedeemLarkBindingTokenResponse,
 } from "./lark";
 export type {
+  OctoInstallation,
+  ListOctoInstallationsResponse,
+  RedeemOctoBindingTokenResponse,
+} from "./octo";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
