@@ -15,6 +15,7 @@ export interface Workspace {
   repos: WorkspaceRepo[];
   issue_prefix: string;
   avatar_url: string | null;
+  scout_agent_id?: string | null;
   created_at: string;
   updated_at: string;
 }

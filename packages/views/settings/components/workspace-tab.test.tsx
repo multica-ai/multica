@@ -24,7 +24,10 @@ const membersRef = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: membersRef.current, isFetched: true }),
+  useQuery: ({ queryKey }: { queryKey: unknown[] }) => {
+    if (queryKey[0] === "agents") return { data: [], isFetched: true };
+    return { data: membersRef.current, isFetched: true };
+  },
   useQueryClient: () => ({
     setQueryData: vi.fn(),
     getQueryData: vi.fn(() => []),
@@ -48,6 +51,7 @@ vi.mock("@multica/core/platform", () => ({
 
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: vi.fn() }),
+  agentListOptions: () => ({ queryKey: ["agents"], queryFn: vi.fn() }),
   workspaceListOptions: () => ({ queryKey: ["workspaces"], queryFn: vi.fn() }),
   workspaceKeys: { list: () => ["workspaces"] },
 }));

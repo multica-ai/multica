@@ -17,6 +17,13 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@multica/ui/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -24,6 +31,7 @@ import { useLeaveWorkspace, useDeleteWorkspace } from "@multica/core/workspace/m
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   memberListOptions,
+  agentListOptions,
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
@@ -42,12 +50,18 @@ import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { useT } from "../../i18n";
 
+// Base UI rejects "" as a SelectItem value, so route the "no scout" state
+// through this sentinel and translate to null at the API boundary.
+const SCOUT_NONE = "__none__";
+
 export function WorkspaceTab() {
   const { t } = useT("settings");
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
   const { data: members = [], isFetched: membersFetched } = useQuery(memberListOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const activeAgents = agents.filter((a) => !a.archived_at);
   const qc = useQueryClient();
   const leaveWorkspace = useLeaveWorkspace();
   const deleteWorkspace = useDeleteWorkspace();
@@ -102,6 +116,7 @@ export function WorkspaceTab() {
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
   const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
+  const [scoutAgentId, setScoutAgentId] = useState<string>(workspace?.scout_agent_id ?? SCOUT_NONE);
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -132,6 +147,7 @@ export function WorkspaceTab() {
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
     setIssuePrefix(workspace?.issue_prefix ?? "");
+    setScoutAgentId(workspace?.scout_agent_id ?? SCOUT_NONE);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
 
@@ -154,6 +170,7 @@ export function WorkspaceTab() {
         name,
         description,
         context,
+        scout_agent_id: scoutAgentId === SCOUT_NONE ? null : scoutAgentId,
         ...(includePrefix ? { issue_prefix: normalizedPrefix } : {}),
       });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
@@ -357,6 +374,33 @@ export function WorkspaceTab() {
                 {t(($) => $.workspace.issue_prefix_hint, {
                   example: `${normalizedPrefix || workspace.issue_prefix}-123`,
                 })}
+              </p>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.scout_agent_label)}</Label>
+              <Select
+                value={scoutAgentId}
+                onValueChange={(value) => setScoutAgentId(value ?? SCOUT_NONE)}
+                disabled={!canManageWorkspace}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue>
+                    {scoutAgentId === SCOUT_NONE
+                      ? t(($) => $.workspace.scout_agent_none)
+                      : (agents.find((a) => a.id === scoutAgentId)?.name ?? scoutAgentId)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SCOUT_NONE}>{t(($) => $.workspace.scout_agent_none)}</SelectItem>
+                  {activeAgents.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(($) => $.workspace.scout_agent_hint)}
               </p>
             </div>
             <div className="flex items-center justify-end gap-2 pt-1">

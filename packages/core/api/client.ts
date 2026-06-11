@@ -190,6 +190,9 @@ import {
   EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+  WorkspaceSchema,
+  WorkspaceListSchema,
+  EMPTY_WORKSPACE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1394,11 +1397,13 @@ export class ApiClient {
 
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
-    return this.fetch("/api/workspaces");
+    const raw = await this.fetch<unknown>("/api/workspaces");
+    return parseWithFallback(raw, WorkspaceListSchema, [], { endpoint: "GET /api/workspaces" });
   }
 
   async getWorkspace(id: string): Promise<Workspace> {
-    return this.fetch(`/api/workspaces/${id}`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${id}`);
+    return parseWithFallback(raw, WorkspaceSchema, EMPTY_WORKSPACE, { endpoint: "GET /api/workspaces/:id" });
   }
 
   async createWorkspace(data: { name: string; slug: string; description?: string; context?: string }): Promise<Workspace> {
@@ -1408,11 +1413,12 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
-    return this.fetch(`/api/workspaces/${id}`, {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string; scout_agent_id?: string | null }): Promise<Workspace> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, WorkspaceSchema, EMPTY_WORKSPACE, { endpoint: "PATCH /api/workspaces/:id" });
   }
 
   // Members

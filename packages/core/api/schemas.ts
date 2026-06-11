@@ -19,6 +19,7 @@ import type {
   Squad,
   TimelineEntry,
   User,
+  Workspace,
   WebhookDelivery,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
@@ -171,6 +172,54 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
+};
+
+// ---------------------------------------------------------------------------
+// Workspace (`GET /api/workspaces`, `GET /api/workspaces/:id`,
+// `PATCH /api/workspaces/:id`). The desktop app caches workspaces in the
+// query layer and reads them on every navigation — a drift here causes
+// white-screens in older installs. Key risk: `scout_agent_id` added in
+// FRO-24; old servers won't return it, so it must default to null instead
+// of blowing up downstream code that reads `workspace.scout_agent_id`.
+// ---------------------------------------------------------------------------
+
+const WorkspaceRepoSchema = z.object({
+  url: z.string().default(""),
+  description: z.string().optional(),
+}).loose();
+
+export const WorkspaceSchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  slug: z.string().default(""),
+  description: z.string().nullable().default(null),
+  context: z.string().nullable().default(null),
+  settings: z.record(z.string(), z.unknown()).default({}),
+  repos: z.array(WorkspaceRepoSchema).default([]),
+  issue_prefix: z.string().default(""),
+  avatar_url: z.string().nullable().default(null),
+  // Optional field added in FRO-24. Old servers omit it; null is the
+  // correct fallback so the Scout selector shows "None" without crashing.
+  scout_agent_id: z.string().nullable().optional().transform((v) => v ?? null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const WorkspaceListSchema = z.array(WorkspaceSchema);
+
+export const EMPTY_WORKSPACE: Workspace = {
+  id: "",
+  name: "",
+  slug: "",
+  description: null,
+  context: null,
+  settings: {},
+  repos: [],
+  issue_prefix: "",
+  avatar_url: null,
+  scout_agent_id: null,
+  created_at: "",
+  updated_at: "",
 };
 
 export const CommentSchema = z.object({

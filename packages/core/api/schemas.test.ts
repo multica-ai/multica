@@ -5,6 +5,7 @@ import {
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_USER,
+  EMPTY_WORKSPACE,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -13,6 +14,8 @@ import {
   SquadListSchema,
   SquadSchema,
   UserSchema,
+  WorkspaceListSchema,
+  WorkspaceSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -268,5 +271,96 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+// WorkspaceSchema: covers the API compatibility contract added in FRO-27.
+// The critical drift scenario is an old server that does not yet return
+// `scout_agent_id` — the schema must not throw; the field must default to
+// null so the Scout selector shows "None" instead of crashing.
+describe("WorkspaceSchema scout_agent_id drift", () => {
+  const baseWorkspace = {
+    id: "ws-1",
+    name: "Acme",
+    slug: "acme",
+    description: null,
+    context: null,
+    settings: {},
+    repos: [],
+    issue_prefix: "ACM",
+    avatar_url: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("defaults scout_agent_id to null when the old server omits it", () => {
+    const parsed = WorkspaceSchema.parse(baseWorkspace);
+    expect(parsed.scout_agent_id).toBe(null);
+  });
+
+  it("accepts a UUID string scout_agent_id", () => {
+    const parsed = WorkspaceSchema.parse({
+      ...baseWorkspace,
+      scout_agent_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    });
+    expect(parsed.scout_agent_id).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+  });
+
+  it("accepts explicit null (cleared scout)", () => {
+    const parsed = WorkspaceSchema.parse({ ...baseWorkspace, scout_agent_id: null });
+    expect(parsed.scout_agent_id).toBe(null);
+  });
+
+  it("defaults repos to [] when the field is absent", () => {
+    const { repos: _omit, ...without } = baseWorkspace;
+    const parsed = WorkspaceSchema.parse(without);
+    expect(parsed.repos).toEqual([]);
+  });
+
+  it("passes through unknown server-side fields via .loose()", () => {
+    const parsed = WorkspaceSchema.parse({ ...baseWorkspace, future_field: "x" });
+    expect((parsed as Record<string, unknown>).future_field).toBe("x");
+  });
+
+  it("falls back to EMPTY_WORKSPACE when the response body is malformed", () => {
+    const parsed = parseWithFallback(
+      { not: "a workspace" },
+      WorkspaceSchema,
+      EMPTY_WORKSPACE,
+      { endpoint: "GET /api/workspaces/:id" },
+    );
+    expect(parsed).toBe(EMPTY_WORKSPACE);
+  });
+});
+
+describe("WorkspaceListSchema drift", () => {
+  const ws = {
+    id: "ws-1",
+    name: "Acme",
+    slug: "acme",
+    description: null,
+    context: null,
+    settings: {},
+    repos: [],
+    issue_prefix: "ACM",
+    avatar_url: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("parses an array of workspaces", () => {
+    const parsed = WorkspaceListSchema.parse([ws, { ...ws, id: "ws-2", slug: "beta" }]);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.scout_agent_id).toBe(null);
+  });
+
+  it("falls back to [] when the body is not an array", () => {
+    const parsed = parseWithFallback(
+      { workspaces: [] },
+      WorkspaceListSchema,
+      [],
+      { endpoint: "GET /api/workspaces" },
+    );
+    expect(parsed).toEqual([]);
   });
 });
