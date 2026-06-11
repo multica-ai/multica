@@ -709,10 +709,11 @@ func TestSweepExpiredHolds(t *testing.T) {
 		t.Fatalf("failed to find test runtime: %v", err)
 	}
 
-	// Place the runtime on hold in the past so sweepExpiredHolds should clear it.
+	// Place the runtime on hold well past the 300s release margin so
+	// sweepExpiredHolds should clear it.
 	if _, err := testPool.Exec(ctx, `
 		UPDATE agent_runtime
-		SET hold_until = now() - interval '5 minutes', hold_reason = 'session_limit'
+		SET hold_until = now() - interval '10 minutes', hold_reason = 'session_limit'
 		WHERE id = $1
 	`, runtimeID); err != nil {
 		t.Fatalf("set hold: %v", err)
@@ -813,6 +814,54 @@ func TestSweepExpiredHoldsLeavesActiveholdsUntouched(t *testing.T) {
 	}
 	if !holdUntilSet {
 		t.Fatal("active hold (future hold_until) must not be cleared by sweepExpiredHolds")
+	}
+}
+
+// TestSweepExpiredHoldsRespectsReleaseMargin verifies that a hold whose
+// hold_until has just passed but is still inside the 300s release margin is
+// NOT cleared. This guards the buffer that keeps a runtime held a little past
+// its stated reset time, since the provider quota is often not lifted on the
+// first run after reset.
+func TestSweepExpiredHoldsRespectsReleaseMargin(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.runtime_id FROM agent a
+		JOIN member m ON m.workspace_id = a.workspace_id
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&runtimeID); err != nil {
+		t.Fatalf("failed to find test runtime: %v", err)
+	}
+
+	// hold_until is 2 minutes in the past — expired, but well within the 300s
+	// release margin, so the runtime must stay held.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET hold_until = now() - interval '2 minutes', hold_reason = 'session_limit'
+		WHERE id = $1
+	`, runtimeID); err != nil {
+		t.Fatalf("set hold: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `UPDATE agent_runtime SET hold_until = NULL, hold_reason = NULL WHERE id = $1`, runtimeID)
+	})
+
+	queries := db.New(testPool)
+	sweepExpiredHolds(ctx, queries, nil)
+
+	var holdUntilSet bool
+	if err := testPool.QueryRow(ctx, `SELECT hold_until IS NOT NULL FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&holdUntilSet); err != nil {
+		t.Fatalf("check hold after sweep: %v", err)
+	}
+	if !holdUntilSet {
+		t.Fatal("hold within the 300s release margin must not be cleared by sweepExpiredHolds")
 	}
 }
 

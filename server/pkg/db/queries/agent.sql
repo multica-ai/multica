@@ -290,7 +290,11 @@ WHERE id = (
           SELECT 1 FROM agent_runtime ar
           WHERE ar.id = atq.runtime_id
             AND ar.hold_until IS NOT NULL
-            AND ar.hold_until > now()
+            -- Stay blocked for a 300s margin past hold_until: the provider
+            -- quota is often not released on the very first run after the
+            -- stated reset, so we hold dispatch a little longer to absorb
+            -- clock skew. Must match ClearExpiredHolds and runtimeOnHold.
+            AND ar.hold_until > now() - make_interval(secs => 300)
       )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
@@ -633,14 +637,17 @@ ORDER BY priority DESC, created_at ASC;
 -- ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 -- runtime is busy on a long-running task. Backed by the partial index
 -- idx_agent_task_queue_claim_candidates so the warm path is cheap.
--- Skips results when the runtime is on hold (hold_until > now()).
+-- Skips results when the runtime is on hold, including a 300s margin past
+-- hold_until (see ClearExpiredHolds: the provider quota is often not released
+-- on the first run after the stated reset, so we keep the runtime held a
+-- little longer to absorb clock skew).
 SELECT atq.* FROM agent_task_queue atq
 WHERE atq.runtime_id = $1 AND atq.status = 'queued'
   AND NOT EXISTS (
       SELECT 1 FROM agent_runtime ar
       WHERE ar.id = atq.runtime_id
         AND ar.hold_until IS NOT NULL
-        AND ar.hold_until > now()
+        AND ar.hold_until > now() - make_interval(secs => 300)
   )
 ORDER BY atq.priority DESC, atq.created_at ASC;
 
