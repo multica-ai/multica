@@ -150,7 +150,7 @@ type UpdateWebhookDeliveryStatusParams struct {
 }
 
 func (q *Queries) UpdateWebhookDeliveryStatus(ctx context.Context, arg UpdateWebhookDeliveryStatusParams) (WebhookEndpointDelivery, error) {
-	const sql = "UPDATE webhook_delivery SET status = $2, http_status = $3, response_body = $4, error_message = $5, attempt = $6, delivered_at = CASE WHEN $2 = 'delivered' THEN now() ELSE delivered_at END WHERE id = $1 RETURNING id, endpoint_id, event_type, payload, status, http_status, response_body, error_message, attempt, created_at, delivered_at"
+	const sql = "UPDATE webhook_endpoint_delivery SET status = $2, http_status = $3, response_body = $4, error_message = $5, attempt = $6, delivered_at = CASE WHEN $2 = 'delivered' THEN now() ELSE delivered_at END WHERE id = $1 RETURNING id, endpoint_id, event_type, payload, status, http_status, response_body, error_message, attempt, created_at, delivered_at"
 	row := q.db.QueryRow(ctx, sql, arg.ID, arg.Status, arg.HttpStatus, arg.ResponseBody, arg.ErrorMessage, arg.Attempt)
 	var i WebhookEndpointDelivery
 	err := row.Scan(&i.ID, &i.EndpointID, &i.EventType, &i.Payload, &i.Status, &i.HttpStatus, &i.ResponseBody, &i.ErrorMessage, &i.Attempt, &i.CreatedAt, &i.DeliveredAt)
@@ -164,7 +164,7 @@ type ListWebhookDeliveriesParams struct {
 }
 
 func (q *Queries) ListWebhookDeliveries(ctx context.Context, arg ListWebhookDeliveriesParams) ([]WebhookEndpointDelivery, error) {
-	const sql = "SELECT id, endpoint_id, event_type, payload, status, http_status, response_body, error_message, attempt, created_at, delivered_at FROM webhook_delivery WHERE endpoint_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+	const sql = "SELECT id, endpoint_id, event_type, payload, status, http_status, response_body, error_message, attempt, created_at, delivered_at FROM webhook_endpoint_delivery WHERE endpoint_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
 	rows, err := q.db.Query(ctx, sql, arg.EndpointID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
@@ -182,7 +182,7 @@ func (q *Queries) ListWebhookDeliveries(ctx context.Context, arg ListWebhookDeli
 }
 
 func (q *Queries) CountWebhookDeliveries(ctx context.Context, endpointID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, "SELECT count(*) FROM webhook_delivery WHERE endpoint_id = $1", endpointID)
+	row := q.db.QueryRow(ctx, "SELECT count(*) FROM webhook_endpoint_delivery WHERE endpoint_id = $1", endpointID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -197,7 +197,7 @@ type CreateEndpointDeliveryParams struct {
 }
 
 func (q *Queries) CreateEndpointDelivery(ctx context.Context, arg CreateEndpointDeliveryParams) (WebhookEndpointDelivery, error) {
-	const sql = "INSERT INTO webhook_delivery (endpoint_id, event_type, payload, status, attempt) VALUES ($1, $2, $3, $4, $5) RETURNING id, endpoint_id, event_type, payload, status, http_status, response_body, error_message, attempt, created_at, delivered_at"
+	const sql = "INSERT INTO webhook_endpoint_delivery (endpoint_id, event_type, payload, status, attempt) VALUES ($1, $2, $3, $4, $5) RETURNING id, endpoint_id, event_type, payload, status, http_status, response_body, error_message, attempt, created_at, delivered_at"
 	row := q.db.QueryRow(ctx, sql, arg.EndpointID, arg.EventType, arg.Payload, arg.Status, arg.Attempt)
 	var i WebhookEndpointDelivery
 	err := row.Scan(&i.ID, &i.EndpointID, &i.EventType, &i.Payload, &i.Status, &i.HttpStatus, &i.ResponseBody, &i.ErrorMessage, &i.Attempt, &i.CreatedAt, &i.DeliveredAt)
