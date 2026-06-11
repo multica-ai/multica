@@ -149,6 +149,10 @@ func (h *Handler) CreateOctoInstallation(w http.ResponseWriter, r *http.Request)
 		InstallerUserID: userUUID,
 	})
 	if err != nil {
+		if errors.Is(err, octo.ErrRobotAlreadyBound) {
+			writeError(w, http.StatusConflict, "this Octo bot is already bound to another agent; disconnect it there first")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to save installation")
 		return
 	}

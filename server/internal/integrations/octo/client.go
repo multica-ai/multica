@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -55,7 +56,7 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 	if err != nil {
 		return db.OctoInstallation{}, fmt.Errorf("seal bot token: %w", err)
 	}
-	return s.queries.UpsertOctoInstallation(ctx, db.UpsertOctoInstallationParams{
+	inst, err := s.queries.UpsertOctoInstallation(ctx, db.UpsertOctoInstallationParams{
 		WorkspaceID:       p.WorkspaceID,
 		AgentID:           p.AgentID,
 		BotTokenEncrypted: sealed,
@@ -66,7 +67,27 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 		WsUrl:             p.WSURL,
 		InstallerUserID:   p.InstallerUserID,
 	})
+	if err != nil {
+		// The upsert's ON CONFLICT only covers (workspace_id, agent_id) —
+		// re-configuring the same agent. Binding a bot whose robot_id is already
+		// in use by a DIFFERENT agent/workspace falls through to an INSERT that
+		// trips the global UNIQUE(robot_id) constraint (23505). Surface that as a
+		// typed error so the handler can return 409 + a clear message instead of
+		// a generic 500.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "octo_installation_robot_id_key" {
+			return db.OctoInstallation{}, ErrRobotAlreadyBound
+		}
+		return db.OctoInstallation{}, err
+	}
+	return inst, nil
 }
+
+// ErrRobotAlreadyBound is returned by Upsert when the bot's robot_id is already
+// bound to a different agent (the UNIQUE(robot_id) constraint is deployment-wide:
+// one Octo bot maps to exactly one Multica agent). Translated to 409 at the HTTP
+// boundary. The fix is to revoke the existing installation first.
+var ErrRobotAlreadyBound = errors.New("octo bot is already bound to another agent")
 
 // Revoke marks an installation revoked; the hub tears down its WS on the next
 // sweep.
