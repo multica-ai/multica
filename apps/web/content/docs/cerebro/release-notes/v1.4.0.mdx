@@ -60,7 +60,7 @@ Changes since [v1.3.0](https://github.com/firtal-group/firtal-cerebro/compare/v1
 - FIR-43 worker pushes FX via internal API, no DB credential [#990](https://github.com/firtal-group/firtal-cerebro/pull/990)
 - Add OpenAI EU provider via api.eu.openai.com (TECH-2989) [#947](https://github.com/firtal-group/firtal-cerebro/pull/947)
 - Overflow guard + Haiku compression with UI toggle [#987](https://github.com/firtal-group/firtal-cerebro/pull/987)
-- FIR-43 Hatchet cron worker for daily USD→{DKK,EUR} refresh
+- FIR-43 Hatchet cron worker for daily USD→`{DKK,EUR}` refresh
 - Cost display-currency (USD/DKK/EUR) — workspace setting + central formatter (FIR-40)
 - Push-down + fold + scroll-reveal for portal topbar (TECH-2971)
 - Enable tool-policy UI + register 8 CS MCP tools in runtime (TECH-3020)
@@ -84,15 +84,15 @@ Changes since [v1.3.0](https://github.com/firtal-group/firtal-cerebro/compare/v1
 - More breathing room between inbox messages (TECH-3322) [#1124](https://github.com/firtal-group/firtal-cerebro/pull/1124)
 - Clear inbox unread state when a channel/DM is opened (TECH-3352) [#1128](https://github.com/firtal-group/firtal-cerebro/pull/1128)
 - Enable cerebro_connections by default (TECH-3209) [#1071](https://github.com/firtal-group/firtal-cerebro/pull/1071)
-- Catalogue PUT /workspaces/{id}/wakeup-settings [#1117](https://github.com/firtal-group/firtal-cerebro/pull/1117)
-- Inventory PUT /workspaces/{id}/wakeup-settings (workspace_admin) [#1116](https://github.com/firtal-group/firtal-cerebro/pull/1116)
+- Catalogue PUT `/workspaces/{id}/wakeup-settings` [#1117](https://github.com/firtal-group/firtal-cerebro/pull/1117)
+- Inventory PUT `/workspaces/{id}/wakeup-settings` (workspace_admin) [#1116](https://github.com/firtal-group/firtal-cerebro/pull/1116)
 - Restart daemon when server/pkg/agent/ or .deploy/ changes
 - Keep messages unread when window is hidden/unfocused (TECH-3300) [#1110](https://github.com/firtal-group/firtal-cerebro/pull/1110)
 - Remove duplicate agent tool invoke exclusion [#1107](https://github.com/firtal-group/firtal-cerebro/pull/1107)
 - Classify agent tool invoke route (TECH-3226 regression) [#1106](https://github.com/firtal-group/firtal-cerebro/pull/1106)
 - Classify POST agent tool invoke route (TECH-3226 regression) [#1105](https://github.com/firtal-group/firtal-cerebro/pull/1105)
 - Inventory POST agent tool invoke route (TECH-3226 regression) [#1103](https://github.com/firtal-group/firtal-cerebro/pull/1103)
-- Cascade-granted tools show as enabled in /api/agents/{id}/tools (TECH-3226)
+- Cascade-granted tools show as enabled in `/api/agents/{id}/tools` (TECH-3226)
 - Make agent-file downloads work from the UI (TECH-3285) [#1100](https://github.com/firtal-group/firtal-cerebro/pull/1100)
 - Cascade permissions + idempotent migration fix (TECH-3226)
 - Surface mutation errors as toasts (TECH-3257)

@@ -84,6 +84,50 @@ class RenderDocsReleaseNotesTest(unittest.TestCase):
                 ),
             )
 
+    def test_escapes_mdx_special_chars_in_bullets(self) -> None:
+        # Regression: TECH-3412. Raw "<value>" broke the MDX build and "{id}"
+        # crashed rendering. The generator must escape both outside code spans
+        # while leaving backticked code spans untouched.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            notes = root / "release-notes.md"
+            notes.write_text(
+                "\n".join(
+                    [
+                        "## v1.0.0",
+                        "",
+                        "### Fixed",
+                        "- Escape <value> in release notes",
+                        "- Catalogue PUT /workspaces/{id}/wakeup-settings",
+                        "- Keep `<value>` and `{id}` inside backticks literal",
+                        "",
+                    ]
+                )
+                + "\n"
+            )
+            notes_dir = root / "release-notes"
+            index = notes_dir / "index.mdx"
+            index.parent.mkdir()
+            index.write_text("")
+
+            output = renderer.render_docs_release_notes(
+                notes_path=notes,
+                notes_dir=notes_dir,
+                index_path=index,
+                tag="v1.0.0",
+                date="2026-05-22",
+            )
+            mdx = output.read_text()
+
+            # Escaped outside code spans.
+            self.assertIn(r"- Escape \<value> in release notes", mdx)
+            self.assertIn(r"- Catalogue PUT /workspaces/\{id}/wakeup-settings", mdx)
+            # Untouched inside backtick code spans.
+            self.assertIn("`<value>` and `{id}` inside backticks", mdx)
+            # No raw unescaped tag/expression leaks into prose.
+            self.assertNotIn("Escape <value>", mdx)
+            self.assertNotIn("/workspaces/{id}/wakeup-settings", mdx)
+
     def test_replaces_existing_index_entry_for_same_tag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

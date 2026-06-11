@@ -18,6 +18,24 @@ def yaml_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+# MDX treats `<` and `{` in prose as JSX tag / JS-expression syntax. Release-note
+# bullets are plain text pulled from GitHub, so a literal `<value>` (parsed as an
+# unclosed JSX tag — breaks the build) or `{id}` (parsed as a JS expression
+# referencing an undefined identifier — crashes rendering) must be escaped. We
+# escape only outside inline-code spans, where backticks already make them
+# literal. Regression source: TECH-3412 (`<value>` build break + `{id}` render
+# crash both shipped from unescaped bullets).
+_INLINE_CODE_SPLIT = re.compile(r"(`[^`]*`)")
+
+
+def escape_mdx_text(text: str) -> str:
+    parts = _INLINE_CODE_SPLIT.split(text)
+    for i, part in enumerate(parts):
+        if i % 2 == 0:  # outside backtick code spans
+            parts[i] = part.replace("<", r"\<").replace("{", r"\{")
+    return "".join(parts)
+
+
 def release_date(value: str | None) -> str:
     if value:
         return value[:10]
@@ -105,12 +123,12 @@ def render_mdx(markdown: str, tag: str, date: str) -> str:
     ]
 
     if intro:
-        lines.extend([intro, ""])
+        lines.extend([escape_mdx_text(intro), ""])
 
     for title, body in sections:
-        lines.append(f"## {title}")
+        lines.append(f"## {escape_mdx_text(title)}")
         lines.append("")
-        lines.extend(body)
+        lines.extend(escape_mdx_text(line) for line in body)
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
