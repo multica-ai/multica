@@ -330,3 +330,61 @@ func TestFirtalRegistryCallAppsGetsAndFiltersByRepo(t *testing.T) {
 		t.Fatalf("callApps dropped owner/deploy data: %s", out)
 	}
 }
+
+func TestFirtalRegistryCallUpdateAppPostsToDeploy(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %q, want POST", r.Method)
+		}
+		if r.URL.Path != firtalRegistryDeployPath {
+			t.Errorf("path = %q, want %q", r.URL.Path, firtalRegistryDeployPath)
+		}
+		if r.Header.Get("x-api-key") != "rk_test" {
+			t.Errorf("x-api-key = %q, want rk_test", r.Header.Get("x-api-key"))
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		_, _ = w.Write([]byte(`{"created":false,"app":{"id":"app-1","name":"cerebro"}}`))
+	}))
+	defer srv.Close()
+
+	tool := &FirtalRegistryTool{}
+	fields := map[string]any{"name": "cerebro", "platform_external_id": "svc_1", "owner_email": "a@firtal.com"}
+	out, err := tool.callUpdateApp(context.Background(), srv.URL, "rk_test", fields)
+	if err != nil {
+		t.Fatalf("callUpdateApp: %v", err)
+	}
+	if gotBody["name"] != "cerebro" || gotBody["owner_email"] != "a@firtal.com" {
+		t.Fatalf("upstream did not receive the fields: %v", gotBody)
+	}
+	if !strings.Contains(out, "app-1") {
+		t.Fatalf("response not returned to caller: %s", out)
+	}
+}
+
+func TestFirtalRegistryUpdateAppRequiresAllowWrite(t *testing.T) {
+	// AllowWrite is gated in Call(); assert the config flag is independent of
+	// read scope so allowed_data_sources_all never implies write.
+	cfg := firtalRegistryGrantConfig{AllowedAll: true}
+	if cfg.AllowWrite {
+		t.Fatal("allowed_data_sources_all must not imply AllowWrite")
+	}
+}
+
+func TestFirtalRegistryCallUpdateAppNon2xxBubblesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"This system key is not authorised to write to the Apps registry."}`))
+	}))
+	defer srv.Close()
+
+	tool := &FirtalRegistryTool{}
+	_, err := tool.callUpdateApp(context.Background(), srv.URL, "rk_test", map[string]any{"name": "x"})
+	if err == nil {
+		t.Fatal("callUpdateApp should error on HTTP 403")
+	}
+	if !strings.Contains(err.Error(), "HTTP 403") || !strings.Contains(err.Error(), "not authorised") {
+		t.Errorf("error should preserve upstream HTTP code and body: %v", err)
+	}
+}

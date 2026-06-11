@@ -389,6 +389,12 @@ type firtalRegistryGrantConfig struct {
 	// allowlist: an agent without allowed_apps (and without
 	// allowed_data_sources_all) cannot read the apps catalog.
 	AllowedApps bool `json:"allowed_apps"`
+	// AllowWrite opts the agent into the update_app action (deploy-write upsert
+	// via /api/apps/deploy). Strictly deny-by-default and NOT implied by
+	// allowed_data_sources_all (which is read scope): a write requires this
+	// explicit flag. The registry itself still gates the call on a system key
+	// with apps_write_enabled + a per-app write grant.
+	AllowWrite bool `json:"allow_write"`
 }
 
 // fdrRegistrySettings is the workspace.settings envelope read for the registry
@@ -405,7 +411,7 @@ type fdrRegistrySettings struct {
 
 func (t *FirtalRegistryTool) Name() string { return "firtal_registry" }
 func (t *FirtalRegistryTool) Description() string {
-	return "Query the Firtal Data Registry. Use action=list_data_sources to discover available data sources, action=get_schema with data_source_id to fetch a single source's schema and parameters, action=execute with data_source_id plus optional parameters, filter_group, pagination, and aggregation to run a query, and action=list_apps to look up registered apps and their owners (optionally filtered by github_repo, e.g. firtal-group/firtal-cerebro) — returns each app's owner_email, owner_member_id and deploy_model for deploy reviews."
+	return "Query the Firtal Data Registry. Use action=list_data_sources to discover available data sources, action=get_schema with data_source_id to fetch a single source's schema and parameters, action=execute with data_source_id plus optional parameters, filter_group, pagination, and aggregation to run a query, and action=list_apps to look up registered apps and their owners (optionally filtered by github_repo, e.g. firtal-group/firtal-cerebro) — returns each app's owner_email, owner_member_id and deploy_model for deploy reviews, and action=update_app to upsert an app's deploy/metadata record (pass a fields object with at least name; matched by platform + platform_external_id)."
 }
 func (t *FirtalRegistryTool) InputSchema() map[string]any {
 	return map[string]any{
@@ -414,7 +420,7 @@ func (t *FirtalRegistryTool) InputSchema() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"description": "Operation to perform: list_data_sources, get_schema, execute, or list_apps.",
+				"description": "Operation to perform: list_data_sources, get_schema, execute, list_apps, or update_app.",
 			},
 			"data_source_id": map[string]any{
 				"type":        "string",
@@ -423,6 +429,10 @@ func (t *FirtalRegistryTool) InputSchema() map[string]any {
 			"github_repo": map[string]any{
 				"type":        "string",
 				"description": "Optional filter for list_apps: an owner/name GitHub repo (e.g. firtal-group/firtal-cerebro). When set, only apps whose github_repo matches are returned.",
+			},
+			"fields": map[string]any{
+				"type":        "object",
+				"description": "For update_app: the app record to upsert. Must include name; platform (default sliplane) + platform_external_id identify an existing app. Writable data fields only (owner_email, owner_member_id, deploy_model, github_repo, notes, …); reserved identity/audit columns are rejected by the registry.",
 			},
 			"parameters": map[string]any{
 				"type":        "object",
@@ -448,18 +458,19 @@ const (
 	firtalRegistryListPath    = "/api/registry/data-sources"
 	firtalRegistryExecutePath = "/api/registry/execute"
 	firtalRegistryAppsPath    = "/api/apps"
+	firtalRegistryDeployPath  = "/api/apps/deploy"
 )
 
 func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (string, error) {
 	action, _ := args["action"].(string)
 	action = strings.TrimSpace(action)
 	if action == "" {
-		return "", fmt.Errorf("firtal_registry: action is required (one of: list_data_sources, get_schema, execute, list_apps)")
+		return "", fmt.Errorf("firtal_registry: action is required (one of: list_data_sources, get_schema, execute, list_apps, update_app)")
 	}
 	switch action {
-	case "list_data_sources", "get_schema", "execute", "list_apps":
+	case "list_data_sources", "get_schema", "execute", "list_apps", "update_app":
 	default:
-		return "", fmt.Errorf("firtal_registry: unknown action %q (expected one of: list_data_sources, get_schema, execute, list_apps)", action)
+		return "", fmt.Errorf("firtal_registry: unknown action %q (expected one of: list_data_sources, get_schema, execute, list_apps, update_app)", action)
 	}
 
 	// Both get_schema and execute address a specific data source; validate the
@@ -511,6 +522,18 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 		}
 		githubRepo, _ := args["github_repo"].(string)
 		return t.callApps(ctx, baseURL, apiKey, strings.TrimSpace(githubRepo))
+	case "update_app":
+		if !config.AllowWrite {
+			return "", fmt.Errorf("firtal_registry: update_app is not enabled for this agent (set allow_write in the firtal_registry grant config)")
+		}
+		fields, ok := args["fields"].(map[string]any)
+		if !ok || len(fields) == 0 {
+			return "", fmt.Errorf("firtal_registry: update_app requires a non-empty fields object")
+		}
+		if name, _ := fields["name"].(string); strings.TrimSpace(name) == "" {
+			return "", fmt.Errorf("firtal_registry: update_app fields must include a non-empty name")
+		}
+		return t.callUpdateApp(ctx, baseURL, apiKey, fields)
 	}
 	// unreachable — the action validation above is exhaustive.
 	return "", fmt.Errorf("firtal_registry: unreachable")
@@ -717,6 +740,29 @@ func filterAppsByRepo(raw []byte, githubRepo string) []byte {
 		return raw
 	}
 	return out
+}
+
+// callUpdateApp performs the update_app action: POST /api/apps/deploy on the
+// registry with the agent-supplied fields. The registry upserts by
+// (platform, platform_external_id), writes only allowlisted data columns
+// (rejecting reserved identity/audit fields with 403), and enforces the
+// system-key + apps_write_enabled + per-app write grant — so this action can
+// never write more than the configured registry key is itself authorised for.
+func (t *FirtalRegistryTool) callUpdateApp(ctx context.Context, baseURL, apiKey string, fields map[string]any) (string, error) {
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		return "", fmt.Errorf("firtal_registry: marshal update_app fields: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+firtalRegistryDeployPath, bytes.NewReader(raw))
+	if err != nil {
+		return "", fmt.Errorf("firtal_registry: build update_app request: %w", err)
+	}
+	t.setRegistryHeaders(req, apiKey)
+	body, err := doRegistryRequest(req)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 }
 
 func (t *FirtalRegistryTool) setRegistryHeaders(req *http.Request, apiKey string) {
