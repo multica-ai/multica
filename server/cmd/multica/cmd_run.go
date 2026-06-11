@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -9,12 +13,16 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/spf13/cobra"
 )
@@ -61,6 +69,11 @@ type localCLIUsage struct {
 const invalidLocalRunMulticaToken = "multica-local-run-token-disabled"
 const localRunHeartbeatInterval = 30 * time.Second
 const localRunUsageDebounce = 2 * time.Second
+const localRunReporterQueueSize = 128
+const localRunReporterDrainTimeout = 30 * time.Second
+const localRunSpoolRetention = 7 * 24 * time.Hour
+
+var localRunMessageRetryBackoffs = []time.Duration{500 * time.Millisecond, 1500 * time.Millisecond, 3 * time.Second}
 
 var executeLocalCLIForRun = executeLocalCLI
 
@@ -122,8 +135,14 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update local run status: %w", err)
 	}
 
+	spool, err := newLocalRunMessageSpoolForCommand(cmd)
+	if err != nil {
+		return err
+	}
+	go syncPendingLocalRunSpool(context.Background(), client, spool, "")
+
 	fmt.Fprintf(os.Stderr, "Multica local run %s started.\n", run.ID)
-	reporter := newLocalRunReporter(client, run.ID)
+	reporter := newLocalRunReporterWithSpool(client, run.ID, spool)
 	usageReporter := newLocalRunUsageReporter(client, run.ID, localRunUsageDebounce)
 	stopHeartbeat := startLocalRunHeartbeat(client, run.ID, localRunHeartbeatInterval)
 	exitCode, runErr := executeLocalCLIForRun(childArgs, cwd, cliName, localCLIEnv{
@@ -186,6 +205,12 @@ type localRunMessagePoster interface {
 	PostJSON(ctx context.Context, path string, body any, out any) error
 }
 
+type localRunMessageSpooler interface {
+	Write(runID string, msg localCLIMessage) error
+	Sync(ctx context.Context, client localRunMessagePoster, runID string) (int, int, error)
+	Count(runID string) int
+}
+
 type localRunStatusPatcher interface {
 	PatchJSON(ctx context.Context, path string, body any, out any) error
 }
@@ -226,20 +251,46 @@ func startLocalRunHeartbeat(client localRunStatusPatcher, runID string, interval
 }
 
 type localRunReporter struct {
-	client localRunMessagePoster
-	runID  string
-	ch     chan localCLIMessage
-	done   chan struct{}
-	mu     sync.Mutex
-	closed bool
+	client       localRunMessagePoster
+	runID        string
+	ch           chan localCLIMessage
+	done         chan struct{}
+	spool        localRunMessageSpooler
+	retryBackoff []time.Duration
+	drainTimeout time.Duration
+	ctx          context.Context
+	cancel       context.CancelFunc
+	seq          atomic.Int64
+	mu           sync.Mutex
+	closed       bool
 }
 
 func newLocalRunReporter(client localRunMessagePoster, runID string) *localRunReporter {
+	return newLocalRunReporterWithOptions(client, runID, nil, localRunReporterQueueSize, localRunMessageRetryBackoffs, localRunReporterDrainTimeout)
+}
+
+func newLocalRunReporterWithSpool(client localRunMessagePoster, runID string, spool localRunMessageSpooler) *localRunReporter {
+	return newLocalRunReporterWithOptions(client, runID, spool, localRunReporterQueueSize, localRunMessageRetryBackoffs, localRunReporterDrainTimeout)
+}
+
+func newLocalRunReporterWithOptions(client localRunMessagePoster, runID string, spool localRunMessageSpooler, queueSize int, retryBackoff []time.Duration, drainTimeout time.Duration) *localRunReporter {
+	if queueSize <= 0 {
+		queueSize = localRunReporterQueueSize
+	}
+	if drainTimeout <= 0 {
+		drainTimeout = localRunReporterDrainTimeout
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	r := &localRunReporter{
-		client: client,
-		runID:  runID,
-		ch:     make(chan localCLIMessage, 128),
-		done:   make(chan struct{}),
+		client:       client,
+		runID:        runID,
+		ch:           make(chan localCLIMessage, queueSize),
+		done:         make(chan struct{}),
+		spool:        spool,
+		retryBackoff: append([]time.Duration(nil), retryBackoff...),
+		drainTimeout: drainTimeout,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 	go r.loop()
 	return r
@@ -254,10 +305,25 @@ func (r *localRunReporter) Post(msg localCLIMessage) {
 	if r.closed {
 		return
 	}
+	msg = r.prepareMessage(msg)
 	select {
 	case r.ch <- msg:
 	default:
+		r.spoolMessage(msg)
 	}
+}
+
+func (r *localRunReporter) prepareMessage(msg localCLIMessage) localCLIMessage {
+	msg.Source = strings.TrimSpace(msg.Source)
+	msg.SourceKey = strings.TrimSpace(msg.SourceKey)
+	if msg.SourceKey == "" {
+		seq := r.seq.Add(1)
+		if msg.Source == "" {
+			msg.Source = "local-run"
+		}
+		msg.SourceKey = "local-run:" + r.runID + ":seq:" + strconv.FormatInt(seq, 10)
+	}
+	return msg
 }
 
 func (r *localRunReporter) Close() {
@@ -272,19 +338,236 @@ func (r *localRunReporter) Close() {
 	r.closed = true
 	close(r.ch)
 	r.mu.Unlock()
-	<-r.done
+	timer := time.NewTimer(r.drainTimeout)
+	defer timer.Stop()
+	select {
+	case <-r.done:
+	case <-timer.C:
+		r.cancel()
+		<-r.done
+	}
+	if r.spool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), r.drainTimeout)
+		defer cancel()
+		_, remaining, err := r.spool.Sync(ctx, r.client, r.runID)
+		if err != nil || remaining > 0 {
+			fmt.Fprintf(os.Stderr, "multica: %d local run messages remain queued for later sync; run `multica local-run sync-pending` to retry.\n", remaining)
+		}
+	}
 }
 
 func (r *localRunReporter) loop() {
 	defer close(r.done)
 	path := "/api/local-runs/" + url.PathEscape(r.runID) + "/messages"
 	for msg := range r.ch {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := r.client.PostJSON(ctx, path, msg, nil); err != nil {
-			fmt.Fprintf(os.Stderr, "multica: failed to sync local run message: %v\n", err)
+		if err := postLocalRunMessageWithRetry(r.ctx, r.client, path, msg, r.retryBackoff); err != nil {
+			r.spoolMessage(msg)
 		}
-		cancel()
 	}
+}
+
+func (r *localRunReporter) spoolMessage(msg localCLIMessage) {
+	if r.spool == nil {
+		fmt.Fprintf(os.Stderr, "multica: failed to sync local run message and no spool is configured\n")
+		return
+	}
+	if err := r.spool.Write(r.runID, msg); err != nil {
+		fmt.Fprintf(os.Stderr, "multica: failed to spool local run message: %v\n", err)
+	}
+}
+
+func postLocalRunMessageWithRetry(ctx context.Context, client localRunMessagePoster, path string, msg localCLIMessage, backoffs []time.Duration) error {
+	if client == nil {
+		return errors.New("local run message client is nil")
+	}
+	var lastErr error
+	for attempt := 0; attempt <= len(backoffs); attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := client.PostJSON(attemptCtx, path, msg, nil)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if attempt == len(backoffs) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoffs[attempt]):
+		}
+	}
+	return lastErr
+}
+
+type localRunMessageSpool struct {
+	dir string
+}
+
+type localRunSpoolEntry struct {
+	RunID     string          `json:"run_id"`
+	Message   localCLIMessage `json:"message"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+type localRunSpoolFile struct {
+	path  string
+	entry localRunSpoolEntry
+}
+
+func newLocalRunMessageSpoolForCommand(cmd *cobra.Command) (*localRunMessageSpool, error) {
+	dir, err := cli.StateDirForInstance(resolveProfile(cmd), resolveConfigPath(cmd))
+	if err != nil {
+		return nil, err
+	}
+	return &localRunMessageSpool{dir: filepath.Join(dir, "local-run-spool")}, nil
+}
+
+func (s *localRunMessageSpool) Write(runID string, msg localCLIMessage) error {
+	if s == nil {
+		return nil
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run ID is required")
+	}
+	msg.Source = strings.TrimSpace(msg.Source)
+	msg.SourceKey = strings.TrimSpace(msg.SourceKey)
+	if msg.SourceKey == "" {
+		return fmt.Errorf("source_key is required")
+	}
+	if msg.Source == "" {
+		msg.Source = "local-run"
+	}
+	dir := filepath.Join(s.dir, safeSpoolName(runID))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create local run spool dir: %w", err)
+	}
+	entry := localRunSpoolEntry{RunID: runID, Message: msg, CreatedAt: time.Now().UTC()}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("encode local run spool entry: %w", err)
+	}
+	name := safeSpoolName(msg.SourceKey) + ".json"
+	path := filepath.Join(dir, name)
+	tmp, err := os.CreateTemp(dir, ".spool-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create local run spool temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write local run spool temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close local run spool temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("chmod local run spool temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename local run spool entry: %w", err)
+	}
+	return nil
+}
+
+func (s *localRunMessageSpool) Sync(ctx context.Context, client localRunMessagePoster, runID string) (int, int, error) {
+	return syncPendingLocalRunSpool(ctx, client, s, runID)
+}
+
+func (s *localRunMessageSpool) Count(runID string) int {
+	entries, err := s.entries(runID)
+	if err != nil {
+		return 0
+	}
+	return len(entries)
+}
+
+func syncPendingLocalRunSpool(ctx context.Context, client localRunMessagePoster, spool *localRunMessageSpool, runID string) (int, int, error) {
+	if spool == nil {
+		return 0, 0, nil
+	}
+	entries, err := spool.entries(runID)
+	if err != nil {
+		return 0, 0, err
+	}
+	sent := 0
+	var lastErr error
+	for _, file := range entries {
+		select {
+		case <-ctx.Done():
+			return sent, len(entries) - sent, ctx.Err()
+		default:
+		}
+		path := "/api/local-runs/" + url.PathEscape(file.entry.RunID) + "/messages"
+		if err := postLocalRunMessageWithRetry(ctx, client, path, file.entry.Message, localRunMessageRetryBackoffs); err != nil {
+			lastErr = err
+			continue
+		}
+		if err := os.Remove(file.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			lastErr = err
+			continue
+		}
+		sent++
+	}
+	remaining := spool.Count(runID)
+	return sent, remaining, lastErr
+}
+
+func (s *localRunMessageSpool) entries(runID string) ([]localRunSpoolFile, error) {
+	if s == nil {
+		return nil, nil
+	}
+	root := s.dir
+	if strings.TrimSpace(runID) != "" {
+		root = filepath.Join(root, safeSpoolName(runID))
+	}
+	var entries []localRunSpoolFile
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".json") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var entry localRunSpoolEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			return err
+		}
+		if time.Since(entry.CreatedAt) > localRunSpoolRetention {
+			_ = os.Remove(path)
+			return nil
+		}
+		entries = append(entries, localRunSpoolFile{path: path, entry: entry})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].entry.RunID == entries[j].entry.RunID {
+			return entries[i].entry.CreatedAt.Before(entries[j].entry.CreatedAt)
+		}
+		return entries[i].entry.RunID < entries[j].entry.RunID
+	})
+	return entries, nil
+}
+
+func safeSpoolName(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 type localRunUsageReporter struct {
