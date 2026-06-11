@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Wand, Trash2, Power, ArrowLeft, Undo2, Redo2, Sun, Moon, Monitor } from "lucide-react";
@@ -26,6 +26,16 @@ import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { ReactFlowProvider } from "@xyflow/react";
@@ -135,6 +145,17 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const [draftTitle, setDraftTitle] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Container for portal dialogs — renders inside the component tree
+  // instead of document.body, so dialogs work inside iframes.
+  const dialogRootRef = useRef<HTMLDivElement>(null);
+
+  const portalContainer = dialogRootRef.current;
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [pendingTemplateValue, setPendingTemplateValue] = useState(false);
+
   const handleNodeMoved = useCallback((nodeId: string, x: number, y: number) => {
     useWorkflowEditorStore.getState().cacheNodeEdits(nodeId, { position_x: x, position_y: y });
   }, []);
@@ -205,9 +226,10 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   };
 
   const handleDeleteWorkflow = async () => {
-    if (!confirm(t(($) => $.page.delete_confirm))) return;
+    setDeleteDialogOpen(false);
     try {
       await deleteWorkflowMutation.mutateAsync(id!);
+      toast.success(t(($) => $.detail.toast_deleted));
       navigation.push(wsPaths.workflows());
     } catch {
       toast.error(t(($) => $.detail.toast_delete_failed));
@@ -268,16 +290,11 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             variant="ghost"
             size="icon"
             className="h-7 w-7 shrink-0"
-            onClick={async () => {
+            onClick={() => {
               const hasEdits = Object.keys(nodeEdits).length > 0 || deletedNodeIds.length > 0;
               if (hasEdits && mode === "edit") {
-                const save = confirm(t(($) => $.detail.unsaved_changes));
-                if (save) {
-                  await handleSave();
-                } else {
-                  for (const k of Object.keys(nodeEdits)) clearNodeEdits(k);
-                  for (const nid of deletedNodeIds) clearNodeDelete(nid);
-                }
+                setUnsavedDialogOpen(true);
+                return;
               }
               useWorkflowEditorStore.getState().reset();
               navigation.push(wsPaths.workflows());
@@ -324,18 +341,10 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             <Button
               size="sm"
               variant="outline"
-              onClick={async () => {
+              onClick={() => {
                 const newIsTemplate = !workflow?.is_template;
-                if (!confirm(newIsTemplate ? t(($) => $.detail.template_confirm_set) : t(($) => $.detail.template_confirm_unset))) return;
-                try {
-                  await toggleTemplate.mutateAsync({
-                    id: id!,
-                    isTemplate: newIsTemplate,
-                  });
-                  toast.success(newIsTemplate ? t(($) => $.detail.toast_template_set) : t(($) => $.detail.toast_template_unset));
-                } catch (err: any) {
-                  toast.error(err?.message || t(($) => $.detail.toast_template_toggle_failed));
-                }
+                setPendingTemplateValue(newIsTemplate);
+                setTemplateDialogOpen(true);
               }}
               disabled={toggleTemplate.isPending}
             >
@@ -365,7 +374,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
           >
             {mode === "view" ? t(($) => $.detail.toolbar.edit) : t(($) => $.detail.toolbar.done)}
           </Button>
-          <Button size="sm" variant="outline" onClick={handleDeleteWorkflow} className="text-destructive hover:text-destructive">
+          <Button size="sm" variant="outline" onClick={() => setDeleteDialogOpen(true)} className="text-destructive hover:text-destructive">
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
           <Button
@@ -496,6 +505,104 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
           </div>
         )}
       </div>
+
+      {/* Portal container for dialogs — renders inside component tree for iframe compatibility */}
+      <div ref={dialogRootRef} />
+
+      {/* Delete workflow confirmation dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent container={portalContainer}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
+            {workflow && (
+              <AlertDialogDescription>
+                {t(($) => $.detail.delete_dialog.description, { title: workflow.title })}
+              </AlertDialogDescription>
+            )}
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={handleDeleteWorkflow}
+              disabled={deleteWorkflowMutation.isPending}
+            >
+              {deleteWorkflowMutation.isPending
+                ? t(($) => $.detail.delete_dialog.deleting)
+                : t(($) => $.detail.delete_dialog.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Unsaved changes dialog */}
+      <AlertDialog open={unsavedDialogOpen} onOpenChange={setUnsavedDialogOpen}>
+        <AlertDialogContent container={portalContainer}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.detail.unsaved_changes)}</AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel />
+            <AlertDialogAction
+              onClick={async () => {
+                setUnsavedDialogOpen(false);
+                await handleSave();
+                useWorkflowEditorStore.getState().reset();
+                navigation.push(wsPaths.workflows());
+              }}
+            >
+              {t(($) => $.detail.save)}
+            </AlertDialogAction>
+            <AlertDialogAction
+              variant="outline"
+              onClick={() => {
+                setUnsavedDialogOpen(false);
+                for (const k of Object.keys(nodeEdits)) clearNodeEdits(k);
+                for (const nid of deletedNodeIds) clearNodeDelete(nid);
+                useWorkflowEditorStore.getState().reset();
+                navigation.push(wsPaths.workflows());
+              }}
+            >
+              {t(($) => $.detail.discard_changes)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Template toggle confirmation dialog */}
+      <AlertDialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+        <AlertDialogContent container={portalContainer}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingTemplateValue
+                ? t(($) => $.detail.template_confirm_set)
+                : t(($) => $.detail.template_confirm_unset)}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel />
+            <AlertDialogAction
+              onClick={async () => {
+                setTemplateDialogOpen(false);
+                try {
+                  await toggleTemplate.mutateAsync({
+                    id: id!,
+                    isTemplate: pendingTemplateValue,
+                  });
+                  toast.success(pendingTemplateValue ? t(($) => $.detail.toast_template_set) : t(($) => $.detail.toast_template_unset));
+                } catch (err: any) {
+                  toast.error(err?.message || t(($) => $.detail.toast_template_toggle_failed));
+                }
+              }}
+              disabled={toggleTemplate.isPending}
+            >
+              {pendingTemplateValue
+                ? t(($) => $.detail.set_as_template)
+                : t(($) => $.detail.unset_template)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
