@@ -62,7 +62,7 @@ func localSkillRootForProvider(provider string) (string, bool, error) {
 	}
 
 	switch provider {
-	case "claude":
+	case "claude", "codebuddy":
 		return filepath.Join(home, ".claude", "skills"), true, nil
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))

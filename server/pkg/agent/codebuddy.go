@@ -4,18 +4,21 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
-// codebuddyBackend implements Backend by spawning the Claude Code CLI
-// (codebuddy fork) with --output-format stream-json.
+// codebuddyBackend implements Backend by spawning the CodeBuddy CLI
+// (a Claude Code fork) with --output-format stream-json.
+// It mirrors claude.go's execution model: concurrent stdin/stdout to
+// avoid pipe deadlocks, open stdin for control_request auto-approval,
+// and runContext for zero-timeout = no-deadline semantics.
 type codebuddyBackend struct {
 	cfg Config
 }
@@ -74,10 +77,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCodebuddyArgs(opts, b.cfg.Logger)
 
@@ -121,12 +121,8 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		cancel()
 		return nil, fmt.Errorf("codebuddy stdin pipe: %w", err)
 	}
-	closeStdin := func() {
-		if stdin != nil {
-			_ = stdin.Close()
-			stdin = nil
-		}
-	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codebuddy:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
@@ -136,13 +132,6 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		cancel()
 		return nil, fmt.Errorf("start codebuddy: %w", err)
 	}
-	if err := writeCodebuddyInput(stdin, prompt); err != nil {
-		closeStdin()
-		cancel()
-		_ = cmd.Wait()
-		return nil, errors.New(withAgentStderr(fmt.Sprintf("write codebuddy input: %v", err), "codebuddy", stderrBuf.Tail()))
-	}
-	closeStdin()
 
 	b.cfg.Logger.Info("codebuddy started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -151,6 +140,20 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
+
+	// Write the prompt in a dedicated goroutine to prevent deadlock.
+	// CodeBuddy (like Claude Code) emits a startup banner to stdout before
+	// reading stdin; a synchronous write would block once the pipe buffer
+	// fills. Keep stdin open after writing so control_request events can
+	// be answered mid-run.
+	writeDone := make(chan error, 1)
+	go func() {
+		err := writeCodebuddyInput(stdin, prompt)
+		if err != nil {
+			closeStdin()
+		}
+		writeDone <- err
+	}()
 
 	go func() {
 		defer cancel()
@@ -170,6 +173,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
 			<-runCtx.Done()
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
@@ -198,7 +202,6 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
-				closeStdin()
 				sessionID = msg.SessionID
 				if msg.ResultText != "" {
 					output.Reset()
@@ -211,6 +214,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 					finalStatus = "failed"
 					finalError = msg.ResultText
 				}
+				closeStdin()
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -219,20 +223,35 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 						Content: msg.Log.Message,
 					})
 				}
+			case "control_request":
+				b.handleControlRequest(msg, stdin)
 			}
 		}
+
+		closeStdin()
 
 		// Wait for process exit.
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
+		// writeDone is buffered (cap 1) and the writer always sends — by the
+		// time cmd has exited, the prompt write has either succeeded, hit a
+		// broken pipe, or been unblocked by the kill that ended cmd.
+		writeErr := <-writeDone
 
-		if runCtx.Err() == context.DeadlineExceeded {
+		switch {
+		case runCtx.Err() == context.DeadlineExceeded:
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf("codebuddy timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
+		case runCtx.Err() == context.Canceled:
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" {
+		case writeErr != nil && finalStatus == "completed" && sessionID == "":
+			// No result event landed and the prompt write failed — codebuddy
+			// died before reading the prompt. Surface the write error; the
+			// stderr tail attached below carries the real reason.
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("write codebuddy input: %v", writeErr)
+		case exitErr != nil && finalStatus == "completed":
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("codebuddy exited with error: %v", exitErr)
 		}
@@ -327,6 +346,44 @@ func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message
 	}
 }
 
+func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin interface{ Write([]byte) (int, error) }) {
+	// Auto-approve all tool uses in autonomous/daemon mode.
+	var req codebuddyControlRequestPayload
+	if err := json.Unmarshal(msg.Request, &req); err != nil {
+		return
+	}
+
+	var inputMap map[string]any
+	if req.Input != nil {
+		_ = json.Unmarshal(req.Input, &inputMap)
+	}
+	if inputMap == nil {
+		inputMap = map[string]any{}
+	}
+
+	response := map[string]any{
+		"type": "control_response",
+		"response": map[string]any{
+			"subtype":    "success",
+			"request_id": msg.RequestID,
+			"response": map[string]any{
+				"behavior":     "allow",
+				"updatedInput": inputMap,
+			},
+		},
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		b.cfg.Logger.Warn("codebuddy: failed to marshal control response", "error", err)
+		return
+	}
+	data = append(data, '\n')
+	if _, err := stdin.Write(data); err != nil {
+		b.cfg.Logger.Warn("codebuddy: failed to write control response", "error", err)
+	}
+}
+
 func writeCodebuddyInput(w io.Writer, prompt string) error {
 	payload := map[string]any{
 		"type": "user",
@@ -370,6 +427,10 @@ type codebuddySDKMessage struct {
 
 	// log fields
 	Log *codebuddyLogEntry `json:"log,omitempty"`
+
+	// control request fields
+	RequestID string          `json:"request_id,omitempty"`
+	Request   json.RawMessage `json:"request,omitempty"`
 }
 
 type codebuddyLogEntry struct {
@@ -378,10 +439,10 @@ type codebuddyLogEntry struct {
 }
 
 type codebuddyMessageContent struct {
-	Role    string                 `json:"role"`
-	Model   string                 `json:"model"`
+	Role    string                  `json:"role"`
+	Model   string                  `json:"model"`
 	Content []codebuddyContentBlock `json:"content"`
-	Usage   *codebuddyUsage        `json:"usage,omitempty"`
+	Usage   *codebuddyUsage         `json:"usage,omitempty"`
 }
 
 type codebuddyUsage struct {
@@ -406,6 +467,12 @@ type codebuddyContentBlock struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
+}
+
+type codebuddyControlRequestPayload struct {
+	Subtype  string          `json:"subtype"`
+	ToolName string          `json:"tool_name,omitempty"`
+	Input    json.RawMessage `json:"input,omitempty"`
 }
 
 func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string) map[string]TokenUsage {

@@ -152,7 +152,7 @@ func TestCodebuddyExecute_Success(t *testing.T) {
 
 	fakePath := filepath.Join(t.TempDir(), "codebuddy")
 	script := "#!/bin/sh\n" +
-		"cat >/dev/null\n" +
+		"IFS= read -r _\n" +
 		`printf '%s\n' '{"type":"system","session_id":"sess-cb-001"}'` + "\n" +
 		`printf '%s\n' '{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"Hello from codebuddy"}]}}'` + "\n" +
 		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-cb-001","result":"Hello from codebuddy","modelUsage":{"claude-sonnet-4-20250514":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":10,"cacheCreationInputTokens":5}}}'` + "\n"
@@ -228,7 +228,7 @@ func TestCodebuddyExecuteSurfacesStderr(t *testing.T) {
 
 	fakePath := filepath.Join(t.TempDir(), "codebuddy")
 	script := "#!/bin/sh\n" +
-		"cat >/dev/null\n" +
+		"IFS= read -r _\n" +
 		"echo \"FATAL ERROR: segfault in codebuddy runtime\" >&2\n" +
 		"exit 1\n"
 	writeTestExecutable(t, fakePath, []byte(script))

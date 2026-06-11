@@ -376,6 +376,51 @@ var codebuddyEffortLabel = map[string]string{
 
 var codebuddyStaticEffortFallback = []string{"low", "medium", "high", "xhigh"}
 
+// codebuddyHelpCache caches the raw --help output so both model discovery
+// (models.go) and effort discovery avoid redundant slow CLI invocations.
+// CodeBuddy's --help takes ~30s; calling it twice on cold start wastes ~30s.
+var (
+	codebuddyHelpMu    sync.Mutex
+	codebuddyHelpStore = map[string]codebuddyHelpEntry{}
+)
+
+const codebuddyHelpTTL = 60 * time.Second
+
+type codebuddyHelpEntry struct {
+	output    string
+	expiresAt time.Time
+}
+
+// codebuddyHelpOutput runs `codebuddy --help` (cached for codebuddyHelpTTL).
+// Both discoverCodebuddyModels and codebuddyEffortSuperset call this so a
+// single cold invocation feeds both.
+func codebuddyHelpOutput(ctx context.Context, executablePath string) string {
+	if executablePath == "" {
+		executablePath = "codebuddy"
+	}
+	key := executablePath
+	codebuddyHelpMu.Lock()
+	if entry, ok := codebuddyHelpStore[key]; ok && time.Now().Before(entry.expiresAt) {
+		codebuddyHelpMu.Unlock()
+		return entry.output
+	}
+	codebuddyHelpMu.Unlock()
+
+	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "--help")
+	hideAgentWindow(cmd)
+	out, _ := cmd.CombinedOutput()
+	result := string(out)
+
+	if result != "" {
+		codebuddyHelpMu.Lock()
+		codebuddyHelpStore[key] = codebuddyHelpEntry{output: result, expiresAt: time.Now().Add(codebuddyHelpTTL)}
+		codebuddyHelpMu.Unlock()
+	}
+	return result
+}
+
 func annotateCodebuddyThinking(ctx context.Context, models []Model, executablePath string) {
 	if executablePath == "" {
 		executablePath = "codebuddy"
@@ -421,16 +466,11 @@ func annotateCodebuddyThinking(ctx context.Context, models []Model, executablePa
 }
 
 func codebuddyEffortSuperset(ctx context.Context, executablePath string) []string {
-	// CodeBuddy's --help is slow (~30s); use a generous timeout.
-	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(runCtx, executablePath, "--help")
-	hideAgentWindow(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	helpOut := codebuddyHelpOutput(ctx, executablePath)
+	if helpOut == "" {
 		return append([]string(nil), codebuddyStaticEffortFallback...)
 	}
-	parsed := parseCodebuddyEffortHelp(string(out))
+	parsed := parseCodebuddyEffortHelp(helpOut)
 	if len(parsed) == 0 {
 		return append([]string(nil), codebuddyStaticEffortFallback...)
 	}
