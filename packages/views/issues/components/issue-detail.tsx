@@ -32,6 +32,8 @@ import {
   Tag,
   Trash2,
   Users,
+  FoldVertical,
+  UnfoldVertical,
 } from "lucide-react";
 import { MarkdownPreviewDrawer } from "./markdown-preview-drawer";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
@@ -103,7 +105,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useRecentIssuesStore, useIssueDetailCollapseStore } from "@multica/core/issues/stores";
 import { useActiveIssueContextStore } from "@multica/core/issues/stores/active-issue-context-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -1561,7 +1563,83 @@ export function IssueDetail({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
-  const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const isDescriptionCollapsedState = useIssueDetailCollapseStore((s) =>
+    s.isDescriptionCollapsed(resolvedId, true)
+  );
+  const setDescriptionCollapsed = useIssueDetailCollapseStore((s) => s.setDescriptionCollapsed);
+  const isDescriptionCollapsed = !isEditingDescription && isDescriptionCollapsedState;
+
+  const descriptionContainerRef = useRef<HTMLDivElement>(null);
+  const [descriptionHeight, setDescriptionHeight] = useState(0);
+
+  useEffect(() => {
+    const element = descriptionContainerRef.current;
+    if (!element) return;
+
+    const observer = new ResizeObserver(() => {
+      setDescriptionHeight(element.scrollHeight);
+    });
+
+    observer.observe(element);
+    setDescriptionHeight(element.scrollHeight);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [id, issue?.description]);
+
+  const showCollapseToggle = descriptionHeight > 400 && !isEditingDescription;
+
+  const defaultSubIssuesCollapsed = useMemo(() => {
+    if (childIssues.length === 0) return false;
+    return childIssues.every((c) => c.status === "done" || c.status === "cancelled");
+  }, [childIssues]);
+
+  const subIssuesCollapsed = useIssueDetailCollapseStore((s) =>
+    s.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed)
+  );
+  const setSubIssuesCollapsed = useCallback((collapsed: boolean | ((prev: boolean) => boolean)) => {
+    const store = useIssueDetailCollapseStore.getState();
+    const current = store.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed);
+    const next = typeof collapsed === "function" ? collapsed(current) : collapsed;
+    store.setSubIssuesCollapsed(resolvedId, next);
+  }, [resolvedId, defaultSubIssuesCollapsed]);
+
+  const handleToggleAllSections = useCallback(() => {
+    const isAllCollapsed = isDescriptionCollapsedState && subIssuesCollapsed;
+    const nextCollapsed = !isAllCollapsed;
+    
+    useIssueDetailCollapseStore.getState().toggleAllSections(resolvedId, nextCollapsed);
+    
+    const resolvedCommentIds: string[] = [];
+    if (timelineView?.groups) {
+      for (const group of timelineView.groups) {
+        if (group.type === "comment") {
+          const entry = group.entries[0];
+          if (entry && entry.resolved_at) {
+            resolvedCommentIds.push(entry.id);
+          }
+        }
+      }
+    }
+    
+    if (nextCollapsed) {
+      useCommentCollapseStore.setState((s) => ({
+        collapsedByIssue: {
+          ...s.collapsedByIssue,
+          [resolvedId]: [...new Set([...(s.collapsedByIssue[resolvedId] ?? []), ...resolvedCommentIds])]
+        }
+      }));
+    } else {
+      useCommentCollapseStore.setState((s) => ({
+        collapsedByIssue: {
+          ...s.collapsedByIssue,
+          [resolvedId]: (s.collapsedByIssue[resolvedId] ?? []).filter(id => !resolvedCommentIds.includes(id))
+        }
+      }));
+    }
+  }, [resolvedId, isDescriptionCollapsedState, subIssuesCollapsed, timelineView?.groups]);
 
   // Selection store is global (workspace-scoped); clear it whenever this
   // issue detail is mounted or switched.
@@ -2521,6 +2599,29 @@ export function IssueDetail({
                     variant="ghost"
                     size="icon-sm"
                     className="text-muted-foreground"
+                    onClick={handleToggleAllSections}
+                  >
+                    {isDescriptionCollapsedState && subIssuesCollapsed ? (
+                      <UnfoldVertical className="h-4 w-4" />
+                    ) : (
+                      <FoldVertical className="h-4 w-4" />
+                    )}
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">
+                {isDescriptionCollapsedState && subIssuesCollapsed
+                  ? t(($) => $.detail.expand_all)
+                  : t(($) => $.detail.collapse_all)}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
                     onClick={() => setMarkdownPreviewOpen(true)}
                   >
                     <Eye className="h-4 w-4" />
@@ -2593,33 +2694,70 @@ export function IssueDetail({
           )}
 
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-            <ContentEditor
-              ref={descEditorRef}
-              key={id}
-              defaultValue={issue.description || ""}
-              placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => {
-                // Attachments are linked to the issue at upload time (via
-                // issueId context), so we only save the description text here.
-                // Removing an attachment node from the body does NOT unlink or
-                // delete the attachment — only the attachment area delete does.
-                handleUpdateField({
-                  description: md,
-                  description_base_updated_at: descBaseUpdatedAtRef.current || undefined,
-                  description_base_value: descBaseValueRef.current ?? undefined,
-                });
-              }}
-              onExternalSyncAccepted={handleDescriptionExternalSyncAccepted}
-              onUploadFile={handleDescriptionUpload}
-              debounceMs={1500}
-              currentIssueId={resolvedId}
-              attachments={descEditorAttachments}
-              selectionQuoteActions={{
-                onQuoteToNewComment: handleEditorQuoteToNewComment,
-                onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
-                replyTargets: selectionQuoteReplyTargets,
-              }}
-            />
+            <div
+              ref={descriptionContainerRef}
+              className={cn(
+                "transition-all duration-300 relative",
+                isDescriptionCollapsed && "max-h-[400px] overflow-hidden"
+              )}
+            >
+              <ContentEditor
+                ref={descEditorRef}
+                key={id}
+                defaultValue={issue.description || ""}
+                placeholder={t(($) => $.detail.desc_placeholder)}
+                onUpdate={(md) => {
+                  // Attachments are linked to the issue at upload time (via
+                  // issueId context), so we only save the description text here.
+                  // Removing an attachment node from the body does NOT unlink or
+                  // delete the attachment — only the attachment area delete does.
+                  handleUpdateField({
+                    description: md,
+                    description_base_updated_at: descBaseUpdatedAtRef.current || undefined,
+                    description_base_value: descBaseValueRef.current ?? undefined,
+                  });
+                }}
+                onExternalSyncAccepted={handleDescriptionExternalSyncAccepted}
+                onUploadFile={handleDescriptionUpload}
+                onFocus={() => setIsEditingDescription(true)}
+                onBlur={() => setIsEditingDescription(false)}
+                debounceMs={1500}
+                currentIssueId={resolvedId}
+                attachments={descEditorAttachments}
+                selectionQuoteActions={{
+                  onQuoteToNewComment: handleEditorQuoteToNewComment,
+                  onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
+                  replyTargets: selectionQuoteReplyTargets,
+                }}
+              />
+              {isDescriptionCollapsed && showCollapseToggle && (
+                <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-background via-background/80 to-transparent pointer-events-none flex items-end justify-center pb-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="pointer-events-auto shadow-sm border"
+                    onClick={() => setDescriptionCollapsed(resolvedId, false)}
+                  >
+                    {t(($) => $.detail.expand_description)}
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {!isDescriptionCollapsed && showCollapseToggle && (
+              <div className="flex justify-center mt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => setDescriptionCollapsed(resolvedId, true)}
+                >
+                  {t(($) => $.detail.collapse_description)}
+                </Button>
+              </div>
+            )}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar

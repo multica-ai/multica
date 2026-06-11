@@ -5,6 +5,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Loader2, MessageSquarePlus, RotateCw, Search, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
+import { useIssueDetailCollapseStore } from "@multica/core/issues/stores";
+import { TaskTraceOutput } from "./task-trace-output";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, TaskFailureReason } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -367,6 +369,14 @@ function ActiveRow({
   const trigger = useTriggerText(task);
   const time = activeTimeText(task, timeAgo);
 
+  const defaultCollapsed = task.status !== "running" && task.status !== "failed";
+  const isCollapsed = useIssueDetailCollapseStore((s) =>
+    s.isTaskCollapsed(issueId, task.id, defaultCollapsed)
+  );
+  const setCollapsed = (collapsed: boolean) => {
+    useIssueDetailCollapseStore.getState().setTaskCollapsed(issueId, task.id, collapsed);
+  };
+
   // Transcript only meaningful once messages exist — pure-queued tasks
   // have nothing to show yet.
   const showTranscript = task.status !== "queued";
@@ -394,42 +404,51 @@ function ActiveRow({
   };
 
   return (
-    <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
-      <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
-      {/* Status + time always visible — actions append on hover, never
-          replace. Same pattern as desktop tab bar / sidebar pins. */}
-      <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{label}</span>
-        <span className="text-muted-foreground"> · {time}</span>
-      </span>
-      <RowActions>
-        {showTranscript && (
-          <TranscriptButton
-            task={task}
-            agentName=""
-            isLive
-            title={t(($) => $.execution_log.transcript_tooltip)}
-          />
-        )}
-        {showCancel && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={requestCancel}
-                  disabled={cancelling}
-                  aria-label={t(($) => $.execution_log.cancel_task_aria)}
-                />
-              }
-              className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {cancelling ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Square className="h-3.5 w-3.5" />
-              )}
-            </TooltipTrigger>
+    <div className="flex flex-col">
+      <RowShell
+        task={task}
+        runIndex={runIndex}
+        colorClass={colorClass}
+        isCollapsed={isCollapsed}
+        onToggleCollapse={() => setCollapsed(!isCollapsed)}
+      >
+        <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
+        {/* Status + time always visible — actions append on hover, never
+            replace. Same pattern as desktop tab bar / sidebar pins. */}
+        <span className="shrink-0 whitespace-nowrap text-xs">
+          <span className={tone}>{label}</span>
+          <span className="text-muted-foreground"> · {time}</span>
+        </span>
+        <RowActions>
+          {showTranscript && (
+            <TranscriptButton
+              task={task}
+              agentName=""
+              isLive
+              title={t(($) => $.execution_log.transcript_tooltip)}
+            />
+          )}
+          {showCancel && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={requestCancel}
+                    disabled={cancelling}
+                    aria-label={t(($) => $.execution_log.cancel_task_aria)}
+                  />
+                }
+                className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {cancelling ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Square className="h-3.5 w-3.5" />
+                )}
+              </button>
+            }
+            />
             <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
           </Tooltip>
         )}
@@ -443,6 +462,12 @@ function ActiveRow({
         />
       )}
     </RowShell>
+    {!isCollapsed && (
+      <div className="pl-6 pr-1 py-1 border-l border-border/60 ml-3.5 mb-1.5 transition-all duration-300">
+        <TaskTraceOutput task={task} compact />
+      </div>
+    )}
+  </div>
   );
 }
 
@@ -479,6 +504,14 @@ function PastRow({
       ? `exit ${task.exit_code}`
       : null;
 
+  const defaultCollapsed = task.status !== "running" && task.status !== "failed";
+  const isCollapsed = useIssueDetailCollapseStore((s) =>
+    s.isTaskCollapsed(issueId, task.id, defaultCollapsed)
+  );
+  const setCollapsed = (collapsed: boolean) => {
+    useIssueDetailCollapseStore.getState().setTaskCollapsed(issueId, task.id, collapsed);
+  };
+
   const handleTriggerClick =
     task.trigger_comment_id && onHighlightComment
       ? () => onHighlightComment(task.trigger_comment_id!)
@@ -500,62 +533,75 @@ function PastRow({
   };
 
   return (
-    <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
-      <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
-      <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{exitCodeText ?? failureLabel ?? label}</span>
-        <span className="text-muted-foreground"> · {time}</span>
-      </span>
-      <RowActions>
-        {canRetry && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={() => void retryTask()}
-                  disabled={retrying}
-                  aria-label={t(($) => $.execution_log.retry_task_aria)}
-                />
-              }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {retrying ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RotateCw className="h-3.5 w-3.5" />
-              )}
-            </TooltipTrigger>
-            <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
-          </Tooltip>
-        )}
-        {canRetry && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={() => setRetryWithNoteOpen(true)}
-                  disabled={retrying}
-                  aria-label={t(($) => $.retry_with_note.action)}
-                />
-              }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <MessageSquarePlus className="h-3.5 w-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>{t(($) => $.retry_with_note.action)}</TooltipContent>
-          </Tooltip>
-        )}
-        <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
-      </RowActions>
-      <RetryWithNoteDialog
-        open={retryWithNoteOpen}
-        pending={retrying}
-        onOpenChange={setRetryWithNoteOpen}
-        onSubmit={(note) => retryTask(note)}
-      />
-    </RowShell>
+    <div className="flex flex-col">
+      <RowShell
+        task={task}
+        runIndex={runIndex}
+        colorClass={colorClass}
+        isCollapsed={isCollapsed}
+        onToggleCollapse={() => setCollapsed(!isCollapsed)}
+      >
+        <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
+        <span className="shrink-0 whitespace-nowrap text-xs">
+          <span className={tone}>{exitCodeText ?? failureLabel ?? label}</span>
+          <span className="text-muted-foreground"> · {time}</span>
+        </span>
+        <RowActions>
+          {canRetry && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={() => void retryTask()}
+                    disabled={retrying}
+                    aria-label={t(($) => $.execution_log.retry_task_aria)}
+                  />
+                }
+                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {retrying ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCw className="h-3.5 w-3.5" />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
+            </Tooltip>
+          )}
+          {canRetry && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={() => setRetryWithNoteOpen(true)}
+                    disabled={retrying}
+                    aria-label={t(($) => $.retry_with_note.action)}
+                  />
+                }
+                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <MessageSquarePlus className="h-3.5 w-3.5" />
+              </TooltipTrigger>
+              <TooltipContent>{t(($) => $.retry_with_note.action)}</TooltipContent>
+            </Tooltip>
+          )}
+          <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
+        </RowActions>
+        <RetryWithNoteDialog
+          open={retryWithNoteOpen}
+          pending={retrying}
+          onOpenChange={setRetryWithNoteOpen}
+          onSubmit={(note) => retryTask(note)}
+        />
+      </RowShell>
+      {!isCollapsed && (
+        <div className="pl-6 pr-1 py-1 border-l border-border/60 ml-3.5 mb-1.5 transition-all duration-300">
+          <TaskTraceOutput task={task} compact />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -565,16 +611,29 @@ function RowShell({
   task,
   runIndex,
   colorClass,
+  isCollapsed,
+  onToggleCollapse,
   children,
 }: {
   task: AgentTask;
   runIndex?: number;
   colorClass?: string;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
   children: React.ReactNode;
 }) {
+  const handleClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("button") || target.closest("a") || target.closest("[role='button']")) {
+      return;
+    }
+    onToggleCollapse?.();
+  };
+
   return (
     <div
-      className={`group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40${
+      onClick={handleClick}
+      className={`group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40 cursor-pointer${
         colorClass ? ` border-l-2 ${colorClass}` : ""
       }`}
     >
@@ -583,6 +642,11 @@ function RowShell({
           #{runIndex}
         </span>
       )}
+      <ChevronRight
+        className={`h-3 w-3 shrink-0 stroke-[2.5] text-muted-foreground/60 transition-transform ${
+          !isCollapsed ? "rotate-90" : ""
+        }`}
+      />
       {task.agent_id ? (
         <ActorAvatar
           actorType="agent"
