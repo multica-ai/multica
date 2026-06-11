@@ -7,7 +7,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -146,6 +145,3 @@ func registerWebhookListeners(bus *events.Bus, queries *db.Queries) {
 	slog.Info("webhook listeners registered")
 }
 
-func parseUUIDForWebhook(s string) interface{} {
-	return util.ParseUUID(s)
-}
