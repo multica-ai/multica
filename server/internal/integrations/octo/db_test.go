@@ -31,20 +31,30 @@ func TestMain(m *testing.M) {
 	if dbURL == "" {
 		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
 	}
-	pool, err := pgxpool.New(ctx, dbURL)
-	if err != nil {
-		fmt.Printf("Skipping octo DB tests: cannot connect: %v\n", err)
-		os.Exit(0)
+	if pool, err := pgxpool.New(ctx, dbURL); err == nil {
+		if perr := pool.Ping(ctx); perr == nil {
+			testPool = pool
+		} else {
+			fmt.Printf("octo DB tests will skip: database not reachable: %v\n", perr)
+			pool.Close()
+		}
+	} else {
+		fmt.Printf("octo DB tests will skip: cannot connect: %v\n", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
-		fmt.Printf("Skipping octo DB tests: database not reachable: %v\n", err)
-		pool.Close()
-		os.Exit(0)
-	}
-	testPool = pool
 	code := m.Run()
-	pool.Close()
+	if testPool != nil {
+		testPool.Close()
+	}
 	os.Exit(code)
+}
+
+// requireDB skips a test when no database is configured, so mock-only tests in
+// the package still run locally without a database.
+func requireDB(t *testing.T) {
+	t.Helper()
+	if testPool == nil {
+		t.Skip("no database available (set DATABASE_URL)")
+	}
 }
 
 func randToken() string {
@@ -130,6 +140,7 @@ func newInstallation(t *testing.T, q *db.Queries, wsID, userID, agentID pgtype.U
 }
 
 func TestOctoInstallation_CRUD(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 
@@ -186,6 +197,7 @@ func containsInstallation(list []db.OctoInstallation, id pgtype.UUID) bool {
 }
 
 func TestOctoInstallation_UpsertOnConflict(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 
@@ -215,6 +227,7 @@ func TestOctoInstallation_UpsertOnConflict(t *testing.T) {
 }
 
 func TestOctoInboundDedup_TwoPhaseClaim(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userID, agentID)
@@ -269,6 +282,7 @@ func TestOctoInboundDedup_TwoPhaseClaim(t *testing.T) {
 }
 
 func TestOctoInboundDedup_ReleaseAllowsReclaim(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userID, agentID)
@@ -306,6 +320,7 @@ func TestOctoInboundDedup_ReleaseAllowsReclaim(t *testing.T) {
 // be re-claimable, minting a fresh claim_token so the original (crashed) owner
 // can no longer Mark/Release it. We back-date received_at instead of sleeping.
 func TestOctoInboundDedup_StaleReclaim(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userID, agentID)
@@ -353,6 +368,7 @@ func TestOctoInboundDedup_StaleReclaim(t *testing.T) {
 }
 
 func TestOctoBindingToken_ConsumeOnce(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userID, agentID)
@@ -385,6 +401,7 @@ func TestOctoBindingToken_ConsumeOnce(t *testing.T) {
 // consumed. The DB CHECK caps TTL at 15 minutes so we mint with a ~1s lifetime
 // and back-date it past expiry rather than sleeping.
 func TestOctoBindingToken_ConsumeExpired(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userID, agentID)
@@ -415,6 +432,7 @@ func TestOctoBindingToken_ConsumeExpired(t *testing.T) {
 }
 
 func TestOctoBindingToken_TTLCapRejected(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userID, agentID)
@@ -438,6 +456,7 @@ func TestOctoBindingToken_TTLCapRejected(t *testing.T) {
 }
 
 func TestOctoChatSessionBinding_BothDirections(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userID, agentID)
@@ -486,6 +505,7 @@ func TestOctoChatSessionBinding_BothDirections(t *testing.T) {
 //   - expired holder → token B takes over
 //   - Release with a non-holder token must NOT clear the live holder's lease
 func TestOctoWSLease_CAS(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userID, agentID)
@@ -588,6 +608,7 @@ func TestOctoWSLease_CAS(t *testing.T) {
 // a different user CANNOT steal an already-bound uid (zero rows), and a
 // non-member redeemer is rejected by the composite member FK.
 func TestOctoUserBinding_NoSteal(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userA, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userA, agentID)
@@ -674,6 +695,7 @@ func TestOctoUserBinding_NoSteal(t *testing.T) {
 // the same non-null task collide, while multiple NULL-task rows coexist. It also
 // exercises GetOctoOutboundMessageByTask and UpdateOctoOutboundMessageStatus.
 func TestOctoOutboundMessage_TaskUniqueness(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	ctx := context.Background()
@@ -754,6 +776,7 @@ func TestOctoOutboundMessage_TaskUniqueness(t *testing.T) {
 // TestOctoInboundDrop_AndPurges covers the drop-audit write path (including its
 // nullable narg columns) plus the two cutoff-based purge queries.
 func TestOctoInboundDrop_AndPurges(t *testing.T) {
+	requireDB(t)
 	q := db.New(testPool)
 	wsID, userID, agentID := fixture(t)
 	inst := newInstallation(t, q, wsID, userID, agentID)
