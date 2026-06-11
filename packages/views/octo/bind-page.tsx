@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
@@ -123,16 +123,22 @@ export function OctoBindPage({ token }: { token: string | null }) {
 }
 
 function redemptionFailureReason(err: unknown): string {
-  const msg = err instanceof Error ? err.message : "";
-  const lower = msg.toLowerCase();
-  if (lower.includes("invalid") || lower.includes("expired") || lower.includes("410")) {
-    return "expired";
-  }
-  if (lower.includes("already bound") || lower.includes("409")) {
-    return "already_bound";
-  }
-  if (lower.includes("workspace member") || lower.includes("403")) {
-    return "not_member";
+  // Classify by the HTTP status the backend assigns each typed failure
+  // (handler/octo.go): 410 invalid/expired, 409 already-bound, 403
+  // not-a-member. Status codes are a stable contract; matching on the error
+  // message text was fragile — a copy change silently downgraded the user to
+  // the generic "unknown" branch.
+  if (err instanceof ApiError) {
+    switch (err.status) {
+      case 410:
+        return "expired";
+      case 409:
+        return "already_bound";
+      case 403:
+        return "not_member";
+      default:
+        return "unknown";
+    }
   }
   return "unknown";
 }
