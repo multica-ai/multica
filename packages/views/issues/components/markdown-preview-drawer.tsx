@@ -1,14 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import {
-	Sheet,
-	SheetContent,
-	SheetHeader,
-	SheetTitle,
-} from "@multica/ui/components/ui/sheet";
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@multica/ui/components/ui/button";
-import { Download, FileText, Loader2 } from "lucide-react";
+import { Download, FileText, Loader2, X } from "lucide-react";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { api } from "@multica/core/api";
 import { toast } from "sonner";
@@ -35,6 +30,15 @@ export function MarkdownPreviewDrawer({
 }: MarkdownPreviewDrawerProps) {
 	const [exportingPdf, setExportingPdf] = useState(false);
 	const [includeComments, setIncludeComments] = useState(false);
+
+	useEffect(() => {
+		if (!open) return;
+		const handler = (e: KeyboardEvent) => {
+			if (e.key === "Escape") onOpenChange(false);
+		};
+		document.addEventListener("keydown", handler);
+		return () => document.removeEventListener("keydown", handler);
+	}, [open, onOpenChange]);
 
 	const handleExportMD = () => {
 		try {
@@ -80,24 +84,46 @@ export function MarkdownPreviewDrawer({
 		}
 	};
 
-	return (
-		<Sheet open={open} onOpenChange={onOpenChange}>
-			<SheetContent side="right" className="w-[90vw] sm:max-w-[700px] flex flex-col h-full p-0">
-				<SheetHeader className="px-6 pt-6 pb-4 border-b">
-					<SheetTitle className="text-lg font-semibold flex items-center gap-2">
-						<FileText className="h-5 w-5 text-primary" />
-						Markdown 预览：{title}
-					</SheetTitle>
-				</SheetHeader>
+	if (!open || typeof document === "undefined") return null;
+
+	return createPortal(
+		<div
+			className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+			onClick={() => onOpenChange(false)}
+			role="dialog"
+			aria-modal="true"
+			aria-label={`Markdown 预览：${title}`}
+		>
+			{/* Capped to viewport minus the surrounding p-4 so it never overflows */}
+			<div
+				className="flex h-[min(90vh,calc(100vh-2rem))] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-background shadow-xl border border-border"
+				onClick={(e) => e.stopPropagation()}
+			>
+				{/* Header */}
+				<div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-3">
+					<FileText className="size-4 shrink-0 text-primary" />
+					<p className="truncate text-sm font-semibold text-foreground">Markdown 预览：{title}</p>
+					<div className="ml-auto flex items-center gap-1">
+						<button
+							type="button"
+							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+							title="关闭"
+							aria-label="关闭"
+							onClick={() => onOpenChange(false)}
+						>
+							<X className="size-4" />
+						</button>
+					</div>
+				</div>
 
 				{/* Toolbar */}
-				<div className="px-6 py-3 bg-muted/40 border-b flex flex-wrap items-center justify-between gap-4">
+				<div className="px-6 py-3 bg-muted/20 border-b flex flex-wrap items-center justify-between gap-4">
 					<div className="flex items-center gap-3">
 						<Button
 							variant="outline"
 							size="sm"
 							onClick={handleExportMD}
-							className="flex items-center gap-1.5"
+							className="flex items-center gap-1.5 h-8"
 						>
 							<Download className="h-4 w-4" />
 							导出 MD
@@ -109,7 +135,7 @@ export function MarkdownPreviewDrawer({
 								size="sm"
 								disabled={exportingPdf}
 								onClick={handleExportPDF}
-								className="flex items-center gap-1.5"
+								className="flex items-center gap-1.5 h-8"
 							>
 								{exportingPdf ? (
 									<Loader2 className="h-4 w-4 animate-spin" />
@@ -144,7 +170,8 @@ export function MarkdownPreviewDrawer({
 						<ReadonlyContent content={content || "*无内容*"} />
 					</div>
 				</div>
-			</SheetContent>
-		</Sheet>
+			</div>
+		</div>,
+		document.body
 	);
 }
