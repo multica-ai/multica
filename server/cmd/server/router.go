@@ -384,9 +384,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Logger:      slog.Default(),
 			}
 
-			// WS hub: per-installation lease + im.Socket connection.
+			// WS hub: per-installation lease + transport.Socket connection.
 			connectorFactory := octo.NewConnectorFactory(installSvc, slog.Default())
 			h.OctoHub = octo.NewHub(queries, connectorFactory, dispatcher, octo.HubConfig{}, slog.Default())
+
+			// Outbound replier for the synchronous outcomes: DM an unbound
+			// sender a binding link, or notify the user when the agent is
+			// offline/archived. Reuses the same MessageSender + token
+			// decryptor as the Patcher. PublicURL drives the clickable
+			// {PublicURL}/octo/bind?token= link; when unset the replier
+			// downgrades to noop and logs the gap.
+			h.OctoHub.SetOutcomeReplier(octo.NewOutcomeReplier(octo.OutcomeReplierConfig{
+				Minter:    h.OctoBindingTokens,
+				Decryptor: installSvc,
+				Sender:    octo.NewMessageSender(),
+				PublicURL: signupConfig.PublicURL,
+				Logger:    slog.Default(),
+			}))
 			slog.Info("octo inbound pipeline wired")
 		}
 	} else {

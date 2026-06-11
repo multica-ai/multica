@@ -45,20 +45,42 @@ func (f *fakeHubQueries) counts() (int, int) {
 }
 
 type fakeHubDispatch struct {
-	mu   sync.Mutex
-	msgs []InboundMessage
+	mu      sync.Mutex
+	msgs    []InboundMessage
+	outcome Outcome
 }
 
 func (f *fakeHubDispatch) Handle(ctx context.Context, msg InboundMessage) (DispatchResult, error) {
 	f.mu.Lock()
 	f.msgs = append(f.msgs, msg)
+	oc := f.outcome
 	f.mu.Unlock()
-	return DispatchResult{Outcome: OutcomeIngested}, nil
+	if oc == "" {
+		oc = OutcomeIngested
+	}
+	return DispatchResult{Outcome: oc, SenderUID: msg.SenderUID}, nil
 }
 func (f *fakeHubDispatch) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.msgs)
+}
+
+// recordingReplier captures the outcomes the hub forwards to the replier.
+type recordingReplier struct {
+	mu       sync.Mutex
+	outcomes []Outcome
+}
+
+func (r *recordingReplier) Reply(_ context.Context, _ db.OctoInstallation, _ InboundMessage, res DispatchResult) {
+	r.mu.Lock()
+	r.outcomes = append(r.outcomes, res.Outcome)
+	r.mu.Unlock()
+}
+func (r *recordingReplier) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.outcomes)
 }
 
 func hubInst() db.OctoInstallation {
@@ -167,4 +189,55 @@ type connectorFunc func(ctx context.Context, inst db.OctoInstallation, onMessage
 
 func (f connectorFunc) Run(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error {
 	return f(ctx, inst, onMessage)
+}
+
+// TestHub_InvokesReplierWithDispatchOutcome guards the regression that started
+// this work: the hub used to discard the DispatchResult, so NeedsBinding (and
+// the agent-unavailable outcomes) never produced an outbound reply. The hub
+// must forward every dispatched message's outcome to the replier.
+func TestHub_InvokesReplierWithDispatchOutcome(t *testing.T) {
+	q := &fakeHubQueries{insts: []db.OctoInstallation{hubInst()}}
+	disp := &fakeHubDispatch{outcome: OutcomeNeedsBinding}
+	replier := &recordingReplier{}
+
+	emitted := make(chan struct{})
+	factory := func(inst db.OctoInstallation) (Connector, error) {
+		return connectorFunc(func(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error {
+			onMessage(transport.BotMessage{
+				MessageID:   "m1",
+				FromUID:     "uid1",
+				ChannelID:   "uid1",
+				ChannelType: transport.ChannelDM,
+				Payload:     transport.MessagePayload{Type: transport.MsgText, Content: "hi"},
+			})
+			close(emitted)
+			<-ctx.Done()
+			return ctx.Err()
+		}), nil
+	}
+
+	hub := NewHub(q, factory, disp, HubConfig{
+		LeaseTTL:           time.Second,
+		LeaseRenewInterval: time.Second,
+		SweepInterval:      time.Second,
+	}, nil)
+	hub.SetOutcomeReplier(replier)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx)
+
+	select {
+	case <-emitted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("connector never emitted a message")
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	if replier.count() == 0 {
+		t.Fatal("replier was never invoked with the dispatch outcome")
+	}
+	if got := replier.outcomes[0]; got != OutcomeNeedsBinding {
+		t.Errorf("replier got outcome %q, want %q", got, OutcomeNeedsBinding)
+	}
 }
