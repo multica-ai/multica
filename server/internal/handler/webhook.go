@@ -26,8 +26,8 @@ type WebhookEndpointResponse struct {
 	UpdatedAt   string   `json:"updated_at"`
 }
 
-// WebhookDeliveryResponse is the API response for a delivery log entry.
-type WebhookDeliveryResponse struct {
+// WebhookEndpointDeliveryResponse is the API response for a delivery log entry.
+type WebhookEndpointDeliveryResponse struct {
 	ID           string          `json:"id"`
 	EndpointID   string          `json:"endpoint_id"`
 	EventType    string          `json:"event_type"`
@@ -63,7 +63,7 @@ func webhookEndpointToResponse(ep db.WebhookEndpoint) WebhookEndpointResponse {
 	}
 }
 
-func webhookDeliveryToResponse(d db.WebhookEndpointDelivery) WebhookDeliveryResponse {
+func webhookDeliveryToResponse(d db.WebhookEndpointDelivery) WebhookEndpointDeliveryResponse {
 	var httpStatus *int32
 	if d.HttpStatus.Valid {
 		httpStatus = &d.HttpStatus.Int32
@@ -81,7 +81,7 @@ func webhookDeliveryToResponse(d db.WebhookEndpointDelivery) WebhookDeliveryResp
 		s := timestampToString(d.DeliveredAt)
 		deliveredAt = &s
 	}
-	return WebhookDeliveryResponse{
+	return WebhookEndpointDeliveryResponse{
 		ID:           uuidToString(d.ID),
 		EndpointID:   uuidToString(d.EndpointID),
 		EventType:    d.EventType,
@@ -327,7 +327,7 @@ func (h *Handler) ListWebhookDeliveries(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	resp := make([]WebhookDeliveryResponse, len(deliveries))
+	resp := make([]WebhookEndpointDeliveryResponse, len(deliveries))
 	for i, d := range deliveries {
 		resp[i] = webhookDeliveryToResponse(d)
 	}
