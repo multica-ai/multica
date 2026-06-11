@@ -127,7 +127,9 @@ export type CerebroFlagKey =
   // TECH-3173: when cerebro_local_tool_policy is on, flips the stage from observe
   // (resolve + log what WOULD block, allow everything) to enforce (Allow proceeds,
   // Block stops, Ask → inbox + wait). Default OFF = observe-only dry run.
-  | "cerebro_local_tool_policy_enforce";
+  | "cerebro_local_tool_policy_enforce"
+  // TECH-3196: Agent Vault — per-agent secret brokering via the internal path.
+  | "cerebro_agent_vault";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -298,6 +300,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3173: OFF by default — when the master is on, observe-only (dry run)
   // until an admin explicitly flips to enforce. Staged rollout, fail-safe.
   cerebro_local_tool_policy_enforce: false,
+  // TECH-3196: OFF by default — Agent Vault per-agent secret brokering ships
+  // dormant until an admin opts in and the access table is configured.
+  cerebro_agent_vault: false,
 };
 
 /**
@@ -803,6 +808,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Enable the Connections settings tab where admins can register API and MCP endpoints (external or internal Sliplane paths) available to all runtimes, with per-layer tool-policy permissions. TECH-3108.",
+  },
+  // TECH-3196: Agent Vault per-agent secret brokering.
+  {
+    key: "cerebro_agent_vault",
+    label: "Agent Vault secret brokering",
+    group: "permissions",
+    description:
+      "Broker per-agent access to secrets via Infisical Agent Vault over the internal path: the backend swaps a placeholder for the real credential on the way out, so an agent uses a secret without ever holding it. An admin-controlled table sets which key-boxes each agent may reach. TECH-3196.",
   },
   // FIR-2563: per-workspace approval gate toggle.
   {

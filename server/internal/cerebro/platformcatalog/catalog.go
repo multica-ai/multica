@@ -552,6 +552,16 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:         "manage_agent_vault_access",
+		Title:       "Manage Agent Vault access",
+		Category:    CategoryPermissions,
+		Description: "Grant or revoke a private agent's access to an Agent Vault secret box (TECH-3196).",
+		Ops: []string{
+			"PUT /api/workspaces/{id}/agentvault/access",
+			"DELETE /api/workspaces/{id}/agentvault/access",
+		},
+	},
+	{
 		Key:         "decide_approval",
 		Title:       "Decide approval request",
 		Category:    CategoryPermissions,

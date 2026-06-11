@@ -251,6 +251,8 @@ type Handler struct {
 	ConnectionsInjector WorkspaceConnectionsInjector
 	// CEREBRO-PATCH(handler-connection-tool-deny): TECH-3156 per-tool connection enforcement.
 	ConnectionToolDeny ConnectionToolDenyResolver
+	// CEREBRO-PATCH(handler-agentvault-broker): TECH-3196 per-agent secret brokering at claim.
+	AgentVaultBroker AgentVaultBroker
 }
 
 // CustomStatusResolver is the upstream-side seam for the cerebro status-model

@@ -350,6 +350,9 @@ func main() {
 		Handler: r,
 	}
 
+	// CEREBRO-PATCH(main-agentvault-relay): TECH-3196 dedicated Agent Vault proxy listener.
+	startAgentVaultRelay(pool)
+
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())

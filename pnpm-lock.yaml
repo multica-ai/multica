@@ -1055,6 +1055,9 @@ importers:
 
   packages/cerebro-agent-tools:
     dependencies:
+      '@multica/cerebro-agentvault':
+        specifier: workspace:*
+        version: link:../cerebro-agentvault
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
@@ -1107,6 +1110,43 @@ importers:
       jsdom:
         specifier: 'catalog:'
         version: 29.1.1(@noble/hashes@1.8.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.14.6(@types/node@25.9.1)(typescript@5.9.3))(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+
+  packages/cerebro-agentvault:
+    dependencies:
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.100.14(react@19.2.3)
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.16.0(react@19.2.3)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/react':
+        specifier: 19.2.15
+        version: 19.2.15
       typescript:
         specifier: 'catalog:'
         version: 5.9.3

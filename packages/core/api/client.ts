@@ -3939,6 +3939,25 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-agentvault-client): TECH-3196 per-agent Agent Vault access-table methods.
+  async listCerebroAgentVaultAccess<T = unknown>(wsId: string, agentId: string): Promise<T> {
+    return this.fetch<T>(
+      `/api/workspaces/${wsId}/agentvault/access?agent_id=${encodeURIComponent(agentId)}`,
+    );
+  }
+  async setCerebroAgentVaultAccess<T = unknown>(wsId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/agentvault/access`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+  async deleteCerebroAgentVaultAccess(wsId: string, body: unknown): Promise<void> {
+    await this.fetch<void>(`/api/workspaces/${wsId}/agentvault/access`, {
+      method: "DELETE",
+      body: JSON.stringify(body),
+    });
+  }
+
   // CEREBRO-PATCH(cerebro-wakeup-sidebar): list and cancel agent wakeups per issue for the sidebar.
   async listIssueWakeups(issueId: string, state = "pending"): Promise<{
     wakeups: {

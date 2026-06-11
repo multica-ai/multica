@@ -233,6 +233,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "DELETE /api/workspaces/{id}/agentvault/access",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/workspaces/{id}/connections/{connId}",
       "gate": "workspace_admin"
     },
@@ -1326,6 +1330,10 @@
     },
     {
       "id": "PUT /api/workspaces/{id}/",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/workspaces/{id}/agentvault/access",
       "gate": "workspace_admin"
     },
     {
