@@ -208,19 +208,24 @@ func (q *Queries) ListWikiPages(ctx context.Context, workspaceID pgtype.UUID) ([
 const reorderWikiPage = `-- name: ReorderWikiPage :one
 UPDATE wiki_page SET
     position = $3,
-    parent_id = COALESCE($4, parent_id),
-    updated_by = $5,
+    parent_id = CASE
+        WHEN $4::boolean THEN NULL
+        WHEN $5::uuid IS NOT NULL THEN $5::uuid
+        ELSE parent_id
+    END,
+    updated_by = $6,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING id, workspace_id, parent_id, title, slug, content, position, created_by, updated_by, created_at, updated_at, type
 `
 
 type ReorderWikiPageParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Position    float64     `json:"position"`
-	ParentID    pgtype.UUID `json:"parent_id"`
-	UpdatedBy   pgtype.UUID `json:"updated_by"`
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Position      float64     `json:"position"`
+	ClearParentID pgtype.Bool `json:"clear_parent_id"`
+	ParentID      pgtype.UUID `json:"parent_id"`
+	UpdatedBy     pgtype.UUID `json:"updated_by"`
 }
 
 func (q *Queries) ReorderWikiPage(ctx context.Context, arg ReorderWikiPageParams) (WikiPage, error) {
@@ -228,6 +233,7 @@ func (q *Queries) ReorderWikiPage(ctx context.Context, arg ReorderWikiPageParams
 		arg.ID,
 		arg.WorkspaceID,
 		arg.Position,
+		arg.ClearParentID,
 		arg.ParentID,
 		arg.UpdatedBy,
 	)
@@ -255,22 +261,27 @@ UPDATE wiki_page SET
     slug = COALESCE($4, slug),
     content = COALESCE($5, content),
     position = COALESCE($6, position),
-    parent_id = COALESCE($7, parent_id),
-    updated_by = COALESCE($8, updated_by),
+    parent_id = CASE
+        WHEN $7::boolean THEN NULL
+        WHEN $8::uuid IS NOT NULL THEN $8::uuid
+        ELSE parent_id
+    END,
+    updated_by = COALESCE($9, updated_by),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING id, workspace_id, parent_id, title, slug, content, position, created_by, updated_by, created_at, updated_at, type
 `
 
 type UpdateWikiPageParams struct {
-	ID          pgtype.UUID   `json:"id"`
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-	Title       pgtype.Text   `json:"title"`
-	Slug        pgtype.Text   `json:"slug"`
-	Content     pgtype.Text   `json:"content"`
-	Position    pgtype.Float8 `json:"position"`
-	ParentID    pgtype.UUID   `json:"parent_id"`
-	UpdatedBy   pgtype.UUID   `json:"updated_by"`
+	ID            pgtype.UUID   `json:"id"`
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	Title         pgtype.Text   `json:"title"`
+	Slug          pgtype.Text   `json:"slug"`
+	Content       pgtype.Text   `json:"content"`
+	Position      pgtype.Float8 `json:"position"`
+	ClearParentID pgtype.Bool   `json:"clear_parent_id"`
+	ParentID      pgtype.UUID   `json:"parent_id"`
+	UpdatedBy     pgtype.UUID   `json:"updated_by"`
 }
 
 func (q *Queries) UpdateWikiPage(ctx context.Context, arg UpdateWikiPageParams) (WikiPage, error) {
@@ -281,6 +292,7 @@ func (q *Queries) UpdateWikiPage(ctx context.Context, arg UpdateWikiPageParams) 
 		arg.Slug,
 		arg.Content,
 		arg.Position,
+		arg.ClearParentID,
 		arg.ParentID,
 		arg.UpdatedBy,
 	)

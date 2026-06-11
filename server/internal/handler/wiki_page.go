@@ -306,7 +306,7 @@ func (h *Handler) UpdateWikiPage(w http.ResponseWriter, r *http.Request) {
 		pid := strings.TrimSpace(*req.ParentID)
 		if pid == "" {
 			// Move to top level (clear parent)
-			params.ParentID = pgtype.UUID{Valid: false}
+			params.ClearParentID = pgtype.Bool{Bool: true, Valid: true}
 		} else {
 			// Validate that the target parent exists and is a folder
 			parsedParentID, ok := parseUUIDOrBadRequest(w, pid, "parent_id")
@@ -461,29 +461,36 @@ func (h *Handler) ReorderWikiPages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var parentID pgtype.UUID
-		if item.ParentID != nil && strings.TrimSpace(*item.ParentID) != "" {
+		var clearParentID pgtype.Bool
+		if item.ParentID != nil {
 			pid := strings.TrimSpace(*item.ParentID)
-			parsedParentID, parseOk := parseUUIDOrBadRequest(w, pid, "parent_id")
-			if !parseOk {
-				return
+			if pid == "" {
+				// Move to top level (clear parent)
+				clearParentID = pgtype.Bool{Bool: true, Valid: true}
+			} else {
+				parsedParentID, parseOk := parseUUIDOrBadRequest(w, pid, "parent_id")
+				if !parseOk {
+					return
+				}
+				parentPage, err := h.Queries.GetWikiPage(r.Context(), db.GetWikiPageParams{ID: parsedParentID, WorkspaceID: wsUUID})
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "parent wiki page not found")
+					return
+				}
+				if parentPage.Type != "folder" {
+					writeError(w, http.StatusBadRequest, "parent must be a folder")
+					return
+				}
+				parentID = parsedParentID
 			}
-			parentPage, err := h.Queries.GetWikiPage(r.Context(), db.GetWikiPageParams{ID: parsedParentID, WorkspaceID: wsUUID})
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "parent wiki page not found")
-				return
-			}
-			if parentPage.Type != "folder" {
-				writeError(w, http.StatusBadRequest, "parent must be a folder")
-				return
-			}
-			parentID = parsedParentID
 		}
 		page, err := h.Queries.ReorderWikiPage(r.Context(), db.ReorderWikiPageParams{
-			ID:          idUUID,
-			WorkspaceID: wsUUID,
-			Position:    item.Position,
-			ParentID:    parentID,
-			UpdatedBy:   member.UserID,
+			ID:            idUUID,
+			WorkspaceID:   wsUUID,
+			Position:      item.Position,
+			ClearParentID: clearParentID,
+			ParentID:      parentID,
+			UpdatedBy:     member.UserID,
 		})
 		if err != nil {
 			writeError(w, http.StatusNotFound, "wiki page not found")

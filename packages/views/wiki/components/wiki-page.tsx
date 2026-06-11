@@ -406,7 +406,8 @@ export function WikiPage({ pageId }: WikiPageProps) {
 
       try {
         const result = await api.reorderWikiPages({
-          pages: [{ id: activeItemId, position: newPosition, parent_id: targetParentId }],
+          // Use "" to signal "clear parent_id" when moving to top level
+          pages: [{ id: activeItemId, position: newPosition, parent_id: targetParentId ?? "" }],
         });
         queryClient.setQueryData<ListWikiPagesResponse>(wikiKeys.list(wsId), (old) => {
           if (!old) return old;

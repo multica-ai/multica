@@ -32,7 +32,11 @@ UPDATE wiki_page SET
     slug = COALESCE(sqlc.narg('slug'), slug),
     content = COALESCE(sqlc.narg('content'), content),
     position = COALESCE(sqlc.narg('position'), position),
-    parent_id = COALESCE(sqlc.narg('parent_id'), parent_id),
+    parent_id = CASE
+        WHEN sqlc.narg('clear_parent_id')::boolean THEN NULL
+        WHEN sqlc.narg('parent_id')::uuid IS NOT NULL THEN sqlc.narg('parent_id')::uuid
+        ELSE parent_id
+    END,
     updated_by = COALESCE(sqlc.narg('updated_by'), updated_by),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
@@ -54,7 +58,11 @@ WHERE workspace_id = $1
 -- name: ReorderWikiPage :one
 UPDATE wiki_page SET
     position = $3,
-    parent_id = COALESCE(sqlc.narg('parent_id'), parent_id),
+    parent_id = CASE
+        WHEN sqlc.narg('clear_parent_id')::boolean THEN NULL
+        WHEN sqlc.narg('parent_id')::uuid IS NOT NULL THEN sqlc.narg('parent_id')::uuid
+        ELSE parent_id
+    END,
     updated_by = sqlc.narg('updated_by'),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
