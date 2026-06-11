@@ -14,6 +14,18 @@ const CONSOLE_METHOD: Record<LogLevel, "log" | "info" | "warn" | "error"> = {
   error: "error",
 };
 
+/** Storage key for toggling frontend logging at runtime. */
+const LOG_LEVEL_KEY = "multica_log_level";
+
+function isSilent(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(LOG_LEVEL_KEY) === "off";
+  } catch {
+    return false;
+  }
+}
+
 export interface Logger {
   debug(msg: string, ...data: unknown[]): void;
   info(msg: string, ...data: unknown[]): void;
@@ -22,6 +34,8 @@ export interface Logger {
 }
 
 export function createLogger(namespace: string): Logger {
+  if (isSilent()) return noopLogger;
+
   const make =
     (level: LogLevel) =>
     (msg: string, ...data: unknown[]) => {
