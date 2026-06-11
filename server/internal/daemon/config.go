@@ -270,6 +270,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// model env like every other backend. MULTICA_ANTIGRAVITY_MODEL seeds the
 	// daemon-wide default; its value is the exact `agy models` display string
 	// (e.g. "Claude Opus 4.6 (Thinking)"), not a provider/model slug.
+	if e, ok := probe("MULTICA_MIMOCODE_PATH", "mimo", "MULTICA_MIMOCODE_MODEL"); ok {
+		agents["mimocode"] = e
+	}
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}
