@@ -994,7 +994,7 @@ func applyCodexServiceTier(params map[string]any, tier string) {
 	if params == nil || tier == "" {
 		return
 	}
-	params["service_tier"] = tier
+	params["serviceTier"] = tier
 }
 
 func resetTimer(timer *time.Timer, d time.Duration) {
@@ -2144,10 +2144,11 @@ type threadEffectiveConfig struct {
 	Model           string
 	ModelProvider   string
 	ReasoningEffort string
+	ServiceTier     string
 }
 
-// extractThreadEffectiveConfig reads the model, modelProvider, and
-// reasoningEffort from a thread/start or thread/resume JSON-RPC result.
+// extractThreadEffectiveConfig reads the model, modelProvider,
+// reasoningEffort, and serviceTier from a thread/start or thread/resume result.
 // Missing fields are left as empty strings.
 func extractThreadEffectiveConfig(result json.RawMessage) threadEffectiveConfig {
 	var r struct {
@@ -2155,6 +2156,7 @@ func extractThreadEffectiveConfig(result json.RawMessage) threadEffectiveConfig 
 			Model           string `json:"model"`
 			ModelProvider   string `json:"modelProvider"`
 			ReasoningEffort string `json:"reasoningEffort"`
+			ServiceTier     string `json:"serviceTier"`
 		} `json:"thread"`
 	}
 	if err := json.Unmarshal(result, &r); err != nil {
@@ -2164,12 +2166,13 @@ func extractThreadEffectiveConfig(result json.RawMessage) threadEffectiveConfig 
 		Model:           r.Thread.Model,
 		ModelProvider:   r.Thread.ModelProvider,
 		ReasoningEffort: r.Thread.ReasoningEffort,
+		ServiceTier:     r.Thread.ServiceTier,
 	}
 }
 
 // logThreadEffectiveConfig emits an info-level log with the effective
-// model/modelProvider/reasoningEffort from a thread operation. Deliberately
-// excludes base_url and API keys.
+// model/modelProvider/reasoningEffort/serviceTier from a thread operation.
+// Deliberately excludes base_url and API keys.
 func logThreadEffectiveConfig(logger *slog.Logger, op string, threadID string, cfg threadEffectiveConfig) {
 	attrs := []any{"thread_id", threadID}
 	if cfg.Model != "" {
@@ -2180,6 +2183,9 @@ func logThreadEffectiveConfig(logger *slog.Logger, op string, threadID string, c
 	}
 	if cfg.ReasoningEffort != "" {
 		attrs = append(attrs, "reasoning_effort", cfg.ReasoningEffort)
+	}
+	if cfg.ServiceTier != "" {
+		attrs = append(attrs, "service_tier", cfg.ServiceTier)
 	}
 	logger.Info("codex thread "+op, attrs...)
 }

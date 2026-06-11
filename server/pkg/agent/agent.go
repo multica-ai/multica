@@ -109,7 +109,7 @@ type ExecOptions struct {
 	ThinkingLevel string
 	// ServiceTier is a Codex-only service tier override. Empty means "do not
 	// override; let the local Codex config/default decide". The Codex backend
-	// passes non-empty values through to app-server as service_tier; other
+	// passes non-empty values through to app-server as serviceTier; other
 	// backends intentionally ignore it.
 	ServiceTier string
 }
