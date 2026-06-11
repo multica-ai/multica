@@ -2565,6 +2565,15 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cascade delete any pins pointing at this issue so the sidebar doesn't
+	// keep firing per-id GETs for a deleted issue (most returning 404).
+	if err := h.Queries.DeletePinnedItemsByItem(r.Context(), db.DeletePinnedItemsByItemParams{
+		ItemType: "issue",
+		ItemID:   issue.ID,
+	}); err != nil {
+		slog.Warn("failed to cascade delete pins for deleted issue", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "error", err)...)
+	}
+
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
