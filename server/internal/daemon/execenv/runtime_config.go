@@ -547,36 +547,42 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
-	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
-	b.WriteString("### Core\n")
-	b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
-	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread` (with or without `--tail`) or `--recent`.\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
-	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
-	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
-	// Available Commands lists `multica issue comment add` with all three input
-	// modes, but the menu entry now actively steers agents away from inlining
-	// `--content` for agent-authored bodies. The prescriptive form-by-platform
-	// guidance lives in the "## Comment Formatting" section below.
-	//
-	// Two distinct shell-layer hazards motivate this, and both bite an inlined
-	// body before the CLI ever runs:
-	//   - Backtick / `$()` command substitution, `$VAR` expansion, and quote /
-	//     newline mangling on Linux/macOS shells. A backtick-wrapped token in
-	//     the body is executed and silently deleted, corrupting the stored
-	//     comment and triggering a retry loop (MUL-2904 / OKK-497).
-	//   - Non-ASCII bytes dropped as `?` on Windows, where the shell layer
-	//     (typically PowerShell) re-encodes a stdin pipe through an ASCII /
-	//     non-UTF-8 codepage (issues #2198 / #2236 / #2376) — which is why
-	//     Windows uses `--content-file`, not stdin.
-	// Because the corruption is shell-driven, the guardrail is provider-agnostic.
-	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. For agent-authored bodies, do NOT inline `--content` — the shell can rewrite backticks, `$()`, quotes, or newlines before the CLI sees them; use the platform-correct non-inline mode shown in ## Comment Formatting below. Run `multica issue comment add --help` for details.\n")
-	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
-	b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
-	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
-	b.WriteString("### Squad maintenance\n")
-	b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
+	// Fork (OPE-1943): channel-origin tasks get the channel CLI menu instead of
+	// the issue core loop — see runtime_config_channel.go.
+	if isChannelTask(ctx) {
+		writeChannelCommands(&b)
+	} else {
+		b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
+		b.WriteString("### Core\n")
+		b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
+		b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread` (with or without `--tail`) or `--recent`.\n")
+		b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
+		b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
+		b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
+		b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
+		// Available Commands lists `multica issue comment add` with all three input
+		// modes, but the menu entry now actively steers agents away from inlining
+		// `--content` for agent-authored bodies. The prescriptive form-by-platform
+		// guidance lives in the "## Comment Formatting" section below.
+		//
+		// Two distinct shell-layer hazards motivate this, and both bite an inlined
+		// body before the CLI ever runs:
+		//   - Backtick / `$()` command substitution, `$VAR` expansion, and quote /
+		//     newline mangling on Linux/macOS shells. A backtick-wrapped token in
+		//     the body is executed and silently deleted, corrupting the stored
+		//     comment and triggering a retry loop (MUL-2904 / OKK-497).
+		//   - Non-ASCII bytes dropped as `?` on Windows, where the shell layer
+		//     (typically PowerShell) re-encodes a stdin pipe through an ASCII /
+		//     non-UTF-8 codepage (issues #2198 / #2236 / #2376) — which is why
+		//     Windows uses `--content-file`, not stdin.
+		// Because the corruption is shell-driven, the guardrail is provider-agnostic.
+		b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. For agent-authored bodies, do NOT inline `--content` — the shell can rewrite backticks, `$()`, quotes, or newlines before the CLI sees them; use the platform-correct non-inline mode shown in ## Comment Formatting below. Run `multica issue comment add --help` for details.\n")
+		b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
+		b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
+		b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
+		b.WriteString("### Squad maintenance\n")
+		b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
+	}
 
 	// Comment Formatting guardrail for ALL providers. The MUL-2904
 	// duplicate-comment loop happened because an agent inlined a backtick-wrapped
@@ -587,15 +593,22 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// `--content`. The platform split mirrors BuildCommentReplyInstructions:
 	// Windows → file (stdin pipes drop non-ASCII), Linux/macOS → quoted HEREDOC
 	// over stdin (the quoted delimiter blocks backtick / `$()` / `$VAR`).
-	b.WriteString("## Comment Formatting\n\n")
-	if runtimeGOOS == "windows" {
-		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
-		b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
-		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
+	//
+	// Fork (OPE-1943): channel tasks get the same guardrail phrased for channel
+	// message/reply verbs — see runtime_config_channel.go.
+	if isChannelTask(ctx) {
+		writeChannelReplyFormatting(&b)
 	} else {
-		b.WriteString("For issue comments, always use `--content-stdin` with a HEREDOC, even for short single-line replies — use a quoted delimiter (`<<'COMMENT'`) so the shell does not expand backticks, `$()`, or `$VAR` inside the body. `--content-file <path>` works too. ")
-		b.WriteString("Never use inline `--content` for agent-authored comments: unescaped backticks, `$()`, `$VAR`, or quotes in the body are rewritten by the shell before the CLI receives them. Keep the same `--parent` value from the trigger comment when replying. ")
-		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
+		b.WriteString("## Comment Formatting\n\n")
+		if runtimeGOOS == "windows" {
+			b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
+			b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
+			b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
+		} else {
+			b.WriteString("For issue comments, always use `--content-stdin` with a HEREDOC, even for short single-line replies — use a quoted delimiter (`<<'COMMENT'`) so the shell does not expand backticks, `$()`, or `$VAR` inside the body. `--content-file <path>` works too. ")
+			b.WriteString("Never use inline `--content` for agent-authored comments: unescaped backticks, `$()`, `$VAR`, or quotes in the body are rewritten by the shell before the CLI receives them. Keep the same `--parent` value from the trigger comment when replying. ")
+			b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
+		}
 	}
 
 	b.WriteString(buildLocalPreviewInstructions(ctx))
@@ -650,7 +663,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- **Recommended keys** (reuse these names so queries stay consistent across the workspace; coin a new key only when none fits): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`. Use snake_case ASCII. The list is short on purpose — most issues only need 1-2 of these pinned, not the full set.\n\n")
 	}
 
-	isAssignmentTriggered := ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" && ctx.TriggerCommentID == ""
+	// Fork (OPE-1943): ChannelID is excluded so channel-mention tasks don't get
+	// the issue-status precedence block — they have no issue to manage.
+	isAssignmentTriggered := ctx.ChatSessionID == "" && ctx.ChannelID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" && ctx.TriggerCommentID == ""
 	if isAssignmentTriggered {
 		b.WriteString("## Instruction Precedence\n\n")
 		b.WriteString("Agent Identity instructions have priority over the assignment workflow below. ")
@@ -685,18 +700,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
 		b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
 	} else if ctx.ChannelID != "" {
-		b.WriteString("**This task was triggered by a channel message mention.** There is no assigned Multica issue for this run. Work from the triggering channel message and fetch channel context on demand.\n\n")
-		fmt.Fprintf(&b, "- Channel ID: `%s`\n", ctx.ChannelID)
-		if ctx.ChannelName != "" {
-			fmt.Fprintf(&b, "- Channel: %s\n", ctx.ChannelName)
-		}
-		if ctx.ChannelMessageID != "" {
-			fmt.Fprintf(&b, "- Triggering message ID: `%s`\n", ctx.ChannelMessageID)
-		}
-		b.WriteString("- Start by reading the triggering message in the user prompt, then run the channel context CLI if you need more context:\n")
-		fmt.Fprintf(&b, "  `multica channel context %s --message %s --include-replies --recent 20 --output json`\n", ctx.ChannelID, ctx.ChannelMessageID)
-		b.WriteString("- Do NOT run `multica issue get`, `multica issue metadata list`, `multica issue comment list`, `multica issue comment add`, or `multica issue status` unless you explicitly decide to create or update an issue as part of the work.\n")
-		b.WriteString("- If you need to reply in the channel, use `multica channel message reply` for the triggering message or `multica channel message send` for a top-level channel message.\n\n")
+		// Fork (OPE-1943): channel-mention task — see runtime_config_channel.go.
+		writeChannelWorkflow(&b, ctx)
 	} else if ctx.AutopilotRunID != "" {
 		// Autopilot run_only task: no issue exists, so the agent must not
 		// follow the assignment/comment workflow.
@@ -826,7 +831,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `[@Name](mention://agent/<agent-id>)` — **enqueues a new run for that agent**\n\n")
 	b.WriteString("### When NOT to use a mention link\n\n")
 	b.WriteString("- Referring to someone in prose (e.g. \"GPT-Boy is right\") — write the plain name, no link.\n")
-	b.WriteString("- **Replying to another agent that just spoke to you.** By default, do NOT put a `mention://agent/...` link anywhere in your reply. The platform already shows your comment to everyone on the issue; re-mentioning the other agent will make them run again, and if they reply with a mention back, you will be triggered again. That is a loop and it costs the user money.\n")
+	// Fork (OPE-1943): channel tasks phrase the loop-prevention bullet for the
+	// channel audience — see runtime_config_channel.go.
+	if isChannelTask(ctx) {
+		b.WriteString(channelMentionsReplyLine)
+	} else {
+		b.WriteString("- **Replying to another agent that just spoke to you.** By default, do NOT put a `mention://agent/...` link anywhere in your reply. The platform already shows your comment to everyone on the issue; re-mentioning the other agent will make them run again, and if they reply with a mention back, you will be triggered again. That is a loop and it costs the user money.\n")
+	}
 	b.WriteString("- Thanking, acknowledging, wrapping up, or signing off. These are exactly the moments where an accidental `@mention` causes the other agent to reply \"you're welcome\" and restart the loop. If the work is done, **end with no mention at all**.\n\n")
 	b.WriteString("### When a mention IS appropriate\n\n")
 	b.WriteString("- Escalating to a human owner who is not yet involved.\n")
@@ -836,7 +847,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("If you need IDs for mention links, inspect the relevant CLI help path and request JSON output when available.\n\n")
 
 	b.WriteString("## Attachments\n\n")
-	b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
+	// Fork (OPE-1943): channel tasks name channel messages as the attachment
+	// carrier — see runtime_config_channel.go.
+	if isChannelTask(ctx) {
+		b.WriteString(channelAttachmentsLine)
+	} else {
+		b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
+	}
 	b.WriteString("When a task includes attachment IDs and you need the files, inspect `multica attachment --help` and use the authenticated CLI path. Do not open Multica resource URLs directly.\n\n")
 
 	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
@@ -844,7 +861,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Multica URLs or APIs directly. ")
 	b.WriteString("Multica resource URLs require authenticated access that only the `multica` CLI can provide.\n\n")
 	b.WriteString("If you need to perform an operation that is not covered by any existing `multica` command, ")
-	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
+	// Fork (OPE-1943): channel tasks escalate via a channel message instead of
+	// an issue comment — see runtime_config_channel.go.
+	if isChannelTask(ctx) {
+		b.WriteString(channelCliWorkaroundLine)
+	} else {
+		b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
+	}
 
 	b.WriteString("## Output\n\n")
 	switch {
@@ -856,10 +879,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Print exactly one final line: `Created <identifier-or-id>: <title>` after a successful `multica issue create`. Use the created issue's `identifier` from JSON output when available; otherwise use its `id`. Do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")
 		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
 	case ctx.ChannelID != "":
-		b.WriteString("This is a channel-origin task, not an Issue task. Your final answer should normally be posted back to the channel only when a reply is useful.\n\n")
-		b.WriteString("- To reply to the triggering message, use `multica channel message reply <channel-id> <message-id> --content \"...\"`.\n")
-		b.WriteString("- To send a top-level channel message, use `multica channel message send <channel-id> --content \"...\"`.\n")
-		b.WriteString("- Do NOT call `multica issue comment add` for this task unless you explicitly created or selected a real issue that needs a comment.\n")
+		// Fork (OPE-1943): channel-origin output — see runtime_config_channel.go.
+		writeChannelOutput(&b)
 	default:
 		if ctx.IsSquadLeader {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")

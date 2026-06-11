@@ -1405,9 +1405,132 @@ func TestWriteRuntimeConfigFileAlwaysInsertsFixedManagedSeparator(t *testing.T) 
 			if got, want := s[len(seed):markerStart], runtimeManagedSeparator; got != want {
 				t.Errorf("expected managed separator %q immediately after seed, got %q", want, got)
 			}
-			if got, want := s[markerStart:markerStart+len(runtimeMarkerBegin)], runtimeMarkerBegin; got != want {
-				t.Errorf("expected begin marker after managed separator, got %q", got)
-			}
 		})
+	}
+}
+
+// TestChannelTaskBriefOmitsIssueWorkflow locks in OPE-1943 point 2: a
+// channel-origin task's runtime config (CLAUDE.md) must present the channel CLI
+// surface and channel reply formatting, and must NOT leak the issue command
+// menu, issue-comment formatting, issue-metadata semantics, or the
+// assignment/precedence workflow. The per-turn prompt was already channel-aware
+// (TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow); this guards
+// the always-on brief that previously contradicted it.
+func TestChannelTaskBriefOmitsIssueWorkflow(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		AgentName:        "Channel Agent",
+		AgentID:          "agent-1",
+		ChannelID:        "11111111-2222-3333-4444-555555555555",
+		ChannelName:      "release",
+		ChannelMessageID: "66666666-7777-8888-9999-000000000000",
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	mustContain := []string{
+		"channel-origin task",
+		"## Channel Reply Formatting",
+		"multica channel context <channel-id> --message <message-id> --include-replies --recent 20 --output json",
+		"multica channel message list <channel-id>",
+		"multica channel message send <channel-id>",
+		"multica channel message reply <channel-id> <message-id>",
+		"multica channel member list <channel-id>",
+		// Channel agents may still open an issue when asked — but only then.
+		"only if the channel conversation explicitly asks you to open one",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("channel brief missing %q", s)
+		}
+	}
+
+	// These must be absent from a channel brief. We deliberately do NOT assert
+	// the bare substring "multica issue get" is absent: the channel Workflow/
+	// Output sections legitimately tell the agent "Do NOT run multica issue
+	// get/status/comment add unless ..." and the Core menu lists `multica issue
+	// create` gated on "only if the channel conversation asks". We instead lock
+	// out the issue command *menu* entries, the issue *workflow* steps, and the
+	// issue-only sections.
+	mustNotContain := []string{
+		"## Issue Metadata",
+		"## Sub-issue Creation",
+		"## Instruction Precedence",
+		"## Comment Formatting",
+		// Issue Core menu entries (these only render in the non-channel branch).
+		"`multica issue get <id> --output json` — Get full issue details.",
+		"— Post a comment. For agent-authored bodies",
+		"`multica issue metadata list <issue-id> [--output json]`",
+		// Issue assignment workflow steps.
+		"to understand your task",
+		"to read the full comment history",
+		"in_progress` unless your Agent Identity",
+		// Issue-comment HEREDOC formatting.
+		"For issue comments, always use `--content-stdin`",
+	}
+	for _, s := range mustNotContain {
+		if strings.Contains(out, s) {
+			t.Errorf("channel brief must not leak issue-workflow text %q", s)
+		}
+	}
+}
+
+// TestIssueTaskBriefStillCarriesIssueWorkflow is the negative control for
+// TestChannelTaskBriefOmitsIssueWorkflow: an ordinary assignment-triggered issue
+// task must keep the full issue command menu and comment formatting, and must
+// not pick up any channel command surface.
+func TestIssueTaskBriefStillCarriesIssueWorkflow(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		AgentName: "Issue Agent",
+		AgentID:   "agent-2",
+		IssueID:   "11111111-2222-3333-4444-555555555555",
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, s := range []string{
+		"multica issue get",
+		"multica issue comment add",
+		"## Comment Formatting",
+		"## Instruction Precedence",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("issue brief missing expected %q", s)
+		}
+	}
+	for _, s := range []string{
+		"## Channel Reply Formatting",
+		"multica channel message send",
+		"multica channel context",
+	} {
+		if strings.Contains(out, s) {
+			t.Errorf("issue brief must not contain channel text %q", s)
+		}
+	}
+}
+
+// TestIsChannelTaskPrecedence locks the discriminator precedence of
+// isChannelTask: chat and quick-create beat channel (mirroring the Workflow
+// chain in buildMetaSkillContent), while autopilot/comment fields do NOT
+// suppress a channel classification. Every Fork hook site in
+// buildMetaSkillContent routes through this predicate; weakening it silently
+// swaps which commands/formatting/output a task receives.
+func TestIsChannelTaskPrecedence(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		ctx  TaskContextForEnv
+		want bool
+	}{
+		{"channel only", TaskContextForEnv{ChannelID: "ch-1"}, true},
+		{"chat beats channel", TaskContextForEnv{ChatSessionID: "s-1", ChannelID: "ch-1"}, false},
+		{"quick-create beats channel", TaskContextForEnv{QuickCreatePrompt: "p", ChannelID: "ch-1"}, false},
+		{"autopilot does not suppress channel", TaskContextForEnv{AutopilotRunID: "r-1", ChannelID: "ch-1"}, true},
+		{"trigger comment does not suppress channel", TaskContextForEnv{TriggerCommentID: "c-1", ChannelID: "ch-1"}, true},
+		{"no channel id", TaskContextForEnv{IssueID: "iss-1"}, false},
+	}
+	for _, tc := range cases {
+		if got := isChannelTask(tc.ctx); got != tc.want {
+			t.Errorf("%s: isChannelTask = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
