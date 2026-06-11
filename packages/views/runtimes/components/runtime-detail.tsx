@@ -203,6 +203,7 @@ export function RuntimeDetail({
             cliVersion={cliVersion}
             canEditVisibility={!!isRuntimeOwner}
             canEditRuntime={!!canEditRuntime}
+            canDelete={!!canDelete}
           />
         }
       >
@@ -325,6 +326,7 @@ function RuntimeProperties({
   cliVersion,
   canEditVisibility,
   canEditRuntime,
+  canDelete,
 }: {
   runtime: AgentRuntime;
   health: ReturnType<typeof deriveRuntimeHealth>;
@@ -340,6 +342,7 @@ function RuntimeProperties({
   canEditVisibility: boolean;
   /** Runtime owner or workspace admin; gates the concurrency cap. */
   canEditRuntime: boolean;
+  canDelete: boolean;
 }) {
   const { t } = useT("runtimes");
   const { t: tLayout } = useT("layout");
@@ -365,23 +368,25 @@ function RuntimeProperties({
                   time: formatHoldUntil(runtime.hold_until)!,
                 })}
               </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 gap-1 border-warning/30 px-2 text-[11px] text-warning hover:bg-warning/10"
-                disabled={resumeMutation.isPending}
-                onClick={() =>
-                  resumeMutation.mutate(runtime.id, {
-                    onSuccess: () =>
-                      toast.success(t(($) => $.health.on_hold.resume_toast)),
-                    onError: () =>
-                      toast.error(t(($) => $.health.on_hold.resume_failed)),
-                  })
-                }
-              >
-                <Play className="h-3 w-3" />
-                {t(($) => $.health.on_hold.resume_button)}
-              </Button>
+              {canDelete && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 gap-1 border-warning/30 px-2 text-[11px] text-warning hover:bg-warning/10"
+                  disabled={resumeMutation.isPending}
+                  onClick={() =>
+                    resumeMutation.mutate(runtime.id, {
+                      onSuccess: () =>
+                        toast.success(t(($) => $.health.on_hold.resume_toast)),
+                      onError: () =>
+                        toast.error(t(($) => $.health.on_hold.resume_failed)),
+                    })
+                  }
+                >
+                  <Play className="h-3 w-3" />
+                  {t(($) => $.health.on_hold.resume_button)}
+                </Button>
+              )}
             </span>
           )}
         </ObjectProperty>
