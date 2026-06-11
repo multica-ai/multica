@@ -66,6 +66,9 @@ import type {
   ChatPendingTask,
   PendingChatTasksResponse,
   SendChatMessageResponse,
+  Channel,
+  ChannelMember,
+  ChannelMessage,
   Project,
   CreateProjectRequest,
   UpdateProjectRequest,
@@ -1681,6 +1684,55 @@ export class ApiClient {
 
   async markChatSessionRead(sessionId: string): Promise<void> {
     await this.fetch(`/api/chat/sessions/${sessionId}/read`, { method: "POST" });
+  }
+
+  async listChannels(): Promise<Channel[]> {
+    return this.fetch("/api/channels");
+  }
+
+  async createChannel(data: { name: string; description?: string; lark_chat_id?: string }): Promise<Channel> {
+    return this.fetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listChannelMembers(channelId: string): Promise<ChannelMember[]> {
+    return this.fetch(`/api/channels/${channelId}/members`);
+  }
+
+  async addChannelMember(channelId: string, data: { member_type: "user" | "agent"; member_id: string }): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeChannelMember(channelId: string, memberType: "user" | "agent", memberId: string): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/members/${memberType}/${memberId}`, { method: "DELETE" });
+  }
+
+  async listChannelMessages(channelId: string): Promise<ChannelMessage[]> {
+    return this.fetch(`/api/channels/${channelId}/messages`);
+  }
+
+  async sendChannelMessage(channelId: string, content: string): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async importLarkChannelMessage(data: {
+    lark_chat_id: string;
+    external_message_id?: string;
+    author_name?: string;
+    content: string;
+  }): Promise<ChannelMessage> {
+    return this.fetch("/api/channels/lark/messages", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   async cancelTaskById(taskId: string): Promise<void> {

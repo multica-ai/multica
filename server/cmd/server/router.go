@@ -155,6 +155,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h.StartChannelBridge()
 	h.Metrics = opts.BusinessMetrics
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
@@ -967,6 +968,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
+
+			r.Route("/api/channels", func(r chi.Router) {
+				r.Get("/", h.ListChannels)
+				r.Post("/", h.CreateChannel)
+				r.Post("/lark/messages", h.ImportLarkChannelMessage)
+				r.Route("/{channelId}", func(r chi.Router) {
+					r.Patch("/", h.UpdateChannel)
+					r.Get("/members", h.ListChannelMembers)
+					r.Post("/members", h.AddChannelMember)
+					r.Delete("/members/{memberType}/{memberId}", h.RemoveChannelMember)
+					r.Get("/messages", h.ListChannelMessages)
+					r.Post("/messages", h.SendChannelMessage)
+				})
+			})
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {

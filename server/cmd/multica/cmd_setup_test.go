@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -161,6 +163,25 @@ func TestSelfHostAppURLHonorsEnv(t *testing.T) {
 		}
 		if got := cli.FlagOrEnv(cmd, "app-url", "MULTICA_APP_URL", ""); got != "https://flag.example" {
 			t.Fatalf("app_url: want flag value, got %q", got)
+		}
+	})
+}
+
+func TestProbeApp(t *testing.T) {
+	t.Run("reachable app", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		if !probeApp(server.URL) {
+			t.Fatalf("probeApp: want true for reachable app")
+		}
+	})
+
+	t.Run("unreachable app", func(t *testing.T) {
+		if probeApp("http://127.0.0.1:1") {
+			t.Fatalf("probeApp: want false for unreachable app")
 		}
 	})
 }

@@ -282,6 +282,18 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			case "agent_start":
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
+			case "message_end":
+				if msg := decodePiMessage(evt.Message); msg != nil {
+					if msg.StopReason == "error" && finalStatus == "completed" {
+						finalStatus = "failed"
+						finalError = msg.ErrorMessage
+						if finalError == "" {
+							finalError = "pi assistant turn ended with stopReason=error"
+						}
+						trySend(msgCh, Message{Type: MessageError, Content: finalError})
+					}
+				}
+
 			case "message_update":
 				if evt.AssistantMessageEvent == nil {
 					continue
@@ -318,20 +330,29 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				})
 
 			case "turn_end":
-				if msg := decodePiMessage(evt.Message); msg != nil && msg.Usage != nil {
-					model := msg.Model
-					if model == "" {
-						model = opts.Model
+				if msg := decodePiMessage(evt.Message); msg != nil {
+					if msg.Usage != nil {
+						model := msg.Model
+						if model == "" {
+							model = opts.Model
+						}
+						if model == "" {
+							model = "unknown"
+						}
+						u := usage[model]
+						u.InputTokens += msg.Usage.Input
+						u.OutputTokens += msg.Usage.Output
+						u.CacheReadTokens += msg.Usage.CacheRead
+						u.CacheWriteTokens += msg.Usage.CacheWrite
+						usage[model] = u
 					}
-					if model == "" {
-						model = "unknown"
+					if msg.StopReason == "error" && finalStatus == "completed" {
+						finalStatus = "failed"
+						finalError = msg.ErrorMessage
+						if finalError == "" {
+							finalError = "pi assistant turn ended with stopReason=error"
+						}
 					}
-					u := usage[model]
-					u.InputTokens += msg.Usage.Input
-					u.OutputTokens += msg.Usage.Output
-					u.CacheReadTokens += msg.Usage.CacheRead
-					u.CacheWriteTokens += msg.Usage.CacheWrite
-					usage[model] = u
 				}
 
 			case "error":
@@ -420,9 +441,11 @@ type piAssistantMessageEvent struct {
 }
 
 type piMessage struct {
-	Role  string   `json:"role,omitempty"`
-	Model string   `json:"model,omitempty"`
-	Usage *piUsage `json:"usage,omitempty"`
+	Role         string   `json:"role,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	StopReason   string   `json:"stopReason,omitempty"`
+	ErrorMessage string   `json:"errorMessage,omitempty"`
+	Usage        *piUsage `json:"usage,omitempty"`
 }
 
 type piUsage struct {

@@ -74,6 +74,8 @@ const (
 	EventChatSessionRead    = "chat:session_read"
 	EventChatSessionDeleted = "chat:session_deleted"
 	EventChatSessionUpdated = "chat:session_updated"
+	EventChannelMessage     = "channel:message"
+	EventChannelUpdated     = "channel:updated"
 
 	// Project events
 	EventProjectCreated         = "project:created"

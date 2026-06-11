@@ -43,6 +43,7 @@ import {
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
+import { channelKeys } from "../channels/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
@@ -1052,6 +1053,18 @@ export function useRealtimeSync(
       }
     });
 
+    const unsubChannelMessage = ws.on("channel:message", (p) => {
+      const payload = p as { channel_id: string };
+      qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      const id = getCurrentWsId();
+      if (id) qc.invalidateQueries({ queryKey: channelKeys.list(id) });
+    });
+
+    const unsubChannelUpdated = ws.on("channel:updated", () => {
+      const id = getCurrentWsId();
+      if (id) qc.invalidateQueries({ queryKey: channelKeys.list(id) });
+    });
+
     return () => {
       unsubAny();
       unsubIssueUpdated();
@@ -1093,6 +1106,8 @@ export function useRealtimeSync(
       unsubChatSessionRead();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
+      unsubChannelMessage();
+      unsubChannelUpdated();
       timers.forEach(clearTimeout);
       timers.clear();
     };

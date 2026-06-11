@@ -194,6 +194,12 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	// working config or wipe the saved token: persistSelfHostConfigIfReachable
 	// writes only when the server answers, so an unreachable host leaves the
 	// existing config untouched and the user stays logged in.
+	if !probeApp(appURL) {
+		fmt.Fprintf(os.Stderr, "\n⚠ App at %s is not reachable.\n", appURL)
+		fmt.Fprintln(os.Stderr, "  Your existing configuration was left unchanged.")
+		fmt.Fprintln(os.Stderr, "  Verify --app-url, then re-run 'multica setup self-host' once it's reachable.")
+		return nil
+	}
 	reachable, err := persistSelfHostConfigIfReachable(serverURL, appURL, profile, probeServer)
 	if err != nil {
 		return fmt.Errorf("save config: %w", err)
@@ -316,4 +322,23 @@ func probeServer(baseURL string) bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// probeApp checks whether the configured frontend URL is reachable before we
+// save it. This catches typoed app URLs before they generate a broken login URL.
+func probeApp(appURL string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, strings.TrimRight(appURL, "/"), nil)
+	if err != nil {
+		return false
+	}
+
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode < http.StatusInternalServerError
 }

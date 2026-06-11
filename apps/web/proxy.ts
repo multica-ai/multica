@@ -12,6 +12,7 @@ import {
 const LEGACY_ROUTE_SEGMENTS = new Set([
   "issues",
   "projects",
+  "channels",
   "agents",
   "inbox",
   "my-issues",
