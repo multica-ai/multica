@@ -23,10 +23,26 @@ func (h *Handler) cerebroChildDoneNotifyParentEnabled(ctx context.Context, works
 	return h.cerebroChildNotifyFlag(ctx, workspaceID, requesterUserID, "cerebro_child_done_notify_parent")
 }
 
-// cerebroChildStatusNotifyParentEnabled reports whether the workspace flag
-// cerebro_child_status_notify_parent is on. Default ON.
-func (h *Handler) cerebroChildStatusNotifyParentEnabled(ctx context.Context, workspaceID pgtype.UUID, requesterUserID string) bool {
-	return h.cerebroChildNotifyFlag(ctx, workspaceID, requesterUserID, "cerebro_child_status_notify_parent")
+// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — per-status notify flags.
+// childStatusNotifyFlagKeys maps each non-done child status that wakes the
+// parent to its own per-status feature flag, split from the original combined
+// `cerebro_child_status_notify_parent` flag so in_review and blocked can be
+// silenced independently.
+var childStatusNotifyFlagKeys = map[string]string{
+	"in_review": "cerebro_child_in_review_notify_parent",
+	"blocked":   "cerebro_child_blocked_notify_parent",
+}
+
+// cerebroChildStatusNotifyParentEnabled reports whether the per-status
+// notification flag for `status` (in_review / blocked) is on. Default ON: an
+// unknown status or any lookup failure resolves to true, preserving current
+// behavior.
+func (h *Handler) cerebroChildStatusNotifyParentEnabled(ctx context.Context, workspaceID pgtype.UUID, requesterUserID, status string) bool {
+	key, ok := childStatusNotifyFlagKeys[status]
+	if !ok {
+		return true
+	}
+	return h.cerebroChildNotifyFlag(ctx, workspaceID, requesterUserID, key)
 }
 
 // cerebroChildNotifyFlag resolves the effective flag value using the same

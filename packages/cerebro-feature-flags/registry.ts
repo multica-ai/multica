@@ -90,8 +90,10 @@ export type CerebroFlagKey =
   | "cerebro_focus_list"
   // TECH-3006: controls whether parent is notified when a sub-issue reaches done.
   | "cerebro_child_done_notify_parent"
-  // TECH-3006: controls whether parent is notified when a sub-issue reaches in_review or blocked.
-  | "cerebro_child_status_notify_parent"
+  // TECH-3006: controls whether parent is notified when a sub-issue reaches in_review.
+  | "cerebro_child_in_review_notify_parent"
+  // TECH-3006: controls whether parent is notified when a sub-issue reaches blocked.
+  | "cerebro_child_blocked_notify_parent"
   // Interactive terminal (cerebro-terminal): per-runtime presentation mode + xterm.js panel.
   | "cerebro_interactive_terminal"
   // TECH-3108: workspace connection registry (API + MCP connections managed from settings).
@@ -258,8 +260,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_child_done_notify_parent: true,
   // TECH-3006: ON by default — preserves current behavior. Post a system
   // comment on the parent and wake its assignee when a sub-issue reaches
-  // in_review or blocked. Off silences the notification for the effective flag scope.
-  cerebro_child_status_notify_parent: true,
+  // in_review. Off silences the notification for the effective flag scope.
+  cerebro_child_in_review_notify_parent: true,
+  // TECH-3006: ON by default — preserves current behavior. Post a system
+  // comment on the parent and wake its assignee when a sub-issue reaches
+  // blocked. Off silences the notification for the effective flag scope.
+  cerebro_child_blocked_notify_parent: true,
   cerebro_interactive_terminal: false,
   // TECH-3108: OFF by default until QA on staging; shows Connections tab in workspace settings.
   cerebro_connections: false,
@@ -739,11 +745,18 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to done. Off silences the notification for the effective flag scope. TECH-3006.",
   },
   {
-    key: "cerebro_child_status_notify_parent",
-    label: "Notify parent when sub-issue is in review or blocked",
+    key: "cerebro_child_in_review_notify_parent",
+    label: "Notify parent when sub-issue is in review",
     group: "inbox",
     description:
-      "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to in_review or blocked. Off silences the notification for the effective flag scope. TECH-3006.",
+      "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to in_review. Off silences the notification for the effective flag scope. TECH-3006.",
+  },
+  {
+    key: "cerebro_child_blocked_notify_parent",
+    label: "Notify parent when sub-issue is blocked",
+    group: "inbox",
+    description:
+      "Post a system comment on the parent issue and wake its assignee when a sub-issue transitions to blocked. Off silences the notification for the effective flag scope. TECH-3006.",
   },
   {
     key: "cerebro_sub_issue_no_owner_mention",

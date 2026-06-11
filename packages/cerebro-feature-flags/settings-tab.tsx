@@ -3,6 +3,10 @@
 import type { ComponentType } from "react";
 import { Lock } from "lucide-react";
 import { Switch } from "@multica/ui/components/ui/switch";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@multica/ui/components/ui/native-select";
 import { Label } from "@multica/ui/components/ui/label";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { toast } from "sonner";
@@ -43,8 +47,16 @@ function FlagRow({
   const personalMutation = useSetFeatureFlagMutation();
   const workspaceMutation = useSetWorkspaceFeatureFlagMutation();
 
-  // Owner has forced this flag on for the whole team and locked it.
-  const forcedForTeam = locked && workspaceValue === true;
+  // The owner's workspace-level setting, as a 3-way mode:
+  //   "default" — no workspace override; members fall back to personal/default.
+  //   "on"      — forced on for everyone (locked).
+  //   "off"     — forced off for everyone (locked); this is the reliable
+  //               org-wide kill switch that personal toggles can't restore.
+  const teamMode: "default" | "on" | "off" = !locked
+    ? "default"
+    : workspaceValue === false
+      ? "off"
+      : "on";
 
   // Optional inline settings for this feature, shown only while it's enabled.
   const SettingsComponent = FLAG_SETTINGS[flagKey];
@@ -60,11 +72,16 @@ function FlagRow({
     );
   };
 
-  const handleTeamLockChange = (next: boolean) => {
-    // On => force the flag on for everyone and lock it. Off => clear the
-    // workspace override so members fall back to their personal/default value.
+  const handleTeamModeChange = (mode: "default" | "on" | "off") => {
+    // default => clear the workspace override (members choose).
+    // on/off  => force that value for everyone and lock it so a personal
+    //            toggle can't override it.
     workspaceMutation.mutate(
-      { key: flagKey, enabled: next ? true : null, locked: next },
+      {
+        key: flagKey,
+        enabled: mode === "default" ? null : mode === "on",
+        locked: mode !== "default",
+      },
       {
         onError: (err) => {
           toast.error(err instanceof Error ? err.message : `Failed to update ${label}`);
@@ -84,8 +101,12 @@ function FlagRow({
               <p className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Lock className="h-3 w-3" />
                 {isAdmin
-                  ? "Locked on for the whole workspace."
-                  : "Turned on for the whole workspace by an owner — you can't change this."}
+                  ? teamMode === "off"
+                    ? "Forced off for the whole workspace."
+                    : "Forced on for the whole workspace."
+                  : teamMode === "off"
+                    ? "Turned off for the whole workspace by an owner — you can't change this."
+                    : "Turned on for the whole workspace by an owner — you can't change this."}
               </p>
             )}
           </div>
@@ -100,14 +121,21 @@ function FlagRow({
         {isAdmin && (
           <div className="mt-3 flex items-center justify-between gap-4 border-t pt-3">
             <Label className="text-xs font-medium text-muted-foreground">
-              Force on for the whole workspace (members can&apos;t turn it off)
+              Whole workspace
             </Label>
-            <Switch
-              checked={forcedForTeam}
+            <NativeSelect
+              size="sm"
+              value={teamMode}
               disabled={workspaceMutation.isPending}
-              onCheckedChange={handleTeamLockChange}
-              aria-label={`Force ${label} on for the whole workspace`}
-            />
+              onChange={(e) =>
+                handleTeamModeChange(e.target.value as "default" | "on" | "off")
+              }
+              aria-label={`${label} — whole-workspace setting`}
+            >
+              <NativeSelectOption value="default">Members choose</NativeSelectOption>
+              <NativeSelectOption value="on">Forced on for everyone</NativeSelectOption>
+              <NativeSelectOption value="off">Forced off for everyone</NativeSelectOption>
+            </NativeSelect>
           </div>
         )}
 
