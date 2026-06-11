@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -220,6 +221,120 @@ func (s *Service) UnarchiveChannelHandler(w http.ResponseWriter, r *http.Request
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// muteChannelRequest is the body for POST /api/channels/{id}/mute.
+type muteChannelRequest struct {
+	MutedUntil string `json:"muted_until"` // RFC3339; must be in the future
+}
+
+// channelStateResponse echoes the user's per-channel inbox controls after a
+// mutation so the client can settle its optimistic update.
+type channelStateResponse struct {
+	MutedUntil *string `json:"muted_until"`
+	Unread     bool    `json:"unread"`
+}
+
+// MuteChannelHandler handles POST /api/channels/{id}/mute — snooze ("remind
+// me") the channel/DM until the supplied time. Per-user state.
+func (s *Service) MuteChannelHandler(w http.ResponseWriter, r *http.Request) {
+	channelID, ok := s.requireChannelMember(w, r)
+	if !ok {
+		return
+	}
+	userID := r.Header.Get("X-User-ID")
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+
+	var body muteChannelRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	parsed, err := time.Parse(time.RFC3339, body.MutedUntil)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "muted_until must be RFC3339")
+		return
+	}
+	if !parsed.After(time.Now()) {
+		writeError(w, http.StatusBadRequest, "muted_until must be in the future")
+		return
+	}
+
+	mutedUntil := pgtype.Timestamptz{Time: parsed, Valid: true}
+	if err := s.MuteChannel(r.Context(), channelID, userUUID, mutedUntil); err != nil {
+		slog.Error("channel mute failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to mute channel")
+		return
+	}
+
+	mutedStr := parsed.UTC().Format(time.RFC3339Nano)
+	s.publishChannelState(r, channelID, userID, &mutedStr, false)
+	writeJSON(w, http.StatusOK, channelStateResponse{MutedUntil: &mutedStr})
+}
+
+// UnmuteChannelHandler handles DELETE /api/channels/{id}/mute. Idempotent.
+func (s *Service) UnmuteChannelHandler(w http.ResponseWriter, r *http.Request) {
+	channelID, ok := s.requireChannelMember(w, r)
+	if !ok {
+		return
+	}
+	userID := r.Header.Get("X-User-ID")
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+	if err := s.UnmuteChannel(r.Context(), channelID, userUUID); err != nil {
+		slog.Error("channel unmute failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to unmute channel")
+		return
+	}
+	s.publishChannelState(r, channelID, userID, nil, false)
+	writeJSON(w, http.StatusOK, channelStateResponse{})
+}
+
+// MarkChannelUnreadHandler handles POST /api/channels/{id}/unread — re-flag a
+// read channel/DM as unread in the user's inbox. Per-user state.
+func (s *Service) MarkChannelUnreadHandler(w http.ResponseWriter, r *http.Request) {
+	channelID, ok := s.requireChannelMember(w, r)
+	if !ok {
+		return
+	}
+	userID := r.Header.Get("X-User-ID")
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+	if err := s.MarkChannelUnread(r.Context(), channelID, userUUID); err != nil {
+		slog.Error("channel mark-unread failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to mark channel unread")
+		return
+	}
+	s.publishChannelState(r, channelID, userID, nil, true)
+	writeJSON(w, http.StatusOK, channelStateResponse{Unread: true})
+}
+
+// publishChannelState broadcasts a per-user channel-state change to the acting
+// user's own WS sessions so other tabs invalidate their channel list.
+func (s *Service) publishChannelState(r *http.Request, channelID pgtype.UUID, userID string, mutedUntil *string, unread bool) {
+	s.Bus.Publish(events.Event{
+		Type:        EventChannelStateChanged,
+		WorkspaceID: middleware.WorkspaceIDFromContext(r.Context()),
+		ActorType:   "member",
+		ActorID:     userID,
+		Payload: map[string]any{
+			"channel_id":  util.UUIDToString(channelID),
+			"user_id":     userID,
+			"muted_until": mutedUntil,
+			"unread":      unread,
+		},
+		AudienceUserIDs: []string{userID},
+	})
 }
 
 // requireChannelMember resolves the {id} path param to a channel/dm issue and

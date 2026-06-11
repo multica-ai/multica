@@ -1373,6 +1373,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-inbox':
+        specifier: workspace:*
+        version: link:../cerebro-inbox
       '@multica/core':
         specifier: workspace:*
         version: link:../core

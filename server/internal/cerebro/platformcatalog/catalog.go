@@ -885,6 +885,9 @@ var excluded = map[string]string{
 	"POST /api/persona/approvals/{id}/approve": "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
 	"POST /api/persona/approvals/{id}/deny":    "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
 	"POST /api/channels/{id}/read":             "self_only — caller marking a channel read",
+	"POST /api/channels/{id}/unread":           "self_only — caller marking a channel unread in their own inbox (TECH-3352)",
+	"POST /api/channels/{id}/mute":             "self_only — caller snoozing a channel in their own inbox (TECH-3352)",
+	"DELETE /api/channels/{id}/mute":           "self_only — caller un-snoozing a channel in their own inbox (TECH-3352)",
 	"POST /api/lark/binding/redeem":            "self_only — caller binding their own Lark open_id to their Multica account",
 
 	// chat sessions — the caller's own AI chat, not an admin-governed action.

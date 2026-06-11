@@ -2592,6 +2592,23 @@ export class ApiClient {
     await this.fetch(`/api/channels/${id}/archive`, { method: "DELETE" });
   }
 
+  // CEREBRO-PATCH(channel-state-client): TECH-3352 — per-user snooze ("remind
+  // me") + mark-unread endpoints, mirroring the inbox mute/unread client.
+  async muteChannel(id: string, mutedUntil: Date): Promise<{ muted_until: string | null }> {
+    return this.fetch(`/api/channels/${id}/mute`, {
+      method: "POST",
+      body: JSON.stringify({ muted_until: mutedUntil.toISOString() }),
+    });
+  }
+
+  async unmuteChannel(id: string): Promise<{ muted_until: string | null }> {
+    return this.fetch(`/api/channels/${id}/mute`, { method: "DELETE" });
+  }
+
+  async markChannelUnread(id: string): Promise<{ unread: boolean }> {
+    return this.fetch(`/api/channels/${id}/unread`, { method: "POST" });
+  }
+
   // CEREBRO-PATCH(channel-listen-client): JEH-699 — per (channel × agent)
   // listen-mode endpoints. Default 'always' applies when no explicit row
   // exists for an agent; the response only contains overrides, so the

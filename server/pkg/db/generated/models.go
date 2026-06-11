@@ -416,6 +416,14 @@ type CerebroChannelArchived struct {
 	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
 }
 
+type CerebroChannelState struct {
+	ChannelID  pgtype.UUID        `json:"channel_id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	MutedUntil pgtype.Timestamptz `json:"muted_until"`
+	UnreadAt   pgtype.Timestamptz `json:"unread_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroCommentTask struct {
 	CommentID   pgtype.UUID        `json:"comment_id"`
 	TaskID      pgtype.UUID        `json:"task_id"`

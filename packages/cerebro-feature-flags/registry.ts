@@ -21,6 +21,7 @@ export type CerebroFlagKey =
   | "cerebro_web_push"
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
+  | "cerebro_channel_row_actions"
   | "cerebro_inbox_action_grouping"
   | "cerebro_inbox_wakeup_running"
   | "cerebro_inbox_pinned_filter"
@@ -147,6 +148,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_web_push: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
+  cerebro_channel_row_actions: true,
   cerebro_inbox_action_grouping: true,
   cerebro_inbox_wakeup_running: true,
   cerebro_inbox_pinned_filter: true,
@@ -442,6 +444,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Show the cerebro inbox row-actions surface: mute, mark-unread, hover menu, mobile swipe gestures, long-press menu, and the `e` keyboard shortcut.",
+  },
+  {
+    key: "cerebro_channel_row_actions",
+    label: "Channel row actions",
+    group: "inbox",
+    description:
+      "Give channels and DMs the same inbox row controls as notifications: \"remind me\" (snooze) and \"mark as unread\", via the hover menu, mobile swipe gestures, and long-press menu.",
   },
   {
     key: "cerebro_inbox_action_grouping",

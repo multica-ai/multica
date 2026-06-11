@@ -117,6 +117,12 @@ export function registerCerebroHandlers(
     "cerebro_channel_unarchived",
     invalidateChannelList,
   );
+  // TECH-3352 — per-user snooze/mark-unread changes the row's unread + muted
+  // state; keep the user's other tabs/devices in sync.
+  const unsubChannelStateChanged = ws.on(
+    "cerebro_channel_state_changed",
+    invalidateChannelList,
+  );
 
   // JEH-838b — issue references. Server emits the reference row (with
   // issue_id) as the payload on create/update/delete. Invalidate the
@@ -176,6 +182,7 @@ export function registerCerebroHandlers(
     unsubChatSessionUpdated();
     unsubChannelArchived();
     unsubChannelUnarchived();
+    unsubChannelStateChanged();
     unsubReferenceCreated();
     unsubReferenceUpdated();
     unsubReferenceDeleted();

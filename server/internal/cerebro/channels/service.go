@@ -42,6 +42,12 @@ const EventChannelArchived = "cerebro_channel_archived"
 // a channel. Same audience contract as EventChannelArchived.
 const EventChannelUnarchived = "cerebro_channel_unarchived"
 
+// EventChannelStateChanged is the WS event published when a member changes
+// their per-user channel inbox controls (snooze / mark-unread). Per-user
+// state, so the audience is restricted to the acting user's own sessions —
+// other channel members must not learn about someone else's inbox flip.
+const EventChannelStateChanged = "cerebro_channel_state_changed"
+
 // AgentTriggerGateFn gates listen-mode triggered agents through the cerebro
 // group-permission allowlist (JEH-1727). The router wires it to a closure
 // that resolves the comment author's viewer (admin flag + group IDs) and
@@ -266,6 +272,67 @@ func (s *Service) GetChannelArchivedAt(ctx context.Context, channelID, userID pg
 		return pgtype.Timestamptz{}, false, err
 	}
 	return ts, true, nil
+}
+
+// MuteChannel snoozes (channelID, userID) until mutedUntil. Idempotent upsert.
+func (s *Service) MuteChannel(ctx context.Context, channelID, userID pgtype.UUID, mutedUntil pgtype.Timestamptz) error {
+	return s.CerebroQueries.SetChannelMutedForUser(ctx, cerebrodb.SetChannelMutedForUserParams{
+		ChannelID:  channelID,
+		UserID:     userID,
+		MutedUntil: mutedUntil,
+	})
+}
+
+// UnmuteChannel clears the snooze for (channelID, userID). Idempotent.
+func (s *Service) UnmuteChannel(ctx context.Context, channelID, userID pgtype.UUID) error {
+	return s.CerebroQueries.ClearChannelMuteForUser(ctx, cerebrodb.ClearChannelMuteForUserParams{
+		ChannelID: channelID,
+		UserID:    userID,
+	})
+}
+
+// MarkChannelUnread sets the manual-unread overlay for (channelID, userID).
+func (s *Service) MarkChannelUnread(ctx context.Context, channelID, userID pgtype.UUID) error {
+	return s.CerebroQueries.SetChannelUnreadForUser(ctx, cerebrodb.SetChannelUnreadForUserParams{
+		ChannelID: channelID,
+		UserID:    userID,
+	})
+}
+
+// ClearChannelState clears both the manual-unread overlay and any snooze for
+// (channelID, userID) — called when the channel is read. Idempotent; a missing
+// row is not an error.
+func (s *Service) ClearChannelState(ctx context.Context, channelID, userID pgtype.UUID) error {
+	return s.CerebroQueries.ClearChannelStateForUser(ctx, cerebrodb.ClearChannelStateForUserParams{
+		ChannelID: channelID,
+		UserID:    userID,
+	})
+}
+
+// ChannelStatesForUser returns the user's per-channel inbox controls as two
+// maps keyed by channel id: snooze targets (muted) and manual-unread markers
+// (unreadAt). Returned as primitive pgtype maps so the upstream handler can
+// consume them through the ChannelListenInvoker seam without importing this
+// package (which would create an import cycle). A DB failure returns empty
+// maps so the channel list still renders.
+func (s *Service) ChannelStatesForUser(ctx context.Context, userID pgtype.UUID) (muted, unreadAt map[string]pgtype.Timestamptz) {
+	muted = map[string]pgtype.Timestamptz{}
+	unreadAt = map[string]pgtype.Timestamptz{}
+	rows, err := s.CerebroQueries.ListChannelStatesForUser(ctx, userID)
+	if err != nil {
+		slog.Warn("channel-list: list states failed", "user_id", util.UUIDToString(userID), "error", err)
+		return muted, unreadAt
+	}
+	for _, r := range rows {
+		id := util.UUIDToString(r.ChannelID)
+		if r.MutedUntil.Valid {
+			muted[id] = r.MutedUntil
+		}
+		if r.UnreadAt.Valid {
+			unreadAt[id] = r.UnreadAt
+		}
+	}
+	return muted, unreadAt
 }
 
 // FilterArchivedChannels removes channels archived by userID from rows. When

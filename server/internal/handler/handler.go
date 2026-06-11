@@ -370,6 +370,10 @@ type ChannelListenInvoker interface {
 	// CEREBRO-PATCH(handler-dm-promote-iface): JEH-1131 — seam for the
 	// DM-to-channel promotion that runs after mention dispatch.
 	PromoteDMOnMention(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, workspaceID, actorType, actorID string)
+	// CEREBRO-PATCH(handler-channel-state-iface): TECH-3352 — per-user channel
+	// snooze + mark-unread overlay read on the channel list, cleared on read.
+	ChannelStatesForUser(ctx context.Context, userID pgtype.UUID) (muted, unreadAt map[string]pgtype.Timestamptz)
+	ClearChannelState(ctx context.Context, channelID, userID pgtype.UUID) error
 }
 
 // New constructs a Handler. The pushService argument is cerebro-specific

@@ -1621,6 +1621,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// archive flag (JEH-855/912).
 				r.Post("/{id}/archive", channelListenSvc.ArchiveChannelHandler)
 				r.Delete("/{id}/archive", channelListenSvc.UnarchiveChannelHandler)
+				// CEREBRO-PATCH(channel-state-routes): TECH-3352 — per-(channel,
+				// user) snooze ("remind me") + mark-unread inbox controls.
+				r.Post("/{id}/mute", channelListenSvc.MuteChannelHandler)
+				r.Delete("/{id}/mute", channelListenSvc.UnmuteChannelHandler)
+				r.Post("/{id}/unread", channelListenSvc.MarkChannelUnreadHandler)
 			})
 
 			// Workspace-wide agent task snapshot for presence derivation:

@@ -252,4 +252,14 @@ export interface AgentToolOverride {
   updated_at: string;
 }
 
+// TECH-3352: per-user snooze ("remind me") target on a channel/DM. A future
+// timestamp means the conversation is muted and hidden from the normal inbox
+// views until then; null/absent means not snoozed. The server overlays this
+// from cerebro_channel_state; older servers omit the field.
+declare module "@multica/core/types/channel" {
+  interface Channel {
+    muted_until?: string | null;
+  }
+}
+
 export {};

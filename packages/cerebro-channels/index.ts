@@ -9,6 +9,9 @@ export { useArchiveChannel, useUnarchiveChannel } from "./archive-mutations";
 // focus-guard effect that left the inbox row stuck as unread when focus
 // flickered on open).
 export { useChannelAutoMarkRead } from "./use-channel-auto-mark-read";
+// TECH-3352 — per-user "remind me" (snooze) + "mark as unread" for channels/DMs.
+export { useMuteChannel, useUnmuteChannel, useMarkChannelUnread } from "./state-mutations";
+export { CerebroChannelRowActions } from "./channel-row-actions";
 // CEREBRO-PATCH(issue-comment-cost): FIR-39 per-comment cost badge shared by
 // issue comment cards and channel slack messages (channels reuse the comment
 // table, so one query backs both surfaces).

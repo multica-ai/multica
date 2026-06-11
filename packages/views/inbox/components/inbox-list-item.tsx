@@ -6,6 +6,8 @@ import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Hash, MessagesSquare } from "lucide-react";
 import { CerebroInboxRowActions, CerebroSwipeArchive, CerebroUnarchiveAction, CerebroInboxTimestamp, CerebroInboxReminderRow, CerebroInboxRunRequestRow, isReminderOverdue } from "@multica/cerebro-inbox"; // CEREBRO-PATCH(inbox-row-actions-mount) / CEREBRO-PATCH(inbox-unarchive-mount) / CEREBRO-PATCH(inbox-muted-timestamp) / CEREBRO-PATCH(inbox-reminder-row) / CEREBRO-PATCH(inbox-run-request-row): FIR-2385
+// CEREBRO-PATCH(channel-row-actions-import): TECH-3352 — remind/mark-unread on channel rows.
+import { CerebroChannelRowActions } from "@multica/cerebro-channels";
 import { AvatarGroup } from "@multica/ui/components/ui/avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Channel, ChannelMember, InboxItem } from "@multica/core/types";
@@ -41,6 +43,7 @@ interface InboxListItemBaseProps {
   children: React.ReactNode;
   cerebroItem?: InboxItem; // CEREBRO-PATCH(inbox-row-actions-mount)
   onUnarchive?: () => void; // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
+  channelActions?: React.ReactNode; // CEREBRO-PATCH(channel-row-actions-slot): TECH-3352
 }
 
 /**
@@ -57,6 +60,7 @@ function InboxListItemShell({
   children,
   cerebroItem, // CEREBRO-PATCH(inbox-row-actions-mount)
   onUnarchive, // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
+  channelActions, // CEREBRO-PATCH(channel-row-actions-slot): TECH-3352
 }: InboxListItemBaseProps) {
   return (
     // CEREBRO-PATCH(inbox-row-action-click-target): avoid nested native buttons so row actions receive clicks.
@@ -85,6 +89,10 @@ function InboxListItemShell({
           the archive action for an unarchive action (icon + swipe). */}
       {onUnarchive ? (
         <CerebroUnarchiveAction onUnarchive={onUnarchive} />
+      ) : channelActions ? (
+        // CEREBRO-PATCH(channel-row-actions-slot): TECH-3352 — channel/DM rows
+        // get remind + mark-unread (the component carries its own swipe-archive).
+        channelActions
       ) : cerebroItem ? (
         /* CEREBRO-PATCH(inbox-row-actions-mount): full row-actions surface
            (mute / mark-unread, hover menu, mobile swipe + long-press) for
@@ -207,6 +215,9 @@ export function ChannelListItem({
       onClick={onClick}
       onArchive={onArchive}
       onUnarchive={onUnarchive} // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
+      // CEREBRO-PATCH(channel-row-actions-slot): TECH-3352 — remind + mark-unread
+      // on channel/DM rows (only in the active view; archived view uses onUnarchive).
+      channelActions={onUnarchive ? undefined : <CerebroChannelRowActions channel={channel} onArchive={onArchive} />}
     >
       <ChannelAvatarStack channel={channel} />
       <div className="min-w-0 flex-1">
