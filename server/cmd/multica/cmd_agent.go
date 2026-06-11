@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 )
@@ -249,6 +250,12 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
+	// CEREBRO-PATCH(cf-access-client): load the per-machine Cloudflare Access
+	// service-token from the active profile so the CLI passes the wall. setHeaders
+	// falls back to env when this is empty.
+	if cfg, err := cli.LoadCLIConfigForProfile(resolveProfile(cmd)); err == nil {
+		client.CFServiceToken = cfaccess.ServiceToken{ClientID: cfg.CFAccessClientID, ClientSecret: cfg.CFAccessClientSecret}
+	}
 	// When running inside a daemon task, attribute actions to the agent.
 	if agentID := os.Getenv("MULTICA_AGENT_ID"); agentID != "" {
 		client.AgentID = agentID

@@ -87,6 +87,9 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if d.client.os != "" {
 		headers.Set("X-Client-OS", d.client.os)
 	}
+	// CEREBRO-PATCH(cf-access-client): carry the Cloudflare Access service-token on
+	// the wakeup websocket handshake so it passes the wall like the HTTP requests.
+	d.client.cfHeaderToken().Apply(headers)
 
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)

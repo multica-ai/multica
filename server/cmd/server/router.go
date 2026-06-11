@@ -22,6 +22,7 @@ import (
 	cerebroaccount "github.com/multica-ai/multica/server/internal/cerebro/account"
 	// CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin handler import
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
+	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-auth): Cloudflare Access verifier
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
 	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 move-comment-to-sub-issue handler import.
 	cerebrocomments "github.com/multica-ai/multica/server/internal/cerebro/comments"
@@ -467,6 +468,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		Redis:        rdb,
 	})
 
+	// CEREBRO-PATCH(cf-access-auth): Cloudflare Access stamp verifier. nil/inert
+	// unless CEREBRO_CF_ACCESS_TEAM_DOMAIN + _AUD are set; when set, a valid
+	// Cf-Access-Jwt-Assertion authenticates the request by mapping its email to
+	// a Multica user (see server/internal/cerebro/cfaccess).
+	cfAccessVerifier := cfaccess.NewVerifierFromEnv(func(ctx context.Context, email string) (string, error) {
+		u, err := queries.GetUserByEmail(ctx, email)
+		if err != nil {
+			return "", err
+		}
+		return util.UUIDToString(u.ID), nil
+	})
+
 	// Empty-claim cache: lets the daemon poll path skip a Postgres
 	// scan when a recent check confirmed the runtime had no queued
 	// task. Returns nil when rdb is nil — TaskService treats that
@@ -814,7 +827,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Registered before the user-only protected group below so each
 	// path lives in exactly one place — chi panics on duplicates.
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfAccessVerifier)) // CEREBRO-PATCH(cf-access-auth): pass Cloudflare Access verifier
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// Attachment upload — agents drop screenshots/logs onto their
@@ -878,7 +891,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfAccessVerifier)) // CEREBRO-PATCH(cf-access-auth): pass Cloudflare Access verifier
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 		// Everything below this line is user-only. Task-scoped tokens
 		// are rejected with 403; the allowlist group above is the

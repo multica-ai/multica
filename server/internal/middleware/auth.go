@@ -13,6 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-auth): Cloudflare Access stamp verification
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -36,7 +37,7 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 // local DB. When nil (Fleet URL unset) mcn_ tokens are rejected at the
 // prefix branch — we don't fall through to the mul_ / JWT paths, since
 // an mcn_ string is by construction not a valid mul_ PAT or JWT.
-func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
+func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier, cfAccess *cfaccess.Verifier) func(http.Handler) http.Handler { // CEREBRO-PATCH(cf-access-auth): accept a Cloudflare Access stamp as identity
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — any value supplied by
@@ -50,6 +51,14 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
+				// CEREBRO-PATCH(cf-access-auth): no Multica token — accept a Cloudflare
+				// Access stamp and map its email to a user. Inert (nil verifier) when the
+				// wall is not configured, so unprotected environments are unchanged.
+				if userID, ok := cfaccess.AuthenticatedUser(r.Context(), cfAccess, r); ok {
+					r.Header.Set("X-User-ID", userID)
+					next.ServeHTTP(w, r.WithContext(withUserScope(r.Context())))
+					return
+				}
 				slog.Debug("auth: no token found", "path", r.URL.Path)
 				http.Error(w, `{"error":"missing authorization"}`, http.StatusUnauthorized)
 				return

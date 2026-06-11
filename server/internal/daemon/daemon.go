@@ -19,6 +19,7 @@ import (
 
 	// CEREBRO-PATCH(daemon-runtime-mcp-merge-import): runtime/agent MCP merge for 9031.
 	// CEREBRO-PATCH(daemon-settings-refresh-import): keep settings live via cerebro-zone helper.
+	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonsettings"
 	"github.com/multica-ai/multica/server/internal/cerebro/traceupload" // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender
@@ -758,6 +759,10 @@ func (d *Daemon) resolveAuth() error {
 		return fmt.Errorf("not authenticated: run %s first", loginHint)
 	}
 	d.client.SetToken(cfg.Token)
+	// CEREBRO-PATCH(cf-access-client): load the per-machine Cloudflare Access
+	// service-token from the same profile config so the daemon passes the wall.
+	// Empty falls back to env (cloud runtimes) inside cfHeaderToken().
+	d.client.SetCFServiceToken(cfaccess.ServiceToken{ClientID: cfg.CFAccessClientID, ClientSecret: cfg.CFAccessClientSecret})
 	d.logger.Info("authenticated")
 	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
 	return nil
