@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Link2, ListChevronsDownUp, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -29,6 +29,7 @@ import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
 import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
@@ -47,6 +48,29 @@ const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
 const highlightedCommentFadeClass =
   "after:from-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
+
+/**
+ * Returns a handler that copies a deep-link to a specific comment to the
+ * clipboard. The link points at the issue detail with a `?comment=<id>` query
+ * param, which the route layer reads to auto-scroll + highlight that comment.
+ * Shared by the root-comment and reply menus so the URL shape lives in one place.
+ */
+function useCopyCommentLink(issueId: string) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  return useCallback(
+    (commentId: string) => {
+      const relative = paths.issueDetail(issueId, { commentId });
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
+      const url = origin ? `${origin}${relative}` : relative;
+      void copyText(url).then((ok) => {
+        if (ok) toast.success(t(($) => $.comment.link_copied_toast));
+      });
+    },
+    [issueId, paths, t],
+  );
+}
 
 function StickyHeaderShell({
   className,
@@ -391,6 +415,7 @@ function CommentRow({
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
+  const copyLink = useCopyCommentLink(issueId);
 
   const edit = useEditAttachmentState(issueId, entry, onEdit);
 
@@ -457,6 +482,10 @@ function CommentRow({
               }}>
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => copyLink(entry.id)}>
+                <Link2 className="h-3.5 w-3.5" />
+                {t(($) => $.comment.copy_link_action)}
               </DropdownMenuItem>
               {onResolveToggle && (
                 <>
@@ -595,6 +624,7 @@ function CommentCardImpl({
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
+  const copyLink = useCopyCommentLink(issueId);
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;
@@ -729,6 +759,10 @@ function CommentCardImpl({
                   }}>
                     <Copy className="h-3.5 w-3.5" />
                     {t(($) => $.comment.copy_action)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => copyLink(entry.id)}>
+                    <Link2 className="h-3.5 w-3.5" />
+                    {t(($) => $.comment.copy_link_action)}
                   </DropdownMenuItem>
                   {onResolveToggle && (
                     <>

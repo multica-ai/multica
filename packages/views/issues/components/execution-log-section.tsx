@@ -18,6 +18,8 @@ import { formatDuration } from "../../agents/components/agent-activity-hover-con
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 // Right-panel section that lists every agent run for this issue. Active
@@ -300,7 +302,7 @@ export function ActiveTaskRow({
 
   return (
     <RowShell task={task}>
-      <TriggerText text={trigger} />
+      <TriggerText text={trigger} issueId={issueId} commentId={task.trigger_comment_id} />
       <RowStatus title={label}>
         {task.status === "running" ? (
           <>
@@ -393,7 +395,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
   return (
     <RowShell task={task}>
-      <TriggerText text={trigger} />
+      <TriggerText text={trigger} issueId={issueId} commentId={task.trigger_comment_id} />
       <RowStatus title={failureLabel ?? label}>
         <TaskStatusIcon status={task.status} />
         <span className="sr-only">{failureLabel ?? label}</span>
@@ -454,8 +456,38 @@ function RowShell({
   );
 }
 
-function TriggerText({ text }: { text: string }) {
-  return <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{text}</span>;
+// The trigger description doubles as a deep-link to the comment that started
+// the run, when one exists (`trigger_comment_id`). Clicking navigates to the
+// issue with `?comment=<id>`, which the route layer reads to auto-scroll +
+// highlight that comment in the timeline. Runs without a triggering comment
+// (direct assignment, autopilot, chat) render as plain, non-clickable text.
+function TriggerText({
+  text,
+  issueId,
+  commentId,
+}: {
+  text: string;
+  issueId: string;
+  commentId?: string;
+}) {
+  const { push } = useNavigation();
+  const paths = useWorkspacePaths();
+  const { t } = useT("issues");
+
+  if (!commentId) {
+    return <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{text}</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => push(paths.issueDetail(issueId, { commentId }))}
+      title={t(($) => $.execution_log.jump_to_comment_tooltip)}
+      className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground transition-colors hover:text-foreground hover:underline"
+    >
+      {text}
+    </button>
+  );
 }
 
 function RowStatus({
