@@ -70,7 +70,7 @@ func TestResolveDaemonToolPolicy_StagedRollout(t *testing.T) {
 
 	clear := func() {
 		testPool.Exec(ctx,
-			`DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key IN ('Bash','Read')`,
+			`DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key IN ('tools:Bash','tools:Read')`,
 			testWorkspaceID)
 	}
 	clear()
@@ -105,10 +105,14 @@ func TestResolveDaemonToolPolicy_StagedRollout(t *testing.T) {
 		upsert("cerebro_local_tool_policy_enforce", enforce)
 	}
 
-	// Agent-level Deny on one tool only (capability-wide, resource_pattern '').
+	// CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-2563 — seed the Deny under the
+	// canonical capability key "tools:Bash", which is what the permissions screen
+	// actually writes (cerebro_capability.capability_key, source runtime_report).
+	// The resolver receives the bare Claude name "Bash" and must canonicalise it to
+	// match; seeding the bare "Bash" (as before) hid the real-world key mismatch.
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting)
-		VALUES ($1, 'Bash', 'agent', $2, '', 'deny')
+		VALUES ($1, 'tools:Bash', 'agent', $2, '', 'deny')
 	`, testWorkspaceID, agentID); err != nil {
 		t.Fatalf("seed deny policy: %v", err)
 	}

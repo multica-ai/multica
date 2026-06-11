@@ -35,6 +35,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
+	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
 	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
@@ -137,20 +138,39 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
-		WorkspaceID:     wsUUID,
-		ToolKey:         req.ToolName,
-		ResourcePattern: req.ResourcePattern,
-		RuntimeID:       runtimeID,
-		AgentID:         agentID,
-		UserID:          ownerID,
-		Base:            toolpolicy.SettingAllow,
-	})
+	// CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-2563 — resolve under the
+	// canonical capability key, not the bare Claude tool name. The permissions
+	// screen authors a built-in-tool Deny under "tools:<Name>" (claudehook
+	// .PolicyToolKey); a bare-name lookup never matched it, so a Deny on Bash/
+	// WebFetch/Edit silently let the tool through on local runtimes.
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	toolKey := claudehook.PolicyToolKey(req.ToolName)
+	// Capability-wide row (resource_pattern "") — the shape an "All tools" Deny is
+	// written under, and the same shape the gateway gate resolves. A concrete
+	// resource (a Bash binary, a WebFetch URL) additionally resolves its exact
+	// pattern and may only TIGHTEN the capability-wide verdict, never loosen it.
+	resolveAt := func(pattern string) (toolpolicy.Effective, error) {
+		return store.Resolve(r.Context(), toolpolicy.Query{
+			WorkspaceID:     wsUUID,
+			ToolKey:         toolKey,
+			ResourcePattern: pattern,
+			RuntimeID:       runtimeID,
+			AgentID:         agentID,
+			UserID:          ownerID,
+			Base:            toolpolicy.SettingAllow,
+		})
+	}
+	eff, err := resolveAt("")
 	if err != nil {
 		slog.Error("local tool-policy resolve failed",
 			"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName, "error", err)
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return
+	}
+	if rp := strings.TrimSpace(req.ResourcePattern); rp != "" {
+		if effSpec, sErr := resolveAt(rp); sErr == nil && toolpolicy.MoreRestrictive(effSpec.Setting, eff.Setting) == effSpec.Setting && effSpec.Setting != eff.Setting {
+			eff = effSpec
+		}
 	}
 
 	decision := localtoolpolicy.Decide(mode, eff)
