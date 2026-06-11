@@ -30,7 +30,7 @@ make selfhost
 
 `make selfhost`는 다음을 수행합니다.
 
-1. `.env`가 없으면 `.env.example`로부터 생성하며 **무작위 JWT_SECRET**을 함께 만듭니다
+1. `.env`가 없으면 `.env.example`로부터 생성하며 **무작위 JWT_SECRET과 Postgres 비밀번호**를 함께 만듭니다
 2. 공식 Docker 이미지(PostgreSQL, Multica backend, Multica frontend)를 받아옵니다
 3. `docker-compose.selfhost.yml`을 사용해 모든 서비스를 시작합니다
 4. 백엔드의 `/health` 엔드포인트가 준비될 때까지 기다립니다
@@ -49,7 +49,7 @@ make selfhost
 - **백엔드**: [http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**포트는 `127.0.0.1`에서만 수신합니다.** `docker-compose.selfhost.yml`은 공개된 모든 포트를 loopback에 바인딩합니다 — `ss -tlnp`에서는 `0.0.0.0:8080`이 보이지 않으며, 설계상 다른 기기에서는 서비스에 접근할 수 없습니다. 기본 `JWT_SECRET`과 Postgres 자격 증명이 공개 인터넷에 노출되어서는 절대 안 됩니다. 기기 간 접근이 필요하면 TLS를 종료하는 리버스 프록시를 스택 앞에 두세요 — [5b단계 — 기기 간: 리버스 프록시를 앞에 두기](#5b-cross-machine-front-with-a-reverse-proxy)를 참고하세요.
+**포트는 `127.0.0.1`에서만 수신합니다.** `docker-compose.selfhost.yml`은 공개된 모든 포트를 loopback에 바인딩합니다 — `ss -tlnp`에서는 `0.0.0.0:8080`이 보이지 않으며, 설계상 다른 기기에서는 서비스에 접근할 수 없습니다. 서버 시크릿과 Postgres 자격 증명이 공개 인터넷에 노출되어서는 절대 안 됩니다. 기기 간 접근이 필요하면 TLS를 종료하는 리버스 프록시를 스택 앞에 두세요 — [5b단계 — 기기 간: 리버스 프록시를 앞에 두기](#5b-cross-machine-front-with-a-reverse-proxy)를 참고하세요.
 </Callout>
 
 ## 2. 중요: 프로덕션 안전 설정 유지하기
@@ -81,7 +81,7 @@ make selfhost
 
 **옵션 B — SMTP relay(내부 네트워크 / 온프레미스):**
 
-배포 환경이 `api.resend.com`에 접근할 수 없거나, 이미 내부 메일 릴레이(Microsoft Exchange, Postfix, 온프레미스 SendGrid 등)가 있는 경우에 사용하세요. 둘 다 설정된 경우 `SMTP_HOST`가 Resend보다 우선하므로, 인증 및 초대 메일이 내부 릴레이에 머무릅니다. 465 포트(SMTPS / 암묵적 TLS)는 현재 지원하지 않습니다 — 25 또는 587을 사용하세요.
+배포 환경이 `api.resend.com`에 접근할 수 없거나, 이미 내부 메일 릴레이(Microsoft Exchange, Postfix, 온프레미스 SendGrid 등)가 있는 경우에 사용하세요. 둘 다 설정된 경우 `SMTP_HOST`가 Resend보다 우선하므로, 인증 및 초대 메일이 내부 릴레이에 머무릅니다. STARTTLS는 광고될 때 자동으로 업그레이드됩니다. `465` 포트(SMTPS / 암묵적 TLS)는 연결 직후의 TLS 핸드셰이크를 자동으로 활성화하며, `SMTP_TLS=implicit`(별칭: `smtps`, `ssl`)는 비표준 SMTPS 포트에서 강제로 활성화합니다.
 
 **익명 Exchange 내부 릴레이(포트 25)** — 호스트가 IP로 신뢰되며 자격 증명 없이 제출하는 경우:
 
@@ -102,6 +102,26 @@ SMTP_PORT=587
 SMTP_USERNAME=multica
 SMTP_PASSWORD=...
 SMTP_TLS_INSECURE=false        # 비공개 CA / 자체 서명 인증서일 때만 true로 설정
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**암묵적 TLS / SMTPS(포트 465)** — STARTTLS를 광고하지 않는 알리바바 클라우드 / 텐센트 기업 메일 같은 제공자용. 포트 `465`는 암묵적 TLS를 자동으로 활성화하므로, 여기서 `SMTP_TLS`는 생략할 수 있습니다:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+공개 IP에서 보내는 기본 `localhost` greeting을 거부하는 **엄격한 공개 relay(예: Google Workspace `smtp-relay.gmail.com`)** 의 경우, relay가 기대하는 FQDN으로 `SMTP_EHLO_NAME`을 설정하세요 — 그렇지 않으면 연결이 끊기고, 이는 이후 명령에서 불투명한 `EOF`로 나타납니다. 기본값은 컨테이너 호스트명이며, 보통 유효한 FQDN이 아닙니다:
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # relay가 받아들이는 FQDN; 기본값은 (FQDN이 아닌) 컨테이너 호스트명
 RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
@@ -134,13 +154,17 @@ multica setup self-host
 
 ### 5b. 기기 간: 리버스 프록시를 앞에 두기
 
-compose 스택은 `127.0.0.1`에서만 수신하므로, 다른 기기에 있는 데몬은 `http://<server-ip>:8080`에 직접 연결할 수 없습니다 — 그리고 그렇게 되기를 원해서도 안 됩니다. 그렇지 않으면 기본 `JWT_SECRET`이 공개 인터넷에서 접근 가능해지기 때문입니다. 서버에 TLS를 종료하고 `127.0.0.1:8080`(백엔드)과 `127.0.0.1:3000`(프런트엔드)으로 전달하는 리버스 프록시를 두고, CLI를 공개 HTTPS URL로 연결하세요.
+compose 스택은 `127.0.0.1`에서만 수신하므로, 다른 기기에 있는 데몬은 `http://<server-ip>:8080`에 직접 연결할 수 없습니다 — 그리고 그렇게 되기를 원해서도 안 됩니다. 그렇지 않으면 서버 시크릿이 공개 인터넷에서 접근 가능해지기 때문입니다. 서버에 TLS를 종료하고 `127.0.0.1:8080`(백엔드)과 `127.0.0.1:3000`(프런트엔드)으로 전달하는 리버스 프록시를 두고, CLI를 공개 HTTPS URL로 연결하세요.
 
 ```bash
 multica setup self-host \
   --server-url https://<your-domain> \
   --app-url https://<your-domain>
 ```
+
+<Callout type="info">
+플래그 대신 환경 변수를 선호한다면, 해당 플래그를 생략할 때 `setup self-host`가 `MULTICA_SERVER_URL`과 `MULTICA_APP_URL`을 읽습니다(둘 다 설정하면 플래그가 우선합니다). `MULTICA_SERVER_URL`은 [환경 변수](/environment-variables)에 나오는 `ws://…/ws` 데몬 형식도 허용하며 HTTP 기본 URL로 정규화합니다.
+</Callout>
 
 단일 호스트네임에서 프런트엔드와 백엔드를 모두 앞단에 두는(데몬과 웹 앱 모두에 필요한 WebSocket 지원 포함) 최소 Caddyfile은 다음과 같습니다.
 
@@ -172,44 +196,26 @@ multica.example.com {
 
 Cloud와 동일한 흐름입니다 — [Cloud 빠른 시작 → 5-6단계](/cloud-quickstart#5-create-an-agent)를 참고하세요.
 
-## 7. 사용량 롤업 스케줄링(사용량 대시보드에 필수)
+<span id="7-usage-rollup-no-operator-action-required" />
 
-<Callout type="warning">
-사용량 / 런타임 대시보드는 `rollup_task_usage_hourly()`가 채우는 파생 테이블 `task_usage_hourly`에서 데이터를 읽습니다. 번들된 `pgvector/pgvector:pg17` Postgres 이미지에는 **`pg_cron`이 포함되어 있지 않으며**, 백엔드도 롤업을 인프로세스로 실행하지 않습니다. `rollup_task_usage_hourly()`를 스케줄링하는 것이 없으면, 원시 `task_usage` 행은 계속 들어오는데 대시보드는 영원히 0에 머무릅니다.
+## 7. 사용량 롤업(운영자 작업 불필요)
+
+<Callout type="info">
+사용량 / 런타임 대시보드는 `rollup_task_usage_hourly()`가 채우는 파생 테이블 `task_usage_hourly`에서 데이터를 읽습니다. MUL-2957부터 백엔드는 DB 기반 스케줄러를 통해 인프로세스로 이 롤업을 실행하므로 더 이상 `pg_cron`이 필요하지 않으며, 외부 cron / systemd 타이머도 권장 설정이 아닙니다. 번들된 `pgvector/pgvector:pg17` 이미지가 변경 없이 동작합니다.
 </Callout>
 
-지원되는 옵션 중 하나를 고르세요 — 하나만 있으면 됩니다.
+인프로세스 스케줄러는 30초마다 틱하면서 `sys_cron_executions` 테이블을 통해 5분 단위 UTC 플랜을 클레임합니다. 백엔드 레플리카가 여러 개여도 안전합니다 — 고유 키 `(job_name, scope_kind, scope_id, plan_time)` 덕분에 각 플랜에서 단 하나만이 승자가 됩니다. 신규 배포에는 어떤 설정도 필요 없습니다.
 
-**옵션 A — 외부 cron / systemd-timer(가장 간단함).** 임의의 외부 스케줄러에서 5분마다 롤업을 실행합니다. 멱등하고 워터마크 기반이므로, 놓친 틱은 따라잡습니다.
-
-```bash
-# /etc/cron.d/multica-rollup — every 5 minutes
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
-  -c "SELECT rollup_task_usage_hourly();" >/dev/null
-```
-
-**옵션 B — Postgres를 `pg_cron`이 포함된 이미지로 교체.** `docker-compose.selfhost.yml`의 `pgvector/pgvector:pg17`을 `pgvector`와 `pg_cron`을 모두 갖춘 이미지(`supabase/postgres` 또는 커스텀 빌드)로 교체하고, `shared_preload_libraries=pg_cron`을 설정한 뒤 재시작하고, 작업을 한 번 등록합니다.
+**호환성 — 기존 `pg_cron` 등록.** 이전에 rollup을 `pg_cron` 잡으로 등록했었다면(`SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', …)`) 굳이 제거할 필요는 없습니다 — SQL 함수가 내부적으로 advisory lock 4246을 잡기 때문에 앱 스케줄러와 `pg_cron`이 이중 쓰기를 할 수 없습니다. 중복 항목을 제거하려면:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-SELECT cron.schedule(
-  'rollup_task_usage_hourly',
-  '*/5 * * * *',
-  $$SELECT rollup_task_usage_hourly()$$
-);
+SELECT cron.unschedule('rollup_task_usage_hourly')
+  FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
 ```
 
-**옵션 C — 먼저 히스토리 백필(업그레이드 경로).** `v0.3.4 → v0.3.5+`로 업그레이드하는 중이고 기존 `task_usage` 행이 있다면, migration `103`이 hourly 테이블이 시드될 때까지 `refusing to drop legacy daily rollups: ...`와 함께 `migrate up`을 중단합니다. 번들된 백필을 한 번 실행한 다음, 옵션 A 또는 B를 설정하세요.
+**`v0.3.4 → v0.3.5+` 업그레이드.** 이전 릴리스에서는 migration 103을 적용하기 전에 운영자가 직접 `cmd/backfill_task_usage_hourly`를 실행해야 했고, 그러지 않으면 fail-closed 가드가 `migrate up`을 중단했습니다. MUL-2957부터 이 작업은 자동입니다 — migrate 명령이 migration 103을 적용하기 직전에(advisory lock 4246 보호 아래에서) 멱등한 월별 슬라이스 백필을 실행한 뒤 계속 진행합니다. 바쁜 DB에서는 여전히 `--sleep-between-slices=2s`로 읽기 부하를 조절하기 위해 스탠드얼론 backfill을 실행할 수 있지만 더 이상 필수는 아닙니다.
 
-```bash
-docker compose -f docker-compose.selfhost.yml exec backend \
-  ./backfill_task_usage_hourly --sleep-between-slices=2s
-```
-
-`--sleep-between-slices=2s`는 바쁜 DB에서 읽기 부하를 조절합니다. 완료된 후 백엔드 컨테이너를 재시작하면(시작 시 migration이 실행됨) 업그레이드가 완료됩니다.
-
-전체 레퍼런스 — Kubernetes `CronJob` 템플릿과 업그레이드 순서 포함 — 는 저장소의 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)에 있습니다.
+전체 레퍼런스(운영 노트와 Kubernetes 배포 형태 포함)는 저장소의 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)에 있습니다.
 
 ## Kubernetes 배포(대체 방안)
 
@@ -263,8 +269,8 @@ multica setup self-host \
 - **백엔드가 시작되지 않음**: `docker compose -f docker-compose.selfhost.yml logs backend`로 컨테이너 로그를 확인하세요. 보통 `.env`의 잘못된 `DATABASE_URL` 또는 `JWT_SECRET`이 원인입니다
 - **인증 코드를 받지 못함**: 이메일 백엔드가 구성되지 않은 경우(Resend도 SMTP도 없음) → `docker compose logs backend`에서 `[DEV] Verification code`를 찾으세요
 - **WebSocket이 연결되지 않음**: 공개 배포에서는 반드시 `FRONTEND_ORIGIN`을 실제 프런트엔드 도메인으로 설정해야 합니다. [문제 해결 → WebSocket이 연결되지 않음](/troubleshooting#websocket-wont-connect)을 참고하세요
-- **사용량 / 런타임 대시보드가 0에 머무름**: `rollup_task_usage_hourly()`가 스케줄링되지 않고 있습니다 — 위의 [7단계](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)와 [문제 해결 → 사용량 대시보드가 0으로 표시됨](/troubleshooting#usage-dashboard-stays-at-zero)을 참고하세요
-- **`migrate up`이 `refusing to drop legacy daily rollups`로 실패함**: `v0.3.4 → v0.3.5+` 업그레이드 경로 가드입니다. 먼저 `backfill_task_usage_hourly`를 실행하세요 — [7단계 → 옵션 C](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)를 참고하세요
+- **사용량 / 런타임 대시보드가 0에 머무름**: `rollup_task_usage_hourly()`가 스케줄링되지 않고 있습니다 — 위의 [7단계](#7-usage-rollup-no-operator-action-required)와 [문제 해결 → 사용량 대시보드가 0으로 표시됨](/troubleshooting#usage-dashboard-stays-at-zero)을 참고하세요
+- **`migrate up`이 `refusing to drop legacy daily rollups`로 실패함**: `v0.3.4 → v0.3.5+` 업그레이드 경로 가드입니다. MUL-2957부터 migrate 명령이 migration 103을 적용하기 전에 백필을 자동으로 실행합니다 — [7단계](#7-usage-rollup-no-operator-action-required)를 참고하세요
 
 ## 다음 단계
 

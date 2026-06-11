@@ -45,6 +45,7 @@ import {
 import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { openExternal } from "../platform";
@@ -92,18 +93,29 @@ interface PreviewState {
 }
 
 function normalize(source: PreviewSource): PreviewState {
+  // Resolve any server-relative URL (e.g. `/api/attachments/{id}/download`
+  // returned by the unified-endpoint metadata path when no CloudFront
+  // signer is configured) against the configured API base. Web with the
+  // default empty base keeps the relative path and resolves it against
+  // the page origin — same behaviour as before this PR. Desktop renderer
+  // (loaded from `app://` / file: / dev-server origin) needs the absolute
+  // form so `<img src>` / `<iframe src>` / `<video src>` actually point at
+  // the API server instead of the shell origin.
   if (source.kind === "full") {
+    const mediaUrl =
+      resolvePublicFileUrl(source.attachment.download_url) ??
+      source.attachment.download_url;
     return {
       filename: source.attachment.filename,
       contentType: source.attachment.content_type,
-      mediaUrl: source.attachment.download_url,
+      mediaUrl,
       attachmentId: source.attachment.id,
     };
   }
   return {
     filename: source.filename,
     contentType: "",
-    mediaUrl: source.url,
+    mediaUrl: resolvePublicFileUrl(source.url) ?? source.url,
     attachmentId: null,
   };
 }

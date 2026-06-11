@@ -102,8 +102,9 @@ describe("useRealtimeSync — ws instance change", () => {
     rerender({ ws: ws2 });
 
     // Should have called invalidateQueries for all workspace-scoped keys
-    // (12 workspace-scoped + 1 workspaceKeys.list() = 13 calls)
-    expect(invalidateSpy).toHaveBeenCalledTimes(13);
+    // (15 workspace-scoped + 6 per-issue prefixes + 1 workspaceKeys.list()
+    // = 22 calls)
+    expect(invalidateSpy).toHaveBeenCalledTimes(22);
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -118,5 +119,49 @@ describe("useRealtimeSync — ws instance change", () => {
     rerender({ ws: ws1 });
 
     expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it("invalidates chat, pins, labels, and invitations queries on ws instance change", () => {
+    const ws1 = createMockWs();
+    const { rerender } = renderHook(
+      ({ ws }) => useRealtimeSync(ws, stores),
+      { initialProps: { ws: ws1 as WSClient | null }, wrapper: createWrapper(qc) },
+    );
+
+    invalidateSpy.mockClear();
+    rerender({ ws: null });
+
+    const ws2 = createMockWs();
+    rerender({ ws: ws2 });
+
+    const calls = invalidateSpy.mock.calls.map((call: [{ queryKey?: unknown }, ...unknown[]]) => call[0].queryKey);
+    expect(calls).toContainEqual(["chat", "ws-1"]);
+    expect(calls).toContainEqual(["labels", "ws-1"]);
+    expect(calls).toContainEqual(["workspaces", "ws-1", "invitations"]);
+  });
+
+  it("invalidates per-issue caches (no wsId in key) on ws instance change", () => {
+    // These keys are not under the ["issues", wsId] prefix, so they need
+    // their own invalidation on recovery — otherwise events missed while
+    // disconnected leave them stale forever (staleTime: Infinity, #3953).
+    const ws1 = createMockWs();
+    const { rerender } = renderHook(
+      ({ ws }) => useRealtimeSync(ws, stores),
+      { initialProps: { ws: ws1 as WSClient | null }, wrapper: createWrapper(qc) },
+    );
+
+    invalidateSpy.mockClear();
+    rerender({ ws: null });
+
+    const ws2 = createMockWs();
+    rerender({ ws: ws2 });
+
+    const calls = invalidateSpy.mock.calls.map((call: [{ queryKey?: unknown }, ...unknown[]]) => call[0].queryKey);
+    expect(calls).toContainEqual(["issues", "timeline"]);
+    expect(calls).toContainEqual(["issues", "reactions"]);
+    expect(calls).toContainEqual(["issues", "subscribers"]);
+    expect(calls).toContainEqual(["issues", "usage"]);
+    expect(calls).toContainEqual(["issues", "attachments"]);
+    expect(calls).toContainEqual(["issues", "tasks"]);
   });
 });

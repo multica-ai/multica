@@ -57,6 +57,10 @@ export function AuthInitializer({
           // (the managed-cloud default) rather than blocking the UI.
           workspaceCreationDisabled: cfg.workspace_creation_disabled === true,
         });
+        configStore.getState().setDaemonConfig({
+          daemonServerUrl: cfg.daemon_server_url,
+          daemonAppUrl: cfg.daemon_app_url,
+        });
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,
@@ -126,6 +130,7 @@ export function AuthInitializer({
         storage.removeItem("multica_token");
         onAuthFailure();
       });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <>{children}</>;

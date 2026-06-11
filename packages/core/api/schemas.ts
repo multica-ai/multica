@@ -23,6 +23,18 @@ import type {
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
+export interface AppConfigResponse {
+  cdn_domain: string;
+  allow_signup: boolean;
+  google_client_id?: string;
+  posthog_key?: string;
+  posthog_host?: string;
+  analytics_environment?: string;
+  daemon_server_url?: string;
+  daemon_app_url?: string;
+  workspace_creation_disabled?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
 // the issue detail page (timeline, comments, subscribers) and the issues
@@ -72,10 +84,18 @@ const AttachmentSchema = z.object({
 // in a new tab — `download_url` and `url` — must be strings, otherwise we'd
 // happily `window.open(undefined)`. `filename` gates the toast/title and is
 // also enforced so a missing value falls back to the empty record below.
+//
+// `markdown_url` is parsed lenient: a server old enough to predate
+// MUL-3192 omits the field, in which case the schema defaults it to "".
+// Callers that need to persist a URL into markdown should go through the
+// `useFileUpload` helper (which falls back to the legacy
+// `attachmentDownloadPath` shape when `markdown_url` is empty), so the
+// empty-string default does not silently break any persistence path.
 export const AttachmentResponseSchema = z.object({
   id: z.string(),
   url: z.string(),
   download_url: z.string(),
+  markdown_url: z.string().optional().default(""),
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
   chat_message_id: z.string().nullable().optional(),
@@ -93,6 +113,7 @@ export const EMPTY_ATTACHMENT: Attachment = {
   filename: "",
   url: "",
   download_url: "",
+  markdown_url: "",
   content_type: "",
   size_bytes: 0,
   created_at: "",
@@ -129,6 +150,38 @@ export const TimelineEntriesSchema = z.array(TimelineEntrySchema);
 
 export const EMPTY_TIMELINE_ENTRIES: TimelineEntry[] = [];
 
+const OptionalStringSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value : undefined),
+  z.string().optional(),
+);
+
+const BooleanWithDefaultSchema = (fallback: boolean) =>
+  z.preprocess(
+    (value) => (typeof value === "boolean" ? value : undefined),
+    z.boolean().default(fallback),
+  );
+
+export const AppConfigSchema = z.object({
+  cdn_domain: z.string().default(""),
+  allow_signup: BooleanWithDefaultSchema(true),
+  google_client_id: OptionalStringSchema,
+  posthog_key: OptionalStringSchema,
+  posthog_host: OptionalStringSchema,
+  analytics_environment: OptionalStringSchema,
+  daemon_server_url: OptionalStringSchema,
+  daemon_app_url: OptionalStringSchema,
+  workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
+}).loose();
+
+export const EMPTY_APP_CONFIG: AppConfigResponse = {
+  cdn_domain: "",
+  allow_signup: true,
+  google_client_id: "",
+  daemon_server_url: "",
+  daemon_app_url: "",
+  workspace_creation_disabled: false,
+};
+
 export const CommentSchema = z.object({
   id: z.string(),
   issue_id: z.string(),
@@ -144,6 +197,18 @@ export const CommentSchema = z.object({
 }).loose();
 
 export const CommentsListSchema = z.array(CommentSchema);
+
+const CommentTriggerPreviewAgentSchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  avatar_url: z.string().optional(),
+  source: z.string().default(""),
+  reason: z.string().default(""),
+}).loose();
+
+export const CommentTriggerPreviewSchema = z.object({
+  agents: z.array(CommentTriggerPreviewAgentSchema).default([]),
+}).loose();
 
 // Metadata is primitive-only by API/DB contract. Stay lenient on shape:
 // unknown keys land as `unknown` to a caller, but the field itself defaults

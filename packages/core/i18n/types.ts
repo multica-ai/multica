@@ -1,6 +1,6 @@
-export type SupportedLocale = "en" | "zh-Hans" | "ko";
+export type SupportedLocale = "en" | "zh-Hans" | "ko" | "ja";
 
-export const SUPPORTED_LOCALES: SupportedLocale[] = ["en", "zh-Hans", "ko"];
+export const SUPPORTED_LOCALES: SupportedLocale[] = ["en", "zh-Hans", "ko", "ja"];
 export const DEFAULT_LOCALE: SupportedLocale = "en";
 
 export type LocaleResources = Record<string, Record<string, unknown>>;

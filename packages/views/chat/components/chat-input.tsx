@@ -15,6 +15,7 @@ import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
@@ -39,11 +40,8 @@ interface ChatInputProps {
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
   leftAdornment?: ReactNode;
-  /** Rendered just before the submit button — used for context-anchor action. */
-  rightAdornment?: ReactNode;
-  /** Rendered inside the rounded container, above the editor — attached
-   *  context cards, drafts, etc. */
-  topSlot?: ReactNode;
+  /** Chat @ suggestions: current/recent issue/project entries. */
+  contextItems?: MentionItem[];
 }
 
 export function ChatInput({
@@ -55,8 +53,7 @@ export function ChatInput({
   noAgent,
   agentName,
   leftAdornment,
-  rightAdornment,
-  topSlot,
+  contextItems,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -99,10 +96,18 @@ export function ChatInput({
   // racing the keyboard) — defense in depth.
   const [pendingUploads, setPendingUploads] = useState(0);
 
-  // Maps "CDN URL inserted into the editor" → "attachment row id" so that
+  // Maps "URL inserted into the editor" → "attachment row id" so that
   // on send we can ask the server to bind only the attachments still
-  // referenced in the message body. Cleared after every send. Mirrors the
-  // comment-input flow exactly.
+  // referenced in the message body. Cleared after every send. Mirrors
+  // the comment-input flow exactly. The map key MUST match what the
+  // editor actually wrote into the markdown — that's `markdownLink`
+  // (the stable per-attachment URL) for normal post-MUL-3130 uploads
+  // and `link` (= att.url) for the no-workspace upload branch where
+  // there's no attachment-row id to address. Storing only `link` here
+  // would cause `content.includes(url)` to miss every new chat upload
+  // because the editor persists `markdownLink` instead, and the
+  // `onSend` call would silently drop `attachment_ids` so the
+  // attachment never binds to the chat message.
   const uploadMapRef = useRef<Map<string, string>>(new Map());
 
   const handleUpload = useCallback(
@@ -111,7 +116,10 @@ export function ChatInput({
       setPendingUploads((n) => n + 1);
       try {
         const result = await onUploadFile(file);
-        if (result) uploadMapRef.current.set(result.link, result.id);
+        if (result) {
+          const persistedURL = result.markdownLink || result.link;
+          uploadMapRef.current.set(persistedURL, result.id);
+        }
         return result;
       } finally {
         setPendingUploads((n) => Math.max(0, n - 1));
@@ -214,7 +222,6 @@ export function ChatInput({
         )}
         aria-disabled={noAgent || undefined}
       >
-        {topSlot}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
             // See the editorKey / draftKey split note above — editorKey
@@ -230,11 +237,15 @@ export function ChatInput({
             onSubmit={handleSend}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
             debounceMs={100}
+            mentionMode={contextItems ? "context" : "default"}
+            mentionContextItems={contextItems}
+            enableSlashCommands
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Mod+Enter submits. Bare Enter falls through to Tiptap's
-            // default, which continues lists/quotes and breaks paragraphs.
+            // Chat intentionally leaves submitOnEnter at its default false:
+            // Mod+Enter submits, while bare Enter falls through to Tiptap's
+            // default behavior for lists, quotes, and paragraph breaks.
             // Without this, Enter-as-send would steal the only key that
             // continues a bullet list, leaving users stuck after one item.
           />
@@ -245,7 +256,6 @@ export function ChatInput({
           </div>
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
-          {rightAdornment}
           {uploadEnabled && (
             <FileUploadButton
               size="sm"

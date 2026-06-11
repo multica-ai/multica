@@ -11,6 +11,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -113,7 +115,7 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 		if user.OnboardedAt.Valid {
 			onboardedAt = user.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
 		}
-		h.Analytics.Capture(analytics.OnboardingCompleted(
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingCompleted(
 			userID,
 			req.WorkspaceID,
 			path,
@@ -130,10 +132,13 @@ type patchOnboardingRequest struct {
 }
 
 // questionnaireAnswers mirrors the frontend's `QuestionnaireAnswers`
-// shape. Source and use_case are multi-select arrays (Step 1 + Step 3
-// allow picking several); role stays single-select.
+// shape. `use_case` is multi-select (Step 3 allows picking several);
+// `source` is single-select (primary acquisition channel) but kept
+// as `stringOrSlice` for back-compat with v2 multi-select rows — the
+// client now always commits a one-element array. `role` stays
+// single-select.
 //
-// stringOrSlice tolerates pre-multi-select rows that wrote a bare
+// stringOrSlice also tolerates pre-array rows that wrote a bare
 // string into the JSONB column — `json.Unmarshal` would otherwise
 // fail on type mismatch when reading those back.
 type stringOrSlice []string
@@ -150,8 +155,8 @@ func (s *stringOrSlice) UnmarshalJSON(data []byte) error {
 		*s = arr
 		return nil
 	}
-	// Fall back to single string (legacy shape from before this column
-	// went multi-select). Empty string means "unanswered" — keep nil.
+	// Fall back to single string (pre-array shape from before this
+	// column held a slice). Empty string means "unanswered" — keep nil.
 	var single string
 	if err := json.Unmarshal(data, &single); err != nil {
 		return err
@@ -228,9 +233,15 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 	// is treated as "incomplete" — worst case we emit once more than
 	// we should, never twice for the same transition.
 	var before questionnaireAnswers
+	beforeRaw := []byte("{}")
 	if beforeUser, err := h.Queries.GetUser(r.Context(), parseUUID(userID)); err == nil {
-		_ = json.Unmarshal(beforeUser.OnboardingQuestionnaire, &before)
+		beforeRaw = beforeUser.OnboardingQuestionnaire
+		_ = json.Unmarshal(beforeRaw, &before)
 	}
+	// firstTouch is true when the user has never written any
+	// onboarding state on the server before this PATCH. Used to fire
+	// onboarding_started exactly once per user from the server side.
+	firstTouch := len(beforeRaw) == 0 || string(beforeRaw) == "null" || string(beforeRaw) == "{}"
 
 	params := db.PatchUserOnboardingParams{ID: parseUUID(userID)}
 	if req.Questionnaire != nil {
@@ -243,10 +254,19 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Server-side onboarding_started: fire on the first PATCH that
+	// actually carries a questionnaire payload. The frontend also
+	// emits its own onboarding_started on page open; the two together
+	// let Grafana cross-check the funnel against PostHog.
+	if firstTouch && req.Questionnaire != nil && len(*req.Questionnaire) > 0 && string(*req.Questionnaire) != "{}" {
+		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingStarted(userID, platform))
+	}
+
 	var after questionnaireAnswers
 	_ = json.Unmarshal(user.OnboardingQuestionnaire, &after)
 	if after.complete() && !before.complete() {
-		h.Analytics.Capture(analytics.OnboardingQuestionnaireSubmitted(
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingQuestionnaireSubmitted(
 			userID,
 			[]string(after.Source),
 			after.Role,
@@ -320,7 +340,7 @@ func (h *Handler) JoinCloudWaitlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.Analytics.Capture(analytics.CloudWaitlistJoined(userID, reason != ""))
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.CloudWaitlistJoined(userID, reason != ""))
 
 	writeJSON(w, http.StatusOK, userToResponse(user))
 }

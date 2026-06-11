@@ -349,6 +349,59 @@ func TestPrepareOpenclawConfigExpandsTilde(t *testing.T) {
 	}
 }
 
+// TestPrepareOpenclawConfigParsesPathFromUITerminalOutput — regression test
+// for the case where `openclaw config file` prints terminal UI borders
+// (e.g., Doctor warnings) before the actual path. The path is always the
+// last non-empty line.
+func TestPrepareOpenclawConfigParsesPathFromUITerminalOutput(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	userConfigDir := t.TempDir()
+	userConfigPath := filepath.Join(userConfigDir, "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	// Simulate OpenClaw's output with UI borders (Doctor warnings)
+	stdoutWithUI := `│
+◇  Doctor warnings ──────────────────────────────────────────────────────╮
+│                                                                        │
+│  - Left plugin install index in place because shared SQLite state has  │
+│    conflicting plugin install metadata for: qqbot                      │
+│                                                                        │
+├────────────────────────────────────────────────────────────────────────╯
+[state-migrations] Legacy state migration warnings:
+- Left plugin install index in place because shared SQLite state has conflicting plugin install metadata for: qqbot
+│
+◇  Doctor warnings ──────────────────────────────────────────────────────╮
+│                                                                        │
+│  - Left plugin install index in place because shared SQLite state has  │
+│    conflicting plugin install metadata for: qqbot                      │
+│                                                                        │
+├────────────────────────────────────────────────────────────────────────╯
+` + userConfigPath + "\n"
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: stdoutWithUI},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+
+	got := mustReadJSON(t, result.ConfigPath)
+	include := got["$include"].([]any)
+	if include[0] != userConfigPath {
+		t.Errorf("$include[0] = %v, want %q (path must be extracted from last non-empty line)", include[0], userConfigPath)
+	}
+}
+
 // TestPrepareOpenclawConfigWrapperLoadableUnderIncludeConfinement is the
 // regression test for the Elon include-confinement blocker. OpenClaw
 // resolves `$include` only inside the wrapper file's own directory unless

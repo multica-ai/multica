@@ -75,7 +75,7 @@ func runRuntimeList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var runtimes []map[string]any
@@ -115,7 +115,7 @@ func runRuntimeUsage(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--days must be between 1 and 365")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var usage []map[string]any
@@ -152,7 +152,7 @@ func runRuntimeActivity(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var activity []map[string]any
@@ -188,7 +188,7 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--target-version is required")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(150*time.Second))
 	defer cancel()
 
 	body := map[string]any{

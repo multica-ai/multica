@@ -129,6 +129,18 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5 + 25, 5);
   });
 
+  it("prices Claude Fable 5 at the Mythos-class tier", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-fable-5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(10 + 50 + 1 + 12.5, 5);
+  });
+
   it("prices the provider-prefixed Anthropic form (anthropic/claude-sonnet-4.6)", () => {
     // openclaw / opencode emit `<provider>/<model>`. Same SKU as the
     // bare form, must hit the same rate.
@@ -346,6 +358,7 @@ describe("estimateCost", () => {
 
 describe("isModelPriced", () => {
   it("recognises both Claude and Codex/GPT families", () => {
+    expect(isModelPriced("claude-fable-5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4-6")).toBe(true);
     expect(isModelPriced("gpt-5-codex")).toBe(true);
     expect(isModelPriced("gpt-5-mini")).toBe(true);
@@ -369,6 +382,7 @@ describe("isModelPriced", () => {
   it("recognises provider-prefixed Anthropic IDs (openclaw / opencode form)", () => {
     // openclaw / opencode emit `<provider>/<model>` in `meta.agentMeta.model`.
     // The provider prefix is routing metadata, not part of the SKU.
+    expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
   });

@@ -1,6 +1,6 @@
 import { forwardRef, useRef, useImperativeHandle } from "react";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import enCommon from "../../locales/en/common.json";
@@ -17,9 +17,15 @@ function makeUpload(overrides: Partial<UploadResult> & { id: string; link: strin
     uploader_id: "user-1",
     url: overrides.link,
     download_url: overrides.link,
+    markdown_url: overrides.link,
     content_type: "image/png",
     size_bytes: 1,
     created_at: new Date(0).toISOString(),
+    // markdownLink defaults to the same value as `link` so legacy
+    // tests assert the previous URL shape unless they pass an
+    // explicit override. Real callers always set it to the stable
+    // /api/attachments/<id>/download path via useFileUpload.
+    markdownLink: overrides.link,
     ...overrides,
   };
 }
@@ -30,6 +36,9 @@ const TEST_RESOURCES = { en: { common: enCommon, chat: enChat } };
 const dropHandlers = vi.hoisted(() => ({
   onDrop: null as null | ((files: File[]) => void),
 }));
+const editorProps = vi.hoisted(() => ({
+  last: null as null | Record<string, unknown>,
+}));
 
 vi.mock("../../editor", () => ({
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
@@ -38,19 +47,23 @@ vi.mock("../../editor", () => ({
   },
   FileDropOverlay: () => null,
   ContentEditor: forwardRef(function MockContentEditor(
-    {
-      defaultValue,
-      onUpdate,
-      placeholder,
-      onUploadFile,
-    }: {
+    props: {
       defaultValue?: string;
       onUpdate?: (md: string) => void;
       placeholder?: string;
       onUploadFile?: (file: File) => Promise<UploadResult | null>;
+      mentionMode?: string;
+      mentionContextItems?: unknown[];
     },
     ref: React.Ref<unknown>,
   ) {
+    const {
+      defaultValue,
+      onUpdate,
+      placeholder,
+      onUploadFile,
+    } = props;
+    editorProps.last = props as unknown as Record<string, unknown>;
     const valueRef = useRef<string>(defaultValue ?? "");
     const uploadingRef = useRef(0);
     useImperativeHandle(ref, () => ({
@@ -65,7 +78,16 @@ vi.mock("../../editor", () => ({
         try {
           const result = await onUploadFile?.(file);
           if (result) {
-            valueRef.current = `${valueRef.current}![](${result.link})`.trim();
+            // Mirror the real editor (uploadAndInsertFile in
+            // packages/views/editor/extensions/file-upload.ts): the
+            // markdown body captures `markdownLink` (the stable
+            // /api/attachments/<id>/download URL) when the upload
+            // returned one, falling back to `link` for the
+            // no-workspace avatar branch. The chat input's
+            // uploadMapRef must use the same value as its key —
+            // pinning that contract is the regression below.
+            const persistedURL = result.markdownLink || result.link;
+            valueRef.current = `${valueRef.current}![](${persistedURL})`.trim();
             onUpdate?.(valueRef.current);
           }
         } finally {
@@ -94,7 +116,6 @@ vi.mock("@multica/core/chat", () => {
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1",
     inputDrafts: {} as Record<string, string>,
-    focusMode: false,
     setInputDraft: vi.fn(),
     clearInputDraft: vi.fn(),
   };
@@ -125,15 +146,30 @@ function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}
   return { onSend, onUploadFile };
 }
 
+describe("ChatInput @ context wiring", () => {
+  it("configures chat @ with current/recent issue/project context", () => {
+    const contextItems = [
+      { id: "issue-1", label: "MUL-1", type: "issue" as const, group: "current" as const },
+    ];
+
+    renderInput({ contextItems });
+
+    expect(editorProps.last?.mentionMode).toBe("context");
+    expect(editorProps.last?.mentionContextItems).toBe(contextItems);
+  });
+});
+
 describe("ChatInput attachment wiring", () => {
   it("routes dropped files through the editor's upload handler", async () => {
     const { onUploadFile } = renderInput();
     expect(dropHandlers.onDrop).not.toBeNull();
     const file = new File(["x"], "drop.png", { type: "image/png" });
-    dropHandlers.onDrop?.([file]);
-    // Microtask: the mock editor awaits onUploadFile before mutating its value.
-    await Promise.resolve();
-    await Promise.resolve();
+    await act(async () => {
+      dropHandlers.onDrop?.([file]);
+      // Microtask: the mock editor awaits onUploadFile before mutating its value.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(onUploadFile).toHaveBeenCalledWith(file);
   });
 
@@ -148,7 +184,11 @@ describe("ChatInput attachment wiring", () => {
     // mock editor appends the markdown link into its value and calls
     // onUpdate so the input flips out of the empty state.
     const file = new File(["x"], "drop.png", { type: "image/png" });
-    dropHandlers.onDrop?.([file]);
+    await act(async () => {
+      dropHandlers.onDrop?.([file]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     // Wait for the submit button to become enabled (onUpdate has fired and
     // React has re-rendered). SubmitButton has no aria-label, so we pick
@@ -166,6 +206,55 @@ describe("ChatInput attachment wiring", () => {
     expect(ids).toEqual(["att-42"]);
   });
 
+  it("binds attachment_ids when the upload's markdownLink differs from its link (MUL-3130 regression)", async () => {
+    // Pin: real LocalStorage uploads return `link` =
+    // /uploads/<key>?exp&sig (short-lived) and `markdownLink` =
+    // /api/attachments/<id>/download (stable). The editor persists
+    // `markdownLink` into the markdown body, so chat-input's upload
+    // map MUST key on `markdownLink` too — keying on `link` would
+    // leave content.includes(url) false at send time and silently
+    // drop the attachment binding. This is exactly the blocker
+    // GPT-Boy raised in PR #3937 review.
+    const onSend = vi.fn();
+    const SHORT_LIVED_LINK = "/uploads/workspaces/ws-1/foo.png?exp=42&sig=stale";
+    const STABLE_MARKDOWN_LINK = "/api/attachments/att-99/download";
+    const onUploadFile = vi.fn(async (_file: File) =>
+      makeUpload({
+        id: "att-99",
+        link: SHORT_LIVED_LINK,
+        markdownLink: STABLE_MARKDOWN_LINK,
+        filename: "foo.png",
+      }),
+    );
+    renderInput({ onSend, onUploadFile });
+
+    const file = new File(["x"], "foo.png", { type: "image/png" });
+    await act(async () => {
+      dropHandlers.onDrop?.([file]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    let sendButton: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+    fireEvent.click(sendButton!);
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    const [content, ids] = onSend.mock.calls[0]!;
+    // The markdown body carries the stable URL — the short-lived
+    // signed `?exp&sig` link must never make it into the message body.
+    expect(content).toContain(STABLE_MARKDOWN_LINK);
+    expect(content).not.toContain("?exp=");
+    expect(content).not.toContain("?sig=");
+    // And the attachment id is bound, even though `result.link` no
+    // longer matches the URL the editor actually persisted.
+    expect(ids).toEqual(["att-99"]);
+  });
+
   it("disables send while an upload is in flight, re-enables after it resolves", async () => {
     let resolveUpload: (v: UploadResult) => void;
     const uploadPromise = new Promise<UploadResult>((res) => {
@@ -181,7 +270,10 @@ describe("ChatInput attachment wiring", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "preview text" } });
 
     const file = new File(["x"], "slow.png", { type: "image/png" });
-    dropHandlers.onDrop?.([file]);
+    await act(async () => {
+      dropHandlers.onDrop?.([file]);
+      await Promise.resolve();
+    });
 
     // While the upload is pending the SubmitButton must be disabled.
     // Bypassing this would send the message with the attachment id
@@ -192,7 +284,10 @@ describe("ChatInput attachment wiring", () => {
       expect(sendButton).toBeDisabled();
     });
 
-    resolveUpload!(makeUpload({ id: "att-slow", link: "https://cdn.example/att-slow.png", filename: "slow.png" }));
+    await act(async () => {
+      resolveUpload!(makeUpload({ id: "att-slow", link: "https://cdn.example/att-slow.png", filename: "slow.png" }));
+      await Promise.resolve();
+    });
 
     let sendButton: HTMLElement;
     await waitFor(() => {
@@ -213,7 +308,7 @@ describe("ChatInput attachment wiring", () => {
     // only. Probe by counting buttons: with no upload, only the submit
     // button is in the action row.
     const buttons = screen.getAllByRole("button");
-    // The agent picker / context anchor adornments may render zero buttons
+    // The agent picker may render zero buttons
     // in this test (no leftAdornment passed). So a single button = submit.
     expect(buttons.length).toBe(1);
   });

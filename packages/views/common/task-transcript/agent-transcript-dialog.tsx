@@ -22,6 +22,7 @@ import {
   ArrowUpNarrowWide,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import {
@@ -280,7 +281,8 @@ export function AgentTranscriptDialog({
   // sequence they see on screen — matters when sort is set to newest-first.
   const handleCopyWorkdir = useCallback(() => {
     if (!task.relative_work_dir) return;
-    navigator.clipboard.writeText(task.relative_work_dir).then(() => {
+    void copyText(task.relative_work_dir).then((ok) => {
+      if (!ok) return;
       setCopiedWorkdir(true);
       setTimeout(() => setCopiedWorkdir(false), 2000);
     });
@@ -294,7 +296,8 @@ export function AgentTranscriptDialog({
         return `[${label}] ${summary}`;
       })
       .join("\n");
-    navigator.clipboard.writeText(text).then(() => {
+    void copyText(text).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -726,6 +729,10 @@ const TranscriptEventRow = ({
   const color = getEventColor(item);
   const label = getEventLabel(item);
   const summary = getEventSummary(item);
+  const date = useMemo(
+    () => (item.created_at ? new Date(item.created_at) : null),
+    [item.created_at],
+  );
 
   const hasDetail =
     (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
@@ -782,6 +789,17 @@ const TranscriptEventRow = ({
           <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
             #{item.seq}
           </span>
+
+          {/* Timestamp */}
+          {date && (
+            <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1" title={date.toLocaleString()}>
+              {date.toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </span>
+          )}
         </div>
 
         {/* Expanded detail */}

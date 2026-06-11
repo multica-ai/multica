@@ -44,6 +44,7 @@ type Task struct {
 	// regardless of task kind so the daemon can inject `## Workspace Context`
 	// into the brief. Empty when the owner hasn't set one.
 	WorkspaceContext        string                `json:"workspace_context,omitempty"`
+	ThreadName              string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                   *AgentData            `json:"agent,omitempty"`
 	Repos                   []RepoData            `json:"repos,omitempty"`
 	ProjectID               string                `json:"project_id,omitempty"`                // issue's project, when present
@@ -52,6 +53,7 @@ type Task struct {
 	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerThreadID         string                `json:"trigger_thread_id,omitempty"`         // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
 	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
@@ -79,6 +81,21 @@ type Task struct {
 	// when description is empty so the agent doesn't see a useless heading.
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
+	// Initiator* identify the actor who triggered THIS task (the real
+	// requester behind the current comment/mention or chat message) as
+	// distinct from the runtime owner whose credentials the agent runs with.
+	// Comment-triggered tasks resolve to the triggering comment's author;
+	// chat tasks resolve to the chat session creator. Empty for task kinds
+	// with no attributable human initiator (on-assign, autopilot,
+	// quick-create). InitiatorEmail is set only for member initiators. The
+	// daemon emits these into the brief under `## Task Initiator` so a
+	// workspace-visible agent can attribute the request per person. The
+	// agent's effective credentials stay owner-scoped — this is an attested
+	// identity, not a credential. See MUL-2645.
+	InitiatorType  string `json:"initiator_type,omitempty"`
+	InitiatorID    string `json:"initiator_id,omitempty"`
+	InitiatorName  string `json:"initiator_name,omitempty"`
+	InitiatorEmail string `json:"initiator_email,omitempty"`
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
 	// agent never sees the daemon's own (often workspace-owner) credential.
@@ -113,6 +130,7 @@ type AgentData struct {
 
 // SkillData represents a structured skill for task execution.
 type SkillData struct {
+	ID          string          `json:"id"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Content     string          `json:"content"`

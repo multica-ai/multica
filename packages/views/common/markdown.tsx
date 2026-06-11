@@ -8,7 +8,10 @@ import {
 } from "@multica/ui/markdown";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { ProjectChip } from "../projects/components/project-chip";
+import { AppLink } from "../navigation";
 import {
   Attachment as AttachmentRenderer,
   AttachmentDownloadProvider,
@@ -28,9 +31,21 @@ export interface MarkdownProps extends MarkdownBaseProps {
 }
 
 /**
- * Default renderMention that delegates to IssueMentionCard for issue mentions
+ * Default renderMention that delegates to entity chips for issue/project mentions
  * and renders a styled span for other mention types.
  */
+function ProjectMentionCard({ projectId }: { projectId: string }): React.ReactNode {
+  const p = useWorkspacePaths();
+  return (
+    <AppLink href={p.projectDetail(projectId)} className="project-mention not-prose inline-flex">
+      <ProjectChip
+        projectId={projectId}
+        className="cursor-pointer hover:bg-accent transition-colors"
+      />
+    </AppLink>
+  );
+}
+
 function defaultRenderMention({
   type,
   id,
@@ -40,6 +55,9 @@ function defaultRenderMention({
 }): React.ReactNode {
   if (type === "issue") {
     return <IssueMentionCard issueId={id} />;
+  }
+  if (type === "project") {
+    return <ProjectMentionCard projectId={id} />;
   }
   return null;
 }
@@ -76,7 +94,7 @@ function renderFileCard({
 
 /**
  * App-level Markdown wrapper. Injects:
- *   - IssueMentionCard for issue mentions
+ *   - entity chips for issue/project mentions
  *   - cdnDomain from the config store (drives fileCard preprocessing)
  *   - unified <Attachment> as the image / file-card renderer
  *   - AttachmentDownloadProvider so url → record resolution works inside

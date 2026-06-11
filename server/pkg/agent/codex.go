@@ -38,6 +38,13 @@ const (
 	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
 	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
 	codexVersionDiagnosticTimeout          = 2 * time.Second
+	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
+	// waits for codex to exit on its own after stdin is closed, before forcing
+	// a context-cancel kill. A clean exit lets codex run its shutdown path and
+	// flush buffered telemetry — OTEL batch exporters only force-flush on
+	// graceful shutdown, so killing it immediately (the prior behavior) drops
+	// the task's spans/metrics/logs.
+	codexGracefulShutdownTimeout = 10 * time.Second
 )
 
 // CodexSemanticInactivityMarker prefixes timeout errors emitted when Codex
@@ -499,14 +506,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
 	semanticInactivityTimeout := opts.SemanticInactivityTimeout
 	if semanticInactivityTimeout == 0 {
 		semanticInactivityTimeout = defaultCodexSemanticInactivityTimeout
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	// Materialise the agent's MCP config into the per-task
 	// `$CODEX_HOME/config.toml`. Argv would be the simpler path, but
@@ -540,6 +544,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
 	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
 	hideAgentWindow(cmd)
+	// Bound the wait after the context is cancelled so a stuck child (or an
+	// open pipe held by a grandchild) can't hang cmd.Wait() forever. Matches
+	// the other long-lived backends (claude, copilot, cursor, …).
+	cmd.WaitDelay = 10 * time.Second
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", codexArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -809,14 +817,24 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("codex finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		// Close stdin and cancel context to signal the app-server to exit.
-		// Without this, the long-running codex process keeps stdout open and
-		// the reader goroutine blocks forever on scanner.Scan().
+		// Close stdin to signal the app-server to exit. Prefer letting codex
+		// shut down on its own: a clean exit runs codex's shutdown path, which
+		// force-flushes its OTEL batch exporters — killing it immediately (via
+		// cancel → SIGKILL) drops the task's buffered telemetry. Give it a
+		// bounded grace period; only force-cancel if it doesn't exit, so the
+		// reader goroutine can never block forever on scanner.Scan().
 		stdin.Close()
-		cancel()
-
-		// Wait for the reader goroutine to finish so all output is accumulated.
-		<-readerDone
+		select {
+		case <-readerDone:
+			// codex closed stdout on its own — clean shutdown, telemetry flushed.
+		case <-time.After(codexGracefulShutdownTimeout):
+			b.cfg.Logger.Warn("codex did not exit after stdin close; forcing shutdown",
+				"pid", cmd.Process.Pid,
+				"grace", codexGracefulShutdownTimeout.String(),
+			)
+			cancel()
+			<-readerDone
+		}
 		drainAndWait()
 
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
@@ -925,7 +943,27 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if threadID == "" {
 		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
 	}
+	c.trySetThreadName(ctx, threadID, opts.ThreadName, logger)
 	return threadID, false, nil
+}
+
+func (c *codexClient) trySetThreadName(ctx context.Context, threadID, name string, logger *slog.Logger) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	if err := c.setThreadName(ctx, threadID, name); err != nil {
+		logger.Warn("codex thread/name/set failed; continuing without provider-native thread title",
+			"thread_id", threadID, "error", err)
+	}
+}
+
+func (c *codexClient) setThreadName(ctx context.Context, threadID, name string) error {
+	_, err := c.request(ctx, "thread/name/set", map[string]any{
+		"threadId": threadID,
+		"name":     name,
+	})
+	return err
 }
 
 // applyCodexReasoningEffort writes the per-agent thinking_level into a

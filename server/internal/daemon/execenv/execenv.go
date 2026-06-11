@@ -59,6 +59,7 @@ type PrepareParams struct {
 type TaskContextForEnv struct {
 	IssueID                 string
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
+	TriggerThreadID         string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
 	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
 	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
@@ -92,6 +93,16 @@ type TaskContextForEnv struct {
 	// context and the agent stays anonymous-user mode.
 	RequestingUserName               string
 	RequestingUserProfileDescription string
+	// Initiator* identify the actor who triggered THIS task (the real
+	// requester) as distinct from the runtime owner. Rendered into the brief
+	// as `## Task Initiator` when a name is present; InitiatorEmail is shown
+	// only for member initiators. Empty for on-assign / autopilot /
+	// quick-create tasks, which have no attributable human initiator. See
+	// MUL-2645.
+	InitiatorType  string
+	InitiatorID    string
+	InitiatorName  string
+	InitiatorEmail string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
@@ -293,6 +304,40 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		WorkDir:        params.WorkDir,
 		LocalDirectory: params.LocalDirectory,
 		logger:         logger,
+	}
+
+	// Roll back the previous dispatch's sidecar writes before refreshing.
+	// On reuse the workdir still holds the prior run's issue_context.md and
+	// skill directories; without clearing them first, writeSkillFiles sees
+	// its own earlier output occupying the canonical slug and falls back to
+	// a collision-free sibling (issue-review, issue-review-multica,
+	// issue-review-multica-2, …), accumulating a fresh duplicate on every
+	// re-dispatch to the same issue. allocateCollisionFreeSkillDir exists to
+	// dodge *user*-owned skill dirs (the local_directory flow), not our own
+	// prior writes, so we undo them via the prior manifest first and let the
+	// refresh below re-create each skill at its natural slug. This also brings
+	// the standard providers in line with the Codex path, where
+	// hydrateCodexSkills already wipes its skills dir before re-hydrating.
+	//
+	// Two steps, in order:
+	//   1. removeReusedManagedSkillDirs reclaims the platform's own skill
+	//      directories even when a prior-run agent left a file inside one.
+	//      CleanupSidecars alone can't do this — it preserves any recorded dir
+	//      the agent populated (correct on the local_directory teardown path),
+	//      which would otherwise keep the canonical slug occupied and push the
+	//      refresh back to issue-review-multica.
+	//   2. CleanupSidecars rolls back the remaining sidecar files
+	//      (issue_context.md, project resources) and the manifest itself.
+	//
+	// No-op when RootDir is empty (legacy local_directory reuse, which the
+	// daemon skips anyway) or when no prior manifest exists (older build).
+	if env.RootDir != "" {
+		if err := removeReusedManagedSkillDirs(env.RootDir, skillsDirPath(params.WorkDir, params.Provider)); err != nil {
+			logger.Warn("execenv: reclaim managed skill dirs on reuse failed", "error", err)
+		}
+		if err := CleanupSidecars(env.RootDir); err != nil {
+			logger.Warn("execenv: roll back prior sidecars on reuse failed", "error", err)
+		}
 	}
 
 	// Refresh context files (issue_context.md, skills). Reuse tracks a

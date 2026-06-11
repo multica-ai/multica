@@ -6,6 +6,7 @@
     "table": {
       "name": "이름",
       "agent": "에이전트",
+      "created_by": "생성자",
       "mode": "모드",
       "status": "상태",
       "last_run": "마지막 실행"
@@ -71,6 +72,7 @@
     "section_run_history": "실행 기록",
     "section_danger": "위험 영역",
     "field_agent": "에이전트",
+    "field_created_by": "생성자",
     "field_output_mode": "출력 모드",
     "field_project": "프로젝트",
     "no_project": "프로젝트 없음",

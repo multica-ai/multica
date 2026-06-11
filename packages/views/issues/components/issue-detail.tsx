@@ -43,7 +43,9 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
@@ -53,8 +55,8 @@ import { LocalDirectoryHint } from "../../projects/components/local-directory-hi
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
-import { collectThreadReplies } from "./thread-utils";
-import { AgentLiveCard } from "./agent-live-card";
+import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
+import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
@@ -63,6 +65,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -168,10 +171,7 @@ function SubscriberPopoverContent({
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
 type ActivityT = ReturnType<typeof useT<"issues">>["t"];
@@ -221,12 +221,12 @@ function formatActivity(
     }
     case "start_date_changed": {
       if (!details.to) return t(($) => $.activity.start_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.start_date_set, { date: formatted });
     }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.due_date_set, { date: formatted });
     }
     case "title_changed":
@@ -733,6 +733,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       else next.delete(commentId);
       return next;
     });
+    // On collapse the thread shrinks and the viewport would jump to whatever was
+    // below; pull the just-folded thread back into view with the smallest
+    // movement. rAF waits for the collapse to land before measuring.
+    if (!expand) {
+      requestAnimationFrame(() =>
+        document.getElementById(`comment-${commentId}`)?.scrollIntoView({ block: "nearest" }),
+      );
+    }
   }, []);
   const clearResolvedExpand = useCallback((commentId: string) => {
     setExpandedResolved((prev) => {
@@ -808,9 +816,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
+  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
   useEffect(() => {
     if (issue) {
       recordVisit(wsId, issue.id);
+      recordRecentContext(wsId, {
+        type: "issue",
+        id: issue.id,
+        label: issue.identifier,
+        subtitle: issue.title,
+        status: issue.status,
+      });
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -852,10 +868,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // visually expanded after the second resolve.
   const handleResolveToggle = useCallback(
     (commentId: string, resolved: boolean) => {
-      clearResolvedExpand(commentId);
+      // Fold the thread back on any resolve change: clear the thread ROOT's
+      // expand entry (expand state is keyed on root id, but a resolve target
+      // can be a reply). Walk parent_id up to the root.
+      const byId = new Map(timeline.map((e) => [e.id, e]));
+      let cur = byId.get(commentId);
+      while (cur?.parent_id && byId.get(cur.parent_id)) cur = byId.get(cur.parent_id)!;
+      clearResolvedExpand(cur?.id ?? commentId);
       toggleResolveComment(commentId, resolved);
     },
-    [clearResolvedExpand, toggleResolveComment],
+    [timeline, clearResolvedExpand, toggleResolveComment],
   );
 
   // Memoized timeline grouping. Each render rebuilds the per-parent map from
@@ -1079,25 +1101,71 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (didHighlightRef.current === highlightCommentId) return;
 
     const rootId = replyToRoot.get(highlightCommentId);
-    if (
-      rootId &&
-      rootId !== highlightCommentId &&
-      items[targetIdx]?.kind === "resolved-bar"
-    ) {
-      toggleResolvedExpand(rootId, true);
-      return;
+    if (rootId && rootId !== highlightCommentId) {
+      // Root resolved → the whole thread is a folded bar.
+      if (items[targetIdx]?.kind === "resolved-bar") {
+        toggleResolvedExpand(rootId, true);
+        return;
+      }
+      // A reply is the resolution → the other replies fold behind the
+      // "N comments" bar; expand if the target is one of those folded replies.
+      const rootItem = items[targetIdx];
+      if (rootItem?.kind === "comment" && !expandedResolved.has(rootId)) {
+        const resolution = deriveThreadResolution(
+          rootItem.entry,
+          timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
+        );
+        if (resolution.kind === "reply" && resolution.resolutionId !== highlightCommentId) {
+          toggleResolvedExpand(rootId, true);
+          return;
+        }
+      }
     }
 
     const el = document.getElementById(`comment-${highlightCommentId}`);
-    if (!el) return;
+    const container = scrollContainerEl;
+    if (!el || !container) return;
 
     didHighlightRef.current = highlightCommentId;
-    el.scrollIntoView({ block: "center" });
+
+    // Center the target comment WITHIN its own scroll container by driving the
+    // container's scrollTop directly — never native scrollIntoView. Native
+    // scrollIntoView is spec'd to scroll EVERY scrollable ancestor: on a cold
+    // mount where the timeline is still growing (streaming agent), the inner
+    // scroller can't satisfy centering on its own, so the scroll propagates up
+    // and moves the desktop shell's `overflow:hidden` wrapper — shoving the
+    // whole page, header included, off the top with no scrollbar to recover,
+    // until a resize reflows it (#3929). Scoping the scroll to `container`
+    // keeps it contained; re-centering across frames lands the comment
+    // precisely once async heights (markdown, code highlight, streamed replies)
+    // settle, instead of leaning on the ancestor scroll the way native did.
+    let rafId = 0;
+    let frames = 0;
+    let last = -1;
+    const center = () => {
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      const target = Math.max(
+        0,
+        container.scrollTop + (e.top - c.top) - (container.clientHeight - e.height) / 2,
+      );
+      container.scrollTop = target;
+      // Content is still laying out → the centered offset keeps shifting; keep
+      // re-centering until it stabilizes (within 1px) or we hit ~0.5s of frames.
+      if (Math.abs(target - last) > 1 && ++frames < 30) {
+        last = target;
+        rafId = requestAnimationFrame(center);
+      }
+    };
+    rafId = requestAnimationFrame(center);
 
     setHighlightedId(highlightCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
-    return () => clearTimeout(fade);
-  }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(fade);
+    };
+  }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
   // the viewport — off-screen comments are invisible to browser find-in-page.
@@ -1575,6 +1643,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onToggleReaction={handleToggleReaction}
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
+            expandedResolvedIds={expandedResolved}
+            onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
           />
         </div>
@@ -1642,6 +1712,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           }
           actions={
             <>
+            {/* Live "agent is working" chip, leftmost in the right cluster so
+                it never overlaps the title (which truncates to make room).
+                It self-hides when no agent is active. */}
+            <IssueAgentHeaderChip issueId={id} />
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
@@ -1774,8 +1848,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 // Bind any pending uploads still referenced in the markdown
                 // so they appear in `issueAttachments` after refresh and the
                 // editor's text/code preview keeps working past reload.
+                //
+                // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
+                // the editor persists the durable `markdownLink`
+                // (`/api/attachments/<id>/download` / `markdown_url`) into the
+                // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
+                // therefore never matches, so the upload is never linked via
+                // `attachment_ids`. After reload it's absent from
+                // `issueAttachments`, the renderer can't resolve it to a
+                // freshly-signed `download_url`, and the persisted auth-gated
+                // download endpoint fails to load as a native <img> on clients
+                // whose origin isn't the API host (Desktop/Electron, mobile
+                // webview) — while still working on web via the cookie/proxy.
+                // This mirrors the comment/reply/chat composers, which already
+                // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
                 const ids = descPendingAttachments
-                  .filter((a) => md.includes(a.url))
+                  .filter((a) => contentReferencesAttachment(md, a))
                   .map((a) => a.id);
                 handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
               }}
@@ -1938,13 +2026,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             <LocalDirectoryHint projectId={issue?.project_id} />
 
-            {/* Agent live output — sticky banner in the activity section,
-                keyed by issue id so switching issues remounts the card and
-                clears any in-flight task state from the previous issue.
-                The execution log itself (per-task timeline + past runs)
-                lives in the right panel via ExecutionLogSection — this
-                card is just a header-style "agent is working" anchor. */}
-            <AgentLiveCard key={id} issueId={id} />
+            {/* The "agent is working" live signal now lives in the header
+                (IssueAgentHeaderChip) so it stays in one fixed place and
+                doesn't compete with sticky banners in this content column.
+                The per-task timeline + past runs live in the right panel
+                via ExecutionLogSection. */}
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment

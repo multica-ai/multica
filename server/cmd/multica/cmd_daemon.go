@@ -78,7 +78,7 @@ func init() {
 	f.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
 	f.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
-	f.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	f.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
 	f.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
@@ -97,7 +97,7 @@ func init() {
 	rf.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
 	rf.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
-	rf.Duration("agent-timeout", 0, "Per-task timeout (env: MULTICA_AGENT_TIMEOUT)")
+	rf.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
 	rf.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
@@ -169,7 +169,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if health["status"] == "running" {
+	if daemonAlive(health) {
 		label := "daemon"
 		if profile != "" {
 			label = fmt.Sprintf("daemon [%s]", profile)
@@ -238,21 +238,33 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
-	// Poll health endpoint until the daemon is ready or timeout.
-	deadline := time.Now().Add(15 * time.Second)
+	// Poll the health endpoint until the daemon reports ready ("running") or we
+	// time out. The daemon binds the health port almost immediately but reports
+	// status:"starting" until preflight finishes (PAT renew + initial workspace
+	// sync, which exec's every configured agent for version detection and can
+	// take ~20s on a cold cache). Wait long enough to cover that so a healthy
+	// cold start is not misreported as a failure.
+	const startupTimeout = 45 * time.Second
+	deadline := time.Now().Add(startupTimeout)
 	started := false
+	lastStatus := ""
 	for time.Now().Before(deadline) {
 		time.Sleep(500 * time.Millisecond)
 		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
 		health = checkDaemonHealthOnPort(hctx, healthPort)
 		hcancel()
-		if health["status"] == "running" {
+		lastStatus, _ = health["status"].(string)
+		if lastStatus == "running" {
 			started = true
 			break
 		}
 	}
 	if !started {
-		fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
+		if lastStatus == "starting" {
+			fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logPath)
+		} else {
+			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
+		}
 		return nil
 	}
 
@@ -284,7 +296,10 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("heartbeat-interval"); d > 0 {
 		args = append(args, "--heartbeat-interval", d.String())
 	}
-	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
+	// Forward agent-timeout when explicitly set, including an explicit 0
+	// (= no cap), so it can override an environment MULTICA_AGENT_TIMEOUT.
+	if cmd.Flags().Changed("agent-timeout") {
+		d, _ := cmd.Flags().GetDuration("agent-timeout")
 		args = append(args, "--agent-timeout", d.String())
 	}
 	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
@@ -336,8 +351,11 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if d, _ := cmd.Flags().GetDuration("heartbeat-interval"); d > 0 {
 		overrides.HeartbeatInterval = d
 	}
-	if d, _ := cmd.Flags().GetDuration("agent-timeout"); d > 0 {
-		overrides.AgentTimeout = d
+	// Distinguish "flag not passed" from an explicit `--agent-timeout 0` so a
+	// user can turn off an env-configured cap from the CLI.
+	if cmd.Flags().Changed("agent-timeout") {
+		d, _ := cmd.Flags().GetDuration("agent-timeout")
+		overrides.AgentTimeout = &d
 	}
 	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
 		overrides.CodexSemanticInactivityTimeout = d
@@ -389,7 +407,10 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			logger.Error("failed to open log file for restart", "error", err)
-			return nil
+			// Runtimes were already deregistered by triggerRestart() before handoff.
+			// The supervisor-spawned successor re-registers on startup; do not
+			// duplicate cleanup here.
+			return fmt.Errorf("failed to open daemon log file %s for restart: %w", logPath, err)
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile
@@ -398,6 +419,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		child.SysProcAttr = daemonSysProcAttr(true)
 
 		if err := child.Start(); err != nil {
+			// Runtimes were already deregistered by triggerRestart() before handoff.
+			// The supervisor-spawned successor re-registers on startup; do not
+			// duplicate cleanup here.
 			if isAccessDeniedSpawnErr(err) {
 				child = exec.Command(restartBin, args...)
 				child.Stdout = logFile
@@ -406,12 +430,12 @@ func runDaemonForeground(cmd *cobra.Command) error {
 				if err := child.Start(); err != nil {
 					logFile.Close()
 					logger.Error("failed to start new daemon (no breakaway)", "error", err)
-					return nil
+					return fmt.Errorf("failed to start new daemon at %s without breakaway: %w", restartBin, err)
 				}
 			} else {
 				logFile.Close()
 				logger.Error("failed to start new daemon", "error", err)
-				return nil
+				return fmt.Errorf("failed to start new daemon at %s: %w", restartBin, err)
 			}
 		}
 		logFile.Close()
@@ -437,7 +461,7 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if health["status"] == "running" {
+	if daemonAlive(health) {
 		pid, _ := health["pid"].(float64)
 		if pid > 0 {
 			fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
@@ -446,12 +470,14 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 					_ = p.Kill()
 				}
 			}
+			// Wait until the port is fully released (not merely past "running"),
+			// otherwise the fresh start below races the old daemon's listener.
 			for i := 0; i < 10; i++ {
 				time.Sleep(500 * time.Millisecond)
 				sctx, scancel := context.WithTimeout(context.Background(), 1*time.Second)
 				h := checkDaemonHealthOnPort(sctx, healthPort)
 				scancel()
-				if h["status"] != "running" {
+				if !daemonAlive(h) {
 					break
 				}
 			}
@@ -472,7 +498,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if health["status"] != "running" {
+	if !daemonAlive(health) {
 		label := "Daemon"
 		if profile != "" {
 			label = fmt.Sprintf("Daemon [%s]", profile)
@@ -512,7 +538,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		ctx2, cancel2 := context.WithTimeout(context.Background(), 1*time.Second)
 		h := checkDaemonHealthOnPort(ctx2, healthPort)
 		cancel2()
-		if h["status"] != "running" {
+		if !daemonAlive(h) {
 			os.Remove(daemonPIDPathForProfile(profile))
 			fmt.Fprintln(os.Stderr, "Daemon stopped.")
 			return nil
@@ -565,12 +591,14 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		label = fmt.Sprintf("Daemon [%s]", profile)
 	}
 
-	if health["status"] != "running" {
+	switch health["status"] {
+	case "running":
+		printDaemonStatusReport(os.Stdout, label, health)
+	case "starting":
+		fmt.Fprintf(os.Stdout, "%s: starting (pid %v)\n", label, health["pid"])
+	default:
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
-		return nil
 	}
-
-	printDaemonStatusReport(os.Stdout, label, health)
 	return nil
 }
 
@@ -620,6 +648,20 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	lines, _ := cmd.Flags().GetInt("lines")
 
 	return tailLogFile(logPath, lines, follow)
+}
+
+// daemonAlive reports whether a health response indicates a live daemon
+// process on the port — either fully "running" (ready) or still "starting"
+// (port bound, preflight in progress). Lifecycle commands that only need to
+// know "is a daemon there" (already-running guard, restart, stop) use this,
+// whereas `daemon start`'s readiness wait gates on the stricter "running".
+func daemonAlive(health map[string]any) bool {
+	switch health["status"] {
+	case "running", "starting":
+		return true
+	default:
+		return false
+	}
 }
 
 // checkDaemonHealthOnPort calls the daemon's local health endpoint on the given port.

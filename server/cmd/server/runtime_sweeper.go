@@ -9,6 +9,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -35,8 +36,12 @@ const (
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this.
-	// The default agent timeout is 2h, so 2.5h gives a generous buffer.
+	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
+	// coarse server-side backstop keyed on started_at (it does NOT look at task
+	// activity) — mainly for runs whose daemon died without reporting. The
+	// daemon itself decides stuck-vs-long-running by activity (idle/tool
+	// watchdog), so this only needs to sit generously above any realistic single
+	// run rather than track a per-run wall-clock cap (MUL-3064).
 	runningTimeoutSeconds = 9000.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
@@ -45,9 +50,8 @@ const (
 	// tasks already on the queue when a runtime drops off (or that lost
 	// the race against a runtime that went offline mid-tick) need a
 	// time-bounded exit. 2 hours is conservatively above any reasonable
-	// "queued behind a long-running task" window for an online runtime
-	// (default agent timeout is 2h, sweeper interval is 30s) so we don't
-	// expire legitimately-pending work, while still draining the historical
+	// "queued behind a long-running task" window for an online runtime, so we
+	// don't expire legitimately-pending work, while still draining the historical
 	// 87k autopilot backlog within ~24h once enabled.
 	queuedTTLSeconds = 2 * 3600.0
 	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
@@ -118,7 +122,7 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 	}
 	if taskSvc != nil && taskSvc.Analytics != nil {
 		for _, row := range staleRows {
-			taskSvc.Analytics.Capture(analytics.RuntimeOffline(
+			obsmetrics.RecordEvent(taskSvc.Analytics, taskSvc.Metrics, analytics.RuntimeOffline(
 				util.UUIDToString(row.OwnerID),
 				util.UUIDToString(row.WorkspaceID),
 				util.UUIDToString(row.ID),
@@ -253,6 +257,7 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	}
 
 	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
+	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 
@@ -276,6 +281,7 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 	}
 
 	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
+	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 

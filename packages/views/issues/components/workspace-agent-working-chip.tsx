@@ -105,12 +105,12 @@ export function WorkspaceAgentWorkingChip({
             <Button
               variant="outline"
               size="sm"
-              className={activeClass}
+              className={`h-8 px-2 md:h-7 md:px-2.5 ${activeClass}`}
               onClick={onToggle}
               aria-pressed={value}
             >
               <span className="tabular-nums">0</span>
-              <span>{label}</span>
+              <span className="hidden md:inline">{label}</span>
             </Button>
           }
         />
@@ -130,7 +130,7 @@ export function WorkspaceAgentWorkingChip({
           <Button
             variant="outline"
             size="sm"
-            className={activeClass}
+            className={`h-8 px-2 md:h-7 md:px-2.5 ${activeClass}`}
             onClick={onToggle}
             aria-pressed={value}
           >
@@ -141,7 +141,7 @@ export function WorkspaceAgentWorkingChip({
               opacity="full"
             />
             <span className="tabular-nums">{agentIds.length}</span>
-            <span>{label}</span>
+            <span className="hidden md:inline">{label}</span>
           </Button>
         }
       />
