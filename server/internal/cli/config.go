@@ -16,6 +16,11 @@ type CLIConfig struct {
 	AppURL      string `json:"app_url,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Token       string `json:"token,omitempty"`
+	// CEREBRO-PATCH(cf-access-client): per-machine Cloudflare Access service-token.
+	// Set once per laptop so the CLI/daemon pass the wall without a manual key.
+	// Empty falls back to the CEREBRO_CF_ACCESS_CLIENT_ID/_SECRET env vars.
+	CFAccessClientID     string `json:"cf_access_client_id,omitempty"`
+	CFAccessClientSecret string `json:"cf_access_client_secret,omitempty"`
 }
 
 // CLIConfigPath returns the default path for the CLI config file.

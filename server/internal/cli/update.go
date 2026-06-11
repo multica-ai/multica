@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/forkdist" // CEREBRO-PATCH(fork-dist): self-update targets the Firtal fork channel, not upstream.
 )
 
 // ChecksumManifestName is the asset name GoReleaser publishes for the
@@ -223,7 +225,8 @@ func verifyAssetSHA256(data []byte, expectedHex, assetName string) error {
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
+	// CEREBRO-PATCH(fork-dist): read fork releases, not upstream multica-ai.
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+forkdist.UpdateRepo()+"/releases/tags/"+tag, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +252,8 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 // FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+	// CEREBRO-PATCH(fork-dist): read fork releases, not upstream multica-ai.
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+forkdist.UpdateRepo()+"/releases/latest", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -317,10 +321,11 @@ func GetBrewPrefix() string {
 	return strings.TrimSpace(string(out))
 }
 
-// UpdateViaBrew runs `brew upgrade multica-ai/tap/multica`.
+// UpdateViaBrew runs `brew upgrade <fork-tap>/multica`.
 // Returns the combined output and any error.
 func UpdateViaBrew() (string, error) {
-	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
+	// CEREBRO-PATCH(fork-dist): upgrade from the Firtal tap, not upstream.
+	cmd := exec.Command("brew", "upgrade", forkdist.BrewTap())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("brew upgrade failed: %w", err)

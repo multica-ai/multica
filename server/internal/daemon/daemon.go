@@ -19,6 +19,7 @@ import (
 
 	// CEREBRO-PATCH(daemon-runtime-mcp-merge-import): runtime/agent MCP merge for 9031.
 	// CEREBRO-PATCH(daemon-settings-refresh-import): keep settings live via cerebro-zone helper.
+	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonsettings"
 	"github.com/multica-ai/multica/server/internal/cerebro/traceupload" // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender
@@ -169,11 +170,11 @@ type Daemon struct {
 
 	// CEREBRO-PATCH(daemon-ws-write-accessor): expose write channel for cerebro term frames.
 	wsWrites atomic.Pointer[chan []byte]
-	// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to interactive terminal sink.
+	// CEREBRO-PATCH(daemon-cerebro-term-tee): per-task interactive terminal sinks (TECH-3388: many terminals at once).
 	cerebroTermSinkMu sync.RWMutex
-	cerebroTermSink   func(taskID string, text string)
-	// CEREBRO-PATCH(daemon-cerebro-term-reattach): in-flight attach frame re-emitted on WS reconnect.
-	cerebroActiveAttach atomic.Pointer[[]byte]
+	cerebroTermSinks  map[string]func(text string)
+	// CEREBRO-PATCH(daemon-cerebro-term-reattach): per-task in-flight attach frames re-emitted on WS reconnect.
+	cerebroActiveAttaches map[string][]byte
 }
 
 // New creates a new Daemon instance.
@@ -201,6 +202,9 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		// CEREBRO-PATCH(daemon-cerebro-term-tee): per-task terminal sink + attach-frame registries (TECH-3388).
+		cerebroTermSinks:      make(map[string]func(string)),
+		cerebroActiveAttaches: make(map[string][]byte),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -755,6 +759,10 @@ func (d *Daemon) resolveAuth() error {
 		return fmt.Errorf("not authenticated: run %s first", loginHint)
 	}
 	d.client.SetToken(cfg.Token)
+	// CEREBRO-PATCH(cf-access-client): load the per-machine Cloudflare Access
+	// service-token from the same profile config so the daemon passes the wall.
+	// Empty falls back to env (cloud runtimes) inside cfHeaderToken().
+	d.client.SetCFServiceToken(cfaccess.ServiceToken{ClientID: cfg.CFAccessClientID, ClientSecret: cfg.CFAccessClientSecret})
 	d.logger.Info("authenticated")
 	d.logger.Debug("auth token loaded", "profile", d.cfg.Profile, "token_len", len(cfg.Token))
 	return nil
@@ -3640,10 +3648,8 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
 				lastActivityAt.Store(time.Now().UnixNano())
-				// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to interactive terminal sink.
-				if sink := d.getCerebroTermSink(); sink != nil {
-					sink(taskID, formatMessageAsText(msg))
-				}
+				// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to this task's interactive terminal sink.
+				d.dispatchCerebroTerm(taskID, formatMessageAsText(msg))
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend

@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token headers
 )
 
 // ClientVersion is the CLI version sent on every request as X-Client-Version.
@@ -57,6 +59,13 @@ type APIClient struct {
 	Platform string
 	Version  string
 	OS       string
+
+	// CFServiceToken is the per-machine Cloudflare Access service-token sent on
+	// every request so the wall lets it through. Empty here falls back to the
+	// CEREBRO_CF_ACCESS_CLIENT_ID/_SECRET env vars in setHeaders; both unset =
+	// no CF headers (unprotected environments are unchanged).
+	// CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token.
+	CFServiceToken cfaccess.ServiceToken
 }
 
 type HTTPError struct {
@@ -84,6 +93,14 @@ func (c *APIClient) setHeaders(req *http.Request) {
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
+	// CEREBRO-PATCH(cf-access-client): attach the Cloudflare Access service-token
+	// so the request passes the wall. Prefer the configured token; fall back to
+	// env (cloud runtimes). No-op when neither is set.
+	cfTok := c.CFServiceToken
+	if !cfTok.Configured() {
+		cfTok = cfaccess.ServiceTokenFromEnv()
+	}
+	cfTok.Apply(req.Header)
 	if c.WorkspaceID != "" {
 		req.Header.Set("X-Workspace-ID", c.WorkspaceID)
 	}

@@ -53,19 +53,65 @@ func (d *Daemon) enqueueCerebroFrame(frame []byte) bool {
 	}
 }
 
-// setCerebroTermSink installs the tee callback. nil disables.
-func (d *Daemon) setCerebroTermSink(fn func(taskID, text string)) {
+// CEREBRO-PATCH(daemon-cerebro-term-tee): per-task terminal sink + attach-frame registry helpers (TECH-3388).
+//
+// registerCerebroTermSink installs the per-task tee callback. Each interactive
+// task owns its own sink keyed by taskID, so concurrent tasks (across slots or
+// runtimes) on the same daemon process each mirror to their own broker session
+// instead of clobbering a single shared sink (TECH-3388).
+func (d *Daemon) registerCerebroTermSink(taskID string, fn func(text string)) {
 	d.cerebroTermSinkMu.Lock()
-	d.cerebroTermSink = fn
+	d.cerebroTermSinks[taskID] = fn
 	d.cerebroTermSinkMu.Unlock()
 }
 
-// getCerebroTermSink returns the active tee callback, or nil. Used by
-// executeAndDrain to avoid the (cheap) function call when no sink is wired.
-func (d *Daemon) getCerebroTermSink() func(string, string) {
+// unregisterCerebroTermSink removes one task's sink. Other tasks' sinks are
+// untouched, so a finishing task no longer tears down mirroring for the rest.
+func (d *Daemon) unregisterCerebroTermSink(taskID string) {
+	d.cerebroTermSinkMu.Lock()
+	delete(d.cerebroTermSinks, taskID)
+	d.cerebroTermSinkMu.Unlock()
+}
+
+// dispatchCerebroTerm forwards a rendered message to the named task's sink, if
+// one is registered. Called from executeAndDrain on the hot path.
+func (d *Daemon) dispatchCerebroTerm(taskID, text string) {
+	if text == "" {
+		return
+	}
+	d.cerebroTermSinkMu.RLock()
+	fn := d.cerebroTermSinks[taskID]
+	d.cerebroTermSinkMu.RUnlock()
+	if fn != nil {
+		fn(text)
+	}
+}
+
+// storeCerebroAttach records a task's term_attach frame so a WS reconnect can
+// re-emit it. removeCerebroAttach drops it when the task ends.
+func (d *Daemon) storeCerebroAttach(taskID string, frame []byte) {
+	d.cerebroTermSinkMu.Lock()
+	d.cerebroActiveAttaches[taskID] = frame
+	d.cerebroTermSinkMu.Unlock()
+}
+
+func (d *Daemon) removeCerebroAttach(taskID string) {
+	d.cerebroTermSinkMu.Lock()
+	delete(d.cerebroActiveAttaches, taskID)
+	d.cerebroTermSinkMu.Unlock()
+}
+
+// snapshotCerebroAttaches returns a copy of every in-flight attach frame, so
+// runTaskWakeupConnection can re-announce all active interactive tasks when the
+// WS reconnects (not just the most recent one).
+func (d *Daemon) snapshotCerebroAttaches() [][]byte {
 	d.cerebroTermSinkMu.RLock()
 	defer d.cerebroTermSinkMu.RUnlock()
-	return d.cerebroTermSink
+	out := make([][]byte, 0, len(d.cerebroActiveAttaches))
+	for _, f := range d.cerebroActiveAttaches {
+		out = append(out, f)
+	}
+	return out
 }
 
 // cerebroAttachTerminal emits cerebro:term_attach for the task and installs
@@ -87,25 +133,22 @@ func (d *Daemon) cerebroAttachTerminal(_ context.Context, task Task) func() {
 		d.logger.Debug("cerebro term_attach marshal failed", "error", err, "task_id", task.ID)
 	} else {
 		// CEREBRO-PATCH(daemon-cerebro-term-reattach): persist frame so runTaskWakeupConnection can re-emit on WS connect.
-		d.cerebroActiveAttach.Store(&attachFrame)
+		d.storeCerebroAttach(task.ID, attachFrame)
 		if !d.enqueueCerebroFrame(attachFrame) {
 			d.logger.Debug("cerebro term_attach dropped: ws not connected; will retry on reconnect", "task_id", task.ID)
 		}
 	}
 
 	pump := newCerebroTermPump(d, task.ID, task.RuntimeID)
-	d.setCerebroTermSink(func(taskID, text string) {
-		if taskID != task.ID || text == "" {
-			return
-		}
+	d.registerCerebroTermSink(task.ID, func(text string) {
 		pump.write(text)
 	})
 
 	return func() {
 		pump.stop()
-		d.setCerebroTermSink(nil)
+		d.unregisterCerebroTermSink(task.ID)
 		// CEREBRO-PATCH(daemon-cerebro-term-reattach): clear on task end so WS reconnects don't re-adopt a finished task.
-		d.cerebroActiveAttach.Store(nil)
+		d.removeCerebroAttach(task.ID)
 		exitFrame, err := marshalCerebroDaemonFrame(frameTermExit, map[string]any{
 			"task_id": task.ID,
 			"code":    0,

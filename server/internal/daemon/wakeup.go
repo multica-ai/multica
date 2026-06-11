@@ -87,6 +87,9 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if d.client.os != "" {
 		headers.Set("X-Client-OS", d.client.os)
 	}
+	// CEREBRO-PATCH(cf-access-client): carry the Cloudflare Access service-token on
+	// the wakeup websocket handshake so it passes the wall like the HTTP requests.
+	d.client.cfHeaderToken().Apply(headers)
 
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
@@ -118,9 +121,9 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// CEREBRO-PATCH(daemon-ws-write-accessor-signal-order): wsWrites must be stored BEFORE signalTaskWakeup so cerebroAttachTerminal never sees a nil channel.
 	d.wsWrites.Store(&writes)
 	defer d.wsWrites.Store(nil)
-	// CEREBRO-PATCH(daemon-cerebro-term-reattach): re-emit any in-flight attach frame so a task claimed before WS connected still gets a broker session.
-	if af := d.cerebroActiveAttach.Load(); af != nil {
-		d.enqueueCerebroFrame(*af)
+	// CEREBRO-PATCH(daemon-cerebro-term-reattach): re-emit every in-flight attach frame so all active interactive tasks (not just the latest) get a broker session after a reconnect.
+	for _, af := range d.snapshotCerebroAttaches() {
+		d.enqueueCerebroFrame(af)
 	}
 	signalTaskWakeup(taskWakeups)
 

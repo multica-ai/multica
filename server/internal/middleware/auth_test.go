@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -57,7 +58,29 @@ func validClaims() jwt.MapClaims {
 
 // authMiddleware returns the Auth middleware with nil queries (JWT-only tests).
 func authMiddleware(next http.Handler) http.Handler {
-	return Auth(nil, nil, nil)(next)
+	return Auth(nil, nil, nil, nil)(next)
+}
+
+// TestAuth_CFAccessVerifierPresentNoStamp confirms the cf-access-auth patch is
+// wired without changing behaviour for requests that carry neither a Multica
+// token nor a Cloudflare Access stamp: a configured verifier returns
+// ErrNoAssertion (no network call), so the middleware still 401s. The full
+// happy path (valid stamp -> X-User-ID) is covered by the cfaccess package's
+// AuthenticatedUser tests, which is the exact seam this middleware calls.
+func TestAuth_CFAccessVerifierPresentNoStamp(t *testing.T) {
+	// CEREBRO-PATCH(cf-access-auth): cover the additive Cloudflare Access verifier wiring.
+	verifier := cfaccess.NewVerifier("firtal", []string{"aud-1"}, nil)
+	handler := Auth(nil, nil, nil, verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called without a stamp")
+	}))
+
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without a stamp, got %d", w.Code)
+	}
 }
 
 func TestAuth_MissingHeader(t *testing.T) {
@@ -237,7 +260,7 @@ func TestAuth_InvalidPAT(t *testing.T) {
 // boundary MUL-2600 introduces.
 func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
 	var gotActorSource string
-	mw := Auth(nil, nil, nil)
+	mw := Auth(nil, nil, nil, nil)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotActorSource = r.Header.Get("X-Actor-Source")
 		w.WriteHeader(http.StatusOK)
@@ -280,7 +303,7 @@ func TestAuth_PATCacheHit(t *testing.T) {
 	cache.Set(context.Background(), hash, "cached-user-id", auth.AuthCacheTTL)
 
 	var gotUserID string
-	mw := Auth(nil, cache, nil) // nil queries — only safe on cache hit
+	mw := Auth(nil, cache, nil, nil) // nil queries — only safe on cache hit
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUserID = r.Header.Get("X-User-ID")
 		w.WriteHeader(http.StatusOK)
@@ -299,14 +322,13 @@ func TestAuth_PATCacheHit(t *testing.T) {
 	}
 }
 
-
 // TestAuth_MCN_NoVerifierConfigured pins the same fail-closed branch
 // as the daemon side: with no MULTICA_CLOUD_FLEET_URL configured, an
 // mcn_ bearer token must be rejected with 401 at the prefix branch.
 // We don't fall through — an mcn_ string can't be a valid mul_ PAT or
 // JWT, so any fall-through would be wasted work.
 func TestAuth_MCN_NoVerifierConfigured(t *testing.T) {
-	mw := Auth(nil, nil, nil)
+	mw := Auth(nil, nil, nil, nil)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called when verifier is unconfigured")
 	}))
@@ -335,7 +357,7 @@ func TestAuth_MCN_ValidTokenSetsUserID(t *testing.T) {
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
 
 	var gotUser, gotActorSource string
-	mw := Auth(nil, nil, verifier)
+	mw := Auth(nil, nil, verifier, nil)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUser = r.Header.Get("X-User-ID")
 		gotActorSource = r.Header.Get("X-Actor-Source")
@@ -373,7 +395,7 @@ func TestAuth_MCN_InvalidReturns401(t *testing.T) {
 	defer srv.Close()
 
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
-	mw := Auth(nil, nil, verifier)
+	mw := Auth(nil, nil, verifier, nil)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called when token is invalid")
 	}))
@@ -397,7 +419,7 @@ func TestAuth_MCN_FleetUnreachableReturns503(t *testing.T) {
 	defer srv.Close()
 
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
-	mw := Auth(nil, nil, verifier)
+	mw := Auth(nil, nil, verifier, nil)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called when fleet is unavailable")
 	}))

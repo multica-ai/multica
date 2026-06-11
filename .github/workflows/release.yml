@@ -56,12 +56,14 @@ jobs:
 
   release:
     needs: verify
-    # Only run on the canonical upstream repo. Forks don't have the
-    # HOMEBREW_TAP_GITHUB_TOKEN secret and should not be publishing to
-    # `multica-ai/homebrew-tap` anyway. Without this guard, every fork's
-    # tag push fails this job (401 against the upstream tap), which makes
-    # downstream CI go red without affecting the actual artifact pipeline.
-    if: github.repository_owner == 'multica-ai'
+    # Runs on the canonical upstream repo (multica-ai) AND the Firtal fork
+    # (firtal-group). Upstream publishes to multica-ai/homebrew-tap; the fork
+    # publishes its binaries to its own GitHub Release and its formula to
+    # firtal-group/homebrew-tap (see .goreleaser.yml). When HOMEBREW_TAP_GITHUB_TOKEN
+    # is not configured, the GoReleaser run passes --skip=homebrew so the
+    # per-os/arch binaries still ship and only the formula publish is deferred
+    # (instead of failing the whole release on a 401 against the tap).
+    if: github.repository_owner == 'multica-ai' || github.repository_owner == 'firtal-group'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -75,11 +77,23 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
+      - name: Decide GoReleaser flags
+        id: gr
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+            echo "args=release --clean --skip=homebrew" >> "$GITHUB_OUTPUT"
+            echo "::notice::HOMEBREW_TAP_GITHUB_TOKEN not set — skipping Homebrew formula publish; binaries still ship to the GitHub Release."
+          else
+            echo "args=release --clean" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           version: "~> v2"
-          args: release --clean
+          args: ${{ steps.gr.outputs.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

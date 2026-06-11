@@ -61,6 +61,11 @@ type Session struct {
 	exitErr     error
 	exitCode    int
 	done        chan struct{}
+	// reattachGen increments every time the owning daemon re-announces this
+	// session (a duplicate term_attach after a WS reconnect). The disconnect
+	// reaper captures it before its grace sleep and skips the close if it
+	// changed — so a brief daemon WS flap does not kill a live session.
+	reattachGen atomic.Uint64
 }
 
 // Subscriber receives stdout chunks. Slow subscribers are evicted (their

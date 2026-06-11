@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token headers
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -99,6 +100,26 @@ type Client struct {
 	platform string
 	version  string
 	os       string
+
+	// cfServiceToken is the per-machine Cloudflare Access service-token attached
+	// to every HTTP request and the wakeup websocket so the daemon passes the
+	// wall. Empty falls back to env in cfHeaderToken(); both unset = no headers.
+	// CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token.
+	cfServiceToken cfaccess.ServiceToken
+}
+
+// SetCFServiceToken records the per-machine Cloudflare Access service-token.
+// CEREBRO-PATCH(cf-access-client): wall credential for daemon HTTP + websocket.
+func (c *Client) SetCFServiceToken(t cfaccess.ServiceToken) { c.cfServiceToken = t }
+
+// cfHeaderToken returns the configured Cloudflare Access service-token, falling
+// back to the CEREBRO_CF_ACCESS_CLIENT_ID/_SECRET env vars (cloud runtimes).
+// CEREBRO-PATCH(cf-access-client): shared by the HTTP client and the websocket dialer.
+func (c *Client) cfHeaderToken() cfaccess.ServiceToken {
+	if c.cfServiceToken.Configured() {
+		return c.cfServiceToken
+	}
+	return cfaccess.ServiceTokenFromEnv()
 }
 
 // NewClient creates a new daemon API client.
@@ -143,6 +164,9 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
 	}
+	// CEREBRO-PATCH(cf-access-client): pass the Cloudflare Access wall on every
+	// daemon API request. No-op when no service-token is configured.
+	c.cfHeaderToken().Apply(req.Header)
 }
 
 // SetToken sets the auth token for authenticated requests.
