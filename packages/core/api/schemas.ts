@@ -10,6 +10,8 @@ import type {
   BillingPriceTier,
   BillingTopupsPage,
   BillingTransactionsPage,
+  BulkAgentEnvKeysResponse,
+  BulkUpdateAgentsResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
@@ -181,6 +183,27 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   workspace_creation_disabled: false,
 };
+
+export const BulkUpdateAgentsResponseSchema = z.object({
+  updated: z.number().int().nonnegative(),
+}).loose();
+
+export const EMPTY_BULK_UPDATE_AGENTS_RESPONSE: BulkUpdateAgentsResponse = { updated: 0 };
+
+export const BulkAgentEnvKeysResponseSchema = z.object({
+  keys: z
+    .array(
+      z
+        .object({
+          key: z.string(),
+          agent_count: z.number().int().nonnegative(),
+        })
+        .loose(),
+    )
+    .default([]),
+}).loose();
+
+export const EMPTY_BULK_AGENT_ENV_KEYS_RESPONSE: BulkAgentEnvKeysResponse = { keys: [] };
 
 export const CommentSchema = z.object({
   id: z.string(),

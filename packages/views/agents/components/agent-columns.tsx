@@ -1,6 +1,6 @@
 "use client";
 
-import { Cloud, Lock, Monitor } from "lucide-react";
+import { Cloud, Cpu, Lock, Monitor } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
@@ -14,6 +14,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { availabilityConfig, workloadConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
@@ -54,10 +55,12 @@ export interface AgentRow {
 // the summed column sizes, the table refuses to shrink further and the
 // container scrolls instead.
 const COL_WIDTHS = {
+  select: 44,
   agent: 240,
   status: 120,
   workload: 140,
   runtime: 200,
+  providerModel: 160,
   activity: 100,
   runs: 64,
   // 60 = 16 left padding + 28 kebab + 16 right padding. Keeps the
@@ -68,7 +71,7 @@ const COL_WIDTHS = {
 
 type ColumnHeaderT = ReturnType<typeof useT<"agents">>["t"];
 
-function makeHeaderRenderer(t: ColumnHeaderT, key: "agent" | "status" | "workload" | "runtime" | "activity_7d" | "runs") {
+function makeHeaderRenderer(t: ColumnHeaderT, key: "agent" | "status" | "workload" | "runtime" | "provider_model" | "activity_7d" | "runs") {
   return key === "runs"
     ? () => <div className="text-right">{t(($) => $.columns.runs)}</div>
     : () => t(($) => $.columns[key]);
@@ -77,11 +80,13 @@ function makeHeaderRenderer(t: ColumnHeaderT, key: "agent" | "status" | "workloa
 export function createAgentColumns({
   onDuplicate,
   t,
+  enableSelection = false,
 }: {
   onDuplicate: (agent: Agent) => void;
   t: ColumnHeaderT;
+  enableSelection?: boolean;
 }): ColumnDef<AgentRow>[] {
-  return [
+  const columns: ColumnDef<AgentRow>[] = [
     {
       id: "agent",
       header: makeHeaderRenderer(t, "agent"),
@@ -117,6 +122,13 @@ export function createAgentColumns({
       size: COL_WIDTHS.runtime,
       meta: { grow: true },
       cell: ({ row }) => <RuntimeCell row={row.original} />,
+    },
+    {
+      id: "provider_model",
+      header: makeHeaderRenderer(t, "provider_model"),
+      size: COL_WIDTHS.providerModel,
+      meta: { grow: true },
+      cell: ({ row }) => <ProviderModelCell row={row.original} />,
     },
     {
       id: "activity",
@@ -157,6 +169,45 @@ export function createAgentColumns({
         </div>
       ),
     },
+  ];
+  if (!enableSelection) return columns;
+
+  return [
+    {
+      id: "select",
+      size: COL_WIDTHS.select,
+      enableResizing: false,
+      header: ({ table }) => (
+        <div
+          className="flex justify-center"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Checkbox
+            checked={table.getIsAllRowsSelected()}
+            onCheckedChange={(value) =>
+              table.toggleAllRowsSelected(Boolean(value))
+            }
+            aria-label={t(($) => $.bulk_edit.select_all_aria)}
+          />
+        </div>
+      ),
+      cell: ({ row }) => (
+        <div
+          className="flex justify-center"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Checkbox
+            checked={row.getIsSelected()}
+            disabled={!row.getCanSelect()}
+            onCheckedChange={(value) => row.toggleSelected(Boolean(value))}
+            aria-label={t(($) => $.bulk_edit.select_agent_aria, {
+              name: row.original.agent.name,
+            })}
+          />
+        </div>
+      ),
+    },
+    ...columns,
   ];
 }
 
@@ -325,6 +376,24 @@ function RuntimeCell({ row }: { row: AgentRow }) {
           }
         />
         <TooltipContent>{runtimeLabel}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+export function ProviderModelCell({ row }: { row: AgentRow }) {
+  const { agent, runtime } = row;
+  if (agent.archived_at || !runtime?.provider) {
+    return <span className="text-xs text-muted-foreground/50">—</span>;
+  }
+  const provider = runtime.provider;
+  const label = agent.model ? `${provider} · ${agent.model}` : provider;
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <Cpu className="h-3 w-3 shrink-0" />
+      <Tooltip>
+        <TooltipTrigger render={<span className="block min-w-0 truncate">{label}</span>} />
+        <TooltipContent>{label}</TooltipContent>
       </Tooltip>
     </div>
   );

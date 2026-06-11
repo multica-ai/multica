@@ -7,3 +7,9 @@ export {
   useTranscriptViewStore,
   type TranscriptSortDirection,
 } from "./transcript-view-store";
+export {
+  useAgentBulkEditPresetsStore,
+  type AgentBulkEditPreset,
+  type AgentBulkEditPresetPatch,
+  type AgentBulkEditPresetEnvOperation,
+} from "./bulk-edit-presets-store";

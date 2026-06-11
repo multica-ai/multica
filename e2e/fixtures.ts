@@ -110,6 +110,7 @@ export class TestApiClient {
     if (res.ok) {
       const created = (await res.json()) as TestWorkspace;
       this.workspaceId = created.id;
+      this.workspaceSlug = created.slug;
       return created;
     }
 
@@ -117,10 +118,45 @@ export class TestApiClient {
     const created = refreshed.find((item) => item.slug === slug) ?? refreshed[0];
     if (created) {
       this.workspaceId = created.id;
+      this.workspaceSlug = created.slug;
       return created;
     }
 
     throw new Error(`Failed to ensure workspace ${slug}: ${res.status} ${res.statusText}`);
+  }
+
+  async completeOnboarding() {
+    const questionnaire = {
+      source: [],
+      source_other: null,
+      source_skipped: true,
+      role: null,
+      role_other: null,
+      role_skipped: true,
+      use_case: [],
+      use_case_other: null,
+      use_case_skipped: true,
+      version: 2,
+    };
+
+    const patchRes = await this.authedFetch("/api/me/onboarding", {
+      method: "PATCH",
+      body: JSON.stringify({ questionnaire }),
+    });
+    if (!patchRes.ok) {
+      throw new Error(`patch onboarding failed: ${patchRes.status}`);
+    }
+
+    const completeRes = await this.authedFetch("/api/me/onboarding/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        completion_path: "skip_existing",
+        workspace_id: this.workspaceId ?? undefined,
+      }),
+    });
+    if (!completeRes.ok) {
+      throw new Error(`complete onboarding failed: ${completeRes.status}`);
+    }
   }
 
   async createIssue(title: string, opts?: Record<string, unknown>) {

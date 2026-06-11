@@ -6,12 +6,22 @@ import {
   ArrowLeft,
   ArrowUpDown,
   Bot,
+  Cpu,
   Plus,
   Search,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import type { Agent, AgentRuntime, CreateAgentRequest } from "@multica/core/types";
+import {
+  getCoreRowModel,
+  useReactTable,
+  type RowSelectionState,
+} from "@tanstack/react-table";
+import type {
+  Agent,
+  AgentRuntime,
+  BulkUpdateAgentsRequest,
+  CreateAgentRequest,
+} from "@multica/core/types";
 import {
   type AgentAvailability,
   agentRunCounts30dOptions,
@@ -44,7 +54,12 @@ import { DataTable } from "@multica/ui/components/ui/data-table";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig, availabilityOrder } from "../presence";
+import { toast } from "sonner";
 import { CreateAgentDialog } from "./create-agent-dialog";
+import {
+  BulkEditAgentsDialog,
+  type BulkCustomArgSummary,
+} from "./bulk-edit-agents-dialog";
 import { type AgentRow, createAgentColumns } from "./agent-columns";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -73,6 +88,9 @@ import { RuntimeMachineFilterDropdown } from "./runtime-machine-filter-dropdown"
 type View = "active" | "archived";
 type Scope = "all" | "mine";
 type AvailabilityFilter = "all" | AgentAvailability;
+type BulkEditTarget =
+  | { mode: "all"; agentIds: null; affects: number }
+  | { mode: "selected"; agentIds: string[]; affects: number };
 
 type SortKey = "recent" | "name" | "runs" | "created";
 const SORT_KEYS: SortKey[] = ["recent", "name", "runs", "created"];
@@ -154,6 +172,8 @@ export function AgentsPage({
   const [sort, setSort] = useState<SortKey>("recent");
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [bulkEditTarget, setBulkEditTarget] = useState<BulkEditTarget | null>(null);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   // When set, the Create dialog opens pre-populated with this agent's
   // config — driven by the row-level "Duplicate" action. We keep this
   // separate from `showCreate` so a stray null-template doesn't open the
@@ -461,6 +481,25 @@ export function AgentsPage({
     setShowCreate(true);
   }, []);
 
+  const handleBulkEditAgents = useCallback(
+    async (request: BulkUpdateAgentsRequest) => {
+      if (!bulkEditTarget) return;
+      const body: BulkUpdateAgentsRequest = bulkEditTarget.agentIds
+        ? { ...request, agent_ids: bulkEditTarget.agentIds }
+        : request;
+      try {
+        const { updated } = await api.bulkUpdateAgents(wsId, body);
+        qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+        setRowSelection({});
+        toast.success(t(($) => $.bulk_edit.applied_toast, { count: updated }));
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : t(($) => $.bulk_edit.failed_toast));
+        throw e;
+      }
+    },
+    [bulkEditTarget, wsId, qc, t],
+  );
+
   // Assemble per-row data once per render — agent + runtime + presence +
   // activity + role flags. The columns reach into `row.original` and never
   // pull their own queries, which keeps each cell a pure function.
@@ -498,8 +537,13 @@ export function AgentsPage({
   ]);
 
   const columns = useMemo(
-    () => createAgentColumns({ onDuplicate: handleDuplicate, t }),
-    [handleDuplicate, t],
+    () =>
+      createAgentColumns({
+        onDuplicate: handleDuplicate,
+        t,
+        enableSelection: isWorkspaceAdmin && view === "active",
+      }),
+    [handleDuplicate, t, isWorkspaceAdmin, view],
   );
 
   const table = useReactTable({
@@ -507,9 +551,40 @@ export function AgentsPage({
     columns,
     getCoreRowModel: getCoreRowModel(),
     enableColumnResizing: true,
+    enableRowSelection: (row) =>
+      isWorkspaceAdmin && view === "active" && !row.original.agent.archived_at,
+    getRowId: (row) => row.agent.id,
+    onRowSelectionChange: setRowSelection,
+    state: { rowSelection },
     // Pin the kebab column right so it stays accessible during horizontal
     // scroll — matches the pattern in Linear / Notion / GitHub.
     initialState: { columnPinning: { right: ["actions"] } },
+  });
+  const selectedAgentIds = table
+    .getFilteredSelectedRowModel()
+    .rows.map((row) => row.original.agent.id);
+  const bulkCustomArgOptions = useMemo(
+    () => buildBulkCustomArgOptions(agents, bulkEditTarget),
+    [agents, bulkEditTarget],
+  );
+  const {
+    data: bulkEnvKeyResponse,
+    isLoading: bulkEnvKeysLoading,
+    isError: bulkEnvKeysError,
+  } = useQuery({
+    queryKey: [
+      "workspaces",
+      wsId,
+      "agent-env-keys",
+      bulkEditTarget?.mode ?? "closed",
+      bulkEditTarget?.agentIds?.join(",") ?? "all",
+    ],
+    queryFn: () =>
+      api.listBulkAgentEnvKeys(
+        wsId,
+        bulkEditTarget?.agentIds ? { agent_ids: bulkEditTarget.agentIds } : {},
+      ),
+    enabled: !!bulkEditTarget && isWorkspaceAdmin,
   });
 
   // ---- Loading ----
@@ -551,6 +626,16 @@ export function AgentsPage({
       <PageHeaderBar
         totalCount={totalActiveCount}
         onCreate={() => setShowCreate(true)}
+        onBulkEditAll={
+          isWorkspaceAdmin && totalActiveCount > 0
+            ? () =>
+                setBulkEditTarget({
+                  mode: "all",
+                  agentIds: null,
+                  affects: totalActiveCount,
+                })
+            : undefined
+        }
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
@@ -605,6 +690,21 @@ export function AgentsPage({
             ) : (
               <DataTable
                 table={table}
+                actionBar={
+                  isWorkspaceAdmin && view === "active" && selectedAgentIds.length > 0 ? (
+                    <BulkEditActionBar
+                      selectedCount={selectedAgentIds.length}
+                      onBulkEdit={() =>
+                        setBulkEditTarget({
+                          mode: "selected",
+                          agentIds: selectedAgentIds,
+                          affects: selectedAgentIds.length,
+                        })
+                      }
+                      onClear={() => setRowSelection({})}
+                    />
+                  ) : null
+                }
                 onRowClick={(row) =>
                   navigation.push(paths.agentDetail(row.original.agent.id))
                 }
@@ -628,20 +728,66 @@ export function AgentsPage({
           onCreate={handleCreate}
         />
       )}
+
+      {bulkEditTarget && (
+        <BulkEditAgentsDialog
+          title={
+            bulkEditTarget.mode === "selected"
+              ? t(($) => $.bulk_edit.dialog_title_selected)
+              : t(($) => $.bulk_edit.dialog_title_all)
+          }
+          runtimes={runtimes}
+          runtimesLoading={runtimesLoading}
+          members={members}
+          currentUserId={currentUser?.id ?? null}
+          affects={bulkEditTarget.affects}
+          envKeyOptions={bulkEnvKeyResponse?.keys ?? []}
+          envKeysLoading={bulkEnvKeysLoading}
+          envKeysError={bulkEnvKeysError}
+          customArgOptions={bulkCustomArgOptions}
+          onApply={handleBulkEditAgents}
+          onClose={() => setBulkEditTarget(null)}
+        />
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Page header — icon + title + count + create CTA. Unchanged.
-// ---------------------------------------------------------------------------
+function buildBulkCustomArgOptions(
+  agents: Agent[],
+  target: BulkEditTarget | null,
+): BulkCustomArgSummary[] {
+  if (!target) return [];
+
+  const targetIds =
+    target.agentIds === null ? null : new Set(target.agentIds);
+  const counts = new Map<string, number>();
+  for (const agent of agents) {
+    if (agent.archived_at) continue;
+    if (targetIds && !targetIds.has(agent.id)) continue;
+
+    const seenForAgent = new Set<string>();
+    for (const rawArg of agent.custom_args ?? []) {
+      const arg = rawArg.trim();
+      if (!arg || seenForAgent.has(arg)) continue;
+      seenForAgent.add(arg);
+      counts.set(arg, (counts.get(arg) ?? 0) + 1);
+    }
+  }
+
+  return Array.from(counts, ([value, agentCount]) => ({ value, agentCount }))
+    .sort((a, b) => b.agentCount - a.agentCount || a.value.localeCompare(b.value))
+    .slice(0, 12);
+}
 
 function PageHeaderBar({
   totalCount,
   onCreate,
+  onBulkEditAll,
 }: {
   totalCount: number;
   onCreate: () => void;
+  onBulkEditAll?: () => void;
 }) {
   const { t } = useT("agents");
   return (
@@ -667,11 +813,47 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      <Button type="button" size="sm" onClick={onCreate}>
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.new_agent)}
-      </Button>
+      <div className="flex items-center gap-2">
+        {onBulkEditAll && (
+          <Button type="button" size="sm" variant="outline" onClick={onBulkEditAll}>
+            <Cpu className="h-3 w-3" />
+            {t(($) => $.bulk_edit.all_action)}
+          </Button>
+        )}
+        <Button type="button" size="sm" onClick={onCreate}>
+          <Plus className="h-3 w-3" />
+          {t(($) => $.page.new_agent)}
+        </Button>
+      </div>
     </PageHeader>
+  );
+}
+
+function BulkEditActionBar({
+  selectedCount,
+  onBulkEdit,
+  onClear,
+}: {
+  selectedCount: number;
+  onBulkEdit: () => void;
+  onClear: () => void;
+}) {
+  const { t } = useT("agents");
+  return (
+    <div className="flex h-12 shrink-0 items-center justify-between border-t bg-background px-4">
+      <span className="text-xs text-muted-foreground">
+        {t(($) => $.bulk_edit.selected_count, { count: selectedCount })}
+      </span>
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={onClear}>
+          {t(($) => $.bulk_edit.clear_selection)}
+        </Button>
+        <Button type="button" size="sm" onClick={onBulkEdit}>
+          <Cpu className="h-3 w-3" />
+          {t(($) => $.bulk_edit.selected_action)}
+        </Button>
+      </div>
+    </div>
   );
 }
 
