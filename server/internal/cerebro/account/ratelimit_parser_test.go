@@ -185,6 +185,18 @@ func TestParseRateLimitReset(t *testing.T) {
 			wantOK: true,
 		},
 		{
+			// TECH-3386 — a wall-clock reset hint (no date) carrying an IANA
+			// timezone must honour that zone, not the server's local zone.
+			// "6:50pm (Europe/Copenhagen)" in May is CEST (UTC+2) → 16:50 UTC.
+			// Pre-fix parseWallClock ignored the IANA name and fell back to
+			// time.Local, so a UTC-deployed server read it as 18:50 UTC and
+			// resumed the runtime 2 hours too late.
+			name:   "wall clock with IANA timezone (no date)",
+			input:  "You've hit your session limit · resets 6:50pm (Europe/Copenhagen)",
+			want:   time.Date(2026, 5, 4, 16, 50, 0, 0, time.UTC),
+			wantOK: true,
+		},
+		{
 			// 401 without "Invalid authentication" must NOT match — a 401
 			// from a normal API call (wrong workspace, revoked invite) is
 			// not a pause-worthy condition, only an expired provider
@@ -258,6 +270,45 @@ func TestParseRateLimitReset(t *testing.T) {
 			}
 			if !got.Equal(tc.want) {
 				t.Fatalf("got %s, want %s", got.Format(time.RFC3339), tc.want.Format(time.RFC3339))
+			}
+		})
+	}
+}
+
+// TestParseRateLimitReset_WallClockTimezoneDST guards TECH-3386 across the DST
+// boundary: the same "(Europe/Copenhagen)" wall-clock hint resolves to a
+// different UTC instant in winter (CET, UTC+1) than in summer (CEST, UTC+2).
+// Both results must be independent of the server's local zone.
+func TestParseRateLimitReset_WallClockTimezoneDST(t *testing.T) {
+	cases := []struct {
+		name  string
+		now   time.Time
+		input string
+		want  time.Time
+	}{
+		{
+			// January → CET (UTC+1): 3pm Copenhagen = 14:00 UTC.
+			name:  "winter CET",
+			now:   time.Date(2026, 1, 15, 8, 0, 0, 0, time.UTC),
+			input: "You've hit your session limit · resets 3pm (Europe/Copenhagen)",
+			want:  time.Date(2026, 1, 15, 14, 0, 0, 0, time.UTC),
+		},
+		{
+			// July → CEST (UTC+2): 3pm Copenhagen = 13:00 UTC.
+			name:  "summer CEST",
+			now:   time.Date(2026, 7, 15, 8, 0, 0, 0, time.UTC),
+			input: "You've hit your session limit · resets 3pm (Europe/Copenhagen)",
+			want:  time.Date(2026, 7, 15, 13, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ParseRateLimitReset(tc.input, tc.now)
+			if !ok {
+				t.Fatalf("expected parse success for %q", tc.input)
+			}
+			if !got.Equal(tc.want) {
+				t.Fatalf("got %s want %s", got.Format(time.RFC3339), tc.want.Format(time.RFC3339))
 			}
 		})
 	}
