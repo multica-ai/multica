@@ -273,6 +273,17 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				b.cfg.Logger.Warn("kimi set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kimi could not switch to model %q: %v", opts.Model, err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// On a resumed session with a model override, the dead
+					// session surfaces here instead of at session/prompt.
+					// Same fix as the prompt path below: clear the id so
+					// the daemon's resume-failure fallback retries fresh.
+					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
+						"backend", "kimi",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 				resCh <- Result{
 					Status:     finalStatus,
 					Error:      finalError,

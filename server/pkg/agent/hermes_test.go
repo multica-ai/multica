@@ -1543,8 +1543,21 @@ func TestIsACPSessionNotFound(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "session wording under a different code",
-			err:  &acpRPCError{Method: "session/prompt", Code: -32602, Message: "Session not found"},
+			name: "kimi session not found as invalid_params data",
+			// kimi-cli raises RequestError.invalid_params({"session_id":
+			// "Session not found"}) for every unknown-session path
+			// (src/kimi_cli/acp/server.py), so -32602 must match too.
+			err:  &acpRPCError{Method: "session/set_model", Code: -32602, Message: "Invalid params", Data: `{"session_id": "Session not found"}`},
+			want: true,
+		},
+		{
+			name: "invalid params without session wording",
+			err:  &acpRPCError{Method: "session/set_model", Code: -32602, Message: "model not available: bogus-model"},
+			want: false,
+		},
+		{
+			name: "session wording under an unrelated code",
+			err:  &acpRPCError{Method: "session/prompt", Code: -32601, Message: "Session not found"},
 			want: false,
 		},
 		{
@@ -1638,6 +1651,84 @@ func TestHermesBackendClearsSessionIDWhenResumedSessionNotFound(t *testing.T) {
 		}
 		if !strings.Contains(result.Error, "Session not found") {
 			t.Errorf("expected error to surface the session-not-found message, got %q", result.Error)
+		}
+		if result.SessionID != "" {
+			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// fakeHermesACPStaleResumeSetModelScript is the model-override variant
+// of fakeHermesACPStaleResumeScript: session/resume echoes the requested
+// sessionId back, and the dead session then surfaces at
+// session/set_model (which runs before session/prompt whenever the
+// caller picked a model) with the same -32603 "Session not found".
+func fakeHermesACPStaleResumeSetModelScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"%s"}}\n' "$id" "$sid"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session not found"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestHermesBackendClearsSessionIDWhenSetModelSessionNotFound pins the
+// set_model sibling of the prompt-path fix above: with a model
+// override, session/set_model runs before session/prompt, so a dead
+// resumed session surfaces there instead. The Result must carry an
+// empty SessionID here too, or the daemon's fresh-session retry never
+// fires for any agent configured with a model.
+func TestHermesBackendClearsSessionIDWhenSetModelSessionNotFound(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPStaleResumeSetModelScript()))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_stale",
+		Model:           "some-model",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, `could not switch to model "some-model"`) {
+			t.Errorf("expected error to name the requested model, got %q", result.Error)
 		}
 		if result.SessionID != "" {
 			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)

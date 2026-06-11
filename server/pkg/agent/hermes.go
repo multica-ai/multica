@@ -299,6 +299,17 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				b.cfg.Logger.Warn("hermes set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// On a resumed session with a model override, the dead
+					// session surfaces here instead of at session/prompt.
+					// Same fix as the prompt path below: clear the id so
+					// the daemon's resume-failure fallback retries fresh.
+					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
+						"backend", "hermes",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 				resCh <- Result{
 					Status:     finalStatus,
 					Error:      finalError,
@@ -645,17 +656,19 @@ func (e *acpRPCError) Error() string {
 }
 
 // isACPSessionNotFound reports whether err is the agent rejecting a
-// session id it no longer knows. Runtimes signal this as JSON-RPC
-// -32603 (Internal error) with wording that varies — Hermes says
-// "Session not found", Kiro puts "No session found with id ..." in
-// `data` — so the code alone is not discriminating and the message
-// text is matched too.
+// session id it no longer knows. Runtimes signal this with codes and
+// wording that vary — Hermes says "Session not found" under -32603
+// (Internal error), Kiro puts "No session found with id ..." in
+// `data` under -32603, and kimi-cli raises invalid_params (-32602)
+// with {"session_id": "Session not found"} in `data` for every
+// unknown-session path (src/kimi_cli/acp/server.py) — so neither the
+// code nor the text alone is discriminating and both are matched.
 func isACPSessionNotFound(err error) bool {
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {
 		return false
 	}
-	if rpcErr.Code != -32603 {
+	if rpcErr.Code != -32603 && rpcErr.Code != -32602 {
 		return false
 	}
 	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
