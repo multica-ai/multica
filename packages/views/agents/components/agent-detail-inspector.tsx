@@ -173,7 +173,7 @@ export function AgentDetailInspector({
               <ActorAvatar
                 actorType="member"
                 actorId={owner.user_id}
-                size={14}
+                size={24}
               />
               <span className="truncate">{owner.name}</span>
             </span>

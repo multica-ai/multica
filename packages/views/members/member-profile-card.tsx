@@ -140,7 +140,7 @@ function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
             <ActorAvatar
               actorType="agent"
               actorId={a.id}
-              size={20}
+              size={30}
               showStatusDot
               className="mt-0.5 shrink-0 rounded-md"
             />

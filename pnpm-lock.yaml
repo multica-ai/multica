@@ -70,7 +70,7 @@ catalogs:
       specifier: ^17.0.6
       version: 17.0.6
     react-qr-code:
-      specifier: ^2.0.18
+      specifier: ^2.0.21
       version: 2.0.21
     react-virtuoso:
       specifier: ^4.14.0

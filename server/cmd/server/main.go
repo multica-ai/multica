@@ -322,7 +322,7 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:    ":" + port,
+		Addr:    "127.0.0.1:" + port,
 		Handler: r,
 	}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -14,7 +14,6 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
@@ -25,9 +24,8 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 // statuses) collapse behind a "Show past runs (N)" toggle.
 //
 // Replaces:
-//   - the click-to-expand timeline that used to live inside the in-body live
-//     card (the live "agent is working" signal now lives in the header via
-//     IssueAgentHeaderChip)
+//   - the click-to-expand timeline that used to live inside AgentLiveCard
+//     (sticky card stays as a header-only banner)
 //   - the standalone <TaskRunHistory> below the main content
 //
 // Row layout — simple left/right flex:
@@ -137,7 +135,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
       {open && (
         <div className="space-y-0.5 pl-2">
           {activeTasks.map((task) => (
-            <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
+            <ActiveRow key={task.id} task={task} issueId={issueId} />
           ))}
 
           {pastTasks.length > 0 && (
@@ -243,39 +241,13 @@ function useStatusLabel(status: AgentTask["status"]): string {
   }
 }
 
-// One active (running / queued / dispatched / parked) task row. Running rows
-// keep status to a single live elapsed timer; transcript and stop stay available
-// as hover actions. Transcript content lazy-loads on click via TranscriptButton,
-// so the row no longer fetches task messages just to render a count.
-export function ActiveTaskRow({
-  task,
-  issueId,
-}: {
-  task: AgentTask;
-  issueId: string;
-}) {
+function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
-
-  // Running rows show a live-ticking elapsed timer (the ticking digits carry
-  // "alive", the duration carries "how long"). Only running rows tick.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (task.status !== "running") return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [task.status]);
-  const elapsed =
-    task.status === "running"
-      ? formatDuration(
-          task.started_at ?? task.dispatched_at ?? task.created_at,
-          now,
-        )
-      : "";
 
   // Transcript only meaningful once messages exist — pure-queued and
   // waiting_local_directory tasks haven't streamed any agent output yet.
@@ -304,7 +276,7 @@ export function ActiveTaskRow({
       <RowStatus title={label}>
         {task.status === "running" ? (
           <>
-            <span className="text-info tabular-nums">{elapsed}</span>
+            <Loader2 className="h-3 w-3 animate-spin text-info" />
             <span className="sr-only">{label}</span>
           </>
         ) : (
@@ -316,7 +288,7 @@ export function ActiveTaskRow({
           <TranscriptButton
             task={task}
             agentName=""
-            isLive={task.status === "running"}
+            isLive
             title={t(($) => $.execution_log.transcript_tooltip)}
           />
         )}
@@ -443,8 +415,9 @@ function RowShell({
         <ActorAvatar
           actorType="agent"
           actorId={task.agent_id}
-          size={20}
+          size={30}
           enableHoverCard
+          showName
         />
       ) : (
         <span className="inline-block h-5 w-5 shrink-0 rounded-full bg-muted" />
@@ -498,3 +471,8 @@ function RowActions({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+// Re-export under historical name for local call sites that pre-date the
+// upstream rename. Keeps issue-agent-header-chip and the local test file
+// working without forcing them to import a private helper.
+export { ActiveRow as ActiveTaskRow };

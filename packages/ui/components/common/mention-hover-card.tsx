@@ -57,7 +57,7 @@ function MentionHoverCard({
             initials={initials}
             avatarUrl={avatarUrl}
             isAgent={type === "agent"}
-            size={32}
+            size={42}
           />
           <div className="min-w-0">
             <p className="text-sm font-medium truncate">{name}</p>

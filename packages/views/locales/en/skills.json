@@ -196,7 +196,8 @@
       "name_conflict_hint": " The imported skill's name already exists — delete the existing one before retrying.",
       "fallback_error": "Import failed",
       "cancel": "Cancel",
-      "toast_imported": "Skill imported"
+      "toast_imported": "Skill imported",
+      "toast_imported_batch": "{{count}} skill(s) imported"
     }
   },
   "runtime_import": {

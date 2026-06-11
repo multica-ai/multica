@@ -86,11 +86,11 @@
       "hint": "Show a banner from your operating system for new inbox items when the app isn't focused."
     },
     "browser": {
-      "label": "Browser notifications",
-      "hint": "Allow this browser to show notification banners for new inbox items.",
-      "enable": "Enable",
-      "granted": "This browser can show notification banners.",
-      "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
+      "label": "Show browser notifications",
+      "hint": "Show a banner from your browser for new inbox items when the app is in the background.",
+      "granted": "Browser notifications are enabled.",
+      "denied": "Browser notifications are blocked. Update site permissions in your browser settings to enable them.",
+      "enable": "Enable browser notifications",
       "enabled_badge": "Enabled"
     }
   },

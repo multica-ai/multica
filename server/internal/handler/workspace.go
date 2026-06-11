@@ -19,18 +19,27 @@ import (
 var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-// generateIssuePrefix produces a 2-5 char uppercase prefix from a workspace name.
+// generateIssuePrefix produces a 2-3 char uppercase prefix from a workspace name.
 // Examples: "Jiayuan's Workspace" → "JIA", "My Team" → "MYT", "AB" → "AB".
-func generateIssuePrefix(name string) string {
+// Falls back to slug (uppercased, 3 chars) when name has no latin letters.
+func generateIssuePrefix(name, slug string) string {
 	letters := nonAlpha.ReplaceAllString(name, "")
-	if len(letters) == 0 {
-		return "WS"
+	if len(letters) > 0 {
+		letters = strings.ToUpper(letters)
+		if len(letters) > 3 {
+			letters = letters[:3]
+		}
+		return letters
 	}
-	letters = strings.ToUpper(letters)
-	if len(letters) > 3 {
-		letters = letters[:3]
+	// Fallback to slug when name contains no latin letters (e.g. Chinese names).
+	if len(slug) > 0 {
+		slugUpper := strings.ToUpper(slug)
+		if len(slugUpper) > 3 {
+			slugUpper = slugUpper[:3]
+		}
+		return slugUpper
 	}
-	return letters
+	return "WS"
 }
 
 type WorkspaceResponse struct {
@@ -182,7 +191,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
-	issuePrefix := generateIssuePrefix(req.Name)
+	issuePrefix := generateIssuePrefix(req.Name, req.Slug)
 	if req.IssuePrefix != nil && strings.TrimSpace(*req.IssuePrefix) != "" {
 		issuePrefix = strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
 	}

@@ -141,7 +141,7 @@ function ReplyInput({
     }
   };
 
-  const avatarSize = size === "sm" ? 22 : 28;
+  const avatarSize = size === "sm" ? 32 : 38;
 
   return (
     <div className="group/editor flex items-start gap-2.5">
@@ -176,8 +176,6 @@ function ReplyInput({
             debounceMs={100}
             currentIssueId={issueId}
             attachments={pendingAttachments}
-            enableSlashCommands
-            slashCommandMode="command"
           />
         </div>
         <div className="absolute bottom-0 left-0 right-24 min-w-0">

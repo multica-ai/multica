@@ -629,7 +629,7 @@ function ActorPicker({
               <ActorAvatar
                 actorType={displayActor.type}
                 actorId={displayActor.id}
-                size={16}
+                size={26}
               />
               {displayLabel}
             </span>
@@ -660,7 +660,7 @@ function ActorPicker({
                     setOpen(false);
                   }}
                 >
-                  <ActorAvatar actorType="agent" actorId={a.id} size={18} />
+                  <ActorAvatar actorType="agent" actorId={a.id} size={28} />
                   <span className="truncate">{a.name}</span>
                 </PickerItem>
               ))}
@@ -677,7 +677,7 @@ function ActorPicker({
                     setOpen(false);
                   }}
                 >
-                  <ActorAvatar actorType="squad" actorId={s.id} size={18} />
+                  <ActorAvatar actorType="squad" actorId={s.id} size={28} />
                   <span className="truncate">{s.name}</span>
                 </PickerItem>
               ))}

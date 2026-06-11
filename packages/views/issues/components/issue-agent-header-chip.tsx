@@ -135,7 +135,7 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
             {label}
           </span>
         </PopoverTrigger>
-        <PopoverContent align="end" keepMounted className="w-80">
+        <PopoverContent align="end" className="w-80">
           <div className="text-xs font-medium text-muted-foreground">
             {t(
               ($) =>

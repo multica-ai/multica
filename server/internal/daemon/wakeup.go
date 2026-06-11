@@ -18,11 +18,7 @@ import (
 
 var errRuntimeSetChanged = errors.New("runtime set changed")
 
-type taskWakeup struct {
-	runtimeID string
-}
-
-func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- taskWakeup) {
+func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- struct{}) {
 	backoff := time.Second
 	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
 	defer unsub()
@@ -72,7 +68,7 @@ func jitterDuration(d time.Duration) time.Duration {
 	return d + delta
 }
 
-func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- taskWakeup, runtimeSetCh <-chan struct{}) error {
+func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- struct{}, runtimeSetCh <-chan struct{}) error {
 	wsURL, err := taskWakeupURL(d.cfg.ServerBaseURL, runtimeIDs)
 	if err != nil {
 		return err
@@ -103,7 +99,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	defer d.clearWSHeartbeatAcks()
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
-	signalTaskWakeup(taskWakeups, "")
+	signalTaskWakeup(taskWakeups)
 
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
@@ -259,7 +255,7 @@ func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatRespons
 	d.handleHeartbeatActions(ctx, ack.RuntimeID, ack)
 }
 
-func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- taskWakeup) error {
+func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- struct{}) error {
 	conn.SetReadLimit(64 * 1024)
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -283,7 +279,7 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 			if payload.RuntimeID != "" {
 				d.logger.Debug("task wakeup received", "runtime_id", payload.RuntimeID, "task_id", payload.TaskID)
 			}
-			signalTaskWakeup(taskWakeups, payload.RuntimeID)
+			signalTaskWakeup(taskWakeups)
 		case protocol.EventDaemonHeartbeatAck:
 			var ack HeartbeatResponse
 			if err := json.Unmarshal(msg.Payload, &ack); err != nil {
@@ -295,9 +291,9 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 	}
 }
 
-func signalTaskWakeup(taskWakeups chan<- taskWakeup, runtimeID string) {
+func signalTaskWakeup(taskWakeups chan<- struct{}) {
 	select {
-	case taskWakeups <- taskWakeup{runtimeID: runtimeID}:
+	case taskWakeups <- struct{}{}:
 	default:
 	}
 }

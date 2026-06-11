@@ -80,6 +80,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+
 func valueOrDefault(v, fallback string) string {
 	if v == "" {
 		return fallback

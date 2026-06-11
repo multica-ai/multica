@@ -640,7 +640,7 @@ func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) s
 	if ws.IssuePrefix != "" {
 		return ws.IssuePrefix
 	}
-	return generateIssuePrefix(ws.Name)
+	return generateIssuePrefix(ws.Name, ws.Slug)
 }
 
 func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agentID string) (db.Agent, bool) {

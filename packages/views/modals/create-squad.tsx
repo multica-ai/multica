@@ -299,7 +299,7 @@ function LeaderPicker({
         >
           <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted">
             {selected ? (
-              <ActorAvatar actorType="agent" actorId={selected.id} size={20} showStatusDot />
+              <ActorAvatar actorType="agent" actorId={selected.id} size={30} showStatusDot />
             ) : (
               <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
@@ -343,7 +343,7 @@ function LeaderPicker({
                         setFilter("");
                       }}
                     >
-                      <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                      <ActorAvatar actorType="agent" actorId={a.id} size={28} showStatusDot />
                       <span className="truncate">{a.name}</span>
                     </PickerItem>
                   ))}
@@ -361,7 +361,7 @@ function LeaderPicker({
                         setFilter("");
                       }}
                     >
-                      <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                      <ActorAvatar actorType="agent" actorId={a.id} size={28} showStatusDot />
                       <span className="truncate">{a.name}</span>
                     </PickerItem>
                   ))}
@@ -535,7 +535,7 @@ function AdditionalMembersPicker({
                       toggle({ type: "agent", id: a.id, name: a.name })
                     }
                   >
-                    <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                    <ActorAvatar actorType="agent" actorId={a.id} size={28} showStatusDot />
                     <span className="truncate">{a.name}</span>
                   </PickerItem>
                 ))}
@@ -551,7 +551,7 @@ function AdditionalMembersPicker({
                       toggle({ type: "agent", id: a.id, name: a.name })
                     }
                   >
-                    <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                    <ActorAvatar actorType="agent" actorId={a.id} size={28} showStatusDot />
                     <span className="truncate">{a.name}</span>
                   </PickerItem>
                 ))}
@@ -567,7 +567,7 @@ function AdditionalMembersPicker({
                       toggle({ type: "member", id: m.user_id, name: m.name })
                     }
                   >
-                    <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+                    <ActorAvatar actorType="member" actorId={m.user_id} size={28} />
                     <span className="truncate">{m.name}</span>
                   </PickerItem>
                 ))}
@@ -591,7 +591,7 @@ function MemberChip({
   const { t } = useT("modals");
   return (
     <span className="inline-flex items-center gap-1 rounded-full border bg-background px-1.5 py-0.5 text-xs">
-      <ActorAvatar actorType={m.type} actorId={m.id} size={14} />
+      <ActorAvatar actorType={m.type} actorId={m.id} size={24} />
       <span className="max-w-[120px] truncate">{m.name}</span>
       <button
         type="button"

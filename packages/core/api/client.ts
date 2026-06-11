@@ -39,6 +39,7 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  BatchImportResponse,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -131,6 +132,7 @@ import { parseWithFallback } from "./schema";
 import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
+  BatchImportResponseSchema,
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
@@ -146,6 +148,7 @@ import {
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
+  EMPTY_BATCH_IMPORT_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
@@ -1378,16 +1381,14 @@ export class ApiClient {
   }
 
   // Notification preferences
-  //
-  // `workspaceSlug` overrides the default `X-Workspace-Slug` header (which
-  // follows the active workspace) so a caller can read a SPECIFIC workspace's
-  // preferences — e.g. honoring the mute setting of the workspace an inbox
-  // notification came from while the user is viewing a different one (#3766).
   async getNotificationPreferences(workspaceSlug?: string): Promise<NotificationPreferenceResponse> {
-    return this.fetch(
-      "/api/notification-preferences",
-      workspaceSlug ? { headers: { "X-Workspace-Slug": workspaceSlug } } : undefined,
-    );
+    // Optional `workspaceSlug` scopes the read to a specific workspace via
+    // X-Workspace-Slug, bypassing the active-workspace default. Used by
+    // notification-preferences/queries.ts so a cold-cache fetch on the
+    // Settings page reads the intended workspace instead of the active one.
+    const extraHeaders = workspaceSlug ? { "X-Workspace-Slug": workspaceSlug } : undefined;
+    const res = await this.fetchRaw("/api/notification-preferences", { extraHeaders });
+    return res.json() as Promise<NotificationPreferenceResponse>;
   }
 
   async updateNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferenceResponse> {
@@ -1527,6 +1528,16 @@ export class ApiClient {
     return this.fetch("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async importSkillsBatch(data: { url: string }): Promise<BatchImportResponse> {
+    const raw = await this.fetch<unknown>("/api/skills/import/batch", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, BatchImportResponseSchema, EMPTY_BATCH_IMPORT_RESPONSE, {
+      endpoint: "POST /api/skills/import/batch",
     });
   }
 

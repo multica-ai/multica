@@ -97,7 +97,7 @@ function ProjectCard({ project }: { project: Project }) {
           renderTrigger={(leadName) => (
             <button type="button" className="flex items-center gap-1.5 rounded px-1.5 py-0.5 -mx-1.5 hover:bg-accent/60 transition-colors cursor-pointer">
               {project.lead_type && project.lead_id ? (
-                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={20} enableHoverCard />
+                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={30} enableHoverCard />
               ) : (
                 <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
               )}
@@ -161,7 +161,7 @@ function ProjectCardCompact({ project }: { project: Project }) {
           <button type="button" className="flex items-center justify-start gap-1.5 rounded px-1 py-0.5 hover:bg-accent/60 transition-colors cursor-pointer">
             <span className="shrink-0">
               {project.lead_type && project.lead_id ? (
-                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={20} enableHoverCard />
+                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={30} enableHoverCard />
               ) : (
                 <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
               )}
@@ -312,7 +312,7 @@ export function ProjectsPage() {
           ) : isCompact ? (
             <div className="mt-4 mx-5 rounded-md border mb-5 overflow-auto flex-1">
               <div className="min-w-[740px]">
-                <div className={cn(COMPACT_GRID, "h-8 shrink-0 items-center gap-2 px-4 text-xs font-medium text-muted-foreground border-b bg-muted/30 backdrop-blur sticky top-0 z-10")}>
+                <div className={cn(COMPACT_GRID, "h-8 shrink-0 items-center gap-2 px-4 text-xs font-medium text-muted-foreground border-b bg-muted/30 sticky top-0 z-10")}>
                   <span />
                   <span className="text-left">{t(($) => $.table.name)}</span>
                   <span className="text-left">{t(($) => $.table.priority)}</span>

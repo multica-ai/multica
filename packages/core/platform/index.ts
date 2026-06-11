@@ -7,11 +7,10 @@ export { createWorkspaceAwareStorage, setCurrentWorkspace, getCurrentSlug, getCu
 export { clearWorkspaceStorage } from "./storage-cleanup";
 export { isMac, modKey, enterKey, formatShortcut } from "./keyboard";
 export {
-  registerSystemNotificationClickHandler,
   isWebNotificationSupported,
   getWebNotificationPermission,
   requestWebNotificationPermission,
   showWebNotification,
-  type SystemNotificationPayload,
-  type WebNotificationPermission,
+  registerSystemNotificationClickHandler,
 } from "./system-notification";
+export type { SystemNotificationPayload, WebNotificationPermission } from "./system-notification";

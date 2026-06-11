@@ -378,7 +378,7 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
       name={squad.name}
       initials={initials}
       avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-      size={16}
+      size={26}
       className="rounded"
     />
   );
@@ -430,7 +430,7 @@ function SquadAvatarEditor({
             name={squad.name}
             initials={initials}
             avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-            size={64}
+            size={74}
             className="rounded-none"
           />
         ) : (
@@ -638,7 +638,7 @@ function AddMemberDialog({
             <Popover open={pickerOpen} onOpenChange={(v) => { setPickerOpen(v); if (!v) setPickerFilter(""); }}>
               <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1 text-left text-sm transition-colors hover:bg-muted">
                 {target ? (
-                  <ActorAvatar actorType={target.type} actorId={target.id} size={20} />
+                  <ActorAvatar actorType={target.type} actorId={target.id} size={30} />
                 ) : (
                   <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
                 )}
@@ -676,7 +676,7 @@ function AddMemberDialog({
                             setPickerFilter("");
                           }}
                         >
-                          <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+                          <ActorAvatar actorType="member" actorId={m.user_id} size={28} />
                           <span>{m.name}</span>
                         </PickerItem>
                       ))}
@@ -694,7 +694,7 @@ function AddMemberDialog({
                             setPickerFilter("");
                           }}
                         >
-                          <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                          <ActorAvatar actorType="agent" actorId={a.id} size={28} showStatusDot />
                           <span>{a.name}</span>
                         </PickerItem>
                       ))}
@@ -852,7 +852,7 @@ function SquadDetailInspector({
         <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
           <InspectorRow label="Leader">
             <span className="flex min-w-0 items-center gap-1.5">
-              <ActorAvatar actorType="agent" actorId={squad.leader_id} size={14} />
+              <ActorAvatar actorType="agent" actorId={squad.leader_id} size={24} />
               <span className="truncate">{leaderName}</span>
             </span>
           </InspectorRow>
@@ -861,7 +861,7 @@ function SquadDetailInspector({
           </InspectorRow>
           <InspectorRow label="Created by">
             <span className="flex min-w-0 items-center gap-1.5">
-              <ActorAvatar actorType="member" actorId={squad.creator_id} size={14} />
+              <ActorAvatar actorType="member" actorId={squad.creator_id} size={24} />
               <span className="truncate">{creatorName}</span>
             </span>
           </InspectorRow>
@@ -1216,7 +1216,7 @@ function SquadMembersTab({
               <ActorAvatar
                 actorType={m.member_type}
                 actorId={m.member_id}
-                size={32}
+                size={42}
                 showStatusDot
                 enableHoverCard={m.member_type === "agent"}
                 hoverCardVariant="live"
@@ -1271,7 +1271,7 @@ function SquadMembersTab({
                   </div>
                 )}
               </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
               {m.member_type === "agent" && (
                 <Tooltip>
                   <TooltipTrigger

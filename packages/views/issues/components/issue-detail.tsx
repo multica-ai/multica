@@ -48,7 +48,7 @@ import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker, IssueIdentifierBadge } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
@@ -56,7 +56,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
-import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
+import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
@@ -65,7 +65,6 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -137,7 +136,7 @@ function SubscriberPopoverContent({
                     className="flex items-center gap-2.5"
                   >
                     <Checkbox checked={isSubbed} className="pointer-events-none" />
-                    <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
+                    <ActorAvatar actorType="member" actorId={m.user_id} size={32} />
                     <span className="truncate flex-1">{m.name}</span>
                   </CommandItem>
                 );
@@ -156,7 +155,7 @@ function SubscriberPopoverContent({
                     className="flex items-center gap-2.5"
                   >
                     <Checkbox checked={isSubbed} className="pointer-events-none" />
-                    <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
+                    <ActorAvatar actorType="agent" actorId={a.id} size={32} showStatusDot />
                     <span className="truncate flex-1">{a.name}</span>
                   </CommandItem>
                 );
@@ -489,7 +488,7 @@ function ActivityBlock({
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
-          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={26} />;
         }
 
         return (
@@ -621,7 +620,7 @@ function SubIssueRow({ child }: { child: Issue }) {
             <ActorAvatar
               actorType={child.assignee_type}
               actorId={child.assignee_id}
-              size={20}
+              size={30}
               className="shrink-0"
             />
           ) : (
@@ -816,17 +815,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
-  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
   useEffect(() => {
     if (issue) {
       recordVisit(wsId, issue.id);
-      recordRecentContext(wsId, {
-        type: "issue",
-        id: issue.id,
-        label: issue.identifier,
-        subtitle: issue.title,
-        status: issue.status,
-      });
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1527,7 +1518,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </button>
         {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           <PropRow label={t(($) => $.detail.prop_created_by)}>
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
+            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={28} enableHoverCard />
             <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_created)}>
@@ -1703,8 +1694,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           leaf={
             <AppLink
               href={paths.issueDetail(issue.id)}
-              className="flex min-w-0 transition-opacity hover:opacity-80"
+              className="flex min-w-0 items-center gap-1.5 transition-opacity hover:opacity-80"
             >
+              <IssueIdentifierBadge
+                issue={issue}
+                onCopy={actions.copyIdentifier}
+                className="shrink-0"
+              />
               <span className="truncate font-medium text-foreground">
                 {issue.identifier} {issue.title}
               </span>
@@ -1712,10 +1708,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           }
           actions={
             <>
-            {/* Live "agent is working" chip, leftmost in the right cluster so
-                it never overlaps the title (which truncates to make room).
-                It self-hides when no agent is active. */}
-            <IssueAgentHeaderChip issueId={id} />
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
@@ -1999,7 +1991,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             key={`${sub.user_type}-${sub.user_id}`}
                             actorType={sub.user_type}
                             actorId={sub.user_id}
-                            size={24}
+                            size={34}
                             enableHoverCard
                           />
                         ))}
@@ -2026,11 +2018,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             <LocalDirectoryHint projectId={issue?.project_id} />
 
-            {/* The "agent is working" live signal now lives in the header
-                (IssueAgentHeaderChip) so it stays in one fixed place and
-                doesn't compete with sticky banners in this content column.
-                The per-task timeline + past runs live in the right panel
-                via ExecutionLogSection. */}
+            {/* Agent live output — sticky banner in the activity section,
+                keyed by issue id so switching issues remounts the card and
+                clears any in-flight task state from the previous issue.
+                The execution log itself (per-task timeline + past runs)
+                lives in the right panel via ExecutionLogSection — this
+                card is just a header-style "agent is working" anchor. */}
+            <AgentLiveCard key={id} issueId={id} />
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment
@@ -2095,17 +2089,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               )
             )}
 
-            {/* Bottom comment input — no avatar, full width */}
-            <div className="mt-4">
-              {/* key={id}: web's /issues/[id] route doesn't remount on
-                  issueId change, so without an explicit key the editor
-                  keeps the previous issue's in-memory content and the
-                  next keystroke would flush it into the new issue's
-                  draft key. */}
-              <CommentInput key={id} issueId={id} onSubmit={submitComment} />
-            </div>
           </div>
         </div>
+        </div>
+
+        {/* Sticky comment input — pinned to the bottom of the detail panel,
+            outside the scrollable timeline so it's always visible. */}
+        <div className="shrink-0 border-t bg-background px-8 py-3">
+          <div className="mx-auto w-full max-w-4xl">
+            {/* key={id}: web's /issues/[id] route doesn't remount on
+                issueId change, so without an explicit key the editor
+                keeps the previous issue's in-memory content and the
+                next keystroke would flush it into the new issue's
+                draft key. */}
+            <CommentInput key={id} issueId={id} onSubmit={submitComment} />
+          </div>
         </div>
       </div>
   );

@@ -351,17 +351,7 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	if err != nil {
 		return "", false, err
 	}
-	// OpenClaw may print terminal UI borders (e.g., Doctor warnings) before
-	// the actual path. The path is always the last non-empty line.
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	path := ""
-	for i := len(lines) - 1; i >= 0; i-- {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed != "" {
-			path = trimmed
-			break
-		}
-	}
+	path := strings.TrimSpace(out)
 	if path == "" {
 		return "", false, fmt.Errorf("`openclaw config file` returned empty output")
 	}

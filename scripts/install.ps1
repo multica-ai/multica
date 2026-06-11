@@ -30,19 +30,6 @@ function Test-CommandExists {
     $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-function New-RandomHex {
-    param([int]$ByteCount)
-
-    $bytes = New-Object byte[] $ByteCount
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $rng.GetBytes($bytes)
-    } finally {
-        $rng.Dispose()
-    }
-    return -join ($bytes | ForEach-Object { "{0:x2}" -f $_ })
-}
-
 function Get-EnvFileValue {
     param(
         [string]$Path,
@@ -424,16 +411,11 @@ function Install-Server {
     Write-Ok "Repository ready at $InstallDir ($serverRef)"
 
     if (-not (Test-Path ".env")) {
-        Write-Info "Creating .env with random secrets..."
+        Write-Info "Creating .env with random JWT_SECRET..."
         Copy-Item ".env.example" ".env"
-        $jwt = New-RandomHex 32
-        $pgpass = New-RandomHex 24
-        $content = Get-Content ".env"
-        $content = $content -replace '^JWT_SECRET=.*', "JWT_SECRET=$jwt"
-        $content = $content -replace '^POSTGRES_PASSWORD=.*', "POSTGRES_PASSWORD=$pgpass"
-        $content = $content -replace '^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)', "`${1}$pgpass`${2}"
-        $content | Set-Content ".env"
-        Write-Ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
+        $jwt = -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Maximum 256) })
+        (Get-Content ".env") -replace '^JWT_SECRET=.*', "JWT_SECRET=$jwt" | Set-Content ".env"
+        Write-Ok "Generated .env with random JWT_SECRET"
     } else {
         Write-Ok "Using existing .env"
     }

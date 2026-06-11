@@ -502,7 +502,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       name={user?.name ?? ""}
                       initials={(user?.name ?? "U").charAt(0).toUpperCase()}
                       avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
-                      size={32}
+                      size={42}
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium leading-tight">

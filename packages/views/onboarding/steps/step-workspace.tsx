@@ -61,10 +61,9 @@ import { isReservedSlug } from "@multica/core/paths";
  */
 
 function issuePrefix(slug: string): string {
-  // Mirrors the server's default prefix derivation — first 4 chars of
-  // the slug, uppercased. Falls back to "WS" when the slug is empty so
-  // the preview line never collapses to a single dangling "-".
-  const head = slug.trim().replace(/[^a-z0-9]/g, "").slice(0, 4);
+  // Mirrors the server's default prefix derivation — fallback to slug
+  // (uppercased, 3 chars) when name has no latin letters.
+  const head = slug.trim().replace(/[^a-z0-9]/g, "").slice(0, 3);
   return (head || "ws").toUpperCase();
 }
 

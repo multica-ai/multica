@@ -151,7 +151,7 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
           <ActorAvatar
             actorType={autopilot.assignee_type}
             actorId={autopilot.assignee_id}
-            size={18}
+            size={28}
             enableHoverCard={autopilot.assignee_type === "agent"}
             showStatusDot={autopilot.assignee_type === "agent"}
           />

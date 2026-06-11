@@ -447,7 +447,7 @@ function MentionRow({
       <ActorAvatar
         actorType={item.type === "all" ? "member" : item.type}
         actorId={item.id}
-        size={20}
+        size={30}
         showStatusDot
       />
       <span className="truncate font-medium">

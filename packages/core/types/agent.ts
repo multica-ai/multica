@@ -430,6 +430,19 @@ export interface UpdateSkillRequest {
   files?: { path: string; content: string }[];
 }
 
+export interface BatchImportError {
+  skill_name: string;
+  error: string;
+}
+
+export interface BatchImportResponse {
+  imported: number;
+  skipped: number;
+  failed: number;
+  skills: Skill[];
+  errors: BatchImportError[];
+}
+
 export interface SetAgentSkillsRequest {
   skill_ids: string[];
 }

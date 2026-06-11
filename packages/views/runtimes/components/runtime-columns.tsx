@@ -112,7 +112,7 @@ export function createRuntimeColumns({
             <ActorAvatar
               actorType="member"
               actorId={row.original.ownerMember.user_id}
-              size={18}
+              size={28}
             />
             <span className="truncate text-xs text-muted-foreground">
               {row.original.ownerMember.name}
@@ -407,7 +407,7 @@ function AgentStack({ agentIds }: { agentIds: string[] }) {
           <ActorAvatar
             actorType="agent"
             actorId={id}
-            size={22}
+            size={32}
             enableHoverCard
           />
         </span>

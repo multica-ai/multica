@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"log/slog"
 	"math/rand"
 	"os"
@@ -27,11 +26,6 @@ import (
 // URL is not present in the workspace's repo configuration after a fresh
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
-
-const (
-	taskSlotWaitTimeout     = 2 * time.Second
-	taskSlotCapacityBackoff = 5 * time.Second
-)
 
 // taskRunner executes a single agent task and returns the result.
 // Extracted as an interface so tests can inject a fake without spawning real
@@ -81,7 +75,6 @@ type workspaceState struct {
 type repoCacheBackend interface {
 	Lookup(workspaceID, url string) string
 	Sync(workspaceID string, repos []repocache.RepoInfo) error
-	WithRepoLock(barePath string, fn func() error) error
 	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
 }
 
@@ -654,7 +647,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
 
-	taskWakeups := make(chan taskWakeup, 256)
+	taskWakeups := make(chan struct{}, 1)
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
@@ -1865,7 +1858,7 @@ func (d *Daemon) triggerRestart() {
 // loop so that a slow ClaimTask call (HTTP 30s timeout) for one runtime no
 // longer delays claims on every other runtime — that was the cross-workspace
 // stall mode reported in MUL-1744.
-func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) error {
+func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan struct{}) error {
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
 	var taskWG sync.WaitGroup   // tracks in-flight handleTask goroutines
 	var pollerWG sync.WaitGroup // tracks runRuntimePoller goroutines
@@ -1930,23 +1923,10 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			return ctx.Err()
 		case <-runtimeSetCh:
 			syncPollers()
-		case wakeup := <-taskWakeups:
-			if wakeup.runtimeID != "" {
-				if h, ok := pollers[wakeup.runtimeID]; ok {
-					d.logger.Debug("task wakeup: signaling runtime poller", "runtime_id", wakeup.runtimeID)
-					select {
-					case h.wakeup <- struct{}{}:
-					default:
-					}
-				} else {
-					d.logger.Debug("task wakeup: runtime poller not found", "runtime_id", wakeup.runtimeID, "pollers", len(pollers))
-				}
-				continue
-			}
-
-			// A wakeup without a runtime_id is a catch-up signal (for example,
-			// immediately after the websocket connects). Fan it out so queued
-			// work that existed before the connection is still discovered.
+		case <-taskWakeups:
+			// Fan out to every runtime poller. Any of them might have a queued
+			// task; the per-poller wakeup channel coalesces (cap 1) so a burst
+			// of wake-ups doesn't pile up.
 			d.logger.Debug("task wakeup: fanning out to pollers", "pollers", len(pollers))
 			for _, h := range pollers {
 				select {
@@ -1988,13 +1968,6 @@ func (d *Daemon) runRuntimePoller(
 	wakeup <-chan struct{},
 	taskWG *sync.WaitGroup,
 ) {
-	if offset := runtimePollOffset(rid, d.cfg.PollInterval); offset > 0 {
-		d.logger.Debug("poll: initial offset", "runtime_id", rid, "offset", offset)
-		if err := sleepWithContextOrWakeup(pollerCtx, offset, wakeup); err != nil {
-			return
-		}
-	}
-
 	for {
 		if pollerCtx.Err() != nil {
 			return
@@ -2003,16 +1976,14 @@ func (d *Daemon) runRuntimePoller(
 		// Acquire an execution slot before claiming. If at capacity, sleep
 		// without claiming so we don't push a task into `dispatched` and
 		// then race the 5-min server-side dispatch timeout while waiting.
-		slot, acquired, woke, err := waitForTaskSlot(pollerCtx, sem, wakeup, taskSlotWaitTimeout)
-		if err != nil {
+		var slot int
+		select {
+		case slot = <-sem:
+		case <-pollerCtx.Done():
 			return
-		}
-		if !acquired {
+		default:
 			d.logger.Debug("poll: at capacity", "runtime_id", rid, "running", d.cfg.MaxConcurrentTasks)
-			if woke {
-				continue
-			}
-			if err := sleepWithContextOrWakeup(pollerCtx, capacityBackoff(d.cfg.PollInterval), wakeup); err != nil {
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
 			}
 			continue
@@ -2079,49 +2050,6 @@ func (d *Daemon) runRuntimePoller(
 	}
 }
 
-func runtimePollOffset(runtimeID string, interval time.Duration) time.Duration {
-	if interval <= 0 || runtimeID == "" {
-		return 0
-	}
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(runtimeID))
-	return time.Duration(h.Sum64() % uint64(interval))
-}
-
-func capacityBackoff(pollInterval time.Duration) time.Duration {
-	if pollInterval <= 0 || pollInterval > taskSlotCapacityBackoff {
-		return taskSlotCapacityBackoff
-	}
-	return pollInterval
-}
-
-func waitForTaskSlot(ctx context.Context, sem chan int, wakeup <-chan struct{}, wait time.Duration) (slot int, acquired, woke bool, err error) {
-	select {
-	case slot = <-sem:
-		return slot, true, false, nil
-	case <-ctx.Done():
-		return 0, false, false, ctx.Err()
-	default:
-	}
-
-	if wait <= 0 {
-		return 0, false, false, nil
-	}
-
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case slot = <-sem:
-		return slot, true, false, nil
-	case <-wakeup:
-		return 0, false, true, nil
-	case <-ctx.Done():
-		return 0, false, false, ctx.Err()
-	case <-timer.C:
-		return 0, false, false, nil
-	}
-}
-
 // newTaskSlotSemaphore returns a buffered channel pre-populated with stable
 // slot indices [0, n). Receive to acquire a slot, send the same slot back to
 // release. Used by pollLoop to expose MULTICA_TASK_SLOT to spawned tasks.
@@ -2138,17 +2066,10 @@ func newTaskSlotSemaphore(maxConcurrentTasks int) chan int {
 // trivially testable; the polling goroutine in watchTaskCancellation is just
 // I/O around it.
 //
-// Two conditions trigger cancellation:
+// Two cases trigger cancellation:
 //
-//  1. status is a terminal state — "completed", "failed", or "cancelled"
-//     (isAgentTaskTerminal). The server has already finalized the task: user
-//     cancel, issue reassignment, the runtime offline sweeper flipping
-//     running → failed during a disconnect, or a duplicate execution that
-//     already completed it. Letting the local agent run on is pure waste —
-//     CompleteAgentTask only accepts status == "running", so its eventual
-//     CompleteTask/FailTask callback is guaranteed to fail and just adds log
-//     noise. Reusing isAgentTaskTerminal keeps this set in lockstep with the
-//     GC's notion of a terminal task.
+//  1. status == "cancelled" — the server moved the task to cancelled
+//     (issue reassigned, user cancel, ...).
 //  2. err is a 404 with "task not found" — the task row was deleted while
 //     the agent was running. Without this we'd let the local agent keep
 //     emitting tool calls against a dead task for its full timeout window.
@@ -2160,7 +2081,7 @@ func shouldInterruptAgent(status string, err error) bool {
 	if err != nil {
 		return isTaskNotFoundError(err)
 	}
-	return isAgentTaskTerminal(status)
+	return status == "cancelled"
 }
 
 // watchTaskCancellation polls the server for the task's status on the given
@@ -2184,7 +2105,7 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 				if err != nil {
 					taskLog.Info("task gone server-side, interrupting agent", "error", err)
 				} else {
-					taskLog.Info("task reached terminal state server-side, interrupting agent", "status", status)
+					taskLog.Info("task cancelled by server, interrupting agent")
 				}
 				close(cancelled)
 				return
@@ -2256,9 +2177,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	// Create a cancellable context so we can interrupt the running agent
-	// when the server signals the task should stop — either the task reached
-	// a terminal state (completed/failed/cancelled) or the task row is
-	// deleted (404).
+	// when the server signals the task should stop — either status moves
+	// to "cancelled" or the task row is deleted (404).
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
@@ -2315,11 +2235,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	_ = d.client.ReportProgress(ctx, task.ID, "Finishing task", 2, 2)
 
-	// Final pre-completion check: if the server already moved the task to a
-	// terminal state (completed/failed/cancelled) or deleted the row
-	// outright, skip reporting — the complete/fail callbacks would fail
-	// anyway. Reuse shouldInterruptAgent so this guard honors the same
-	// signals as the in-flight watcher.
+	// Final pre-completion check: if the server already moved the task to
+	// "cancelled" or deleted the row outright, skip reporting — the
+	// complete/fail callbacks would fail anyway. Reuse shouldInterruptAgent
+	// so this guard honors the same signals as the in-flight watcher.
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
 		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
 		return
@@ -2421,10 +2340,10 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
 		}
 		// Start polling once we actually park. shouldInterruptAgent inside
-		// watchTaskCancellation already handles both server-side terminal
-		// states (completed/failed/cancelled) and the row-deleted
-		// reassignment case (404), which is the full set of "this task
-		// shouldn't run anymore" signals we need to react to during the wait.
+		// watchTaskCancellation already handles both server-side cancel
+		// (status=cancelled) and the row-deleted reassignment case (404),
+		// which is the full set of "this task shouldn't run anymore"
+		// signals we need to react to during the wait.
 		watcherOnce.Do(func() {
 			cancelledByPoll = d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
 			go func() {
@@ -2438,15 +2357,15 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	}
 	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
 	if err != nil {
-		// If the wait was cut short because the server finalized the task
-		// (terminal state) or deleted the row, the row is already in a
-		// terminal state — return silently the same way the run-phase poller
-		// does at lines ~2104. Issuing FailTask here would be a no-op at best
+		// If the wait was cut short because the server cancelled the task
+		// (or deleted the row), the row is already in a terminal state —
+		// return silently the same way the run-phase poller does at
+		// lines ~2104. Issuing FailTask here would be a no-op at best
 		// and a confusing redundant log line at worst.
 		if cancelledByPoll != nil {
 			select {
 			case <-cancelledByPoll:
-				taskLog.Info("local_directory: wait aborted by server-side terminal state")
+				taskLog.Info("local_directory: wait aborted by server-side cancel")
 				return nil, true
 			default:
 			}
@@ -2924,7 +2843,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
-		ThreadName:                deriveTaskThreadName(task),
 		Timeout:                   d.cfg.AgentTimeout,
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
 		ResumeSessionID:           task.PriorSessionID,

@@ -311,7 +311,9 @@
     "status_queued": "待機中",
     "chip_label": "作業中",
     "empty_hover": "現在作業中のエージェントはありません",
-    "filter_active_label": "作業中のエージェントのみ表示中"
+    "filter_active_label": "作業中のエージェントのみ表示中",
+    "hover_header": "{{count}} 体のエージェントが作業中",
+    "hover_header_queued": "キュー中"
   },
   "agent_live": {
     "is_working": "{{name}} が作業中",

@@ -963,3 +963,91 @@ func bindingPromptTemplate(bindURL string) (string, error) {
 	}
 	return string(raw), nil
 }
+
+// AddMessageReaction attaches an emoji reaction to an existing message
+// via POST /open-apis/im/v1/messages/{message_id}/reactions. The
+// typing indicator calls it when an agent picks up a chat turn so the
+// user sees a visible "TYPING" pin on the message that triggered the
+// agent. EmojiType is Lark's canonical emoji name (e.g. "THUMBSUP",
+// "TYPING") and is passed verbatim in the request body. The
+// reaction_id in the response is what DeleteMessageReaction needs to
+// later remove the pin; the typing indicator's caller persists it
+// alongside the chat_session so the refresh loop can tear it down on
+// completion or agent crash.
+//
+// Why a separate method (rather than embedding in the chat dispatcher):
+// the call is fire-and-forget from the typing state machine, never
+// holds a card-message reference, and never participates in
+// card-patch throttling. Keeping it on its own keeps the typing
+// indicator's failure paths (warn-and-continue) orthogonal to the
+// dispatcher card-flow (retry-on-token-error).
+func (c *httpAPIClient) AddMessageReaction(ctx context.Context, p AddReactionParams) (string, error) {
+	if p.MessageID == "" {
+		return "", errors.New("lark http client: missing message_id")
+	}
+	if p.EmojiType == "" {
+		return "", errors.New("lark http client: missing emoji_type")
+	}
+	token, err := c.tenantAccessToken(ctx, p.InstallationID)
+	if err != nil {
+		return "", err
+	}
+	body := map[string]string{
+		"reaction_type": p.EmojiType,
+	}
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			ReactionID string `json:"reaction_id"`
+		} `json:"data"`
+	}
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(p.MessageID) + "/reactions"
+	if err := c.doJSON(ctx, c.resolveBaseURL(p.InstallationID), http.MethodPost, path, token, body, &resp); err != nil {
+		return "", fmt.Errorf("lark http client: add message reaction: %w", err)
+	}
+	if resp.Code != 0 || resp.Data.ReactionID == "" {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(p.InstallationID.AppID)
+		}
+		return "", fmt.Errorf("lark http client: add message reaction: code=%d msg=%q", resp.Code, resp.Msg)
+	}
+	return resp.Data.ReactionID, nil
+}
+
+// DeleteMessageReaction removes a previously-added reaction via
+// DELETE /open-apis/im/v1/messages/{message_id}/reactions/{reaction_id}.
+// The typing indicator calls it from its refresh loop (when the agent
+// finishes) and from its crash-recovery sweep (in case the indicator
+// died before tearing down). We deliberately do not retry on
+// "reaction not found" (Lark 231001 / 230020): a missing reaction is
+// already the desired terminal state, so callers can treat the error
+// as advisory rather than fatal.
+func (c *httpAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error {
+	if p.MessageID == "" {
+		return errors.New("lark http client: missing message_id")
+	}
+	if p.ReactionID == "" {
+		return errors.New("lark http client: missing reaction_id")
+	}
+	token, err := c.tenantAccessToken(ctx, p.InstallationID)
+	if err != nil {
+		return err
+	}
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(p.MessageID) +
+		"/reactions/" + url.PathEscape(p.ReactionID)
+	if err := c.doJSON(ctx, c.resolveBaseURL(p.InstallationID), http.MethodDelete, path, token, nil, &resp); err != nil {
+		return fmt.Errorf("lark http client: delete message reaction: %w", err)
+	}
+	if resp.Code != 0 {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(p.InstallationID.AppID)
+		}
+		return fmt.Errorf("lark http client: delete message reaction: code=%d msg=%q", resp.Code, resp.Msg)
+	}
+	return nil
+}

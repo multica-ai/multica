@@ -82,7 +82,7 @@ export function AgentPicker({
                 <ActorAvatar
                   actorType={assignee.type}
                   actorId={assignee.id}
-                  size={16}
+                  size={26}
                   showStatusDot={assignee.type === "agent"}
                 />
                 <span className="truncate">{selectedName}</span>
@@ -109,7 +109,7 @@ export function AgentPicker({
                   selected={isSelected("agent", a.id)}
                   onClick={() => handlePick("agent", a.id)}
                 >
-                  <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
+                  <ActorAvatar actorType="agent" actorId={a.id} size={26} showStatusDot />
                   <span className="truncate">{a.name}</span>
                 </PickerItem>
               ))}
@@ -123,7 +123,7 @@ export function AgentPicker({
                   selected={isSelected("squad", s.id)}
                   onClick={() => handlePick("squad", s.id)}
                 >
-                  <ActorAvatar actorType="squad" actorId={s.id} size={16} />
+                  <ActorAvatar actorType="squad" actorId={s.id} size={26} />
                   <span className="truncate">{s.name}</span>
                 </PickerItem>
               ))}

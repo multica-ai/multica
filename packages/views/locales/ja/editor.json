@@ -80,9 +80,6 @@
   },
   "slash_command": {
     "no_skills_configured": "設定済みスキルなし",
-    "no_results": "一致するスキルなし",
-    "commands": {
-      "note": "メモを追加 — エージェントをトリガーしません"
-    }
+    "no_results": "一致するスキルなし"
   }
 }

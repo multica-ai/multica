@@ -168,7 +168,7 @@ function UsedBySection({ agents }: { agents: Agent[] }) {
             initials={a.name.slice(0, 2).toUpperCase()}
             avatarUrl={resolvePublicFileUrl(a.avatar_url)}
             isAgent
-            size={22}
+            size={32}
           />
           <div className="min-w-0 flex-1">
             <div className="truncate text-xs font-medium">{a.name}</div>
@@ -725,7 +725,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                       name={creator.name}
                       initials={creator.name.slice(0, 2).toUpperCase()}
                       avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
-                      size={14}
+                      size={24}
                     />
                     {t(($) => $.detail.subline.by_creator, { name: creator.name })}
                   </span>

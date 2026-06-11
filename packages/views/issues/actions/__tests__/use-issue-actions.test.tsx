@@ -174,6 +174,26 @@ describe("useIssueActions", () => {
     );
   });
 
+  it("copyIdentifier writes the issue identifier to the clipboard", async () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyIdentifier();
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("TES-1");
+  });
+
+  it("copyIdentifier is a no-op when issue is null", async () => {
+    const { result } = renderHook(() => useIssueActions(null), { wrapper });
+
+    await act(async () => {
+      await result.current.copyIdentifier();
+    });
+
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
   it("openSetParent / openAddChild / openDeleteConfirm / openCreateSubIssue open the correct modal with payload", () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 
