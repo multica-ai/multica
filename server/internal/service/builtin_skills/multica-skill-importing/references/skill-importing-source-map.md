@@ -17,44 +17,48 @@ grep -n "func IsReservedContentPath"    server/internal/skill/reserved.go
 
 | Behavior | File:line |
 |---|---|
-| `ImportSkill` handler (`POST /api/skills/import`) | `server/internal/handler/skill.go:1724` |
-| Decodes `ImportSkillRequest` (`{ "url": ... }`) | `server/internal/handler/skill.go:1737-1741`, struct at `:523` |
-| Detects source family + normalizes URL | `server/internal/handler/skill.go:1743` (calls `detectImportSource`) |
-| Persists provenance into `config.origin` | `server/internal/handler/skill.go:1776-1781` — set at `:1780` **only when** `imported.origin != nil` (`:1779`); otherwise `config` stays `{}` and `origin` is absent |
-| Builds skill + files via `createSkillWithFiles` (def `server/internal/handler/skill_create.go:72`, tx body `:27`) | call site `server/internal/handler/skill.go:1783` |
-| Success: `201 Created` with the response body | `server/internal/handler/skill.go:1806` |
-| Route registration `r.Post("/import", h.ImportSkill)` | `server/cmd/server/router.go:621` (under `/api/skills`, `:617`) |
+| `ImportSkill` handler (`POST /api/skills/import`) | `server/internal/handler/skill.go:1882` |
+| Decodes `ImportSkillRequest` (`{ "url": ..., "on_conflict": ... }`) | `server/internal/handler/skill.go:1895-1899`, struct at `:553` |
+| Validates `on_conflict` (`fail`, `overwrite`, `rename`, `skip`) | `server/internal/handler/skill.go:1900-1908`, helper `validImportOnConflict` at `:566` |
+| Detects source family + normalizes URL | `server/internal/handler/skill.go:1910` (calls `detectImportSource`) |
+| Persists provenance into `config.origin` | `server/internal/handler/skill.go:1944-1948` — set only when `imported.origin != nil`; otherwise `config` stays `{}` and `origin` is absent |
+| Structured conflict dispatcher | `server/internal/handler/skill.go:1813-1878` |
+| Builds skill + files via `createSkillWithFiles` (def `server/internal/handler/skill_create.go:77`, tx body `:29`) | wrapped by `createImportedSkillWithName` at `server/internal/handler/skill.go:1774` |
+| Structured success: `201 Created` with `{status:"created", skill}` when `on_conflict` was sent | `server/internal/handler/skill.go:1985-1988` |
+| Legacy success: `201 Created` with bare `SkillWithFilesResponse` when `on_conflict` was omitted | `server/internal/handler/skill.go:1990` |
+| Route registration `r.Post("/import", h.ImportSkill)` | `server/cmd/server/router.go:874` |
 
 ## CLI: `multica skill import --url`
 
 | Behavior | File:line |
 |---|---|
 | `skill import` command def | `server/cmd/multica/cmd_skill.go:60-64` |
-| `--url` flag | `server/cmd/multica/cmd_skill.go:143` |
+| `--url` flag | `server/cmd/multica/cmd_skill.go:142` |
+| `--on-conflict` flag (default `fail`) | `server/cmd/multica/cmd_skill.go:143` |
 | `--output` flag (default `json`) | `server/cmd/multica/cmd_skill.go:144` |
 | `runSkillImport` | `server/cmd/multica/cmd_skill.go:412` |
 | Requires `--url` | `server/cmd/multica/cmd_skill.go:418-421` |
-| `POST /api/skills/import` | `server/cmd/multica/cmd_skill.go:431` |
-| On error, tries conflict handler; returns `nil` (exit 0) when handled | `server/cmd/multica/cmd_skill.go:432-434` |
+| Reads and validates `--on-conflict` | `server/cmd/multica/cmd_skill.go:422-425` |
+| Sends `on_conflict` in the request body | `server/cmd/multica/cmd_skill.go:428-431` |
+| `POST /api/skills/import` | `server/cmd/multica/cmd_skill.go:436` |
+| Structured HTTP error body handling | `server/cmd/multica/cmd_skill.go:437-440`, `handleSkillImportError` at `:454` |
+| Prints structured result (`json` or table) | `server/cmd/multica/cmd_skill.go:443`, helper at `:497` |
 
-## Duplicate 409 handling
+## Same-name conflict handling
 
 | Behavior | File:line |
 |---|---|
-| `ImportSkill` unique-violation branch | `server/internal/handler/skill.go:1793-1800` |
-| Structured 409 via `writeSkillImportDuplicateConflict` (looks up existing skill) | `server/internal/handler/skill.go:1794-1795` |
-| `writeSkillImportDuplicateConflict` writes `{error, existing_skill}` at status 409 | `server/internal/handler/skill.go:109-114` |
-| `ExistingSkillIdentity` (`{id,name}`) | `server/internal/handler/skill.go:104-107` |
-| `existingSkillIdentityByName` (GetSkillByWorkspaceAndName) | `server/internal/handler/skill.go:130-142` |
-| Defensive fallback: plain-string 409 when lookup misses (delete-race) | `server/internal/handler/skill.go:1796-1798` |
-| CLI `handleSkillImportConflict` | `server/cmd/multica/cmd_skill.go:447` |
-| Requires HTTP 409 + non-empty body | `server/cmd/multica/cmd_skill.go:449-451` |
-| Requires `existing_skill` key (else `false` → non-zero exit) | `server/cmd/multica/cmd_skill.go:457-459` |
-| Under `--output json`: prints body, returns `true` (caller exits 0) | `server/cmd/multica/cmd_skill.go:461-465` |
-
-A legacy plain-string 409 (no `existing_skill` key) fails the `:457-459` guard,
-so `handleSkillImportConflict` returns `false`, `runSkillImport` falls through to
-`return fmt.Errorf("import skill: ...")` at `:435` → non-zero exit.
+| `SkillImportResult` (`status`, `reason`, `skill`, `existing_skill`) | `server/internal/handler/skill.go:104-109` |
+| `ExistingSkillIdentity` (`id`, `name`, `created_by`, `can_overwrite`) | `server/internal/handler/skill.go:112-117` |
+| Pre-create lookup for structured conflict flow | `server/internal/handler/skill.go:1951-1962` |
+| Race-safe unique-violation fallback into structured conflict flow | `server/internal/handler/skill.go:1966-1971` |
+| Default `fail`: `status:"conflict"` and HTTP 409 | `server/internal/handler/skill.go:1872-1877` |
+| `overwrite`: creator-only update, preserves skill identity/bindings via `overwriteSkillWithFiles` | `server/internal/handler/skill.go:1823-1852`, tx helper at `server/internal/handler/skill_create.go:133` |
+| `rename`: creates suffixed name with bounded attempts | `server/internal/handler/skill.go:1854-1870`, helper at `:1786` |
+| `skip`: returns `status:"skipped"` and leaves existing skill untouched | `server/internal/handler/skill.go:1816-1821` |
+| Legacy duplicate branch when `on_conflict` was omitted | `server/internal/handler/skill.go:1973-1978` |
+| Legacy duplicate response `{error, existing_skill}` | `server/internal/handler/skill.go:118-123` |
+| CLI normalizes legacy `{existing_skill}` body into `status:"conflict"` | `server/cmd/multica/cmd_skill.go:454-482`, helper at `:484` |
 
 ## Response shape: `SkillWithFilesResponse`
 
@@ -64,10 +68,11 @@ so `handleSkillImportConflict` returns `false`, `runSkillImport` falls through t
 | `SkillResponse` fields (`id, workspace_id, name, description, content, config, created_by, created_at, updated_at`) | `server/internal/handler/skill.go:41-51` |
 | `SkillFileResponse` fields | `server/internal/handler/skill.go:80-87` |
 | `createSkillWithFilesInTx` returns `SkillWithFilesResponse{SkillResponse, Files}` | `server/internal/handler/skill_create.go:66-69` |
-| `config.origin` set on import | `server/internal/handler/skill.go:1780` |
+| `config.origin` set on import | `server/internal/handler/skill.go:1947` |
 
-The import response is a `SkillWithFilesResponse` (not a bare `SkillResponse`):
-it carries every `SkillResponse` field plus the `files` array.
+For current CLI imports, `SkillWithFilesResponse` appears under
+`SkillImportResult.skill` when status is `created` or `updated`. Legacy clients
+that omit `on_conflict` still receive a bare `SkillWithFilesResponse`.
 
 ## URL source families (`detectImportSource`)
 
