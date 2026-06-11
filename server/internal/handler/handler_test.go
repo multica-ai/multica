@@ -4549,6 +4549,11 @@ func TestAgentExplicitMentionWithoutOriginalUserIsDenied(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("agent A handoff comment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	// CEREBRO-PATCH(mention-delegation-block-visible-test): missing human provenance gets a visible system reply.
+	var comment CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&comment); err != nil {
+		t.Fatalf("decode denied handoff comment: %v", err)
+	}
 	var got int
 	if err := testPool.QueryRow(ctx,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
@@ -4558,6 +4563,22 @@ func TestAgentExplicitMentionWithoutOriginalUserIsDenied(t *testing.T) {
 	}
 	if got != 0 {
 		t.Fatalf("expected default-deny to block Agent B task without original_user_id, got %d", got)
+	}
+	var systemContent string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content
+		FROM comment
+		WHERE issue_id = $1
+		  AND parent_id = $2
+		  AND author_type = 'system'
+		  AND type = 'system'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, comment.ID).Scan(&systemContent); err != nil {
+		t.Fatalf("expected system comment explaining denied handoff: %v", err)
+	}
+	if !strings.Contains(systemContent, "Kunne ikke starte") || !strings.Contains(systemContent, "menneskelig afsender") {
+		t.Fatalf("system comment should explain the denied handoff, got %q", systemContent)
 	}
 }
 
