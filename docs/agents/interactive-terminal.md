@@ -99,3 +99,99 @@ Patch: `CEREBRO-PATCH(daemon-ws-write-accessor-signal-order)`
 **Fix:** Increase `SetReadLimit` from 4096 to `128 * 1024`.
 
 Patch: `CEREBRO-PATCH(daemonws-term-read-limit)`
+
+## Operational dependency — the whole feature rides on ONE WebSocket (TECH-3388)
+
+Everything the daemon normally does (claim tasks, heartbeat, wakeup) has an
+**HTTP fallback**: if the daemon ↔ server task-wakeup WebSocket (`/api/daemon/ws`)
+is unavailable, the daemon degrades to HTTP polling and agents keep running
+"glimrende".
+
+The interactive terminal does **not** have that fallback. `term_attach`,
+`term_stdout`, and `term_exit` are sent **only** over that WebSocket
+(`server/internal/daemon/cerebro_terminal.go` → `enqueueCerebroFrame` →
+`d.wsWrites`). If the WS does not connect (reverse proxy doesn't upgrade
+`/api/daemon/ws`, TLS/origin issue, HTTP/2-only proxy that won't do an
+RFC-6455 upgrade), then:
+
+- the agent still runs and posts comments normally (HTTP path), **but**
+- no `term_attach` ever reaches the server → broker never `Adopt`s a session →
+  `GET /api/cerebro/terminal/runtimes/{id}/session` returns `204` forever →
+  the browser sits on **"Waiting for agent…"** indefinitely.
+
+This is the first thing to check when "the agent works but the live terminal
+doesn't": confirm the daemon log shows `task wakeup websocket connected`, not
+`task wakeup websocket unavailable; polling fallback remains active`.
+
+**A second thing to check: the daemon binary version.** The terminal needs the
+daemon-side fixes from 2026-06-08 (`CEREBRO-PATCH(daemon-ws-write-accessor-signal-order)`).
+A daemon built before that drops `term_attach` at task start and the terminal
+never connects even though the agent runs fine. Check `multica --version` /
+`multica update` on the machine hosting the runtime.
+
+### Surviving WS flaps (TECH-3388)
+
+The task-wakeup WS flaps regularly in the field (`close 1006 unexpected EOF`,
+reconnect gaps up to ~55s — likely a tunnel/proxy connection max-age). Before
+the fix, the server closed the adopted session 15s after any disconnect, so the
+browser terminal died on every flap. Now:
+
+- `daemonDisconnectGrace` is 90s (comfortably exceeds an observed reconnect).
+- On reconnect the daemon re-announces each active task; the duplicate
+  `term_attach` bumps `Session.reattachGen`, and the disconnect reaper skips any
+  session whose generation changed during the grace window. A flap is invisible
+  to the browser apart from a brief pause in output.
+- Output produced *during* the reconnect gap is still lost (the daemon drops
+  `term_stdout` frames while the WS is down). Buffering across reconnect is a
+  follow-up; today the session survives, which is what "100% uptime" needs.
+
+## Fixed — many interactive terminals at once, per daemon process (TECH-3388)
+
+`cerebroTermSink` and `cerebroActiveAttach` are **single process-wide fields**
+on the `Daemon` struct (`daemon.go` lines 173-176), but the daemon runs up to
+`MaxConcurrentTasks` tasks at once (`newTaskSlotSemaphore`), possibly across
+several interactive runtimes hosted by the same daemon.
+
+Consequences when two or more interactive tasks overlap:
+
+1. **Last-attach-wins.** `cerebroAttachTerminal` calls `setCerebroTermSink(...)`
+   which overwrites the single field. `executeAndDrain` reads that one field and
+   calls it with its own `taskID`; the installed closure filters
+   `if taskID != task.ID { return }`, so the **earlier** task's output is
+   silently dropped — its browser shows a frozen/blank terminal even though the
+   agent is producing output.
+2. **Teardown kills the others.** When *any* interactive task ends, its teardown
+   runs `setCerebroTermSink(nil)` + `cerebroActiveAttach.Store(nil)`,
+   disabling mirroring (and reconnect re-emit) for every other still-running
+   interactive task.
+
+For a busy dogfood runtime (Sara, Mia) that runs many tasks in parallel, this
+broke the live terminal most of the time, not just in a rare race.
+
+**Fix (shipped):** the daemon sink is now a per-task registry keyed by `taskID`
+(`cerebroTermSinks map[string]func(string)` under `cerebroTermSinkMu`), and the
+in-flight attach frames are a `cerebroActiveAttaches map[string][]byte` so a WS
+reconnect re-emits every active task's attach (not just the latest). Each task's
+teardown removes only its own `taskID`. `executeAndDrain` routes through
+`dispatchCerebroTerm(taskID, text)`, which looks up that task's sink. Concurrent
+interactive tasks — across slots or across runtimes hosted by one daemon — now
+each mirror to their own broker session.
+
+Note: the browser popout is keyed by `runtimeId`, and `GetByRuntime` returns the
+most-recent open session for a runtime. So "many terminals at once" means one
+live terminal per runtime across many runtimes. If a single runtime runs several
+concurrent tasks, its popout shows the newest task's session.
+
+## Diagnostic runbook — where is it breaking?
+
+Walk the chain in order; the first failing hop is the cause.
+
+| Check | How | If it fails |
+|---|---|---|
+| Feature flag on for the workspace | `cerebro_interactive_terminal` (defaults **false**) | Toggle + "Open terminal" never render |
+| Runtime is `interactive` | `GET /api/cerebro/terminal/runtimes/{id}/presentation-mode` | Toggle was never flipped, or it's a `firtal-gateway` cloud runtime (rejected) |
+| Daemon WS connected | daemon log: `task wakeup websocket connected` | term frames have no transport — see "Operational dependency" above |
+| Server adopted a session | server log: `term_attach: session adopted` | claim didn't carry `presentation_mode`, or attach frame dropped |
+| Active session visible to UI | `GET /api/cerebro/terminal/runtimes/{id}/session` returns `200` (not `204`) | broker has no open session for the runtime |
+| Browser WS attaches | network tab: WS to `/api/cerebro/terminal/sessions/{id}/ws` upgrades (101) + `auth_ack`/cookie | cross-origin cookie not sent, or auth handshake mismatch |
+| Only one task running | if multiple interactive tasks overlap → single-sink bug above | output frozen/blank for all but the most recent task |

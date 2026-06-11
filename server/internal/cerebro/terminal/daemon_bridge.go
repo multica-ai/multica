@@ -60,10 +60,15 @@ type DaemonBridge struct {
 	hub     hubWriter
 	queries PresentationModeQuerier
 
-	mu       sync.Mutex
-	adopted  map[string]*Session // key: bridgeKey(runtimeID, taskID)
-	stdinWG  sync.WaitGroup      // tracks per-session stdin pumps for test/shutdown
-	logger   *slog.Logger
+	mu      sync.Mutex
+	adopted map[string]*Session // key: bridgeKey(runtimeID, taskID)
+	stdinWG sync.WaitGroup      // tracks per-session stdin pumps for test/shutdown
+	logger  *slog.Logger
+
+	// disconnectGrace is how long OnDaemonDisconnect waits before closing a
+	// session whose daemon dropped. Defaults to daemonDisconnectGrace; tests
+	// shorten it so the reconnect-cancels-close path is checkable in ms.
+	disconnectGrace time.Duration
 }
 
 // NewDaemonBridge wires the broker, hub, and queries together. queries may
@@ -76,11 +81,12 @@ func NewDaemonBridge(broker *Broker, hub *daemonws.Hub, queries PresentationMode
 // newDaemonBridge accepts the interface form for tests.
 func newDaemonBridge(broker *Broker, hub hubWriter, queries PresentationModeQuerier) *DaemonBridge {
 	return &DaemonBridge{
-		broker:  broker,
-		hub:     hub,
-		queries: queries,
-		adopted: make(map[string]*Session),
-		logger:  slog.Default(),
+		broker:          broker,
+		hub:             hub,
+		queries:         queries,
+		adopted:         make(map[string]*Session),
+		logger:          slog.Default(),
+		disconnectGrace: daemonDisconnectGrace,
 	}
 }
 
@@ -147,7 +153,12 @@ func (b *DaemonBridge) handleAttach(ctx context.Context, identity daemonws.Clien
 	b.mu.Lock()
 	if existing, ok := b.adopted[key]; ok && !existing.closed.Load() {
 		b.mu.Unlock()
-		b.logger.Debug("term_attach: session already adopted; ignoring duplicate", "runtime_id", p.RuntimeID, "task_id", p.TaskID, "session_id", existing.ID)
+		// Duplicate attach = the daemon reconnected after a WS flap and is
+		// re-announcing the same task. Bump the reattach generation so the
+		// disconnect reaper (OnDaemonDisconnect) leaves this live session
+		// alone, and keep streaming into the existing session. TECH-3388.
+		existing.reattachGen.Add(1)
+		b.logger.Debug("term_attach: session re-announced after reconnect; keeping live session", "runtime_id", p.RuntimeID, "task_id", p.TaskID, "session_id", existing.ID)
 		return nil
 	}
 
@@ -333,9 +344,13 @@ func marshalCerebroFrame(frameType string, payload any) ([]byte, error) {
 }
 
 // daemonDisconnectGrace is how long we wait before closing adopted sessions
-// after a daemon WS disconnect. This covers transient reconnects so a brief
-// network blip doesn't kill an in-flight terminal session.
-const daemonDisconnectGrace = 15 * time.Second
+// after a daemon WS disconnect. The daemon ↔ server task-wakeup WS flaps
+// regularly in the field (TECH-3388: observed reconnect gaps up to ~55s), so
+// the grace must comfortably exceed a normal reconnect or every flap would
+// kill the live terminal. The reaper also re-checks reattachGen, so this is an
+// upper bound on how long a truly-dead daemon's session lingers, not a fixed
+// wait — a reconnect within the window cancels the close immediately.
+const daemonDisconnectGrace = 90 * time.Second
 
 // OnDaemonDisconnect is called by the daemonws hub when a daemon WS connection
 // drops. After a short grace period it closes any adopted sessions whose
@@ -354,25 +369,52 @@ func (b *DaemonBridge) OnDaemonDisconnect(identity daemonws.ClientIdentity) {
 			runtimeSet[rid] = true
 		}
 	}
+	// Snapshot the candidate sessions and their reattach generation NOW, before
+	// the grace sleep. If the daemon reconnects during the window it re-announces
+	// each task (bumping reattachGen), and we leave those live sessions alone.
+	type candidate struct {
+		key string
+		s   *Session
+		gen uint64
+	}
+	b.mu.Lock()
+	candidates := make([]candidate, 0)
+	for key, s := range b.adopted {
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 || !runtimeSet[parts[0]] {
+			continue
+		}
+		candidates = append(candidates, candidate{key: key, s: s, gen: s.reattachGen.Load()})
+	}
+	b.mu.Unlock()
+	if len(candidates) == 0 {
+		return
+	}
 	go func() {
-		time.Sleep(daemonDisconnectGrace)
+		time.Sleep(b.disconnectGrace)
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		for key, s := range b.adopted {
-			parts := strings.SplitN(key, "|", 2)
-			if len(parts) != 2 || !runtimeSet[parts[0]] {
+		for _, c := range candidates {
+			// Still the same session in the map?
+			if cur, ok := b.adopted[c.key]; !ok || cur != c.s {
 				continue
 			}
-			if s.closed.Load() {
-				delete(b.adopted, key)
+			if c.s.closed.Load() {
+				delete(b.adopted, c.key)
 				continue
 			}
-			s.Exit(1, errors.New("daemon disconnected"))
-			delete(b.adopted, key)
+			// Reconnected during the grace window → keep the live session.
+			if c.s.reattachGen.Load() != c.gen {
+				b.logger.Debug("term: daemon reconnected during grace; keeping session", "key", c.key, "session_id", c.s.ID)
+				continue
+			}
+			parts := strings.SplitN(c.key, "|", 2)
+			c.s.Exit(1, errors.New("daemon disconnected"))
+			delete(b.adopted, c.key)
 			b.logger.Info("term: session closed on daemon disconnect",
 				"runtime_id", parts[0],
 				"task_id", parts[1],
-				"session_id", s.ID,
+				"session_id", c.s.ID,
 			)
 		}
 	}()

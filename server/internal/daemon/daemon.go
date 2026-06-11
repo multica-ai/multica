@@ -169,11 +169,11 @@ type Daemon struct {
 
 	// CEREBRO-PATCH(daemon-ws-write-accessor): expose write channel for cerebro term frames.
 	wsWrites atomic.Pointer[chan []byte]
-	// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to interactive terminal sink.
+	// CEREBRO-PATCH(daemon-cerebro-term-tee): per-task interactive terminal sinks (TECH-3388: many terminals at once).
 	cerebroTermSinkMu sync.RWMutex
-	cerebroTermSink   func(taskID string, text string)
-	// CEREBRO-PATCH(daemon-cerebro-term-reattach): in-flight attach frame re-emitted on WS reconnect.
-	cerebroActiveAttach atomic.Pointer[[]byte]
+	cerebroTermSinks  map[string]func(text string)
+	// CEREBRO-PATCH(daemon-cerebro-term-reattach): per-task in-flight attach frames re-emitted on WS reconnect.
+	cerebroActiveAttaches map[string][]byte
 }
 
 // New creates a new Daemon instance.
@@ -201,6 +201,9 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		// CEREBRO-PATCH(daemon-cerebro-term-tee): per-task terminal sink + attach-frame registries (TECH-3388).
+		cerebroTermSinks:      make(map[string]func(string)),
+		cerebroActiveAttaches: make(map[string][]byte),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -3640,10 +3643,8 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
 				lastActivityAt.Store(time.Now().UnixNano())
-				// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to interactive terminal sink.
-				if sink := d.getCerebroTermSink(); sink != nil {
-					sink(taskID, formatMessageAsText(msg))
-				}
+				// CEREBRO-PATCH(daemon-cerebro-term-tee): forward agent messages to this task's interactive terminal sink.
+				d.dispatchCerebroTerm(taskID, formatMessageAsText(msg))
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend

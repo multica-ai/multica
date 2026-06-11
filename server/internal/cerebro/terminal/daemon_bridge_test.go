@@ -204,3 +204,71 @@ func TestBridge_AttachRejectsRuntimeNotInIdentity(t *testing.T) {
 		t.Errorf("expected no broker session for unauthorized runtime; got %v", got)
 	}
 }
+
+// attachFor is a small helper for the disconnect tests below.
+func attachFor(t *testing.T, bridge *DaemonBridge, identity daemonws.ClientIdentity, taskID string) {
+	t.Helper()
+	if err := bridge.HandleMessage(context.Background(), identity, msgWith(t, FrameTermAttach, map[string]any{
+		"task_id":    taskID,
+		"runtime_id": identity.RuntimeIDs[0],
+	})); err != nil {
+		t.Fatalf("attach %s: %v", taskID, err)
+	}
+}
+
+// TestBridge_DisconnectClosesSessionAfterGrace proves a truly-dead daemon's
+// adopted session is closed once the grace elapses with no reconnect.
+func TestBridge_DisconnectClosesSessionAfterGrace(t *testing.T) {
+	broker := NewBroker()
+	bridge := newDaemonBridge(broker, &fakeHub{}, &fakeQ{mode: "interactive"})
+	bridge.disconnectGrace = 50 * time.Millisecond
+	identity := daemonws.ClientIdentity{
+		WorkspaceID: "ws-1",
+		RuntimeIDs:  []string{"00000000-0000-0000-0000-0000000000aa"},
+	}
+	attachFor(t, bridge, identity, "task-dc-1")
+	session := broker.GetByRuntime(identity.RuntimeIDs[0])
+	if session == nil {
+		t.Fatal("expected adopted session before disconnect")
+	}
+
+	bridge.OnDaemonDisconnect(identity)
+	select {
+	case <-session.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("session not closed after grace elapsed without reconnect")
+	}
+}
+
+// TestBridge_ReconnectDuringGraceKeepsSession is the TECH-3388 regression: the
+// daemon WS flaps and re-announces the task within the grace window. The live
+// session must survive (the duplicate attach bumps reattachGen, so the reaper
+// skips the close).
+func TestBridge_ReconnectDuringGraceKeepsSession(t *testing.T) {
+	broker := NewBroker()
+	bridge := newDaemonBridge(broker, &fakeHub{}, &fakeQ{mode: "interactive"})
+	bridge.disconnectGrace = 200 * time.Millisecond
+	identity := daemonws.ClientIdentity{
+		WorkspaceID: "ws-1",
+		RuntimeIDs:  []string{"00000000-0000-0000-0000-0000000000bb"},
+	}
+	attachFor(t, bridge, identity, "task-rc-1")
+	session := broker.GetByRuntime(identity.RuntimeIDs[0])
+	if session == nil {
+		t.Fatal("expected adopted session before disconnect")
+	}
+
+	// Daemon drops, then reconnects (re-announces the same task) before grace.
+	bridge.OnDaemonDisconnect(identity)
+	time.Sleep(40 * time.Millisecond)
+	attachFor(t, bridge, identity, "task-rc-1") // duplicate attach = reconnect
+
+	// Wait past the original grace; the session must still be live.
+	time.Sleep(300 * time.Millisecond)
+	if session.closed.Load() {
+		t.Fatal("session was closed despite a reconnect within the grace window")
+	}
+	if got := broker.GetByRuntime(identity.RuntimeIDs[0]); got != session {
+		t.Fatal("expected the same live session to remain adopted after reconnect")
+	}
+}
