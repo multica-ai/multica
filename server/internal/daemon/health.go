@@ -132,6 +132,8 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — local-runtime PreToolUse hook resolve.
+	mux.HandleFunc(toolPolicyResolvePath, d.handleToolPolicyResolve)
 
 	mux.HandleFunc("/repo/checkout", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

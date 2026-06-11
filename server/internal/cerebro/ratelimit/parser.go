@@ -84,7 +84,7 @@ func ClassifyReset(errText string, now time.Time) (time.Time, bool, bool) {
 	if t, ok := parseAbsoluteMonthDay(errText, now); ok {
 		return t, true, true
 	}
-	if t, ok := parseWallClock(lower, now); ok {
+	if t, ok := parseWallClock(errText, now); ok {
 		return t, true, true
 	}
 	if t, ok := parseRelativeDuration(lower, now); ok {
@@ -134,14 +134,21 @@ func parseISO8601(errText string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// wallClockRe matches "resets 12:40pm (Europe/Copenhagen)" / "resets 6:50pm
+// (UTC)" / "Resets at 18:50 UTC" style hints (a time-of-day with no date).
+// Uses (?i) so the keywords and am/pm match case-insensitively while group 4
+// keeps its original casing for time.LoadLocation (IANA zone names are
+// case-sensitive). Group 4 captures an optional trailing timezone —
+// parenthesised or bare — which may be an IANA name (Europe/Copenhagen) or a
+// UTC/GMT alias; locationFromHint resolves it.
 var wallClockRe = regexp.MustCompile(
-	`(?:reset|resets|available|try again|retry)\s*(?:at\s*)?` +
+	`(?i)(?:reset|resets|available|try again|retry)\s*(?:at\s*)?` +
 		`(\d{1,2})(?::(\d{2}))?\s*(am|pm)?` +
-		`\s*(?:\(?\s*(utc|gmt)\s*\)?)?`,
+		`(?:\s*\(?\s*([A-Za-z][A-Za-z0-9/_.+\-]*)\s*\)?)?`,
 )
 
-func parseWallClock(lower string, now time.Time) (time.Time, bool) {
-	m := wallClockRe.FindStringSubmatch(lower)
+func parseWallClock(text string, now time.Time) (time.Time, bool) {
+	m := wallClockRe.FindStringSubmatch(text)
 	if m == nil {
 		return time.Time{}, false
 	}
@@ -170,10 +177,7 @@ func parseWallClock(lower string, now time.Time) (time.Time, bool) {
 	if hour > 23 {
 		return time.Time{}, false
 	}
-	loc := time.UTC
-	if m[4] == "" {
-		loc = time.Local
-	}
+	loc := locationFromHint(m[4])
 	candidate := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, loc)
 	if !candidate.After(now) {
 		candidate = candidate.Add(24 * time.Hour)

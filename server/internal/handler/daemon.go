@@ -21,7 +21,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp" // CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge workspace connections into RuntimeToolsConfig
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"       // CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge workspace connections into RuntimeToolsConfig
+	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy" // CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 staged local-runtime enforcement mode at claim
 	cerebropersona "github.com/multica-ai/multica/server/internal/cerebro/persona"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy" // CEREBRO-PATCH(daemon-repo-toolpolicy): FIR-2505 repo-capability resolved via tool-policy chain
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -1484,6 +1485,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.RuntimeSandboxPolicy = json.RawMessage(rt.SandboxPolicy)
 		}
 		resp.RuntimePersonaSandbox = rt.PersonaSandbox.String
+		// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — resolve the staged
+		// local-runtime enforcement mode from workspace settings so the daemon
+		// wires the Claude PreToolUse hook only when the workspace opted in.
+		// Off (default) leaves the field empty and the daemon wires nothing.
+		if stage := h.localToolPolicyMode(r.Context(), rt.WorkspaceID); stage != localtoolpolicy.ModeOff {
+			resp.LocalToolPolicyStage = string(stage)
+		}
 		// CEREBRO-PATCH(runtime-tools-config-claim-populate): surface runtime tools_config to daemon (9031).
 		if len(rt.ToolsConfig) > 0 {
 			resp.RuntimeToolsConfig = json.RawMessage(rt.ToolsConfig)

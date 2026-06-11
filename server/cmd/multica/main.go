@@ -104,6 +104,7 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(cerebroToolPolicyHookCmd) // CEREBRO-PATCH(cerebro-tool-policy-hook-cmd): TECH-2563 Claude Code PreToolUse hook
 
 	initHelp(rootCmd)
 }
