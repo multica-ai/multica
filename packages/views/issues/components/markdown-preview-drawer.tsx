@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@multica/ui/components/ui/button";
 import { Download, FileText, Loader2, X } from "lucide-react";
@@ -30,6 +30,7 @@ export function MarkdownPreviewDrawer({
 }: MarkdownPreviewDrawerProps) {
 	const [exportingPdf, setExportingPdf] = useState(false);
 	const [includeComments, setIncludeComments] = useState(false);
+	const contentRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		if (!open) return;
@@ -62,12 +63,29 @@ export function MarkdownPreviewDrawer({
 			toast.error("无法导出 PDF：未指定 Issue ID");
 			return;
 		}
+
+		// Capture the rendered HTML from the preview content area
+		const htmlContent = contentRef.current?.innerHTML;
+		if (!htmlContent) {
+			toast.error("无法导出 PDF：预览内容为空");
+			return;
+		}
+
 		setExportingPdf(true);
 		try {
-			const blob = await api.exportIssue(issueId, {
-				format: "pdf",
-				include_comments: includeComments,
-			});
+			// If comments export is requested, fall back to the original endpoint
+			// which fetches comments server-side
+			let blob: Blob;
+			if (includeComments) {
+				blob = await api.exportIssue(issueId, {
+					format: "pdf",
+					include_comments: true,
+				});
+			} else {
+				// Use the new HTML-based export for exact preview fidelity
+				blob = await api.exportIssueHTML(issueId, htmlContent);
+			}
+
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement("a");
 			a.href = url;
@@ -94,15 +112,14 @@ export function MarkdownPreviewDrawer({
 			aria-modal="true"
 			aria-label={`Markdown 预览：${title}`}
 		>
-			{/* Capped to viewport minus the surrounding p-4 so it never overflows */}
 			<div
-				className="flex h-[min(90vh,calc(100vh-2rem))] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-background shadow-xl border border-border"
+				className="flex h-[min(90vh,calc(100vh-2rem))] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-background shadow-xl border border-border"
 				onClick={(e) => e.stopPropagation()}
 			>
 				{/* Header */}
-				<div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-3">
+				<div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
 					<FileText className="size-4 shrink-0 text-primary" />
-					<p className="truncate text-sm font-semibold text-foreground">Markdown 预览：{title}</p>
+					<p className="truncate text-sm font-medium">Markdown 预览：{title}</p>
 					<div className="ml-auto flex items-center gap-1">
 						<button
 							type="button"
@@ -117,15 +134,15 @@ export function MarkdownPreviewDrawer({
 				</div>
 
 				{/* Toolbar */}
-				<div className="px-6 py-3 bg-muted/20 border-b flex flex-wrap items-center justify-between gap-4">
-					<div className="flex items-center gap-3">
+				<div className="px-4 py-2 bg-muted/20 border-b flex flex-wrap items-center justify-between gap-3">
+					<div className="flex items-center gap-2">
 						<Button
 							variant="outline"
 							size="sm"
 							onClick={handleExportMD}
-							className="flex items-center gap-1.5 h-8"
+							className="flex items-center gap-1.5 h-7 text-xs"
 						>
-							<Download className="h-4 w-4" />
+							<Download className="h-3.5 w-3.5" />
 							导出 MD
 						</Button>
 
@@ -135,12 +152,12 @@ export function MarkdownPreviewDrawer({
 								size="sm"
 								disabled={exportingPdf}
 								onClick={handleExportPDF}
-								className="flex items-center gap-1.5 h-8"
+								className="flex items-center gap-1.5 h-7 text-xs"
 							>
 								{exportingPdf ? (
-									<Loader2 className="h-4 w-4 animate-spin" />
+									<Loader2 className="h-3.5 w-3.5 animate-spin" />
 								) : (
-									<Download className="h-4 w-4" />
+									<Download className="h-3.5 w-3.5" />
 								)}
 								导出 PDF
 							</Button>
@@ -165,8 +182,8 @@ export function MarkdownPreviewDrawer({
 				</div>
 
 				{/* Content Area */}
-				<div className="flex-1 overflow-y-auto px-6 py-6 bg-background dark:bg-card">
-					<div className="prose prose-sm dark:prose-invert max-w-none">
+				<div className="min-h-0 flex-1 overflow-auto bg-background">
+					<div ref={contentRef} className="px-6 py-4">
 						<ReadonlyContent content={content || "*无内容*"} />
 					</div>
 				</div>
