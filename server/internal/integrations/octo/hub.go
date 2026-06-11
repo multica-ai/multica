@@ -78,6 +78,7 @@ type Hub struct {
 	queries  HubQueries
 	factory  ConnectorFactory
 	dispatch InboundHandler
+	replier  OutcomeReplier
 	cfg      HubConfig
 	nodeID   string
 	logger   *slog.Logger
@@ -88,7 +89,8 @@ type Hub struct {
 }
 
 // NewHub constructs a Hub over the supplied queries, connector factory, and
-// inbound dispatcher.
+// inbound dispatcher. The outbound replier defaults to noop; call
+// SetOutcomeReplier to install the production one.
 func NewHub(queries HubQueries, factory ConnectorFactory, dispatch InboundHandler, cfg HubConfig, logger *slog.Logger) *Hub {
 	if logger == nil {
 		logger = slog.Default()
@@ -97,11 +99,22 @@ func NewHub(queries HubQueries, factory ConnectorFactory, dispatch InboundHandle
 		queries:     queries,
 		factory:     factory,
 		dispatch:    dispatch,
+		replier:     NewNoopOutcomeReplier(logger),
 		cfg:         cfg.withDefaults(),
 		nodeID:      newNodeID(),
 		logger:      logger,
 		supervisors: make(map[string]context.CancelFunc),
 	}
+}
+
+// SetOutcomeReplier installs the production replier on the Hub. Must be called
+// before Run so it is visible to the supervisor goroutines. A nil replier
+// resets back to the noop replier (useful for tests).
+func (h *Hub) SetOutcomeReplier(r OutcomeReplier) {
+	if r == nil {
+		r = NewNoopOutcomeReplier(h.logger)
+	}
+	h.replier = r
 }
 
 // Run sweeps for active installations until ctx is cancelled, starting a
@@ -235,9 +248,15 @@ func (h *Hub) onMessage(ctx context.Context, inst db.OctoInstallation, m transpo
 		Body:           m.Payload.Content,
 		AddressedToBot: addressedToBot(inst.RobotID, m),
 	}
-	if _, err := h.dispatch.Handle(ctx, msg); err != nil {
+	res, err := h.dispatch.Handle(ctx, msg)
+	if err != nil {
 		h.logger.Error("octo hub: dispatch failed", "installation", uuidString(inst.ID), "err", err.Error())
+		return
 	}
+	// Outbound side effects for the synchronous outcomes (binding prompt,
+	// agent-unavailable notice). Best-effort: the replier swallows its own
+	// errors so a Octo outage never blocks inbound processing.
+	h.replier.Reply(ctx, inst, msg, res)
 }
 
 // addressedToBot reports whether a group message targets the bot (@mention).
