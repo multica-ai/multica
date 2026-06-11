@@ -66,13 +66,19 @@ brews:
   - name: multica
     ids:
       - versioned
+    # Firtal fork publishes its formula to firtal-group/homebrew-tap so the
+    # fleet self-updates from the fork channel (carrying every cerebro patch),
+    # not upstream multica-ai. Needs the HOMEBREW_TAP_GITHUB_TOKEN secret with
+    # write access to firtal-group/homebrew-tap; when that secret is absent the
+    # release job passes --skip=homebrew (see .github/workflows/release.yml) so
+    # the per-os/arch binaries still ship to the fork's GitHub Release.
     repository:
-      owner: multica-ai
+      owner: firtal-group
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/multica-ai/multica"
+    homepage: "https://github.com/firtal-group/firtal-cerebro"
     description: "Multica CLI — local agent runtime and management tool for the Multica platform"
     license: "Apache-2.0"
     install: |
