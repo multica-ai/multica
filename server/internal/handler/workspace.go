@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -34,17 +35,18 @@ func generateIssuePrefix(name string) string {
 }
 
 type WorkspaceResponse struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix string  `json:"issue_prefix"`
-	AvatarURL   *string `json:"avatar_url"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Slug         string  `json:"slug"`
+	Description  *string `json:"description"`
+	Context      *string `json:"context"`
+	Settings     any     `json:"settings"`
+	Repos        any     `json:"repos"`
+	IssuePrefix  string  `json:"issue_prefix"`
+	AvatarURL    *string `json:"avatar_url"`
+	ScoutAgentID *string `json:"scout_agent_id"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
 }
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -63,17 +65,18 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		repos = []any{}
 	}
 	return WorkspaceResponse{
-		ID:          uuidToString(w.ID),
-		Name:        w.Name,
-		Slug:        w.Slug,
-		Description: textToPtr(w.Description),
-		Context:     textToPtr(w.Context),
-		Settings:    settings,
-		Repos:       repos,
-		IssuePrefix: w.IssuePrefix,
-		AvatarURL:   textToPtr(w.AvatarUrl),
-		CreatedAt:   timestampToString(w.CreatedAt),
-		UpdatedAt:   timestampToString(w.UpdatedAt),
+		ID:           uuidToString(w.ID),
+		Name:         w.Name,
+		Slug:         w.Slug,
+		Description:  textToPtr(w.Description),
+		Context:      textToPtr(w.Context),
+		Settings:     settings,
+		Repos:        repos,
+		IssuePrefix:  w.IssuePrefix,
+		AvatarURL:    textToPtr(w.AvatarUrl),
+		ScoutAgentID: uuidToPtr(w.ScoutAgentID),
+		CreatedAt:    timestampToString(w.CreatedAt),
+		UpdatedAt:    timestampToString(w.UpdatedAt),
 	}
 }
 
@@ -240,13 +243,18 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateWorkspaceRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix *string `json:"issue_prefix"`
-	AvatarURL   *string `json:"avatar_url"`
+	Name         *string         `json:"name"`
+	Description  *string         `json:"description"`
+	Context      *string         `json:"context"`
+	Settings     any             `json:"settings"`
+	Repos        any             `json:"repos"`
+	IssuePrefix  *string         `json:"issue_prefix"`
+	AvatarURL    *string         `json:"avatar_url"`
+	// ScoutAgentID uses json.RawMessage to distinguish three states:
+	//   nil (absent from body)  → no-op
+	//   "null" or `""`          → clear scout agent
+	//   "<uuid>"                → set scout agent
+	ScoutAgentID json.RawMessage `json:"scout_agent_id"`
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -302,6 +310,51 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("update workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update workspace: "+err.Error())
 		return
+	}
+
+	// Handle scout_agent_id: absent → no-op, "null"/`""` → clear, UUID → set.
+	if len(req.ScoutAgentID) > 0 {
+		raw := strings.TrimSpace(string(req.ScoutAgentID))
+		if raw == "null" || raw == `""` {
+			if ws, err = h.Queries.ClearWorkspaceScoutAgent(r.Context(), idUUID); err != nil {
+				slog.Warn("clear workspace scout agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
+				writeError(w, http.StatusInternalServerError, "failed to update workspace")
+				return
+			}
+		} else {
+			// Expect a JSON-encoded UUID string: `"<uuid>"` → unquote.
+			var scoutIDStr string
+			if err := json.Unmarshal(req.ScoutAgentID, &scoutIDStr); err != nil || scoutIDStr == "" {
+				writeError(w, http.StatusBadRequest, "invalid scout_agent_id")
+				return
+			}
+			scoutUUID, err := util.ParseUUID(scoutIDStr)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid scout_agent_id: not a valid UUID")
+				return
+			}
+			scout, err := h.Queries.GetAgent(r.Context(), scoutUUID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "scout_agent_id: agent not found")
+				return
+			}
+			if uuidToString(scout.WorkspaceID) != uuidToString(idUUID) {
+				writeError(w, http.StatusBadRequest, "scout_agent_id: agent does not belong to this workspace")
+				return
+			}
+			if scout.ArchivedAt.Valid {
+				writeError(w, http.StatusBadRequest, "scout_agent_id: agent is archived")
+				return
+			}
+			if ws, err = h.Queries.SetWorkspaceScoutAgent(r.Context(), db.SetWorkspaceScoutAgentParams{
+				ID:           idUUID,
+				ScoutAgentID: scoutUUID,
+			}); err != nil {
+				slog.Warn("set workspace scout agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
+				writeError(w, http.StatusInternalServerError, "failed to update workspace")
+				return
+			}
+		}
 	}
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)

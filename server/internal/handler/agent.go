@@ -230,6 +230,10 @@ type AgentTaskResponse struct {
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
 	Kind                             string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	// Scout is the workspace's designated scout agent, included only when
+	// the scout is set, active (not archived), and is not the same agent
+	// that is executing this task. Old daemons safely ignore the field.
+	Scout *TaskScoutData `json:"scout,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
@@ -239,6 +243,15 @@ type AgentTaskResponse struct {
 	// (cloud / system runtimes that pre-date per-task tokens); in that case
 	// the daemon falls back to its own credential. See MUL-2600.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+// TaskScoutData carries the workspace scout agent's identity so the daemon
+// can inject it into the brief. The scout is optional — old daemons ignore
+// the field; new daemons skip the injection when it is nil.
+type TaskScoutData struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Instructions string `json:"instructions"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
@@ -1165,6 +1178,16 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("cancel agent tasks on archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 	} else {
 		h.TaskService.CaptureCancelledTasks(r.Context(), cancelled)
+	}
+
+	// Clear the workspace scout pointer when the archived agent was the scout,
+	// so the workspace is not left referencing an archived (inactive) agent.
+	if ws, wsErr := h.Queries.GetWorkspace(r.Context(), archived.WorkspaceID); wsErr == nil {
+		if uuidToString(ws.ScoutAgentID) == uuidToString(archived.ID) {
+			if _, clearErr := h.Queries.ClearWorkspaceScoutAgent(r.Context(), archived.WorkspaceID); clearErr != nil {
+				slog.Warn("clear workspace scout on archive failed", append(logger.RequestAttrs(r), "error", clearErr, "agent_id", id)...)
+			}
+		}
 	}
 
 	wsID := uuidToString(archived.WorkspaceID)

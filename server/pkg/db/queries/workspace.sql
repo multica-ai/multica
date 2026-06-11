@@ -1,7 +1,7 @@
 -- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.scout_agent_id
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
@@ -37,6 +37,16 @@ RETURNING *;
 UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
 RETURNING issue_counter;
+
+-- name: SetWorkspaceScoutAgent :one
+UPDATE workspace SET scout_agent_id = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearWorkspaceScoutAgent :one
+UPDATE workspace SET scout_agent_id = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
 
 -- name: DeleteWorkspace :exec
 DELETE FROM workspace WHERE id = $1;

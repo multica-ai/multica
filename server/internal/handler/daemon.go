@@ -1615,9 +1615,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// quick-create) so every agent running in the workspace sees the same
 	// shared context. Empty string when the owner hasn't set one; the daemon
 	// skips rendering the heading in that case.
+	//
+	// Scout agent: also resolved from the workspace row. Included only when the
+	// scout is set, not archived, and is not the same agent executing this task.
+	// Fail-soft: any error (missing row, archived scout) silently omits the field.
 	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil {
 		if ws.Context.Valid {
 			resp.WorkspaceContext = ws.Context.String
+		}
+		if ws.ScoutAgentID.Valid && uuidToString(ws.ScoutAgentID) != uuidToString(task.AgentID) {
+			if scout, serr := h.Queries.GetAgent(r.Context(), ws.ScoutAgentID); serr == nil && !scout.ArchivedAt.Valid {
+				resp.Scout = &TaskScoutData{
+					ID:           uuidToString(scout.ID),
+					Name:         scout.Name,
+					Instructions: scout.Instructions,
+				}
+			}
 		}
 	} else {
 		slog.Warn("task claim: failed to load workspace for context injection",

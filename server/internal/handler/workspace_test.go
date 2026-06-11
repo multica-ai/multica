@@ -583,6 +583,354 @@ RETURNING id
 	}
 }
 
+// ── Scout agent tests ────────────────────────────────────────────────────────
+
+// setupScoutWorkspace creates an isolated workspace + owner membership for
+// scout-related tests and registers a cleanup. Returns (wsID, agentID).
+func setupScoutWorkspace(t *testing.T, slug string) (wsID, agentID string) {
+	t.Helper()
+	ctx := context.Background()
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO workspace (name, slug, description, issue_prefix)
+VALUES ($1, $2, $3, $4) RETURNING id
+`, "Scout Test "+slug, slug, "", "SCT").Scan(&wsID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
+`, wsID, testUserID); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+
+	rID := handlerTestRuntimeID(t)
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO agent (
+    workspace_id, name, description, runtime_mode, runtime_config,
+    runtime_id, visibility, max_concurrent_tasks, owner_id
+)
+VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
+RETURNING id
+`, wsID, "Scout Agent "+slug, rID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+	return wsID, agentID
+}
+
+// TestUpdateWorkspace_SetScoutAgent verifies that a valid same-workspace agent
+// UUID is accepted and persisted as scout_agent_id, and that the response
+// reflects the new value.
+func TestUpdateWorkspace_SetScoutAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, agentID := setupScoutWorkspace(t, "scout-set")
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"scout_agent_id": agentID,
+	})
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", wsID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp WorkspaceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ScoutAgentID == nil || *resp.ScoutAgentID != agentID {
+		t.Fatalf("expected scout_agent_id %q in response, got %v", agentID, resp.ScoutAgentID)
+	}
+	var dbScout *string
+	if err := testPool.QueryRow(context.Background(), `SELECT scout_agent_id::text FROM workspace WHERE id = $1`, wsID).Scan(&dbScout); err != nil {
+		t.Fatalf("read db: %v", err)
+	}
+	if dbScout == nil || *dbScout != agentID {
+		t.Fatalf("expected scout_agent_id %q in DB, got %v", agentID, dbScout)
+	}
+}
+
+// TestUpdateWorkspace_ClearScoutAgent_Null verifies that passing
+// `"scout_agent_id": null` clears the scout agent.
+func TestUpdateWorkspace_ClearScoutAgent_Null(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, agentID := setupScoutWorkspace(t, "scout-clear-null")
+	ctx := context.Background()
+
+	// Pre-set scout directly in DB.
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET scout_agent_id = $1 WHERE id = $2`, agentID, wsID); err != nil {
+		t.Fatalf("pre-set scout: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"scout_agent_id": nil,
+	})
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", wsID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp WorkspaceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ScoutAgentID != nil {
+		t.Fatalf("expected scout_agent_id nil after clear, got %q", *resp.ScoutAgentID)
+	}
+	var dbScout *string
+	if err := testPool.QueryRow(ctx, `SELECT scout_agent_id::text FROM workspace WHERE id = $1`, wsID).Scan(&dbScout); err != nil {
+		t.Fatalf("read db: %v", err)
+	}
+	if dbScout != nil {
+		t.Fatalf("expected scout_agent_id NULL in DB after clear, got %q", *dbScout)
+	}
+}
+
+// TestUpdateWorkspace_ClearScoutAgent_EmptyString verifies that passing
+// `"scout_agent_id": ""` also clears the scout agent.
+func TestUpdateWorkspace_ClearScoutAgent_EmptyString(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, agentID := setupScoutWorkspace(t, "scout-clear-empty")
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET scout_agent_id = $1 WHERE id = $2`, agentID, wsID); err != nil {
+		t.Fatalf("pre-set scout: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"scout_agent_id": "",
+	})
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", wsID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var dbScout *string
+	if err := testPool.QueryRow(ctx, `SELECT scout_agent_id::text FROM workspace WHERE id = $1`, wsID).Scan(&dbScout); err != nil {
+		t.Fatalf("read db: %v", err)
+	}
+	if dbScout != nil {
+		t.Fatalf("expected scout_agent_id NULL in DB, got %q", *dbScout)
+	}
+}
+
+// TestUpdateWorkspace_ScoutAgent_Absent verifies that omitting scout_agent_id
+// from the update body leaves the existing value untouched (no-op).
+func TestUpdateWorkspace_ScoutAgent_Absent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, agentID := setupScoutWorkspace(t, "scout-absent")
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET scout_agent_id = $1 WHERE id = $2`, agentID, wsID); err != nil {
+		t.Fatalf("pre-set scout: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"name": "Scout Absent Test",
+	})
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", wsID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var dbScout *string
+	if err := testPool.QueryRow(ctx, `SELECT scout_agent_id::text FROM workspace WHERE id = $1`, wsID).Scan(&dbScout); err != nil {
+		t.Fatalf("read db: %v", err)
+	}
+	if dbScout == nil || *dbScout != agentID {
+		t.Fatalf("expected scout_agent_id %q preserved by name-only update, got %v", agentID, dbScout)
+	}
+}
+
+// TestUpdateWorkspace_SetScoutAgent_InvalidUUID verifies that a malformed
+// UUID string returns 400.
+func TestUpdateWorkspace_SetScoutAgent_InvalidUUID(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, _ := setupScoutWorkspace(t, "scout-invalid-uuid")
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"scout_agent_id": "not-a-uuid",
+	})
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", wsID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid UUID, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpdateWorkspace_SetScoutAgent_CrossWorkspace verifies that an agent from
+// a different workspace is rejected with 400.
+func TestUpdateWorkspace_SetScoutAgent_CrossWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, _ := setupScoutWorkspace(t, "scout-cross-ws")
+	// testWorkspaceID contains the fixture agent; use it as the "other" workspace agent.
+	var otherAgentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID,
+	).Scan(&otherAgentID); err != nil {
+		t.Skip("no agent in other workspace, skipping cross-workspace check")
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"scout_agent_id": otherAgentID,
+	})
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", wsID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for cross-workspace agent, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpdateWorkspace_SetScoutAgent_Archived verifies that an archived agent
+// is rejected with 400.
+func TestUpdateWorkspace_SetScoutAgent_Archived(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, agentID := setupScoutWorkspace(t, "scout-archived")
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent SET archived_at = now(), archived_by = $1 WHERE id = $2`, testUserID, agentID,
+	); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"scout_agent_id": agentID,
+	})
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", wsID)
+	testHandler.UpdateWorkspace(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for archived agent, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestArchiveAgent_ClearsWorkspaceScout verifies that archiving an agent that
+// is the workspace's current scout automatically clears workspace.scout_agent_id.
+func TestArchiveAgent_ClearsWorkspaceScout(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, agentID := setupScoutWorkspace(t, "scout-archive-clears")
+	ctx := context.Background()
+
+	// Pin the agent as the workspace scout.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE workspace SET scout_agent_id = $1 WHERE id = $2`, agentID, wsID,
+	); err != nil {
+		t.Fatalf("set scout: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents/"+agentID+"/archive", nil)
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", agentID)
+	testHandler.ArchiveAgent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ArchiveAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var dbScout *string
+	if err := testPool.QueryRow(ctx,
+		`SELECT scout_agent_id::text FROM workspace WHERE id = $1`, wsID,
+	).Scan(&dbScout); err != nil {
+		t.Fatalf("read db: %v", err)
+	}
+	if dbScout != nil {
+		t.Fatalf("expected workspace.scout_agent_id to be cleared after archive, got %q", *dbScout)
+	}
+}
+
+// TestArchiveAgent_OtherScoutUnaffected verifies that archiving an agent that
+// is NOT the workspace scout leaves the existing scout pointer intact.
+func TestArchiveAgent_OtherScoutUnaffected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, _ := setupScoutWorkspace(t, "scout-archive-other")
+	ctx := context.Background()
+	rID := handlerTestRuntimeID(t)
+
+	// Create a second agent to archive.
+	var otherAgentID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO agent (
+    workspace_id, name, description, runtime_mode, runtime_config,
+    runtime_id, visibility, max_concurrent_tasks, owner_id
+)
+VALUES ($1, 'Other Agent', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3)
+RETURNING id
+`, wsID, rID, testUserID).Scan(&otherAgentID); err != nil {
+		t.Fatalf("create other agent: %v", err)
+	}
+
+	// Pin the first agent as scout.
+	var scoutAgentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 AND id != $2 LIMIT 1`, wsID, otherAgentID).Scan(&scoutAgentID); err != nil {
+		t.Fatalf("find scout agent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET scout_agent_id = $1 WHERE id = $2`, scoutAgentID, wsID); err != nil {
+		t.Fatalf("set scout: %v", err)
+	}
+
+	// Archive the OTHER agent (not the scout).
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents/"+otherAgentID+"/archive", nil)
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", otherAgentID)
+	testHandler.ArchiveAgent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ArchiveAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var dbScout *string
+	if err := testPool.QueryRow(ctx, `SELECT scout_agent_id::text FROM workspace WHERE id = $1`, wsID).Scan(&dbScout); err != nil {
+		t.Fatalf("read db: %v", err)
+	}
+	if dbScout == nil || *dbScout != scoutAgentID {
+		t.Fatalf("expected scout_agent_id %q preserved, got %v", scoutAgentID, dbScout)
+	}
+}
+
 // TestDeleteMember_NoRuntimes_DeletesMember covers the empty-revocation
 // path: a member with no owned runtimes should still have their member row
 // deleted by the same atomic transaction, with no spurious archive/cancel
