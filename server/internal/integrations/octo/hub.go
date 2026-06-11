@@ -92,8 +92,19 @@ type Hub struct {
 	logger   *slog.Logger
 
 	mu          sync.Mutex
-	supervisors map[string]context.CancelFunc // installation id -> cancel
+	supervisors map[string]*supervisorHandle // installation id -> handle
 	wg          sync.WaitGroup
+}
+
+// supervisorHandle tracks a running per-installation supervisor: its cancel
+// func and the installation's updated_at at the time it was started. The hub
+// compares updatedAt on each sweep to detect a reconfigure (token rotation,
+// re-register) and restart the supervisor so the connector picks up the new
+// config — a running connector holds an in-memory snapshot of the installation
+// row, so an in-place DB update alone never reaches the live connection.
+type supervisorHandle struct {
+	cancel    context.CancelFunc
+	updatedAt time.Time
 }
 
 // NewHub constructs a Hub over the supplied queries, connector factory, and
@@ -111,7 +122,7 @@ func NewHub(queries HubQueries, factory ConnectorFactory, dispatch InboundHandle
 		cfg:         cfg.withDefaults(),
 		nodeID:      newNodeID(),
 		logger:      logger,
-		supervisors: make(map[string]context.CancelFunc),
+		supervisors: make(map[string]*supervisorHandle),
 	}
 }
 
@@ -148,6 +159,9 @@ func (h *Hub) Run(ctx context.Context) {
 // does not stop supervisors for installations that vanished — those exit on
 // their own when the connection drops and the lease can't be renewed (revoked
 // rows stop being returned here, so their next renewal fails and they unwind).
+// When an installation's config changed since its supervisor started (updated_at
+// advanced — a token rotation or re-register), the supervisor is cancelled so a
+// subsequent sweep restarts it with the fresh config.
 func (h *Hub) sweep(ctx context.Context) {
 	insts, err := h.queries.ListActiveOctoInstallations(ctx)
 	if err != nil {
@@ -159,11 +173,20 @@ func (h *Hub) sweep(ctx context.Context) {
 		id := uuidString(inst.ID)
 		active[id] = struct{}{}
 		h.mu.Lock()
-		_, running := h.supervisors[id]
+		handle, running := h.supervisors[id]
 		h.mu.Unlock()
-		if !running {
-			h.startSupervisor(ctx, inst)
+		if running {
+			// Reconfigured in place: cancel the stale supervisor (it releases
+			// its lease and removes itself on exit); the next sweep restarts it
+			// with the new config. Skip starting now to avoid racing the
+			// in-flight removal.
+			if inst.UpdatedAt.Valid && !inst.UpdatedAt.Time.Equal(handle.updatedAt) {
+				h.logger.Info("octo hub: installation reconfigured, restarting supervisor", "installation", id)
+				handle.cancel()
+			}
+			continue
 		}
+		h.startSupervisor(ctx, inst)
 	}
 }
 
@@ -179,7 +202,7 @@ func (h *Hub) startSupervisor(parent context.Context, inst db.OctoInstallation) 
 		cancel()
 		return
 	}
-	h.supervisors[id] = cancel
+	h.supervisors[id] = &supervisorHandle{cancel: cancel, updatedAt: inst.UpdatedAt.Time}
 	h.mu.Unlock()
 
 	h.wg.Add(1)
@@ -338,8 +361,8 @@ func (h *Hub) releaseLease(instID pgtype.UUID, token string) {
 
 func (h *Hub) shutdown() {
 	h.mu.Lock()
-	for _, cancel := range h.supervisors {
-		cancel()
+	for _, handle := range h.supervisors {
+		handle.cancel()
 	}
 	h.mu.Unlock()
 	h.wg.Wait()

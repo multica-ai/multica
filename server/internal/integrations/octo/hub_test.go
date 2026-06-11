@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/octo/transport"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -21,7 +22,16 @@ type fakeHubQueries struct {
 }
 
 func (f *fakeHubQueries) ListActiveOctoInstallations(ctx context.Context) ([]db.OctoInstallation, error) {
-	return f.insts, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]db.OctoInstallation, len(f.insts))
+	copy(out, f.insts)
+	return out, nil
+}
+func (f *fakeHubQueries) setInsts(insts []db.OctoInstallation) {
+	f.mu.Lock()
+	f.insts = insts
+	f.mu.Unlock()
 }
 func (f *fakeHubQueries) AcquireOctoWSLease(ctx context.Context, arg db.AcquireOctoWSLeaseParams) (db.OctoInstallation, error) {
 	f.mu.Lock()
@@ -297,5 +307,64 @@ func TestHub_ShutdownTimeoutDefault(t *testing.T) {
 	hub := NewHub(&fakeHubQueries{}, nil, &fakeHubDispatch{}, HubConfig{}, nil)
 	if got := hub.ShutdownTimeout(); got != defaultShutdownTimeout {
 		t.Errorf("ShutdownTimeout() = %v, want default %v", got, defaultShutdownTimeout)
+	}
+}
+
+// TestHub_ReconfigureRestartsSupervisor guards the reconfigure fix: when an
+// installation's updated_at advances (token rotation / re-register), the hub
+// must cancel the stale supervisor and restart it so the connector picks up the
+// new config. A running connector holds an in-memory snapshot, so an in-place
+// DB update alone never reaches the live connection.
+func TestHub_ReconfigureRestartsSupervisor(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	inst := hubInst()
+	inst.UpdatedAt = pgtype.Timestamptz{Time: t0, Valid: true}
+	q := &fakeHubQueries{insts: []db.OctoInstallation{inst}}
+	disp := &fakeHubDispatch{}
+
+	type run struct{ updatedAt time.Time }
+	runs := make(chan run, 4)
+	factory := func(inst db.OctoInstallation) (Connector, error) {
+		return connectorFunc(func(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error {
+			runs <- run{updatedAt: inst.UpdatedAt.Time}
+			<-ctx.Done()
+			return ctx.Err()
+		}), nil
+	}
+
+	hub := NewHub(q, factory, disp, HubConfig{
+		LeaseTTL:           time.Second,
+		LeaseRenewInterval: time.Second,
+		SweepInterval:      150 * time.Millisecond,
+	}, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx)
+
+	// First run uses the original config.
+	select {
+	case r := <-runs:
+		if !r.updatedAt.Equal(t0) {
+			t.Fatalf("first run updatedAt = %v, want %v", r.updatedAt, t0)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("connector never started")
+	}
+
+	// Reconfigure: bump updated_at. The hub should cancel the stale supervisor
+	// and a later sweep should restart the connector with the new config.
+	t1 := time.Unix(2000, 0)
+	reconf := hubInst()
+	reconf.UpdatedAt = pgtype.Timestamptz{Time: t1, Valid: true}
+	q.setInsts([]db.OctoInstallation{reconf})
+
+	select {
+	case r := <-runs:
+		if !r.updatedAt.Equal(t1) {
+			t.Fatalf("restarted run updatedAt = %v, want %v (new config not applied)", r.updatedAt, t1)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("connector was not restarted after reconfigure")
 	}
 }
