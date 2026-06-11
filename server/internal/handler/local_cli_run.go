@@ -309,94 +309,16 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 	req.Source = strings.TrimSpace(req.Source)
 	req.SourceKey = strings.TrimSpace(req.SourceKey)
 
-	if req.Source != "" && req.SourceKey != "" {
-		msg, found, err := h.loadLocalCLIMessageBySource(r.Context(), run, req.Source, req.SourceKey)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to check local run message")
-			return
-		}
-		if found {
-			writeJSON(w, http.StatusOK, msg)
-			return
-		}
-	}
-
-	input, _ := json.Marshal(req.Input)
-	if req.Input == nil {
-		input = nil
-	}
-
-	row := h.DB.QueryRow(r.Context(), `
-		INSERT INTO local_cli_message (run_id, seq, type, tool, content, input, output, source, source_key)
-		VALUES (
-			$1,
-			COALESCE((SELECT MAX(seq) + 1 FROM local_cli_message WHERE run_id = $1), 1),
-			$2, NULLIF($3, ''), NULLIF($4, ''), $5::jsonb, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, '')
-		)
-		ON CONFLICT (run_id, source, source_key)
-			WHERE source IS NOT NULL AND source_key IS NOT NULL
-			DO NOTHING
-		RETURNING id, run_id, seq, type, tool, content, input, output, created_at, source, source_key
-	`, run.ID, req.Type, req.Tool, req.Content, input, req.Output, req.Source, req.SourceKey)
-	msg, err := scanLocalCLIMessage(row, uuidToString(run.IssueID))
+	result, err := h.createLocalCLIMessageAndOutbox(r.Context(), run, req, requestAppOrigin(r))
 	if err != nil {
-		if req.Source != "" && req.SourceKey != "" && err == pgx.ErrNoRows {
-			existing, found, loadErr := h.loadLocalCLIMessageBySource(r.Context(), run, req.Source, req.SourceKey)
-			if loadErr != nil {
-				writeError(w, http.StatusInternalServerError, "failed to load local run message")
-				return
-			}
-			if found {
-				writeJSON(w, http.StatusOK, existing)
-				return
-			}
-		}
 		writeError(w, http.StatusInternalServerError, "failed to create local run message")
 		return
 	}
-
-	var commentID pgtype.UUID
-	createsThreadReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsNonCommentableCommand(req)) || localCLIMessageIsCodexProposedPlan(req)) &&
-		run.CommentsMode == "thread" &&
-		run.TopCommentID.Valid
-	createsReply := createsThreadReply && strings.TrimSpace(req.Content) != ""
-	if createsReply {
-		parentID := run.TopCommentID
-		comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
-			IssueID:     run.IssueID,
-			WorkspaceID: run.WorkspaceID,
-			AuthorType:  "member",
-			AuthorID:    run.OwnerID,
-			Content:     req.Content,
-			Type:        "comment",
-			ParentID:    parentID,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create final reply")
-			return
-		}
-		commentID = comment.ID
-		var displayName *string
-		if req.Type == "final" || localCLIMessageIsCodexProposedPlan(req) {
-			name := h.localCLIDisplayName(r.Context(), run)
-			displayName = &name
-		}
-		resp := commentToResponseWithDisplay(comment, nil, nil, displayName)
-		h.publish(protocol.EventCommentCreated, uuidToString(run.WorkspaceID), "member", uuidToString(run.OwnerID), map[string]any{
-			"comment":    resp,
-			"app_origin": requestAppOrigin(r),
-		})
-		if _, err := h.DB.Exec(r.Context(), `
-			UPDATE local_cli_message
-			SET comment_id = $2
-			WHERE run_id = $1 AND seq = $3
-		`, run.ID, uuidOrNil(commentID), msg.Seq); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to attach local run comment")
-			return
-		}
+	if result.Created {
+		writeJSON(w, http.StatusCreated, result.Message)
+		return
 	}
-	h.publishTask(protocol.EventTaskMessage, uuidToString(run.WorkspaceID), "member", uuidToString(run.OwnerID), uuidToString(run.ID), msg)
-	writeJSON(w, http.StatusCreated, msg)
+	writeJSON(w, http.StatusOK, result.Message)
 }
 
 func (h *Handler) loadLocalCLIMessageBySource(ctx context.Context, run localCLIRun, source, sourceKey string) (protocol.TaskMessagePayload, bool, error) {

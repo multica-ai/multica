@@ -61,6 +61,19 @@ func withLocalRunWorkspace(req *http.Request) *http.Request {
 	return req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{}))
 }
 
+func drainLocalCLIMessageOutboxForTest(t *testing.T) {
+	t.Helper()
+	for {
+		n, err := testHandler.processLocalCLIMessageOutboxBatch(context.Background(), 25)
+		if err != nil {
+			t.Fatalf("drain local CLI message outbox: %v", err)
+		}
+		if n == 0 {
+			return
+		}
+	}
+}
+
 func TestCreateLocalCLIRun_CreatesThreadAndMarksIssueInProgress(t *testing.T) {
 	ctx := context.Background()
 	issue := createIssueForLocalRunTest(t, "todo")
@@ -214,6 +227,7 @@ func TestCreateLocalCLIMessage_FinalCreatesLocalDisplayReplyAndRedactedTranscrip
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	drainLocalCLIMessageOutboxForTest(t)
 	var msg map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&msg); err != nil {
 		t.Fatalf("decode message: %v", err)
@@ -276,6 +290,7 @@ func TestCreateLocalCLIMessage_UserInputCreatesMemberReplyOnly(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	drainLocalCLIMessageOutboxForTest(t)
 
 	commentsW := httptest.NewRecorder()
 	commentsReq := newRequest("GET", "/api/issues/"+issue.ID+"/comments", nil)
@@ -324,6 +339,7 @@ func TestCreateLocalCLIMessage_CommandUserInputStoresTranscriptOnly(t *testing.T
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	drainLocalCLIMessageOutboxForTest(t)
 	var msg map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&msg); err != nil {
 		t.Fatalf("decode message: %v", err)
@@ -382,6 +398,7 @@ func TestCreateLocalCLIMessage_CommentableCommandUserInputCreatesReply(t *testin
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	drainLocalCLIMessageOutboxForTest(t)
 
 	var replyCount int
 	if err := testPool.QueryRow(ctx, `
@@ -429,6 +446,7 @@ func TestCreateLocalCLIMessage_CodexProposedPlanCreatesLocalDisplayReply(t *test
 			t.Fatalf("duplicate CreateLocalCLIMessage: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 	}
+	drainLocalCLIMessageOutboxForTest(t)
 
 	var messageCount int
 	if err := testPool.QueryRow(ctx, `
@@ -496,6 +514,7 @@ func TestCreateLocalCLIMessage_TextWithoutPlanMetadataStoresTranscriptOnly(t *te
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	drainLocalCLIMessageOutboxForTest(t)
 
 	var replyCount int
 	if err := testPool.QueryRow(ctx, `
@@ -537,6 +556,7 @@ func TestCreateLocalCLIMessage_SourceKeyDedupesTranscriptAndComment(t *testing.T
 			t.Fatalf("duplicate CreateLocalCLIMessage: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 	}
+	drainLocalCLIMessageOutboxForTest(t)
 
 	var messageCount int
 	if err := testPool.QueryRow(ctx, `
@@ -578,6 +598,7 @@ func TestCreateLocalCLIMessage_CommentsOffDoesNotCreateReply(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	drainLocalCLIMessageOutboxForTest(t)
 	var count int
 	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM comment WHERE issue_id = $1`, issue.ID).Scan(&count); err != nil {
 		t.Fatalf("count comments: %v", err)
@@ -609,6 +630,7 @@ func TestCreateLocalCLIMessage_CodexProposedPlanCommentsOffDoesNotCreateReply(t 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	drainLocalCLIMessageOutboxForTest(t)
 	var count int
 	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM comment WHERE issue_id = $1`, issue.ID).Scan(&count); err != nil {
 		t.Fatalf("count comments: %v", err)
