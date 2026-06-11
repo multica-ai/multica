@@ -21,6 +21,7 @@ type WikiPageSummaryResponse struct {
 	ParentID    *string `json:"parent_id"`
 	Title       string  `json:"title"`
 	Slug        string  `json:"slug"`
+	Type        string  `json:"type"`
 	Position    float64 `json:"position"`
 	CreatedBy   *string `json:"created_by"`
 	UpdatedBy   *string `json:"updated_by"`
@@ -40,6 +41,7 @@ func wikiPageSummaryRowToResponse(p db.ListWikiPagesRow) WikiPageSummaryResponse
 		ParentID:    uuidToPtr(p.ParentID),
 		Title:       p.Title,
 		Slug:        p.Slug,
+		Type:        p.Type,
 		Position:    p.Position,
 		CreatedBy:   uuidToPtr(p.CreatedBy),
 		UpdatedBy:   uuidToPtr(p.UpdatedBy),
@@ -55,6 +57,7 @@ func wikiPageToSummaryResponse(p db.WikiPage) WikiPageSummaryResponse {
 		ParentID:    uuidToPtr(p.ParentID),
 		Title:       p.Title,
 		Slug:        p.Slug,
+		Type:        p.Type,
 		Position:    p.Position,
 		CreatedBy:   uuidToPtr(p.CreatedBy),
 		UpdatedBy:   uuidToPtr(p.UpdatedBy),
@@ -138,6 +141,7 @@ func (h *Handler) GetWikiPage(w http.ResponseWriter, r *http.Request) {
 type CreateWikiPageRequest struct {
 	Title    string   `json:"title"`
 	ParentID *string  `json:"parent_id"`
+	Type     *string  `json:"type"`
 	Content  *string  `json:"content"`
 	Position *float64 `json:"position"`
 }
@@ -164,14 +168,36 @@ func (h *Handler) CreateWikiPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate type field (default to "page")
+	pageType := "page"
+	if req.Type != nil {
+		t := strings.TrimSpace(*req.Type)
+		if t != "page" && t != "folder" {
+			writeError(w, http.StatusBadRequest, "type must be 'page' or 'folder'")
+			return
+		}
+		pageType = t
+	}
+
 	var parentID pgtype.UUID
 	if req.ParentID != nil && strings.TrimSpace(*req.ParentID) != "" {
+		// Folders cannot have a parent (no nesting)
+		if pageType == "folder" {
+			writeError(w, http.StatusBadRequest, "folders cannot be nested inside other folders")
+			return
+		}
 		parsedParentID, ok := parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
 		if !ok {
 			return
 		}
-		if _, err := h.Queries.GetWikiPage(r.Context(), db.GetWikiPageParams{ID: parsedParentID, WorkspaceID: wsUUID}); err != nil {
+		parentPage, err := h.Queries.GetWikiPage(r.Context(), db.GetWikiPageParams{ID: parsedParentID, WorkspaceID: wsUUID})
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "parent wiki page not found")
+			return
+		}
+		// Only folders can be parents (one-level constraint)
+		if parentPage.Type != "folder" {
+			writeError(w, http.StatusBadRequest, "parent must be a folder")
 			return
 		}
 		parentID = parsedParentID
@@ -194,6 +220,7 @@ func (h *Handler) CreateWikiPage(w http.ResponseWriter, r *http.Request) {
 	if req.Content != nil {
 		content = pgtype.Text{String: *req.Content, Valid: true}
 	}
+	pageTypeText := pgtype.Text{String: pageType, Valid: true}
 	baseSlug := wikiSlugFromTitle(title)
 	var page db.WikiPage
 	var err error
@@ -204,6 +231,7 @@ func (h *Handler) CreateWikiPage(w http.ResponseWriter, r *http.Request) {
 			Title:       title,
 			Slug:        wikiSlugWithSuffix(baseSlug, attempt),
 			Content:     content,
+			Type:        pageTypeText,
 			Position:    position,
 			CreatedBy:   member.UserID,
 			UpdatedBy:   member.UserID,
@@ -231,6 +259,7 @@ type UpdateWikiPageRequest struct {
 	Title    *string  `json:"title"`
 	Content  *string  `json:"content"`
 	Position *float64 `json:"position"`
+	ParentID *string  `json:"parent_id"`
 }
 
 func (h *Handler) UpdateWikiPage(w http.ResponseWriter, r *http.Request) {
@@ -271,6 +300,40 @@ func (h *Handler) UpdateWikiPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Position != nil {
 		params.Position = pgtype.Float8{Float64: *req.Position, Valid: true}
+	}
+	// Handle parent_id change (move between folders)
+	if req.ParentID != nil {
+		pid := strings.TrimSpace(*req.ParentID)
+		if pid == "" {
+			// Move to top level (clear parent)
+			params.ParentID = pgtype.UUID{Valid: false}
+		} else {
+			// Validate that the target parent exists and is a folder
+			parsedParentID, ok := parseUUIDOrBadRequest(w, pid, "parent_id")
+			if !ok {
+				return
+			}
+			parentPage, err := h.Queries.GetWikiPage(r.Context(), db.GetWikiPageParams{ID: parsedParentID, WorkspaceID: wsUUID})
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "parent wiki page not found")
+				return
+			}
+			if parentPage.Type != "folder" {
+				writeError(w, http.StatusBadRequest, "parent must be a folder")
+				return
+			}
+			// Prevent moving a folder into another folder
+			currentPage, err := h.Queries.GetWikiPage(r.Context(), db.GetWikiPageParams{ID: idUUID, WorkspaceID: wsUUID})
+			if err != nil {
+				writeError(w, http.StatusNotFound, "wiki page not found")
+				return
+			}
+			if currentPage.Type == "folder" {
+				writeError(w, http.StatusBadRequest, "folders cannot be nested inside other folders")
+				return
+			}
+			params.ParentID = parsedParentID
+		}
 	}
 
 	baseSlug := ""
@@ -365,8 +428,9 @@ func (h *Handler) DeleteWikiPage(w http.ResponseWriter, r *http.Request) {
 
 type ReorderWikiPagesRequest struct {
 	Pages []struct {
-		ID       string  `json:"id"`
-		Position float64 `json:"position"`
+		ID       string   `json:"id"`
+		Position float64  `json:"position"`
+		ParentID *string  `json:"parent_id"`
 	} `json:"pages"`
 }
 
@@ -396,10 +460,29 @@ func (h *Handler) ReorderWikiPages(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+		var parentID pgtype.UUID
+		if item.ParentID != nil && strings.TrimSpace(*item.ParentID) != "" {
+			pid := strings.TrimSpace(*item.ParentID)
+			parsedParentID, parseOk := parseUUIDOrBadRequest(w, pid, "parent_id")
+			if !parseOk {
+				return
+			}
+			parentPage, err := h.Queries.GetWikiPage(r.Context(), db.GetWikiPageParams{ID: parsedParentID, WorkspaceID: wsUUID})
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "parent wiki page not found")
+				return
+			}
+			if parentPage.Type != "folder" {
+				writeError(w, http.StatusBadRequest, "parent must be a folder")
+				return
+			}
+			parentID = parsedParentID
+		}
 		page, err := h.Queries.ReorderWikiPage(r.Context(), db.ReorderWikiPageParams{
 			ID:          idUUID,
 			WorkspaceID: wsUUID,
 			Position:    item.Position,
+			ParentID:    parentID,
 			UpdatedBy:   member.UserID,
 		})
 		if err != nil {

@@ -1,9 +1,12 @@
+export type WikiPageType = "page" | "folder";
+
 export interface WikiPageSummary {
   id: string;
   workspace_id: string;
   parent_id: string | null;
   title: string;
   slug: string;
+  type: WikiPageType;
   position: number;
   created_by: string | null;
   updated_by: string | null;
@@ -23,6 +26,7 @@ export interface ListWikiPagesResponse {
 export interface CreateWikiPageRequest {
   title: string;
   parent_id?: string | null;
+  type?: WikiPageType;
   content?: string;
   position?: number;
 }
@@ -31,10 +35,11 @@ export interface UpdateWikiPageRequest {
   title?: string;
   content?: string;
   position?: number;
+  parent_id?: string | null;
 }
 
 export interface ReorderWikiPagesRequest {
-  pages: Array<{ id: string; position: number }>;
+  pages: Array<{ id: string; position: number; parent_id?: string | null }>;
 }
 
 export type WikiPageActivityAction =
