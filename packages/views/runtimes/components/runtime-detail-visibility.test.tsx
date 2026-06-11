@@ -114,6 +114,7 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
     isPending: false,
     mutateAsync: vi.fn(),
   }),
+  useResumeRuntime: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 // Stubbing ProviderLogo / UsageSection / UpdateSection avoids dragging in
