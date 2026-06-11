@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { useApiClient } from "../api";
+import { api } from "../api";
 
 export const webhookKeys = {
   all: (wsId: string) => ["webhooks", wsId] as const,
@@ -9,7 +9,6 @@ export const webhookKeys = {
 };
 
 export function webhookListOptions(wsId: string) {
-  const api = useApiClient();
   return queryOptions({
     queryKey: webhookKeys.list(wsId),
     queryFn: () => api.listWebhookEndpoints(),
@@ -17,7 +16,6 @@ export function webhookListOptions(wsId: string) {
 }
 
 export function webhookDetailOptions(wsId: string, id: string) {
-  const api = useApiClient();
   return queryOptions({
     queryKey: webhookKeys.detail(wsId, id),
     queryFn: () => api.getWebhookEndpoint(id),
@@ -26,7 +24,6 @@ export function webhookDetailOptions(wsId: string, id: string) {
 }
 
 export function webhookDeliveriesOptions(wsId: string, endpointId: string) {
-  const api = useApiClient();
   return queryOptions({
     queryKey: webhookKeys.deliveries(wsId, endpointId),
     queryFn: () => api.listWebhookDeliveries(endpointId),

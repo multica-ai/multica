@@ -63,7 +63,7 @@ func webhookEndpointToResponse(ep db.WebhookEndpoint) WebhookEndpointResponse {
 	}
 }
 
-func webhookDeliveryToResponse(d db.WebhookDelivery) WebhookDeliveryResponse {
+func webhookDeliveryToResponse(d db.WebhookEndpointDelivery) WebhookDeliveryResponse {
 	var httpStatus *int32
 	if d.HttpStatus.Valid {
 		httpStatus = &d.HttpStatus.Int32

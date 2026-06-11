@@ -77,7 +77,7 @@ func (s *WebhookService) Deliver(ctx context.Context, endpoint db.WebhookEndpoin
 		return
 	}
 
-	delivery, err := s.Queries.CreateWebhookDelivery(ctx, db.CreateWebhookDeliveryParams{
+	delivery, err := s.Queries.CreateEndpointDelivery(ctx, db.CreateEndpointDeliveryParams{
 		EndpointID: endpoint.ID,
 		EventType:  eventType,
 		Payload:    body,

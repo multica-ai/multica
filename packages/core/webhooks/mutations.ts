@@ -1,11 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useApiClient } from "../api";
+import { api } from "../api";
 import { webhookKeys } from "./queries";
 import type { CreateWebhookEndpointRequest, UpdateWebhookEndpointRequest, WebhookEndpoint } from "../types";
 
 export function useCreateWebhookEndpoint(wsId: string) {
   const qc = useQueryClient();
-  const api = useApiClient();
   return useMutation({
     mutationFn: (data: CreateWebhookEndpointRequest) => api.createWebhookEndpoint(data),
     onSettled: () => {
@@ -16,7 +15,6 @@ export function useCreateWebhookEndpoint(wsId: string) {
 
 export function useUpdateWebhookEndpoint(wsId: string) {
   const qc = useQueryClient();
-  const api = useApiClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateWebhookEndpointRequest }) =>
       api.updateWebhookEndpoint(id, data),
@@ -39,7 +37,6 @@ export function useUpdateWebhookEndpoint(wsId: string) {
 
 export function useDeleteWebhookEndpoint(wsId: string) {
   const qc = useQueryClient();
-  const api = useApiClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteWebhookEndpoint(id),
     onMutate: async (id) => {
@@ -60,7 +57,6 @@ export function useDeleteWebhookEndpoint(wsId: string) {
 }
 
 export function useTestWebhookEndpoint() {
-  const api = useApiClient();
   return useMutation({
     mutationFn: (id: string) => api.testWebhookEndpoint(id),
   });
