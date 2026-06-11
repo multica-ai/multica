@@ -20,7 +20,12 @@ export function buildWikiTree(pages: WikiPageSummary[]): WikiPageTreeNode[] {
   }
 
   const sortNodes = (nodes: WikiPageTreeNode[]) => {
-    nodes.sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at));
+    // Folders first, then pages, each group sorted by position
+    nodes.sort((a, b) => {
+      if (a.type === "folder" && b.type !== "folder") return -1;
+      if (a.type !== "folder" && b.type === "folder") return 1;
+      return a.position - b.position || a.created_at.localeCompare(b.created_at);
+    });
     nodes.forEach((node) => sortNodes(node.children));
   };
   sortNodes(roots);

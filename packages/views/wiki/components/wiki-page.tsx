@@ -5,18 +5,39 @@ import {
   BookOpenText,
   ChevronRight,
   FileText,
+  Folder,
+  FolderOpen,
   MoreHorizontal,
   Plus,
   Trash2,
   History,
+  GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragOverlay,
+  closestCenter,
+  type DragStartEvent,
+  type DragEndEvent,
+  type DragOverEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { api } from "@multica/core/api";
-import type { ListWikiPagesResponse, WikiPageSummary, WikiPageActivity } from "@multica/core/types";
+import type { ListWikiPagesResponse, WikiPageSummary, WikiPageActivity, WikiPageType } from "@multica/core/types";
 import { wikiKeys, wikiPageDetailOptions, wikiPageListOptions, wikiPageActivityOptions } from "@multica/core/wiki";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
@@ -59,6 +80,19 @@ import {
 import { PageHeader } from "../../layout/page-header";
 import { buildWikiTree, flattenWikiTree, type WikiPageTreeNode } from "../lib/tree";
 
+// ---------------------------------------------------------------------------
+// Position computation (same lexorank pattern as Issues)
+// ---------------------------------------------------------------------------
+function computePosition(ids: string[], activeId: string, pageMap: Map<string, WikiPageSummary>): number {
+  const idx = ids.indexOf(activeId);
+  if (idx === -1) return 0;
+  const getPos = (id: string) => pageMap.get(id)?.position ?? 0;
+  if (ids.length === 1) return pageMap.get(activeId)?.position ?? 0;
+  if (idx === 0) return getPos(ids[1]!) - 1;
+  if (idx === ids.length - 1) return getPos(ids[idx - 1]!) + 1;
+  return (getPos(ids[idx - 1]!) + getPos(ids[idx + 1]!)) / 2;
+}
+
 interface WikiPageProps {
   pageId?: string;
 }
@@ -77,6 +111,10 @@ export function WikiPage({ pageId }: WikiPageProps) {
   const [deleteTarget, setDeleteTarget] = useState<WikiPageTreeNode | null>(null);
   const [isSwitching, setIsSwitching] = useState(false);
 
+  // DnD state
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [overFolderId, setOverFolderId] = useState<string | null>(null);
+
   const { data: members = [], isLoading: membersLoading } = useQuery(memberListOptions(wsId));
   const { data: pages = [], isLoading: pagesLoading } = useQuery(wikiPageListOptions(wsId));
   const selectedPageId = pageId && pages.some((page) => page.id === pageId)
@@ -92,6 +130,11 @@ export function WikiPage({ pageId }: WikiPageProps) {
   const canEdit = currentMember?.role === "owner" || currentMember?.role === "admin";
   const tree = useMemo(() => buildWikiTree(pages), [pages]);
   const flatPages = useMemo(() => flattenWikiTree(tree), [tree]);
+  const pageMap = useMemo(() => {
+    const map = new Map<string, WikiPageSummary>();
+    for (const page of pages) map.set(page.id, page);
+    return map;
+  }, [pages]);
   const childCountById = useMemo(() => {
     const counts = new Map<string, number>();
     const count = (node: WikiPageTreeNode): number => {
@@ -142,12 +185,13 @@ export function WikiPage({ pageId }: WikiPageProps) {
     if (ok) nav.push(paths.wikiPage(targetId));
   }, [isSwitching, nav, paths, saveCurrentPage, selectedPageId]);
 
-  const createPage = useCallback(async (parentId: string | null = null) => {
+  const createPage = useCallback(async (parentId: string | null = null, type: WikiPageType = "page") => {
     if (!canEdit) return;
     const ok = await saveCurrentPage();
     if (!ok) return;
+    const defaultTitle = type === "folder" ? "新文件夹" : "新页面";
     try {
-      const page = await api.createWikiPage({ title: "新页面", parent_id: parentId });
+      const page = await api.createWikiPage({ title: defaultTitle, parent_id: parentId, type });
       queryClient.setQueryData<ListWikiPagesResponse>(wikiKeys.list(wsId), (old) => {
         if (!old || old.pages.some((existing) => existing.id === page.id)) return old;
         const { content: _content, ...summary } = page;
@@ -159,13 +203,19 @@ export function WikiPage({ pageId }: WikiPageProps) {
       });
       queryClient.setQueryData(wikiKeys.detail(wsId, page.id), page);
       queryClient.invalidateQueries({ queryKey: wikiKeys.list(wsId) });
-      nav.push(paths.wikiPage(page.id));
+      if (type === "page") {
+        nav.push(paths.wikiPage(page.id));
+      }
       setRenamingId(page.id);
       setRenameValue(page.title);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create wiki page");
+      toast.error(err instanceof Error ? err.message : `Failed to create wiki ${type}`);
     }
   }, [canEdit, nav, paths, queryClient, saveCurrentPage, wsId]);
+
+  const createFolder = useCallback(async () => {
+    await createPage(null, "folder");
+  }, [createPage]);
 
   const renamePage = useCallback(async (page: WikiPageSummary, title: string) => {
     const nextTitle = title.trim();
@@ -236,6 +286,166 @@ export function WikiPage({ pageId }: WikiPageProps) {
     enabled: canEdit && !!selectedPage,
   });
 
+  // ---- DnD handlers ----
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  // Build ordered ID lists for each "container" (top-level + each folder)
+  const containerIds = useMemo(() => {
+    const map = new Map<string | null, string[]>();
+    // Top-level items (parent_id = null)
+    const topIds: string[] = [];
+    for (const node of tree) topIds.push(node.id);
+    map.set(null, topIds);
+    // Per-folder items
+    for (const node of tree) {
+      if (node.type === "folder" && node.children.length > 0) {
+        map.set(node.id, node.children.map((c) => c.id));
+      } else if (node.type === "folder") {
+        map.set(node.id, []);
+      }
+    }
+    // Also include folders that are children (shouldn't happen, but just in case)
+    for (const page of pages) {
+      if (page.type === "folder" && !map.has(page.id)) {
+        map.set(page.id, []);
+      }
+    }
+    return map;
+  }, [tree, pages]);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+  }, []);
+
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const { over } = event;
+    if (!over) {
+      setOverFolderId(null);
+      return;
+    }
+    const overId = String(over.id);
+    const overPage = pageMap.get(overId);
+    // Highlight folder when hovering over it
+    if (overPage?.type === "folder") {
+      setOverFolderId(overId);
+    } else {
+      setOverFolderId(null);
+    }
+  }, [pageMap]);
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+    setOverFolderId(null);
+
+    if (!over || active.id === over.id || !canEdit) return;
+
+    const activeItemId = String(active.id);
+    const overItemId = String(over.id);
+    const activePage = pageMap.get(activeItemId);
+    const overPage = pageMap.get(overItemId);
+    if (!activePage) return;
+
+    // Determine target folder: if dropping on a folder, move into it
+    // If dropping on a page, keep in the same container as the over item
+    let targetParentId: string | null;
+    if (overPage?.type === "folder") {
+      // Dropping onto a folder → move INTO that folder (only for pages, not folders)
+      if (activePage.type === "folder") {
+        // Folders cannot be nested - snap back
+        toast.error("文件夹不能嵌套到其他文件夹中");
+        return;
+      }
+      targetParentId = overItemId;
+      // Place at the end of the folder
+      const folderChildren = containerIds.get(overItemId) ?? [];
+      const newPosition = folderChildren.length > 0
+        ? (pageMap.get(folderChildren[folderChildren.length - 1]!)?.position ?? 0) + 1
+        : 0;
+
+      try {
+        const result = await api.reorderWikiPages({
+          pages: [{ id: activeItemId, position: newPosition, parent_id: targetParentId }],
+        });
+        queryClient.setQueryData<ListWikiPagesResponse>(wikiKeys.list(wsId), (old) => {
+          if (!old) return old;
+          return { pages: result.pages, total: result.total };
+        });
+        toast.success(`已移入文件夹「${overPage.title}」`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "移动失败");
+        queryClient.invalidateQueries({ queryKey: wikiKeys.list(wsId) });
+      }
+      return;
+    }
+
+    // Dropping on a page → reorder within the same container
+    targetParentId = overPage?.parent_id ?? null;
+    const activeParentId = activePage.parent_id;
+
+    // Prevent folder from being dragged into another folder
+    if (activePage.type === "folder" && targetParentId !== null) {
+      // This shouldn't happen since folders are always top-level, but guard anyway
+      toast.error("文件夹不能嵌套到其他文件夹中");
+      return;
+    }
+
+    // If moving between containers (different parent), handle the cross-folder move
+    if (activeParentId !== targetParentId && activePage.type === "page") {
+      const container = containerIds.get(targetParentId) ?? [];
+      const newContainer = activeParentId
+        ? [...container, activeItemId]  // adding to new container
+        : [...container, activeItemId];
+
+      // Compute position based on where it was dropped
+      const overIdx = newContainer.indexOf(overItemId);
+      const reordered = arrayMove(newContainer, newContainer.indexOf(activeItemId), overIdx >= 0 ? overIdx : newContainer.length - 1);
+      const newPosition = computePosition(reordered, activeItemId, pageMap);
+
+      try {
+        const result = await api.reorderWikiPages({
+          // Use "" to signal "clear parent_id" when moving to top level
+          pages: [{ id: activeItemId, position: newPosition, parent_id: targetParentId ?? "" }],
+        });
+        queryClient.setQueryData<ListWikiPagesResponse>(wikiKeys.list(wsId), (old) => {
+          if (!old) return old;
+          return { pages: result.pages, total: result.total };
+        });
+        toast.success("移动完成");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "移动失败");
+        queryClient.invalidateQueries({ queryKey: wikiKeys.list(wsId) });
+      }
+      return;
+    }
+
+    // Same container reorder
+    const container = containerIds.get(targetParentId) ?? [];
+    const activeIdx = container.indexOf(activeItemId);
+    const overIdx = container.indexOf(overItemId);
+    if (activeIdx === -1 || overIdx === -1) return;
+
+    const reordered = arrayMove(container, activeIdx, overIdx);
+    const newPosition = computePosition(reordered, activeItemId, pageMap);
+
+    try {
+      const result = await api.reorderWikiPages({
+        pages: [{ id: activeItemId, position: newPosition }],
+      });
+      queryClient.setQueryData<ListWikiPagesResponse>(wikiKeys.list(wsId), (old) => {
+        if (!old) return old;
+        return { pages: result.pages, total: result.total };
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "排序失败");
+      queryClient.invalidateQueries({ queryKey: wikiKeys.list(wsId) });
+    }
+  }, [canEdit, containerIds, pageMap, queryClient, wsId]);
+
+  const activePage = activeId ? pageMap.get(activeId) : null;
+
   if (!workspace || membersLoading || pagesLoading) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -274,40 +484,91 @@ export function WikiPage({ pageId }: WikiPageProps) {
           <div className="flex h-12 items-center gap-2 border-b px-3">
             <span className="text-sm font-medium">Pages</span>
             {canEdit && (
-              <Button size="icon-sm" variant="ghost" className="ml-auto" onClick={() => void createPage(null)}>
-                <Plus className="size-4" />
-              </Button>
+              <div className="ml-auto flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button size="icon-sm" variant="ghost" onClick={() => void createFolder()}>
+                        <Folder className="size-4" />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>新建文件夹</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button size="icon-sm" variant="ghost" onClick={() => void createPage(null)}>
+                        <Plus className="size-4" />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>新建页面</TooltipContent>
+                </Tooltip>
+              </div>
             )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {tree.length ? (
-              <WikiTree
-                nodes={tree}
-                selectedPageId={selectedPageId}
-                canEdit={canEdit}
-                renamingId={renamingId}
-                renameValue={renameValue}
-                onRenameValueChange={setRenameValue}
-                onStartRename={(page) => {
-                  setRenamingId(page.id);
-                  setRenameValue(page.title);
-                }}
-                onCommitRename={renamePage}
-                onSelect={(id) => void selectPage(id)}
-                onCreateChild={(id) => void createPage(id)}
-                onDelete={setDeleteTarget}
-                members={members}
-              />
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={containerIds.get(null) ?? []}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <WikiTree
+                    nodes={tree}
+                    selectedPageId={selectedPageId}
+                    canEdit={canEdit}
+                    renamingId={renamingId}
+                    renameValue={renameValue}
+                    onRenameValueChange={setRenameValue}
+                    onStartRename={(page) => {
+                      setRenamingId(page.id);
+                      setRenameValue(page.title);
+                    }}
+                    onCommitRename={renamePage}
+                    onSelect={(id) => void selectPage(id)}
+                    onCreateChild={(id) => void createPage(id)}
+                    onDelete={setDeleteTarget}
+                    members={members}
+                    overFolderId={overFolderId}
+                  />
+                </SortableContext>
+                <DragOverlay>
+                  {activeId && activePage ? (
+                    <div className="flex h-8 items-center gap-1.5 rounded-md border bg-background px-2 text-sm shadow-lg">
+                      {activePage.type === "folder" ? (
+                        <Folder className="size-3.5 text-muted-foreground" />
+                      ) : (
+                        <FileText className="size-3.5 text-muted-foreground" />
+                      )}
+                      <span className="truncate">{activePage.title}</span>
+                    </div>
+                  ) : null}
+                </DragOverlay>
+              </DndContext>
             ) : (
               <div className="px-3 py-10 text-center">
                 <FileText className="mx-auto size-8 text-muted-foreground" />
                 <p className="mt-3 text-sm font-medium">No wiki pages yet</p>
                 <p className="mt-1 text-xs text-muted-foreground">Create the first page to start documenting this workspace.</p>
                 {canEdit && (
-                  <Button size="sm" className="mt-4" onClick={() => void createPage(null)}>
-                    <Plus className="size-3.5" />
-                    New page
-                  </Button>
+                  <div className="mt-4 flex items-center justify-center gap-2">
+                    <Button size="sm" onClick={() => void createPage(null)}>
+                      <Plus className="size-3.5" />
+                      New page
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void createFolder()}>
+                      <Folder className="size-3.5" />
+                      New folder
+                    </Button>
+                  </div>
                 )}
               </div>
             )}
@@ -374,10 +635,16 @@ export function WikiPage({ pageId }: WikiPageProps) {
                 <h2 className="mt-4 text-lg font-semibold">No wiki page selected</h2>
                 <p className="mt-1 text-sm text-muted-foreground">Select a page from the tree or create a new one.</p>
                 {canEdit && (
-                  <Button className="mt-5" onClick={() => void createPage(null)}>
-                    <Plus className="size-4" />
-                    New page
-                  </Button>
+                  <div className="mt-5 flex items-center justify-center gap-2">
+                    <Button onClick={() => void createPage(null)}>
+                      <Plus className="size-4" />
+                      New page
+                    </Button>
+                    <Button variant="outline" onClick={() => void createFolder()}>
+                      <Folder className="size-4" />
+                      New folder
+                    </Button>
+                  </div>
                 )}
               </div>
             )}
@@ -388,7 +655,9 @@ export function WikiPage({ pageId }: WikiPageProps) {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete page{deleteTarget ? ` "${deleteTarget.title}"` : ""}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Delete {deleteTarget?.type === "folder" ? "folder" : "page"}{deleteTarget ? ` "${deleteTarget.title}"` : ""}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget && (childCountById.get(deleteTarget.id) ?? 0) > 0
                 ? `This will also delete ${childCountById.get(deleteTarget.id)} child page(s). This action cannot be undone.`
@@ -407,6 +676,223 @@ export function WikiPage({ pageId }: WikiPageProps) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Sortable tree item component
+// ---------------------------------------------------------------------------
+function SortableWikiItem({
+  node,
+  selectedPageId,
+  canEdit,
+  renamingId,
+  renameValue,
+  onRenameValueChange,
+  onStartRename,
+  onCommitRename,
+  onSelect,
+  onCreateChild,
+  onDelete,
+  members,
+  overFolderId,
+  depth = 0,
+}: {
+  node: WikiPageTreeNode;
+  selectedPageId: string | null;
+  canEdit: boolean;
+  renamingId: string | null;
+  renameValue: string;
+  onRenameValueChange: (value: string) => void;
+  onStartRename: (page: WikiPageSummary) => void;
+  onCommitRename: (page: WikiPageSummary, value: string) => void | Promise<void>;
+  onSelect: (id: string) => void;
+  onCreateChild: (id: string) => void;
+  onDelete: (page: WikiPageTreeNode) => void;
+  members: Array<{ user_id: string; name: string; avatar_url: string | null }>;
+  overFolderId: string | null;
+  depth?: number;
+}) {
+  const isFolder = node.type === "folder";
+  const isRenaming = node.id === renamingId;
+  const isActive = node.id === selectedPageId;
+  const isDragOverFolder = node.id === overFolderId;
+  const [expanded, setExpanded] = useState(true);
+  const creator = node.created_by ? members.find((m) => m.user_id === node.created_by) : undefined;
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: node.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <div
+        className={cn(
+          "group flex h-8 items-center gap-1 rounded-md pr-1 text-sm",
+          isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+          isDragOverFolder && isFolder && "ring-2 ring-primary/50 bg-primary/10",
+        )}
+        style={{ paddingLeft: 6 + depth * 14 }}
+      >
+        {canEdit && (
+          <button
+            type="button"
+            className="cursor-grab shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="size-3.5 text-muted-foreground" />
+          </button>
+        )}
+        {isFolder ? (
+          <button
+            type="button"
+            className="shrink-0"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? (
+              <ChevronRight className="size-3.5 rotate-90 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="size-3.5 text-muted-foreground" />
+            )}
+          </button>
+        ) : node.children.length > 0 ? (
+          <ChevronRight className="size-3.5 rotate-90 text-muted-foreground" />
+        ) : (
+          <span className="size-3.5" />
+        )}
+        {isFolder ? (
+          expanded ? (
+            <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+          )
+        ) : (
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        {isRenaming ? (
+          <Input
+            autoFocus
+            value={renameValue}
+            onChange={(event) => onRenameValueChange(event.target.value)}
+            onBlur={() => void onCommitRename(node, renameValue)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") onCommitRename(node, node.title);
+            }}
+            className="h-6 flex-1 px-1.5 text-sm"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => onSelect(node.id)}
+            className="min-w-0 flex-1 truncate text-left"
+          >
+            {node.title}
+          </button>
+        )}
+        {creator && !isRenaming && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <ActorAvatar actorType="member" actorId={creator.user_id} size={14} />
+                </span>
+              }
+            />
+            <TooltipContent side="right">{creator.name}</TooltipContent>
+          </Tooltip>
+        )}
+        {canEdit && !isRenaming && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={(
+                <Button size="icon-sm" variant="ghost" className="opacity-0 group-hover:opacity-100">
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+              )}
+            />
+            <DropdownMenuContent align="end" className="w-40">
+              {isFolder && (
+                <DropdownMenuItem onClick={() => onCreateChild(node.id)}>
+                  <Plus className="size-3.5" />
+                  添加页面
+                </DropdownMenuItem>
+              )}
+              {!isFolder && (
+                <DropdownMenuItem onClick={() => onCreateChild(node.id)}>
+                  <Plus className="size-3.5" />
+                  New child page
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => onStartRename(node)}>
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => onDelete(node)}>
+                <Trash2 className="size-3.5" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+      {isFolder && expanded && node.children.length > 0 && (
+        <SortableContext
+          items={node.children.map((c) => c.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <WikiTree
+            nodes={node.children}
+            selectedPageId={selectedPageId}
+            canEdit={canEdit}
+            renamingId={renamingId}
+            renameValue={renameValue}
+            onRenameValueChange={onRenameValueChange}
+            onStartRename={onStartRename}
+            onCommitRename={onCommitRename}
+            onSelect={onSelect}
+            onCreateChild={onCreateChild}
+            onDelete={onDelete}
+            members={members}
+            overFolderId={overFolderId}
+            depth={depth + 1}
+          />
+        </SortableContext>
+      )}
+      {!isFolder && node.children.length > 0 && (
+        <WikiTree
+          nodes={node.children}
+          selectedPageId={selectedPageId}
+          canEdit={canEdit}
+          renamingId={renamingId}
+          renameValue={renameValue}
+          onRenameValueChange={onRenameValueChange}
+          onStartRename={onStartRename}
+          onCommitRename={onCommitRename}
+          onSelect={onSelect}
+          onCreateChild={onCreateChild}
+          onDelete={onDelete}
+          members={members}
+          overFolderId={overFolderId}
+          depth={depth + 1}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WikiTree (renders a list of sortable items)
+// ---------------------------------------------------------------------------
 function WikiTree({
   nodes,
   selectedPageId,
@@ -420,6 +906,7 @@ function WikiTree({
   onCreateChild,
   onDelete,
   members,
+  overFolderId,
   depth = 0,
 }: {
   nodes: WikiPageTreeNode[];
@@ -434,111 +921,37 @@ function WikiTree({
   onCreateChild: (id: string) => void;
   onDelete: (page: WikiPageTreeNode) => void;
   members: Array<{ user_id: string; name: string; avatar_url: string | null }>;
+  overFolderId: string | null;
   depth?: number;
 }) {
   return (
-    <div className={depth === 0 ? "space-y-0.5" : "space-y-0.5"}>
-      {nodes.map((node) => {
-        const active = node.id === selectedPageId;
-        const renaming = node.id === renamingId;
-        const creator = node.created_by ? members.find((m) => m.user_id === node.created_by) : undefined;
-        return (
-          <div key={node.id}>
-            <div
-              className={cn(
-                "group flex h-8 items-center gap-1 rounded-md pr-1 text-sm",
-                active ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-              )}
-              style={{ paddingLeft: 6 + depth * 14 }}
-            >
-              {node.children.length ? (
-                <ChevronRight className="size-3.5 rotate-90 text-muted-foreground" />
-              ) : (
-                <span className="size-3.5" />
-              )}
-              {renaming ? (
-                <Input
-                  autoFocus
-                  value={renameValue}
-                  onChange={(event) => onRenameValueChange(event.target.value)}
-                  onBlur={() => void onCommitRename(node, renameValue)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                    if (event.key === "Escape") onCommitRename(node, node.title);
-                  }}
-                  className="h-6 flex-1 px-1.5 text-sm"
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onSelect(node.id)}
-                  className="min-w-0 flex-1 truncate text-left"
-                >
-                  {node.title}
-                </button>
-              )}
-              {creator && !renaming && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <ActorAvatar actorType="member" actorId={creator.user_id} size={14} />
-                      </span>
-                    }
-                  />
-                  <TooltipContent side="right">{creator.name}</TooltipContent>
-                </Tooltip>
-              )}
-              {canEdit && !renaming && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={(
-                      <Button size="icon-sm" variant="ghost" className="opacity-0 group-hover:opacity-100">
-                        <MoreHorizontal className="size-3.5" />
-                      </Button>
-                    )}
-                  />
-                  <DropdownMenuContent align="end" className="w-40">
-                    <DropdownMenuItem onClick={() => onCreateChild(node.id)}>
-                      <Plus className="size-3.5" />
-                      New child page
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => onStartRename(node)}>
-                      Rename
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onClick={() => onDelete(node)}>
-                      <Trash2 className="size-3.5" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
-            {node.children.length > 0 && (
-              <WikiTree
-                nodes={node.children}
-                selectedPageId={selectedPageId}
-                canEdit={canEdit}
-                renamingId={renamingId}
-                renameValue={renameValue}
-                onRenameValueChange={onRenameValueChange}
-                onStartRename={onStartRename}
-                onCommitRename={onCommitRename}
-                onSelect={onSelect}
-                onCreateChild={onCreateChild}
-                onDelete={onDelete}
-                members={members}
-                depth={depth + 1}
-              />
-            )}
-          </div>
-        );
-      })}
+    <div className="space-y-0.5">
+      {nodes.map((node) => (
+        <SortableWikiItem
+          key={node.id}
+          node={node}
+          selectedPageId={selectedPageId}
+          canEdit={canEdit}
+          renamingId={renamingId}
+          renameValue={renameValue}
+          onRenameValueChange={onRenameValueChange}
+          onStartRename={onStartRename}
+          onCommitRename={onCommitRename}
+          onSelect={onSelect}
+          onCreateChild={onCreateChild}
+          onDelete={onDelete}
+          members={members}
+          overFolderId={overFolderId}
+          depth={depth}
+        />
+      ))}
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Helper sub-components (unchanged from original)
+// ---------------------------------------------------------------------------
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
