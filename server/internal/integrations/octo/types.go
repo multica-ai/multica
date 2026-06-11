@@ -40,8 +40,8 @@ const BindingTokenTTL = 15 * time.Minute
 
 // InboundMessage is the dispatcher's input: a single Octo message already
 // decoded by the transport layer (internal/integrations/im) and normalized into
-// the fields the business pipeline needs. The bridge that owns the im.Socket
-// converts an im.BotMessage into this shape (resolving robot_id → routing,
+// the fields the business pipeline needs. The bridge that owns the transport.Socket
+// converts an transport.BotMessage into this shape (resolving robot_id → routing,
 // computing AddressedToBot) so the dispatcher has no direct dependency on the
 // transport package.
 type InboundMessage struct {

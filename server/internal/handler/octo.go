@@ -9,8 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/multica-ai/multica/server/internal/integrations/im"
 	"github.com/multica-ai/multica/server/internal/integrations/octo"
+	"github.com/multica-ai/multica/server/internal/integrations/octo/transport"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -131,7 +131,7 @@ func (h *Handler) CreateOctoInstallation(w http.ResponseWriter, r *http.Request)
 	// Register against Octo to validate the token and capture the bot identity.
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	reg, err := im.NewHTTPClient(apiURL, req.BotToken).Register(ctx, false, "Multica", "")
+	reg, err := transport.NewHTTPClient(apiURL, req.BotToken).Register(ctx, false, "Multica", "")
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to register bot with Octo (check token and api_url)")
 		return

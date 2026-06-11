@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/integrations/im"
+	"github.com/multica-ai/multica/server/internal/integrations/octo/transport"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -32,22 +32,22 @@ type TokenDecryptor interface {
 }
 
 // MessageSender sends an outbound message to Octo for a given installation.
-// Production uses octoMessageSender (a thin wrapper over im.HTTPClient); tests
+// Production uses octoMessageSender (a thin wrapper over transport.HTTPClient); tests
 // provide a fake. Returns the server-assigned message id/seq.
 type MessageSender interface {
-	Send(ctx context.Context, apiURL, botToken, channelID string, channelType im.ChannelType, content string) (*im.SendMessageResult, error)
+	Send(ctx context.Context, apiURL, botToken, channelID string, channelType transport.ChannelType, content string) (*transport.SendMessageResult, error)
 }
 
 // octoMessageSender is the production MessageSender. It constructs a per-call
-// im.HTTPClient because each installation has its own api_url + token.
+// transport.HTTPClient because each installation has its own api_url + token.
 type octoMessageSender struct{}
 
 // NewMessageSender returns the production MessageSender.
 func NewMessageSender() MessageSender { return octoMessageSender{} }
 
-func (octoMessageSender) Send(ctx context.Context, apiURL, botToken, channelID string, channelType im.ChannelType, content string) (*im.SendMessageResult, error) {
-	client := im.NewHTTPClient(apiURL, botToken)
-	return client.SendMessage(ctx, im.SendMessageParams{
+func (octoMessageSender) Send(ctx context.Context, apiURL, botToken, channelID string, channelType transport.ChannelType, content string) (*transport.SendMessageResult, error) {
+	client := transport.NewHTTPClient(apiURL, botToken)
+	return client.SendMessage(ctx, transport.SendMessageParams{
 		ChannelID:   channelID,
 		ChannelType: channelType,
 		Content:     content,
@@ -140,7 +140,7 @@ func (p *Patcher) sendReply(ctx context.Context, inst db.OctoInstallation, bindi
 	if content == "" {
 		return nil
 	}
-	res, err := p.sender.Send(ctx, inst.ApiUrl, token, binding.OctoChannelID, im.ChannelType(binding.OctoChannelType), content)
+	res, err := p.sender.Send(ctx, inst.ApiUrl, token, binding.OctoChannelID, transport.ChannelType(binding.OctoChannelType), content)
 	if err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}

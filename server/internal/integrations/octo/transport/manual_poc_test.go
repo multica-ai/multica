@@ -12,7 +12,7 @@
 // TestManualSend           — register + send one message to the bot owner (DM).
 // TestManualReceive        — register + open WS, print inbound messages for 60s.
 // TestManualEcho           — register + WS; echo every inbound DM back to sender.
-package im
+package transport
 
 import (
 	"context"

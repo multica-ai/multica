@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/integrations/im"
+	"github.com/multica-ai/multica/server/internal/integrations/octo/transport"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -45,15 +45,15 @@ func (f fakeDecryptor) DecryptBotToken(inst db.OctoInstallation) (string, error)
 type fakeSender struct {
 	sent    int
 	lastTxt string
-	res     *im.SendMessageResult
+	res     *transport.SendMessageResult
 	err     error
 }
 
-func (f *fakeSender) Send(ctx context.Context, apiURL, botToken, channelID string, channelType im.ChannelType, content string) (*im.SendMessageResult, error) {
+func (f *fakeSender) Send(ctx context.Context, apiURL, botToken, channelID string, channelType transport.ChannelType, content string) (*transport.SendMessageResult, error) {
 	f.sent++
 	f.lastTxt = content
 	if f.res == nil {
-		f.res = &im.SendMessageResult{MessageID: "m1", MessageSeq: 5}
+		f.res = &transport.SendMessageResult{MessageID: "m1", MessageSeq: 5}
 	}
 	return f.res, f.err
 }

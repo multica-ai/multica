@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/multica-ai/multica/server/internal/integrations/im"
+	"github.com/multica-ai/multica/server/internal/integrations/octo/transport"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -71,13 +71,13 @@ func TestHub_AcquiresLeaseRunsConnectorDispatches(t *testing.T) {
 
 	emitted := make(chan struct{})
 	factory := func(inst db.OctoInstallation) (Connector, error) {
-		return connectorFunc(func(ctx context.Context, inst db.OctoInstallation, onMessage func(im.BotMessage)) error {
-			onMessage(im.BotMessage{
+		return connectorFunc(func(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error {
+			onMessage(transport.BotMessage{
 				MessageID:   "m1",
 				FromUID:     "uid1",
 				ChannelID:   "ch1",
-				ChannelType: im.ChannelDM,
-				Payload:     im.MessagePayload{Type: im.MsgText, Content: "hi"},
+				ChannelType: transport.ChannelDM,
+				Payload:     transport.MessagePayload{Type: transport.MsgText, Content: "hi"},
 			})
 			close(emitted)
 			<-ctx.Done()
@@ -134,7 +134,7 @@ func TestHub_LeaseDeniedDoesNotRunConnector(t *testing.T) {
 
 	ran := make(chan struct{}, 1)
 	factory := func(inst db.OctoInstallation) (Connector, error) {
-		return connectorFunc(func(ctx context.Context, inst db.OctoInstallation, onMessage func(im.BotMessage)) error {
+		return connectorFunc(func(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error {
 			select {
 			case ran <- struct{}{}:
 			default:
@@ -163,8 +163,8 @@ func TestHub_LeaseDeniedDoesNotRunConnector(t *testing.T) {
 }
 
 // connectorFunc adapts a function to the Connector interface.
-type connectorFunc func(ctx context.Context, inst db.OctoInstallation, onMessage func(im.BotMessage)) error
+type connectorFunc func(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error
 
-func (f connectorFunc) Run(ctx context.Context, inst db.OctoInstallation, onMessage func(im.BotMessage)) error {
+func (f connectorFunc) Run(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error {
 	return f(ctx, inst, onMessage)
 }

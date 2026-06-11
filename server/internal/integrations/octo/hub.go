@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/integrations/im"
+	"github.com/multica-ai/multica/server/internal/integrations/octo/transport"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -40,9 +40,9 @@ type InboundHandler interface {
 
 // Connector is the per-installation transport. Run blocks until ctx is
 // cancelled (lease lost / shutdown) or the connection terminally fails. The
-// production connector wraps an im.Socket; tests provide a fake.
+// production connector wraps an transport.Socket; tests provide a fake.
 type Connector interface {
-	Run(ctx context.Context, inst db.OctoInstallation, onMessage func(im.BotMessage)) error
+	Run(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error
 }
 
 // ConnectorFactory builds a Connector for an installation. The factory needs
@@ -72,7 +72,7 @@ func (c HubConfig) withDefaults() HubConfig {
 // Hub owns the per-installation WS connections. It sweeps active installations,
 // claims a WS lease for each, and runs a Connector that bridges inbound
 // messages to the Dispatcher. Reconnect within a held lease is the Connector's
-// concern (im.Socket reconnects internally); the Hub handles lease lifecycle
+// concern (transport.Socket reconnects internally); the Hub handles lease lifecycle
 // and starting/stopping supervisors as installations come and go.
 type Hub struct {
 	queries  HubQueries
@@ -205,7 +205,7 @@ func (h *Hub) supervise(ctx context.Context, inst db.OctoInstallation, id string
 		if err != nil {
 			h.logger.Error("octo hub: build connector failed", "installation", id, "err", err.Error())
 		} else {
-			runErr := conn.Run(runCtx, inst, func(m im.BotMessage) {
+			runErr := conn.Run(runCtx, inst, func(m transport.BotMessage) {
 				h.onMessage(runCtx, inst, m)
 			})
 			if runErr != nil && runCtx.Err() == nil {
@@ -225,7 +225,7 @@ func (h *Hub) supervise(ctx context.Context, inst db.OctoInstallation, id string
 
 // onMessage bridges a transport message to the dispatcher. The Connector has
 // already populated routing fields; here we just hand it off.
-func (h *Hub) onMessage(ctx context.Context, inst db.OctoInstallation, m im.BotMessage) {
+func (h *Hub) onMessage(ctx context.Context, inst db.OctoInstallation, m transport.BotMessage) {
 	msg := InboundMessage{
 		RobotID:        inst.RobotID,
 		MessageID:      m.MessageID,
@@ -242,8 +242,8 @@ func (h *Hub) onMessage(ctx context.Context, inst db.OctoInstallation, m im.BotM
 
 // addressedToBot reports whether a group message targets the bot (@mention).
 // DMs are always addressed; for groups we check the mention uid list.
-func addressedToBot(robotID string, m im.BotMessage) bool {
-	if im.ChannelType(m.ChannelType) == im.ChannelDM {
+func addressedToBot(robotID string, m transport.BotMessage) bool {
+	if transport.ChannelType(m.ChannelType) == transport.ChannelDM {
 		return true
 	}
 	if m.Payload.Mention == nil {

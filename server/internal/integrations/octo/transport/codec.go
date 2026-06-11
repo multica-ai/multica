@@ -1,4 +1,4 @@
-// Package im implements the WuKongIM binary protocol used by Octo IM, plus a
+// Package transport implements the WuKongIM binary protocol used by Octo IM, plus a
 // REST client for the Octo bot API. It is the transport layer for the Octo
 // integration: a User Bot (bf_* token) registers via REST to obtain an im_token
 // and ws_url, opens a WuKongIM WebSocket long connection to receive messages,
@@ -6,7 +6,7 @@
 //
 // Ported from cc-channel-octo/src/octo/{socket,types,api}.ts (the TypeScript
 // reference implementation). See PORTING.md for the function-by-function map.
-package im
+package transport
 
 import (
 	"encoding/binary"
