@@ -1,0 +1,159 @@
+// TECH-3413 — Dynamic inbox layout model.
+//
+// A user's inbox is a list of TABS; each tab is one outer box holding an ordered
+// list of SECTIONS. Each section is a filtered/grouped slice of the same inbox
+// data the classic inbox uses. The whole InboxLayout is persisted to the
+// server-synced user.preferences blob (see use-inbox-layout.ts), with an
+// optional separate layout for the mobile/PWA view.
+
+/** What a section pulls from the merged inbox feed. */
+export type SectionKind =
+  | "act_now"
+  | "running"
+  | "reminders"
+  | "waiting"
+  | "calm"
+  | "unread"
+  | "pinned"
+  | "project"
+  | "all";
+
+/** How rows inside a section are grouped under sub-headers. */
+export type SectionGroupBy = "none" | "action" | "project";
+
+/** How rows inside a section are ordered. */
+export type SectionSort = "newest" | "oldest";
+
+export interface InboxSectionConfig {
+  /** Stable id for React keys + reorder/remove. */
+  id: string;
+  kind: SectionKind;
+  /** Optional custom header; falls back to the catalog label. */
+  title?: string;
+  /** Required when kind === "project". */
+  projectId?: string;
+  groupBy?: SectionGroupBy;
+  sort?: SectionSort;
+  /** Show the priority chip on rows. */
+  showPriority?: boolean;
+  /** Compact (denser) rows. */
+  compact?: boolean;
+  /** Max rows before a "show more" affordance; 0 / undefined = no cap. */
+  maxRows?: number;
+}
+
+export interface InboxTabConfig {
+  id: string;
+  title: string;
+  sections: InboxSectionConfig[];
+}
+
+export interface InboxLayout {
+  /** Bumped when the shape changes so stale blobs can be reset. */
+  version: 1;
+  tabs: InboxTabConfig[];
+  /** Id of the tab to open by default. */
+  activeTabId?: string;
+}
+
+export const INBOX_LAYOUT_VERSION = 1 as const;
+
+/** Catalog entry shown in the "+ Add section" menu. */
+export interface SectionCatalogEntry {
+  kind: SectionKind;
+  label: string;
+  /** Whether picking it needs extra input (e.g. a project). */
+  needsProject?: boolean;
+}
+
+export const SECTION_CATALOG: SectionCatalogEntry[] = [
+  { kind: "act_now", label: "Act now" },
+  { kind: "unread", label: "Unread" },
+  { kind: "running", label: "Agents working" },
+  { kind: "reminders", label: "Reminders" },
+  { kind: "pinned", label: "Pinned issues" },
+  { kind: "project", label: "Project…", needsProject: true },
+  { kind: "waiting", label: "Waiting" },
+  { kind: "calm", label: "Done / calm" },
+  { kind: "all", label: "All messages" },
+];
+
+export function sectionLabel(section: InboxSectionConfig): string {
+  if (section.title && section.title.trim()) return section.title.trim();
+  return SECTION_CATALOG.find((c) => c.kind === section.kind)?.label ?? section.kind;
+}
+
+let counter = 0;
+/** Deterministic-enough id without Date.now()/Math.random() (banned in some envs). */
+export function makeId(prefix: string): string {
+  counter += 1;
+  return `${prefix}_${counter}`;
+}
+
+function section(kind: SectionKind, extra: Partial<InboxSectionConfig> = {}): InboxSectionConfig {
+  return { id: makeId(kind), kind, groupBy: "none", sort: "newest", showPriority: true, ...extra };
+}
+
+/** Built-in presets the user can start from (mirrors the brainstorm). */
+export function operatorPreset(): InboxLayout {
+  const tabId = makeId("tab");
+  return {
+    version: INBOX_LAYOUT_VERSION,
+    activeTabId: tabId,
+    tabs: [
+      {
+        id: tabId,
+        title: "Inbox",
+        sections: [
+          section("act_now", { groupBy: "action" }),
+          section("running"),
+          section("reminders"),
+        ],
+      },
+    ],
+  };
+}
+
+export function managerPreset(): InboxLayout {
+  const tabId = makeId("tab");
+  return {
+    version: INBOX_LAYOUT_VERSION,
+    activeTabId: tabId,
+    tabs: [
+      {
+        id: tabId,
+        title: "Inbox",
+        sections: [section("unread"), section("running"), section("pinned")],
+      },
+    ],
+  };
+}
+
+export const DEFAULT_INBOX_LAYOUT = operatorPreset;
+
+export interface InboxPreset {
+  key: string;
+  label: string;
+  build: () => InboxLayout;
+}
+
+export const INBOX_PRESETS: InboxPreset[] = [
+  { key: "operator", label: "Operator", build: operatorPreset },
+  { key: "manager", label: "Manager", build: managerPreset },
+];
+
+/** Defensive: validate an untrusted layout blob from preferences. */
+export function isValidLayout(value: unknown): value is InboxLayout {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Partial<InboxLayout>;
+  if (v.version !== INBOX_LAYOUT_VERSION) return false;
+  if (!Array.isArray(v.tabs) || v.tabs.length === 0) return false;
+  return v.tabs.every(
+    (t) =>
+      t &&
+      typeof t.id === "string" &&
+      typeof t.title === "string" &&
+      Array.isArray(t.sections) &&
+      t.sections.every((s) => typeof s?.id === "string" && typeof s?.kind === "string"),
+  );
+}

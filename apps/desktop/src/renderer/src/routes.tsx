@@ -33,7 +33,8 @@ import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
-import { InboxPage } from "@multica/views/inbox";
+// TECH-3413 — switcher chooses classic vs dynamic inbox (flag + per-user mode).
+import { CerebroInboxSwitcher } from "@multica/cerebro-inbox-dynamic";
 import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
 import { MemberDetailPage as CerebroMemberDetailPage } from "@multica/cerebro-users/views";
@@ -286,7 +287,7 @@ export const appRoutes: RouteObject[] = [
             element: <GroupDetailRoute />,
             handle: { title: "Group" },
           },
-          { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
+          { path: "inbox", element: <CerebroInboxSwitcher />, handle: { title: "Inbox" } },
           { path: "search", element: <SearchPage />, handle: { title: "Search" } },
           { path: "tasks", element: <TasksPage />, handle: { title: "Tasks" } },
           {

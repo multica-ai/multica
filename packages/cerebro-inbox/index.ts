@@ -13,6 +13,17 @@ export {
   CustomReminderPicker,
 } from "./components/cerebro-inbox-row-actions";
 export { CerebroUnarchiveToolbarButton } from "./components/cerebro-unarchive-toolbar-button";
+// TECH-3413 — classic vs dynamic inbox mode (per-user, server-synced) + the
+// toolbar button that switches the classic inbox into the dynamic inbox.
+export {
+  useInboxMode,
+  useSetInboxMode,
+  toInboxMode,
+  INBOX_MODE_KEY,
+  DEFAULT_INBOX_MODE,
+  type InboxMode,
+} from "./dynamic-mode";
+export { CerebroInboxModeButton } from "./components/cerebro-inbox-mode-button";
 export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
 export { CerebroInboxReminderRow } from "./components/cerebro-inbox-reminder-row";
 export { CerebroInboxRunRequestRow } from "./components/cerebro-inbox-run-request-row";
