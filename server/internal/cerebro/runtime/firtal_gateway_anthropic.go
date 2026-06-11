@@ -45,11 +45,18 @@ type AnthropicTool struct {
 type AnthropicContentBlock struct {
 	Type      string                  `json:"type"`
 	Text      string                  `json:"text,omitempty"`
+	Source    *AnthropicContentSource `json:"source,omitempty"`
 	ID        string                  `json:"id,omitempty"`
 	Name      string                  `json:"name,omitempty"`
 	Input     map[string]any          `json:"input,omitempty"`
 	ToolUseID string                  `json:"tool_use_id,omitempty"`
 	Content   []AnthropicContentBlock `json:"content,omitempty"`
+}
+
+type AnthropicContentSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
 }
 
 // AnthropicMessage is a single turn in the Anthropic messages conversation.
@@ -67,7 +74,7 @@ type anthropicToolChoice struct {
 	Type string `json:"type"`
 }
 
-// anthropicRequest is the JSON body sent to /api/ai/proxy/v1/messages.
+// anthropicRequest is the JSON body sent to the Anthropic Messages endpoint.
 type anthropicRequest struct {
 	Model      string                 `json:"model"`
 	MaxTokens  int                    `json:"max_tokens"`
@@ -185,7 +192,7 @@ func (c *GatewayClient) completeAnthropic(
 		return GatewayCompletion{}, fmt.Errorf("marshal anthropic request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/ai/proxy/v1/messages", bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/ai/proxy/anthropic/v1/messages", bytes.NewReader(raw))
 	if err != nil {
 		return GatewayCompletion{}, fmt.Errorf("build anthropic request: %w", err)
 	}
@@ -304,6 +311,11 @@ func ConvertGatewayMessagesToAnthropic(messages []GatewayMessage) []AnthropicMes
 							},
 						},
 					},
+				})
+			} else if len(m.ContentBlocks) > 0 {
+				out = append(out, AnthropicMessage{
+					Role:    "user",
+					Content: m.ContentBlocks,
 				})
 			} else {
 				out = append(out, AnthropicMessage{

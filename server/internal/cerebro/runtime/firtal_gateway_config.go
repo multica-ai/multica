@@ -17,6 +17,9 @@ const (
 	FirtalGatewayProvider    = "firtal-gateway"
 	FirtalGatewaySettingsKey = "firtal_gateway"
 
+	FirtalGatewayEntryModeCompat = "compat"
+	FirtalGatewayEntryModeNative = "native"
+
 	defaultFirtalGatewayModel          = "claude-sonnet-4-6"
 	defaultFirtalGatewayRuntimeName    = "Firtal Gateway"
 	defaultFirtalGatewayPollInterval   = 2 * time.Second
@@ -50,6 +53,7 @@ type FirtalGatewayRuntimeConfig struct {
 	HistoryLimit   int
 	MaxConcurrency int
 	WorkspaceIDs   []pgtype.UUID
+	EntryMode      string
 
 	// ToolsEnabledAgentIDs is loaded from MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS
 	// for backward compatibility only. Tool-loop gating uses the runtime tools
@@ -110,6 +114,7 @@ type WorkspaceFirtalGatewaySettings struct {
 	GatewayURL string `json:"gateway_url"`
 	APIKey     string `json:"api_key"`
 	Model      string `json:"model"`
+	EntryMode  string `json:"entry_mode"`
 }
 
 type workspaceSettingsEnvelope struct {
@@ -123,6 +128,7 @@ func withFirtalGatewayDefaults(cfg FirtalGatewayRuntimeConfig) FirtalGatewayRunt
 	if cfg.Model == "" {
 		cfg.Model = defaultFirtalGatewayModel
 	}
+	cfg.EntryMode = normalizeFirtalGatewayEntryMode(cfg.EntryMode)
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 4096
 	}
@@ -177,6 +183,7 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 		BaseURL:        baseURL,
 		APIKey:         apiKey,
 		Model:          firstNonEmptyEnv("FIRTAL_REGISTRY_MODEL"),
+		EntryMode:      firstNonEmptyEnv("MULTICA_SERVER_FIRTAL_GATEWAY_ENTRY_MODE", "FIRTAL_REGISTRY_ENTRY_MODE"),
 		MaxTokens:      positiveIntFromEnv(4096, "FIRTAL_REGISTRY_MAX_TOKENS"),
 		RuntimeName:    stringFromEnv(defaultFirtalGatewayRuntimeName, "MULTICA_SERVER_FIRTAL_GATEWAY_RUNTIME_NAME"),
 		PollInterval:   durationFromEnv(defaultFirtalGatewayPollInterval, "MULTICA_SERVER_FIRTAL_GATEWAY_POLL_INTERVAL"),
@@ -284,6 +291,9 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 		if model := strings.TrimSpace(settings.Model); model != "" {
 			cfg.Model = model
 		}
+		if mode := strings.TrimSpace(settings.EntryMode); mode != "" {
+			cfg.EntryMode = mode
+		}
 		cfg = withFirtalGatewayDefaults(cfg)
 	}
 
@@ -305,6 +315,17 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 	cfg.BaseURL = normalizedURL
 
 	return cfg, true, nil
+}
+
+func normalizeFirtalGatewayEntryMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", FirtalGatewayEntryModeNative:
+		return FirtalGatewayEntryModeNative
+	case FirtalGatewayEntryModeCompat, "compatible", "openai", "openai_compat":
+		return FirtalGatewayEntryModeCompat
+	default:
+		return FirtalGatewayEntryModeNative
+	}
 }
 
 func firstNonEmptyEnv(keys ...string) string {

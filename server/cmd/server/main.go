@@ -417,7 +417,8 @@ func main() {
 		os.Exit(1)
 	} else if gatewayCfg.Enabled {
 		gatewayExecutor := cerebroruntime.NewFirtalGatewayExecutor(gatewayCfg, queries, cerebrodb.New(pool), taskSvc, bus, nil, nil, cerebroruntime.NewRegistry(pool)) // CEREBRO-PATCH(main-firtal-gateway-tool-registry): give server runtime DB-backed tool grants.
-		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus)                                                                        // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
+		gatewayExecutor.SetAttachmentStorage(cerebroruntime.FirtalGatewayAttachmentStorage()) // CEREBRO-PATCH(main-firtal-gateway-attachment-storage): wire server-side attachment storage into the gateway runtime.
+		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus) // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
 		// CEREBRO-PATCH(main-firtal-gateway-connection-deny): TECH-3174 always-on per-tool connection Deny on the gateway path.
 		gatewayExecutor.SetConnectionDenyStore(cerebrotoolpolicy.NewStore(pool))
 		go gatewayExecutor.Run(gatewayRuntimeCtx)
