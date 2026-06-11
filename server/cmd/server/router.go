@@ -602,6 +602,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ToolExecutor = &cerebroruntime.ToolExecutorInvoker{
 		Queries:        queries,
 		CerebroQueries: cerebroQueries,
+		Pool:           pool, // CEREBRO-PATCH(invoke-grant-config-pool): TECH-3356 — registry needs the pool to read agent_tool_grant.config_json.
 	}
 	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 wire the unified
 	// runtime tool admin service (per-runtime tool inventory + group/user

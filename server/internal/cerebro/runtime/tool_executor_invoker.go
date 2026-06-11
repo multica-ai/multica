@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/handler"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -21,6 +22,12 @@ import (
 type ToolExecutorInvoker struct {
 	Queries        *db.Queries
 	CerebroQueries *cerebrodb.Queries
+	// Pool backs the per-request registry's DB-dependent lookups — chiefly
+	// GetGrantConfig, which reads agent_tool_grant.config_json for tools like
+	// firtal_registry (data-source allowlist, allowed_apps, allow_write).
+	// Without it the registry is db-less and every grant config reads empty,
+	// silently denying config-gated actions through this server-side path.
+	Pool *pgxpool.Pool
 }
 
 // compile-time interface check
@@ -35,6 +42,10 @@ var _ handler.ToolExecutorInvoker = (*ToolExecutorInvoker)(nil)
 func (e *ToolExecutorInvoker) Invoke(ctx context.Context, agentID, workspaceID, userID, cascadeUserID pgtype.UUID, toolName string, args map[string]any) (string, error) {
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, UserID: userID}
 	reg := NewDefaultRegistry(nil, e.Queries, tctx, e.CerebroQueries)
+	// NewDefaultRegistry leaves the pool unset (it only registers tools); wire
+	// it here so tools can read their per-agent grant config (mirrors how the
+	// firtal-gateway executor sets taskRegistry.db).
+	reg.db = e.Pool
 
 	// CEREBRO-PATCH(invoke-cascade-check): TECH-3226 — same permission check as
 	// firtal-gateway's agentHasCallableTools: cascade grants, not raw agent_tool_grant.
