@@ -442,12 +442,29 @@ type taskPlan struct {
 // Empty fields are simply not sent; the registry stores null and its UI falls
 // back to the ID column.
 type gatewayContext struct {
-	surface     string // chat | issue | autopilot
+	surface     string // chat | issue | channel | dm | autopilot
 	issueID     string
 	issueTitle  string
 	projectID   string
 	projectName string
 	autopilotID string
+}
+
+// gatewayIssueSurface maps an issue's kind to the spend "surface" label. A
+// channel/DM is an issue with kind 'channel'/'dm' (Jesper 30/5: "channel er
+// issues med kind = channel"); every other kind is an ordinary issue. The
+// labels match the daemon trace-upload path (traceSurface in
+// internal/daemon/cerebro_trace_upload.go) so both spend systems report the
+// same surface tokens (TECH-3360).
+func gatewayIssueSurface(kind string) string {
+	switch kind {
+	case "channel":
+		return "channel"
+	case "dm":
+		return "dm"
+	default:
+		return "issue"
+	}
 }
 
 func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.AgentTaskQueue, agent db.Agent) (taskPlan, error) {
@@ -502,7 +519,13 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 		}
 		wsCtx := gatewayLoadWorkspaceContext(ctx, e.queries, issue.WorkspaceID)
 		issueCtx := gatewayContext{
-			surface:    "issue",
+			// A channel/DM is itself an issue (kind 'channel'/'dm'), so this
+			// branch also serves channel and DM runs. Label them by kind so the
+			// spend dashboard's Trigger filter can slice channel/DM spend instead
+			// of folding it all into "issue" (TECH-3360). Per-channel grouping
+			// reuses the issue dimension below — for a channel, issueID/issueTitle
+			// are the channel's own id + name.
+			surface:    gatewayIssueSurface(issue.Kind),
 			issueID:    util.UUIDToString(issue.ID),
 			issueTitle: issue.Title,
 		}
