@@ -470,13 +470,29 @@ function TriggerText({
   issueId: string;
   commentId?: string;
 }) {
-  const { push } = useNavigation();
-  const paths = useWorkspacePaths();
-  const { t } = useT("issues");
-
+  // Plain-text path returns before any navigation hook runs, so runs without a
+  // triggering comment don't require a NavigationProvider in the tree.
   if (!commentId) {
     return <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{text}</span>;
   }
+
+  return <TriggerTextLink text={text} issueId={issueId} commentId={commentId} />;
+}
+
+// Clickable variant — isolated so `useNavigation`/`useWorkspacePaths` are only
+// invoked when there's actually a comment to deep-link to.
+function TriggerTextLink({
+  text,
+  issueId,
+  commentId,
+}: {
+  text: string;
+  issueId: string;
+  commentId: string;
+}) {
+  const { push } = useNavigation();
+  const paths = useWorkspacePaths();
+  const { t } = useT("issues");
 
   return (
     <button
