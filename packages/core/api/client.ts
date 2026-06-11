@@ -856,6 +856,22 @@ export class ApiClient {
     return this.fetch(`/api/issues/${id}`);
   }
 
+  async exportIssue(
+    id: string,
+    params: { format: "pdf" | "md"; include_comments?: boolean },
+  ): Promise<Blob> {
+    const search = new URLSearchParams();
+    search.set("format", params.format);
+    if (params.include_comments !== undefined) {
+      search.set("include_comments", String(params.include_comments));
+    }
+    const res = await this.fetchRaw(`/api/issues/${id}/export?${search.toString()}`, {
+      method: "POST",
+    });
+    return res.blob();
+  }
+
+
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     return this.fetch("/api/issues", {
       method: "POST",
