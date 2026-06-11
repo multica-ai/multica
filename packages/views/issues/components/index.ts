@@ -9,3 +9,5 @@ export { CommentInput } from "./comment-input";
 export { ReplyInput } from "./reply-input";
 export { IssueMentionCard } from "./issue-mention-card";
 export { IssueChip } from "./issue-chip";
+export { MarkdownPreviewDrawer } from "./markdown-preview-drawer";
+

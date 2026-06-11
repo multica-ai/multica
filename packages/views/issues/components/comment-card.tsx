@@ -1,9 +1,10 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, Link2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, Eye, Link2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { MarkdownPreviewDrawer } from "./markdown-preview-drawer";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -75,6 +76,7 @@ interface CommentCardProps {
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
+  issueIdentifier?: string;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** Toggle the resolved state on the thread root. Only invoked for root entries. */
@@ -467,6 +469,7 @@ function useEditAttachmentState(
 
 function CommentRow({
   issueId,
+  issueIdentifier,
   entry,
   commentById,
   agents,
@@ -479,6 +482,7 @@ function CommentRow({
   selectionQuoteActions,
 }: {
   issueId: string;
+  issueIdentifier?: string;
   entry: TimelineEntry;
   commentById: Map<string, TimelineEntry>;
   agents: Agent[];
@@ -495,6 +499,7 @@ function CommentRow({
   const { getActorName } = useActorName();
   const copyCommentLink = useCopyCommentLink(issueId);
   const [editing, setEditing] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
   const { uploadWithToast } = useFileUpload(api);
@@ -648,6 +653,10 @@ function CommentRow({
                 <Link2 className="h-3.5 w-3.5" />
                 {t(($) => $.actions.copy_link)}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setPreviewOpen(true)}>
+                <Eye className="h-3.5 w-3.5" />
+                预览评论
+              </DropdownMenuItem>
               {canRetryAgentComment && <DropdownMenuSeparator />}
               {canRetryAgentComment && (
                 <DropdownMenuItem
@@ -759,6 +768,15 @@ function CommentRow({
           )}
         </>
       )}
+      <MarkdownPreviewDrawer
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        content={entry.content ?? ""}
+        title={getActorName(entry.actor_type, entry.actor_id)}
+        issueId={issueId}
+        issueIdentifier={issueIdentifier}
+        showCommentExportOption={false}
+      />
     </div>
   );
 }
@@ -770,6 +788,7 @@ function CommentRow({
 
 function CommentCardImpl({
   issueId,
+  issueIdentifier,
   entry,
   replies,
   commentById,
@@ -805,6 +824,7 @@ function CommentCardImpl({
   const canDeleteEntry = isOwn || canModerate;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [retryWithNoteOpen, setRetryWithNoteOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const isAgent = isAgentComment(entry);
   const isTemp = entry.id.startsWith("temp-");
   const agentMeta = isAgent ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
@@ -941,6 +961,10 @@ function CommentCardImpl({
                   <DropdownMenuItem onClick={() => { void copyCommentLink(entry.id); }}>
                     <Link2 className="h-3.5 w-3.5" />
                     {t(($) => $.actions.copy_link)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setPreviewOpen(true)}>
+                    <Eye className="h-3.5 w-3.5" />
+                    预览评论
                   </DropdownMenuItem>
                   {onResolveToggle && (
                     <>
@@ -1088,6 +1112,7 @@ function CommentCardImpl({
             >
               <CommentRow
                 issueId={issueId}
+                issueIdentifier={issueIdentifier}
                 entry={reply}
                 commentById={commentById}
                 agents={agents}
@@ -1118,6 +1143,15 @@ function CommentCardImpl({
           </div>
         </CollapsibleContent>
       </Collapsible>
+      <MarkdownPreviewDrawer
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        content={entry.content ?? ""}
+        title={getActorName(entry.actor_type, entry.actor_id)}
+        issueId={issueId}
+        issueIdentifier={issueIdentifier}
+        showCommentExportOption={false}
+      />
     </Card>
   );
 }

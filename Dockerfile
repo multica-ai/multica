@@ -33,6 +33,15 @@ RUN cd server && CGO_ENABLED=0 go build -tags timetzdata -ldflags "-s -w" -o bin
 # --- Runtime stage ---
 FROM alpine:3.21
 
+RUN apk add --no-cache \
+    weasyprint \
+    msttcorefonts-installer \
+    fontconfig \
+    ttf-dejavu \
+    font-noto-cjk \
+    && fc-cache -f
+
+
 WORKDIR /app
 
 COPY --from=builder /src/server/bin/server .
