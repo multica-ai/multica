@@ -73,7 +73,7 @@ func TestGatewayClientCompleteUsesNativeAnthropicByDefault(t *testing.T) {
 	}
 
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/ai/proxy/anthropic/v1/messages" {
+		if r.URL.Path != "/api/ai/proxy/v1/messages" {
 			t.Fatalf("path = %q", r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {

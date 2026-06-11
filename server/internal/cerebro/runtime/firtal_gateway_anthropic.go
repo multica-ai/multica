@@ -192,7 +192,7 @@ func (c *GatewayClient) completeAnthropic(
 		return GatewayCompletion{}, fmt.Errorf("marshal anthropic request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/ai/proxy/anthropic/v1/messages", bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/ai/proxy/v1/messages", bytes.NewReader(raw))
 	if err != nil {
 		return GatewayCompletion{}, fmt.Errorf("build anthropic request: %w", err)
 	}
