@@ -190,6 +190,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               ownerMember={ownerMember}
               cliVersion={cliVersion}
               daemonShort={daemonShort}
+              canDelete={!!canDelete}
             />
             <UsageSection runtime={runtime} />
           </div>
@@ -255,6 +256,7 @@ function HeroCard({
   ownerMember,
   cliVersion,
   daemonShort,
+  canDelete,
 }: {
   runtime: AgentRuntime;
   health: ReturnType<typeof deriveRuntimeHealth>;
@@ -262,6 +264,7 @@ function HeroCard({
   ownerMember: MemberWithUser | null;
   cliVersion: string | null;
   daemonShort: string | null;
+  canDelete: boolean;
 }) {
   const { t } = useT("runtimes");
   const [showDetails, setShowDetails] = useState(false);
@@ -296,23 +299,25 @@ function HeroCard({
                   time: formatHoldUntil(runtime.hold_until)!,
                 })}
               </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 gap-1 border-warning/30 px-2 text-[11px] text-warning hover:bg-warning/10"
-                disabled={resumeMutation.isPending}
-                onClick={() =>
-                  resumeMutation.mutate(runtime.id, {
-                    onSuccess: () =>
-                      toast.success(t(($) => $.health.on_hold.resume_toast)),
-                    onError: () =>
-                      toast.error(t(($) => $.health.on_hold.resume_failed)),
-                  })
-                }
-              >
-                <PlayCircle className="h-3 w-3" />
-                {t(($) => $.health.on_hold.resume_button)}
-              </Button>
+              {canDelete && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 gap-1 border-warning/30 px-2 text-[11px] text-warning hover:bg-warning/10"
+                  disabled={resumeMutation.isPending}
+                  onClick={() =>
+                    resumeMutation.mutate(runtime.id, {
+                      onSuccess: () =>
+                        toast.success(t(($) => $.health.on_hold.resume_toast)),
+                      onError: () =>
+                        toast.error(t(($) => $.health.on_hold.resume_failed)),
+                    })
+                  }
+                >
+                  <PlayCircle className="h-3 w-3" />
+                  {t(($) => $.health.on_hold.resume_button)}
+                </Button>
+              )}
             </div>
           )}
         </div>

@@ -17,7 +17,14 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-// Human-readable countdown until a hold expires ("in 5h 23m", "in 12m", "soon").
+// The backend adds a 5-minute margin after `hold_until` before actually
+// releasing the hold (clock skew + provider quota not released on the first
+// run after the stated reset). The frontend countdown must agree so the
+// badge doesn't say "soon" while the runtime is still genuinely held.
+export const HOLD_EXPIRY_MARGIN_MS = 5 * 60_000;
+
+// Human-readable countdown until a hold expires ("in 5h 23m", "in 12m",
+// "in 3m" during the margin window, "soon" once the margin also passes).
 // Returns null when holdUntil is null/undefined so callers can gate on truthiness.
 // `now` defaults to Date.now() but can be injected for testability.
 export function formatHoldUntil(
@@ -25,7 +32,9 @@ export function formatHoldUntil(
   now: number = Date.now(),
 ): string | null {
   if (!holdUntil) return null;
-  const diffMs = new Date(holdUntil).getTime() - now;
+  const holdMs = new Date(holdUntil).getTime();
+  const effectiveExpiryMs = holdMs + HOLD_EXPIRY_MARGIN_MS;
+  const diffMs = effectiveExpiryMs - now;
   if (diffMs <= 0) return "soon";
   const minutes = Math.ceil(diffMs / 60_000);
   const hours = Math.floor(minutes / 60);
