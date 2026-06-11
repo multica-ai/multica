@@ -7,6 +7,7 @@ import {
   Lock,
   CirclePause,
   MoreHorizontal,
+  Play,
   Trash2,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ import type {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { useResumeRuntime } from "@multica/core/runtimes/mutations";
 import {
   deriveRuntimeHealth,
   isRuntimeUsableForUser,
@@ -32,6 +34,7 @@ import {
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
@@ -342,6 +345,8 @@ function RuntimeProperties({
   const { t: tLayout } = useT("layout");
   const healthLabel = useHealthLabel();
   const daemonShort = shortDaemonId(runtime.daemon_id);
+  const wsId = useWorkspaceId();
+  const resumeMutation = useResumeRuntime(wsId);
 
   return (
     <div className="space-y-5">
@@ -352,14 +357,31 @@ function RuntimeProperties({
             {health === "online" ? healthLabel(health) : `${healthLabel(health)} · ${lastSeen}`}
           </span>
           {runtime.hold_until && (
-            <span className="flex items-center gap-1.5 rounded-md bg-warning/10 px-2 py-1 text-xs text-warning">
+            <span className="flex items-center gap-1.5 rounded-md bg-warning/10 px-2 py-1.5 text-xs text-warning">
               <CirclePause className="h-3.5 w-3.5 shrink-0" />
-              <span>
+              <span className="min-w-0 flex-1">
                 {t(($) => $.health.on_hold.label)} —{" "}
                 {t(($) => $.health.on_hold.resumes_in, {
                   time: formatHoldUntil(runtime.hold_until)!,
                 })}
               </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 gap-1 border-warning/30 px-2 text-[11px] text-warning hover:bg-warning/10"
+                disabled={resumeMutation.isPending}
+                onClick={() =>
+                  resumeMutation.mutate(runtime.id, {
+                    onSuccess: () =>
+                      toast.success(t(($) => $.health.on_hold.resume_toast)),
+                    onError: () =>
+                      toast.error(t(($) => $.health.on_hold.resume_failed)),
+                  })
+                }
+              >
+                <Play className="h-3 w-3" />
+                {t(($) => $.health.on_hold.resume_button)}
+              </Button>
             </span>
           )}
         </ObjectProperty>
