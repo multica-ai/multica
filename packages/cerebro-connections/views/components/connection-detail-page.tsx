@@ -5,7 +5,9 @@ import {
   CheckCircle2,
   ChevronRight,
   Loader2,
+  Plus,
   Settings,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,7 +30,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, useNavigation } from "@multica/views/navigation";
 import { PageHeader } from "@multica/views/layout/page-header";
 
-import type { Connection, ConnectionType, CreateConnectionInput, UpdateConnectionInput } from "../types";
+import type { Connection, ConnectionType, CreateConnectionInput, EndpointPermission, UpdateConnectionInput } from "../types";
 import {
   useConnection,
   useCreateConnection,
@@ -63,6 +65,29 @@ const EMPTY_FORM = {
   enabled: true,
 };
 
+// HTTP methods an admin can allow per endpoint. Order matches CRUD intuition.
+const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+
+// mergeEndpoints folds newly discovered endpoints into the admin's current list:
+// a path that's already present keeps its curated methods unioned with the
+// discovered ones; a new path is added with everything the spec declared. Sorted
+// by path so the list stays stable across discoveries.
+function mergeEndpoints(
+  current: EndpointPermission[],
+  discovered: { path: string; methods: string[] }[],
+): EndpointPermission[] {
+  const byPath = new Map<string, Set<string>>();
+  for (const ep of current) byPath.set(ep.path, new Set(ep.methods));
+  for (const ep of discovered) {
+    const set = byPath.get(ep.path) ?? new Set<string>();
+    for (const m of ep.methods) set.add(m.toUpperCase());
+    byPath.set(ep.path, set);
+  }
+  return Array.from(byPath.entries())
+    .map(([path, methods]) => ({ path, methods: Array.from(methods).sort() }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
 // ---------------------------------------------------------------------------
 // Shared form body
 // ---------------------------------------------------------------------------
@@ -71,8 +96,9 @@ interface FormBodyProps {
   mode: "create" | "edit";
   initial: typeof EMPTY_FORM;
   initialAuthType: AuthType;
+  initialEndpoints?: EndpointPermission[];
   existingConn?: Connection;
-  onSave: (form: typeof EMPTY_FORM, authType: AuthType) => Promise<void>;
+  onSave: (form: typeof EMPTY_FORM, authType: AuthType, endpoints: EndpointPermission[]) => Promise<void>;
   isSaving: boolean;
   // Which secret fields had a value on load (server masks them as "***")
   secretsSet?: { bearerToken: boolean; apiKey: boolean; cfSecret: boolean };
@@ -82,6 +108,7 @@ function ConnectionFormBody({
   mode,
   initial,
   initialAuthType,
+  initialEndpoints,
   existingConn,
   onSave,
   isSaving,
@@ -93,6 +120,7 @@ function ConnectionFormBody({
 
   const [form, setForm] = useState(initial);
   const [authType, setAuthType] = useState<AuthType>(initialAuthType);
+  const [endpoints, setEndpoints] = useState<EndpointPermission[]>(initialEndpoints ?? []);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   const testConn = useTestConnection(wsId ?? "");
@@ -126,11 +154,44 @@ function ConnectionFormBody({
       ...(existingConn?.id ? { connection_id: existingConn.id } : {}),
     });
     setTestResult(result);
+    // For API connections, discovery returns the endpoint catalogue from the
+    // API's OpenAPI/Swagger spec — fold it into the editable list.
+    if (form.type === "api" && result.endpoints && result.endpoints.length > 0) {
+      setEndpoints((prev) => mergeEndpoints(prev, result.endpoints ?? []));
+      toast.success(`Discovered ${result.endpoints.length} endpoint${result.endpoints.length !== 1 ? "s" : ""}.`);
+    }
+  }
+
+  function addEndpoint() {
+    setEndpoints((prev) => [...prev, { path: "", methods: ["GET"] }]);
+  }
+
+  function removeEndpoint(index: number) {
+    setEndpoints((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function setEndpointPath(index: number, path: string) {
+    setEndpoints((prev) => prev.map((ep, i) => (i === index ? { ...ep, path } : ep)));
+  }
+
+  function toggleEndpointMethod(index: number, method: string) {
+    setEndpoints((prev) =>
+      prev.map((ep, i) => {
+        if (i !== index) return ep;
+        const has = ep.methods.includes(method);
+        const methods = has ? ep.methods.filter((m) => m !== method) : [...ep.methods, method];
+        return { ...ep, methods };
+      }),
+    );
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await onSave(form, authType);
+    // Drop blank-path rows so an empty editor row doesn't persist as a junk endpoint.
+    const cleaned = endpoints
+      .map((ep) => ({ path: ep.path.trim(), methods: ep.methods }))
+      .filter((ep) => ep.path !== "" && ep.methods.length > 0);
+    await onSave(form, authType, cleaned);
   }
 
   const backPath = wsPaths.settings();
@@ -268,6 +329,8 @@ function ConnectionFormBody({
               >
                 {testConn.isPending ? (
                   <Loader2 className="size-3.5 animate-spin" />
+                ) : form.type === "api" ? (
+                  "Test & discover"
                 ) : (
                   "Test"
                 )}
@@ -315,13 +378,23 @@ function ConnectionFormBody({
                 </div>
               )}
 
-              {testResult.reachable && (!testResult.tools || testResult.tools.length === 0) && (
-                <p className="text-xs text-muted-foreground">
-                  {form.type === "mcp_http"
-                    ? "Server reachable — no tools returned (server may require initialize handshake)."
-                    : "Server reachable."}
-                </p>
+              {testResult.endpoints && testResult.endpoints.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {testResult.endpoints.length} endpoint{testResult.endpoints.length !== 1 ? "s" : ""} discovered — added to the list below.
+                  </p>
+                </div>
               )}
+
+              {testResult.reachable &&
+                (!testResult.tools || testResult.tools.length === 0) &&
+                (!testResult.endpoints || testResult.endpoints.length === 0) && (
+                  <p className="text-xs text-muted-foreground">
+                    {form.type === "mcp_http"
+                      ? "Server reachable — no tools returned (server may require initialize handshake)."
+                      : "Server reachable — no OpenAPI/Swagger spec found. Add endpoints manually below."}
+                  </p>
+                )}
             </div>
           )}
 
@@ -446,6 +519,74 @@ function ConnectionFormBody({
             </div>
           </div>
 
+          {/* Endpoints (REST API only) — the catalogue of paths agents may call,
+              each gated per HTTP method. Populated by "Test & discover" from the
+              API's OpenAPI/Swagger spec, or added by hand. */}
+          {form.type === "api" && (
+            <div className="space-y-3 rounded-md border p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">Endpoints</p>
+                  <p className="text-xs text-muted-foreground">
+                    The paths agents may call, gated per method. Use “Test &amp; discover” to read them
+                    from the API’s spec, or add them by hand. Fine-grained allow/deny per level is set
+                    afterwards under Permissions.
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={addEndpoint} className="shrink-0">
+                  <Plus className="size-3.5 mr-1" />
+                  Add
+                </Button>
+              </div>
+
+              {endpoints.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">
+                  No endpoints yet. Click “Test &amp; discover” above, or “Add” to enter one manually.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {endpoints.map((ep, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input
+                        value={ep.path}
+                        onChange={(e) => setEndpointPath(i, e.target.value)}
+                        placeholder="/orders/{id}"
+                        className="flex-1 font-mono text-xs"
+                      />
+                      <div className="flex gap-1 shrink-0">
+                        {HTTP_METHODS.map((m) => {
+                          const active = ep.methods.includes(m);
+                          return (
+                            <Button
+                              key={m}
+                              type="button"
+                              size="sm"
+                              variant={active ? "default" : "outline"}
+                              onClick={() => toggleEndpointMethod(i, m)}
+                              className="h-7 px-2 text-[10px] font-mono"
+                            >
+                              {m}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => removeEndpoint(i)}
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        aria-label="Remove endpoint"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Enabled (edit only) */}
           {isEdit && (
             <div className="flex items-center gap-3">
@@ -488,7 +629,7 @@ export function ConnectionCreatePage() {
   const wsPaths = useWorkspacePaths();
   const create = useCreateConnection(wsId ?? "");
 
-  async function handleSave(form: typeof EMPTY_FORM, authType: AuthType) {
+  async function handleSave(form: typeof EMPTY_FORM, authType: AuthType, endpoints: EndpointPermission[]) {
     const input: CreateConnectionInput = {
       name: form.name,
       display_name: form.display_name,
@@ -496,7 +637,7 @@ export function ConnectionCreatePage() {
       url: form.url,
       internal: form.internal,
       auth_config: buildAuthConfig(form, authType),
-      endpoint_permissions: [],
+      endpoint_permissions: endpoints,
     };
     await create.mutateAsync(input);
     toast.success("Connection created.");
@@ -508,8 +649,9 @@ export function ConnectionCreatePage() {
       mode="create"
       initial={{ ...EMPTY_FORM }}
       initialAuthType="none"
-      onSave={(form, authType) => {
-        return handleSave(form, authType).catch(() => {
+      initialEndpoints={[]}
+      onSave={(form, authType, endpoints) => {
+        return handleSave(form, authType, endpoints).catch(() => {
           toast.error("Something went wrong. Please try again.");
         });
       }}
@@ -571,13 +713,13 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
     enabled: conn.enabled,
   };
 
-  async function handleSave(form: typeof EMPTY_FORM, authType: AuthType) {
+  async function handleSave(form: typeof EMPTY_FORM, authType: AuthType, endpoints: EndpointPermission[]) {
     const input: UpdateConnectionInput = {
       display_name: form.display_name,
       url: form.url,
       internal: form.internal,
       auth_config: buildAuthConfig(form, authType),
-      endpoint_permissions: conn?.endpoint_permissions ?? [],
+      endpoint_permissions: endpoints,
       enabled: form.enabled,
     };
     await update.mutateAsync(input);
@@ -590,10 +732,11 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
       mode="edit"
       initial={initialForm}
       initialAuthType={detectAuthType(conn.auth_config)}
+      initialEndpoints={conn.endpoint_permissions ?? []}
       existingConn={conn}
       secretsSet={secretsSet}
-      onSave={(form, authType) => {
-        return handleSave(form, authType).catch(() => {
+      onSave={(form, authType, endpoints) => {
+        return handleSave(form, authType, endpoints).catch(() => {
           toast.error("Something went wrong. Please try again.");
         });
       }}
