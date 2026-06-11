@@ -267,8 +267,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // blocked. Off silences the notification for the effective flag scope.
   cerebro_child_blocked_notify_parent: true,
   cerebro_interactive_terminal: false,
-  // TECH-3108: OFF by default until QA on staging; shows Connections tab in workspace settings.
-  cerebro_connections: false,
+  // TECH-3108: ON by default — feature shipped and QA done. TECH-3209: switching
+  // to true-default so admins don't lose access when personal/workspace override is cleared.
+  cerebro_connections: true,
   // TECH-3077: ON — skill metadata schema (category, domain, tags, data-domain links).
   cerebro_skill_metadata: true,
   // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
