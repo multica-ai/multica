@@ -384,9 +384,22 @@ func main() {
 	// logging them on the tick that fails and retrying on the next
 	// cycle, so a temporary outage does not crash the server.
 	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
+	registeredAny := false
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
 	} else {
+		registeredAny = true
+	}
+	// Octo cleanup: purge expired binding tokens and stale inbound-dedup rows.
+	// Only when the Octo integration is enabled on this deployment.
+	if h.OctoInstallations != nil {
+		if err := schedulerMgr.Register(scheduler.OctoCleanupJob(pool)); err != nil {
+			slog.Warn("scheduler: failed to register octo_cleanup job", "error", err)
+		} else {
+			registeredAny = true
+		}
+	}
+	if registeredAny {
 		go func() {
 			_ = schedulerMgr.Run(sweepCtx)
 		}()
