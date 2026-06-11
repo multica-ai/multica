@@ -51,6 +51,30 @@ const CLAUDE_MODEL: RuntimeModel = {
   },
 };
 
+// Pi model with the full thinking catalog — mirrors what the daemon returns
+// for Pi agents. The daemon annotates every Pi model with all 6 thinking levels.
+const PI_MODEL: RuntimeModel = {
+  id: "anthropic/claude-opus-4-6",
+  label: "Claude Opus 4.6",
+  default: true,
+  thinking: {
+    supported_levels: [
+      { value: "off", label: "Off" },
+      { value: "minimal", label: "Minimal" },
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High" },
+      {
+        value: "xhigh",
+        label: "Extra high",
+        description:
+          'Maximum reasoning. Available on select models only (e.g., OpenAI o-series, Claude Opus 4.6+). Falls back to "high" on unsupported models.',
+      },
+    ],
+    default_level: "medium",
+  },
+};
+
 // Model without thinking metadata — what the row sees when the agent's
 // model swap landed on a non-thinking runtime, or when the daemon catalog
 // shrank and stopped emitting `thinking` for this id.
@@ -189,5 +213,37 @@ describe("ThinkingPropRow", () => {
     // Empty value means Multica omits --effort, so the local CLI's
     // config decides — chip + tooltip both read "Follow CLI config".
     expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
+  });
+
+  it("shows the thinking row for a Pi agent model", async () => {
+    // Pi models carry all 6 thinking levels in their catalog.
+    // The row must be visible for Pi agents just as it is for Claude/Codex.
+    mockInitiateListModels.mockResolvedValue(listResult([PI_MODEL]));
+    renderRow({ model: PI_MODEL.id, value: "" });
+
+    await screen.findByText("Thinking");
+    expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
+  });
+
+  it("hides the thinking row for a non-Pi, non-Claude runtime (e.g. Gemini)", async () => {
+    // Gemini/other providers have no thinking catalog — row stays hidden.
+    mockInitiateListModels.mockResolvedValue(listResult([NO_THINKING_MODEL]));
+    renderRow({ model: NO_THINKING_MODEL.id, value: "" });
+
+    await waitFor(() => expect(mockInitiateListModels).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText("Thinking")).toBeNull());
+  });
+
+  it("renders the xhigh description for Pi agents", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([PI_MODEL]));
+    renderRow({ model: PI_MODEL.id, value: "xhigh" });
+
+    await screen.findByText("Thinking");
+    // Open the picker to see the level descriptions.
+    fireEvent.click(screen.getByRole("button"));
+    // The xhigh description text must appear in the open popover.
+    expect(
+      await screen.findByText(/Falls back to .high. on unsupported models/i),
+    ).toBeInTheDocument();
   });
 });

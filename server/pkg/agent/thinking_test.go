@@ -708,3 +708,66 @@ func argIndexOf(slice []string, target string) int {
 	}
 	return -1
 }
+
+// TestAnnotatePiThinking verifies that every model in the list gets the full
+// Pi thinking catalog attached, with the correct default and xhigh description.
+func TestAnnotatePiThinking(t *testing.T) {
+	t.Parallel()
+	models := []Model{
+		{ID: "anthropic/claude-opus-4-6", Label: "Claude Opus 4.6"},
+		{ID: "openai/gpt-4o", Label: "GPT-4o"},
+	}
+	annotatePiThinking(models)
+
+	wantLevels := []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+	for _, m := range models {
+		if m.Thinking == nil {
+			t.Errorf("model %q: Thinking is nil", m.ID)
+			continue
+		}
+		if m.Thinking.DefaultLevel != "medium" {
+			t.Errorf("model %q: DefaultLevel = %q, want medium", m.ID, m.Thinking.DefaultLevel)
+		}
+		if len(m.Thinking.SupportedLevels) != len(wantLevels) {
+			t.Errorf("model %q: got %d levels, want %d", m.ID, len(m.Thinking.SupportedLevels), len(wantLevels))
+			continue
+		}
+		for i, want := range wantLevels {
+			if m.Thinking.SupportedLevels[i].Value != want {
+				t.Errorf("model %q: level[%d] = %q, want %q", m.ID, i, m.Thinking.SupportedLevels[i].Value, want)
+			}
+		}
+		var xhigh *ThinkingLevel
+		for i := range m.Thinking.SupportedLevels {
+			if m.Thinking.SupportedLevels[i].Value == "xhigh" {
+				xhigh = &m.Thinking.SupportedLevels[i]
+				break
+			}
+		}
+		if xhigh == nil || xhigh.Description == "" {
+			t.Errorf("model %q: xhigh level missing or has no description", m.ID)
+		}
+	}
+}
+
+// TestIsKnownThinkingValue_Pi verifies that all six Pi thinking levels are
+// accepted by the server-side enum guard, and that an unknown value is rejected.
+func TestIsKnownThinkingValue_Pi(t *testing.T) {
+	t.Parallel()
+	valid := []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+	for _, v := range valid {
+		if !IsKnownThinkingValue("pi", v) {
+			t.Errorf("IsKnownThinkingValue(\"pi\", %q) = false, want true", v)
+		}
+	}
+	if !IsKnownThinkingValue("pi", "") {
+		t.Error(`IsKnownThinkingValue("pi", "") = false, want true — empty must be accepted (follow runtime default)`)
+	}
+	if IsKnownThinkingValue("pi", "supersonic") {
+		t.Error("IsKnownThinkingValue(\"pi\", \"supersonic\") = true, want false")
+	}
+	if IsKnownThinkingValue("pi", "none") {
+		// "none" is Codex-specific, not valid for Pi
+		t.Error("IsKnownThinkingValue(\"pi\", \"none\") = true, want false")
+	}
+}

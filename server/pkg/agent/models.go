@@ -591,7 +591,9 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	if strings.TrimSpace(text) == "" {
 		text = stderr.String()
 	}
-	return parsePiModels(text), nil
+	models := parsePiModels(text)
+	annotatePiThinking(models)
+	return models, nil
 }
 
 // parsePiModels accepts the `pi --list-models` output. Pi historically
