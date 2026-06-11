@@ -110,9 +110,16 @@ runtime:
   #
   # `env` maps each pod env var to a key in the Secret. Defaults assume a Vault
   # KV entry with keys api-token / access-key-id / secret-access-key /
-  # s3-api-endpoint and wire the conventional names wrangler + the AWS S3 SDK
-  # (used by rclone via `--s3-env-auth` / aws CLI) read. Override `env` to
-  # rename or add variables (e.g. CLOUDFLARE_ACCOUNT_ID, RCLONE_S3_*).
+  # s3-api-endpoint and wire the conventional names each tool reads:
+  #   - wrangler            → CLOUDFLARE_API_TOKEN
+  #   - aws CLI / SDK v2    → AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
+  #                           AWS_ENDPOINT_URL_S3
+  #   - rclone S3 backend   → credentials via AWS_* (with `--s3-env-auth`),
+  #                           endpoint via RCLONE_S3_ENDPOINT (rclone does NOT
+  #                           read AWS_ENDPOINT_URL_S3, hence the separate var)
+  # Override `env` to rename or add variables (e.g. CLOUDFLARE_ACCOUNT_ID for
+  # wrangler r2 ops, or RCLONE_S3_ACCESS_KEY_ID/_SECRET_ACCESS_KEY if you'd
+  # rather drive rclone purely from RCLONE_S3_* instead of `--s3-env-auth`).
   cloudflare:
     enabled: false
     secretName: multica-cloudflare
@@ -124,6 +131,8 @@ runtime:
       - name: AWS_SECRET_ACCESS_KEY
         secretKey: secret-access-key
       - name: AWS_ENDPOINT_URL_S3
+        secretKey: s3-api-endpoint
+      - name: RCLONE_S3_ENDPOINT
         secretKey: s3-api-endpoint
     # Optional: sync the Secret from Vault via External Secrets Operator.
     # Requires ESO + a (Cluster)SecretStore that can read the Vault path. The

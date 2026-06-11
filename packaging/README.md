@@ -99,12 +99,13 @@ runtime:
     secretName: multica-cloudflare      # K8s Secret the keys come from
     # env maps pod env var → Secret key (defaults shown):
     # CLOUDFLARE_API_TOKEN ← api-token        (wrangler)
-    # AWS_ACCESS_KEY_ID    ← access-key-id     (rclone/aws S3 → R2)
+    # AWS_ACCESS_KEY_ID    ← access-key-id     (aws CLI + rclone creds)
     # AWS_SECRET_ACCESS_KEY← secret-access-key
-    # AWS_ENDPOINT_URL_S3  ← s3-api-endpoint
+    # AWS_ENDPOINT_URL_S3  ← s3-api-endpoint   (aws CLI / SDK v2)
+    # RCLONE_S3_ENDPOINT   ← s3-api-endpoint   (rclone; it ignores AWS_ENDPOINT_*)
 ```
 
-Provide the Secret one of two ways:
+Provide the Secret one of two **mutually exclusive** ways:
 
 1. **Manually** — `kubectl -n multica create secret generic multica-cloudflare
    --from-literal=api-token=… --from-literal=access-key-id=… …`
@@ -115,9 +116,15 @@ Provide the Secret one of two ways:
    chart renders an `ExternalSecret` that materializes `secretName` and keeps it
    synced (ESO must be installed with a SecretStore that can read the path).
 
-`wrangler r2 bucket create <name>` then works inside any agent task; `rclone`
-reaches R2 via `--s3-provider Cloudflare --s3-env-auth` (or set `RCLONE_S3_*`
-vars by extending `env`).
+Pick one — don't do both. ESO's `creationPolicy: Owner` refuses to adopt a
+Secret it didn't create, so enabling the ExternalSecret on top of a
+hand-created `multica-cloudflare` errors instead of taking over.
+
+`wrangler r2 bucket create <name>` then works inside any agent task (add a
+`CLOUDFLARE_ACCOUNT_ID` entry to `env` if your account has more than one).
+`rclone` reaches R2 with `rclone --s3-provider Cloudflare --s3-env-auth lsd
+:s3:` — credentials come from `AWS_*` and the endpoint from `RCLONE_S3_ENDPOINT`
+(rclone does not honor `AWS_ENDPOINT_URL_S3`).
 
 ### Modes
 
