@@ -12,6 +12,15 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// holdExpiryMargin keeps a runtime held for a grace period past its hold_until
+// before it is considered released. The provider quota is often not lifted on
+// the very first run after the stated reset time, and there is some clock skew
+// between when we parsed the reset time and when the limit actually clears, so
+// we wait this much longer rather than dispatch into a still-throttled
+// provider. Must stay in sync with the 300s margin in the ClearExpiredHolds,
+// ClaimAgentTask, and ListQueuedClaimCandidatesByRuntime SQL queries.
+const holdExpiryMargin = 5 * time.Minute
+
 // HoldRuntime places a runtime on hold until the given reset time. While on
 // hold, the claim path skips the runtime so no new tasks are dispatched to
 // it. The hold_reason is stored for observability (e.g. "session_limit").
@@ -86,11 +95,11 @@ func (s *TaskService) HoldRuntimeIfSessionLimit(ctx context.Context, runtimeID, 
 }
 
 // runtimeOnHold reports whether the runtime currently has an active hold
-// (hold_until set and in the future). It is the gate for auto-retrying
-// session_limit failures: the retry is only safe once the runtime is held,
-// otherwise the requeued task is claimed immediately and hot-loops. A missing
-// runtime or read error is treated as "not held" so the caller fails closed
-// (no retry) rather than risking a hot-loop.
+// (hold_until set and not yet past by more than holdExpiryMargin). It is the
+// gate for auto-retrying session_limit failures: the retry is only safe once
+// the runtime is held, otherwise the requeued task is claimed immediately and
+// hot-loops. A missing runtime or read error is treated as "not held" so the
+// caller fails closed (no retry) rather than risking a hot-loop.
 func (s *TaskService) runtimeOnHold(ctx context.Context, runtimeID pgtype.UUID) bool {
 	if !runtimeID.Valid {
 		return false
@@ -103,7 +112,7 @@ func (s *TaskService) runtimeOnHold(ctx context.Context, runtimeID pgtype.UUID) 
 		)
 		return false
 	}
-	return rt.HoldUntil.Valid && rt.HoldUntil.Time.After(time.Now())
+	return rt.HoldUntil.Valid && rt.HoldUntil.Time.Add(holdExpiryMargin).After(time.Now())
 }
 
 // ResumeRuntime clears the hold on a runtime, allowing tasks to be
