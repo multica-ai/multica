@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -368,7 +369,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		} else {
 			h.OctoInstallations = installSvc
 			h.OctoBindingTokens = octo.NewBindingTokenService(queries, pool)
-			h.OctoAPIBaseURL = strings.TrimSpace(os.Getenv("MULTICA_OCTO_API_URL"))
+			// Trim whitespace and any trailing slash so the base URL concatenates
+			// cleanly with "/v1/bot/..." paths (a trailing slash would yield
+			// "//v1/bot/..."). Mirrors how MULTICA_PUBLIC_URL is normalized above.
+			h.OctoAPIBaseURL = strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_OCTO_API_URL")), "/")
+			if h.OctoAPIBaseURL != "" {
+				if u, perr := url.ParseRequestURI(h.OctoAPIBaseURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") {
+					slog.Warn("octo: MULTICA_OCTO_API_URL is not a valid http(s) URL; installs without an explicit api_url will fail",
+						"value", h.OctoAPIBaseURL)
+				}
+			}
 			slog.Info("octo integration enabled")
 
 			// Outbound: relay chat:done / task:failed back to Octo.
@@ -392,8 +402,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// sender a binding link, or notify the user when the agent is
 			// offline/archived. Reuses the same MessageSender + token
 			// decryptor as the Patcher. PublicURL drives the clickable
-			// {PublicURL}/octo/bind?token= link; when unset the replier
-			// downgrades to noop and logs the gap.
+			// {PublicURL}/octo/bind?token= link.
 			h.OctoHub.SetOutcomeReplier(octo.NewOutcomeReplier(octo.OutcomeReplierConfig{
 				Minter:    h.OctoBindingTokens,
 				Decryptor: installSvc,
@@ -401,6 +410,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				PublicURL: signupConfig.PublicURL,
 				Logger:    slog.Default(),
 			}))
+			// Make the binding-link capability explicit in boot output: without
+			// MULTICA_PUBLIC_URL the replier still runs but cannot produce a
+			// clickable bind link, so unbound users silently can't self-serve.
+			if signupConfig.PublicURL == "" {
+				slog.Warn("octo: MULTICA_PUBLIC_URL not set; unbound users will NOT receive a clickable binding link")
+			} else {
+				slog.Info("octo: binding links enabled", "public_url", signupConfig.PublicURL)
+			}
 			slog.Info("octo inbound pipeline wired")
 		}
 	} else {
