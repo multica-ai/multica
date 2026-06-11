@@ -131,18 +131,30 @@ func (h *Handler) buildIssueContextComments(r *http.Request, issue db.Issue) []C
 		slog.Warn("issue context: list comments failed", "issue_id", uuidToString(issue.ID), "error", err)
 		return []CommentResponse{}
 	}
+	comments := issueContextAgentComments(result.Comments)
 
-	commentIDs := make([]pgtype.UUID, len(result.Comments))
-	for i, c := range result.Comments {
+	commentIDs := make([]pgtype.UUID, len(comments))
+	for i, c := range comments {
 		commentIDs[i] = c.ID
 	}
 	grouped := h.groupReactions(r, commentIDs)
 	groupedAtt := h.groupAttachments(r, commentIDs)
 
-	out := make([]CommentResponse, len(result.Comments))
-	for i, c := range result.Comments {
+	out := make([]CommentResponse, len(comments))
+	for i, c := range comments {
 		cid := uuidToString(c.ID)
 		out[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
+	}
+	return out
+}
+
+func issueContextAgentComments(comments []db.Comment) []db.Comment { // CEREBRO-PATCH(issue-context-agent-comments): keep wakeup/system rows out of agent context.
+	out := comments[:0]
+	for _, c := range comments {
+		if c.Type != "comment" {
+			continue
+		}
+		out = append(out, c)
 	}
 	return out
 }
