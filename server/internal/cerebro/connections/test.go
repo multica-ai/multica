@@ -22,10 +22,11 @@ type testConnectionRequest struct {
 }
 
 type testConnectionResult struct {
-	Reachable  bool       `json:"reachable"`
-	StatusCode int        `json:"status_code,omitempty"`
-	Tools      []toolInfo `json:"tools,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	Reachable  bool                 `json:"reachable"`
+	StatusCode int                  `json:"status_code,omitempty"`
+	Tools      []toolInfo           `json:"tools,omitempty"`
+	Endpoints  []discoveredEndpoint `json:"endpoints,omitempty"`
+	Error      string               `json:"error,omitempty"`
 }
 
 type toolInfo struct {
@@ -204,5 +205,16 @@ func testAPIConnection(ctx context.Context, client *http.Client, url string, aut
 	}
 	defer resp.Body.Close()
 
-	return testConnectionResult{Reachable: resp.StatusCode < 500, StatusCode: resp.StatusCode}
+	result := testConnectionResult{Reachable: resp.StatusCode < 500, StatusCode: resp.StatusCode}
+	// Drain the reachability probe's body before reusing the client for the
+	// spec fetches, so the connection can be pooled.
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	// Discover the API's endpoints from its OpenAPI/Swagger spec (TECH-3410).
+	// Best-effort: a reachable API with no machine-readable spec still tests
+	// green — the admin just adds endpoints by hand.
+	if eps := discoverAPIEndpoints(ctx, client, url, auth); len(eps) > 0 {
+		result.Endpoints = eps
+	}
+	return result
 }
