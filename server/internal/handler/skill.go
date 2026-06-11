@@ -22,6 +22,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+var (
+	ErrUnsupportedSkillContentType = errors.New("unsupported skill content type")
+)
+
 // sanitizeNullBytes makes a string safe for a PostgreSQL TEXT column.
 //
 // Two failure modes covered:
@@ -521,7 +525,8 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 // --- Skill import ---
 
 type ImportSkillRequest struct {
-	URL string `json:"url"`
+	URL         string `json:"url"`
+	GitLabToken string `json:"gitlab_token,omitempty"`
 }
 
 // Per-import bundle limits. These mirror the local-runtime importer so that
@@ -718,6 +723,7 @@ const (
 	sourceClawHub importSource = iota
 	sourceSkillsSh
 	sourceGitHub
+	sourceGitLab
 )
 
 // detectImportSource determines the source from a URL.
@@ -746,12 +752,22 @@ func detectImportSource(raw string) (importSource, string, error) {
 		return sourceClawHub, normalized, nil
 	case host == "github.com" || host == "www.github.com":
 		return sourceGitHub, normalized, nil
+	case host == "gitlab.com" || host == "www.gitlab.com":
+		return sourceGitLab, normalized, nil
 	default:
 		// If no host (bare slug), default to clawhub
 		if !strings.Contains(raw, "/") || !strings.Contains(raw, ".") {
 			return sourceClawHub, raw, nil
 		}
-		return 0, "", fmt.Errorf("unsupported source: %s (supported: clawhub.ai, skills.sh, github.com)", host)
+		// Self-hosted GitLab: any URL with a host that isn't one of the known
+		// services above and whose path looks like /{owner}/{repo}[/...] is
+		// treated as a GitLab instance. This covers URLs like
+		// https://git-intra.example.com/team/repo.
+		pathParts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		if len(pathParts) >= 2 && pathParts[0] != "" && pathParts[1] != "" {
+			return sourceGitLab, normalized, nil
+		}
+		return 0, "", fmt.Errorf("unsupported source: %s (supported: clawhub.ai, skills.sh, github.com, gitlab.com, or any self-hosted GitLab)", host)
 	}
 }
 
@@ -1648,6 +1664,320 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 	return result, nil
 }
 
+// --- GitLab import ---
+
+// gitlabSpec captures the parsed components of a GitLab URL pointing at a
+// repository (optionally with a tree path and ref).
+type gitlabSpec struct {
+	baseURL   string // scheme + host, e.g. "https://gitlab.com"
+	owner     string
+	repo      string
+	ref       string // empty → caller resolves the default branch
+	skillDir  string // relative directory within the repo, "" for root
+	skillFile string // set when URL points directly at a SKILL.md file (/-/raw/ form)
+}
+
+// parseGitLabURL extracts the base URL, owner, repo, ref, and skill directory
+// from a GitLab URL. Supported forms:
+//
+//	{host}/{owner}/{repo}                                          → root, default branch
+//	{host}/{owner}/{repo}/-/tree/{ref}/{path...}                   → ref / skill dir
+//	{host}/{owner}/{repo}/-/blob/{ref}/{path.../SKILL.md}          → ref / skill dir
+//	{host}/{owner}/{repo}/-/raw/{ref}/{path.../SKILL.md}           → direct file download
+func parseGitLabURL(raw string) (gitlabSpec, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return gitlabSpec{}, fmt.Errorf("invalid URL: %w", err)
+	}
+	baseURL := parsed.Scheme + "://" + parsed.Host
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return gitlabSpec{}, fmt.Errorf("expected URL format: {host}/{owner}/{repo}[/-/tree/{ref}/{path}], got: %s", parsed.Path)
+	}
+	spec := gitlabSpec{
+		baseURL: baseURL,
+		owner:   parts[0],
+		repo:    strings.TrimSuffix(parts[1], ".git"),
+	}
+	// /{owner}/{repo}/-/{tree|blob|raw}/{ref}/{path...}
+	if len(parts) >= 4 && parts[2] == "-" {
+		kind := parts[3]
+		switch kind {
+		case "tree", "blob", "raw":
+		default:
+			return gitlabSpec{}, fmt.Errorf("unsupported GitLab URL form: /-/%s/... (use /-/tree/{ref}/..., /-/blob/{ref}/.../SKILL.md, or /-/raw/{ref}/.../SKILL.md)", kind)
+		}
+		if len(parts) < 5 || parts[4] == "" {
+			return gitlabSpec{}, fmt.Errorf("missing ref after /-/%s/", kind)
+		}
+		rest := parts[4:]
+		switch kind {
+		case "blob", "raw":
+			if !strings.EqualFold(rest[len(rest)-1], "SKILL.md") {
+				return gitlabSpec{}, fmt.Errorf("%s URL must point to a SKILL.md file", kind)
+			}
+			spec.ref = rest[0]
+			if len(rest) > 1 {
+				filePath := strings.Join(rest[1:], "/")
+				spec.skillFile = filePath
+				if dir := filepath.Dir(filePath); dir != "." {
+					spec.skillDir = dir
+				}
+			}
+		case "tree":
+			spec.ref = rest[0]
+			if len(rest) > 1 {
+				spec.skillDir = strings.Join(rest[1:], "/")
+			}
+		}
+	}
+	return spec, nil
+}
+
+// gitlabProjectPath returns the URL-encoded project path for GitLab API calls.
+func gitlabProjectPath(owner, repo string) string {
+	return url.PathEscape(owner + "/" + repo)
+}
+
+// gitlabAPIGet performs a GET against a GitLab API URL, attaching the
+// PRIVATE-TOKEN header when token is non-empty.
+func gitlabAPIGet(httpClient *http.Client, apiURL, token string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if token != "" {
+		req.Header.Set("PRIVATE-TOKEN", token)
+	}
+	return httpClient.Do(req)
+}
+
+type gitlabProjectInfo struct {
+	DefaultBranch string `json:"default_branch"`
+}
+
+type gitlabTreeEntry struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"` // "blob" or "tree"
+	Path string `json:"path"`
+	Mode string `json:"mode"`
+}
+
+// fetchGitLabDefaultBranch returns the default branch of a GitLab repository.
+// Falls back to "main" if the API call fails.
+func fetchGitLabDefaultBranch(httpClient *http.Client, baseURL, owner, repo, token string) string {
+	apiURL := fmt.Sprintf("%s/api/v4/projects/%s", baseURL, gitlabProjectPath(owner, repo))
+	resp, err := gitlabAPIGet(httpClient, apiURL, token)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return "main"
+	}
+	defer resp.Body.Close()
+	var info gitlabProjectInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil || info.DefaultBranch == "" {
+		return "main"
+	}
+	return info.DefaultBranch
+}
+
+// fetchGitLabRawFile downloads a file from a GitLab repository using the raw
+// file API endpoint.
+func fetchGitLabRawFile(httpClient *http.Client, baseURL, owner, repo, ref, filePath, token string) ([]byte, error) {
+	apiURL := fmt.Sprintf("%s/api/v4/projects/%s/repository/files/%s/raw?ref=%s",
+		baseURL, gitlabProjectPath(owner, repo),
+		url.PathEscape(filePath), url.QueryEscape(ref))
+	resp, err := gitlabAPIGet(httpClient, apiURL, token)
+	if err != nil {
+		return nil, err
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "text") {
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedSkillContentType, contentType)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("HTTP 404")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImportFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxImportFileSize {
+		return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
+	}
+	return body, nil
+}
+
+// fetchGitLabTree lists all blobs in a GitLab repository directory recursively.
+func fetchGitLabTree(httpClient *http.Client, baseURL, owner, repo, ref, path, token string) ([]gitlabTreeEntry, error) {
+	var all []gitlabTreeEntry
+	page := 1
+	for {
+		apiURL := fmt.Sprintf("%s/api/v4/projects/%s/repository/tree?ref=%s&recursive=true&per_page=100&page=%d",
+			baseURL, gitlabProjectPath(owner, repo),
+			url.QueryEscape(ref), page)
+		if path != "" {
+			apiURL += "&path=" + url.QueryEscape(path)
+		}
+		resp, err := gitlabAPIGet(httpClient, apiURL, token)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusNotFound {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+		var entries []gitlabTreeEntry
+		if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
+		resp.Body.Close()
+		all = append(all, entries...)
+		if len(entries) < 100 {
+			break
+		}
+		page++
+	}
+	return all, nil
+}
+
+func fetchFromGitLab(httpClient *http.Client, rawURL, token string) (*importedSkill, error) {
+	spec, err := parseGitLabURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if spec.ref == "" {
+		spec.ref = fetchGitLabDefaultBranch(httpClient, spec.baseURL, spec.owner, spec.repo, token)
+	}
+
+	// Candidate directories to search for SKILL.md (same convention as skills.sh importer)
+	var skillMdBody []byte
+	var skillDir string
+
+	switch {
+	case spec.skillFile != "":
+		// URL pointed directly at a SKILL.md file (/-/raw/ or /-/blob/ form).
+		body, err := fetchGitLabRawFile(httpClient, spec.baseURL, spec.owner, spec.repo, spec.ref, spec.skillFile, token)
+		if err != nil {
+			return nil, fmt.Errorf("SKILL.md not found at %s in %s/%s@%s: %w",
+				spec.skillFile, spec.owner, spec.repo, spec.ref, err)
+		}
+		skillMdBody = body
+		skillDir = spec.skillDir
+
+	case spec.skillDir != "":
+		// Explicit directory path given in URL (/-/tree/ form).
+		body, err := fetchGitLabRawFile(httpClient, spec.baseURL, spec.owner, spec.repo, spec.ref, spec.skillDir+"/SKILL.md", token)
+		if err != nil {
+			return nil, fmt.Errorf("SKILL.md not found at %s in %s/%s@%s",
+				spec.skillDir, spec.owner, spec.repo, spec.ref)
+		}
+		skillMdBody = body
+		skillDir = spec.skillDir
+
+	default:
+		// No explicit path — search conventional locations.
+		candidates := []string{
+			"skills",
+			".claude/skills",
+			"plugin/skills",
+			"",
+		}
+		for _, prefix := range candidates {
+			var path string
+			if prefix == "" {
+				path = "SKILL.md"
+			} else {
+				path = prefix + "/SKILL.md"
+			}
+			body, err := fetchGitLabRawFile(httpClient, spec.baseURL, spec.owner, spec.repo, spec.ref, path, token)
+			if err == nil {
+				skillMdBody = body
+				skillDir = prefix
+				break
+			}
+		}
+		if skillMdBody == nil {
+			return nil, fmt.Errorf("SKILL.md not found in repository %s/%s@%s. For multi-skill repositories, point to a specific directory using {host}/%s/%s/-/tree/%s/<skill-dir>",
+				spec.owner, spec.repo, spec.ref, spec.owner, spec.repo, spec.ref)
+		}
+	}
+
+	name, description := parseSkillFrontmatter(string(skillMdBody))
+	if name == "" {
+		if skillDir != "" {
+			name = filepath.Base(skillDir)
+		} else {
+			name = spec.repo
+		}
+	}
+
+	result := &importedSkill{
+		name:        name,
+		description: description,
+		content:     string(skillMdBody),
+		origin: map[string]any{
+			"type":       "gitlab",
+			"source_url": rawURL,
+			"base_url":   spec.baseURL,
+			"owner":      spec.owner,
+			"repo":       spec.repo,
+			"ref":        spec.ref,
+			"path":       skillDir,
+		},
+	}
+
+	// List supporting files via GitLab tree API.
+	entries, err := fetchGitLabTree(httpClient, spec.baseURL, spec.owner, spec.repo, spec.ref, skillDir, token)
+	if err != nil {
+		slog.Warn("gitlab import: failed to list repository tree", "error", err)
+		return result, nil
+	}
+
+	basePath := ""
+	if skillDir != "" {
+		basePath = skillDir + "/"
+	}
+	for _, entry := range entries {
+		if entry.Type != "blob" {
+			continue
+		}
+		lower := strings.ToLower(entry.Name)
+		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
+			continue
+		}
+
+		body, err := fetchGitLabRawFile(httpClient, spec.baseURL, spec.owner, spec.repo, spec.ref, entry.Path, token)
+		if err != nil {
+			if isCapError(err) {
+				return nil, fmt.Errorf("gitlab import: %s: %w", entry.Path, err)
+			}
+			if errors.Is(err, ErrUnsupportedSkillContentType) {
+				slog.Warn("gitlab import: unsupported skill content type", "type", entry.Path, "error", err)
+				continue
+			}
+			slog.Warn("gitlab import: file download failed", "path", entry.Path, "error", err)
+			continue
+		}
+		relPath := strings.TrimPrefix(entry.Path, basePath)
+		if err := result.addFile(relPath, string(body)); err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
+}
+
 // --- Shared helpers ---
 
 // fetchRawFile downloads a URL and returns the body bytes. Returns an error
@@ -1756,6 +2086,8 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		imported, err = fetchFromSkillsSh(httpClient, normalized)
 	case sourceGitHub:
 		imported, err = fetchFromGitHub(httpClient, normalized)
+	case sourceGitLab:
+		imported, err = fetchFromGitLab(httpClient, normalized, req.GitLabToken)
 	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())

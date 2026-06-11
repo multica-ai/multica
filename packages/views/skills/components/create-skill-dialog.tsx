@@ -238,13 +238,25 @@ function ManualForm({
 // URL import form
 // ---------------------------------------------------------------------------
 
-type DetectedSource = "clawhub" | "skills.sh" | "github" | null;
+type DetectedSource = "clawhub" | "skills.sh" | "github" | "gitlab" | null;
 
 function detectUrlSource(url: string): DetectedSource {
   const u = url.trim().toLowerCase();
   if (u.includes("clawhub.ai")) return "clawhub";
   if (u.includes("skills.sh")) return "skills.sh";
   if (u.includes("github.com")) return "github";
+  if (u.includes("gitlab.com") || u.includes("gitlab.")) return "gitlab";
+  // Self-hosted GitLab: any URL with a host not matching the above known services
+  // that has a path in /{owner}/{repo} format is treated as GitLab.
+  try {
+    if (u.includes("git")) {
+      const parsed = new URL(u.startsWith("http") ? u : "https://" + u);
+      const parts = parsed.pathname.replace(/^\//, "").split("/");
+      if (parts.length >= 2 && parts[0] && parts[1]) return "gitlab";
+    }
+  } catch {
+    // ignore parse errors
+  }
   return null;
 }
 
@@ -288,6 +300,7 @@ function UrlForm({
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [url, setUrl] = useState("");
+  const [gitlabToken, setGitlabToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const source = detectUrlSource(url);
@@ -300,7 +313,11 @@ function UrlForm({
     setLoading(true);
     setError("");
     try {
-      const skill = await api.importSkill({ url: trimmed });
+      const payload: { url: string; gitlab_token?: string } = { url: trimmed };
+      if (source === "gitlab" && gitlabToken.trim()) {
+        payload.gitlab_token = gitlabToken.trim();
+      }
+      const skill = await api.importSkill(payload);
       seedAfterCreate(qc, wsId, skill);
       toast.success(t(($) => $.create.url.toast_imported));
       onCreated(skill);
@@ -315,6 +332,7 @@ function UrlForm({
     if (source === "clawhub") return t(($) => $.create.url.importing_clawhub);
     if (source === "skills.sh") return t(($) => $.create.url.importing_skills_sh);
     if (source === "github") return t(($) => $.create.url.importing_github);
+    if (source === "gitlab") return t(($) => $.create.url.importing_gitlab);
     return t(($) => $.create.url.importing);
   })();
 
@@ -345,11 +363,30 @@ function UrlForm({
           />
         </div>
 
+        {source === "gitlab" && (
+          <div className="space-y-1.5">
+            <Label htmlFor="gitlab-token" className="text-xs text-muted-foreground">
+              {t(($) => $.create.url.gitlab_token_label)}
+            </Label>
+            <Input
+              id="gitlab-token"
+              type="password"
+              value={gitlabToken}
+              onChange={(e) => setGitlabToken(e.target.value)}
+              placeholder={t(($) => $.create.url.gitlab_token_placeholder)}
+              className="font-mono text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
+            />
+          </div>
+        )}
+
         <div>
           <p className="mb-2 text-xs text-muted-foreground">
             {t(($) => $.create.url.supported_sources)}
           </p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <SourceCard
               label="ClawHub"
               exampleHost="clawhub.ai/owner/skill"
@@ -367,6 +404,12 @@ function UrlForm({
               exampleHost="github.com/owner/repo"
               browseUrl="https://github.com"
               active={source === "github"}
+            />
+            <SourceCard
+              label="GitLab"
+              exampleHost="gitlab.com/owner/repo"
+              browseUrl="https://gitlab.com"
+              active={source === "gitlab"}
             />
           </div>
         </div>

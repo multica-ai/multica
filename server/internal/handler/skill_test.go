@@ -1226,3 +1226,580 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// GitLab test helpers
+// ---------------------------------------------------------------------------
+
+// rewriteGitLabTransport rewrites requests targeting any of the listed hosts
+// to a local test server, preserving the original host in X-Test-Original-Host.
+type rewriteGitLabTransport struct {
+	target *url.URL
+	base   http.RoundTripper
+	hosts  map[string]struct{}
+}
+
+func (t *rewriteGitLabTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	if _, ok := t.hosts[clone.URL.Host]; ok {
+		headers := clone.Header.Clone()
+		headers.Set("X-Test-Original-Host", req.URL.Host)
+		clone.Header = headers
+		clone.URL.Scheme = t.target.Scheme
+		clone.URL.Host = t.target.Host
+		clone.Host = t.target.Host
+	}
+	return t.base.RoundTrip(clone)
+}
+
+// newGitLabFixtureClient builds an *http.Client that routes requests for the
+// given hosts to a local httptest.Server running handler.
+//
+// Because Go's net/http server decodes %2F in r.URL.Path (turning
+// /api/v4/projects/acme%2Fskill into /api/v4/projects/acme/skill), the
+// wrapper injects the raw, still-encoded path into the X-Test-Raw-Path header
+// so that handlers can switch on the encoded form that the production code
+// actually sends.
+func newGitLabFixtureClient(t *testing.T, hosts []string, handler http.HandlerFunc) (*http.Client, *[]string) {
+	t.Helper()
+	var (
+		mu       sync.Mutex
+		requests []string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawPath := r.URL.RawPath
+		if rawPath == "" {
+			rawPath = r.URL.Path
+		}
+		mu.Lock()
+		requests = append(requests, r.Header.Get("X-Test-Original-Host")+" "+r.URL.RequestURI())
+		mu.Unlock()
+		r.Header.Set("X-Test-Raw-Path", rawPath)
+		handler(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	hostSet := make(map[string]struct{}, len(hosts))
+	for _, h := range hosts {
+		hostSet[h] = struct{}{}
+	}
+	return &http.Client{
+		Transport: &rewriteGitLabTransport{
+			target: target,
+			base:   http.DefaultTransport,
+			hosts:  hostSet,
+		},
+	}, &requests
+}
+
+// ---------------------------------------------------------------------------
+// parseGitLabURL
+// ---------------------------------------------------------------------------
+
+func TestParseGitLabURL(t *testing.T) {
+	cases := []struct {
+		name    string
+		url     string
+		want    gitlabSpec
+		wantErr bool
+	}{
+		{
+			name: "raw URL pointing at SKILL.md",
+			url:  "https://git.example.com/myorg/myrepo/-/raw/main/skills/myskill/SKILL.md",
+			want: gitlabSpec{
+				baseURL:   "https://git.example.com",
+				owner:     "myorg",
+				repo:      "myrepo",
+				ref:       "main",
+				skillDir:  "skills/myskill",
+				skillFile: "skills/myskill/SKILL.md",
+			},
+		},
+		{
+			name: "root URL",
+			url:  "https://gitlab.com/acme/myskill",
+			want: gitlabSpec{baseURL: "https://gitlab.com", owner: "acme", repo: "myskill"},
+		},
+		{
+			name: "root URL with .git suffix",
+			url:  "https://gitlab.com/acme/myskill.git",
+			want: gitlabSpec{baseURL: "https://gitlab.com", owner: "acme", repo: "myskill"},
+		},
+		{
+			name: "self-hosted root URL",
+			url:  "https://git.example.com/myorg/myrepo",
+			want: gitlabSpec{baseURL: "https://git.example.com", owner: "myorg", repo: "myrepo"},
+		},
+		{
+			name: "tree URL with ref and path",
+			url:  "https://gitlab.com/acme/skills/-/tree/main/skills/pptx",
+			want: gitlabSpec{baseURL: "https://gitlab.com", owner: "acme", repo: "skills", ref: "main", skillDir: "skills/pptx"},
+		},
+		{
+			name: "tree URL with ref only (root)",
+			url:  "https://gitlab.com/acme/skills/-/tree/main",
+			want: gitlabSpec{baseURL: "https://gitlab.com", owner: "acme", repo: "skills", ref: "main"},
+		},
+		{
+			name: "blob URL pointing at SKILL.md",
+			url:  "https://gitlab.com/acme/skills/-/blob/main/skills/pptx/SKILL.md",
+			want: gitlabSpec{baseURL: "https://gitlab.com", owner: "acme", repo: "skills", ref: "main", skillDir: "skills/pptx"},
+		},
+		{
+			name:    "missing owner/repo",
+			url:     "https://gitlab.com/acme",
+			wantErr: true,
+		},
+		{
+			name:    "blob URL pointing at non-SKILL.md file",
+			url:     "https://gitlab.com/acme/skills/-/blob/main/README.md",
+			wantErr: true,
+		},
+		{
+			name:    "tree URL missing ref",
+			url:     "https://gitlab.com/acme/skills/-/tree/",
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseGitLabURL(tc.url)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseGitLabURL: %v", err)
+			}
+			if got.baseURL != tc.want.baseURL || got.owner != tc.want.owner ||
+				got.repo != tc.want.repo || got.ref != tc.want.ref || got.skillDir != tc.want.skillDir {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// detectImportSource — GitLab
+// ---------------------------------------------------------------------------
+
+func TestDetectImportSource_RecognizesGitLabCom(t *testing.T) {
+	src, normalized, err := detectImportSource("https://gitlab.com/acme/skill")
+	if err != nil {
+		t.Fatalf("detectImportSource: %v", err)
+	}
+	if src != sourceGitLab {
+		t.Fatalf("source = %v, want sourceGitLab", src)
+	}
+	if normalized != "https://gitlab.com/acme/skill" {
+		t.Fatalf("normalized = %q, unexpected", normalized)
+	}
+}
+
+func TestDetectImportSource_RecognizesGitLabComWithoutScheme(t *testing.T) {
+	src, _, err := detectImportSource("gitlab.com/acme/skill")
+	if err != nil {
+		t.Fatalf("detectImportSource: %v", err)
+	}
+	if src != sourceGitLab {
+		t.Fatalf("source = %v, want sourceGitLab", src)
+	}
+}
+
+func TestDetectImportSource_RecognizesSelfHostedGitLab(t *testing.T) {
+	src, normalized, err := detectImportSource("https://git.example.com/myorg/myrepo")
+	if err != nil {
+		t.Fatalf("detectImportSource: %v", err)
+	}
+	if src != sourceGitLab {
+		t.Fatalf("source = %v, want sourceGitLab", src)
+	}
+	if normalized != "https://git.example.com/myorg/myrepo" {
+		t.Fatalf("normalized = %q, unexpected", normalized)
+	}
+}
+
+func TestDetectImportSource_SelfHostedGitLabWithoutScheme(t *testing.T) {
+	src, _, err := detectImportSource("git.example.com/myorg/myrepo")
+	if err != nil {
+		t.Fatalf("detectImportSource: %v", err)
+	}
+	if src != sourceGitLab {
+		t.Fatalf("source = %v, want sourceGitLab", src)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — root repo (SKILL.md at repository root)
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_RootRepoImport(t *testing.T) {
+	const (
+		host  = "git.example.com"
+		owner = "myorg"
+		repo  = "myskill"
+	)
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Raw-Path") {
+		case "/api/v4/projects/myorg%2Fmyskill":
+			writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+		case "/api/v4/projects/myorg%2Fmyskill/repository/files/SKILL.md/raw":
+			w.Write([]byte("---\nname: myskill\ndescription: my skill description\n---\ncontent"))
+		case "/api/v4/projects/myorg%2Fmyskill/repository/tree":
+			writeJSON(w, http.StatusOK, []gitlabTreeEntry{
+				{Type: "blob", Name: "README.md", Path: "README.md"},
+				{Type: "blob", Name: "helper.py", Path: "helper.py"},
+			})
+		case "/api/v4/projects/myorg%2Fmyskill/repository/files/README.md/raw":
+			w.Write([]byte("readme"))
+		case "/api/v4/projects/myorg%2Fmyskill/repository/files/helper.py/raw":
+			w.Write([]byte("print('hi')"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitLab(client, "https://"+host+"/"+owner+"/"+repo, "")
+	if err != nil {
+		t.Fatalf("fetchFromGitLab: %v", err)
+	}
+	if result.name != "myskill" {
+		t.Fatalf("name = %q, want myskill", result.name)
+	}
+	if result.description != "my skill description" {
+		t.Fatalf("description = %q, unexpected", result.description)
+	}
+	wantFiles := []string{"README.md", "helper.py"}
+	gotFiles := importedFilePaths(result.files)
+	if !equalStrings(gotFiles, wantFiles) {
+		t.Fatalf("files = %v, want %v", gotFiles, wantFiles)
+	}
+	if result.origin["type"] != "gitlab" {
+		t.Fatalf("origin.type = %v, want gitlab", result.origin["type"])
+	}
+	if result.origin["base_url"] != "https://"+host {
+		t.Fatalf("origin.base_url = %v, unexpected", result.origin["base_url"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — tree URL (skill in subdirectory)
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_TreeURLImportsSkillDirectory(t *testing.T) {
+	const host = "gitlab.com"
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Raw-Path") {
+		case "/api/v4/projects/acme%2Fskills/repository/files/skills%2Fpptx%2FSKILL.md/raw":
+			if r.URL.Query().Get("ref") != "main" {
+				t.Fatalf("ref = %q, want main", r.URL.Query().Get("ref"))
+			}
+			w.Write([]byte("---\nname: pptx\ndescription: slides\n---\nbody"))
+		case "/api/v4/projects/acme%2Fskills/repository/tree":
+			if r.URL.Query().Get("path") != "skills/pptx" {
+				writeJSON(w, http.StatusOK, []gitlabTreeEntry{})
+				return
+			}
+			writeJSON(w, http.StatusOK, []gitlabTreeEntry{
+				{Type: "blob", Name: "editing.md", Path: "skills/pptx/editing.md"},
+				{Type: "blob", Name: "add_slide.py", Path: "skills/pptx/scripts/add_slide.py"},
+			})
+		case "/api/v4/projects/acme%2Fskills/repository/files/skills%2Fpptx%2Fediting.md/raw":
+			w.Write([]byte("editing"))
+		case "/api/v4/projects/acme%2Fskills/repository/files/skills%2Fpptx%2Fscripts%2Fadd_slide.py/raw":
+			w.Write([]byte("print('slide')"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitLab(client, "https://"+host+"/acme/skills/-/tree/main/skills/pptx", "")
+	if err != nil {
+		t.Fatalf("fetchFromGitLab: %v", err)
+	}
+	if result.name != "pptx" {
+		t.Fatalf("name = %q, want pptx", result.name)
+	}
+	wantFiles := []string{"editing.md", "scripts/add_slide.py"}
+	gotFiles := importedFilePaths(result.files)
+	if !equalStrings(gotFiles, wantFiles) {
+		t.Fatalf("files = %v, want %v", gotFiles, wantFiles)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — blob URL
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_BlobURLImportsSkillDirectory(t *testing.T) {
+	const host = "gitlab.com"
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Raw-Path") {
+		case "/api/v4/projects/acme%2Fskills/repository/files/skills%2Ffoo%2FSKILL.md/raw":
+			w.Write([]byte("---\nname: foo\n---\nbody"))
+		case "/api/v4/projects/acme%2Fskills/repository/tree":
+			writeJSON(w, http.StatusOK, []gitlabTreeEntry{})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitLab(client, "https://"+host+"/acme/skills/-/blob/main/skills/foo/SKILL.md", "")
+	if err != nil {
+		t.Fatalf("fetchFromGitLab: %v", err)
+	}
+	if result.name != "foo" {
+		t.Fatalf("name = %q, want foo", result.name)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — default branch fallback to "main"
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_FallsBackToMainWhenAPIFails(t *testing.T) {
+	const host = "git.example.com"
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Raw-Path") {
+		case "/api/v4/projects/myorg%2Fmyrepo":
+			// Simulate API unavailable (private instance, no token)
+			http.Error(w, "forbidden", http.StatusForbidden)
+		case "/api/v4/projects/myorg%2Fmyrepo/repository/files/SKILL.md/raw":
+			if r.URL.Query().Get("ref") != "main" {
+				t.Fatalf("expected fallback ref=main, got %q", r.URL.Query().Get("ref"))
+			}
+			w.Write([]byte("---\nname: fallback-skill\n---\ncontent"))
+		case "/api/v4/projects/myorg%2Fmyrepo/repository/tree":
+			writeJSON(w, http.StatusOK, []gitlabTreeEntry{})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitLab(client, "https://"+host+"/myorg/myrepo", "")
+	if err != nil {
+		t.Fatalf("fetchFromGitLab: %v", err)
+	}
+	if result.name != "fallback-skill" {
+		t.Fatalf("name = %q, want fallback-skill", result.name)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — SKILL.md missing returns error
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_MissingSkillMdReturnsError(t *testing.T) {
+	const host = "gitlab.com"
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Raw-Path") {
+		case "/api/v4/projects/acme%2Fempty/repository/files/SKILL.md/raw",
+			"/api/v4/projects/acme%2Fempty/repository/files/skills%2FSKILL.md/raw",
+			"/api/v4/projects/acme%2Fempty/repository/files/.claude%2Fskills%2FSKILL.md/raw",
+			"/api/v4/projects/acme%2Fempty/repository/files/plugin%2Fskills%2FSKILL.md/raw":
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := fetchFromGitLab(client, "https://"+host+"/acme/empty", "")
+	if err == nil {
+		t.Fatal("expected error for missing SKILL.md, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — PRIVATE-TOKEN is forwarded from request parameter
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_ForwardsGitLabToken(t *testing.T) {
+	const (
+		host  = "gitlab.com"
+		token = "glpat-test-token-456"
+	)
+	var (
+		mu      sync.Mutex
+		authHdr []string
+	)
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		authHdr = append(authHdr, r.Header.Get("PRIVATE-TOKEN"))
+		mu.Unlock()
+		switch r.Header.Get("X-Test-Raw-Path") {
+		case "/api/v4/projects/acme%2Fskill/repository/files/SKILL.md/raw":
+			w.Write([]byte("---\nname: token-skill\n---\nbody"))
+		case "/api/v4/projects/acme%2Fskill/repository/tree":
+			writeJSON(w, http.StatusOK, []gitlabTreeEntry{})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	if _, err := fetchFromGitLab(client, "https://"+host+"/acme/skill", token); err != nil {
+		t.Fatalf("fetchFromGitLab: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(authHdr) == 0 {
+		t.Fatal("expected at least one request with PRIVATE-TOKEN header")
+	}
+	for i, h := range authHdr {
+		if h != token {
+			t.Fatalf("request %d PRIVATE-TOKEN = %q, want %q", i, h, token)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — SKILL.md skipped in file listing, LICENSE skipped
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_SkipsSkillMdAndLicenseInFileListing(t *testing.T) {
+	const host = "gitlab.com"
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		rawPath := r.Header.Get("X-Test-Raw-Path")
+		switch rawPath {
+		case "/api/v4/projects/acme%2Fskill":
+			writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+		case "/api/v4/projects/acme%2Fskill/repository/files/SKILL.md/raw":
+			w.Write([]byte("---\nname: myskill\n---\nbody"))
+		case "/api/v4/projects/acme%2Fskill/repository/tree":
+			writeJSON(w, http.StatusOK, []gitlabTreeEntry{
+				{Type: "blob", Name: "SKILL.md", Path: "SKILL.md"},
+				{Type: "blob", Name: "LICENSE", Path: "LICENSE"},
+				{Type: "blob", Name: "LICENSE.md", Path: "LICENSE.md"},
+				{Type: "blob", Name: "helper.py", Path: "helper.py"},
+			})
+		case "/api/v4/projects/acme%2Fskill/repository/files/helper.py/raw":
+			w.Write([]byte("print('hi')"))
+		case "/api/v4/projects/acme%2Fskill/repository/files/LICENSE/raw",
+			"/api/v4/projects/acme%2Fskill/repository/files/LICENSE.md/raw":
+			// These must never be fetched as supporting files.
+			t.Errorf("supporting-file fetch must not happen for %s", rawPath)
+			http.NotFound(w, r)
+		default:
+			// Candidate SKILL.md search probes (skills/, .claude/skills/, plugin/skills/)
+			// are expected 404s — just return not found.
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitLab(client, "https://"+host+"/acme/skill", "")
+	if err != nil {
+		t.Fatalf("fetchFromGitLab: %v", err)
+	}
+	wantFiles := []string{"helper.py"}
+	gotFiles := importedFilePaths(result.files)
+	if !equalStrings(gotFiles, wantFiles) {
+		t.Fatalf("files = %v, want %v", gotFiles, wantFiles)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — file-size cap is enforced
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_FileCapAbortImport(t *testing.T) {
+	const host = "gitlab.com"
+	bigContent := strings.Repeat("x", maxImportFileSize+1)
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Raw-Path") {
+		case "/api/v4/projects/acme%2Fskill/repository/files/SKILL.md/raw":
+			w.Write([]byte("---\nname: capskill\n---\nbody"))
+		case "/api/v4/projects/acme%2Fskill/repository/tree":
+			writeJSON(w, http.StatusOK, []gitlabTreeEntry{
+				{Type: "blob", Name: "big.bin", Path: "big.bin"},
+			})
+		case "/api/v4/projects/acme%2Fskill/repository/files/big.bin/raw":
+			w.Write([]byte(bigContent))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := fetchFromGitLab(client, "https://"+host+"/acme/skill", "")
+	if err == nil {
+		t.Fatal("expected import cap error, got nil")
+	}
+	if !isCapError(err) {
+		t.Fatalf("expected cap error, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — raw URL (direct file link, real-world format)
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_RawURLImportsCorrectSkillDirectory(t *testing.T) {
+	const host = "git.example.com"
+	// URL mimics a real-world raw file link:
+	// https://git.example.com/myorg/myrepo/-/raw/main/skills/myskill/SKILL.md
+	rawURL := "https://" + host + "/myorg/myrepo/-/raw/main/skills/myskill/SKILL.md"
+	skillPath := "skills/myskill"
+
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Raw-Path") {
+		case "/api/v4/projects/myorg%2Fmyrepo/repository/files/" +
+			url.PathEscape(skillPath+"/SKILL.md") + "/raw":
+			w.Write([]byte("---\nname: myskill\ndescription: my skill\n---\ncontent"))
+		case "/api/v4/projects/myorg%2Fmyrepo/repository/tree":
+			writeJSON(w, http.StatusOK, []gitlabTreeEntry{
+				{Type: "blob", Name: "guide.md", Path: skillPath + "/guide.md"},
+			})
+		case "/api/v4/projects/myorg%2Fmyrepo/repository/files/" +
+			url.PathEscape(skillPath+"/guide.md") + "/raw":
+			w.Write([]byte("guide content"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitLab(client, rawURL, "")
+	if err != nil {
+		t.Fatalf("fetchFromGitLab: %v", err)
+	}
+	if result.name != "myskill" {
+		t.Fatalf("name = %q, want myskill", result.name)
+	}
+	if result.origin["path"] != skillPath {
+		t.Fatalf("origin.path = %q, want %q", result.origin["path"], skillPath)
+	}
+	wantFiles := []string{"guide.md"}
+	gotFiles := importedFilePaths(result.files)
+	if !equalStrings(gotFiles, wantFiles) {
+		t.Fatalf("files = %v, want %v", gotFiles, wantFiles)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchFromGitLab — name falls back to repo name when frontmatter missing
+// ---------------------------------------------------------------------------
+
+func TestFetchFromGitLab_NameFallsBackToRepoName(t *testing.T) {
+	const host = "gitlab.com"
+	client, _ := newGitLabFixtureClient(t, []string{host}, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Raw-Path") {
+		case "/api/v4/projects/acme%2Fmy-awesome-skill/repository/files/SKILL.md/raw":
+			w.Write([]byte("no frontmatter here"))
+		case "/api/v4/projects/acme%2Fmy-awesome-skill/repository/tree":
+			writeJSON(w, http.StatusOK, []gitlabTreeEntry{})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitLab(client, "https://"+host+"/acme/my-awesome-skill", "")
+	if err != nil {
+		t.Fatalf("fetchFromGitLab: %v", err)
+	}
+	if result.name != "my-awesome-skill" {
+		t.Fatalf("name = %q, want my-awesome-skill", result.name)
+	}
+}
