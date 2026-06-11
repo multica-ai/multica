@@ -639,6 +639,57 @@ func (c *Client) PollRepoApproval(ctx context.Context, workspaceID, approvalID s
 	return resp.Allowed, resp.Decision, resp.Reason, nil
 }
 
+// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — local-runtime per-tool resolve.
+//
+// ToolPolicyResolution is the daemon's view of one local-runtime tool-call
+// verdict from handler.ResolveDaemonToolPolicy. Allowed is the immediate answer;
+// Decision is "allow"/"deny"/"pending"; ApprovalID is set when an enforce-stage
+// Ask raised a shared-inbox approval the caller long-polls via
+// PollToolPolicyApproval.
+type ToolPolicyResolution struct {
+	Allowed    bool   `json:"allowed"`
+	Decision   string `json:"decision"`
+	Mode       string `json:"mode"`
+	Reason     string `json:"reason"`
+	ApprovalID string `json:"approval_id"`
+}
+
+// ResolveToolPolicy asks the server to resolve one local-runtime tool call
+// (Claude/Codex/etc. PreToolUse) against the same per-tool chain the gateway
+// gate uses. The server reads the staged rollout mode from workspace settings,
+// short-circuits to allow when off, logs would-blocks under observe, and on an
+// enforce-stage Ask raises a shared-inbox approval and returns decision="pending"
+// with an ApprovalID. Args are informational context attached to the inbox ask,
+// never part of the decision.
+func (c *Client) ResolveToolPolicy(ctx context.Context, workspaceID, agentID, toolName, resourcePattern string, args map[string]any) (ToolPolicyResolution, error) {
+	body := map[string]any{
+		"agent_id":         agentID,
+		"tool_name":        toolName,
+		"resource_pattern": resourcePattern,
+		"args":             args,
+	}
+	var resp ToolPolicyResolution
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/tool-policy/resolve", workspaceID), body, &resp); err != nil {
+		return ToolPolicyResolution{}, err
+	}
+	return resp, nil
+}
+
+// PollToolPolicyApproval reads the current status of a pending local-runtime
+// tool approval. Single-shot: the caller loops on it (own sleep + deadline)
+// until the decision is no longer "pending". Returns (allowed, decision, reason).
+func (c *Client) PollToolPolicyApproval(ctx context.Context, workspaceID, approvalID string) (bool, string, string, error) {
+	var resp struct {
+		Allowed  bool   `json:"allowed"`
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/tool-policy/resolve/%s", workspaceID, approvalID), &resp); err != nil {
+		return false, "", "", err
+	}
+	return resp.Allowed, resp.Decision, resp.Reason, nil
+}
+
 // defaultTerminalRetrySchedule is the backoff used by postJSONWithRetry for
 // terminal task callbacks (CompleteTask / FailTask). N entries → N+1 attempts
 // in the worst case (one immediate + N retries). Five backoffs totalling

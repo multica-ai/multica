@@ -3113,6 +3113,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}()
 		}
 	}
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — wire Claude Code's
+	// PreToolUse hook to the local tool-policy resolve IPC when the workspace
+	// has opted in (claim carries the resolved stage). No-op for the default
+	// "off" stage and for non-Claude providers. The hook calls back to this
+	// daemon's loopback server, which proxies the unified tool-policy chain.
+	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, task.LocalToolPolicyStage, env.WorkDir)
+	if tperr != nil {
+		return TaskResult{}, fmt.Errorf("tool-policy prep: %w", tperr)
+	}
+	if toolPolicySpawn != nil {
+		for k, v := range toolPolicySpawn.Env {
+			agentEnv[k] = v
+		}
+		// The PreToolUse hook is passed to Claude Code via --settings on
+		// customArgs (the args path the CLI actually consumes); it is appended
+		// after customArgs is assembled below.
+	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
@@ -3158,6 +3175,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			mcpConfig = daemonmcp.StripServers(mcpConfig, connectionsFromMCPTokens(task.DisallowedMCPTools))
 		}
+	}
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — pass the tool-policy
+	// PreToolUse hook to Claude Code via --settings on customArgs (the args the
+	// CLI actually consumes; the MULTICA_CLAUDE_EXTRA_ARGS env var is not read
+	// by any backend). No-op unless prepareToolPolicySpawn wired a settings file.
+	if toolPolicySpawn != nil && provider == "claude" && toolPolicySpawn.SettingsPath != "" {
+		customArgs = append(customArgs, "--settings", toolPolicySpawn.SettingsPath)
 	}
 	thinkingLevel := ""
 	if task.Agent != nil {

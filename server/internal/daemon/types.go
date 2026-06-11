@@ -138,6 +138,11 @@ type Task struct {
 	// to mirror agent stdout to the cerebro terminal broker so a browser
 	// can watch the run live. Empty / "headless" = no mirroring.
 	PresentationMode string `json:"presentation_mode,omitempty"`
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — staged-rollout mode for
+	// local-runtime per-tool enforcement ("off"|"observe"|"enforce"), resolved
+	// server-side from workspace settings at claim. Empty/"off" = no PreToolUse
+	// hook wired (default, no behaviour change); observe/enforce wires the hook.
+	LocalToolPolicyStage string `json:"local_tool_policy_stage,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

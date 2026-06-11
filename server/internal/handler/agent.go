@@ -292,6 +292,8 @@ type AgentTaskResponse struct {
 	// CEREBRO-PATCH(agent): persona integration additions.
 	// CEREBRO-PATCH(runtime-tools-config-claim-resp): runtime-level tools_config surfaced at claim so daemon can merge with agent.mcp_config (9031).
 	PresentationMode string `json:"presentation_mode,omitempty"` // CEREBRO-PATCH(agent-task-presentation-mode): pass interactive terminal mode through to daemon
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — local-runtime per-tool enforcement stage ("off"|"observe"|"enforce") resolved from workspace settings; daemon wires the Claude PreToolUse hook only when not "off".
+	LocalToolPolicyStage string `json:"local_tool_policy_stage,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
