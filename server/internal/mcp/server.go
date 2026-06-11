@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sync"
 	"syscall"
@@ -69,6 +70,33 @@ func (s *Server) Call(ctx context.Context, name string, args map[string]any) (Ca
 	return h(ctx, args)
 }
 
+// CEREBRO-PATCH(workspace-mcp-http): TECH-3405 expose JSON-RPC MCP over HTTP for Connections.
+// ServeHTTP handles MCP JSON-RPC over Streamable HTTP. It intentionally keeps
+// the transport stateless; current tools do not require server-side sessions.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req Request
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeHTTPResponse(w, Response{
+			JSONRPC: "2.0",
+			Error:   &RPCError{Code: -32700, Message: "parse error"},
+		})
+		return
+	}
+
+	resp := s.handleRequest(r.Context(), req)
+	if resp.JSONRPC == "" {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	writeHTTPResponse(w, resp)
+}
+
 // Run starts the stdio server loop. It blocks until stdin is closed or ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
 	scanner := bufio.NewScanner(os.Stdin)
@@ -105,6 +133,13 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	return scanner.Err()
+}
+
+func writeHTTPResponse(w http.ResponseWriter, resp Response) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleRequest(ctx context.Context, req Request) Response {

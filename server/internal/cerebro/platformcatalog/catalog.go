@@ -742,6 +742,7 @@ var catalog = []Capability{
 		Category:    CategoryConnections,
 		Description: "Create, edit, or delete workspace API/MCP connections (external URLs and internal Sliplane paths).",
 		Ops: []string{
+			"POST /api/workspaces/{id}/mcp",
 			"POST /api/workspaces/{id}/connections",
 			"PUT /api/workspaces/{id}/connections/{connId}",
 			"DELETE /api/workspaces/{id}/connections/{connId}",

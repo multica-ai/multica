@@ -1027,6 +1027,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/connections/{connId}", cerebroConnectionsHandler.Get)
 					// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent Agent Vault access read (any member).
 					r.Get("/agentvault/access", cerebroAgentVaultHandler.List)
+					// CEREBRO-PATCH(workspace-mcp-http): TECH-3405 workspace-scoped MCP endpoint for Connections.
+					r.Post("/mcp", h.WorkspaceMCP)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
