@@ -2579,6 +2579,30 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
+// gateResumeToReusedWorkdir clears the task's prior session unless the task
+// runs in the exact workdir the session was recorded against, and reports
+// whether that workdir was reused. CLI backends key their session stores to
+// the cwd (Claude Code looks sessions up under ~/.claude/projects/<encoded-cwd>/),
+// so a session id from a different workdir can never resolve: the CLI exits
+// within a second and the run fails before doing any work — permanently,
+// because the failed run records no session and the next claim serves the
+// same stale pointer again. This fires whenever the prior workdir no longer
+// exists (GC'd after the issue went done, daemon reinstall, manual cleanup)
+// and execenv.Reuse fell back to a fresh Prepare (GitHub #3854).
+func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, taskLog *slog.Logger) bool {
+	reused := task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir
+	if !reused && task.PriorSessionID != "" {
+		taskLog.Info("dropping prior session: workdir not reused, per-cwd session cannot resolve",
+			"session_id", task.PriorSessionID,
+			"prior_workdir", task.PriorWorkDir,
+			"workdir", envWorkDir,
+		)
+		task.PriorSessionID = ""
+		taskCtx.PriorSessionResumed = false
+	}
+	return reused
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -2721,6 +2745,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
 
+	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
+
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
 	if err != nil {
@@ -2853,7 +2879,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
-	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
