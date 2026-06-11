@@ -597,7 +597,7 @@ func TestApplyCodexServiceTier_ThreePoints(t *testing.T) {
 			applyCodexServiceTier(startParams, tc.tier)
 			assertCodexServiceTier(t, "thread/start", startParams, tc.tier)
 			if cfg, _ := startParams["config"].(map[string]any); cfg["model_reasoning_effort"] != "high" {
-				t.Fatalf("thread/start service_tier clobbered config: %+v", startParams)
+				t.Fatalf("thread/start serviceTier clobbered config: %+v", startParams)
 			}
 
 			resumeParams := map[string]any{
@@ -620,18 +620,21 @@ func TestApplyCodexServiceTier_ThreePoints(t *testing.T) {
 
 func assertCodexServiceTier(t *testing.T, method string, params map[string]any, want string) {
 	t.Helper()
-	got, has := params["service_tier"]
+	got, has := params["serviceTier"]
+	if legacy, leaked := params["service_tier"]; leaked {
+		t.Errorf("%s: must not emit legacy service_tier, got %v", method, legacy)
+	}
 	if want == "" {
 		if has {
-			t.Errorf("%s: empty tier must not emit service_tier, got %v", method, got)
+			t.Errorf("%s: empty tier must not emit serviceTier, got %v", method, got)
 		}
 		return
 	}
 	if !has {
-		t.Fatalf("%s: missing service_tier for tier=%q (params=%+v)", method, want, params)
+		t.Fatalf("%s: missing serviceTier for tier=%q (params=%+v)", method, want, params)
 	}
 	if got != want {
-		t.Errorf("%s: service_tier = %v, want %q", method, got, want)
+		t.Errorf("%s: serviceTier = %v, want %q", method, got, want)
 	}
 }
 
