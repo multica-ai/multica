@@ -19,7 +19,7 @@ export function IntegrationsTab() {
         <LarkTab />
       </section>
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold">Octo IM</h2>
+        <h2 className="text-sm font-semibold">{t(($) => $.octo.section_title)}</h2>
         <OctoTab />
       </section>
     </div>

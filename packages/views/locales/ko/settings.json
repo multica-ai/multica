@@ -302,6 +302,28 @@
       }
     }
   },
+  "octo": {
+    "section_title": "Octo IM",
+    "description": "Octo 봇을 연결하여 에이전트가 Octo에서 대화하고 이슈를 생성할 수 있게 합니다.",
+    "configure": "봇 구성",
+    "not_configured": "이 배포에서는 Octo 연동이 활성화되지 않았습니다. 운영자에게 MULTICA_OCTO_SECRET_KEY 설정을 요청하세요.",
+    "loading": "불러오는 중…",
+    "empty": "아직 구성된 Octo 봇이 없습니다.",
+    "status_label": "상태",
+    "disconnect": "연결 해제",
+    "disconnect_title": "이 봇의 연결을 해제할까요?",
+    "disconnect_body": "봇이 메시지 수신과 전송을 중단합니다. 동일한 토큰으로 나중에 다시 구성할 수 있습니다.",
+    "disconnected": "봇 연결을 해제했습니다",
+    "disconnect_failed": "연결 해제 실패",
+    "cancel": "취소",
+    "configured": "봇이 구성되었습니다",
+    "configure_failed": "봇 구성 실패",
+    "configure_desc": "Octo 봇(bf_ 토큰)을 에이전트에 바인딩합니다. 봇 ID는 Octo에서 가져옵니다.",
+    "agent_id": "에이전트 ID",
+    "bot_token": "봇 토큰",
+    "api_url": "API URL(선택)",
+    "saving": "저장 중…"
+  },
   "lark": {
     "section_title": "Lark",
     "page_description": "각 Multica 에이전트를 Lark(飞书) PersonalAgent 봇에 연결하세요. 멤버는 봇과 1:1로 대화하거나, 그룹에서 @ 멘션하거나, /issue 를 입력해 새 Multica 이슈를 만들 수 있습니다.",

@@ -225,6 +225,28 @@
     "repositories_shortcut_link": "Manage repositories →",
     "toast_failed": "Failed to update GitHub settings"
   },
+  "octo": {
+    "section_title": "Octo IM",
+    "description": "Connect Octo bots so agents can chat and create issues from Octo.",
+    "configure": "Configure a bot",
+    "not_configured": "Octo integration is not enabled on this deployment. Ask an operator to set MULTICA_OCTO_SECRET_KEY.",
+    "loading": "Loading…",
+    "empty": "No Octo bots configured yet.",
+    "status_label": "Status",
+    "disconnect": "Disconnect",
+    "disconnect_title": "Disconnect this bot?",
+    "disconnect_body": "The bot stops receiving and sending messages. You can reconfigure it later with the same token.",
+    "disconnected": "Bot disconnected",
+    "disconnect_failed": "Failed to disconnect",
+    "cancel": "Cancel",
+    "configured": "Bot configured",
+    "configure_failed": "Failed to configure bot",
+    "configure_desc": "Bind an Octo bot (bf_ token) to an agent. The bot's identity is fetched from Octo.",
+    "agent_id": "Agent ID",
+    "bot_token": "Bot token",
+    "api_url": "API URL (optional)",
+    "saving": "Saving…"
+  },
   "lark": {
     "section_title": "Lark",
     "page_description": "Connect each Multica Agent to a Lark (飞书) PersonalAgent Bot. Members can DM the Bot, @ it in groups, and type /issue to spin up a new Multica issue.",

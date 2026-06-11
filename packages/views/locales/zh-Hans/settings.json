@@ -225,6 +225,28 @@
     "repositories_shortcut_link": "前往管理 →",
     "toast_failed": "更新 GitHub 设置失败"
   },
+  "octo": {
+    "section_title": "Octo IM",
+    "description": "连接 Octo 机器人，让 Agent 可以在 Octo 中对话并创建 issue。",
+    "configure": "配置机器人",
+    "not_configured": "本部署未启用 Octo 集成。请联系运维设置 MULTICA_OCTO_SECRET_KEY。",
+    "loading": "加载中…",
+    "empty": "尚未配置 Octo 机器人。",
+    "status_label": "状态",
+    "disconnect": "断开连接",
+    "disconnect_title": "断开此机器人？",
+    "disconnect_body": "机器人将停止收发消息。你可以稍后用相同的 token 重新配置。",
+    "disconnected": "已断开机器人",
+    "disconnect_failed": "断开失败",
+    "cancel": "取消",
+    "configured": "机器人已配置",
+    "configure_failed": "配置机器人失败",
+    "configure_desc": "将 Octo 机器人（bf_ token）绑定到一个 Agent。机器人身份将从 Octo 获取。",
+    "agent_id": "Agent ID",
+    "bot_token": "机器人 token",
+    "api_url": "API 地址（可选）",
+    "saving": "保存中…"
+  },
   "lark": {
     "section_title": "飞书",
     "page_description": "将每个 Multica 智能体绑定到飞书 PersonalAgent Bot。成员可在飞书私聊 Bot、群聊 @ Bot，或输入 /issue 直接创建 Multica issue。",
