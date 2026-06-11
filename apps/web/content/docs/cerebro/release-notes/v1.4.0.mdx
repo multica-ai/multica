@@ -1,0 +1,210 @@
+---
+title: "Multica v1.4.0"
+description: "189 release bullets: 65 new, 97 fixed, 8 improved, plus 19 more."
+date: 2026-06-11
+---
+
+**Release summary:** 189 release bullets: 65 new, 97 fixed, 8 improved, plus 19 more.
+
+Changes since [v1.3.0](https://github.com/firtal-group/firtal-cerebro/compare/v1.3.0...v1.4.0) — bump: **minor**
+
+## New
+
+- Self-update + release from the Firtal fork channel (TECH-3395) [#1141](https://github.com/firtal-group/firtal-cerebro/pull/1141)
+- Wire Claude Code PreToolUse hook to local tool-policy chain (TECH-2563) [#1136](https://github.com/firtal-group/firtal-cerebro/pull/1136)
+- Label channel/DM gateway runs by surface [#1132](https://github.com/firtal-group/firtal-cerebro/pull/1132)
+- Add update_app deploy-write action [#1130](https://github.com/firtal-group/firtal-cerebro/pull/1130)
+- List_apps action for app+owner lookup (TECH-3356) [#1127](https://github.com/firtal-group/firtal-cerebro/pull/1127)
+- Per-status child→parent notify flags + workspace off switch (TECH-3006) [#1078](https://github.com/firtal-group/firtal-cerebro/pull/1078)
+- Mark issues with a pending wakeup as Running with a clock pip [#1122](https://github.com/firtal-group/firtal-cerebro/pull/1122)
+- Render wakeups as collapsible action notes + self-wakeup limits [#1114](https://github.com/firtal-group/firtal-cerebro/pull/1114)
+- Issue link no longer satisfies the comment-target guard (TECH-3279) [#1099](https://github.com/firtal-group/firtal-cerebro/pull/1099)
+- Universal server-side tool execution for all runtimes
+- Firtal-local respects agent_tool_grant and exposes full tool set (TECH-3226 follow-up)
+- Add Pending bucket for sent-but-unanswered DMs/channels (TECH-3265)
+- Add Channels & DMs and Agent Usage sections to agent runtime brief
+- Add channel kind filter, messages command, and agent usage command
+- Forward full run context + content-capture to registry AI-gateway [#1085](https://github.com/firtal-group/firtal-cerebro/pull/1085)
+- Firtal-local — local Ollama engine with full tool loop (TECH-3226) [#1084](https://github.com/firtal-group/firtal-cerebro/pull/1084)
+- Workspace-level channel, DM, and chat session listing (FIR-125)
+- Add Chat Reply section to Available Commands (TECH-3183)
+- Add agent direct reply endpoint and CLI command (TECH-3183)
+- Per-type on/off settings + wrap UI as extension package (TECH-3176) [#1067](https://github.com/firtal-group/firtal-cerebro/pull/1067)
+- Daemon-side per-tool resolve endpoint for local runtimes (TECH-3173) [#1061](https://github.com/firtal-group/firtal-cerebro/pull/1061)
+- Render chat-message attachments with open + download (TECH-3183) [#1066](https://github.com/firtal-group/firtal-cerebro/pull/1066)
+- Make document sheet resizable and add open-in-documents link (TECH-3168) [#1054](https://github.com/firtal-group/firtal-cerebro/pull/1054)
+- Fail closed on non-Claude providers (TECH-3156)
+- Deny per-tool MCP connection calls at spawn (TECH-3156)
+- Per-connection tool config sheet with Konfigurer button (TECH-3156)
+- Per-tool rows for MCP connections in the policy table (TECH-3156)
+- Persist discovered MCP tool list per connection (TECH-3156)
+- Shared horizontal permission surface on all five levels (TECH-3156)
+- Show agent replies + cost in message detail sheet [#1043](https://github.com/firtal-group/firtal-cerebro/pull/1043)
+- TECH-3077 skill category filter UI + always-on metadata in list [#1038](https://github.com/firtal-group/firtal-cerebro/pull/1038)
+- Show pending wakeups in issue sidebar with cancel (TECH-3144)
+- Message detail sheet on row click [#1030](https://github.com/firtal-group/firtal-cerebro/pull/1030)
+- Cancel wakeups on done + MCP comment reminder [#1031](https://github.com/firtal-group/firtal-cerebro/pull/1031)
+- Cancel wakeups on done + MCP comment reminder
+- Messages tab — thread links, spend KPI, spend table, activity chart, filter wiring (TECH-3093)
+- Full-page editor with test button + MCP tool discovery (TECH-3108) [#1014](https://github.com/firtal-group/firtal-cerebro/pull/1014)
+- Require wakeup + timestamp when agents comment about waiting (TECH-3121)
+- Cerebro_approval_gate workspace feature flag (FIR-2563)
+- TECH-3099 extend comment guard with three sub-issue checks [#994](https://github.com/firtal-group/firtal-cerebro/pull/994)
+- TECH-3077 skill metadata — category/domain filtering + audit [#995](https://github.com/firtal-group/firtal-cerebro/pull/995)
+- Per-member message history + spend panel (TECH-3093) [#1002](https://github.com/firtal-group/firtal-cerebro/pull/1002)
+- Mobile long-press context menu for priority actions [#982](https://github.com/firtal-group/firtal-cerebro/pull/982)
+- Workspace connection registry — API/MCP connections management [#1001](https://github.com/firtal-group/firtal-cerebro/pull/1001)
+- Surface wakeup CLI and MCP tools in agent brief (TECH-3013)
+- Message tracker — top senders og recipients (TECH-3093) [#991](https://github.com/firtal-group/firtal-cerebro/pull/991)
+- Add to inbox action on issues [#985](https://github.com/firtal-group/firtal-cerebro/pull/985)
+- FIR-43 worker pushes FX via internal API, no DB credential [#990](https://github.com/firtal-group/firtal-cerebro/pull/990)
+- Add OpenAI EU provider via api.eu.openai.com (TECH-2989) [#947](https://github.com/firtal-group/firtal-cerebro/pull/947)
+- Overflow guard + Haiku compression with UI toggle [#987](https://github.com/firtal-group/firtal-cerebro/pull/987)
+- FIR-43 Hatchet cron worker for daily USD→{DKK,EUR} refresh
+- Cost display-currency (USD/DKK/EUR) — workspace setting + central formatter (FIR-40)
+- Push-down + fold + scroll-reveal for portal topbar (TECH-2971)
+- Enable tool-policy UI + register 8 CS MCP tools in runtime (TECH-3020)
+- Add FIRTAL_REGISTRY_RUNTIME_NAME env var for custom runtime display name
+- Add agent wakeup scheduling [#965](https://github.com/firtal-group/firtal-cerebro/pull/965)
+- Auto-extract accent color from logo + color picker in settings (TECH-3002) [#962](https://github.com/firtal-group/firtal-cerebro/pull/962)
+- Per-comment cost badge + channel-total chip (FIR-39) [#959](https://github.com/firtal-group/firtal-cerebro/pull/959)
+- Daemon bridge, issue terminal link, web route
+- Interactive PTY-style runtime presentation mode
+- Auto-open thread from inbox + responsive overlay (TECH-3004)
+- Add workspace flags for child-to-parent notifications (TECH-3006)
+- Surface artifact commands + workspace.context in Gateway [#940](https://github.com/firtal-group/firtal-cerebro/pull/940)
+- Priorities polish — rename, todo checkbox, drag, sort, visibility (TECH-2947) [#937](https://github.com/firtal-group/firtal-cerebro/pull/937)
+- Workspace-specific sidebar color + page title (TECH-2945) [#942](https://github.com/firtal-group/firtal-cerebro/pull/942)
+
+## Fixed
+
+- Interactive terminal â many sessions + survive WS flaps (TECH-3388) [#1138](https://github.com/firtal-group/firtal-cerebro/pull/1138)
+- Honour IANA timezone in wall-clock reset parse (TECH-3386) [#1137](https://github.com/firtal-group/firtal-cerebro/pull/1137)
+- Give server-side tool invoker the DB pool for grant config [#1134](https://github.com/firtal-group/firtal-cerebro/pull/1134)
+- More breathing room between inbox messages (TECH-3322) [#1124](https://github.com/firtal-group/firtal-cerebro/pull/1124)
+- Clear inbox unread state when a channel/DM is opened (TECH-3352) [#1128](https://github.com/firtal-group/firtal-cerebro/pull/1128)
+- Enable cerebro_connections by default (TECH-3209) [#1071](https://github.com/firtal-group/firtal-cerebro/pull/1071)
+- Catalogue PUT /workspaces/{id}/wakeup-settings [#1117](https://github.com/firtal-group/firtal-cerebro/pull/1117)
+- Inventory PUT /workspaces/{id}/wakeup-settings (workspace_admin) [#1116](https://github.com/firtal-group/firtal-cerebro/pull/1116)
+- Restart daemon when server/pkg/agent/ or .deploy/ changes
+- Keep messages unread when window is hidden/unfocused (TECH-3300) [#1110](https://github.com/firtal-group/firtal-cerebro/pull/1110)
+- Remove duplicate agent tool invoke exclusion [#1107](https://github.com/firtal-group/firtal-cerebro/pull/1107)
+- Classify agent tool invoke route (TECH-3226 regression) [#1106](https://github.com/firtal-group/firtal-cerebro/pull/1106)
+- Classify POST agent tool invoke route (TECH-3226 regression) [#1105](https://github.com/firtal-group/firtal-cerebro/pull/1105)
+- Inventory POST agent tool invoke route (TECH-3226 regression) [#1103](https://github.com/firtal-group/firtal-cerebro/pull/1103)
+- Cascade-granted tools show as enabled in /api/agents/{id}/tools (TECH-3226)
+- Make agent-file downloads work from the UI (TECH-3285) [#1100](https://github.com/firtal-group/firtal-cerebro/pull/1100)
+- Cascade permissions + idempotent migration fix (TECH-3226)
+- Surface mutation errors as toasts (TECH-3257)
+- Prevent attachment filename overflow in comment cards (TECH-3124) [#1023](https://github.com/firtal-group/firtal-cerebro/pull/1023)
+- Update workspace route layout test mocks [#1092](https://github.com/firtal-group/firtal-cerebro/pull/1092)
+- CEREBRO-PATCH issue-origin-lark-chat — include runtime_approval + agent_task in 111 constraint
+- Export workspace/welcome-after-onboarding subpath [#1089](https://github.com/firtal-group/firtal-cerebro/pull/1089)
+- Register channel list and chat session list in CLI inventory (FIR-125)
+- Break views↔cerebro-access turbo cycle (TECH-3194 follow-up) [#1080](https://github.com/firtal-group/firtal-cerebro/pull/1080)
+- Composer trigger indicator mirrors backend "who gets the comment" [#1077](https://github.com/firtal-group/firtal-cerebro/pull/1077)
+- Truncate Name column so actions stay visible (TECH-3209) [#1074](https://github.com/firtal-group/firtal-cerebro/pull/1074)
+- Bill local Gemma models at zero, not the Opus fallback [#1072](https://github.com/firtal-group/firtal-cerebro/pull/1072)
+- Classify new agent-message chat route as personal-chat
+- Register new chat agent-message route and CLI command
+- Apply period + actor scope to every overview widget (FIR-70) [#1040](https://github.com/firtal-group/firtal-cerebro/pull/1040)
+- Postpone when active task or offline runtime, fix inbox spam (TECH-3167)
+- Override max-width CSS to enforce 900px default sheet width (TECH-3168)
+- Enforce connection-wide deny per runtime/agent (TECH-3180) [#1065](https://github.com/firtal-group/firtal-cerebro/pull/1065)
+- Show connections on runtime/agent permission views [#1058](https://github.com/firtal-group/firtal-cerebro/pull/1058)
+- Prevent horizontal overflow on mobile by adding min-w-0 to text button [#1052](https://github.com/firtal-group/firtal-cerebro/pull/1052)
+- Show pending wakeups without toggling (TECH-3144) [#1050](https://github.com/firtal-group/firtal-cerebro/pull/1050)
+- New thread starts fresh agent session [#1033](https://github.com/firtal-group/firtal-cerebro/pull/1033)
+- Render permission sub-tabs horizontally (TECH-3156 Mangel 3) [#1049](https://github.com/firtal-group/firtal-cerebro/pull/1049)
+- Make session cost token-based so it shows real spend [#1048](https://github.com/firtal-group/firtal-cerebro/pull/1048)
+- Show uncategorized skills in filter
+- Fail closed on resolve error + API CRUD per-endpoint config (TECH-3156)
+- Stabilize skill metadata fallback and patch marker
+- Key auto-open comment snapshot on selectedKey, not channel object (TECH-3004) [#1042](https://github.com/firtal-group/firtal-cerebro/pull/1042)
+- Use tooltip render prop for wakeup cancel
+- Use Base UI TooltipTrigger render pattern, drop asChild
+- Restore sprint UI wiring and fix feature-flags test [#980](https://github.com/firtal-group/firtal-cerebro/pull/980)
+- Honor child notify flag precedence
+- Show scheduled time in Europe/Copenhagen timezone
+- Update issue-detail test assertions for English aria-label
+- Update views and cerebro-runtime test assertions for English
+- Update cerebro-agent-tools and cerebro-runtime test assertions for English
+- Update cerebro-groups test assertions for English translation
+- Restore da locale in inbox/chat strings.ts
+- Restore Danish strings in da locale table
+- MCP initialize handshake + auth set indicator (TECH-3108) [#1029](https://github.com/firtal-group/firtal-cerebro/pull/1029)
+- Fix remaining Danish strings in test assertions (final sweep)
+- Update tool-policy test assertions for English translation
+- Update compile.test.ts snapshots for English translation
+- Horizontal tabs + test reveals stored-credential tools (TECH-3108) [#1028](https://github.com/firtal-group/firtal-cerebro/pull/1028)
+- TECH-3099 use task.OriginalUserID as on-behalf-of user in sub-issue guard [#1025](https://github.com/firtal-group/firtal-cerebro/pull/1025)
+- Fix cs.issue_id SQL error in actor/all-messages queries (TECH-3093)
+- Få terminal frontend-test grøn [#1021](https://github.com/firtal-group/firtal-cerebro/pull/1021)
+- Få runtime tool CI grøn [#1020](https://github.com/firtal-group/firtal-cerebro/pull/1020)
+- Close terminal sessions when daemon disconnects (MUL-3100 follow-up)
+- Få runtime tool CI grøn igen [#1018](https://github.com/firtal-group/firtal-cerebro/pull/1018)
+- Complete terminal WebSocket auth fix — first-message PAT support (TECH-3100)
+- UX fixes — auth type, permissions tabs, English strings (TECH-3108) [#1011](https://github.com/firtal-group/firtal-cerebro/pull/1011)
+- Show Create Agent button to all workspace members [#1005](https://github.com/firtal-group/firtal-cerebro/pull/1005)
+- Add "Add to inbox" to issue detail 3-dot menu [#1006](https://github.com/firtal-group/firtal-cerebro/pull/1006)
+- Register connection routes in inventory and platformcatalog (TECH-3108) [#1004](https://github.com/firtal-group/firtal-cerebro/pull/1004)
+- Messages tab polish — rename, clickable rows, focused KPIs (TECH-3093)
+- Fix interactive terminal stuck on "Waiting for agent..." (TECH-3100)
+- Default floating chat popup to closed for new users [#969](https://github.com/firtal-group/firtal-cerebro/pull/969)
+- Stop mounting floating chat popup (FIR-29) [#908](https://github.com/firtal-group/firtal-cerebro/pull/908)
+- Codex first-turn timeout 30s → 90s (TECH-3078) [#984](https://github.com/firtal-group/firtal-cerebro/pull/984)
+- Per-comment cost badge honors display currency (FIR-40) [#989](https://github.com/firtal-group/firtal-cerebro/pull/989)
+- Snapshot initialCommentId at channel-select time (TECH-3004)
+- Snapshot initialCommentId at channel-select time (TECH-3004)
+- ResizeObserver not set up when channel loads async (TECH-3004)
+- Respect start page on workspace switch [#974](https://github.com/firtal-group/firtal-cerebro/pull/974)
+- Move timestamp and cost to sub-row below commenter name [#966](https://github.com/firtal-group/firtal-cerebro/pull/966)
+- Show context top-sheet from inbox too (TECH-2969) [#963](https://github.com/firtal-group/firtal-cerebro/pull/963)
+- Allow priority text to wrap full width [#953](https://github.com/firtal-group/firtal-cerebro/pull/953)
+- Defer ResizeObserver setState via rAF to fix React #310 (TECH-3009) [#958](https://github.com/firtal-group/firtal-cerebro/pull/958)
+- Switch to gpt-image-1 via OpenAI images API, add young Scandinavian appearance [#960](https://github.com/firtal-group/firtal-cerebro/pull/960)
+- Stop PWA portalbar layout shift
+- Scope context panel to issue column only (TECH-2969) [#948](https://github.com/firtal-group/firtal-cerebro/pull/948)
+- Archive only fires when row is opened >= 70%, not at 50px [#944](https://github.com/firtal-group/firtal-cerebro/pull/944)
+- Lower swipe-to-archive threshold from 80% → 70% [#943](https://github.com/firtal-group/firtal-cerebro/pull/943)
+- Escape `<value>` in v1.3.0 release notes so MDX build succeeds [#938](https://github.com/firtal-group/firtal-cerebro/pull/938)
+- Drop next force-include that flattened next and broke standalone boot (FIR-2823)
+- Pin @swc/helpers in standalone trace so Sliplane prod boots (FIR-2823)
+- Restore .next tracer sources + pin next in outputFileTracingIncludes (FIR-2823)
+- Allow opt-in internal gateway URL (FIR-2556)
+- Ignore-scripts in web deps stage (postinstall needs source)
+- Copy all workspace manifests in web deps stage
+- Copy cerebro replace() targets before go mod download
+
+## Improved
+
+- Only Sara/Mia/Sabine flip staging-only → prod-ready (TECH-3124) [#1024](https://github.com/firtal-group/firtal-cerebro/pull/1024)
+- Note connection-wide row runtime-filter exemption (TECH-3108) [#1060](https://github.com/firtal-group/firtal-cerebro/pull/1060)
+- Dedupe connection per-tool deny row (TECH-3156)
+- Document connection tool deny enforcement
+- Document per-tool Connection deny enforcement (TECH-3156)
+- Document CEREBRO_APPROVAL_GATE_ENABLED + _MODE (TECH-2563) [#1007](https://github.com/firtal-group/firtal-cerebro/pull/1007)
+- Production gate — prod-ready / staging-only PR label (TECH-2977) [#939](https://github.com/firtal-group/firtal-cerebro/pull/939)
+- Correct environment URLs — main=staging (Sara.firtal.com), production=Multica.firtal.com (FIR-2823)
+
+## Other changes
+
+- Cloudflare Access for multica-api.firtal.com (TECH-3396) [#1140](https://github.com/firtal-group/firtal-cerebro/pull/1140)
+- Fix mobile DM message actions [#1126](https://github.com/firtal-group/firtal-cerebro/pull/1126)
+- Fix DM og channel beskedvisning [#1120](https://github.com/firtal-group/firtal-cerebro/pull/1120)
+- Gør class filter kompakt [#1118](https://github.com/firtal-group/firtal-cerebro/pull/1118)
+- TECH-3174: enforce per-tool connection deny on firtal-gateway [#1057](https://github.com/firtal-group/firtal-cerebro/pull/1057)
+- Permission-interface: gør blokering synlig + navngiv blokerende gruppe (TECH-3287) [#1102](https://github.com/firtal-group/firtal-cerebro/pull/1102)
+- TECH-3295 R3: runtime spend counts the human, not the handoff agent [#1109](https://github.com/firtal-group/firtal-cerebro/pull/1109)
+- Dokumenter runtime prompt-opbygning [#1027](https://github.com/firtal-group/firtal-cerebro/pull/1027)
+- Tilføj TECH-3001 patchmarkering til notification-test [#1064](https://github.com/firtal-group/firtal-cerebro/pull/1064)
+- Ret TECH-3001 testforventninger efter inbox-defaults [#1063](https://github.com/firtal-group/firtal-cerebro/pull/1063)
+- Gør standardindstillinger klar for alle (TECH-3001)
+- Fix TECH-3108 connection permissions and MCP data [#1044](https://github.com/firtal-group/firtal-cerebro/pull/1044)
+- Fix markdown document list edit action
+- Gør markdown-dokumenter redigerbare
+- Tilføj kanalvalg for systemnotifikationer [#1022](https://github.com/firtal-group/firtal-cerebro/pull/1022)
+- TECH-3071 Runtime-agnostiske Cerebro tools [#986](https://github.com/firtal-group/firtal-cerebro/pull/986)
+- Fjern alle Firtal portal bar overlay-ændringer (TECH-2971) [#1000](https://github.com/firtal-group/firtal-cerebro/pull/1000)
+- Beskyt paused runtime-kø mod timeout [#946](https://github.com/firtal-group/firtal-cerebro/pull/946)
+- Vis run-detaljer fra tasks [#941](https://github.com/firtal-group/firtal-cerebro/pull/941)

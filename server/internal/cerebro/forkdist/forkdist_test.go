@@ -2,10 +2,12 @@ package forkdist
 
 import "testing"
 
-func TestUpdateRepo_DefaultIsFork(t *testing.T) {
+func TestUpdateRepo_DefaultIsPublicTap(t *testing.T) {
 	t.Setenv("MULTICA_UPDATE_REPO", "")
-	if got := UpdateRepo(); got != "firtal-group/firtal-cerebro" {
-		t.Fatalf("default UpdateRepo = %q, want firtal-group/firtal-cerebro", got)
+	// MUST be the public tap repo: the daemon downloads assets unauthenticated,
+	// so the private code repo (firtal-group/firtal-cerebro) would 404.
+	if got := UpdateRepo(); got != "firtal-group/homebrew-tap" {
+		t.Fatalf("default UpdateRepo = %q, want firtal-group/homebrew-tap", got)
 	}
 }
 
@@ -25,7 +27,7 @@ func TestBrewTap_DefaultIsFork(t *testing.T) {
 
 func TestEnvOr_TrimsWhitespace(t *testing.T) {
 	t.Setenv("MULTICA_UPDATE_REPO", "  \t ")
-	if got := UpdateRepo(); got != "firtal-group/firtal-cerebro" {
+	if got := UpdateRepo(); got != "firtal-group/homebrew-tap" {
 		t.Fatalf("whitespace-only env should fall back to default, got %q", got)
 	}
 }
