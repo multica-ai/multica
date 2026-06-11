@@ -530,9 +530,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       </DropdownMenuItem>
                     ))}
                     <DropdownMenuItem
-                      onClick={() =>
-                        useModalStore.getState().open("create-workspace")
-                      }
+                      onClick={() => {
+                        // Defer modal open so DropdownMenu finishes closing
+                        // and returns focus before Dialog applies aria-hidden
+                        // to #root. Prevents blocked-aria-hidden browser warning.
+                        setTimeout(
+                          () =>
+                            useModalStore.getState().open("create-workspace"),
+                          0,
+                        );
+                      }}
                     >
                       <Plus className="h-3.5 w-3.5" />
                       {t(($) => $.sidebar.create_workspace)}

@@ -39,6 +39,11 @@ type ScopeAuthorizer interface {
 	AuthorizeScope(ctx context.Context, userID, workspaceID, scopeType, scopeID string) (bool, error)
 }
 
+// SubjectResolver maps a Casdoor subject ID (the "sub" claim from the JWT)
+// to a Multica user UUID. This is the same contract as middleware.SubjectResolver
+// but lives in the realtime package to avoid an import cycle.
+type SubjectResolver func(ctx context.Context, subjectID, name, email string) (userID string, err error)
+
 var allowedWSOrigins atomic.Value // holds []string
 
 func init() {
@@ -75,6 +80,22 @@ func loadAllowedOrigins() []string {
 // SetAllowedOrigins overrides the WebSocket origin whitelist.
 func SetAllowedOrigins(origins []string) {
 	allowedWSOrigins.Store(origins)
+}
+
+// extractCasdoorTokenForWS reads the Casdoor session token from the request
+// for WebSocket authentication. Priority: zgsmAdminToken cookie >
+// Authorization: Bearer header. Matches the logic in middleware.CasdoorAuth.
+func extractCasdoorTokenForWS(r *http.Request) string {
+	if cookie, err := r.Cookie("zgsmAdminToken"); err == nil && cookie.Value != "" {
+		return cookie.Value
+	}
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token != authHeader {
+			return token
+		}
+	}
+	return ""
 }
 
 func checkOrigin(r *http.Request) bool {
@@ -653,9 +674,9 @@ func writeWSAuthErrorAndClose(conn *websocket.Conn, payload []byte, attrs ...any
 	conn.Close()
 }
 
-// HandleWebSocket upgrades an HTTP connection to WebSocket with cookie or
-// first-message auth.
-func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, w http.ResponseWriter, r *http.Request) {
+// HandleWebSocket upgrades an HTTP connection to WebSocket with cookie,
+// Casdoor token, or first-message auth.
+func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, jwks *auth.JWKSProvider, subjectResolver SubjectResolver, w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		if slug := r.URL.Query().Get("workspace_slug"); slug != "" && resolveSlug != nil {
@@ -684,6 +705,25 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 			return
 		}
 		userID = uid
+	} else if jwks != nil && subjectResolver != nil {
+		// Embedded clients (e.g. app-ai-native) may authenticate via Casdoor
+		// token instead of the multica_auth cookie. Fall back to Casdoor
+		// JWT validation so WebSocket works in iframe/embedded scenarios.
+		casdoorToken := extractCasdoorTokenForWS(r)
+		if casdoorToken != "" && !strings.HasPrefix(casdoorToken, "mul_") {
+			userInfo, err := auth.ParseCasdoorJWT(casdoorToken, jwks)
+			if err == nil {
+				uid, err := subjectResolver(r.Context(), userInfo.SubjectID, userInfo.Name, userInfo.Email)
+				if err == nil && uid != "" {
+					if !mc.IsMember(r.Context(), uid, workspaceID) {
+						http.Error(w, `{"error":"not a member of this workspace"}`, http.StatusForbidden)
+						return
+					}
+					userID = uid
+					slog.Debug("ws: authenticated via casdoor token", "user_id", userID, "subject_id", userInfo.SubjectID)
+				}
+			}
+		}
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
