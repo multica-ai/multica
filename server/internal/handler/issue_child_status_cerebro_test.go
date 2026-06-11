@@ -64,8 +64,8 @@ func TestChildInReviewNotifiesParent(t *testing.T) {
 func TestChildStatusNotificationSkippedWhenWorkspaceFlagOff(t *testing.T) {
 	// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — workspace override off suppresses status notification.
 	wireChildNotifyFlagQueries(t)
-	clearChildNotifyFlag(t, testUserID, "cerebro_child_status_notify_parent")
-	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_status_notify_parent", false, false)
+	clearChildNotifyFlag(t, testUserID, "cerebro_child_in_review_notify_parent")
+	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_in_review_notify_parent", false, false)
 	fx := newChildDoneFixture(t, "in_progress")
 
 	updateChildStatus(t, fx.child.ID, "in_review")
@@ -78,14 +78,60 @@ func TestChildStatusNotificationSkippedWhenWorkspaceFlagOff(t *testing.T) {
 func TestChildStatusNotificationPersonalOverrideBeatsUnlockedWorkspaceOff(t *testing.T) {
 	// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — personal override beats unlocked workspace default.
 	wireChildNotifyFlagQueries(t)
-	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_status_notify_parent", false, false)
-	setChildNotifyFlag(t, testUserID, "cerebro_child_status_notify_parent", true, false)
+	setChildNotifyFlag(t, "00000000-0000-0000-0000-000000000000", "cerebro_child_blocked_notify_parent", false, false)
+	setChildNotifyFlag(t, testUserID, "cerebro_child_blocked_notify_parent", true, false)
 	fx := newChildDoneFixture(t, "in_progress")
 
 	updateChildStatus(t, fx.child.ID, "blocked")
 
 	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
 		t.Fatalf("personal override on should allow blocked parent notification, got %d comments", got)
+	}
+}
+
+// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — per-status flag tests.
+// TestChildStatusFlagsAreIndependentPerStatus — TECH-3006 split the single
+// status flag into one per status. Turning OFF the in_review flag must NOT
+// silence a blocked transition, and vice versa. This is the core ask: each
+// status has its own kill switch.
+func TestChildStatusFlagsAreIndependentPerStatus(t *testing.T) {
+	wireChildNotifyFlagQueries(t)
+	zero := "00000000-0000-0000-0000-000000000000"
+
+	// in_review forced off (locked), blocked left at default ON.
+	clearChildNotifyFlag(t, testUserID, "cerebro_child_in_review_notify_parent")
+	clearChildNotifyFlag(t, testUserID, "cerebro_child_blocked_notify_parent")
+	setChildNotifyFlag(t, zero, "cerebro_child_in_review_notify_parent", false, true)
+
+	inReviewFx := newChildDoneFixture(t, "in_progress")
+	updateChildStatus(t, inReviewFx.child.ID, "in_review")
+	if got := countSystemCommentsOn(t, inReviewFx.parent.ID); got != 0 {
+		t.Fatalf("in_review flag off should suppress in_review notification, got %d", got)
+	}
+
+	blockedFx := newChildDoneFixture(t, "in_progress")
+	updateChildStatus(t, blockedFx.child.ID, "blocked")
+	if got := countSystemCommentsOn(t, blockedFx.parent.ID); got != 1 {
+		t.Fatalf("blocked flag still on should allow blocked notification even when in_review is off, got %d", got)
+	}
+}
+
+// TestChildStatusWorkspaceOffSilencesRegardlessOfActor — a LOCKED workspace-off
+// is the reliable org-wide kill switch: it suppresses the notification even
+// though the precedence checks the requester (the agent flipping the child),
+// who has no personal override. This is what makes the admin "Forced off for
+// everyone" control actually stop the messages. TECH-3006.
+func TestChildStatusWorkspaceOffSilencesRegardlessOfActor(t *testing.T) {
+	wireChildNotifyFlagQueries(t)
+	zero := "00000000-0000-0000-0000-000000000000"
+	clearChildNotifyFlag(t, testUserID, "cerebro_child_blocked_notify_parent")
+	setChildNotifyFlag(t, zero, "cerebro_child_blocked_notify_parent", false, true)
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "blocked")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+		t.Fatalf("locked workspace-off should suppress blocked notification for everyone, got %d", got)
 	}
 }
 

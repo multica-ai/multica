@@ -55,15 +55,18 @@ var childStatusNotifyTemplates = map[string]string{
 // Errors are logged at warn and swallowed: this is a best-effort notification
 // on the side of a successful status update.
 func (h *Handler) notifyParentOfChildStatus(ctx context.Context, prev, issue db.Issue, requesterUserID string) {
-	// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — flag gate for in_review/blocked parent notifications.
-	if !h.cerebroChildStatusNotifyParentEnabled(ctx, issue.WorkspaceID, requesterUserID) {
-		return
-	}
 	if !issue.ParentIssueID.Valid {
 		return
 	}
 	template, ok := childStatusNotifyTemplates[issue.Status]
 	if !ok || prev.Status == issue.Status {
+		return
+	}
+	// CEREBRO-PATCH(child-done-notify-flag): TECH-3006 — per-status flag gate
+	// (in_review / blocked have independent flags). Checked after we know this
+	// is a real transition into a status we notify on, so the flag key matches
+	// issue.Status exactly.
+	if !h.cerebroChildStatusNotifyParentEnabled(ctx, issue.WorkspaceID, requesterUserID, issue.Status) {
 		return
 	}
 	parent, err := h.Queries.GetIssue(ctx, issue.ParentIssueID)
