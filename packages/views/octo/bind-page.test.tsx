@@ -27,8 +27,22 @@ const mockRedeem = vi.hoisted(() => vi.fn());
 const mockNavigate = vi.hoisted(() => vi.fn());
 const mockUser = vi.hoisted(() => ({ value: null as null | { id: string } }));
 
+// Minimal ApiError stub carrying the status code — bind-page now classifies
+// redemption failures by err.status, so the mock must expose the same class.
+const ApiError = vi.hoisted(() => {
+  return class ApiError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  };
+});
+
 vi.mock("@multica/core/api", () => ({
   api: { redeemOctoBindingToken: mockRedeem },
+  ApiError,
 }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -92,11 +106,11 @@ describe("OctoBindPage", () => {
   });
 
   it.each([
-    ["410 invalid or expired", "octo_bind.error_expired"],
-    ["409 already bound", "octo_bind.error_already_bound"],
-    ["403 not a workspace member", "octo_bind.error_not_member"],
-  ])("maps backend failure %s to specific copy", async (errMsg, key) => {
-    mockRedeem.mockRejectedValue(new Error(errMsg));
+    [410, "octo_bind.error_expired"],
+    [409, "octo_bind.error_already_bound"],
+    [403, "octo_bind.error_not_member"],
+  ])("maps backend HTTP %s to specific copy", async (status, key) => {
+    mockRedeem.mockRejectedValue(new ApiError("redeem failed", status));
     renderWithI18n(<OctoBindPage token="raw-token" />);
 
     const expected =
@@ -108,6 +122,14 @@ describe("OctoBindPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText(expected)).toBeInTheDocument();
+    });
+  });
+
+  it("falls back to the generic error for an unexpected status", async () => {
+    mockRedeem.mockRejectedValue(new ApiError("boom", 500));
+    renderWithI18n(<OctoBindPage token="raw-token" />);
+    await waitFor(() => {
+      expect(screen.getByText(enCommon.octo_bind.error_unknown)).toBeInTheDocument();
     });
   });
 });
