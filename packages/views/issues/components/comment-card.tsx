@@ -40,8 +40,6 @@ import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
-import { CommentsFoldBar } from "./resolved-thread-bar";
-import { deriveThreadResolution } from "./thread-utils";
 
 const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
@@ -86,20 +84,22 @@ interface CommentCardProps {
   issueId: string;
   entry: TimelineEntry;
   /**
-   * Flat list of every nested reply under this thread root, in render order.
-   * Computed once in `issue-detail.tsx`'s `timelineView` and stabilized so
-   * the array reference only changes when *this* thread's replies change —
-   * an unrelated thread receiving a new reply must NOT bust this card's
-   * memo. Passing the full Map here used to do exactly that.
+   * Flat list of every nested reply under this entry's thread root. The card no
+   * longer renders these replies inline; it only uses the stabilized slice for
+   * thread-level affordances such as delete warnings and reply counts.
    */
   replies: TimelineEntry[];
+  parentEntry?: TimelineEntry | null;
+  rootEntry?: TimelineEntry | null;
+  threadReplyCount?: number;
+  isResolution?: boolean;
   currentUserId?: string;
   /**
    * True when the current user is a workspace owner/admin and can therefore
    * moderate comments authored by anyone — restoring the admin override that
    * the backend already grants at `comment.go:507-512`. Computed once in
-   * `issue-detail.tsx` and threaded down so neither this component nor
-   * `CommentRow` has to rerun the rule per row.
+   * `issue-detail.tsx` and threaded down so this component does not have to
+   * rerun the rule per row.
    */
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
@@ -114,13 +114,8 @@ interface CommentCardProps {
    * can fold the thread back to the bar; the parent owns the session state.
    */
   onCollapseResolved?: () => void;
-  /**
-   * Per-session set of thread ROOT ids whose reply-resolution fold is expanded.
-   * Used only when a REPLY is the resolution (root-resolution folding is handled
-   * one level up in issue-detail's resolved-bar). Keyed on root id.
-   */
-  expandedResolvedIds?: ReadonlySet<string>;
-  onResolvedExpandChange?: (rootId: string, expand: boolean) => void;
+  onJumpToComment?: (commentId: string) => void;
+  onViewThread?: (rootCommentId: string) => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
 }
@@ -360,226 +355,17 @@ function useEditAttachmentState(
 }
 
 // ---------------------------------------------------------------------------
-// Single comment row (used for both parent and replies within the same Card)
-// ---------------------------------------------------------------------------
-
-function CommentRow({
-  issueId,
-  entry,
-  currentUserId,
-  canModerate = false,
-  isResolution = false,
-  isHighlighted = false,
-  onEdit,
-  onDelete,
-  onToggleReaction,
-  onResolveToggle,
-}: {
-  issueId: string;
-  entry: TimelineEntry;
-  currentUserId?: string;
-  canModerate?: boolean;
-  /** True when this reply is the thread's resolution (shows the green badge). */
-  isResolution?: boolean;
-  /** True when this row is the deep-link target currently being highlighted. */
-  isHighlighted?: boolean;
-  onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
-  onDelete: (commentId: string) => void;
-  onToggleReaction: (commentId: string, emoji: string) => void;
-  onResolveToggle?: (commentId: string, resolved: boolean) => void;
-}) {
-  const { t } = useT("issues");
-  const timeAgo = useTimeAgo();
-  const { getActorName } = useActorName();
-
-  const edit = useEditAttachmentState(issueId, entry, onEdit);
-
-  const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
-  const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
-  const canDeleteEntry = isOwn || canModerate;
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const reactions = entry.reactions ?? [];
-  const contentText = entry.content ?? "";
-  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
-
-  return (
-    <div className="py-1.5">
-      {/* Header pins to the timeline's scroll parent within this reply's own
-          row box, so a LONG reply keeps its
-          author + actions visible while you scroll its body, then releases once
-          this reply ends. bg-card occludes the body scrolling underneath. */}
-      <StickyHeaderShell
-        highlighted={isHighlighted}
-        className="flex items-center gap-2.5 px-4 pt-1 pb-1.5"
-      >
-        <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
-        <span className="cursor-pointer text-sm font-medium">
-          {getActorName(entry.actor_type, entry.actor_id)}
-        </span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="text-xs text-muted-foreground cursor-default">
-                {timeAgo(entry.created_at)}
-              </span>
-            }
-          />
-          <TooltipContent side="top">
-            {new Date(entry.created_at).toLocaleString()}
-          </TooltipContent>
-        </Tooltip>
-
-        {isResolution && (
-          <span className="text-xs font-medium text-success">
-            {t(($) => $.comment.resolve.resolution_badge)}
-          </span>
-        )}
-
-        <div className="ml-auto flex items-center gap-0.5">
-          <QuickEmojiPicker
-            onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-            align="end"
-          />
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => {
-                void copyText(entry.content ?? "").then((ok) => {
-                  if (ok) toast.success(t(($) => $.comment.copied_toast));
-                });
-              }}>
-                <Copy className="h-3.5 w-3.5" />
-                {t(($) => $.comment.copy_action)}
-              </DropdownMenuItem>
-              {onResolveToggle && (
-                <>
-                  <DropdownMenuSeparator />
-                  {isResolution ? (
-                    <DropdownMenuItem onClick={() => onResolveToggle(entry.id, false)}>
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      {t(($) => $.comment.resolve.unresolve_action)}
-                    </DropdownMenuItem>
-                  ) : (
-                    <DropdownMenuItem onClick={() => onResolveToggle(entry.id, true)}>
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      {t(($) => $.comment.resolve.resolve_with_comment_action)}
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
-              {(canEditEntry || canDeleteEntry) && (
-                <>
-                  <DropdownMenuSeparator />
-                  {canEditEntry && (
-                    <DropdownMenuItem onClick={edit.startEdit}>
-                      <Pencil className="h-3.5 w-3.5" />
-                      {t(($) => $.comment.edit_action)}
-                    </DropdownMenuItem>
-                  )}
-                  {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
-                  {canDeleteEntry && (
-                    <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                      <Trash2 className="h-3.5 w-3.5" />
-                      {t(($) => $.comment.delete_action)}
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DeleteCommentDialog
-            open={confirmDelete}
-            onOpenChange={setConfirmDelete}
-            onConfirm={() => onDelete(entry.id)}
-          />
-        </div>
-      </StickyHeaderShell>
-
-      {edit.editing ? (
-        <div
-          {...edit.dropZoneProps}
-          className="relative pl-12 pr-4 pt-1"
-          onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
-        >
-          <div className="text-sm leading-relaxed">
-            <ContentEditor
-              ref={edit.editorRef}
-              defaultValue={edit.initialValue}
-              placeholder={t(($) => $.comment.edit_placeholder)}
-              onUpdate={(md) => {
-                if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
-                else edit.clearDraft(edit.draftKey);
-              }}
-              onSubmit={edit.saveEdit}
-              onUploadFile={edit.handleUpload}
-              debounceMs={100}
-              currentIssueId={issueId}
-              attachments={edit.editorAttachments}
-            />
-          </div>
-          <div className="flex items-center justify-between mt-2">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              {edit.standaloneEditAttachments.length > 0 && (
-                <AttachmentList
-                  attachments={edit.standaloneEditAttachments}
-                  className="max-w-full"
-                  onRemove={(attachmentId) =>
-                    edit.setRetainedStandaloneIds((ids) => {
-                      const next = new Set(ids ?? []);
-                      next.delete(attachmentId);
-                      return next;
-                    })
-                  }
-                />
-              )}
-              <FileUploadButton
-                size="sm"
-                multiple
-                onSelect={(file) => edit.editorRef.current?.uploadFile(file)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
-              <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
-            </div>
-          </div>
-          {edit.isDragOver && <FileDropOverlay />}
-        </div>
-      ) : (
-        <>
-          <div className="pl-12 pr-4 pt-1 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
-          </div>
-          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
-          <ReactionBar
-            reactions={reactions}
-            currentUserId={currentUserId}
-            onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-            getActorName={getActorName}
-            hideAddButton={!isLongContent}
-            className="mt-1.5 pl-12 pr-4"
-          />
-        </>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// CommentCard — One Card per thread (parent + all replies flat inside)
+// CommentCard — one rendered card per comment
 // ---------------------------------------------------------------------------
 
 function CommentCardImpl({
   issueId,
   entry,
   replies,
+  parentEntry,
+  rootEntry,
+  threadReplyCount,
+  isResolution = false,
   currentUserId,
   canModerate = false,
   onReply,
@@ -588,8 +374,8 @@ function CommentCardImpl({
   onToggleReaction,
   onResolveToggle,
   onCollapseResolved,
-  expandedResolvedIds,
-  onResolvedExpandChange,
+  onJumpToComment,
+  onViewThread,
   highlightedCommentId,
 }: CommentCardProps) {
   const { t } = useT("issues");
@@ -607,43 +393,22 @@ function CommentCardImpl({
   const canDeleteEntry = isOwn || canModerate;
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const allNestedReplies = replies;
-
-  const replyCount = allNestedReplies.length;
+  const replyCount = threadReplyCount ?? replies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   const isHighlighted = highlightedCommentId === entry.id;
+  const hasReplies = replyCount > 0;
+  const parentName = parentEntry ? getActorName(parentEntry.actor_type, parentEntry.actor_id) : null;
+  const rootId = rootEntry?.id ?? parentEntry?.id ?? entry.id;
+  const isReply = !!parentEntry;
 
-  // Reply-resolution display. When a REPLY is the thread's resolution, the other
-  // replies fold behind a bar and the resolution stays visible (root-resolution
-  // is handled one level up in issue-detail's resolved-bar, so kind "root" here
-  // renders the normal full thread under the Collapse header).
-  const resolution = deriveThreadResolution(entry, allNestedReplies);
-  const replyResolutionId = resolution.kind === "reply" ? resolution.resolutionId : null;
-  const threadExpanded = !!expandedResolvedIds?.has(entry.id);
-  const replyFolded = replyResolutionId != null && !threadExpanded;
-  const foldedReplies = replyResolutionId
-    ? allNestedReplies.filter((r) => r.id !== replyResolutionId)
-    : allNestedReplies;
-  const resolutionReply = replyResolutionId
-    ? allNestedReplies.find((r) => r.id === replyResolutionId) ?? null
-    : null;
-
-  // Pin the root comment's header to the timeline's scroll parent while the
-  // thread is open, so a LONG root comment keeps its author + actions visible
-  // as you scroll its body (overflow-clip on the Card anchors this to the
-  // timeline, not the card — see below). The root-section wrapper below scopes
-  // its containing block to the header + body, so it releases the moment the
-  // replies begin — exactly one header is pinned at a time. Each reply pins its
-  // header the same way, scoped to its own row (see CommentRow). Skip the root
-  // header whenever a resolution collapse bar already owns the top-0 sticky slot
-  // (root resolved + expanded, or reply-resolution expanded): two sticky bars at
-  // the same offset would stack and hide one.
-  const stickyHeader =
-    open && !onCollapseResolved && !(replyResolutionId != null && threadExpanded);
+  // Pin this comment's header to the timeline scroll parent while its body is
+  // open. A resolved-thread collapse affordance owns the same sticky slot, so
+  // skip the header stickiness when that button is present.
+  const stickyHeader = open && !onCollapseResolved;
 
   return (
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
@@ -662,12 +427,9 @@ function CommentCardImpl({
         </button>
       )}
       <Collapsible open={open} onOpenChange={handleOpenChange}>
-        {/* root-section — the sticky header's containing block. It wraps ONLY
-            the header + root body, so the header releases the moment you scroll
-            past the body into the replies (which render OUTSIDE this wrapper).
-            That is what keeps exactly one header pinned at a time: without this
-            wrapper the header's containing block is the whole thread and it
-            stays stuck behind every reply. */}
+        {/* comment-section — the sticky header's containing block. It wraps only
+            this comment's header + body, so the header releases after the
+            comment instead of sticking across later timeline rows. */}
         <div>
         {/* Header — always visible, acts as toggle */}
         <StickyHeaderShell
@@ -708,7 +470,14 @@ function CommentCardImpl({
             )}
 
             {open && (
-              <div className="ml-auto flex items-center gap-0.5">
+              <>
+                {isResolution && (
+                  <span className="shrink-0 text-xs font-medium text-success">
+                    {t(($) => $.comment.resolve.resolution_badge)}
+                  </span>
+                )}
+
+                <div className="ml-auto flex items-center gap-0.5">
                 <QuickEmojiPicker
                   onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
                   align="end"
@@ -737,12 +506,16 @@ function CommentCardImpl({
                         {entry.resolved_at ? (
                           <>
                             <RotateCcw className="h-3.5 w-3.5" />
-                            {t(($) => $.comment.resolve.unresolve_thread_action)}
+                            {isReply
+                              ? t(($) => $.comment.resolve.unresolve_action)
+                              : t(($) => $.comment.resolve.unresolve_thread_action)}
                           </>
                         ) : (
                           <>
                             <CheckCircle2 className="h-3.5 w-3.5" />
-                            {t(($) => $.comment.resolve.resolve_thread_action)}
+                            {isReply
+                              ? t(($) => $.comment.resolve.resolve_with_comment_action)
+                              : t(($) => $.comment.resolve.resolve_thread_action)}
                           </>
                         )}
                       </DropdownMenuItem>
@@ -772,16 +545,38 @@ function CommentCardImpl({
                 open={confirmDelete}
                 onOpenChange={setConfirmDelete}
                 onConfirm={() => onDelete(entry.id)}
-                hasReplies
+                hasReplies={hasReplies}
               />
-              </div>
+                </div>
+              </>
             )}
           </div>
         </StickyHeaderShell>
 
         {/* Collapsible body */}
         <CollapsibleContent>
-          {/* Parent comment body */}
+          {parentEntry && parentName && (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pb-1 pl-14 text-xs text-muted-foreground">
+              <span>{t(($) => $.comment.replying_to, { name: parentName })}</span>
+              <button
+                type="button"
+                className="font-medium transition-colors hover:text-foreground"
+                onClick={() => onJumpToComment?.(parentEntry.id)}
+              >
+                {t(($) => $.comment.jump_to_parent)}
+              </button>
+              <span aria-hidden>·</span>
+              <button
+                type="button"
+                className="font-medium transition-colors hover:text-foreground"
+                onClick={() => onViewThread?.(rootId)}
+              >
+                {t(($) => $.comment.view_thread)}
+              </button>
+            </div>
+          )}
+
+          {/* Comment body */}
           <div className="px-4 pt-1 pb-3">
             {edit.editing ? (
               <div
@@ -853,87 +648,22 @@ function CommentCardImpl({
         </CollapsibleContent>
         </div>
 
-        {/* Replies + reply input — rendered OUTSIDE root-section so the root
-            header's sticky containing block ends with the body. Gated on `open`
-            to mirror the body Panel's collapse visibility. */}
+        {/* Reply input — each comment is a first-class timeline item, so replying
+            to a reply naturally creates a nested child without rendering the
+            whole thread inline here. */}
         {open && (
-          <>
-          {replyFolded ? (
-            <>
-              {/* reply-mode folded: other replies behind a bar, resolution pinned below */}
-              {foldedReplies.length > 0 && (
-                <div className="border-t border-border/50 px-4 py-2.5">
-                  <CommentsFoldBar
-                    replies={foldedReplies}
-                    onExpand={() => onResolvedExpandChange?.(entry.id, true)}
-                  />
-                </div>
-              )}
-              {resolutionReply && (
-                <div id={`comment-${resolutionReply.id}`} className={cn("border-t border-border/50 transition-colors duration-700", highlightedCommentId === resolutionReply.id && highlightedCommentBackgroundClass)}>
-                  <CommentRow
-                    issueId={issueId}
-                    entry={resolutionReply}
-                    currentUserId={currentUserId}
-                    canModerate={canModerate}
-                    isResolution
-                    isHighlighted={highlightedCommentId === resolutionReply.id}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onToggleReaction={onToggleReaction}
-                    onResolveToggle={onResolveToggle}
-                  />
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              {/* reply-mode expanded: a Collapse affordance to fold back */}
-              {replyResolutionId != null && onResolvedExpandChange && (
-                <button
-                  type="button"
-                  onClick={() => onResolvedExpandChange(entry.id, false)}
-                  className="sticky top-0 z-20 flex w-full items-center gap-2.5 border-t border-border/50 bg-muted px-4 py-2.5 text-left text-sm text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                  aria-label={t(($) => $.comment.resolve.collapse)}
-                >
-                  <ListChevronsDownUp className="h-3.5 w-3.5" />
-                  {t(($) => $.comment.resolve.collapse)}
-                </button>
-              )}
-              {/* Replies — chronological; the resolution keeps its place with a badge */}
-              {allNestedReplies.map((reply) => (
-                <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 transition-colors duration-700", highlightedCommentId === reply.id && highlightedCommentBackgroundClass)}>
-                  <CommentRow
-                    issueId={issueId}
-                    entry={reply}
-                    currentUserId={currentUserId}
-                    canModerate={canModerate}
-                    isResolution={reply.id === replyResolutionId}
-                    isHighlighted={highlightedCommentId === reply.id}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onToggleReaction={onToggleReaction}
-                    onResolveToggle={onResolveToggle}
-                  />
-                </div>
-              ))}
-
-              {/* Reply input */}
-              <div className="border-t border-border/50 px-4 py-2.5">
-                <ReplyInput
-                  issueId={issueId}
-                  parentId={entry.id}
-                  placeholder={t(($) => $.reply.placeholder)}
-                  size="sm"
-                  avatarType="member"
-                  avatarId={currentUserId ?? ""}
-                  draftKey={`reply:${issueId}:${entry.id}`}
-                  onSubmit={(content, attachmentIds, suppressAgentIds) => onReply(entry.id, content, attachmentIds, suppressAgentIds)}
-                />
-              </div>
-            </>
-          )}
-          </>
+          <div className="border-t border-border/50 px-4 py-2.5">
+            <ReplyInput
+              issueId={issueId}
+              parentId={entry.id}
+              placeholder={t(($) => $.reply.placeholder)}
+              size="sm"
+              avatarType="member"
+              avatarId={currentUserId ?? ""}
+              draftKey={`reply:${issueId}:${entry.id}`}
+              onSubmit={(content, attachmentIds, suppressAgentIds) => onReply(entry.id, content, attachmentIds, suppressAgentIds)}
+            />
+          </div>
         )}
       </Collapsible>
     </Card>

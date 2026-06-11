@@ -434,6 +434,28 @@ const mockTimeline: TimelineEntry[] = [
   },
 ];
 
+function makeCommentEntry(
+  id: string,
+  content: string,
+  createdAt: string,
+  overrides: Partial<TimelineEntry> = {},
+): TimelineEntry {
+  return {
+    type: "comment",
+    id,
+    actor_type: "member",
+    actor_id: "user-1",
+    content,
+    parent_id: null,
+    created_at: createdAt,
+    updated_at: createdAt,
+    comment_type: "comment",
+    reactions: [],
+    attachments: [],
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
@@ -763,6 +785,111 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
+  it("renders replies in the main timeline by their own created_at", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      makeCommentEntry("comment-a", "A: async request started", "2026-01-16T00:00:00Z"),
+      makeCommentEntry("comment-b", "B: independent update", "2026-01-16T00:30:00Z"),
+      makeCommentEntry("comment-c", "C: later independent update", "2026-01-16T00:50:00Z"),
+      makeCommentEntry("reply-d", "D: late reply to A", "2026-01-16T00:57:00Z", {
+        parent_id: "comment-a",
+      }),
+    ]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("D: late reply to A")).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByTestId("readonly-content").map((el) => el.textContent)).toEqual([
+      "A: async request started",
+      "B: independent update",
+      "C: later independent update",
+      "D: late reply to A",
+    ]);
+    expect(screen.getByText("Replying to Test User")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Jump to parent" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View thread" })).toBeInTheDocument();
+    expect(document.querySelector("#comment-comment-a .sticky.top-0")).not.toBeNull();
+    expect(document.querySelector("#comment-reply-d .sticky.top-0")).not.toBeNull();
+  });
+
+  it("highlights the parent when a reply row jumps to its parent", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      makeCommentEntry("comment-a", "Parent comment", "2026-01-16T00:00:00Z"),
+      makeCommentEntry("reply-d", "Reply comment", "2026-01-16T00:10:00Z", {
+        parent_id: "comment-a",
+      }),
+    ]);
+
+    renderIssueDetail();
+
+    const jump = await screen.findByRole("button", { name: "Jump to parent" });
+    fireEvent.click(jump);
+
+    await waitFor(() => {
+      expect(
+        document.getElementById("comment-comment-a")?.querySelector(".ring-2"),
+      ).not.toBeNull();
+    });
+  });
+
+  it("folds root-resolved threads behind a resolved bar until expanded", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      makeCommentEntry("comment-root", "Resolved root", "2026-01-16T00:00:00Z", {
+        resolved_at: "2026-01-16T00:30:00Z",
+      }),
+      makeCommentEntry("reply-1", "Reply inside resolved thread", "2026-01-16T00:10:00Z", {
+        parent_id: "comment-root",
+      }),
+    ]);
+
+    renderIssueDetail();
+
+    const bar = await screen.findByText("2 resolved comments from Test User");
+    expect(screen.queryByText("Resolved root")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reply inside resolved thread")).not.toBeInTheDocument();
+
+    fireEvent.click(bar);
+
+    await waitFor(() => {
+      expect(screen.getByText("Resolved root")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Reply inside resolved thread")).toBeInTheDocument();
+  });
+
+  it("folds non-resolution replies when a reply resolves the thread", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      makeCommentEntry("comment-root", "Thread root", "2026-01-16T00:00:00Z"),
+      makeCommentEntry("reply-1", "Earlier reply", "2026-01-16T00:10:00Z", {
+        parent_id: "comment-root",
+      }),
+      makeCommentEntry("reply-2", "Resolution reply", "2026-01-16T00:20:00Z", {
+        parent_id: "comment-root",
+        resolved_at: "2026-01-16T00:25:00Z",
+      }),
+      makeCommentEntry("reply-3", "Later reply", "2026-01-16T00:30:00Z", {
+        parent_id: "comment-root",
+      }),
+    ]);
+
+    renderIssueDetail();
+
+    const fold = await screen.findByText("2 comments from Test User");
+    expect(screen.getByText("Thread root")).toBeInTheDocument();
+    expect(screen.getByText("Resolution reply")).toBeInTheDocument();
+    expect(screen.getByText("Resolution")).toBeInTheDocument();
+    expect(screen.queryByText("Earlier reply")).not.toBeInTheDocument();
+    expect(screen.queryByText("Later reply")).not.toBeInTheDocument();
+
+    fireEvent.click(fold);
+
+    await waitFor(() => {
+      expect(screen.getByText("Earlier reply")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Later reply")).toBeInTheDocument();
+  });
+
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
     // Timeline shape:
     //   [activities: status_changed, priority_changed] ← block A (older)
@@ -1023,12 +1150,32 @@ describe("IssueDetail (shared)", () => {
       });
     });
 
+    it("scrolls directly to a visible reply because replies are flat timeline items", async () => {
+      mockApiObj.listTimeline.mockResolvedValue([
+        makeCommentEntry("comment-a", "Parent for deep link", "2026-01-16T00:00:00Z"),
+        makeCommentEntry("reply-d", "Visible reply target", "2026-01-16T00:10:00Z", {
+          parent_id: "comment-a",
+        }),
+      ]);
+
+      renderIssueDetailWithHighlight("reply-d");
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-reply-d")).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(
+          document.getElementById("comment-reply-d")?.querySelector(".ring-2"),
+        ).not.toBeNull();
+      });
+    });
+
     it("auto-expands a folded resolved thread when deep-link target is a reply inside it", async () => {
       // Seed a timeline where comment-3 is resolved (so it renders as a
       // resolved-bar by default) and has a reply, reply-1, whose id is the
-      // deep-link target. The reply is not in the flat items array — only
-      // the resolved-bar root is. The effect must detect this, expand the
-      // thread, then on re-run scroll to the reply's id="comment-reply-1" node.
+      // deep-link target. The root-resolved fold hides the reply until the
+      // effect detects it, expands the thread, then on re-run scrolls to the
+      // reply's id="comment-reply-1" node.
       const timelineWithResolvedThread: TimelineEntry[] = [
         ...mockTimeline,
         {
@@ -1066,10 +1213,8 @@ describe("IssueDetail (shared)", () => {
         </I18nProvider>,
       );
 
-      // After expansion, the reply must appear in the DOM (inside the now
-      // -unfolded CommentCard) and the deep-link effect must land on + highlight
-      // it. The reply highlight renders as a computed bg tint on its row (see
-      // CommentCard's reply branch), so assert the row carries the brand tint.
+      // After expansion, the reply must appear in the DOM as its own flat
+      // CommentCard and the deep-link effect must land on + highlight it.
       await waitFor(() => {
         expect(
           document.getElementById("comment-reply-1"),
@@ -1077,8 +1222,8 @@ describe("IssueDetail (shared)", () => {
       });
       await waitFor(() => {
         expect(
-          document.getElementById("comment-reply-1")?.className,
-        ).toContain("bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]");
+          document.getElementById("comment-reply-1")?.querySelector(".ring-2"),
+        ).not.toBeNull();
       });
     });
   });

@@ -106,8 +106,27 @@ vi.mock("sonner", () => ({
 }));
 
 import { useIssueTimeline } from "./use-issue-timeline";
+import type { TimelineEntry } from "@multica/core/types";
 
 describe("useIssueTimeline", () => {
+  function makeEntry(id: string, parentId: string | null = null, content = id): TimelineEntry {
+    return {
+      type: "comment",
+      id,
+      actor_type: "member",
+      actor_id: "u",
+      content,
+      parent_id: parentId,
+      created_at: "2026-05-06T01:00:00Z",
+      updated_at: "2026-05-06T01:00:00Z",
+      reactions: [],
+      attachments: [],
+      resolved_at: null,
+      resolved_by_type: null,
+      resolved_by_id: null,
+    };
+  }
+
   beforeEach(() => {
     wsHandlers.clear();
     queryState.data = [];
@@ -256,6 +275,109 @@ describe("useIssueTimeline", () => {
     });
     // setQueryData should not have been invoked for a non-matching issue.
     expect(cacheUpdates.last).toBeNull();
+  });
+
+  it("comment:deleted removes the deleted comment and every descendant from the flat cache", () => {
+    queryState.data = [
+      makeEntry("root"),
+      makeEntry("reply-a", "root"),
+      makeEntry("nested-reply", "reply-a"),
+      makeEntry("reply-b", "root"),
+      makeEntry("other-root"),
+    ];
+
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("comment:deleted");
+    expect(handler).toBeDefined();
+
+    act(() => {
+      handler!({
+        issue_id: "issue-1",
+        comment_id: "root",
+      });
+    });
+
+    const updated = cacheUpdates.last as TimelineEntry[];
+    expect(updated.map((e) => e.id)).toEqual(["other-root"]);
+  });
+
+  it("comment:updated replaces a reply entry with edited content and attachments", () => {
+    queryState.data = [
+      makeEntry("root"),
+      makeEntry("reply-a", "root", "old reply"),
+    ];
+    const attachment = {
+      id: "att-1",
+      url: "/uploads/edited.txt",
+      filename: "edited.txt",
+      content_type: "text/plain",
+      size_bytes: 12,
+    };
+
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("comment:updated");
+    expect(handler).toBeDefined();
+
+    act(() => {
+      handler!({
+        comment: {
+          id: "reply-a",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "edited reply",
+          parent_id: "root",
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T02:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [attachment],
+          resolved_at: null,
+          resolved_by_type: null,
+          resolved_by_id: null,
+        },
+      });
+    });
+
+    const updated = cacheUpdates.last as TimelineEntry[];
+    expect(updated.map((e) => e.id)).toEqual(["root", "reply-a"]);
+    expect(updated[1]).toMatchObject({
+      id: "reply-a",
+      content: "edited reply",
+      parent_id: "root",
+      attachments: [attachment],
+    });
+  });
+
+  it("reaction:added updates a reply entry directly in the flat timeline", () => {
+    queryState.data = [
+      makeEntry("root"),
+      makeEntry("reply-a", "root"),
+    ];
+
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("reaction:added");
+    expect(handler).toBeDefined();
+
+    act(() => {
+      handler!({
+        issue_id: "issue-1",
+        reaction: {
+          id: "reaction-1",
+          comment_id: "reply-a",
+          actor_type: "member",
+          actor_id: "user-1",
+          emoji: "+1",
+          created_at: "2026-05-06T03:00:00Z",
+        },
+      });
+    });
+
+    const updated = cacheUpdates.last as TimelineEntry[];
+    expect(updated[0]!.reactions).toEqual([]);
+    expect(updated[1]!.reactions).toEqual([
+      expect.objectContaining({ id: "reaction-1", comment_id: "reply-a", emoji: "+1" }),
+    ]);
   });
 
   // The global useRealtimeSync handler now uses refetchType: "none" for
