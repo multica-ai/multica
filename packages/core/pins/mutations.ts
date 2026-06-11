@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useAuthStore } from "../auth";
 import { pinKeys } from "./queries";
+import { issueKeys } from "../issues/queries";
+import { projectKeys } from "../projects/queries";
 import { useWorkspaceId } from "../hooks";
 import type { PinnedItem, PinnedItemType } from "../types";
 
@@ -36,6 +38,12 @@ export function useDeletePin() {
       qc.setQueryData<PinnedItem[]>(pinKeys.list(wsId, userId), (old) =>
         old ? old.filter((p) => !(p.item_type === itemType && p.item_id === itemId)) : old,
       );
+      // Clean up associated detail cache so stale queries don't refetch on reconnect.
+      if (itemType === "issue") {
+        qc.removeQueries({ queryKey: issueKeys.detail(wsId, itemId) });
+      } else if (itemType === "project") {
+        qc.removeQueries({ queryKey: projectKeys.detail(wsId, itemId) });
+      }
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
