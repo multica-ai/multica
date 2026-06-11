@@ -1121,12 +1121,15 @@ func TestCodexStartOrResumeThreadPassesServiceTier(t *testing.T) {
 			method: "thread/start",
 			result: json.RawMessage(`{"thread":{"id":"thr_fast"}}`),
 			assertFn: func(t *testing.T, params map[string]any) {
-				if params["service_tier"] != "fast" {
-					t.Errorf("thread/start service_tier = %v, want fast", params["service_tier"])
+				if params["serviceTier"] != "fast" {
+					t.Errorf("thread/start serviceTier = %v, want fast", params["serviceTier"])
+				}
+				if _, leaked := params["service_tier"]; leaked {
+					t.Errorf("thread/start must not send legacy service_tier: %+v", params)
 				}
 				if cfg, ok := params["config"].(map[string]any); ok {
 					if _, leaked := cfg["service_tier"]; leaked {
-						t.Errorf("service_tier must be top-level, leaked into config: %+v", cfg)
+						t.Errorf("serviceTier must be top-level, leaked into config: %+v", cfg)
 					}
 				}
 			},
@@ -1156,12 +1159,15 @@ func TestCodexStartOrResumeThreadPassesServiceTierOnResume(t *testing.T) {
 			method: "thread/resume",
 			result: json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
 			assertFn: func(t *testing.T, params map[string]any) {
-				if params["service_tier"] != "default" {
-					t.Errorf("thread/resume service_tier = %v, want default", params["service_tier"])
+				if params["serviceTier"] != "default" {
+					t.Errorf("thread/resume serviceTier = %v, want default", params["serviceTier"])
+				}
+				if _, leaked := params["service_tier"]; leaked {
+					t.Errorf("thread/resume must not send legacy service_tier: %+v", params)
 				}
 				if cfg, ok := params["config"].(map[string]any); ok {
 					if _, leaked := cfg["service_tier"]; leaked {
-						t.Errorf("service_tier must be top-level, leaked into config: %+v", cfg)
+						t.Errorf("serviceTier must be top-level, leaked into config: %+v", cfg)
 					}
 				}
 			},
@@ -2279,7 +2285,7 @@ func TestHasManagedCodexMcpConfig(t *testing.T) {
 }
 
 // TestExtractThreadEffectiveConfig verifies parsing of model/modelProvider/
-// reasoningEffort from thread/start and thread/resume JSON-RPC responses.
+// reasoningEffort/serviceTier from thread/start and thread/resume responses.
 // Missing fields default to empty strings.
 func TestExtractThreadEffectiveConfig(t *testing.T) {
 	t.Parallel()
@@ -2306,8 +2312,8 @@ func TestExtractThreadEffectiveConfig(t *testing.T) {
 		},
 		{
 			name:   "all fields populated",
-			result: json.RawMessage(`{"thread":{"id":"thr_3","model":"gpt-5.5","modelProvider":"p2","reasoningEffort":"medium"}}`),
-			want:   threadEffectiveConfig{Model: "gpt-5.5", ModelProvider: "p2", ReasoningEffort: "medium"},
+			result: json.RawMessage(`{"thread":{"id":"thr_3","model":"gpt-5.5","modelProvider":"p2","reasoningEffort":"medium","serviceTier":"priority"}}`),
+			want:   threadEffectiveConfig{Model: "gpt-5.5", ModelProvider: "p2", ReasoningEffort: "medium", ServiceTier: "priority"},
 		},
 		{
 			name:   "only thread id (legacy)",

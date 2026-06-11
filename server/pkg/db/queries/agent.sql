@@ -749,6 +749,19 @@ WHERE atq.issue_id = $1
   AND (a.owner_id = $2 OR a.owner_id IS NULL)
 ORDER BY atq.created_at DESC;
 
+-- name: GetRecentTaskTriggerBeforeComment :one
+-- Finds the most recent task for the given agent on the same issue that was
+-- created at or before the comment's timestamp and carries a trigger_comment_id.
+-- Used by RetryAgentComment to recover the original trigger after parent_id has
+-- been flattened to the thread root.
+SELECT * FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND trigger_comment_id IS NOT NULL
+  AND created_at <= $3
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: DeleteTasksByIssue :execrows
 DELETE FROM agent_task_queue WHERE issue_id = $1;
 

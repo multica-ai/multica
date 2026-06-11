@@ -163,6 +163,7 @@ function GeminiLogo({ className }: { className: string }) {
 // provided JPEG logo.
 import antigravityLogo from "./antigravity-logo.png";
 import wujieclawLogo from "./wujieclaw-logo.jpg";
+import mmxLogo from "./mmx-logo.png";
 
 function assetSrc(asset: unknown): string {
   return typeof asset === "string" ? asset : (asset as { src: string }).src;
@@ -170,6 +171,7 @@ function assetSrc(asset: unknown): string {
 
 const antigravityLogoSrc = assetSrc(antigravityLogo);
 const wujieclawLogoSrc = assetSrc(wujieclawLogo);
+const mmxLogoSrc = assetSrc(mmxLogo);
 
 function AntigravityLogo({ className }: { className: string }) {
   return <img src={antigravityLogoSrc} alt="Antigravity" className={className} />;
@@ -239,6 +241,13 @@ function QoderclicnLogo({ className }: { className: string }) {
   );
 }
 
+// MiniMax mmx — official MiniMax brand mark (filecdn.minimax.chat OG icon),
+// shipped as a PNG asset next to this file. Rendered via <img> rather
+// than inline SVG to preserve the official artwork.
+function MmxLogo({ className }: { className: string }) {
+  return <img src={mmxLogoSrc} alt="MMX" className={className} />;
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -277,6 +286,8 @@ export function ProviderLogo({
       return <AntigravityLogo className={className} />;
     case "qoderclicn":
       return <QoderclicnLogo className={className} />;
+    case "mmx":
+      return <MmxLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

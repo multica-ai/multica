@@ -18,6 +18,7 @@ import {
   CircleCheck,
   Eraser,
   ExternalLink,
+  Eye,
   Link2,
   MoreHorizontal,
   PanelRight,
@@ -32,6 +33,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
+import { MarkdownPreviewDrawer } from "./markdown-preview-drawer";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -1148,6 +1150,7 @@ export function IssueDetail({
   }, [id, paths]);
 
   const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
+  const [markdownPreviewOpen, setMarkdownPreviewOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
@@ -2335,6 +2338,7 @@ export function IssueDetail({
         <div className="pb-3" id={`comment-${item.id}`}>
           <CommentCard
             issueId={id}
+            issueIdentifier={issue.identifier}
             entry={item.entry}
             replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
             commentById={timelineView.commentById}
@@ -2510,6 +2514,21 @@ export function IssueDetail({
                 {t(($) => $.detail.clear_history)}
               </DropdownMenuItem>
             </IssueActionsDropdown>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={() => setMarkdownPreviewOpen(true)}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">预览 Markdown</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -2970,6 +2989,15 @@ export function IssueDetail({
       <>
       {clearHistoryDialog}
       {previewLogsDialog}
+      <MarkdownPreviewDrawer
+        open={markdownPreviewOpen}
+        onOpenChange={setMarkdownPreviewOpen}
+        content={issue?.description || ""}
+        title={issue?.title || ""}
+        issueId={issue?.id}
+        issueIdentifier={issue?.identifier}
+        showCommentExportOption={true}
+      />
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
@@ -2986,6 +3014,15 @@ export function IssueDetail({
     <>
     {clearHistoryDialog}
     {previewLogsDialog}
+    <MarkdownPreviewDrawer
+      open={markdownPreviewOpen}
+      onOpenChange={setMarkdownPreviewOpen}
+      content={issue?.description || ""}
+      title={issue?.title || ""}
+      issueId={issue?.id}
+      issueIdentifier={issue?.identifier}
+      showCommentExportOption={true}
+    />
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         {detailContent}

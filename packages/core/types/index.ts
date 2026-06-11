@@ -203,6 +203,7 @@ export type {
 export type {
   WikiPage,
   WikiPageSummary,
+  WikiPageType,
   ListWikiPagesResponse,
   CreateWikiPageRequest,
   UpdateWikiPageRequest,

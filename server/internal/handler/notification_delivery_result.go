@@ -9,12 +9,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
-
-const openclawWeixinDeliveryMaxAttempts = 3
 
 var errNotificationDeliveryResultIgnored = errors.New("notification delivery result ignored")
 
@@ -56,11 +55,14 @@ func (h *Handler) HandleNotificationDeliveryResult(ctx context.Context, identity
 			SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 			Status_2:  "awaiting_ack",
 		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errNotificationDeliveryResultIgnored
+		}
 		return err
 	}
 
 	nextStatus := "pending"
-	if row.AttemptCount >= openclawWeixinDeliveryMaxAttempts {
+	if row.AttemptCount >= notifyutil.OpenclawWeixinDeliveryMaxAttempts {
 		nextStatus = "failed"
 	}
 	_, err = h.Queries.CompleteNotificationDeliveryIfStatus(ctx, db.CompleteNotificationDeliveryIfStatusParams{
@@ -70,6 +72,9 @@ func (h *Handler) HandleNotificationDeliveryResult(ctx context.Context, identity
 		SentAt:    pgtype.Timestamptz{},
 		Status_2:  "awaiting_ack",
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errNotificationDeliveryResultIgnored
+	}
 	return err
 }
 

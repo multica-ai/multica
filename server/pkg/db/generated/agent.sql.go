@@ -1767,6 +1767,60 @@ func (q *Queries) GetLatestTaskIsLeaderForIssueAndAgent(ctx context.Context, arg
 	return is_leader_task, err
 }
 
+const getRecentTaskTriggerBeforeComment = `-- name: GetRecentTaskTriggerBeforeComment :one
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND trigger_comment_id IS NOT NULL
+  AND created_at <= $3
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetRecentTaskTriggerBeforeCommentParams struct {
+	IssueID   pgtype.UUID        `json:"issue_id"`
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Finds the most recent task for the given agent on the same issue that was
+// created at or before the comment's timestamp and carries a trigger_comment_id.
+// Used by RetryAgentComment to recover the original trigger after parent_id has
+// been flattened to the thread root.
+func (q *Queries) GetRecentTaskTriggerBeforeComment(ctx context.Context, arg GetRecentTaskTriggerBeforeCommentParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, getRecentTaskTriggerBeforeComment, arg.IssueID, arg.AgentID, arg.CreatedAt)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+	)
+	return i, err
+}
+
 const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many
 SELECT
     atq.agent_id,

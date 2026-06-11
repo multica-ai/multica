@@ -89,6 +89,8 @@ func tokenUsageFromFlatMap(data map[string]any) TokenUsage {
 			"cacheWrite", "cache_write",
 		),
 	}
+	// Reasoning/thinking token fields are reported separately by supported
+	// runtimes here, so treat them as an additive output component.
 	u.OutputTokens += tokenUsageInt64FirstOf(data,
 		"reasoning_output_tokens", "reasoningOutputTokens",
 		"thought_tokens", "thoughtTokens",

@@ -51,6 +51,14 @@ vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
   return { useCustomPricingStore };
 });
 
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    searchParams: new URLSearchParams(),
+    replace: vi.fn(),
+    pathname: "",
+  }),
+}));
+
 import { DashboardPage } from "./dashboard-page";
 
 describe("DashboardPage — viewing timezone drives the query key", () => {

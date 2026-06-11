@@ -303,8 +303,9 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":                            runtimeID,
+		"supports_batch_import":                 true,
+		"supports_notification_delivery_result": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -671,8 +672,6 @@ func (c *Client) ReportInteraction(ctx context.Context, taskID string, req map[s
 	}
 	return resp.ID, nil
 }
-
-
 
 // GetInteraction polls the server for an interaction's current state.
 func (c *Client) GetInteraction(ctx context.Context, taskID, interactionID string) (map[string]any, error) {

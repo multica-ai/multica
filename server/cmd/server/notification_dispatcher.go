@@ -1150,8 +1150,6 @@ func pgTextToString(value pgtype.Text) string {
 
 // --- OpenClaw WeChat notification delivery ---
 
-const openclawWeixinDeliveryMaxAttempts = 3
-
 type openclawWeixinDeliveryPayload struct {
 	BindingID         string          `json:"binding_id"`
 	Provider          string          `json:"provider"`
@@ -1279,16 +1277,34 @@ func processOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, dae
 		return
 	}
 
-	delivered := daemonHub.SendToUser(recipientID, frame)
+	delivered, awaitsAck := daemonHub.SendNotificationDeliveryToUser(recipientID, frame)
 	if !delivered {
 		finalizeFailedOpenclawWeixinDelivery(ctx, queries, claimed, errors.New("no online daemon for user"))
 		return
+	}
+	if awaitsAck {
+		return
+	}
+	if _, err := queries.CompleteNotificationDeliveryIfStatus(ctx, db.CompleteNotificationDeliveryIfStatusParams{
+		ID:        claimed.ID,
+		Status:    "sent",
+		LastError: pgtype.Text{},
+		SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		Status_2:  "awaiting_ack",
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		slog.Warn("notification dispatcher: failed to mark openclaw_weixin delivery sent for legacy daemon",
+			"delivery_id", util.UUIDToString(claimed.ID),
+			"error", err,
+		)
 	}
 }
 
 func finalizeFailedOpenclawWeixinDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
 	nextStatus := "pending"
-	if delivery.AttemptCount >= openclawWeixinDeliveryMaxAttempts {
+	if delivery.AttemptCount >= notifyutil.OpenclawWeixinDeliveryMaxAttempts {
 		nextStatus = "failed"
 	}
 

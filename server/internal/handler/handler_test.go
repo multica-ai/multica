@@ -2657,6 +2657,97 @@ func TestRetryAgentComment_SystemCommentFallbackToTask(t *testing.T) {
 	}
 }
 
+func TestRetryAgentComment_UsesTaskTriggerBeforeParentRoot(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type,
+			assignee_type, assignee_id, number, position
+		)
+		VALUES ($1, 'retry task trigger issue', 'in_progress', 'medium', $2, 'member',
+			'agent', $3, 92003, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	var rootCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'first message', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&rootCommentID); err != nil {
+		t.Fatalf("setup: create root comment: %v", err)
+	}
+
+	var laterCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		VALUES ($1, $2, 'member', $3, '@agent answer this follow-up', 'comment', $4)
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID, rootCommentID).Scan(&laterCommentID); err != nil {
+		t.Fatalf("setup: create later comment: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, created_at)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'completed', 0, $3, now() - interval '1 minute')
+	`, agentID, issueID, laterCommentID); err != nil {
+		t.Fatalf("setup: create completed task: %v", err)
+	}
+
+	var agentCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		VALUES ($1, $2, 'agent', $3, 'agent reply to follow-up', 'comment', $4)
+		RETURNING id
+	`, issueID, testWorkspaceID, agentID, rootCommentID).Scan(&agentCommentID); err != nil {
+		t.Fatalf("setup: create agent comment: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/comments/"+agentCommentID+"/retry", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req = withURLParam(req, "commentId", agentCommentID)
+
+	testHandler.RetryAgentComment(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("RetryAgentComment: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var gotTriggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT trigger_comment_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&gotTriggerCommentID); err != nil {
+		t.Fatalf("read queued retry task: %v", err)
+	}
+	if gotTriggerCommentID != laterCommentID {
+		t.Fatalf("expected trigger_comment_id %q, got %q", laterCommentID, gotTriggerCommentID)
+	}
+	if gotTriggerCommentID == rootCommentID {
+		t.Fatalf("retry used thread root %q instead of later trigger %q", rootCommentID, laterCommentID)
+	}
+}
+
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/agents", map[string]any{

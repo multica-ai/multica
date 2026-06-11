@@ -603,8 +603,9 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 }
 
 type DaemonHeartbeatRequest struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	RuntimeID                          string `json:"runtime_id"`
+	SupportsBatchImport                bool   `json:"supports_batch_import,omitempty"`
+	SupportsNotificationDeliveryResult bool   `json:"supports_notification_delivery_result,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the

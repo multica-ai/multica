@@ -1694,29 +1694,23 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// findTriggerFromRecentTask looks up the most recent task for the given agent
-// on the issue and returns its trigger_comment_id (and the corresponding
-// comment, if it exists). This recovers the original trigger context for system
-// comments that have no parent_id chain — e.g. failure notifications.
-func (h *Handler) findTriggerFromRecentTask(ctx context.Context, issueID, agentID pgtype.UUID) (pgtype.UUID, *db.Comment) {
-	tasks, err := h.Queries.ListTasksByIssue(ctx, issueID)
+// findTriggerFromRecentTask looks up the latest trigger-bearing task for the
+// same agent before the retried comment. That task is the best available
+// source of truth after comment.parent_id has been flattened to the thread root.
+func (h *Handler) findTriggerFromRecentTask(ctx context.Context, comment db.Comment) (pgtype.UUID, *db.Comment) {
+	task, err := h.Queries.GetRecentTaskTriggerBeforeComment(ctx, db.GetRecentTaskTriggerBeforeCommentParams{
+		IssueID:   comment.IssueID,
+		AgentID:   comment.AuthorID,
+		CreatedAt: comment.CreatedAt,
+	})
 	if err != nil {
 		return pgtype.UUID{}, nil
 	}
-	for _, t := range tasks {
-		if uuidToString(t.AgentID) != uuidToString(agentID) {
-			continue
-		}
-		if !t.TriggerCommentID.Valid {
-			continue
-		}
-		tc, err := h.Queries.GetComment(ctx, t.TriggerCommentID)
-		if err != nil {
-			return t.TriggerCommentID, nil
-		}
-		return t.TriggerCommentID, &tc
+	tc, err := h.Queries.GetComment(ctx, task.TriggerCommentID)
+	if err != nil {
+		return task.TriggerCommentID, nil
 	}
-	return pgtype.UUID{}, nil
+	return task.TriggerCommentID, &tc
 }
 
 // findAncestorMemberComment walks parent_id chain from start until it finds a member-authored comment.
@@ -1744,8 +1738,9 @@ func (h *Handler) findAncestorMemberComment(ctx context.Context, start db.Commen
 	return nil, nil
 }
 
-// RetryAgentComment enqueues a new agent task to regenerate a reply, using the nearest
-// member comment in the thread as trigger context (when present).
+// RetryAgentComment enqueues a new agent task to regenerate a reply, using the
+// original task trigger when it can be recovered and the parent chain only as a
+// legacy fallback.
 func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
 	commentID := chi.URLParam(r, "commentId")
 	userID, ok := requireUserID(w, r)
@@ -1795,26 +1790,31 @@ func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	triggerMember, err := h.findAncestorMemberComment(r.Context(), comment)
-	if err != nil {
-		slog.Warn("retry agent comment: ancestor walk failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to resolve thread")
-		return
-	}
 	triggerID := pgtype.UUID{}
-	if triggerMember != nil {
-		triggerID = triggerMember.ID
+	triggerMember := (*db.Comment)(nil)
+
+	// Prefer the original task trigger_comment_id — this is the most accurate
+	// source after comment.parent_id has been flattened to the thread root by
+	// CreateComment.
+	if tid, tc := h.findTriggerFromRecentTask(r.Context(), comment); tid.Valid {
+		triggerID = tid
+		if tc != nil {
+			triggerMember = tc
+		}
 	}
 
-	// Fallback: system comments from failed tasks have no parent_id chain.
-	// Recover the original trigger_comment_id from the most recent task for
-	// this agent on the issue.
+	// Legacy fallback: walk the parent_id chain for cases where no task record
+	// exists (e.g. very old comments or manually created agent comments).
 	if !triggerID.Valid {
-		if tid, tc := h.findTriggerFromRecentTask(r.Context(), comment.IssueID, comment.AuthorID); tid.Valid {
-			triggerID = tid
-			if triggerMember == nil && tc != nil {
-				triggerMember = tc
-			}
+		var err error
+		triggerMember, err = h.findAncestorMemberComment(r.Context(), comment)
+		if err != nil {
+			slog.Warn("retry agent comment: ancestor walk failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve thread")
+			return
+		}
+		if triggerMember != nil {
+			triggerID = triggerMember.ID
 		}
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -184,6 +185,46 @@ func TestReporterIgnoresPostsAfterClose(t *testing.T) {
 	reporter.Post(localCLIMessage{Type: "raw", Content: "late"})
 	if got := len(poster.messages()); got != 0 {
 		t.Fatalf("messages after close = %d, want 0", got)
+	}
+}
+
+func TestLocalRunReporterRetriesBeforeSpooling(t *testing.T) {
+	spool := &localRunMessageSpool{dir: t.TempDir()}
+	poster := &flakyLocalRunPoster{failures: 2}
+	reporter := newLocalRunReporterWithOptions(poster, "run-1", spool, 4, []time.Duration{time.Millisecond, time.Millisecond}, time.Second)
+
+	reporter.Post(localCLIMessage{Type: "raw", Content: "hello"})
+	reporter.Close()
+
+	messages := poster.messages()
+	if len(messages) != 1 {
+		t.Fatalf("messages = %+v, want one sent message after retries", messages)
+	}
+	if messages[0].Source != "local-run" || messages[0].SourceKey != "local-run:run-1:seq:1" {
+		t.Fatalf("message source/source_key = %q/%q, want stable local-run key", messages[0].Source, messages[0].SourceKey)
+	}
+	if got := spool.Count("run-1"); got != 0 {
+		t.Fatalf("spool count = %d, want 0 after retry success", got)
+	}
+}
+
+func TestLocalRunReporterSpoolsAfterRetryExhaustionAndSyncClears(t *testing.T) {
+	spool := &localRunMessageSpool{dir: t.TempDir()}
+	poster := &flakyLocalRunPoster{failures: 100}
+	reporter := newLocalRunReporterWithOptions(poster, "run-1", spool, 4, nil, time.Millisecond)
+
+	reporter.Post(localCLIMessage{Type: "raw", Content: "persist me"})
+	reporter.Close()
+
+	if got := spool.Count("run-1"); got != 1 {
+		t.Fatalf("spool count = %d, want 1 after retry exhaustion", got)
+	}
+	sent, remaining, err := syncPendingLocalRunSpool(context.Background(), &flakyLocalRunPoster{}, spool, "run-1")
+	if err != nil {
+		t.Fatalf("syncPendingLocalRunSpool: %v", err)
+	}
+	if sent != 1 || remaining != 0 {
+		t.Fatalf("sync sent/remaining = %d/%d, want 1/0", sent, remaining)
 	}
 }
 
@@ -1204,6 +1245,12 @@ type fakeLocalRunPoster struct {
 	usage []localCLIUsage
 }
 
+type flakyLocalRunPoster struct {
+	mu       sync.Mutex
+	failures int
+	msgs     []localCLIMessage
+}
+
 type fakeLocalRunPatcher struct {
 	mu      sync.Mutex
 	patches []localRunPatch
@@ -1219,6 +1266,23 @@ func (f *fakeLocalRunPoster) PostJSON(_ context.Context, _ string, body any, _ a
 	defer f.mu.Unlock()
 	f.msgs = append(f.msgs, body.(localCLIMessage))
 	return nil
+}
+
+func (f *flakyLocalRunPoster) PostJSON(_ context.Context, _ string, body any, _ any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failures > 0 {
+		f.failures--
+		return errors.New("temporary failure")
+	}
+	f.msgs = append(f.msgs, body.(localCLIMessage))
+	return nil
+}
+
+func (f *flakyLocalRunPoster) messages() []localCLIMessage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]localCLIMessage(nil), f.msgs...)
 }
 
 func (f *fakeLocalRunPoster) PutJSON(_ context.Context, _ string, body any, _ any) error {

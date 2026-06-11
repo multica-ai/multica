@@ -1,9 +1,13 @@
 package daemon
 
 import (
+	"context"
+	"encoding/json"
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestTaskWakeupURL(t *testing.T) {
@@ -73,5 +77,38 @@ func TestWSHeartbeatFreshnessSuppressesHTTP(t *testing.T) {
 	d.clearWSHeartbeatAcks()
 	if d.wsHeartbeatRecentlyAcked("runtime-2") {
 		t.Fatalf("expected clearWSHeartbeatAcks to drop all entries")
+	}
+}
+
+func TestSendWSHeartbeatsAdvertisesNotificationDeliveryResult(t *testing.T) {
+	d := New(Config{}, slog.Default())
+	writes := make(chan []byte, 1)
+
+	d.sendWSHeartbeats(context.Background(), []string{"runtime-1"}, writes)
+
+	select {
+	case raw := <-writes:
+		var msg protocol.Message
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			t.Fatalf("unmarshal heartbeat envelope: %v", err)
+		}
+		if msg.Type != protocol.EventDaemonHeartbeat {
+			t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonHeartbeat)
+		}
+		var payload protocol.DaemonHeartbeatRequestPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal heartbeat payload: %v", err)
+		}
+		if payload.RuntimeID != "runtime-1" {
+			t.Fatalf("runtime_id = %q, want runtime-1", payload.RuntimeID)
+		}
+		if !payload.SupportsBatchImport {
+			t.Fatal("expected heartbeat to advertise batch import support")
+		}
+		if !payload.SupportsNotificationDeliveryResult {
+			t.Fatal("expected heartbeat to advertise notification delivery result support")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected heartbeat frame")
 	}
 }

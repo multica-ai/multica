@@ -53,6 +53,7 @@ func init() {
 	channelCmd.GroupID = groupCore
 	notifyCmd.GroupID = groupCore
 	codexPluginCmd.GroupID = groupCore
+	localRunCmd.GroupID = groupCore
 
 	// Runtime commands
 	daemonCmd.GroupID = groupRuntime
@@ -83,6 +84,7 @@ func init() {
 	rootCmd.AddCommand(channelCmd)
 	rootCmd.AddCommand(notifyCmd)
 	rootCmd.AddCommand(codexPluginCmd)
+	rootCmd.AddCommand(localRunCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)
