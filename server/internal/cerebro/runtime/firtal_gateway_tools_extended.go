@@ -157,7 +157,9 @@ func (t *FirtalCreateIssueTool) Call(ctx context.Context, args map[string]any) (
 
 	// CEREBRO-PATCH(create-issue-user-author): TECH-3226 — human-invoke fallback.
 	cType, cID := "agent", t.tctx.AgentID
-	if t.tctx.UserID.Valid { cType, cID = "member", t.tctx.UserID }
+	if t.tctx.UserID.Valid {
+		cType, cID = "member", t.tctx.UserID
+	}
 	params := db.CreateIssueParams{
 		WorkspaceID: t.tctx.WorkspaceID,
 		Title:       strings.TrimSpace(title),
@@ -382,6 +384,11 @@ type FirtalRegistryTool struct {
 type firtalRegistryGrantConfig struct {
 	AllowedDataSources []string `json:"allowed_data_sources"`
 	AllowedAll         bool     `json:"allowed_data_sources_all"`
+	// AllowedApps opts the agent into the list_apps action (app + owner
+	// catalog lookup via /api/apps). Deny-by-default like the data-source
+	// allowlist: an agent without allowed_apps (and without
+	// allowed_data_sources_all) cannot read the apps catalog.
+	AllowedApps bool `json:"allowed_apps"`
 }
 
 // fdrRegistrySettings is the workspace.settings envelope read for the registry
@@ -398,7 +405,7 @@ type fdrRegistrySettings struct {
 
 func (t *FirtalRegistryTool) Name() string { return "firtal_registry" }
 func (t *FirtalRegistryTool) Description() string {
-	return "Query the Firtal Data Registry. Use action=list_data_sources to discover available data sources, action=get_schema with data_source_id to fetch a single source's schema and parameters, and action=execute with data_source_id plus optional parameters, filter_group, pagination, and aggregation to run a query."
+	return "Query the Firtal Data Registry. Use action=list_data_sources to discover available data sources, action=get_schema with data_source_id to fetch a single source's schema and parameters, action=execute with data_source_id plus optional parameters, filter_group, pagination, and aggregation to run a query, and action=list_apps to look up registered apps and their owners (optionally filtered by github_repo, e.g. firtal-group/firtal-cerebro) — returns each app's owner_email, owner_member_id and deploy_model for deploy reviews."
 }
 func (t *FirtalRegistryTool) InputSchema() map[string]any {
 	return map[string]any{
@@ -407,11 +414,15 @@ func (t *FirtalRegistryTool) InputSchema() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"description": "Operation to perform: list_data_sources, get_schema, or execute.",
+				"description": "Operation to perform: list_data_sources, get_schema, execute, or list_apps.",
 			},
 			"data_source_id": map[string]any{
 				"type":        "string",
 				"description": "Data source UUID. Required for get_schema and execute.",
+			},
+			"github_repo": map[string]any{
+				"type":        "string",
+				"description": "Optional filter for list_apps: an owner/name GitHub repo (e.g. firtal-group/firtal-cerebro). When set, only apps whose github_repo matches are returned.",
 			},
 			"parameters": map[string]any{
 				"type":        "object",
@@ -436,18 +447,19 @@ func (t *FirtalRegistryTool) InputSchema() map[string]any {
 const (
 	firtalRegistryListPath    = "/api/registry/data-sources"
 	firtalRegistryExecutePath = "/api/registry/execute"
+	firtalRegistryAppsPath    = "/api/apps"
 )
 
 func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (string, error) {
 	action, _ := args["action"].(string)
 	action = strings.TrimSpace(action)
 	if action == "" {
-		return "", fmt.Errorf("firtal_registry: action is required (one of: list_data_sources, get_schema, execute)")
+		return "", fmt.Errorf("firtal_registry: action is required (one of: list_data_sources, get_schema, execute, list_apps)")
 	}
 	switch action {
-	case "list_data_sources", "get_schema", "execute":
+	case "list_data_sources", "get_schema", "execute", "list_apps":
 	default:
-		return "", fmt.Errorf("firtal_registry: unknown action %q (expected one of: list_data_sources, get_schema, execute)", action)
+		return "", fmt.Errorf("firtal_registry: unknown action %q (expected one of: list_data_sources, get_schema, execute, list_apps)", action)
 	}
 
 	// Both get_schema and execute address a specific data source; validate the
@@ -493,6 +505,12 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 			}
 		}
 		return t.callExecute(ctx, baseURL, apiKey, body)
+	case "list_apps":
+		if !config.AllowedAll && !config.AllowedApps {
+			return "", fmt.Errorf("firtal_registry: list_apps is not enabled for this agent (set allowed_apps in the firtal_registry grant config)")
+		}
+		githubRepo, _ := args["github_repo"].(string)
+		return t.callApps(ctx, baseURL, apiKey, strings.TrimSpace(githubRepo))
 	}
 	// unreachable — the action validation above is exhaustive.
 	return "", fmt.Errorf("firtal_registry: unreachable")
@@ -655,6 +673,50 @@ func (t *FirtalRegistryTool) callExecute(ctx context.Context, baseURL, apiKey st
 		return "", err
 	}
 	return string(respBody), nil
+}
+
+// callApps performs the list_apps action: GET /api/apps on the registry,
+// optionally narrowed to a single github_repo. The registry endpoint itself
+// does not filter by repo, so the match is applied here on the returned array.
+// Each app carries owner_email, owner_member_id and deploy_model, which deploy
+// reviews use to attribute a release to its owner.
+func (t *FirtalRegistryTool) callApps(ctx context.Context, baseURL, apiKey, githubRepo string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+firtalRegistryAppsPath, nil)
+	if err != nil {
+		return "", fmt.Errorf("firtal_registry: build apps request: %w", err)
+	}
+	t.setRegistryHeaders(req, apiKey)
+	body, err := doRegistryRequest(req)
+	if err != nil {
+		return "", err
+	}
+	if githubRepo == "" {
+		return string(body), nil
+	}
+	return string(filterAppsByRepo(body, githubRepo)), nil
+}
+
+// filterAppsByRepo keeps only the apps whose github_repo equals the requested
+// repo (case-insensitive). The /api/apps response is a bare JSON array; on any
+// unexpected shape the body is returned untouched so a parsing quirk never
+// hides data the agent is allowed to see.
+func filterAppsByRepo(raw []byte, githubRepo string) []byte {
+	var apps []map[string]any
+	if err := json.Unmarshal(raw, &apps); err != nil {
+		return raw
+	}
+	kept := make([]map[string]any, 0, len(apps))
+	for _, a := range apps {
+		repo, _ := a["github_repo"].(string)
+		if strings.EqualFold(strings.TrimSpace(repo), githubRepo) {
+			kept = append(kept, a)
+		}
+	}
+	out, err := json.Marshal(kept)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func (t *FirtalRegistryTool) setRegistryHeaders(req *http.Request, apiKey string) {
@@ -1051,7 +1113,9 @@ func (t *FirtalAddCommentTool) Call(ctx context.Context, args map[string]any) (s
 	}
 	// CEREBRO-PATCH(add-comment-user-author): TECH-3226 — human-invoke fallback.
 	aType, aID := "agent", t.tctx.AgentID
-	if t.tctx.UserID.Valid { aType, aID = "member", t.tctx.UserID }
+	if t.tctx.UserID.Valid {
+		aType, aID = "member", t.tctx.UserID
+	}
 	comment, err := t.queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: t.tctx.WorkspaceID,
@@ -1153,7 +1217,9 @@ func (t *FirtalCreateProjectTool) Call(ctx context.Context, args map[string]any)
 	}
 	// CEREBRO-PATCH(create-project-user-lead): TECH-3226 — human-invoke fallback.
 	lType, lID := pgtype.Text{String: "agent", Valid: t.tctx.AgentID.Valid}, t.tctx.AgentID
-	if t.tctx.UserID.Valid { lType, lID = pgtype.Text{String: "member", Valid: true}, t.tctx.UserID }
+	if t.tctx.UserID.Valid {
+		lType, lID = pgtype.Text{String: "member", Valid: true}, t.tctx.UserID
+	}
 	project, err := t.queries.CreateProject(ctx, db.CreateProjectParams{
 		WorkspaceID: t.tctx.WorkspaceID,
 		Title:       strings.TrimSpace(title),
