@@ -5,6 +5,10 @@ export { ChannelAgentInlineRow } from "./channel-agent-inline-row";
 export { useChannelFavoritesStore, actorKey } from "./favorites-store";
 export type { ActorKey } from "./favorites-store";
 export { useArchiveChannel, useUnarchiveChannel } from "./archive-mutations";
+// TECH-3352 — open-time auto-mark-read for channels/DMs (replaces the inline
+// focus-guard effect that left the inbox row stuck as unread when focus
+// flickered on open).
+export { useChannelAutoMarkRead } from "./use-channel-auto-mark-read";
 // CEREBRO-PATCH(issue-comment-cost): FIR-39 per-comment cost badge shared by
 // issue comment cards and channel slack messages (channels reuse the comment
 // table, so one query backs both surfaces).

@@ -157,7 +157,9 @@ func (t *FirtalCreateIssueTool) Call(ctx context.Context, args map[string]any) (
 
 	// CEREBRO-PATCH(create-issue-user-author): TECH-3226 — human-invoke fallback.
 	cType, cID := "agent", t.tctx.AgentID
-	if t.tctx.UserID.Valid { cType, cID = "member", t.tctx.UserID }
+	if t.tctx.UserID.Valid {
+		cType, cID = "member", t.tctx.UserID
+	}
 	params := db.CreateIssueParams{
 		WorkspaceID: t.tctx.WorkspaceID,
 		Title:       strings.TrimSpace(title),
@@ -382,6 +384,17 @@ type FirtalRegistryTool struct {
 type firtalRegistryGrantConfig struct {
 	AllowedDataSources []string `json:"allowed_data_sources"`
 	AllowedAll         bool     `json:"allowed_data_sources_all"`
+	// AllowedApps opts the agent into the list_apps action (app + owner
+	// catalog lookup via /api/apps). Deny-by-default like the data-source
+	// allowlist: an agent without allowed_apps (and without
+	// allowed_data_sources_all) cannot read the apps catalog.
+	AllowedApps bool `json:"allowed_apps"`
+	// AllowWrite opts the agent into the update_app action (deploy-write upsert
+	// via /api/apps/deploy). Strictly deny-by-default and NOT implied by
+	// allowed_data_sources_all (which is read scope): a write requires this
+	// explicit flag. The registry itself still gates the call on a system key
+	// with apps_write_enabled + a per-app write grant.
+	AllowWrite bool `json:"allow_write"`
 }
 
 // fdrRegistrySettings is the workspace.settings envelope read for the registry
@@ -398,7 +411,7 @@ type fdrRegistrySettings struct {
 
 func (t *FirtalRegistryTool) Name() string { return "firtal_registry" }
 func (t *FirtalRegistryTool) Description() string {
-	return "Query the Firtal Data Registry. Use action=list_data_sources to discover available data sources, action=get_schema with data_source_id to fetch a single source's schema and parameters, and action=execute with data_source_id plus optional parameters, filter_group, pagination, and aggregation to run a query."
+	return "Query the Firtal Data Registry. Use action=list_data_sources to discover available data sources, action=get_schema with data_source_id to fetch a single source's schema and parameters, action=execute with data_source_id plus optional parameters, filter_group, pagination, and aggregation to run a query, and action=list_apps to look up registered apps and their owners (optionally filtered by github_repo, e.g. firtal-group/firtal-cerebro) — returns each app's owner_email, owner_member_id and deploy_model for deploy reviews, and action=update_app to upsert an app's deploy/metadata record (pass a fields object with at least name; matched by platform + platform_external_id)."
 }
 func (t *FirtalRegistryTool) InputSchema() map[string]any {
 	return map[string]any{
@@ -407,11 +420,19 @@ func (t *FirtalRegistryTool) InputSchema() map[string]any {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"description": "Operation to perform: list_data_sources, get_schema, or execute.",
+				"description": "Operation to perform: list_data_sources, get_schema, execute, list_apps, or update_app.",
 			},
 			"data_source_id": map[string]any{
 				"type":        "string",
 				"description": "Data source UUID. Required for get_schema and execute.",
+			},
+			"github_repo": map[string]any{
+				"type":        "string",
+				"description": "Optional filter for list_apps: an owner/name GitHub repo (e.g. firtal-group/firtal-cerebro). When set, only apps whose github_repo matches are returned.",
+			},
+			"fields": map[string]any{
+				"type":        "object",
+				"description": "For update_app: the app record to upsert. Must include name; platform (default sliplane) + platform_external_id identify an existing app. Writable data fields only (owner_email, owner_member_id, deploy_model, github_repo, notes, …); reserved identity/audit columns are rejected by the registry.",
 			},
 			"parameters": map[string]any{
 				"type":        "object",
@@ -436,18 +457,20 @@ func (t *FirtalRegistryTool) InputSchema() map[string]any {
 const (
 	firtalRegistryListPath    = "/api/registry/data-sources"
 	firtalRegistryExecutePath = "/api/registry/execute"
+	firtalRegistryAppsPath    = "/api/apps"
+	firtalRegistryDeployPath  = "/api/apps/deploy"
 )
 
 func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (string, error) {
 	action, _ := args["action"].(string)
 	action = strings.TrimSpace(action)
 	if action == "" {
-		return "", fmt.Errorf("firtal_registry: action is required (one of: list_data_sources, get_schema, execute)")
+		return "", fmt.Errorf("firtal_registry: action is required (one of: list_data_sources, get_schema, execute, list_apps, update_app)")
 	}
 	switch action {
-	case "list_data_sources", "get_schema", "execute":
+	case "list_data_sources", "get_schema", "execute", "list_apps", "update_app":
 	default:
-		return "", fmt.Errorf("firtal_registry: unknown action %q (expected one of: list_data_sources, get_schema, execute)", action)
+		return "", fmt.Errorf("firtal_registry: unknown action %q (expected one of: list_data_sources, get_schema, execute, list_apps, update_app)", action)
 	}
 
 	// Both get_schema and execute address a specific data source; validate the
@@ -493,6 +516,24 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 			}
 		}
 		return t.callExecute(ctx, baseURL, apiKey, body)
+	case "list_apps":
+		if !config.AllowedAll && !config.AllowedApps {
+			return "", fmt.Errorf("firtal_registry: list_apps is not enabled for this agent (set allowed_apps in the firtal_registry grant config)")
+		}
+		githubRepo, _ := args["github_repo"].(string)
+		return t.callApps(ctx, baseURL, apiKey, strings.TrimSpace(githubRepo))
+	case "update_app":
+		if !config.AllowWrite {
+			return "", fmt.Errorf("firtal_registry: update_app is not enabled for this agent (set allow_write in the firtal_registry grant config)")
+		}
+		fields, ok := args["fields"].(map[string]any)
+		if !ok || len(fields) == 0 {
+			return "", fmt.Errorf("firtal_registry: update_app requires a non-empty fields object")
+		}
+		if name, _ := fields["name"].(string); strings.TrimSpace(name) == "" {
+			return "", fmt.Errorf("firtal_registry: update_app fields must include a non-empty name")
+		}
+		return t.callUpdateApp(ctx, baseURL, apiKey, fields)
 	}
 	// unreachable — the action validation above is exhaustive.
 	return "", fmt.Errorf("firtal_registry: unreachable")
@@ -655,6 +696,73 @@ func (t *FirtalRegistryTool) callExecute(ctx context.Context, baseURL, apiKey st
 		return "", err
 	}
 	return string(respBody), nil
+}
+
+// callApps performs the list_apps action: GET /api/apps on the registry,
+// optionally narrowed to a single github_repo. The registry endpoint itself
+// does not filter by repo, so the match is applied here on the returned array.
+// Each app carries owner_email, owner_member_id and deploy_model, which deploy
+// reviews use to attribute a release to its owner.
+func (t *FirtalRegistryTool) callApps(ctx context.Context, baseURL, apiKey, githubRepo string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+firtalRegistryAppsPath, nil)
+	if err != nil {
+		return "", fmt.Errorf("firtal_registry: build apps request: %w", err)
+	}
+	t.setRegistryHeaders(req, apiKey)
+	body, err := doRegistryRequest(req)
+	if err != nil {
+		return "", err
+	}
+	if githubRepo == "" {
+		return string(body), nil
+	}
+	return string(filterAppsByRepo(body, githubRepo)), nil
+}
+
+// filterAppsByRepo keeps only the apps whose github_repo equals the requested
+// repo (case-insensitive). The /api/apps response is a bare JSON array; on any
+// unexpected shape the body is returned untouched so a parsing quirk never
+// hides data the agent is allowed to see.
+func filterAppsByRepo(raw []byte, githubRepo string) []byte {
+	var apps []map[string]any
+	if err := json.Unmarshal(raw, &apps); err != nil {
+		return raw
+	}
+	kept := make([]map[string]any, 0, len(apps))
+	for _, a := range apps {
+		repo, _ := a["github_repo"].(string)
+		if strings.EqualFold(strings.TrimSpace(repo), githubRepo) {
+			kept = append(kept, a)
+		}
+	}
+	out, err := json.Marshal(kept)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// callUpdateApp performs the update_app action: POST /api/apps/deploy on the
+// registry with the agent-supplied fields. The registry upserts by
+// (platform, platform_external_id), writes only allowlisted data columns
+// (rejecting reserved identity/audit fields with 403), and enforces the
+// system-key + apps_write_enabled + per-app write grant — so this action can
+// never write more than the configured registry key is itself authorised for.
+func (t *FirtalRegistryTool) callUpdateApp(ctx context.Context, baseURL, apiKey string, fields map[string]any) (string, error) {
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		return "", fmt.Errorf("firtal_registry: marshal update_app fields: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+firtalRegistryDeployPath, bytes.NewReader(raw))
+	if err != nil {
+		return "", fmt.Errorf("firtal_registry: build update_app request: %w", err)
+	}
+	t.setRegistryHeaders(req, apiKey)
+	body, err := doRegistryRequest(req)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 }
 
 func (t *FirtalRegistryTool) setRegistryHeaders(req *http.Request, apiKey string) {
@@ -1051,7 +1159,9 @@ func (t *FirtalAddCommentTool) Call(ctx context.Context, args map[string]any) (s
 	}
 	// CEREBRO-PATCH(add-comment-user-author): TECH-3226 — human-invoke fallback.
 	aType, aID := "agent", t.tctx.AgentID
-	if t.tctx.UserID.Valid { aType, aID = "member", t.tctx.UserID }
+	if t.tctx.UserID.Valid {
+		aType, aID = "member", t.tctx.UserID
+	}
 	comment, err := t.queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: t.tctx.WorkspaceID,
@@ -1153,7 +1263,9 @@ func (t *FirtalCreateProjectTool) Call(ctx context.Context, args map[string]any)
 	}
 	// CEREBRO-PATCH(create-project-user-lead): TECH-3226 — human-invoke fallback.
 	lType, lID := pgtype.Text{String: "agent", Valid: t.tctx.AgentID.Valid}, t.tctx.AgentID
-	if t.tctx.UserID.Valid { lType, lID = pgtype.Text{String: "member", Valid: true}, t.tctx.UserID }
+	if t.tctx.UserID.Valid {
+		lType, lID = pgtype.Text{String: "member", Valid: true}, t.tctx.UserID
+	}
 	project, err := t.queries.CreateProject(ctx, db.CreateProjectParams{
 		WorkspaceID: t.tctx.WorkspaceID,
 		Title:       strings.TrimSpace(title),

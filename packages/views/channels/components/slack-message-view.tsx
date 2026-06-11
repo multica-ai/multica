@@ -86,7 +86,8 @@ export function SlackMessageView({
   const grouped = useMemo(() => groupByDay(topLevel), [topLevel]);
 
   return (
-    <div className="flex flex-col">
+    // CEREBRO-PATCH(channels-msg-spacing): TECH-3322 — extra space at the bottom of the message stream
+    <div className="flex flex-col pb-3">
       {grouped.map((day) => (
         <div key={day.dayKey}>
           <DateSeparator dayKey={day.dayKey} />
@@ -226,7 +227,7 @@ const MessageRow = memo(function MessageRow({
       className={cn(
         "group/msg relative flex gap-2.5 px-4 py-0.5 hover:bg-accent/30 transition-colors",
         "before:absolute before:inset-x-0 before:-top-3 before:h-3 before:content-['']", // CEREBRO-PATCH(channels-msg-hover-gap-fix): TECH-2909
-        continuation ? "pt-0" : "pt-2",
+        continuation ? "pt-1" : "pt-3", // CEREBRO-PATCH(channels-msg-spacing): TECH-3322 — a bit more vertical gap between each message
         isTemp && "opacity-60",
         isThreadOpen && "bg-accent/40",
       )}

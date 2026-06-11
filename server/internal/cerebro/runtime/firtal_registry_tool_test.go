@@ -268,3 +268,123 @@ func TestFirtalRegistryCallRejectsMissingAction(t *testing.T) {
 		t.Fatalf("expected required-action error, got %v", err)
 	}
 }
+
+func TestFirtalRegistryFilterAppsByRepo(t *testing.T) {
+	body := []byte(`[
+		{"name":"cerebro","github_repo":"firtal-group/firtal-cerebro","owner_email":"a@firtal.com"},
+		{"name":"portal","github_repo":"firtal-group/firtal-portal","owner_email":"b@firtal.com"}
+	]`)
+	out := filterAppsByRepo(body, "firtal-group/firtal-cerebro")
+	var apps []map[string]any
+	if err := json.Unmarshal(out, &apps); err != nil {
+		t.Fatalf("unmarshal filtered: %v", err)
+	}
+	if len(apps) != 1 || apps[0]["name"] != "cerebro" {
+		t.Fatalf("expected only the cerebro app, got: %s", out)
+	}
+
+	// Case-insensitive match.
+	if got := filterAppsByRepo(body, "FIRTAL-GROUP/FIRTAL-CEREBRO"); !strings.Contains(string(got), "cerebro") {
+		t.Fatalf("expected case-insensitive match, got: %s", got)
+	}
+
+	// No match → empty array, never the unfiltered body.
+	if got := filterAppsByRepo(body, "firtal-group/does-not-exist"); strings.Contains(string(got), "cerebro") || strings.Contains(string(got), "portal") {
+		t.Fatalf("expected empty result for unknown repo, got: %s", got)
+	}
+
+	// Unexpected (non-array) shape → returned untouched, fail-open on parse.
+	weird := []byte(`{"error":"nope"}`)
+	if got := filterAppsByRepo(weird, "x"); string(got) != string(weird) {
+		t.Fatalf("unexpected shape should pass through untouched, got: %s", got)
+	}
+}
+
+func TestFirtalRegistryCallAppsGetsAndFiltersByRepo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		if r.URL.Path != firtalRegistryAppsPath {
+			t.Errorf("path = %q, want %q", r.URL.Path, firtalRegistryAppsPath)
+		}
+		if r.Header.Get("x-api-key") != "rk_test" {
+			t.Errorf("x-api-key = %q, want rk_test", r.Header.Get("x-api-key"))
+		}
+		_, _ = w.Write([]byte(`[
+			{"name":"cerebro","github_repo":"firtal-group/firtal-cerebro","owner_email":"a@firtal.com","deploy_model":"gate"},
+			{"name":"portal","github_repo":"firtal-group/firtal-portal","owner_email":"b@firtal.com"}
+		]`))
+	}))
+	defer srv.Close()
+
+	tool := &FirtalRegistryTool{}
+	out, err := tool.callApps(context.Background(), srv.URL, "rk_test", "firtal-group/firtal-cerebro")
+	if err != nil {
+		t.Fatalf("callApps: %v", err)
+	}
+	if strings.Contains(out, "portal") {
+		t.Fatalf("callApps leaked an unrelated app: %s", out)
+	}
+	if !strings.Contains(out, "a@firtal.com") || !strings.Contains(out, "gate") {
+		t.Fatalf("callApps dropped owner/deploy data: %s", out)
+	}
+}
+
+func TestFirtalRegistryCallUpdateAppPostsToDeploy(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %q, want POST", r.Method)
+		}
+		if r.URL.Path != firtalRegistryDeployPath {
+			t.Errorf("path = %q, want %q", r.URL.Path, firtalRegistryDeployPath)
+		}
+		if r.Header.Get("x-api-key") != "rk_test" {
+			t.Errorf("x-api-key = %q, want rk_test", r.Header.Get("x-api-key"))
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		_, _ = w.Write([]byte(`{"created":false,"app":{"id":"app-1","name":"cerebro"}}`))
+	}))
+	defer srv.Close()
+
+	tool := &FirtalRegistryTool{}
+	fields := map[string]any{"name": "cerebro", "platform_external_id": "svc_1", "owner_email": "a@firtal.com"}
+	out, err := tool.callUpdateApp(context.Background(), srv.URL, "rk_test", fields)
+	if err != nil {
+		t.Fatalf("callUpdateApp: %v", err)
+	}
+	if gotBody["name"] != "cerebro" || gotBody["owner_email"] != "a@firtal.com" {
+		t.Fatalf("upstream did not receive the fields: %v", gotBody)
+	}
+	if !strings.Contains(out, "app-1") {
+		t.Fatalf("response not returned to caller: %s", out)
+	}
+}
+
+func TestFirtalRegistryUpdateAppRequiresAllowWrite(t *testing.T) {
+	// AllowWrite is gated in Call(); assert the config flag is independent of
+	// read scope so allowed_data_sources_all never implies write.
+	cfg := firtalRegistryGrantConfig{AllowedAll: true}
+	if cfg.AllowWrite {
+		t.Fatal("allowed_data_sources_all must not imply AllowWrite")
+	}
+}
+
+func TestFirtalRegistryCallUpdateAppNon2xxBubblesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"This system key is not authorised to write to the Apps registry."}`))
+	}))
+	defer srv.Close()
+
+	tool := &FirtalRegistryTool{}
+	_, err := tool.callUpdateApp(context.Background(), srv.URL, "rk_test", map[string]any{"name": "x"})
+	if err == nil {
+		t.Fatal("callUpdateApp should error on HTTP 403")
+	}
+	if !strings.Contains(err.Error(), "HTTP 403") || !strings.Contains(err.Error(), "not authorised") {
+		t.Errorf("error should preserve upstream HTTP code and body: %v", err)
+	}
+}

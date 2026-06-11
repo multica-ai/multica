@@ -10,13 +10,13 @@ import { useChatStore } from "@multica/core/chat";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   channelDetailOptions,
-  useMarkChannelRead,
   useUpdateChannel,
 } from "@multica/core/channels";
 import { inboxListOptions } from "@multica/core/inbox/queries";
 import { useArchiveInbox } from "@multica/core/inbox/mutations";
 // CEREBRO-PATCH(channel-detail-archive): JEH-851 — per-user channel archive mutation.
-import { useArchiveChannel } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(channel-auto-mark-read-hook): TECH-3352 — open-time read hook.
+import { useArchiveChannel, useChannelAutoMarkRead } from "@multica/cerebro-channels";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
@@ -93,41 +93,12 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   const { data: inboxItems = [] } = useQuery(inboxListOptions(wsId));
 
   // --- Auto-mark-read ----------------------------------------------------
-  // When the panel opens, hit POST /api/channels/{id}/read once. The server
-  // marks every unread inbox_item for this channel — across both inbox- and
-  // notifications-routed rows — so CountUnreadInboxForChannel drops to zero
-  // and the badge in the inbox list clears.
-  const markChannelRead = useMarkChannelRead();
-  // CEREBRO-PATCH(channel-unread-mark-read-guard): JEH-1249 — track (id, count)
-  // instead of just id so mark-as-read re-fires when new messages arrive after
-  // the channel was previously marked read. Count equality prevents infinite
-  // retries when the API fails (onError restores count; won't re-fire until count changes).
-  const seenChannelRef = useRef<{ id: string; count: number } | null>(null);
-
-  // CEREBRO-PATCH(channel-unread-focus-guard): TECH-3300 — only auto-mark-read
-  // while the user is actually looking (tab visible + window focused). Before
-  // this, an incoming message was marked read the instant it arrived as long as
-  // the channel sat mounted in the inbox — even in a background tab — so the
-  // unread badge never appeared. Now a message that lands while you are away
-  // stays unread, and we retry the moment focus/visibility returns.
-  useEffect(() => {
-    if (!channelId || !channel || channel.unread_count === 0) return;
-    const count = channel.unread_count;
-    const markIfVisible = () => {
-      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
-      const last = seenChannelRef.current;
-      if (last?.id === channelId && last.count === count) return;
-      seenChannelRef.current = { id: channelId, count };
-      markChannelRead.mutate(channelId);
-    };
-    markIfVisible();
-    window.addEventListener("focus", markIfVisible);
-    document.addEventListener("visibilitychange", markIfVisible);
-    return () => {
-      window.removeEventListener("focus", markIfVisible);
-      document.removeEventListener("visibilitychange", markIfVisible);
-    };
-  }, [channelId, channel, markChannelRead]);
+  // Opening a channel/DM clears its unread state. The hook marks read once on
+  // open (explicit intent, no focus check — fixes TECH-3352 where the inbox row
+  // stayed unread when focus flickered) and keeps the TECH-3300 focus guard only
+  // for new messages that arrive while the conversation is already open.
+  // CEREBRO-PATCH(channel-auto-mark-read-hook): TECH-3352 — see cerebro-channels.
+  useChannelAutoMarkRead(channelId, channel?.unread_count);
 
   // CEREBRO-PATCH(channels-slack-message-view): JEH-1017 — produce {topLevel,
   // repliesByParent} for SlackMessageView + ThreadSidePanel.
