@@ -53,6 +53,28 @@ func TestGated(t *testing.T) {
 	}
 }
 
+func TestPolicyToolKey(t *testing.T) {
+	cases := map[string]string{
+		// Built-in Claude tools get the "tools:" capability-key prefix the
+		// permissions screen authors a Deny under (TECH-2563 regression).
+		"Bash":     "tools:Bash",
+		"WebFetch": "tools:WebFetch",
+		"Edit":     "tools:Edit",
+		"Write":    "tools:Write",
+		// MCP tools keep their mcp__ name (connection denies enforced elsewhere).
+		"mcp__supabase__execute_sql": "mcp__supabase__execute_sql",
+		// Already-namespaced keys and the empty tool are passed through unchanged.
+		"connection:customer-service": "connection:customer-service",
+		"tools:Bash":                  "tools:Bash",
+		"":                            "",
+	}
+	for in, want := range cases {
+		if got := PolicyToolKey(in); got != want {
+			t.Errorf("PolicyToolKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestResourcePattern(t *testing.T) {
 	cases := []struct {
 		tool string

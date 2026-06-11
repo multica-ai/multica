@@ -107,6 +107,28 @@ func Gated(tool string) bool {
 	return strings.HasPrefix(tool, "mcp__")
 }
 
+// PolicyToolKey maps a Claude Code tool name to the canonical capability key the
+// cerebro tool-policy chain is authored under. The runtime tool scan registers a
+// runtime's built-in tools as capabilities keyed "tools:<Name>" (cerebro_capability
+// .capability_key, source runtime_report) — which is exactly what the permissions
+// screen reads and what an admin's Deny writes. So a local-runtime resolve MUST
+// look the tool up under that prefixed key, not the bare Claude name; resolving
+// the bare name silently finds nothing and lets a denied tool through (TECH-2563).
+//
+// MCP tools keep their mcp__<server>__<tool> name: on local runtimes connection
+// denies are enforced at claim time via --disallowedTools (TECH-3156), and the
+// connection chain is keyed separately. An already-namespaced key (one that
+// contains ':', e.g. a platform capability or a pre-mapped key) is left as-is.
+func PolicyToolKey(toolName string) string {
+	if toolName == "" {
+		return ""
+	}
+	if strings.HasPrefix(toolName, "mcp__") || strings.Contains(toolName, ":") {
+		return toolName
+	}
+	return "tools:" + toolName
+}
+
 // ResourcePattern pulls the operator-meaningful identifier out of a Claude
 // tool_input object so the tool-policy chain can refine a grant via
 // resource_pattern. The mapping is per-tool because Claude's tool_input shape
