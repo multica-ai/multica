@@ -119,6 +119,78 @@ func TestV2ChannelMessagesIncludeMentionAgentTasks(t *testing.T) {
 	}
 }
 
+// TestV2ChannelMessagesResolveAuthorNames verifies the message timeline
+// surfaces the real Member/Agent display name (author_name) so the UI no longer
+// has to fall back to the bare author_type ("member"/"agent"). A member-authored
+// message resolves the user's name; an agent-authored message resolves the
+// agent's name; a system message (no author) carries no name.
+func TestV2ChannelMessagesResolveAuthorNames(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
+	})
+
+	agentID := createHandlerTestAgent(t, "Channel Author Agent", nil)
+	channel := createChannelForMentionTest(t, "Author Name Channel", "open")
+	chUUID := util.MustParseUUID(channel.ID)
+	wsUUID := util.MustParseUUID(testWorkspaceID)
+
+	// Member-authored message via the normal send path.
+	memberMsg := sendChannelMessageForMentionTest(t, channel.ID, testUserID, "member says hi")
+
+	// Agent-authored message inserted directly (agents post via the daemon CLI).
+	agentMsg, err := testHandler.Queries.CreateChannelMessageTopLevel(ctx, db.CreateChannelMessageTopLevelParams{
+		ChannelID:   chUUID,
+		WorkspaceID: wsUUID,
+		AuthorType:  "agent",
+		AuthorID:    util.MustParseUUID(agentID),
+		Content:     "agent says hi",
+	})
+	if err != nil {
+		t.Fatalf("insert agent message: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodGet, "/", nil), "id", channel.ID)
+	testHandler.ListChannelMessages(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ListChannelMessages: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var listResp struct {
+		Messages []ChannelMessageV2Response `json:"messages"`
+	}
+	decodeJSON(t, rr, &listResp)
+
+	byID := make(map[string]ChannelMessageV2Response, len(listResp.Messages))
+	for _, m := range listResp.Messages {
+		byID[m.ID] = m
+	}
+
+	gotMember, ok := byID[memberMsg.ID]
+	if !ok {
+		t.Fatalf("member message %s missing from list", memberMsg.ID)
+	}
+	if gotMember.AuthorName == nil || *gotMember.AuthorName != handlerTestName {
+		t.Fatalf("member author_name = %v, want %q", gotMember.AuthorName, handlerTestName)
+	}
+
+	gotAgent, ok := byID[uuidToString(agentMsg.ID)]
+	if !ok {
+		t.Fatalf("agent message missing from list")
+	}
+	if gotAgent.AuthorName == nil || *gotAgent.AuthorName != "Channel Author Agent" {
+		t.Fatalf("agent author_name = %v, want %q", gotAgent.AuthorName, "Channel Author Agent")
+	}
+
+	// The send response itself should also carry the resolved name.
+	if memberMsg.AuthorName == nil || *memberMsg.AuthorName != handlerTestName {
+		t.Fatalf("send response author_name = %v, want %q", memberMsg.AuthorName, handlerTestName)
+	}
+}
+
 // TestV2ReplyAutoCreateThread verifies that replying to a message
 // implicitly creates a thread.
 func TestV2ReplyAutoCreateThread(t *testing.T) {

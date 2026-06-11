@@ -21,6 +21,7 @@ type ChannelMessageV2Response struct {
 	WorkspaceID string                     `json:"workspace_id"`
 	AuthorType  string                     `json:"author_type"`
 	AuthorID    *string                    `json:"author_id"`
+	AuthorName  *string                    `json:"author_name,omitempty"`
 	Content     string                     `json:"content"`
 	ReplyToID   *string                    `json:"reply_to_id,omitempty"`
 	ReplyCount  int32                      `json:"reply_count"`
@@ -171,6 +172,36 @@ func (h *Handler) attachChannelAgentTasks(ctx context.Context, messages []Channe
 	return messages
 }
 
+// attachChannelAuthorNames resolves the display name for each message author
+// so the UI can render a real Member/Agent name instead of the bare
+// author_type ("member"/"agent"). Lookups are deduplicated per distinct author
+// and skipped for system messages (no author_id). Names that can't be resolved
+// (deleted user/agent) are left nil, and the client keeps its own fallback.
+func (h *Handler) attachChannelAuthorNames(ctx context.Context, messages []ChannelMessageV2Response) []ChannelMessageV2Response {
+	if len(messages) == 0 {
+		return messages
+	}
+	// Cache by "type:id" so a chatty author is resolved once per request.
+	names := make(map[string]string)
+	for i := range messages {
+		m := &messages[i]
+		if m.AuthorID == nil || *m.AuthorID == "" {
+			continue
+		}
+		key := m.AuthorType + ":" + *m.AuthorID
+		name, seen := names[key]
+		if !seen {
+			name = h.resolveChannelActorName(ctx, m.AuthorType, *m.AuthorID)
+			names[key] = name
+		}
+		if name != "" {
+			n := name
+			m.AuthorName = &n
+		}
+	}
+	return messages
+}
+
 func channelContextRowToMessage(m db.GetChannelContextRow) ChannelContextMessage {
 	return ChannelContextMessage{
 		ID:         uuidToString(m.ID),
@@ -226,6 +257,7 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 		resp[i] = channelMessageV2ToResponse(m)
 	}
 	resp = h.attachChannelAgentTasks(r.Context(), resp)
+	resp = h.attachChannelAuthorNames(r.Context(), resp)
 	writeJSON(w, http.StatusOK, map[string]any{"messages": resp, "total": len(resp)})
 }
 
@@ -278,6 +310,9 @@ func (h *Handler) SendChannelMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	h.Queries.TouchChannel(r.Context(), cctx.channel.ID)
 	resp := channelMessageToV2Response(msg, 0)
+	if name := h.resolveChannelActorName(r.Context(), actorType, actorID); name != "" {
+		resp.AuthorName = &name
+	}
 	h.publish(protocol.EventChannelMessageCreated, workspaceID, actorType, actorID, map[string]any{
 		"message":    resp,
 		"channel_id": uuidToString(cctx.channel.ID),
@@ -380,6 +415,9 @@ func (h *Handler) ReplyToMessage(w http.ResponseWriter, r *http.Request) {
 	h.Queries.TouchChannel(r.Context(), cctx.channel.ID)
 
 	resp := channelMessageToV2Response(reply, 0)
+	if name := h.resolveChannelActorName(r.Context(), actorType, actorID); name != "" {
+		resp.AuthorName = &name
+	}
 	h.publish(protocol.EventChannelMessageCreated, workspaceID, actorType, actorID, map[string]any{
 		"message":    resp,
 		"channel_id": uuidToString(cctx.channel.ID),
@@ -421,6 +459,7 @@ func (h *Handler) GetMessageThread(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// No thread yet — return just the root message with no replies.
 		rootResp := h.attachChannelAgentTasks(r.Context(), []ChannelMessageV2Response{channelMessageToV2Response(rootMsg, 0)})
+		rootResp = h.attachChannelAuthorNames(r.Context(), rootResp)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"root_message": rootResp[0],
 			"replies":      []ChannelMessageV2Response{},
@@ -441,6 +480,8 @@ func (h *Handler) GetMessageThread(w http.ResponseWriter, r *http.Request) {
 	}
 	rootResp := h.attachChannelAgentTasks(r.Context(), []ChannelMessageV2Response{channelMessageToV2Response(rootMsg, int32(len(replies)))})
 	replyResp = h.attachChannelAgentTasks(r.Context(), replyResp)
+	rootResp = h.attachChannelAuthorNames(r.Context(), rootResp)
+	replyResp = h.attachChannelAuthorNames(r.Context(), replyResp)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"root_message": rootResp[0],
 		"replies":      replyResp,
@@ -764,6 +805,9 @@ func (h *Handler) UpdateChannelMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := channelMessageToV2Response(updated, 0)
+	if name := h.resolveChannelActorName(r.Context(), updated.AuthorType, uuidToString(updated.AuthorID)); name != "" {
+		resp.AuthorName = &name
+	}
 	h.publish(protocol.EventChannelMessageUpdated, workspaceID, "member", userID, map[string]any{
 		"message":    resp,
 		"channel_id": uuidToString(cctx.channel.ID),
