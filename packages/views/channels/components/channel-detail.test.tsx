@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Channel } from "@multica/core/types";
 
@@ -304,21 +304,16 @@ describe("ChannelDetail thread header", () => {
     expect(mockMarkChannelRead).not.toHaveBeenCalled();
   });
 
-  // CEREBRO-PATCH(channel-unread-focus-guard): TECH-3300 — a message that
-  // arrives while the window is hidden/unfocused must stay unread.
-  it("does not mark read when the document is hidden, then fires on visibility", () => {
+  // CEREBRO-PATCH(channel-unread-focus-guard): TECH-3352 — opening a channel is
+  // explicit read intent, so it marks read on open even when the document is
+  // hidden. The focus guard now only applies to messages that arrive while the
+  // thread is already open (covered in cerebro-channels/use-channel-auto-mark-read.test.ts).
+  it("marks read on open even when the document is hidden", () => {
     const hiddenSpy = vi
       .spyOn(document, "visibilityState", "get")
       .mockReturnValue("hidden");
     const unread: Channel = { ...baseChannel, unread_count: 3 };
     render(<ChannelDetail channelId="c1" initialChannel={unread} />);
-    expect(mockMarkChannelRead).not.toHaveBeenCalled();
-
-    // User returns to the tab → visibilitychange re-evaluates and marks read.
-    hiddenSpy.mockReturnValue("visible");
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
     expect(mockMarkChannelRead).toHaveBeenCalledWith("c1");
     hiddenSpy.mockRestore();
   });
