@@ -33,6 +33,7 @@ const (
 // BotRegisterResp is the result of POST /v1/bot/register.
 type BotRegisterResp struct {
 	RobotID        string `json:"robot_id"`
+	Name           string `json:"name"`
 	IMToken        string `json:"im_token"`
 	WSURL          string `json:"ws_url"`
 	APIURL         string `json:"api_url"`

@@ -133,4 +133,11 @@ const (
 	// deleting the row; the audit trail is preserved.
 	EventLarkInstallationCreated = "lark_installation:created"
 	EventLarkInstallationRevoked = "lark_installation:revoked"
+
+	// Octo IM integration events. Same semantics as the Lark pair:
+	// `created` covers first-install and re-config (UNIQUE on
+	// (workspace_id, agent_id)); `revoked` flips status to 'revoked'
+	// without deleting the row.
+	EventOctoInstallationCreated = "octo_installation:created"
+	EventOctoInstallationRevoked = "octo_installation:revoked"
 )

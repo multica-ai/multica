@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -87,12 +88,21 @@ func (s *InstallationService) DecryptBotToken(inst db.OctoInstallation) (string,
 }
 
 // GetInWorkspace loads a workspace-scoped installation (HTTP handler path).
+// Returns ErrInstallationNotFound when no matching row exists.
 func (s *InstallationService) GetInWorkspace(ctx context.Context, id, workspaceID pgtype.UUID) (db.OctoInstallation, error) {
-	return s.queries.GetOctoInstallationInWorkspace(ctx, db.GetOctoInstallationInWorkspaceParams{
+	inst, err := s.queries.GetOctoInstallationInWorkspace(ctx, db.GetOctoInstallationInWorkspaceParams{
 		ID:          id,
 		WorkspaceID: workspaceID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.OctoInstallation{}, ErrInstallationNotFound
+	}
+	return inst, err
 }
+
+// ErrInstallationNotFound is returned by GetInWorkspace when no matching
+// installation row exists for the (id, workspace) pair.
+var ErrInstallationNotFound = errors.New("octo installation not found")
 
 // ListByWorkspace lists a workspace's installations (HTTP handler path).
 func (s *InstallationService) ListByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.OctoInstallation, error) {

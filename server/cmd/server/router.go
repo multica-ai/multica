@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/octo"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -354,6 +355,44 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	} else {
 		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
 	}
+
+	// Octo IM integration. Only wired when MULTICA_OCTO_SECRET_KEY is set
+	// (the InstallationService refuses plaintext token storage). When absent
+	// the Octo HTTP handlers return 503 and the rest of the server starts
+	// normally, so self-host deployments that have not opted in are unaffected.
+	if octoKey, err := secretbox.LoadKey("MULTICA_OCTO_SECRET_KEY"); err == nil {
+		if box, err := secretbox.New(octoKey); err != nil {
+			slog.Error("octo: secretbox.New failed; octo integration disabled", "error", err)
+		} else if installSvc, err := octo.NewInstallationService(queries, box); err != nil {
+			slog.Error("octo: InstallationService init failed; octo integration disabled", "error", err)
+		} else {
+			h.OctoInstallations = installSvc
+			h.OctoBindingTokens = octo.NewBindingTokenService(queries, pool)
+			h.OctoAPIBaseURL = strings.TrimSpace(os.Getenv("MULTICA_OCTO_API_URL"))
+			slog.Info("octo integration enabled")
+
+			// Outbound: relay chat:done / task:failed back to Octo.
+			patcher := octo.NewPatcher(queries, installSvc, octo.NewMessageSender(), slog.Default())
+			patcher.Register(bus)
+
+			// Inbound: audit + chat-session service + dispatcher.
+			dispatcher := &octo.Dispatcher{
+				Queries:     queries,
+				Chat:        octo.NewChatSessionService(queries, pool),
+				TaskService: h.TaskService,
+				Audit:       octo.NewAuditLogger(queries),
+				Logger:      slog.Default(),
+			}
+
+			// WS hub: per-installation lease + im.Socket connection.
+			connectorFactory := octo.NewConnectorFactory(installSvc, slog.Default())
+			h.OctoHub = octo.NewHub(queries, connectorFactory, dispatcher, octo.HubConfig{}, slog.Default())
+			slog.Info("octo inbound pipeline wired")
+		}
+	} else {
+		slog.Info("octo integration disabled (MULTICA_OCTO_SECRET_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -609,10 +648,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
+					r.Get("/octo/installations", h.ListOctoInstallations)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
+					// Octo IM: configure a bot for an agent (admin) and revoke.
+					r.Post("/octo/installations", h.CreateOctoInstallation)
+					r.Delete("/octo/installations/{installationId}", h.RevokeOctoInstallation)
 					// Device-flow scan-to-install. Begin opens a new
 					// registration session against Lark and returns
 					// the QR-code URL; the frontend dialog then polls
@@ -631,6 +674,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// the token only proves "this open_id requested binding," and
 		// is combined with the logged-in user to create the mapping.
 		r.Post("/api/lark/binding/redeem", h.RedeemLarkBindingToken)
+		// Octo binding-token redemption. Not workspace-scoped: identity comes
+		// from the session, and redemption is what mints the octo_user_binding.
+		r.Post("/api/octo/binding/redeem", h.RedeemOctoBindingToken)
 
 		// User-scoped invitation routes (no workspace context required)
 		r.Get("/api/invitations", h.ListMyInvitations)

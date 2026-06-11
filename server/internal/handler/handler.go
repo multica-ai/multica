@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/octo"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -155,7 +156,16 @@ type Handler struct {
 	// process exit indefinitely if the pool is frozen — at worst the
 	// next replica waits the full TTL.
 	LarkHub *lark.Hub
-	cfg     Config
+	// Octo IM integration. Nil when MULTICA_OCTO_SECRET_KEY is unset; the
+	// HTTP handlers return 503 in that case. Wired in router.go after
+	// handler.New. OctoHub is constructed by the router but started by main.go.
+	OctoInstallations *octo.InstallationService
+	OctoBindingTokens *octo.BindingTokenService
+	OctoHub           *octo.Hub
+	// OctoAPIBaseURL is the default Octo REST base (MULTICA_OCTO_API_URL),
+	// used by CreateOctoInstallation when the request omits api_url.
+	OctoAPIBaseURL string
+	cfg            Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

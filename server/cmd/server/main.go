@@ -361,6 +361,14 @@ func main() {
 		go h.LarkHub.Run(sweepCtx)
 	}
 
+	// Octo inbound supervisor: holds the WS lease per installation and runs
+	// the im.Socket connection for each. Nil when MULTICA_OCTO_SECRET_KEY is
+	// unset. Bound to sweepCtx; the Hub winds down (and releases its leases)
+	// when sweepCtx is cancelled during graceful shutdown.
+	if h.OctoHub != nil {
+		go h.OctoHub.Run(sweepCtx)
+	}
+
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
 	// `sys_cron_executions` table into the distributed lease + audit
 	// log for internal periodic jobs. The first job is
