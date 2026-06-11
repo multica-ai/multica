@@ -100,7 +100,8 @@
     "delete_button": "Delete workflow",
     "canvas_theme_system": "System theme",
     "canvas_theme_light": "Light theme",
-    "canvas_theme_dark": "Dark theme"
+    "canvas_theme_dark": "Dark theme",
+    "discard_changes": "Discard"
   },
   "node": {
     "title": "Title",

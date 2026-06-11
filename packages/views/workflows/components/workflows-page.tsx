@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Plus, Workflow as WorkflowIcon, Play, Pause, FileText, Archive, History, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -12,6 +12,16 @@ import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader } from "@multica/ui/components/ui/dialog";
 import { ReactFlowProvider } from "@xyflow/react";
 import { DAGCanvas } from "./dag-canvas";
@@ -72,8 +82,12 @@ function WorkflowRow({ workflow }: { workflow: Workflow }) {
   const thumbH = 44;
   const thumbW = Math.min(vw * (thumbH / vh), 180);
 
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const dialogRootRef = useRef<HTMLDivElement>(null);
+  const portalContainer = dialogRootRef.current;
+
   const handleDelete = async () => {
-    if (!confirm(t(($) => $.page.delete_confirm))) return;
+    setDeleteDialogOpen(false);
     try {
       await deleteWorkflow.mutateAsync(workflow.id);
       toast.success(t(($) => $.detail.toast_deleted));
@@ -159,11 +173,38 @@ function WorkflowRow({ workflow }: { workflow: Workflow }) {
           type="button"
           className="shrink-0 w-20 flex justify-center p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
           title="Delete"
-          onClick={handleDelete}
+          onClick={() => setDeleteDialogOpen(true)}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {/* Dialog portal container for iframe compatibility */}
+      <div ref={dialogRootRef} />
+
+      {/* Delete confirm dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent container={portalContainer}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.detail.delete_dialog.description, { title: workflow.title })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteWorkflow.isPending}
+            >
+              {deleteWorkflow.isPending
+                ? t(($) => $.detail.delete_dialog.deleting)
+                : t(($) => $.detail.delete_dialog.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

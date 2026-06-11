@@ -100,7 +100,8 @@
     "delete_button": "删除工作流",
     "canvas_theme_system": "跟随系统",
     "canvas_theme_light": "浅色主题",
-    "canvas_theme_dark": "深色主题"
+    "canvas_theme_dark": "深色主题",
+    "discard_changes": "放弃"
   },
   "node": {
     "title": "标题",
