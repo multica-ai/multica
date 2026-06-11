@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
-import { OctoAgentBindButton } from "./octo-tab";
+import { OctoAgentBindButton, OctoTab } from "./octo-tab";
 
 type MemberRole = "owner" | "admin" | "member" | "guest";
 
@@ -128,5 +128,39 @@ describe("OctoAgentBindButton", () => {
     // The CTA shows because agent-1 itself is unbound.
     expect(screen.getByTestId("octo-agent-bind")).toBeInTheDocument();
     expect(screen.queryByTestId("octo-agent-connected")).not.toBeInTheDocument();
+  });
+});
+
+function renderTab() {
+  function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        {children}
+      </I18nProvider>
+    );
+  }
+  return render(<OctoTab />, { wrapper: Wrapper });
+}
+
+describe("OctoTab status rendering", () => {
+  beforeEach(() => {
+    membersRef.current = [{ user_id: "user-1", role: "owner" }];
+  });
+
+  it("localizes known statuses and falls back to the raw value for an unknown one", () => {
+    octoListingRef.current = {
+      configured: true,
+      installations: [
+        { id: "i1", agent_id: "a1", status: "active", bot_name: "Active Bot", robot_id: "r1" },
+        { id: "i2", agent_id: "a2", status: "revoked", bot_name: "Revoked Bot", robot_id: "r2" },
+        // A status the backend might add later must render raw, not crash.
+        { id: "i3", agent_id: "a3", status: "suspended", bot_name: "Future Bot", robot_id: "r3" },
+      ],
+    };
+    renderTab();
+    expect(screen.getByText(new RegExp(enSettings.octo.status_active))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(enSettings.octo.status_revoked))).toBeInTheDocument();
+    // Unknown enum value: downgraded to its raw string.
+    expect(screen.getByText(/suspended/)).toBeInTheDocument();
   });
 });

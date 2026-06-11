@@ -328,7 +328,12 @@
     "agent_connected_label": "Octo에 연결됨",
     "agent_bind_intro": "이 에이전트에 Octo 봇을 연결하면 사용자가 Octo에서 대화하고 이슈를 생성할 수 있습니다.",
     "members_note": "Octo 봇 연결·관리는 워크스페이스 소유자와 관리자만 할 수 있습니다. 관리자에게 설정을 요청하세요.",
-    "not_enabled_note": "이 배포에서는 Octo 연동이 활성화되어 있지 않습니다."
+    "not_enabled_note": "이 배포에서는 Octo 연동이 활성화되어 있지 않습니다.",
+    "agent_id_placeholder": "agent uuid",
+    "bot_token_placeholder": "bf_…",
+    "api_url_placeholder": "https://…/api",
+    "status_active": "연결됨",
+    "status_revoked": "연결 해제됨"
   },
   "lark": {
     "section_title": "Lark",

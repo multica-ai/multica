@@ -251,7 +251,12 @@
     "agent_connected_label": "Octo に接続済み",
     "agent_bind_intro": "このエージェントに Octo ボットを接続すると、ユーザーは Octo から対話したり issue を作成したりできます。",
     "members_note": "Octo ボットの接続・管理ができるのはワークスペースのオーナーと管理者のみです。管理者に設定を依頼してください。",
-    "not_enabled_note": "このデプロイでは Octo 連携が有効になっていません。"
+    "not_enabled_note": "このデプロイでは Octo 連携が有効になっていません。",
+    "agent_id_placeholder": "agent uuid",
+    "bot_token_placeholder": "bf_…",
+    "api_url_placeholder": "https://…/api",
+    "status_active": "接続済み",
+    "status_revoked": "切断済み"
   },
   "lark": {
     "section_title": "Lark",

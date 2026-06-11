@@ -251,7 +251,12 @@
     "agent_connected_label": "Connected to Octo",
     "agent_bind_intro": "Connect an Octo bot to this agent so people can chat with it and create issues from Octo.",
     "members_note": "Only workspace owners and admins can connect or manage Octo bots. Ask an admin to set it up.",
-    "not_enabled_note": "Octo integration is not enabled on this deployment."
+    "not_enabled_note": "Octo integration is not enabled on this deployment.",
+    "agent_id_placeholder": "agent uuid",
+    "bot_token_placeholder": "bf_…",
+    "api_url_placeholder": "https://…/api",
+    "status_active": "Connected",
+    "status_revoked": "Disconnected"
   },
   "lark": {
     "section_title": "Lark",

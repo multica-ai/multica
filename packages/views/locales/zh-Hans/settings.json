@@ -251,7 +251,12 @@
     "agent_connected_label": "已连接到 Octo",
     "agent_bind_intro": "为该智能体连接一个 Octo bot，用户即可在 Octo 与其对话并创建 issue。",
     "members_note": "只有工作区所有者和管理员可以连接或管理 Octo bot。请联系管理员配置。",
-    "not_enabled_note": "该部署未启用 Octo 集成。"
+    "not_enabled_note": "该部署未启用 Octo 集成。",
+    "agent_id_placeholder": "agent uuid",
+    "bot_token_placeholder": "bf_…",
+    "api_url_placeholder": "https://…/api",
+    "status_active": "已连接",
+    "status_revoked": "已断开"
   },
   "lark": {
     "section_title": "飞书",

@@ -69,6 +69,20 @@ export function OctoTab() {
     if (wsId) qc.invalidateQueries({ queryKey: octoKeys.installations(wsId) });
   };
 
+  // Localize the known installation statuses; an unknown value (a status the
+  // backend adds later) downgrades to its raw string rather than crashing —
+  // enum drift downgrades, never throws (CLAUDE.md → API Response Compatibility).
+  const statusText = (status: string) => {
+    switch (status) {
+      case "active":
+        return t(($) => $.octo.status_active);
+      case "revoked":
+        return t(($) => $.octo.status_revoked);
+      default:
+        return status;
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -109,7 +123,7 @@ export function OctoTab() {
             <div className="min-w-0">
               <div className="truncate text-sm font-medium">{inst.bot_name || inst.robot_id}</div>
               <div className="truncate text-xs text-muted-foreground">
-                {t(($) => $.octo.status_label)}: {inst.status}
+                {t(($) => $.octo.status_label)}: {statusText(inst.status)}
               </div>
             </div>
             {isAdmin && (
@@ -374,17 +388,17 @@ function ConfigureDialog({
             <Input
               value={agentId}
               onChange={(e) => setAgentId(e.target.value)}
-              placeholder="agent uuid"
+              placeholder={t(($) => $.octo.agent_id_placeholder)}
               disabled={!!defaultAgentId}
             />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium">{t(($) => $.octo.bot_token)}</label>
-            <Input value={botToken} onChange={(e) => setBotToken(e.target.value)} placeholder="bf_…" />
+            <Input value={botToken} onChange={(e) => setBotToken(e.target.value)} placeholder={t(($) => $.octo.bot_token_placeholder)} />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium">{t(($) => $.octo.api_url)}</label>
-            <Input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} placeholder="https://…/api" />
+            <Input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} placeholder={t(($) => $.octo.api_url_placeholder)} />
           </div>
         </div>
         <DialogFooter>
