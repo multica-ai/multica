@@ -502,59 +502,6 @@ type IssueToLabel struct {
 	LabelID pgtype.UUID `json:"label_id"`
 }
 
-type LocalCliMessage struct {
-	ID        pgtype.UUID        `json:"id"`
-	RunID     pgtype.UUID        `json:"run_id"`
-	CommentID pgtype.UUID        `json:"comment_id"`
-	Seq       int32              `json:"seq"`
-	Type      string             `json:"type"`
-	Tool      pgtype.Text        `json:"tool"`
-	Content   pgtype.Text        `json:"content"`
-	Input     []byte             `json:"input"`
-	Output    pgtype.Text        `json:"output"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	Source    pgtype.Text        `json:"source"`
-	SourceKey pgtype.Text        `json:"source_key"`
-}
-
-type LocalCliRun struct {
-	ID           pgtype.UUID        `json:"id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	IssueID      pgtype.UUID        `json:"issue_id"`
-	OwnerID      pgtype.UUID        `json:"owner_id"`
-	CliName      string             `json:"cli_name"`
-	Status       string             `json:"status"`
-	StartedAt    pgtype.Timestamptz `json:"started_at"`
-	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
-	ExitCode     pgtype.Int4        `json:"exit_code"`
-	WorkDir      pgtype.Text        `json:"work_dir"`
-	ContextDir   pgtype.Text        `json:"context_dir"`
-	CommentsMode string             `json:"comments_mode"`
-	TopCommentID pgtype.UUID        `json:"top_comment_id"`
-	Error        pgtype.Text        `json:"error"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Source       pgtype.Text        `json:"source"`
-	SourceKey    pgtype.Text        `json:"source_key"`
-}
-
-type LocalCliUsage struct {
-	ID               pgtype.UUID        `json:"id"`
-	RunID            pgtype.UUID        `json:"run_id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	IssueID          pgtype.UUID        `json:"issue_id"`
-	OwnerID          pgtype.UUID        `json:"owner_id"`
-	CliName          string             `json:"cli_name"`
-	Provider         string             `json:"provider"`
-	Model            string             `json:"model"`
-	InputTokens      int64              `json:"input_tokens"`
-	OutputTokens     int64              `json:"output_tokens"`
-	CacheReadTokens  int64              `json:"cache_read_tokens"`
-	CacheWriteTokens int64              `json:"cache_write_tokens"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-}
-
 type LarkBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -631,6 +578,59 @@ type LarkUserBinding struct {
 	LarkOpenID     string             `json:"lark_open_id"`
 	UnionID        pgtype.Text        `json:"union_id"`
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+}
+
+type LocalCliMessage struct {
+	ID        pgtype.UUID        `json:"id"`
+	RunID     pgtype.UUID        `json:"run_id"`
+	CommentID pgtype.UUID        `json:"comment_id"`
+	Seq       int32              `json:"seq"`
+	Type      string             `json:"type"`
+	Tool      pgtype.Text        `json:"tool"`
+	Content   pgtype.Text        `json:"content"`
+	Input     []byte             `json:"input"`
+	Output    pgtype.Text        `json:"output"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Source    pgtype.Text        `json:"source"`
+	SourceKey pgtype.Text        `json:"source_key"`
+}
+
+type LocalCliRun struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
+	CliName      string             `json:"cli_name"`
+	Status       string             `json:"status"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	ExitCode     pgtype.Int4        `json:"exit_code"`
+	WorkDir      pgtype.Text        `json:"work_dir"`
+	ContextDir   pgtype.Text        `json:"context_dir"`
+	CommentsMode string             `json:"comments_mode"`
+	TopCommentID pgtype.UUID        `json:"top_comment_id"`
+	Error        pgtype.Text        `json:"error"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Source       pgtype.Text        `json:"source"`
+	SourceKey    pgtype.Text        `json:"source_key"`
+}
+
+type LocalCliUsage struct {
+	ID               pgtype.UUID        `json:"id"`
+	RunID            pgtype.UUID        `json:"run_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	OwnerID          pgtype.UUID        `json:"owner_id"`
+	CliName          string             `json:"cli_name"`
+	Provider         string             `json:"provider"`
+	Model            string             `json:"model"`
+	InputTokens      int64              `json:"input_tokens"`
+	OutputTokens     int64              `json:"output_tokens"`
+	CacheReadTokens  int64              `json:"cache_read_tokens"`
+	CacheWriteTokens int64              `json:"cache_write_tokens"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Member struct {
@@ -832,6 +832,31 @@ type SquadMember struct {
 	MemberID   pgtype.UUID        `json:"member_id"`
 	Role       string             `json:"role"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type SysCronExecution struct {
+	ID           pgtype.UUID        `json:"id"`
+	JobName      string             `json:"job_name"`
+	ScopeKind    string             `json:"scope_kind"`
+	ScopeID      string             `json:"scope_id"`
+	PlanTime     pgtype.Timestamptz `json:"plan_time"`
+	Status       string             `json:"status"`
+	Attempt      int32              `json:"attempt"`
+	MaxAttempts  int32              `json:"max_attempts"`
+	NextRetryAt  pgtype.Timestamptz `json:"next_retry_at"`
+	RunnerID     pgtype.Text        `json:"runner_id"`
+	LeaseToken   pgtype.UUID        `json:"lease_token"`
+	HeartbeatAt  pgtype.Timestamptz `json:"heartbeat_at"`
+	StaleAfter   pgtype.Timestamptz `json:"stale_after"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+	DurationMs   pgtype.Int4        `json:"duration_ms"`
+	RowsAffected pgtype.Int8        `json:"rows_affected"`
+	Result       []byte             `json:"result"`
+	ErrorCode    pgtype.Text        `json:"error_code"`
+	ErrorMsg     pgtype.Text        `json:"error_msg"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type TaskMessage struct {
