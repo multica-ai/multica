@@ -153,7 +153,10 @@ const MessageRow = memo(function MessageRow({
   const cancelledRef = useRef(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { uploadWithToast } = useFileUpload(api);
-  const reminder = useCommentReminder(channelId);
+  // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — DM/channel message
+  // reminders are part of the delivered message menu, independent of the
+  // older issue-comment feature flag.
+  const reminder = useCommentReminder(channelId, { forceEnabled: true });
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
     enabled: editing,
@@ -373,7 +376,7 @@ const MessageRow = memo(function MessageRow({
       {!isTemp && !editing && (
         <div
           className={cn(
-            "absolute -top-3 right-4 items-center gap-0.5 rounded-md border bg-background shadow-sm",
+            "absolute -top-3 left-2 items-center gap-0.5 rounded-md border bg-background shadow-sm sm:left-auto sm:right-4",
             actionsOpen ? "flex" : "hidden sm:group-hover/msg:flex sm:focus-within:flex",
           )}
         >
