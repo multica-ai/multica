@@ -50,7 +50,7 @@ export const navigationGroups: WorkspaceNavGroup[] = [
   },
   {
     label: "Tools",
-    items: [{ href: "/pomodoro", label: "Pomodoro", icon: Timer }],
+    items: [{ href: "/focus", label: "Focus", icon: Timer }],
   },
   {
     label: "Workspace",
@@ -77,6 +77,8 @@ export function isWorkspaceNavActive(pathname: string, href: string): boolean {
       return pathname === "/my-work" || pathname === "/my-issues";
     case "/calendar":
       return pathname === "/calendar";
+    case "/focus":
+      return pathname === "/focus" || pathname === "/pomodoro";
     case "/agents":
       return pathname === "/agents" || pathname.startsWith("/agents/");
     case "/projects":

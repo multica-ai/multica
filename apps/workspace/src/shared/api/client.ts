@@ -64,6 +64,14 @@ import type {
   PomodoroSession,
   CompletePomodoroBody,
   CompletePomodoroResponse,
+  FocusSessionResponse,
+  FocusMutationResponse,
+  FocusCompleteResponse,
+  FocusEventsResponse,
+  StartFocusRequest,
+  UpdateFocusRequest,
+  FocusReasonRequest,
+  CompleteFocusRequest,
   WorkspaceExportManifest,
   WorkspaceImportPayload,
   WorkspaceImportResult,
@@ -1271,5 +1279,69 @@ export class ApiClient {
     if (params?.offset !== undefined) query.set("offset", String(params.offset));
     const qs = query.toString();
     return this.fetch(`/api/pomodoro/history${qs ? `?${qs}` : ""}`);
+  }
+
+  // Focus
+
+  async getFocusSession(): Promise<FocusSessionResponse> {
+    return this.fetch("/api/focus/current");
+  }
+
+  async listFocusEvents(): Promise<FocusEventsResponse> {
+    return this.fetch("/api/focus/events");
+  }
+
+  async startFocus(body: StartFocusRequest): Promise<FocusMutationResponse> {
+    return this.fetch("/api/focus/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateFocus(body: UpdateFocusRequest): Promise<FocusSessionResponse> {
+    return this.fetch("/api/focus/current", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async pauseFocus(body?: FocusReasonRequest): Promise<FocusMutationResponse> {
+    return this.fetch("/api/focus/pause", {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  async resumeFocus(): Promise<FocusMutationResponse> {
+    return this.fetch("/api/focus/resume", { method: "POST", body: "{}" });
+  }
+
+  async completeFocus(body?: CompleteFocusRequest): Promise<FocusCompleteResponse> {
+    return this.fetch("/api/focus/complete", {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  async abandonFocus(body?: FocusReasonRequest): Promise<FocusMutationResponse> {
+    return this.fetch("/api/focus/abandon", {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  async startFocusBreak(): Promise<FocusMutationResponse> {
+    return this.fetch("/api/focus/break/start", { method: "POST", body: "{}" });
+  }
+
+  async skipFocusBreak(body?: FocusReasonRequest): Promise<FocusMutationResponse> {
+    return this.fetch("/api/focus/break/skip", {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  async completeFocusBreak(): Promise<FocusMutationResponse> {
+    return this.fetch("/api/focus/break/complete", { method: "POST", body: "{}" });
   }
 }

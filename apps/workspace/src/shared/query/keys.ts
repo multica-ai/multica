@@ -88,9 +88,13 @@ export const queryKeys = {
   pomodoro: {
     current: (workspaceId: string) => ["pomodoro", "current", workspaceId] as const,
   },
+  focus: {
+    current: (workspaceId: string) => ["focus", "current", workspaceId] as const,
+    events: (workspaceId: string) => ["focus", "events", workspaceId] as const,
+  },
 } as const;
 
-const WORKSPACE_SCOPED_ROOTS = new Set(["workspace", "issues", "projects", "inbox", "runtimes", "tasks", "time-tracking", "pomodoro"]);
+const WORKSPACE_SCOPED_ROOTS = new Set(["workspace", "issues", "projects", "inbox", "runtimes", "tasks", "time-tracking", "pomodoro", "focus"]);
 
 export function isWorkspaceScopedQueryKey(queryKey: readonly unknown[]): boolean {
   const root = queryKey[0];

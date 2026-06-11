@@ -47,4 +47,19 @@ export type { TimeEntry, TimeEntryLabel, CreateTimeEntryRequest, SwitchTimeEntry
 export type { DailyReview, DailyPlan } from "./daily";
 export type { AutomationTemplate, StandupSummaryResult } from "./automation";
 export type { PomodoroPhase, PomodoroStatus, PomodoroSession, CompletePomodoroBody, CompletePomodoroResponse } from "./pomodoro";
+export type {
+  FocusMode,
+  FocusPhase,
+  FocusReason,
+  FocusSession,
+  FocusEvent,
+  FocusSessionResponse,
+  FocusMutationResponse,
+  FocusCompleteResponse,
+  FocusEventsResponse,
+  StartFocusRequest,
+  UpdateFocusRequest,
+  FocusReasonRequest,
+  CompleteFocusRequest,
+} from "./focus";
 export type { ManifestIssue, WorkspaceExportManifest, WorkspaceImportPayload, WorkspaceImportError, WorkspaceImportResult } from "./data-sync";

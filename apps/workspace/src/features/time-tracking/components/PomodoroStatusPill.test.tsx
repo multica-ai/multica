@@ -1,10 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
-import type { PomodoroSession } from "@/shared/types";
+import type { FocusSession } from "@/shared/types";
 import { PomodoroStatusPill } from "./PomodoroStatusPill";
-import { getPomodoroHeaderLabel } from "../lib/pomodoro-display";
 
-let mockSession: PomodoroSession | undefined;
+let mockSession: FocusSession | undefined;
 
 vi.mock("@/shared/router", () => ({
   Link: ({
@@ -23,8 +22,8 @@ vi.mock("@/shared/router", () => ({
   ),
 }));
 
-vi.mock("../hooks/use-pomodoro", () => ({
-  usePomodoroQuery: () => ({
+vi.mock("../hooks/use-focus", () => ({
+  useFocusQuery: () => ({
     data: mockSession,
     isLoading: false,
   }),
@@ -43,10 +42,10 @@ describe("PomodoroStatusPill", () => {
 
   it("renders nothing when there is no active running session", () => {
     mockSession = {
-      phase: "work",
-      phase_duration_seconds: 1500,
-      status: "idle",
-      elapsed_seconds: 0,
+      mode: "flowtime",
+      phase: "idle",
+      label_ids: [],
+      elapsed_focus_seconds: 0,
       started_at: null,
     };
 
@@ -55,36 +54,36 @@ describe("PomodoroStatusPill", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows a pomodoro link with focus label and remaining time for a running work session", async () => {
+  it("shows a focus link with elapsed time for a running focus session", async () => {
     mockSession = {
       id: "session-1",
-      phase: "work",
-      phase_duration_seconds: 1500,
-      status: "running",
-      elapsed_seconds: 120,
+      mode: "flowtime",
+      phase: "focusing",
+      label_ids: [],
+      elapsed_focus_seconds: 120,
       started_at: "2024-06-01T10:00:00.000Z",
     };
 
     render(<PomodoroStatusPill />);
 
-    const link = screen.getByRole("link", { name: /focus 23:00/i });
-    expect(link).toHaveAttribute("href", "/pomodoro");
+    const link = screen.getByRole("link", { name: /focus 2:00/i });
+    expect(link).toHaveAttribute("href", "/focus");
     expect(screen.getByText("Focus")).toBeInTheDocument();
-    expect(screen.getByText("23:00")).toBeInTheDocument();
+    expect(screen.getByText("2:00")).toBeInTheDocument();
 
     await act(async () => {
       vi.advanceTimersByTime(1000);
     });
 
-    expect(screen.getByText("22:59")).toBeInTheDocument();
+    expect(screen.getByText("2:01")).toBeInTheDocument();
   });
 
-  it("renders the correct remaining time on the first frame when switching to running", () => {
+  it("renders the correct elapsed time on the first frame when switching to focusing", () => {
     mockSession = {
-      phase: "work",
-      phase_duration_seconds: 1500,
-      status: "idle",
-      elapsed_seconds: 0,
+      mode: "flowtime",
+      phase: "idle",
+      label_ids: [],
+      elapsed_focus_seconds: 0,
       started_at: null,
     };
 
@@ -95,33 +94,33 @@ describe("PomodoroStatusPill", () => {
     vi.setSystemTime(new Date("2024-06-01T10:00:02.000Z"));
     mockSession = {
       id: "session-3",
-      phase: "work",
-      phase_duration_seconds: 1500,
-      status: "running",
-      elapsed_seconds: 120,
+      mode: "flowtime",
+      phase: "focusing",
+      label_ids: [],
+      elapsed_focus_seconds: 120,
       started_at: "2024-06-01T10:00:00.000Z",
     };
 
     rerender(<PomodoroStatusPill />);
 
-    expect(screen.getByRole("link", { name: /focus 22:58/i })).toBeInTheDocument();
-    expect(screen.getByText("22:58")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /focus 2:02/i })).toBeInTheDocument();
+    expect(screen.getByText("2:02")).toBeInTheDocument();
   });
 
   it("clears the interval when the pill unmounts", async () => {
     mockSession = {
       id: "session-4",
-      phase: "work",
-      phase_duration_seconds: 1500,
-      status: "running",
-      elapsed_seconds: 0,
+      mode: "flowtime",
+      phase: "focusing",
+      label_ids: [],
+      elapsed_focus_seconds: 0,
       started_at: "2024-06-01T10:00:00.000Z",
     };
 
     const clearIntervalSpy = vi.spyOn(window, "clearInterval");
     const { unmount } = render(<PomodoroStatusPill />);
 
-    expect(screen.getByText("25:00")).toBeInTheDocument();
+    expect(screen.getByText("0:00")).toBeInTheDocument();
 
     unmount();
 
@@ -136,19 +135,17 @@ describe("PomodoroStatusPill", () => {
   it("shows break for a running break session", () => {
     mockSession = {
       id: "session-2",
-      phase: "break",
-      phase_duration_seconds: 300,
-      status: "running",
-      elapsed_seconds: 0,
+      mode: "flowtime",
+      phase: "breaking",
+      label_ids: [],
+      elapsed_focus_seconds: 1500,
+      suggested_break_seconds: 300,
       started_at: "2024-06-01T10:00:00.000Z",
     };
 
     render(<PomodoroStatusPill />);
 
     expect(screen.getByText("Break")).toBeInTheDocument();
-  });
-
-  it("maps long breaks to the break label", () => {
-    expect(getPomodoroHeaderLabel("long_break")).toBe("Break");
+    expect(screen.getByText("5:00")).toBeInTheDocument();
   });
 });

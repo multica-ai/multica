@@ -2,16 +2,17 @@ import { test, expect, type TestInfo } from "@playwright/test";
 import { loginAsDefault, createTestApi } from "./helpers";
 import type { TestApiClient } from "./fixtures";
 
-function scopeForPomodoroTest(testInfo: TestInfo): string {
-  return `pomodoro-${testInfo.line}`;
+function scopeForFocusTest(testInfo: TestInfo): string {
+  return `focus-${testInfo.line}`;
 }
 
-test.describe("Pomodoro", () => {
+test.describe("Focus", () => {
   let api: TestApiClient;
 
   test.beforeEach(async ({ page }, testInfo) => {
-    const scope = scopeForPomodoroTest(testInfo);
+    const scope = scopeForFocusTest(testInfo);
     api = await createTestApi(scope);
+    await api.clearFocusState();
     await api.clearPomodoroHistory();
     await loginAsDefault(page, scope);
     // Reset any leftover session from a previous test so each test starts clean.
@@ -24,169 +25,98 @@ test.describe("Pomodoro", () => {
 
   // ── Navigation ──────────────────────────────────────────────────────────────
 
-  test("Pomodoro page is reachable from the sidebar", async ({ page }) => {
-    await page.getByRole("link", { name: /pomodoro/i }).click();
-    await page.waitForURL("**/pomodoro");
-    await expect(page.getByRole("heading", { name: "Current session" })).toBeVisible();
+  test("Focus page is reachable from the sidebar", async ({ page }) => {
+    await page.getByRole("link", { name: /focus/i }).click();
+    await page.waitForURL("**/focus");
+    await expect(page.locator('[aria-label="Current focus"]')).toBeVisible();
+  });
+
+  test("legacy Pomodoro route redirects to Focus", async ({ page }) => {
+    await page.goto("/pomodoro");
+    await page.waitForURL("**/focus");
+    await expect(page.locator('[aria-label="Current focus"]')).toBeVisible();
   });
 
   // ── Empty state ─────────────────────────────────────────────────────────────
 
-  test("Pomodoro page renders the focus-first layout even with no sessions", async ({ page }) => {
-    await page.goto("/pomodoro");
-    // Focus-first shell is always present regardless of session history.
-    await expect(page.getByRole("heading", { name: "Current session" })).toBeVisible({ timeout: 8000 });
-    await expect(page.getByText("Focus mode first. History stays below.")).toBeVisible();
-    await expect(page.getByText("Recent sessions")).toBeVisible();
+  test("Focus page renders the Flowtime-first layout with no session", async ({ page }) => {
+    await page.goto("/focus");
+    await expect(page.locator('[aria-label="Current focus"]')).toBeVisible({ timeout: 8000 });
+    await expect(page.locator('[aria-label="Focus context"]')).toBeVisible();
+    await expect(page.getByLabel("Mode")).toHaveValue("flowtime");
+    await expect(page.getByLabel("Next step")).toBeVisible();
+    await expect(page.getByLabel("Start friction")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
   });
 
-  // ── Timer controls ──────────────────────────────────────────────────────────
+  // ── Focus controls ──────────────────────────────────────────────────────────
 
-  test("Pomodoro timer shows work phase by default", async ({ page }) => {
-    await page.goto("/pomodoro");
-    await expect(page.getByText("专注")).toBeVisible({ timeout: 8000 });
-  });
+  test("can start and pause a Flowtime session from the page", async ({ page }) => {
+    await page.goto("/focus");
 
-  test("can start and pause the pomodoro timer from the page", async ({ page }) => {
-    await page.goto("/pomodoro");
+    await page.getByLabel("Next step").fill("Open the failing CI log");
+    await page.getByLabel("Note").fill("E2E focus start and pause");
 
-    // Wait for the widget to finish loading the session from the server.
-    const startBtn = page.getByRole("button", { name: "Start timer" });
+    const startBtn = page.getByRole("button", { name: "Start" });
     await expect(startBtn).toBeVisible({ timeout: 8000 });
-
-    // Start the timer.
     await startBtn.click();
 
-    // The pause button should now be present.
-    const pauseBtn = page.getByRole("button", { name: "Pause timer" });
+    const pauseBtn = page.getByRole("button", { name: "Pause" });
     await expect(pauseBtn).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("focusing")).toBeVisible();
+    await expect(page.getByLabel("Pause reason")).toBeVisible();
 
-    // Pause it.
     await pauseBtn.click();
-
-    // After pausing the start button returns.
-    await expect(page.getByRole("button", { name: "Start timer" })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: "Resume" })).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[aria-label="Current focus"]').getByText("paused", { exact: true })).toBeVisible();
   });
 
-  test("can reset the pomodoro timer from the page", async ({ page }) => {
-    // Start a session via the API so the timer is in a paused state.
-    await api.startPomodoroSession();
-    await api.pausePomodoroSession();
+  test("can resume complete and enter a suggested break", async ({ page }) => {
+    await page.goto("/focus");
 
-    await page.goto("/pomodoro");
+    await page.getByLabel("Next step").fill("Finish the focus E2E check");
+    await page.getByRole("button", { name: "Start" }).click();
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible({ timeout: 5000 });
 
-    // The reset button should be visible.
-    const resetBtn = page.getByRole("button", { name: "Reset timer" });
-    await expect(resetBtn).toBeVisible({ timeout: 8000 });
+    await page.getByRole("button", { name: "Pause" }).click();
+    await expect(page.getByRole("button", { name: "Resume" })).toBeVisible({ timeout: 5000 });
 
-    await resetBtn.click();
+    await page.getByRole("button", { name: "Resume" }).click();
+    await expect(page.getByRole("button", { name: "Complete" })).toBeVisible({ timeout: 5000 });
 
-    // After reset the start button should reappear (idle state).
-    await expect(page.getByRole("button", { name: "Start timer" })).toBeVisible({ timeout: 5000 });
+    await page.getByRole("button", { name: "Complete" }).click();
+    await expect(page.getByText("Suggested break")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: "Start break" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Skip" })).toBeVisible();
   });
 
-  test("document title updates while the timer is running", async ({ page }) => {
-    await page.goto("/pomodoro");
+  test("can start and complete a suggested break", async ({ page }) => {
+    await page.goto("/focus");
 
-    const startBtn = page.getByRole("button", { name: "Start timer" });
-    await expect(startBtn).toBeVisible({ timeout: 8000 });
-    await startBtn.click();
+    await page.getByRole("button", { name: "Start" }).click();
+    await expect(page.getByRole("button", { name: "Complete" })).toBeVisible({ timeout: 5000 });
+    await page.getByRole("button", { name: "Complete" }).click();
 
-    // Title should contain the 🍅 emoji while running.
-    await expect(page).toHaveTitle(/🍅/, { timeout: 5000 });
+    await expect(page.getByRole("button", { name: "Start break" })).toBeVisible({ timeout: 5000 });
+    await page.getByRole("button", { name: "Start break" }).click();
 
-    // Pause to clean up.
-    await page.getByRole("button", { name: "Pause timer" }).click();
+    await expect(page.getByText("Break in progress.")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: "Complete break" })).toBeVisible();
+    await page.getByRole("button", { name: "Complete break" }).click();
+    await expect(page.getByRole("button", { name: "Start" })).toBeVisible({ timeout: 5000 });
   });
 
-  // ── Focus-first layout ──────────────────────────────────────────────────────
+  test("captures quick-start friction reason before starting", async ({ page }) => {
+    await page.goto("/focus");
 
-  test("pomodoro page shows the focus-first hero before history", async ({ page }) => {
-    await api.startPomodoroSession();
-    await page.goto("/pomodoro");
+    await page.getByLabel("Mode").selectOption("quick_start");
+    await page.getByLabel("Next step").fill("Write the first sentence");
+    await page.getByLabel("Start friction").selectOption("avoidance");
+    await page.getByPlaceholder("Optional reason note").fill("E2E avoidance note");
 
-    await expect(page.getByRole("heading", { name: "Current session" })).toBeVisible();
-    await expect(page.getByText("Quick capture")).toBeVisible();
-    await expect(page.getByText("Recent sessions")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Expand full history" })).toBeVisible();
-  });
-
-  // ── History & stats ─────────────────────────────────────────────────────────
-
-  test("completed pomodoro appears in the recent sessions list", async ({ page }) => {
-    // Create a pomodoro entry: start → complete (backend writes type=pomodoro time_entry).
-    await api.startPomodoroSession();
-    await api.completePomodoroSession({ note: "E2E pomodoro test" });
-
-    await page.goto("/pomodoro");
-
-    // The recent sessions section should now render — entry is shown in the list.
-    await expect(page.getByText("Recent sessions")).toBeVisible({ timeout: 8000 });
-    await expect(page.getByText("E2E pomodoro test")).toBeVisible({ timeout: 5000 });
-  });
-
-  test("today summary increments after completing a pomodoro", async ({ page }) => {
-    // Complete a fresh pomodoro session via the API so there is exactly 1 done entry for today.
-    await api.startPomodoroSession();
-    await api.completePomodoroSession();
-
-    await page.goto("/pomodoro");
-
-    // The Today summary card must be visible and its "Done today" counter must read "1".
-    const todaySection = page.locator('[aria-label="Today"]');
-    await expect(todaySection).toBeVisible({ timeout: 8000 });
-    // Locate the stat cell that is labelled "Done today" and verify the count value.
-    const doneTodayCell = todaySection.locator("div").filter({ hasText: /^Done today/ }).first();
-    await expect(doneTodayCell.locator("p").last()).toHaveText("1", { timeout: 8000 });
-  });
-
-  test("today summary shows capped progress after hitting the focus target", async ({ page }) => {
-    const now = new Date();
-    now.setHours(12, 0, 0, 0);
-    for (let index = 0; index < 6; index += 1) {
-      const start = new Date(now.getTime() - (index + 1) * 40 * 60 * 1000);
-      const stop = new Date(start.getTime() + 25 * 60 * 1000);
-      await api.createPomodoroHistoryEntry({
-        start_time: start.toISOString(),
-        stop_time: stop.toISOString(),
-        description: `E2E pomodoro target ${index + 1}`,
-      });
-    }
-
-    await page.goto("/pomodoro");
-
-    const todaySection = page.locator('[aria-label="Today"]');
-    await expect(todaySection).toBeVisible({ timeout: 8000 });
-    await expect(todaySection.getByText("Focus target")).toBeVisible();
-    await expect(todaySection.getByText("6 pomodoros")).toBeVisible();
-    await expect(todaySection.getByText("Done today")).toBeVisible();
-    await expect(todaySection.getByText("100%")).toBeVisible();
-    const remainingCell = todaySection.locator("div").filter({ hasText: /^Remaining/ }).first();
-    await expect(remainingCell.locator("p").last()).toHaveText("0");
-  });
-
-  test("today summary shows a two-day streak from consecutive local days", async ({ page }) => {
-    const todayStart = new Date();
-    todayStart.setHours(10, 0, 0, 0);
-    const yesterdayStart = new Date(todayStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-    const createSession = async (start: Date, label: string) => {
-      await api.createPomodoroHistoryEntry({
-        start_time: start.toISOString(),
-        stop_time: new Date(start.getTime() + 25 * 60 * 1000).toISOString(),
-        description: label,
-      });
-    };
-
-    await createSession(todayStart, "E2E streak today");
-    await createSession(yesterdayStart, "E2E streak yesterday");
-
-    await page.goto("/pomodoro");
-
-    const todaySection = page.locator('[aria-label="Today"]');
-    await expect(todaySection).toBeVisible({ timeout: 8000 });
-    const streakCell = todaySection.locator("div").filter({ hasText: /^Streak/ }).first();
-    await expect(streakCell.locator("p").last()).toHaveText("2 days");
+    await page.getByRole("button", { name: "Start" }).click();
+    await expect(page.getByText("focusing")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[aria-label="Current focus"]').getByText("2 min start")).toBeVisible();
   });
 
   // ── Settings ────────────────────────────────────────────────────────────────

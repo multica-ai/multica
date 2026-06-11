@@ -21,7 +21,7 @@ describe("workspace navigation metadata", () => {
       "Archived",
     ]);
 
-    expect(navigationGroups[2]?.items.map((item) => item.label)).toEqual(["Pomodoro"]);
+    expect(navigationGroups[2]?.items.map((item) => item.label)).toEqual(["Focus"]);
 
     const flattenedLabels = navigationGroups.flatMap((group) =>
       group.items.map((item) => item.label),
@@ -39,7 +39,8 @@ describe("workspace navigation metadata", () => {
     expect(getWorkspacePageTitle("/issues/issue-123")).toBe("Issues");
     expect(getWorkspacePageTitle("/issues/archived")).toBe("Archived");
     expect(getWorkspacePageTitle("/projects/project-1")).toBe("Projects");
-    expect(getWorkspacePageTitle("/pomodoro")).toBe("Pomodoro");
+    expect(getWorkspacePageTitle("/focus")).toBe("Focus");
+    expect(getWorkspacePageTitle("/pomodoro")).toBe("Focus");
     expect(getWorkspacePageTitle("/settings")).toBe("Settings");
   });
 

@@ -37,7 +37,7 @@ import { SkillsPage } from "@/features/skills";
 import { MyTimePage } from "@/features/time-tracking/pages/MyTimePage";
 import { MyTimeCalendarPage } from "@/features/time-tracking/pages/MyTimeCalendarPage";
 import { TeamTimePage } from "@/features/time-tracking/pages/TeamTimePage";
-import { PomodoroPage } from "@/features/time-tracking/pages/PomodoroPage";
+import { FocusPage } from "@/features/time-tracking/pages/FocusPage";
 import { IssueCalendarPage } from "@/features/issues/components/IssueCalendarPage";
 import { InvitePage } from "@/features/invite";
 
@@ -309,7 +309,13 @@ const teamTimeRoute = createRoute({
 const pomodoroRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "pomodoro",
-  component: PomodoroPage,
+  component: () => <Navigate to="/focus" replace />,
+});
+
+const focusRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "focus",
+  component: FocusPage,
 });
 
 const issueCalendarRoute = createRoute({
@@ -356,6 +362,7 @@ const routeTree = rootRoute.addChildren([
     myTimeRoute,
     myTimeCalendarRoute,
     teamTimeRoute,
+    focusRoute,
     pomodoroRoute,
     issueCalendarRoute,
   ]),

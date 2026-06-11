@@ -35,7 +35,7 @@ vi.mock("@/features/issues/stores/draft-store", () => ({
 }));
 
 vi.mock("@/features/time-tracking", () => ({
-  PomodoroStatusPill: () => <a href="/pomodoro">Focus 23:00</a>,
+  PomodoroStatusPill: () => <a href="/focus">Focus 23:00</a>,
 }));
 
 vi.mock("@/shared/router", () => ({
@@ -54,7 +54,7 @@ describe("DesktopWorkspaceHeader", () => {
     render(<DesktopWorkspaceHeader />);
 
     expect(screen.getByRole("heading", { name: "Issues" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Focus 23:00" })).toHaveAttribute("href", "/pomodoro");
+    expect(screen.getByRole("link", { name: "Focus 23:00" })).toHaveAttribute("href", "/focus");
   });
 
   it("opens global search and the create issue modal from desktop actions", () => {
@@ -72,6 +72,6 @@ describe("DesktopWorkspaceHeader", () => {
 
     render(<DesktopWorkspaceHeader />);
 
-    expect(screen.getByRole("heading", { name: "Pomodoro" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Focus" })).toBeInTheDocument();
   });
 });

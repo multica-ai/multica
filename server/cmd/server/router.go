@@ -276,6 +276,20 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 				r.Delete("/{id}", h.DeleteTimeEntryLabel)
 			})
 
+			r.Route("/api/focus", func(r chi.Router) {
+				r.Get("/current", h.GetCurrentFocus)
+				r.Patch("/current", h.UpdateCurrentFocus)
+				r.Get("/events", h.ListFocusEvents)
+				r.Post("/start", h.StartFocus)
+				r.Post("/pause", h.PauseFocus)
+				r.Post("/resume", h.ResumeFocus)
+				r.Post("/complete", h.CompleteFocus)
+				r.Post("/abandon", h.AbandonFocus)
+				r.Post("/break/start", h.StartFocusBreak)
+				r.Post("/break/skip", h.SkipFocusBreak)
+				r.Post("/break/complete", h.CompleteFocusBreak)
+			})
+
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/", h.ListProjects)

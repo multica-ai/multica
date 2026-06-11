@@ -399,6 +399,40 @@ export class TestApiClient {
     }
   }
 
+  /** Delete focus sessions/events and flowtime entries for the current user/workspace. */
+  async clearFocusState(): Promise<void> {
+    const userId = typeof this.user?.id === "string" ? this.user.id : null;
+    if (!userId || !this.workspaceId) {
+      throw new Error("Missing user or workspace for focus cleanup");
+    }
+
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(
+        `DELETE FROM focus_events
+         WHERE workspace_id = $1
+           AND user_id = $2`,
+        [this.workspaceId, userId],
+      );
+      await client.query(
+        `DELETE FROM focus_sessions
+         WHERE workspace_id = $1
+           AND user_id = $2`,
+        [this.workspaceId, userId],
+      );
+      await client.query(
+        `DELETE FROM time_entry
+         WHERE workspace_id = $1
+           AND user_id = $2
+           AND type = 'flowtime'`,
+        [this.workspaceId, userId],
+      );
+    } finally {
+      await client.end();
+    }
+  }
+
   async createPomodoroHistoryEntry(opts: {
     start_time: string;
     stop_time: string;

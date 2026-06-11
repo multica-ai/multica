@@ -1,25 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Timer } from "lucide-react";
+import { Focus } from "lucide-react";
 import { Link } from "@/shared/router";
 import { cn } from "@/lib/utils";
-import { usePomodoroQuery } from "../hooks/use-pomodoro";
-import {
-  formatPomodoroTimer,
-  getPomodoroHeaderLabel,
-  getPomodoroRemainingSeconds,
-} from "../lib/pomodoro-display";
+import { useFocusQuery } from "../hooks/use-focus";
 
 /**
- * Renders a compact shell-level status link for the active pomodoro session.
+ * Renders a compact shell-level status link for the active Focus session.
  */
 export function PomodoroStatusPill() {
-  const { data: session } = usePomodoroQuery();
+  const { data: session } = useFocusQuery();
   const [, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!session || session.status !== "running") {
+    if (!session || !["focusing", "paused", "breaking"].includes(session.phase)) {
       return undefined;
     }
 
@@ -32,26 +27,35 @@ export function PomodoroStatusPill() {
     };
   }, [session]);
 
-  if (!session || session.status !== "running") {
+  if (!session || !["focusing", "paused", "breaking"].includes(session.phase)) {
     return null;
   }
 
-  const label = getPomodoroHeaderLabel(session.phase);
-  const remaining = formatPomodoroTimer(getPomodoroRemainingSeconds(session));
+  const elapsed = session.phase === "focusing" && session.started_at
+    ? session.elapsed_focus_seconds + Math.max(0, Math.floor((Date.now() - new Date(session.started_at).getTime()) / 1000))
+    : session.elapsed_focus_seconds;
+  const breakRemaining = session.phase === "breaking" && session.started_at && session.suggested_break_seconds
+    ? Math.max(0, session.suggested_break_seconds - Math.floor((Date.now() - new Date(session.started_at).getTime()) / 1000))
+    : session.suggested_break_seconds ?? 0;
+  const shownSeconds = session.phase === "breaking" ? breakRemaining : elapsed;
+  const minutes = Math.floor(shownSeconds / 60);
+  const seconds = shownSeconds % 60;
+  const display = `${minutes}:${String(seconds).padStart(2, "0")}`;
+  const label = session.phase === "breaking" ? "Break" : session.phase === "paused" ? "Paused" : "Focus";
 
   return (
     <Link
-      href="/pomodoro"
-      aria-label={`${label} ${remaining}`}
+      href="/focus"
+      aria-label={`${label} ${display}`}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border border-border/70",
         "bg-muted/60 px-2.5 py-1 text-xs font-medium text-muted-foreground",
         "transition-colors hover:text-foreground",
       )}
     >
-      <Timer className="size-3.5 shrink-0" aria-hidden="true" />
+      <Focus className="size-3.5 shrink-0" aria-hidden="true" />
       <span>{label}</span>
-      <span className="font-mono text-foreground tabular-nums">{remaining}</span>
+      <span className="font-mono text-foreground tabular-nums">{display}</span>
     </Link>
   );
 }

@@ -92,4 +92,7 @@ const (
 	EventTimeEntryStopped = "time_entry:stopped"
 	EventTimeEntryUpdated = "time_entry:updated"
 	EventTimeEntryDeleted = "time_entry:deleted"
+
+	// Focus events
+	EventFocusUpdated = "focus:updated"
 )

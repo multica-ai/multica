@@ -175,6 +175,41 @@ type DailyReview struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type FocusEvent struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	FocusSessionID  pgtype.UUID        `json:"focus_session_id"`
+	EventType       string             `json:"event_type"`
+	Reason          pgtype.Text        `json:"reason"`
+	Note            pgtype.Text        `json:"note"`
+	DurationSeconds pgtype.Int4        `json:"duration_seconds"`
+	Metadata        []byte             `json:"metadata"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type FocusSession struct {
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	UserID                pgtype.UUID        `json:"user_id"`
+	Mode                  string             `json:"mode"`
+	Phase                 string             `json:"phase"`
+	Preset                pgtype.Text        `json:"preset"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	Description           pgtype.Text        `json:"description"`
+	CommitmentText        pgtype.Text        `json:"commitment_text"`
+	LabelIds              []byte             `json:"label_ids"`
+	FirstStartedAt        pgtype.Timestamptz `json:"first_started_at"`
+	StartedAt             pgtype.Timestamptz `json:"started_at"`
+	PausedAt              pgtype.Timestamptz `json:"paused_at"`
+	ElapsedFocusSeconds   int32              `json:"elapsed_focus_seconds"`
+	SuggestedBreakSeconds pgtype.Int4        `json:"suggested_break_seconds"`
+	StatusReason          pgtype.Text        `json:"status_reason"`
+	ReasonNote            pgtype.Text        `json:"reason_note"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

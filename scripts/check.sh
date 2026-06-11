@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ==========================================================================
-# Full verification pipeline: typecheck → unit tests → Go tests → E2E
+# Full verification pipeline: DB migrations → typecheck → unit tests → Go tests → E2E
 # Usage: bash scripts/check.sh
 # ==========================================================================
 
@@ -82,31 +82,39 @@ echo "==> Checking PostgreSQL..."
 bash scripts/ensure-postgres.sh "$ENV_FILE"
 
 # --------------------------------------------------------------------------
-# Step 1: TypeScript typecheck
+# --------------------------------------------------------------------------
+# Step 1: Run database migrations
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [1/5] TypeScript typecheck..."
+echo "==> [1/6] Database migrations..."
+(cd server && go run ./cmd/migrate up) || { EXIT_CODE=1; exit 1; }
+
+# --------------------------------------------------------------------------
+# Step 2: TypeScript typecheck
+# --------------------------------------------------------------------------
+echo ""
+echo "==> [2/6] TypeScript typecheck..."
 pnpm typecheck || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
-# Step 2: TypeScript unit tests (Vitest)
+# Step 3: TypeScript unit tests (Vitest)
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [2/5] TypeScript unit tests..."
+echo "==> [3/6] TypeScript unit tests..."
 pnpm test || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
-# Step 3: Go tests
+# Step 4: Go tests
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [3/5] Go tests..."
+echo "==> [4/6] Go tests..."
 (cd server && go test ./...) || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
-# Step 4: Start services for E2E (only if not already running)
+# Step 5: Start services for E2E (only if not already running)
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [4/5] Starting services for E2E..."
+echo "==> [5/6] Starting services for E2E..."
 
 if curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
   echo "    Backend already running on :$PORT"
@@ -129,8 +137,8 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# Step 5: E2E tests (Playwright)
+# Step 6: E2E tests (Playwright)
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [5/5] E2E tests (Playwright)..."
+echo "==> [6/6] E2E tests (Playwright)..."
 pnpm exec playwright test || { EXIT_CODE=1; exit 1; }
