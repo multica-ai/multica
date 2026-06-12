@@ -28,3 +28,12 @@ export interface ChannelMessage {
   external_message_id: string | null;
   created_at: string;
 }
+
+export interface ChannelTypingPayload {
+  channel_id: string;
+  actor_type: "user" | "agent" | "lark" | "system";
+  actor_id?: string;
+  actor_name: string;
+  is_typing: boolean;
+  expires_in_ms?: number;
+}

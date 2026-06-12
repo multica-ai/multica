@@ -11,10 +11,13 @@ import {
   useCreateChannel,
   useRemoveChannelMember,
   useSendChannelMessage,
+  useSetChannelTyping,
 } from "@multica/core/channels";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import type { Channel, ChannelMember, ChannelMessage } from "@multica/core/types";
+import type { Channel, ChannelMember, ChannelMessage, ChannelTypingPayload } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -29,6 +32,14 @@ function formatTime(value: string) {
   } catch {
     return "";
   }
+}
+
+interface TypingActor {
+  key: string;
+  channelId: string;
+  actorName: string;
+  actorType: ChannelTypingPayload["actor_type"];
+  expiresAt: number;
 }
 
 function MessageRow({ message }: { message: ChannelMessage }) {
@@ -74,6 +85,24 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
+function TypingIndicator({ actors }: { actors: TypingActor[] }) {
+  if (actors.length === 0) return null;
+  const names = actors.map((a) => a.actorName || (a.actorType === "agent" ? "Agent" : "Someone"));
+  const label = names.length === 1 ? `${names[0]} 正在输入` : `${names.slice(0, 2).join("、")} ${names.length > 2 ? `等 ${names.length} 人` : ""}正在输入`;
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground" aria-live="polite">
+      <span className="flex h-7 items-center gap-1 rounded-full border bg-card px-3 shadow-sm">
+        <span>{label}</span>
+        <span className="ml-1 flex items-end gap-0.5" aria-hidden="true">
+          <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-0.24s]" />
+          <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-0.12s]" />
+          <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70" />
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function MemberPill({ member, onRemove }: { member: ChannelMember; onRemove: () => void }) {
   const isAgent = member.member_type === "agent";
   return (
@@ -89,13 +118,18 @@ function MemberPill({ member, onRemove }: { member: ChannelMember; onRemove: () 
 
 export function ChannelsPage() {
   const wsId = useWorkspaceId();
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [typingActors, setTypingActors] = useState<Record<string, TypingActor>>({});
   const [newName, setNewName] = useState("");
   const [newLarkChatId, setNewLarkChatId] = useState("");
   const [selectedMember, setSelectedMember] = useState("");
   const [selectedAgent, setSelectedAgent] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const typingStartedRef = useRef(false);
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingPulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: channels = [], isLoading } = useQuery(channelsOptions(wsId));
   const { data: workspaceMembers = [] } = useQuery(memberListOptions(wsId));
@@ -105,6 +139,7 @@ export function ChannelsPage() {
   const { data: channelMembers = [] } = useQuery(channelMembersOptions(active?.id ?? ""));
   const createChannel = useCreateChannel();
   const sendMessage = useSendChannelMessage();
+  const setTyping = useSetChannelTyping();
   const addMember = useAddChannelMember();
   const removeMember = useRemoveChannelMember();
 
@@ -112,6 +147,10 @@ export function ChannelsPage() {
   const agentIds = useMemo(() => new Set(channelMembers.filter((m) => m.member_type === "agent").map((m) => m.member_id)), [channelMembers]);
   const availableMembers = workspaceMembers.filter((m) => !memberIds.has(m.user_id));
   const availableAgents = agents.filter((a) => !agentIds.has(a.id) && !a.archived_at);
+  const activeTypingActors = useMemo(
+    () => Object.values(typingActors).filter((a) => a.channelId === active?.id),
+    [active?.id, typingActors],
+  );
 
   useEffect(() => {
     if (!activeId && channels[0]) setActiveId(channels[0].id);
@@ -119,7 +158,48 @@ export function ChannelsPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, active?.id]);
+  }, [messages.length, active?.id, activeTypingActors.length]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setTypingActors((current) => {
+        const next = Object.fromEntries(Object.entries(current).filter(([, actor]) => actor.expiresAt > now));
+        return Object.keys(next).length === Object.keys(current).length ? current : next;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    typingStartedRef.current = false;
+    if (typingStopTimerRef.current) window.clearTimeout(typingStopTimerRef.current);
+    if (typingPulseTimerRef.current) window.clearTimeout(typingPulseTimerRef.current);
+  }, [active?.id]);
+
+  useWSEvent("channel:typing", (payload) => {
+    const event = payload as ChannelTypingPayload;
+    if (!event.channel_id || event.channel_id !== active?.id) return;
+    const actorKey = `${event.actor_type}:${event.actor_id ?? event.actor_name}`;
+    if (event.actor_type === "user" && event.actor_id && event.actor_id === currentUserId) return;
+    setTypingActors((current) => {
+      if (!event.is_typing) {
+        const next = { ...current };
+        delete next[actorKey];
+        return next;
+      }
+      return {
+        ...current,
+        [actorKey]: {
+          key: actorKey,
+          channelId: event.channel_id,
+          actorName: event.actor_name,
+          actorType: event.actor_type,
+          expiresAt: Date.now() + (event.expires_in_ms ?? 5000),
+        },
+      };
+    });
+  });
 
   const handleCreate = () => {
     const name = newName.trim() || "general";
@@ -135,9 +215,56 @@ export function ChannelsPage() {
     );
   };
 
+  const publishTyping = (isTyping: boolean) => {
+    if (!active) return;
+    setTyping.mutate({ channelId: active.id, isTyping });
+  };
+
+  const scheduleTypingStop = () => {
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = setTimeout(() => {
+      if (typingStartedRef.current) {
+        typingStartedRef.current = false;
+        publishTyping(false);
+      }
+    }, 1200);
+  };
+
+  const scheduleTypingPulse = () => {
+    if (typingPulseTimerRef.current) clearTimeout(typingPulseTimerRef.current);
+    typingPulseTimerRef.current = setTimeout(() => {
+      if (typingStartedRef.current) {
+        publishTyping(true);
+        scheduleTypingPulse();
+      }
+    }, 3500);
+  };
+
+  const handleDraftChange = (value: string) => {
+    setDraft(value);
+    if (!active) return;
+    if (value.trim()) {
+      if (!typingStartedRef.current) {
+        typingStartedRef.current = true;
+        publishTyping(true);
+        scheduleTypingPulse();
+      }
+      scheduleTypingStop();
+      return;
+    }
+    if (typingStartedRef.current) {
+      typingStartedRef.current = false;
+      publishTyping(false);
+    }
+  };
+
   const handleSend = () => {
     const content = draft.trim();
     if (!content || !active) return;
+    if (typingStartedRef.current) {
+      typingStartedRef.current = false;
+      publishTyping(false);
+    }
     sendMessage.mutate({ channelId: active.id, content }, { onSuccess: () => setDraft("") });
   };
 
@@ -211,13 +338,14 @@ export function ChannelsPage() {
                 {messages.length === 0 ? (
                   <div className="flex h-full items-center justify-center text-sm text-muted-foreground">开始聊天吧。把智能体加入右侧成员后，输入 @智能体名称 触发回复。</div>
                 ) : messages.map((message) => <MessageRow key={message.id} message={message} />)}
+                <TypingIndicator actors={activeTypingActors} />
                 <div ref={bottomRef} />
               </div>
               <div className="border-t bg-background p-4">
                 <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm">
                   <Textarea
                     value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
+                    onChange={(e) => handleDraftChange(e.target.value)}
                     placeholder="发消息到群聊。@智能体名称 会触发它回复。"
                     className="min-h-11 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
                     onKeyDown={(e) => {

@@ -23,6 +23,8 @@ const channelNameMaxLen = 80
 const channelMessageMaxLen = 20000
 const channelContextMessageLimit = 30
 const channelRunTriggerLimit = 10
+const channelUserTypingExpiresInMS = 5000
+const channelAgentTypingExpiresInMS = 10 * 60 * 1000
 
 type ChannelResponse struct {
 	ID          string  `json:"id"`
@@ -78,6 +80,10 @@ type SendChannelMessageRequest struct {
 	Content string `json:"content"`
 }
 
+type ChannelTypingRequest struct {
+	IsTyping bool `json:"is_typing"`
+}
+
 type ImportLarkChannelMessageRequest struct {
 	LarkChatID        string `json:"lark_chat_id"`
 	ExternalMessageID string `json:"external_message_id"`
@@ -90,6 +96,8 @@ func (h *Handler) StartChannelBridge() {
 		return
 	}
 	h.Bus.Subscribe(protocol.EventChatDone, h.handleChannelChatDone)
+	h.Bus.Subscribe(protocol.EventTaskFailed, h.handleChannelChatStopped)
+	h.Bus.Subscribe(protocol.EventTaskCancelled, h.handleChannelChatStopped)
 }
 
 func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
@@ -357,6 +365,35 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (h *Handler) SetChannelTyping(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	channelID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "channelId"), "channel id")
+	if !ok {
+		return
+	}
+	var req ChannelTypingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !h.requireChannelUserMember(w, r.Context(), workspaceID, channelID, parseUUID(userID)) {
+		return
+	}
+	h.publish(protocol.EventChannelTyping, workspaceID, "member", userID, protocol.ChannelTypingPayload{
+		ChannelID:   uuidToString(channelID),
+		ActorType:   "user",
+		ActorID:     userID,
+		ActorName:   h.channelAuthorName(r.Context(), userID),
+		IsTyping:    req.IsTyping,
+		ExpiresInMS: channelUserTypingExpiresInMS,
+	})
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (h *Handler) SendChannelMessage(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -492,6 +529,7 @@ func (h *Handler) dispatchChannelMentions(ctx context.Context, ch ChannelRespons
 		if trigger.AuthorType == "agent" && trigger.AuthorID != nil && *trigger.AuthorID == uuidToString(agent.ID) {
 			continue
 		}
+		h.publishChannelAgentTyping(ch, agent, true)
 		session, err := h.ensureChannelAgentSession(ctx, ch, agent.ID, initiatorUserID)
 		if err != nil {
 			slog.Warn("channel mention: ensure chat session failed", "channel", ch.ID, "agent", uuidToString(agent.ID), "error", err)
@@ -512,6 +550,17 @@ func (h *Handler) dispatchChannelMentions(ctx context.Context, ch ChannelRespons
 			slog.Warn("channel mention: tag prompt with task failed", "channel", ch.ID, "agent", uuidToString(agent.ID), "task", uuidToString(task.ID), "error", err)
 		}
 	}
+}
+
+func (h *Handler) publishChannelAgentTyping(ch ChannelResponse, agent db.Agent, isTyping bool) {
+	h.publish(protocol.EventChannelTyping, ch.WorkspaceID, "agent", uuidToString(agent.ID), protocol.ChannelTypingPayload{
+		ChannelID:   ch.ID,
+		ActorType:   "agent",
+		ActorID:     uuidToString(agent.ID),
+		ActorName:   agent.Name,
+		IsTyping:    isTyping,
+		ExpiresInMS: channelAgentTypingExpiresInMS,
+	})
 }
 
 func (h *Handler) channelMentionedAgents(ctx context.Context, workspaceID, channelID, content string) []db.Agent {
@@ -676,18 +725,31 @@ func (h *Handler) ensureChannelAgentSession(ctx context.Context, ch ChannelRespo
 	return session, nil
 }
 
+func (h *Handler) handleChannelChatStopped(e events.Event) {
+	chatSessionID, _ := e.Payload.(map[string]any)["chat_session_id"].(string)
+	if chatSessionID == "" {
+		return
+	}
+	channelID, workspaceID, agentID, ok := h.channelAgentForChatSession(context.Background(), chatSessionID)
+	if !ok {
+		return
+	}
+	h.publish(protocol.EventChannelTyping, uuidToString(workspaceID), "agent", uuidToString(agentID), protocol.ChannelTypingPayload{
+		ChannelID: uuidToString(channelID),
+		ActorType: "agent",
+		ActorID:   uuidToString(agentID),
+		ActorName: h.agentName(context.Background(), agentID),
+		IsTyping:  false,
+	})
+}
+
 func (h *Handler) handleChannelChatDone(e events.Event) {
 	payload, ok := e.Payload.(protocol.ChatDonePayload)
 	if !ok || payload.ChatSessionID == "" || strings.TrimSpace(payload.Content) == "" {
 		return
 	}
-	var channelID, workspaceID, agentID pgtype.UUID
-	err := h.DB.QueryRow(context.Background(), `
-		SELECT cas.channel_id, ch.workspace_id, cas.agent_id
-		FROM channel_agent_session cas
-		JOIN channel ch ON ch.id = cas.channel_id
-		WHERE cas.chat_session_id = $1`, parseUUID(payload.ChatSessionID)).Scan(&channelID, &workspaceID, &agentID)
-	if err != nil {
+	channelID, workspaceID, agentID, ok := h.channelAgentForChatSession(context.Background(), payload.ChatSessionID)
+	if !ok {
 		return
 	}
 	var taskID pgtype.UUID
@@ -697,6 +759,13 @@ func (h *Handler) handleChannelChatDone(e events.Event) {
 	threadID, triggerDepth := h.channelThreadForChatTask(context.Background(), parseUUID(payload.ChatSessionID), taskID)
 	nextDepth := triggerDepth + 1
 	agentName := h.agentName(context.Background(), agentID)
+	h.publish(protocol.EventChannelTyping, uuidToString(workspaceID), "agent", uuidToString(agentID), protocol.ChannelTypingPayload{
+		ChannelID: uuidToString(channelID),
+		ActorType: "agent",
+		ActorID:   uuidToString(agentID),
+		ActorName: agentName,
+		IsTyping:  false,
+	})
 	msg, err := h.insertChannelMessage(context.Background(), channelID, workspaceID, "agent", agentID, agentName, payload.Content, "multica", nil, threadID, nextDepth)
 	if err != nil {
 		slog.Warn("channel bridge: insert agent reply failed", "chat_session_id", payload.ChatSessionID, "error", err)
@@ -709,6 +778,19 @@ func (h *Handler) handleChannelChatDone(e events.Event) {
 		h.dispatchChannelMentions(context.Background(), ch, msg, h.channelInitiatorForChatSession(context.Background(), parseUUID(payload.ChatSessionID)))
 		h.sendChannelMessageToFeishu(context.Background(), ch, agentName, payload.Content)
 	}
+}
+
+func (h *Handler) channelAgentForChatSession(ctx context.Context, chatSessionID string) (pgtype.UUID, pgtype.UUID, pgtype.UUID, bool) {
+	var channelID, workspaceID, agentID pgtype.UUID
+	err := h.DB.QueryRow(ctx, `
+		SELECT cas.channel_id, ch.workspace_id, cas.agent_id
+		FROM channel_agent_session cas
+		JOIN channel ch ON ch.id = cas.channel_id
+		WHERE cas.chat_session_id = $1`, parseUUID(chatSessionID)).Scan(&channelID, &workspaceID, &agentID)
+	if err != nil {
+		return pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	return channelID, workspaceID, agentID, true
 }
 
 func (h *Handler) channelThreadForChatTask(ctx context.Context, chatSessionID, taskID pgtype.UUID) (*string, int) {

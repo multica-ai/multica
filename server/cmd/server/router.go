@@ -980,6 +980,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/members/{memberType}/{memberId}", h.RemoveChannelMember)
 					r.Get("/messages", h.ListChannelMessages)
 					r.Post("/messages", h.SendChannelMessage)
+					r.Post("/typing", h.SetChannelTyping)
 				})
 			})
 

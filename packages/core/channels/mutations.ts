@@ -24,6 +24,12 @@ export function useSendChannelMessage() {
   });
 }
 
+export function useSetChannelTyping() {
+  return useMutation({
+    mutationFn: ({ channelId, isTyping }: { channelId: string; isTyping: boolean }) => api.setChannelTyping(channelId, isTyping),
+  });
+}
+
 export function useAddChannelMember() {
   const qc = useQueryClient();
   return useMutation({

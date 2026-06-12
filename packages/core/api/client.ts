@@ -1723,6 +1723,13 @@ export class ApiClient {
     });
   }
 
+  async setChannelTyping(channelId: string, isTyping: boolean): Promise<void> {
+    await this.fetch(`/api/channels/${channelId}/typing`, {
+      method: "POST",
+      body: JSON.stringify({ is_typing: isTyping }),
+    });
+  }
+
   async importLarkChannelMessage(data: {
     lark_chat_id: string;
     external_message_id?: string;

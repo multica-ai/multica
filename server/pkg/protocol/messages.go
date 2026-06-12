@@ -112,6 +112,17 @@ type ChatSessionUpdatedPayload struct {
 	UpdatedAt     string `json:"updated_at"`
 }
 
+// ChannelTypingPayload is a transient group-chat typing indicator. It is not
+// persisted; clients expire it locally if a matching stop event is missed.
+type ChannelTypingPayload struct {
+	ChannelID   string `json:"channel_id"`
+	ActorType   string `json:"actor_type"`
+	ActorID     string `json:"actor_id,omitempty"`
+	ActorName   string `json:"actor_name"`
+	IsTyping    bool   `json:"is_typing"`
+	ExpiresInMS int    `json:"expires_in_ms,omitempty"`
+}
+
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket
 // to update last_seen_at and pull pending actions for a single runtime.
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share
