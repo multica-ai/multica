@@ -393,3 +393,89 @@ func TestIsBenignRenewCancel(t *testing.T) {
 }
 
 var errTestDB = errors.New("dial tcp: connection refused")
+
+// TestHub_IgnoresSelfAndSystemMessages guards the inbound noise filters: the
+// bot's own echoed messages (from_uid == robot id) and non-conversation
+// channels (e.g. channel_type 8 "systemcmdonline") must be dropped before
+// dispatch — no Handle call, no replier invocation, no audit/dedup churn. A
+// real user DM on the same connection must still be dispatched.
+func TestHub_IgnoresSelfAndSystemMessages(t *testing.T) {
+	q := &fakeHubQueries{insts: []db.OctoInstallation{hubInst()}}
+	disp := &fakeHubDispatch{}
+	replier := &recordingReplier{}
+
+	const robot = "robot_hub" // matches hubInst().RobotID
+	emitted := make(chan struct{})
+	factory := func(inst db.OctoInstallation) (Connector, error) {
+		return connectorFunc(func(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error {
+			// (a) bot's own echo — must be dropped
+			onMessage(transport.BotMessage{
+				MessageID: "self1", FromUID: robot, ChannelID: "uidX", ChannelType: transport.ChannelDM,
+				Payload: transport.MessagePayload{Type: transport.MsgText, Content: "echo"},
+			})
+			// (b) system/command channel (type 8) — must be dropped
+			onMessage(transport.BotMessage{
+				MessageID: "sys1", FromUID: "", ChannelID: "systemcmdonline", ChannelType: transport.ChannelType(8),
+				Payload: transport.MessagePayload{Type: transport.MsgText},
+			})
+			// (c) real user DM — must be dispatched
+			onMessage(transport.BotMessage{
+				MessageID: "u1", FromUID: "user_42", ChannelID: "user_42", ChannelType: transport.ChannelDM,
+				Payload: transport.MessagePayload{Type: transport.MsgText, Content: "hi"},
+			})
+			close(emitted)
+			<-ctx.Done()
+			return ctx.Err()
+		}), nil
+	}
+
+	hub := NewHub(q, factory, disp, HubConfig{
+		LeaseTTL: time.Second, LeaseRenewInterval: time.Second, SweepInterval: time.Second,
+	}, nil)
+	hub.SetOutcomeReplier(replier)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx)
+
+	select {
+	case <-emitted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("connector never emitted")
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Only the real user DM (c) should have reached the dispatcher.
+	if disp.count() != 1 {
+		t.Fatalf("dispatch called %d times, want 1 (only the real DM)", disp.count())
+	}
+	disp.mu.Lock()
+	got := disp.msgs[0]
+	disp.mu.Unlock()
+	if got.MessageID != "u1" || got.SenderUID != "user_42" {
+		t.Errorf("dispatched the wrong message: %+v", got)
+	}
+	// The replier must only have been invoked for the dispatched message, never
+	// for the self/system noise (which previously caused bogus binding prompts).
+	if replier.count() != 1 {
+		t.Errorf("replier invoked %d times, want 1 (self/system messages must not reach it)", replier.count())
+	}
+}
+
+func TestIsConversationChannel(t *testing.T) {
+	cases := []struct {
+		t    transport.ChannelType
+		want bool
+	}{
+		{transport.ChannelDM, true},
+		{transport.ChannelGroup, true},
+		{transport.ChannelTopic, true},
+		{transport.ChannelType(8), false}, // systemcmdonline
+		{transport.ChannelType(0), false},
+	}
+	for _, c := range cases {
+		if got := isConversationChannel(c.t); got != c.want {
+			t.Errorf("isConversationChannel(%d) = %v, want %v", c.t, got, c.want)
+		}
+	}
+}

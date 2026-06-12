@@ -270,6 +270,24 @@ func (h *Hub) supervise(ctx context.Context, inst db.OctoInstallation, id string
 // onMessage bridges a transport message to the dispatcher. The Connector has
 // already populated routing fields; here we just hand it off.
 func (h *Hub) onMessage(ctx context.Context, inst db.OctoInstallation, m transport.BotMessage) {
+	// Ignore traffic that isn't a real inbound user message, BEFORE any dedup,
+	// dispatch, or audit work:
+	//   1. The bot's own messages echoed back to its socket (from_uid == robot
+	//      id). Without this, every outbound reply loops back in and is treated
+	//      as a new unbound-user message, triggering a bogus binding prompt that
+	//      the bot then tries to DM to itself.
+	//   2. Non-conversation channels. Octo emits system/command channels (e.g.
+	//      channel_type 8 "systemcmdonline" on connect) that aren't DM/group/
+	//      topic; they otherwise slip past the group-mention gate and get an
+	//      unsolicited "please bind" reply with an empty sender uid.
+	// Both are dropped silently (no audit row, no dedup churn) — they are not
+	// user traffic. Mirrors the reference channel's processMessage guards.
+	if m.FromUID == inst.RobotID {
+		return
+	}
+	if !isConversationChannel(m.ChannelType) {
+		return
+	}
 	msg := InboundMessage{
 		RobotID:        inst.RobotID,
 		MessageID:      m.MessageID,
@@ -288,6 +306,19 @@ func (h *Hub) onMessage(ctx context.Context, inst db.OctoInstallation, m transpo
 	// agent-unavailable notice). Best-effort: the replier swallows its own
 	// errors so a Octo outage never blocks inbound processing.
 	h.replier.Reply(ctx, inst, msg, res)
+}
+
+// isConversationChannel reports whether a channel type is a real user
+// conversation (DM, group, or community topic). Octo also emits system/command
+// channels (e.g. channel_type 8 "systemcmdonline" on connect) that must not be
+// dispatched as user messages.
+func isConversationChannel(t transport.ChannelType) bool {
+	switch t {
+	case transport.ChannelDM, transport.ChannelGroup, transport.ChannelTopic:
+		return true
+	default:
+		return false
+	}
 }
 
 // addressedToBot reports whether a group message targets the bot (@mention).
