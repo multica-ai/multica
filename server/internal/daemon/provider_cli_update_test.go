@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -163,11 +164,13 @@ func TestMaterializeProviderCLICommandReplacesVersionAndInstallPrefix(t *testing
 }
 
 func TestProviderCLIInstallLocationUsesDaemonPathPrefix(t *testing.T) {
-	path, prefix, err := providerCLIInstallLocation("/usr/local/bin/codex", "")
+	root := t.TempDir()
+	daemonPath := filepath.Join(root, "bin", "codex")
+	path, prefix, err := providerCLIInstallLocation(daemonPath, "")
 	if err != nil {
 		t.Fatalf("install location: %v", err)
 	}
-	if path != "/usr/local/bin/codex" || prefix != "/usr/local" {
+	if path != daemonPath || prefix != root {
 		t.Fatalf("install location = (%q, %q)", path, prefix)
 	}
 
@@ -217,6 +220,7 @@ func TestParseProviderCLIUpdateModeDefaultsToDryRun(t *testing.T) {
 }
 
 func TestBuildProviderCLIAutoUpdatePlanUsesPinnedWithoutLatestLookup(t *testing.T) {
+	root := t.TempDir()
 	called := false
 	prev := providerCLICommandRunner
 	providerCLICommandRunner = func(context.Context, []string) (string, error) {
@@ -227,7 +231,7 @@ func TestBuildProviderCLIAutoUpdatePlanUsesPinnedWithoutLatestLookup(t *testing.
 
 	d := &Daemon{
 		cfg: Config{
-			Agents:                    map[string]AgentEntry{"codex": {Path: "/usr/local/bin/codex"}},
+			Agents:                    map[string]AgentEntry{"codex": {Path: filepath.Join(root, "bin", "codex")}},
 			ProviderCLIPinnedVersions: map[string]string{"codex": "0.136.0"},
 		},
 		agentVersions: map[string]string{"codex": "0.125.0"},
@@ -242,8 +246,8 @@ func TestBuildProviderCLIAutoUpdatePlanUsesPinnedWithoutLatestLookup(t *testing.
 	if plan.TargetVersion != "0.136.0" || plan.RollbackVersion != "0.125.0" {
 		t.Fatalf("plan target/rollback = %q/%q", plan.TargetVersion, plan.RollbackVersion)
 	}
-	if plan.InstallPrefix != "/usr/local" {
-		t.Fatalf("install prefix = %q", plan.InstallPrefix)
+	if plan.InstallPrefix != root {
+		t.Fatalf("install prefix = %q, want %q", plan.InstallPrefix, root)
 	}
 }
 
@@ -273,8 +277,8 @@ func TestApplyProviderCLIUpdateInstallFailureRecordsRollbackRequired(t *testing.
 	t.Cleanup(func() { providerCLICommandRunner = prev })
 
 	d := &Daemon{cfg: Config{
-		WorkspacesRoot:                          t.TempDir(),
-		ProviderCLIUpdateMode:                   ProviderCLIUpdateApply,
+		WorkspacesRoot:                         t.TempDir(),
+		ProviderCLIUpdateMode:                  ProviderCLIUpdateApply,
 		ProviderCLIUpdateWindowStartConfigured: true,
 		ProviderCLIUpdateWindowDuration:        24 * time.Hour,
 	}}
@@ -322,7 +326,7 @@ func TestProviderCLIInstallLocationBlocksVersionManagerShimWithoutExplicitPrefix
 
 func TestVerifyPendingProviderCLIUpdatesMarksVerified(t *testing.T) {
 	d := &Daemon{
-		cfg: Config{WorkspacesRoot: t.TempDir()},
+		cfg:           Config{WorkspacesRoot: t.TempDir()},
 		agentVersions: map[string]string{"codex": "codex 0.139.0"},
 	}
 	record := providerCLIUpdateRecord{
@@ -350,7 +354,7 @@ func TestVerifyPendingProviderCLIUpdatesMarksVerified(t *testing.T) {
 
 func TestVerifyPendingProviderCLIUpdatesMarksRollbackRequiredOnMismatch(t *testing.T) {
 	d := &Daemon{
-		cfg: Config{WorkspacesRoot: t.TempDir()},
+		cfg:           Config{WorkspacesRoot: t.TempDir()},
 		agentVersions: map[string]string{"codex": "codex 0.138.0"},
 	}
 	record := providerCLIUpdateRecord{

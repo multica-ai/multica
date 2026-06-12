@@ -48,8 +48,8 @@ type ProviderCLISource struct {
 	PackageManager               string   `json:"package_manager"`
 	PackageName                  string   `json:"package_name"`
 	LatestVersionCommandTemplate []string `json:"latest_version_command_template"`
-	VersionCommandTemplate        []string `json:"version_command_template"`
-	UpgradeCommandTemplate        []string `json:"upgrade_command_template"`
+	VersionCommandTemplate       []string `json:"version_command_template"`
+	UpgradeCommandTemplate       []string `json:"upgrade_command_template"`
 }
 
 // ProviderCLIUpdateRequest describes a planned provider CLI update. A pinned
@@ -120,8 +120,8 @@ var providerCLISources = map[string]ProviderCLISource{
 		PackageManager:               "npm",
 		PackageName:                  "@anthropic-ai/claude-code",
 		LatestVersionCommandTemplate: []string{"npm", "view", "@anthropic-ai/claude-code", "version"},
-		VersionCommandTemplate:        []string{"claude", "--version"},
-		UpgradeCommandTemplate:        []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "@anthropic-ai/claude-code@<version>"},
+		VersionCommandTemplate:       []string{"claude", "--version"},
+		UpgradeCommandTemplate:       []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "@anthropic-ai/claude-code@<version>"},
 	},
 	"codex": {
 		Provider:                     "codex",
@@ -130,8 +130,8 @@ var providerCLISources = map[string]ProviderCLISource{
 		PackageManager:               "npm",
 		PackageName:                  "@openai/codex",
 		LatestVersionCommandTemplate: []string{"npm", "view", "@openai/codex", "version"},
-		VersionCommandTemplate:        []string{"codex", "--version"},
-		UpgradeCommandTemplate:        []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "@openai/codex@<version>"},
+		VersionCommandTemplate:       []string{"codex", "--version"},
+		UpgradeCommandTemplate:       []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "@openai/codex@<version>"},
 	},
 	"gemini": {
 		Provider:                     "gemini",
@@ -140,8 +140,8 @@ var providerCLISources = map[string]ProviderCLISource{
 		PackageManager:               "npm",
 		PackageName:                  "@google/gemini-cli",
 		LatestVersionCommandTemplate: []string{"npm", "view", "@google/gemini-cli", "version"},
-		VersionCommandTemplate:        []string{"gemini", "--version"},
-		UpgradeCommandTemplate:        []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "@google/gemini-cli@<version>"},
+		VersionCommandTemplate:       []string{"gemini", "--version"},
+		UpgradeCommandTemplate:       []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "@google/gemini-cli@<version>"},
 	},
 	"kimi": {
 		Provider:                     "kimi",
@@ -150,8 +150,8 @@ var providerCLISources = map[string]ProviderCLISource{
 		PackageManager:               "npm",
 		PackageName:                  "@moonshot-ai/kimi-code",
 		LatestVersionCommandTemplate: []string{"npm", "view", "@moonshot-ai/kimi-code", "version"},
-		VersionCommandTemplate:        []string{"kimi", "--version"},
-		UpgradeCommandTemplate:        []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "@moonshot-ai/kimi-code@<version>"},
+		VersionCommandTemplate:       []string{"kimi", "--version"},
+		UpgradeCommandTemplate:       []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "@moonshot-ai/kimi-code@<version>"},
 	},
 	"opencode": {
 		Provider:                     "opencode",
@@ -160,8 +160,8 @@ var providerCLISources = map[string]ProviderCLISource{
 		PackageManager:               "npm",
 		PackageName:                  "opencode-ai",
 		LatestVersionCommandTemplate: []string{"npm", "view", "opencode-ai", "version"},
-		VersionCommandTemplate:        []string{"opencode", "--version"},
-		UpgradeCommandTemplate:        []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "opencode-ai@<version>"},
+		VersionCommandTemplate:       []string{"opencode", "--version"},
+		UpgradeCommandTemplate:       []string{"npm", "install", "-g", "--prefix", "<install_prefix>", "opencode-ai@<version>"},
 	},
 }
 
