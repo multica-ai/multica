@@ -52,6 +52,31 @@ func TestParseSessionLimitResetTime(t *testing.T) {
 			wantOK:  true,
 		},
 		{
+			name:    "iana timezone Europe/Paris",
+			message: "You've hit your session limit · resets 5:10pm (Europe/Paris)",
+			wantOK:  true,
+		},
+		{
+			name:    "iana timezone America/New_York with underscore",
+			message: "You've hit your session limit · resets 9:30am (America/New_York)",
+			wantOK:  true,
+		},
+		{
+			name:    "iana timezone Asia/Tokyo no parentheses",
+			message: "You've hit your session limit · resets 11:00pm Asia/Tokyo",
+			wantOK:  true,
+		},
+		{
+			name:    "multi-segment iana timezone",
+			message: "You've hit your session limit · resets 2:00pm (America/Argentina/Buenos_Aires)",
+			wantOK:  true,
+		},
+		{
+			name:    "unresolvable timezone",
+			message: "You've hit your session limit · resets 5:10pm (Mars/Olympus_Mons)",
+			wantOK:  false,
+		},
+		{
 			name:    "unrelated error",
 			message: "connection refused",
 			wantOK:  false,
@@ -153,6 +178,77 @@ func TestParseSessionLimitResetTimeConversions(t *testing.T) {
 				t.Fatalf("expected %02d:%02d, got %02d:%02d", tc.wantHour, tc.wantMinute, got.Hour(), got.Minute())
 			}
 		})
+	}
+}
+
+// TestParseSessionLimitResetTimeTimezone verifies the wall-clock time is
+// interpreted in the timezone named by the message, not in UTC.
+func TestParseSessionLimitResetTimeTimezone(t *testing.T) {
+	cases := []struct {
+		name       string
+		tz         string
+		message    string
+		wantHour   int
+		wantMinute int
+	}{
+		{
+			name:       "Europe/Paris",
+			tz:         "Europe/Paris",
+			message:    "You've hit your session limit · resets 5:10pm (Europe/Paris)",
+			wantHour:   17,
+			wantMinute: 10,
+		},
+		{
+			name:       "Asia/Tokyo",
+			tz:         "Asia/Tokyo",
+			message:    "You've hit your session limit · resets 9:30am (Asia/Tokyo)",
+			wantHour:   9,
+			wantMinute: 30,
+		},
+		{
+			name:       "America/New_York midnight",
+			tz:         "America/New_York",
+			message:    "You've hit your session limit · resets 12:00am (America/New_York)",
+			wantHour:   0,
+			wantMinute: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			loc, err := time.LoadLocation(tc.tz)
+			if err != nil {
+				t.Skipf("timezone %s unavailable on this system: %v", tc.tz, err)
+			}
+			got, ok := ParseSessionLimitResetTime(tc.message)
+			if !ok {
+				t.Fatalf("expected parse success for %q", tc.message)
+			}
+			// The returned instant, viewed in the named zone, must show the
+			// original wall-clock time regardless of UTC offset or DST.
+			inZone := got.In(loc)
+			if inZone.Hour() != tc.wantHour || inZone.Minute() != tc.wantMinute {
+				t.Fatalf("in %s expected %02d:%02d, got %02d:%02d",
+					tc.tz, tc.wantHour, tc.wantMinute, inZone.Hour(), inZone.Minute())
+			}
+		})
+	}
+}
+
+// TestParseSessionLimitResetTimeZonesDiffer confirms the same wall-clock time
+// in two different timezones yields two different absolute instants — proving
+// the zone is honored rather than ignored.
+func TestParseSessionLimitResetTimeZonesDiffer(t *testing.T) {
+	utc, ok := ParseSessionLimitResetTime("resets 6:00pm (UTC)")
+	if !ok {
+		t.Fatal("expected UTC parse success")
+	}
+	tokyo, ok := ParseSessionLimitResetTime("resets 6:00pm (Asia/Tokyo)")
+	if !ok {
+		t.Skip("Asia/Tokyo unavailable on this system")
+	}
+	if utc.Equal(tokyo) {
+		t.Fatalf("expected different instants for 6:00pm UTC vs 6:00pm Asia/Tokyo, both were %v", utc)
 	}
 }
 

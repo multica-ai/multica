@@ -7,23 +7,27 @@ import (
 	"time"
 )
 
-// sessionLimitResetRe matches the Claude session limit reset time pattern.
+// sessionLimitResetRe matches the Claude session limit reset time pattern. The
+// trailing timezone is captured and may be "UTC" or any IANA name in
+// Region/City form (e.g. "Europe/Paris", "America/Argentina/Buenos_Aires").
 // Examples:
 //
 //	"You've hit your session limit · resets 5:10pm (UTC)"
-//	"You've hit your session limit · resets 10:10pm (UTC)"
-//	"You've hit your session limit · resets 12:00am (UTC)"
-var sessionLimitResetRe = regexp.MustCompile(`(?i)resets?\s+(\d{1,2}):(\d{2})\s*(am|pm)\s*\(?UTC\)?`)
+//	"You've hit your session limit · resets 10:10pm (Europe/Paris)"
+//	"You've hit your session limit · resets 12:00am (America/New_York)"
+var sessionLimitResetRe = regexp.MustCompile(`(?i)resets?\s+(\d{1,2}):(\d{2})\s*(am|pm)\s*\(?([A-Za-z]+(?:/[A-Za-z0-9_+-]+)*)\)?`)
 
 // ParseSessionLimitResetTime extracts the reset time from a Claude session
-// limit message. Returns the absolute UTC time of the next occurrence of the
-// given wall-clock time. Returns (zero, false) when the message does not
-// contain a parseable reset time.
+// limit message. The wall-clock time is interpreted in the timezone named by
+// the message (UTC or an IANA Region/City zone) and returned as the absolute
+// UTC time of its next occurrence. Returns (zero, false) when the message does
+// not contain a parseable reset time or names a timezone the system cannot
+// resolve.
 //
-// The message only carries a wall-clock time (e.g. "5:10pm (UTC)") without a
-// date, so we compute the next occurrence relative to now. If the parsed time
-// is in the past today, we assume it refers to tomorrow (the reset hasn't
-// happened yet in the current cycle).
+// The message only carries a wall-clock time (e.g. "5:10pm (Europe/Paris)")
+// without a date, so we compute the next occurrence relative to now in that
+// zone. If the parsed time is in the past today, we assume it refers to
+// tomorrow (the reset hasn't happened yet in the current cycle).
 func ParseSessionLimitResetTime(message string) (time.Time, bool) {
 	matches := sessionLimitResetRe.FindStringSubmatch(message)
 	if matches == nil {
@@ -46,10 +50,18 @@ func ParseSessionLimitResetTime(message string) (time.Time, bool) {
 		hour = 0
 	}
 
-	now := time.Now().UTC()
-	reset := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+	// IANA names are case-sensitive; the regex preserves the original casing of
+	// the captured zone, so it is passed to LoadLocation as written. An
+	// unresolvable zone makes the reset time unparseable.
+	loc, err := time.LoadLocation(matches[4])
+	if err != nil {
+		return time.Time{}, false
+	}
+
+	now := time.Now().In(loc)
+	reset := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, loc)
 	if reset.Before(now) {
 		reset = reset.AddDate(0, 0, 1)
 	}
-	return reset, true
+	return reset.UTC(), true
 }
