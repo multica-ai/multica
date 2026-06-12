@@ -166,6 +166,29 @@ func gatewayAttachmentBlocks(ctx context.Context, store storage.Storage, att db.
 	}
 }
 
+// extractPDFBlockText pulls plain text out of a base64 PDF document block.
+// The OpenAI-compat wire has no document type, so the compat fold uses this to
+// turn a PDF attachment into a text block the model can still read. Returns
+// (text, true) on success; ("", false) when the block is not an extractable
+// base64 PDF or extraction yields nothing.
+func extractPDFBlockText(b AnthropicContentBlock) (string, bool) {
+	if b.Source == nil || b.Source.Type != "base64" || b.Source.MediaType != "application/pdf" || b.Source.Data == "" {
+		return "", false
+	}
+	raw, err := base64.StdEncoding.DecodeString(b.Source.Data)
+	if err != nil {
+		return "", false
+	}
+	text, err := pdftext.Extract(raw, firtalGatewayAttachmentMaxBytes)
+	if err != nil {
+		return "", false
+	}
+	if strings.TrimSpace(string(text)) == "" {
+		return "", false
+	}
+	return string(text), true
+}
+
 func attachmentTextBlocks(filename, text string) []AnthropicContentBlock {
 	text = strings.TrimSpace(text)
 	if text == "" {

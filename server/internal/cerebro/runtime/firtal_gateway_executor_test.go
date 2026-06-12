@@ -61,7 +61,7 @@ func TestBuildGatewayMessagesAddsAttachmentBlocks(t *testing.T) {
 	}
 }
 
-func TestFoldGatewayCompatAttachmentBlocksSurfacesDroppedAttachments(t *testing.T) {
+func TestFoldGatewayCompatAttachmentBlocksKeepsImages(t *testing.T) {
 	e := &FirtalGatewayExecutor{}
 	messages := []GatewayMessage{
 		{Role: "user", Content: "what is in this?", ContentBlocks: []AnthropicContentBlock{
@@ -76,17 +76,43 @@ func TestFoldGatewayCompatAttachmentBlocksSurfacesDroppedAttachments(t *testing.
 	if len(out) != 2 {
 		t.Fatalf("len(out) = %d, want 2", len(out))
 	}
-	if out[0].ContentBlocks != nil {
-		t.Fatalf("expected blocks cleared on compat path, got %+v", out[0].ContentBlocks)
-	}
-	if !strings.Contains(out[0].Content, "image/png") || !strings.Contains(out[0].Content, "omitted") {
-		t.Fatalf("expected a visible drop note, got %q", out[0].Content)
+	// Image blocks are carried on the compat wire (as image_url parts), not dropped.
+	if len(out[0].ContentBlocks) != 2 || out[0].ContentBlocks[1].Type != "image" {
+		t.Fatalf("expected image block preserved, got %+v", out[0].ContentBlocks)
 	}
 	if out[1].Content != "plain answer" {
 		t.Fatalf("text-only message changed: %q", out[1].Content)
 	}
+}
+
+func TestFoldGatewayCompatAttachmentBlocksConvertsUnreadablePDFToNote(t *testing.T) {
+	e := &FirtalGatewayExecutor{}
+	messages := []GatewayMessage{
+		{Role: "user", Content: "summarize", ContentBlocks: []AnthropicContentBlock{
+			{Type: "text", Text: "summarize"},
+			// Not a real PDF, so extraction fails and a visible note replaces it.
+			{Type: "document", Source: &AnthropicContentSource{Type: "base64", MediaType: "application/pdf", Data: "bm90LWEtcGRm"}},
+		}},
+	}
+
+	out := e.foldGatewayCompatAttachmentBlocks(messages, GatewayRequestMeta{TaskID: "task-1"})
+
+	for _, b := range out[0].ContentBlocks {
+		if b.Type == "document" {
+			t.Fatalf("document block must not survive on the compat path: %+v", out[0].ContentBlocks)
+		}
+	}
+	var noted bool
+	for _, b := range out[0].ContentBlocks {
+		if b.Type == "text" && strings.Contains(b.Text, "application/pdf") && strings.Contains(b.Text, "omitted") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Fatalf("expected a visible note for the unreadable PDF, got %+v", out[0].ContentBlocks)
+	}
 	// Original slice must not be mutated.
-	if len(messages[0].ContentBlocks) != 2 {
+	if len(messages[0].ContentBlocks) != 2 || messages[0].ContentBlocks[1].Type != "document" {
 		t.Fatalf("original message mutated: %+v", messages[0].ContentBlocks)
 	}
 }

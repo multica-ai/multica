@@ -21,6 +21,72 @@ type GatewayMessage struct {
 	ToolCallID    string                  `json:"tool_call_id,omitempty"`
 }
 
+// gatewayOpenAIContentPart is one element of an OpenAI Chat Completions
+// multimodal content array: a text part or an image_url part.
+type gatewayOpenAIContentPart struct {
+	Type     string                 `json:"type"`
+	Text     string                 `json:"text,omitempty"`
+	ImageURL *gatewayOpenAIImageURL `json:"image_url,omitempty"`
+}
+
+type gatewayOpenAIImageURL struct {
+	URL string `json:"url"`
+}
+
+// MarshalJSON renders the message for the OpenAI-compat
+// `/v1/chat/completions` wire. When the message carries ContentBlocks (image
+// and text attachments folded in for the compat path), they are emitted as a
+// multimodal content array — text blocks become text parts and base64 image
+// blocks become image_url data-URL parts — so vision input survives the compat
+// transport instead of being dropped by the `json:"-"` tag. Messages without
+// ContentBlocks keep the plain string content. The Anthropic-native path does
+// not use this method; it marshals AnthropicMessage instead.
+func (m GatewayMessage) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		Role       string            `json:"role"`
+		Content    any               `json:"content,omitempty"`
+		ToolCalls  []GatewayToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string            `json:"tool_call_id,omitempty"`
+	}
+	w := wire{Role: m.Role, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
+	if parts := gatewayContentBlocksToOpenAIParts(m.ContentBlocks); len(parts) > 0 {
+		w.Content = parts
+	} else if m.Content != "" {
+		w.Content = m.Content
+	}
+	return json.Marshal(w)
+}
+
+// gatewayContentBlocksToOpenAIParts converts Anthropic content blocks into
+// OpenAI multimodal content parts. Text blocks become text parts; base64 image
+// blocks become image_url data-URL parts. Document and other non-text/image
+// blocks are skipped — the executor folds PDFs to text before serialization, so
+// a surviving non-image block has no compat representation. Returns nil when
+// there is nothing to emit, so the caller falls back to the string content.
+func gatewayContentBlocksToOpenAIParts(blocks []AnthropicContentBlock) []gatewayOpenAIContentPart {
+	if len(blocks) == 0 {
+		return nil
+	}
+	parts := make([]gatewayOpenAIContentPart, 0, len(blocks))
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			if b.Text != "" {
+				parts = append(parts, gatewayOpenAIContentPart{Type: "text", Text: b.Text})
+			}
+		case "image":
+			if b.Source != nil && b.Source.Type == "base64" && b.Source.MediaType != "" && b.Source.Data != "" {
+				url := fmt.Sprintf("data:%s;base64,%s", b.Source.MediaType, b.Source.Data)
+				parts = append(parts, gatewayOpenAIContentPart{Type: "image_url", ImageURL: &gatewayOpenAIImageURL{URL: url}})
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return parts
+}
+
 // GatewayToolDef is the OpenAI-compatible tool definition the gateway accepts
 // on `/v1/chat/completions`. Only `type: "function"` is supported today.
 type GatewayToolDef struct {

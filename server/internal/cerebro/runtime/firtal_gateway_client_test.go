@@ -219,3 +219,59 @@ func TestGatewayClientPassesToolMessageBack(t *testing.T) {
 		t.Fatalf("tool turn = %+v", got.Messages[3])
 	}
 }
+
+func TestGatewayMessageMarshalsImageBlocksAsOpenAIImageURL(t *testing.T) {
+	msg := GatewayMessage{
+		Role:    "user",
+		Content: "what is in this?",
+		ContentBlocks: []AnthropicContentBlock{
+			{Type: "text", Text: "what is in this?"},
+			{Type: "image", Source: &AnthropicContentSource{Type: "base64", MediaType: "image/png", Data: "aW1n"}},
+		},
+	}
+
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			ImageURL struct {
+				URL string `json:"url"`
+			} `json:"image_url"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v (raw=%s)", err, raw)
+	}
+	if len(decoded.Content) != 2 {
+		t.Fatalf("content parts = %d, want 2: %s", len(decoded.Content), raw)
+	}
+	if decoded.Content[0].Type != "text" || decoded.Content[0].Text != "what is in this?" {
+		t.Fatalf("text part = %+v", decoded.Content[0])
+	}
+	if decoded.Content[1].Type != "image_url" || decoded.Content[1].ImageURL.URL != "data:image/png;base64,aW1n" {
+		t.Fatalf("image part = %+v", decoded.Content[1])
+	}
+}
+
+func TestGatewayMessageMarshalsPlainTextWithoutBlocks(t *testing.T) {
+	raw, err := json.Marshal(GatewayMessage{Role: "user", Content: "hello"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v (raw=%s)", err, raw)
+	}
+	if decoded.Role != "user" || decoded.Content != "hello" {
+		t.Fatalf("decoded = %+v (raw=%s)", decoded, raw)
+	}
+}

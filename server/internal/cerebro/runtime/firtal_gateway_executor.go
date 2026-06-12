@@ -394,7 +394,15 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	if e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID) {
 		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, pruneOn && !pruneHeldOut)
 	} else {
-		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, messages, meta)
+		// The no-tools compat path serializes over the OpenAI wire, which
+		// cannot carry Anthropic document blocks; fold attachments (PDF -> text,
+		// images kept for image_url serialization) so files are not lost. The
+		// native path carries the blocks directly, so leave them intact there.
+		noToolMessages := messages
+		if cfg.EntryMode != FirtalGatewayEntryModeNative {
+			noToolMessages = e.foldGatewayCompatAttachmentBlocks(messages, meta)
+		}
+		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, noToolMessages, meta)
 	}
 	if err != nil {
 		e.failTask(parent, task, err.Error(), "agent_error")
@@ -853,46 +861,60 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 }
 
 // foldGatewayCompatAttachmentBlocks rewrites messages for the OpenAI-compat
-// transports, which cannot carry Anthropic image/document blocks. For every
-// message that holds such a block it appends a short text note naming the
-// dropped attachment (so the model and the transcript still show it was sent)
-// and logs a warning. Messages without non-text blocks are returned unchanged;
-// when nothing needs folding the original slice is returned as-is.
+// transports. Image and text blocks are kept — GatewayMessage.MarshalJSON
+// serializes them as image_url / text parts on the compat wire. PDF document
+// blocks have no compat wire representation, so they are converted to a text
+// block via server-side text extraction. Any document that cannot be extracted
+// is replaced with a visible note (never silently dropped — TECH-3416). docx and
+// xlsx already arrive as text blocks from the attachment loader. Messages that
+// need no rewrite are left untouched; when nothing changes the original slice is
+// returned as-is.
 func (e *FirtalGatewayExecutor) foldGatewayCompatAttachmentBlocks(messages []GatewayMessage, meta GatewayRequestMeta) []GatewayMessage {
-	folded := false
+	changed := false
 	out := make([]GatewayMessage, len(messages))
 	copy(out, messages)
 	for i := range out {
+		if len(out[i].ContentBlocks) == 0 {
+			continue
+		}
+		newBlocks := make([]AnthropicContentBlock, 0, len(out[i].ContentBlocks))
 		var dropped []string
+		rewrote := false
 		for _, b := range out[i].ContentBlocks {
 			switch b.Type {
-			case "image", "document":
+			case "document":
+				if text, ok := extractPDFBlockText(b); ok {
+					newBlocks = append(newBlocks, AnthropicContentBlock{Type: "text", Text: fmt.Sprintf("Attachment (PDF) contents:\n%s", strings.TrimSpace(text))})
+					rewrote = true
+					continue
+				}
 				label := b.Type
 				if b.Source != nil && b.Source.MediaType != "" {
 					label = b.Source.MediaType
 				}
 				dropped = append(dropped, label)
+				rewrote = true
+			default:
+				// text and image blocks are carried on the compat wire as
+				// text / image_url parts by GatewayMessage.MarshalJSON.
+				newBlocks = append(newBlocks, b)
 			}
 		}
-		if len(dropped) == 0 {
-			continue
+		if len(dropped) > 0 {
+			newBlocks = append(newBlocks, AnthropicContentBlock{Type: "text", Text: fmt.Sprintf("[Attachment (%s) could not be read on this path and was omitted.]", strings.Join(dropped, ", "))})
+			e.attachmentLogger().Warn("firtal gateway dropped attachment on compat path",
+				"task_id", meta.TaskID,
+				"agent_id", meta.AgentID,
+				"workspace_id", meta.WorkspaceID,
+				"dropped", strings.Join(dropped, ","),
+			)
 		}
-		folded = true
-		note := fmt.Sprintf("[Attachment (%s) was provided but cannot be read by this tool-enabled agent path and was omitted.]", strings.Join(dropped, ", "))
-		if strings.TrimSpace(out[i].Content) == "" {
-			out[i].Content = note
-		} else {
-			out[i].Content = out[i].Content + "\n\n" + note
+		if rewrote {
+			out[i].ContentBlocks = newBlocks
+			changed = true
 		}
-		out[i].ContentBlocks = nil
-		e.attachmentLogger().Warn("firtal gateway dropped attachment on compat tool path",
-			"task_id", meta.TaskID,
-			"agent_id", meta.AgentID,
-			"workspace_id", meta.WorkspaceID,
-			"dropped", strings.Join(dropped, ","),
-		)
 	}
-	if !folded {
+	if !changed {
 		return messages
 	}
 	return out
