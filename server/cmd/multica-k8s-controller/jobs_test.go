@@ -469,17 +469,29 @@ func TestDispatchJob_WithRepoCache(t *testing.T) {
 	// MULTICA_REPOCACHE_DIR tells the worker daemon that the bare cache
 	// is mounted RO and externally managed, so it should swap in the
 	// controller-mode /repo/checkout handler (Cache.CreateSharedClone).
-	var sawEnv bool
+	// MULTICA_REPOCACHE_URL points the in-pod /repo/refresh handler at
+	// the cluster repocache server's admin endpoint so `multica repo
+	// refresh` can force an immediate fetch.
+	var sawDir, sawURL bool
 	for _, e := range runtask.Env {
 		if e.Name == "MULTICA_REPOCACHE_DIR" {
-			sawEnv = true
+			sawDir = true
 			if e.Value != "/repos" {
 				t.Errorf("MULTICA_REPOCACHE_DIR = %q, want /repos", e.Value)
 			}
 		}
+		if e.Name == "MULTICA_REPOCACHE_URL" {
+			sawURL = true
+			if e.Value != "http://multica-repocache.multica.svc:8080" {
+				t.Errorf("MULTICA_REPOCACHE_URL = %q, want http://multica-repocache.multica.svc:8080", e.Value)
+			}
+		}
 	}
-	if !sawEnv {
+	if !sawDir {
 		t.Errorf("MULTICA_REPOCACHE_DIR env missing — worker daemon won't enter controller mode")
+	}
+	if !sawURL {
+		t.Errorf("MULTICA_REPOCACHE_URL env missing — controller-mode /repo/refresh handler has nowhere to proxy")
 	}
 }
 
@@ -519,6 +531,9 @@ func TestDispatchJob_RepoCacheDisabled(t *testing.T) {
 	for _, e := range pod.Containers[0].Env {
 		if e.Name == "MULTICA_REPOCACHE_DIR" {
 			t.Errorf("MULTICA_REPOCACHE_DIR leaked despite repocache disabled — worker daemon would enter controller mode without a cache mount")
+		}
+		if e.Name == "MULTICA_REPOCACHE_URL" {
+			t.Errorf("MULTICA_REPOCACHE_URL leaked despite repocache disabled — worker daemon's /repo/refresh would point at a non-existent service")
 		}
 	}
 }

@@ -27,6 +27,16 @@ import (
 // caches and worktrees, so the ownership check adds no security value
 // and breaks CI environments where the runner UID differs from the
 // directory owner.
+//
+// A url.insteadOf rewrite redirects https://github.com/ remotes through
+// the SSH endpoint. The repocache pod mounts an SSH deploy key but has no
+// HTTPS credential helper, so anonymous HTTPS clones of fresh repos fail
+// with "could not read Username" when GitHub returns the credential
+// challenge (rate-limited, private, or just a fresh anonymous clone of a
+// public repo). Rewriting to SSH reuses the working auth path. Per-bare-
+// repo origin URLs are stored in their own config and are not affected by
+// this env-scoped rewrite for subsequent fetches — only the initial clone
+// resolves the URL through the rewrite.
 func gitEnv() []string {
 	base := os.Environ()
 
@@ -42,12 +52,15 @@ func gitEnv() []string {
 		}
 	}
 
-	idx := strconv.Itoa(existing)
+	idx0 := strconv.Itoa(existing)
+	idx1 := strconv.Itoa(existing + 1)
 	return append(base,
 		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT="+strconv.Itoa(existing+1),
-		"GIT_CONFIG_KEY_"+idx+"=safe.directory",
-		"GIT_CONFIG_VALUE_"+idx+"=*",
+		"GIT_CONFIG_COUNT="+strconv.Itoa(existing+2),
+		"GIT_CONFIG_KEY_"+idx0+"=safe.directory",
+		"GIT_CONFIG_VALUE_"+idx0+"=*",
+		"GIT_CONFIG_KEY_"+idx1+"=url.git@github.com:.insteadOf",
+		"GIT_CONFIG_VALUE_"+idx1+"=https://github.com/",
 	)
 }
 

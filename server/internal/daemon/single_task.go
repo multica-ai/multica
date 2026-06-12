@@ -95,8 +95,10 @@ func NewSingleTaskRunner(cfg Config, logger *slog.Logger) (*SingleTaskRunner, er
 	// original handler because that flow owns the bare and uses worktrees.
 	if os.Getenv("MULTICA_REPOCACHE_DIR") != "" {
 		mux.HandleFunc("/repo/checkout", d.controllerRepoCheckoutHandler())
+		mux.HandleFunc("/repo/refresh", d.controllerRepoRefreshHandler())
 	} else {
 		mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
+		mux.HandleFunc("/repo/refresh", d.repoRefreshHandler())
 	}
 	srv := &http.Server{Handler: mux}
 	go func() {

@@ -16,7 +16,7 @@
 # The ARGs have no defaults so an unpinned build fails loudly — matches the
 # CLAUDE_CODE_VERSION pattern in Dockerfile.claude.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.4
 
 # ── Build the multica binary from source ──────────────────────────────
 FROM golang:${GO_VERSION}-bookworm AS multica-build
@@ -188,6 +188,15 @@ ENV ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION} \
 RUN corepack enable \
     && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
     && corepack prepare "yarn@stable" --activate
+
+# ── pnpm install behavior for agent workers ───────────────────────────
+# `pnpm install` in agent pods kept hanging on postinstall binary downloads
+# (electron + playwright). Default the skip flags ON so a vanilla
+# `pnpm install` completes inside a single agent turn. Tasks that genuinely
+# need the binaries can unset the var and run `playwright install` /
+# `electron-builder install-app-deps` explicitly.
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # ── Kubernetes CLI tooling (kubectl + helm) ───────────────────────────
 RUN curl -fsSL "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \

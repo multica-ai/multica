@@ -152,6 +152,7 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 	mode := int32(0o400)
 	allowPrivEsc := false
 	seccompRuntimeDefault := corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
+	fsGroupOnRootMismatch := corev1.FSGroupChangeOnRootMismatch
 	containerSC := &corev1.SecurityContext{
 		AllowPrivilegeEscalation: &allowPrivEsc,
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
@@ -235,8 +236,15 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 		// the bare clone (no fetch, no `git worktree add` since the bare
 		// is RO) and then resets origin to the original URL so the
 		// gitconfig's insteadOf / pushInsteadOf rules still apply.
+		//
+		// MULTICA_REPOCACHE_URL points the in-pod /repo/refresh handler at
+		// the cluster repocache server's admin endpoint. Agents calling
+		// `multica repo refresh <url>` proxy through to /repos/fetch on the
+		// repocache server, which owns the writable side of the bare PVC
+		// and can force an immediate `git fetch origin`.
 		runtaskEnv = append(runtaskEnv,
 			corev1.EnvVar{Name: "MULTICA_REPOCACHE_DIR", Value: rc.MountPath},
+			corev1.EnvVar{Name: "MULTICA_REPOCACHE_URL", Value: "http://multica-repocache." + namespace + ".svc:8080"},
 		)
 	}
 
@@ -319,11 +327,12 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 					ServiceAccountName: r.ServiceAccountName,
 					ImagePullSecrets:   []corev1.LocalObjectReference{{Name: imagePullSecret}},
 					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot:   &nonRoot,
-						RunAsUser:      &uid,
-						RunAsGroup:     &gid,
-						FSGroup:        &gid,
-						SeccompProfile: &seccompRuntimeDefault,
+						RunAsNonRoot:        &nonRoot,
+						RunAsUser:           &uid,
+						RunAsGroup:          &gid,
+						FSGroup:             &gid,
+						FSGroupChangePolicy: &fsGroupOnRootMismatch,
+						SeccompProfile:      &seccompRuntimeDefault,
 					},
 					InitContainers: initContainers,
 					Containers: []corev1.Container{{

@@ -431,6 +431,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
+	b.WriteString("- `multica repo refresh <url>` — Force the platform's repo cache to fetch the latest refs for a repository. The cache otherwise refreshes on a fixed interval (~60s), so most runs do not need this. Use it when a commit you know landed within the last minute or two is not yet visible to `multica repo checkout` or to `git fetch` from inside a checked-out worktree. After a successful refresh, either re-run `multica repo checkout` (fresh worktree) or run `git fetch origin && git reset --hard origin/<branch>` inside an existing checkout to pick up the new refs.\n")
 	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
 	// Available Commands lists `multica issue comment add` neutrally —
 	// three input modes, pick what fits.
@@ -479,6 +480,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			}
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed, and can pass `--ref` for review/QA on a non-default branch or commit.\n\n")
+		b.WriteString("**If the snapshot looks stale.** The platform caches each repo and refreshes it on a fixed interval (typically ~60s), so a commit you know just landed may not be visible yet. If `multica repo checkout` returns code older than what is on the remote, or if `git fetch` from inside the worktree does not pick up a known-recent commit, run `multica repo refresh <url>` to force the cache to fetch immediately. Then either re-run `multica repo checkout` to get a fresh worktree, or run `git fetch origin && git reset --hard origin/<branch>` inside the existing checkout. Do not work around stale code by cloning the remote directly — the platform's gitconfig rewrites prevent that, and the refresh + recheckout flow is the supported path.\n\n")
 	}
 
 	// Inject project-scoped context (resources attached to the issue's project).

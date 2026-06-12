@@ -60,6 +60,15 @@ func TestGitEnv(t *testing.T) {
 	if !envHas(env, "GIT_CONFIG_VALUE_0=*") {
 		t.Error("gitEnv() must include GIT_CONFIG_VALUE_0=*")
 	}
+
+	// Must rewrite https://github.com/ to git@github.com: at index 1 so HTTPS
+	// remotes reuse the SSH auth path the repocache pod already has.
+	if !envHas(env, "GIT_CONFIG_KEY_1=url.git@github.com:.insteadOf") {
+		t.Error("gitEnv() must include GIT_CONFIG_KEY_1=url.git@github.com:.insteadOf")
+	}
+	if !envHas(env, "GIT_CONFIG_VALUE_1=https://github.com/") {
+		t.Error("gitEnv() must include GIT_CONFIG_VALUE_1=https://github.com/")
+	}
 }
 
 func TestGitEnvPreservesExistingConfig(t *testing.T) {
@@ -82,15 +91,22 @@ func TestGitEnvPreservesExistingConfig(t *testing.T) {
 		return false
 	}
 
-	// safe.directory must be appended at index 2 (next available).
-	if !envHas("GIT_CONFIG_COUNT=3") {
-		t.Error("expected GIT_CONFIG_COUNT=3")
+	// safe.directory and the github HTTPS→SSH rewrite are appended at the
+	// next two indices after the caller's existing entries.
+	if !envHas("GIT_CONFIG_COUNT=4") {
+		t.Error("expected GIT_CONFIG_COUNT=4")
 	}
 	if !envHas("GIT_CONFIG_KEY_2=safe.directory") {
 		t.Error("expected GIT_CONFIG_KEY_2=safe.directory")
 	}
 	if !envHas("GIT_CONFIG_VALUE_2=*") {
 		t.Error("expected GIT_CONFIG_VALUE_2=*")
+	}
+	if !envHas("GIT_CONFIG_KEY_3=url.git@github.com:.insteadOf") {
+		t.Error("expected GIT_CONFIG_KEY_3=url.git@github.com:.insteadOf")
+	}
+	if !envHas("GIT_CONFIG_VALUE_3=https://github.com/") {
+		t.Error("expected GIT_CONFIG_VALUE_3=https://github.com/")
 	}
 
 	// Original entries must still be present.

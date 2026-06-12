@@ -74,6 +74,10 @@ type workspaceState struct {
 type repoCacheBackend interface {
 	Lookup(workspaceID, url string) string
 	Sync(workspaceID string, repos []repocache.RepoInfo) error
+	// Fetch runs `git fetch origin` on the given bare clone path. Used by
+	// the daemon-mode /repo/refresh handler so an agent can force a cache
+	// refresh without waiting for the next sync tick.
+	Fetch(barePath string) error
 	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
 	// CreateSharedClone is the read-only-cache equivalent of CreateWorktree,
 	// used by the controller-mode single-task runner (Plan F.1) where the

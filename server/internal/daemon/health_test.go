@@ -3,9 +3,12 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -212,6 +215,10 @@ func (c *blockingLookupRepoCache) Sync(string, []repocache.RepoInfo) error {
 	return nil
 }
 
+func (c *blockingLookupRepoCache) Fetch(string) error {
+	return nil
+}
+
 func (c *blockingLookupRepoCache) CreateWorktree(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
 	return nil, nil
 }
@@ -233,6 +240,170 @@ func (c *blockingLookupRepoCache) release() {
 	c.releaseOnce.Do(func() {
 		close(c.releaseLookup)
 	})
+}
+
+type recordingRepoCache struct {
+	lookupPath  string
+	fetchCalls  []string
+	fetchErr    error
+}
+
+func (c *recordingRepoCache) Lookup(_, _ string) string                                  { return c.lookupPath }
+func (c *recordingRepoCache) Sync(string, []repocache.RepoInfo) error                    { return nil }
+func (c *recordingRepoCache) Fetch(barePath string) error {
+	c.fetchCalls = append(c.fetchCalls, barePath)
+	return c.fetchErr
+}
+func (c *recordingRepoCache) CreateWorktree(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, nil
+}
+func (c *recordingRepoCache) CreateSharedClone(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, nil
+}
+
+func postRefresh(t *testing.T, h http.HandlerFunc, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/repo/refresh", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestRepoRefreshHandlerCallsFetch(t *testing.T) {
+	t.Parallel()
+	cache := &recordingRepoCache{lookupPath: "/cache/ws/foo.git"}
+	d := &Daemon{repoCache: cache, logger: slog.Default()}
+
+	rec := postRefresh(t, d.repoRefreshHandler(), `{"url":"https://github.com/o/r.git","workspace_id":"ws-1"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(cache.fetchCalls) != 1 || cache.fetchCalls[0] != "/cache/ws/foo.git" {
+		t.Fatalf("fetch calls: got %v, want [/cache/ws/foo.git]", cache.fetchCalls)
+	}
+}
+
+func TestRepoRefreshHandlerMissingURLReturns400(t *testing.T) {
+	t.Parallel()
+	cache := &recordingRepoCache{lookupPath: "/cache/ws/foo.git"}
+	d := &Daemon{repoCache: cache, logger: slog.Default()}
+
+	rec := postRefresh(t, d.repoRefreshHandler(), `{"workspace_id":"ws-1"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400", rec.Code)
+	}
+	if len(cache.fetchCalls) != 0 {
+		t.Fatalf("fetch should not be called on bad input, got %v", cache.fetchCalls)
+	}
+}
+
+func TestRepoRefreshHandlerNotInCacheReturns404(t *testing.T) {
+	t.Parallel()
+	// Lookup returns "" → repo not in cache.
+	cache := &recordingRepoCache{lookupPath: ""}
+	d := &Daemon{repoCache: cache, logger: slog.Default()}
+
+	rec := postRefresh(t, d.repoRefreshHandler(), `{"url":"https://github.com/o/r.git","workspace_id":"ws-1"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d, want 404", rec.Code)
+	}
+}
+
+func TestRepoRefreshHandlerFetchErrorReturns500(t *testing.T) {
+	t.Parallel()
+	cache := &recordingRepoCache{lookupPath: "/cache/ws/foo.git", fetchErr: fmt.Errorf("boom")}
+	d := &Daemon{repoCache: cache, logger: slog.Default()}
+
+	rec := postRefresh(t, d.repoRefreshHandler(), `{"url":"https://github.com/o/r.git","workspace_id":"ws-1"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d, want 500", rec.Code)
+	}
+}
+
+func TestControllerRepoRefreshHandlerProxiesToAdmin(t *testing.T) {
+	// Spin up a fake repocache admin server that records the call.
+	var seenWS, seenURL string
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/fetch" {
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		seenWS = r.URL.Query().Get("workspace_id")
+		seenURL = r.URL.Query().Get("url")
+		_, _ = w.Write([]byte("fetched\n"))
+	}))
+	defer admin.Close()
+
+	t.Setenv("MULTICA_REPOCACHE_URL", admin.URL)
+	d := &Daemon{logger: slog.Default()}
+
+	rec := postRefresh(t, d.controllerRepoRefreshHandler(), `{"url":"https://github.com/o/r.git","workspace_id":"ws-1"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if seenWS != "ws-1" {
+		t.Errorf("workspace_id query: got %q, want %q", seenWS, "ws-1")
+	}
+	if seenURL != "https://github.com/o/r.git" {
+		t.Errorf("url query: got %q, want %q", seenURL, "https://github.com/o/r.git")
+	}
+}
+
+func TestControllerRepoRefreshHandlerMissingEnvReturns503(t *testing.T) {
+	t.Setenv("MULTICA_REPOCACHE_URL", "")
+	d := &Daemon{logger: slog.Default()}
+
+	rec := postRefresh(t, d.controllerRepoRefreshHandler(), `{"url":"https://github.com/o/r.git","workspace_id":"ws-1"}`)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d, want 503", rec.Code)
+	}
+}
+
+func TestControllerRepoRefreshHandlerForwardsUpstream404(t *testing.T) {
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unknown", http.StatusNotFound)
+	}))
+	defer admin.Close()
+	t.Setenv("MULTICA_REPOCACHE_URL", admin.URL)
+	d := &Daemon{logger: slog.Default()}
+
+	rec := postRefresh(t, d.controllerRepoRefreshHandler(), `{"url":"https://github.com/o/r.git","workspace_id":"ws-1"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d, want 404 (forwarded), body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// Sanity check: the URL-escape path in the proxy handler builds the expected
+// query string. Belt-and-suspenders for the workspace_id and url params.
+func TestControllerRepoRefreshHandlerEscapesQuery(t *testing.T) {
+	var rawQuery string
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer admin.Close()
+	t.Setenv("MULTICA_REPOCACHE_URL", admin.URL)
+	d := &Daemon{logger: slog.Default()}
+
+	rec := postRefresh(t, d.controllerRepoRefreshHandler(), `{"url":"https://github.com/o/r.git?fancy=1","workspace_id":"ws+special"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", rec.Code)
+	}
+	parsed, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		t.Fatalf("parse rawQuery %q: %v", rawQuery, err)
+	}
+	if parsed.Get("workspace_id") != "ws+special" {
+		t.Errorf("workspace_id round-trip: got %q, want %q", parsed.Get("workspace_id"), "ws+special")
+	}
+	if parsed.Get("url") != "https://github.com/o/r.git?fancy=1" {
+		t.Errorf("url round-trip: got %q, want %q", parsed.Get("url"), "https://github.com/o/r.git?fancy=1")
+	}
 }
 
 func assertActiveTaskCount(t *testing.T, h http.HandlerFunc, want int64) {

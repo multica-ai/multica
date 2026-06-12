@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -51,6 +54,12 @@ type repoCheckoutRequest struct {
 	Ref         string `json:"ref,omitempty"`
 	AgentName   string `json:"agent_name"`
 	TaskID      string `json:"task_id"`
+}
+
+// repoRefreshRequest is the body of a POST /repo/refresh request.
+type repoRefreshRequest struct {
+	URL         string `json:"url"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -244,6 +253,116 @@ func (d *Daemon) controllerRepoCheckoutHandler() http.HandlerFunc {
 	}
 }
 
+// repoRefreshHandler returns the POST /repo/refresh HTTP handler for daemon
+// mode. It looks up the bare clone for (workspace_id, url) and runs
+// `git fetch origin` on it. Used by `multica repo refresh` so an agent can
+// force the cache to pick up commits that landed within the daemon's sync
+// interval window. Returns 404 when the URL is not in the cache, 400 on
+// missing fields, 500 on fetch failure.
+func (d *Daemon) repoRefreshHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req repoRefreshRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.URL == "" {
+			http.Error(w, "url is required", http.StatusBadRequest)
+			return
+		}
+		if req.WorkspaceID == "" {
+			http.Error(w, "workspace_id is required", http.StatusBadRequest)
+			return
+		}
+		if d.repoCache == nil {
+			http.Error(w, "repo cache not initialized", http.StatusInternalServerError)
+			return
+		}
+		bare := d.repoCache.Lookup(req.WorkspaceID, req.URL)
+		if bare == "" {
+			http.Error(w, fmt.Sprintf("repo not found in cache: %s (workspace: %s)", req.URL, req.WorkspaceID), http.StatusNotFound)
+			return
+		}
+		if err := d.repoCache.Fetch(bare); err != nil {
+			d.logger.Error("repo refresh failed", "url", req.URL, "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "refreshed"})
+	}
+}
+
+// controllerRepoRefreshHandler is the controller-mode variant of
+// repoRefreshHandler. The bare clone is on a ReadOnly mount owned by the
+// multica-repocache Deployment, so the local worker daemon cannot run a fetch
+// against it. Instead, this handler proxies to the repocache server's admin
+// endpoint at MULTICA_REPOCACHE_URL, which executes the fetch on the writable
+// side of the same PVC.
+//
+// Returns 503 when MULTICA_REPOCACHE_URL is not set (controller-mode is
+// indicated by MULTICA_REPOCACHE_DIR being present; if URL is missing too,
+// the deployment is misconfigured and the agent's refresh request cannot
+// land).
+func (d *Daemon) controllerRepoRefreshHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req repoRefreshRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.URL == "" {
+			http.Error(w, "url is required", http.StatusBadRequest)
+			return
+		}
+		if req.WorkspaceID == "" {
+			http.Error(w, "workspace_id is required", http.StatusBadRequest)
+			return
+		}
+		adminBase := strings.TrimRight(os.Getenv("MULTICA_REPOCACHE_URL"), "/")
+		if adminBase == "" {
+			http.Error(w, "MULTICA_REPOCACHE_URL not set; controller is missing the repocache admin endpoint", http.StatusServiceUnavailable)
+			return
+		}
+		// Build the admin /repos/fetch URL. The repocache admin server takes
+		// workspace_id and url as query params (see cmd/multica-repocache/server.go).
+		q := url.Values{}
+		q.Set("workspace_id", req.WorkspaceID)
+		q.Set("url", req.URL)
+		fetchURL := adminBase + "/repos/fetch?" + q.Encode()
+		client := &http.Client{Timeout: 5 * time.Minute}
+		resp, err := client.Post(fetchURL, "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			d.logger.Error("controller repo refresh: proxy failed", "url", req.URL, "error", err)
+			http.Error(w, "proxy to repocache failed: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			// Mirror the upstream status so the agent sees 404 (not in cache)
+			// vs 500 (fetch error) vs 400 (bad input) without translation.
+			d.logger.Warn("controller repo refresh: upstream non-OK",
+				"url", req.URL,
+				"status", resp.StatusCode,
+				"body", strings.TrimSpace(string(body)),
+			)
+			http.Error(w, strings.TrimSpace(string(body)), resp.StatusCode)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "refreshed"})
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
@@ -251,6 +370,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
+	mux.HandleFunc("/repo/refresh", d.repoRefreshHandler())
 
 	srv := &http.Server{Handler: mux}
 
