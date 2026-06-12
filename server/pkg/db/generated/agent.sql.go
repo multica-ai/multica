@@ -1768,7 +1768,7 @@ func (q *Queries) GetLatestTaskIsLeaderForIssueAndAgent(ctx context.Context, arg
 }
 
 const getRecentTaskTriggerBeforeComment = `-- name: GetRecentTaskTriggerBeforeComment :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, channel_id, channel_message_id, channel_thread_id, channel_reply_to_id FROM agent_task_queue
 WHERE issue_id = $1
   AND agent_id = $2
   AND trigger_comment_id IS NOT NULL
@@ -1817,6 +1817,10 @@ func (q *Queries) GetRecentTaskTriggerBeforeComment(ctx context.Context, arg Get
 		&i.ForceFreshSession,
 		&i.IsLeaderTask,
 		&i.WaitReason,
+		&i.ChannelID,
+		&i.ChannelMessageID,
+		&i.ChannelThreadID,
+		&i.ChannelReplyToID,
 	)
 	return i, err
 }

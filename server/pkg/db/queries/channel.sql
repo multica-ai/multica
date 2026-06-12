@@ -22,13 +22,16 @@ SELECT
             SELECT 1 FROM channel_message m
             WHERE m.channel_id = c.id AND m.created_at > cm.last_read_at
         )
-    )::boolean AS has_unread
+    )::boolean AS has_unread,
+    cg.name AS group_name,
+    COALESCE(cg.position, 0)::float8 AS group_position
 FROM channel c
 LEFT JOIN channel_member cm ON cm.channel_id = c.id AND cm.user_id = $2
+LEFT JOIN channel_group cg ON cg.id = c.group_id
 WHERE c.workspace_id = $1
   AND c.is_archived = false
   AND (c.access_mode = 'open' OR cm.user_id IS NOT NULL)
-ORDER BY last_activity_at DESC, c.created_at DESC;
+ORDER BY group_position ASC, c.position ASC, last_activity_at DESC, c.created_at DESC;
 
 -- name: GetChannel :one
 SELECT * FROM channel WHERE id = $1 AND workspace_id = $2;
@@ -148,6 +151,16 @@ FROM channel_message m
 WHERE m.channel_id = $1 AND m.thread_id IS NULL
 ORDER BY m.created_at ASC;
 
+-- name: ListChannelMessagesLatest :many
+-- Lists the N most recent top-level messages (for initial page load).
+-- Returns in DESC order; caller reverses to ASC for display.
+SELECT m.*,
+    COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
+FROM channel_message m
+WHERE m.channel_id = $1 AND m.thread_id IS NULL
+ORDER BY m.created_at DESC
+LIMIT $2;
+
 -- name: ListChannelMessagesPaginated :many
 -- Lists top-level channel messages with cursor-based pagination (before a timestamp).
 SELECT m.*,
@@ -258,3 +271,36 @@ SELECT id, number, title, status, priority, source_thread_id
 FROM issue
 WHERE source_thread_id = $1
 ORDER BY created_at ASC;
+
+-- ============ Channel Groups ============
+
+-- name: ListChannelGroups :many
+SELECT * FROM channel_group
+WHERE workspace_id = $1
+ORDER BY position ASC;
+
+-- name: CreateChannelGroup :one
+INSERT INTO channel_group (workspace_id, name, position, created_by)
+VALUES ($1, $2, $3, sqlc.narg('created_by'))
+RETURNING *;
+
+-- name: UpdateChannelGroupName :one
+UPDATE channel_group SET name = $2 WHERE id = $1
+RETURNING *;
+
+-- name: UpdateChannelGroupPosition :exec
+UPDATE channel_group SET position = $2 WHERE id = $1;
+
+-- name: DeleteChannelGroup :exec
+DELETE FROM channel_group WHERE id = $1 AND workspace_id = $2;
+
+-- name: MoveChannelToGroup :exec
+UPDATE channel SET group_id = sqlc.narg('group_id'), position = $2 WHERE id = $1;
+
+-- name: GetMaxChannelGroupPosition :one
+SELECT COALESCE(MAX(position), 0)::float8 AS max_position
+FROM channel_group WHERE workspace_id = $1;
+
+-- name: GetMaxChannelPositionInGroup :one
+SELECT COALESCE(MAX(position), 0)::float8 AS max_position
+FROM channel WHERE workspace_id = $1 AND group_id = sqlc.narg('group_id');

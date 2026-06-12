@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
 export const channelKeys = {
@@ -28,12 +28,23 @@ export function channelListOptions(wsId: string) {
   });
 }
 
+const CHANNEL_PAGE_SIZE = 20;
+
 export function channelMessagesOptions(wsId: string, channelId: string | null) {
-  return queryOptions({
+  return infiniteQueryOptions({
     queryKey: channelKeys.channelMessages(wsId, channelId ?? ""),
-    queryFn: () => api.listChannelMessages(channelId ?? ""),
+    queryFn: ({ pageParam }) =>
+      api.listChannelMessages(channelId ?? "", {
+        limit: CHANNEL_PAGE_SIZE,
+        before: pageParam ?? undefined,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more && lastPage.messages.length > 0
+        ? lastPage.messages[0]!.created_at
+        : undefined,
     enabled: !!channelId,
-    select: (data) => data.messages,
+    select: (data) => data.pages.flatMap((p) => p.messages),
   });
 }
 

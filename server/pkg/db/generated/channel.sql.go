@@ -41,7 +41,7 @@ func (q *Queries) CountMessageReplies(ctx context.Context, replyToID pgtype.UUID
 const createChannel = `-- name: CreateChannel :one
 INSERT INTO channel (workspace_id, name, slug, description, access_mode, created_by)
 VALUES ($1, $2, $3, COALESCE($4, ''), COALESCE($5, 'open'), $6)
-RETURNING id, workspace_id, name, slug, description, access_mode, is_locked, is_archived, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, slug, description, access_mode, is_locked, is_archived, created_by, created_at, updated_at, group_id, position
 `
 
 type CreateChannelParams struct {
@@ -75,6 +75,40 @@ func (q *Queries) CreateChannel(ctx context.Context, arg CreateChannelParams) (C
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GroupID,
+		&i.Position,
+	)
+	return i, err
+}
+
+const createChannelGroup = `-- name: CreateChannelGroup :one
+INSERT INTO channel_group (workspace_id, name, position, created_by)
+VALUES ($1, $2, $3, $4)
+RETURNING id, workspace_id, name, position, created_by, created_at
+`
+
+type CreateChannelGroupParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Position    float64     `json:"position"`
+	CreatedBy   pgtype.UUID `json:"created_by"`
+}
+
+func (q *Queries) CreateChannelGroup(ctx context.Context, arg CreateChannelGroupParams) (ChannelGroup, error) {
+	row := q.db.QueryRow(ctx, createChannelGroup,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Position,
+		arg.CreatedBy,
+	)
+	var i ChannelGroup
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Position,
+		&i.CreatedBy,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -292,6 +326,20 @@ func (q *Queries) DeleteChannel(ctx context.Context, arg DeleteChannelParams) er
 	return err
 }
 
+const deleteChannelGroup = `-- name: DeleteChannelGroup :exec
+DELETE FROM channel_group WHERE id = $1 AND workspace_id = $2
+`
+
+type DeleteChannelGroupParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteChannelGroup(ctx context.Context, arg DeleteChannelGroupParams) error {
+	_, err := q.db.Exec(ctx, deleteChannelGroup, arg.ID, arg.WorkspaceID)
+	return err
+}
+
 const deleteChannelMessage = `-- name: DeleteChannelMessage :exec
 DELETE FROM channel_message WHERE id = $1
 `
@@ -311,7 +359,7 @@ func (q *Queries) DeleteChannelThread(ctx context.Context, id pgtype.UUID) error
 }
 
 const getChannel = `-- name: GetChannel :one
-SELECT id, workspace_id, name, slug, description, access_mode, is_locked, is_archived, created_by, created_at, updated_at FROM channel WHERE id = $1 AND workspace_id = $2
+SELECT id, workspace_id, name, slug, description, access_mode, is_locked, is_archived, created_by, created_at, updated_at, group_id, position FROM channel WHERE id = $1 AND workspace_id = $2
 `
 
 type GetChannelParams struct {
@@ -334,6 +382,8 @@ func (q *Queries) GetChannel(ctx context.Context, arg GetChannelParams) (Channel
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GroupID,
+		&i.Position,
 	)
 	return i, err
 }
@@ -521,6 +571,35 @@ func (q *Queries) GetChannelThread(ctx context.Context, id pgtype.UUID) (Channel
 	return i, err
 }
 
+const getMaxChannelGroupPosition = `-- name: GetMaxChannelGroupPosition :one
+SELECT COALESCE(MAX(position), 0)::float8 AS max_position
+FROM channel_group WHERE workspace_id = $1
+`
+
+func (q *Queries) GetMaxChannelGroupPosition(ctx context.Context, workspaceID pgtype.UUID) (float64, error) {
+	row := q.db.QueryRow(ctx, getMaxChannelGroupPosition, workspaceID)
+	var max_position float64
+	err := row.Scan(&max_position)
+	return max_position, err
+}
+
+const getMaxChannelPositionInGroup = `-- name: GetMaxChannelPositionInGroup :one
+SELECT COALESCE(MAX(position), 0)::float8 AS max_position
+FROM channel WHERE workspace_id = $1 AND group_id = $2
+`
+
+type GetMaxChannelPositionInGroupParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	GroupID     pgtype.UUID `json:"group_id"`
+}
+
+func (q *Queries) GetMaxChannelPositionInGroup(ctx context.Context, arg GetMaxChannelPositionInGroupParams) (float64, error) {
+	row := q.db.QueryRow(ctx, getMaxChannelPositionInGroup, arg.WorkspaceID, arg.GroupID)
+	var max_position float64
+	err := row.Scan(&max_position)
+	return max_position, err
+}
+
 const getThreadByRootMessage = `-- name: GetThreadByRootMessage :one
 SELECT id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id FROM channel_thread WHERE root_message_id = $1
 `
@@ -585,6 +664,41 @@ type LinkIssueSourceParams struct {
 func (q *Queries) LinkIssueSource(ctx context.Context, arg LinkIssueSourceParams) error {
 	_, err := q.db.Exec(ctx, linkIssueSource, arg.ID, arg.SourceChannelID, arg.SourceThreadID)
 	return err
+}
+
+const listChannelGroups = `-- name: ListChannelGroups :many
+
+SELECT id, workspace_id, name, position, created_by, created_at FROM channel_group
+WHERE workspace_id = $1
+ORDER BY position ASC
+`
+
+// ============ Channel Groups ============
+func (q *Queries) ListChannelGroups(ctx context.Context, workspaceID pgtype.UUID) ([]ChannelGroup, error) {
+	rows, err := q.db.Query(ctx, listChannelGroups, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChannelGroup{}
+	for rows.Next() {
+		var i ChannelGroup
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Position,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listChannelMembers = `-- name: ListChannelMembers :many
@@ -770,6 +884,68 @@ func (q *Queries) ListChannelMessages(ctx context.Context, channelID pgtype.UUID
 	return items, nil
 }
 
+const listChannelMessagesLatest = `-- name: ListChannelMessagesLatest :many
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+    COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
+FROM channel_message m
+WHERE m.channel_id = $1 AND m.thread_id IS NULL
+ORDER BY m.created_at DESC
+LIMIT $2
+`
+
+type ListChannelMessagesLatestParams struct {
+	ChannelID pgtype.UUID `json:"channel_id"`
+	Limit     int32       `json:"limit"`
+}
+
+type ListChannelMessagesLatestRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	ThreadID    pgtype.UUID        `json:"thread_id"`
+	ChannelID   pgtype.UUID        `json:"channel_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Content     string             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+	ReplyCount  int32              `json:"reply_count"`
+}
+
+// Lists the N most recent top-level messages (for initial page load).
+// Returns in DESC order; caller reverses to ASC for display.
+func (q *Queries) ListChannelMessagesLatest(ctx context.Context, arg ListChannelMessagesLatestParams) ([]ListChannelMessagesLatestRow, error) {
+	rows, err := q.db.Query(ctx, listChannelMessagesLatest, arg.ChannelID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelMessagesLatestRow{}
+	for rows.Next() {
+		var i ListChannelMessagesLatestRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ThreadID,
+			&i.ChannelID,
+			&i.WorkspaceID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ReplyToID,
+			&i.ReplyCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelMessagesPaginated = `-- name: ListChannelMessagesPaginated :many
 SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
@@ -898,7 +1074,7 @@ func (q *Queries) ListChannelThreads(ctx context.Context, channelID pgtype.UUID)
 const listChannels = `-- name: ListChannels :many
 
 SELECT
-    c.id, c.workspace_id, c.name, c.slug, c.description, c.access_mode, c.is_locked, c.is_archived, c.created_by, c.created_at, c.updated_at,
+    c.id, c.workspace_id, c.name, c.slug, c.description, c.access_mode, c.is_locked, c.is_archived, c.created_by, c.created_at, c.updated_at, c.group_id, c.position,
     cm.role          AS member_role,
     cm.last_read_at  AS member_last_read_at,
     (cm.user_id IS NOT NULL)::boolean AS is_member,
@@ -915,13 +1091,16 @@ SELECT
             SELECT 1 FROM channel_message m
             WHERE m.channel_id = c.id AND m.created_at > cm.last_read_at
         )
-    )::boolean AS has_unread
+    )::boolean AS has_unread,
+    cg.name AS group_name,
+    COALESCE(cg.position, 0)::float8 AS group_position
 FROM channel c
 LEFT JOIN channel_member cm ON cm.channel_id = c.id AND cm.user_id = $2
+LEFT JOIN channel_group cg ON cg.id = c.group_id
 WHERE c.workspace_id = $1
   AND c.is_archived = false
   AND (c.access_mode = 'open' OR cm.user_id IS NOT NULL)
-ORDER BY last_activity_at DESC, c.created_at DESC
+ORDER BY group_position ASC, c.position ASC, last_activity_at DESC, c.created_at DESC
 `
 
 type ListChannelsParams struct {
@@ -941,11 +1120,15 @@ type ListChannelsRow struct {
 	CreatedBy        pgtype.UUID        `json:"created_by"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	GroupID          pgtype.UUID        `json:"group_id"`
+	Position         float64            `json:"position"`
 	MemberRole       pgtype.Text        `json:"member_role"`
 	MemberLastReadAt pgtype.Timestamptz `json:"member_last_read_at"`
 	IsMember         bool               `json:"is_member"`
 	LastActivityAt   pgtype.Timestamptz `json:"last_activity_at"`
 	HasUnread        bool               `json:"has_unread"`
+	GroupName        pgtype.Text        `json:"group_name"`
+	GroupPosition    float64            `json:"group_position"`
 }
 
 // ============ Channels ============
@@ -973,11 +1156,15 @@ func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]L
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.GroupID,
+			&i.Position,
 			&i.MemberRole,
 			&i.MemberLastReadAt,
 			&i.IsMember,
 			&i.LastActivityAt,
 			&i.HasUnread,
+			&i.GroupName,
+			&i.GroupPosition,
 		); err != nil {
 			return nil, err
 		}
@@ -1124,6 +1311,21 @@ func (q *Queries) MarkChannelRead(ctx context.Context, arg MarkChannelReadParams
 	return err
 }
 
+const moveChannelToGroup = `-- name: MoveChannelToGroup :exec
+UPDATE channel SET group_id = $3, position = $2 WHERE id = $1
+`
+
+type MoveChannelToGroupParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Position float64     `json:"position"`
+	GroupID  pgtype.UUID `json:"group_id"`
+}
+
+func (q *Queries) MoveChannelToGroup(ctx context.Context, arg MoveChannelToGroupParams) error {
+	_, err := q.db.Exec(ctx, moveChannelToGroup, arg.ID, arg.Position, arg.GroupID)
+	return err
+}
+
 const removeChannelMember = `-- name: RemoveChannelMember :exec
 DELETE FROM channel_member WHERE channel_id = $1 AND user_id = $2
 `
@@ -1156,7 +1358,7 @@ UPDATE channel SET
     is_archived = COALESCE($7, is_archived),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, slug, description, access_mode, is_locked, is_archived, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, slug, description, access_mode, is_locked, is_archived, created_by, created_at, updated_at, group_id, position
 `
 
 type UpdateChannelParams struct {
@@ -1192,8 +1394,48 @@ func (q *Queries) UpdateChannel(ctx context.Context, arg UpdateChannelParams) (C
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GroupID,
+		&i.Position,
 	)
 	return i, err
+}
+
+const updateChannelGroupName = `-- name: UpdateChannelGroupName :one
+UPDATE channel_group SET name = $2 WHERE id = $1
+RETURNING id, workspace_id, name, position, created_by, created_at
+`
+
+type UpdateChannelGroupNameParams struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+}
+
+func (q *Queries) UpdateChannelGroupName(ctx context.Context, arg UpdateChannelGroupNameParams) (ChannelGroup, error) {
+	row := q.db.QueryRow(ctx, updateChannelGroupName, arg.ID, arg.Name)
+	var i ChannelGroup
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Position,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateChannelGroupPosition = `-- name: UpdateChannelGroupPosition :exec
+UPDATE channel_group SET position = $2 WHERE id = $1
+`
+
+type UpdateChannelGroupPositionParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Position float64     `json:"position"`
+}
+
+func (q *Queries) UpdateChannelGroupPosition(ctx context.Context, arg UpdateChannelGroupPositionParams) error {
+	_, err := q.db.Exec(ctx, updateChannelGroupPosition, arg.ID, arg.Position)
+	return err
 }
 
 const updateChannelMessage = `-- name: UpdateChannelMessage :one

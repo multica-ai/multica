@@ -61,36 +61,38 @@ const LeaderTaskSourceSquadMention = "squad_mention"
 const ChannelMentionContextType = "channel_mention"
 
 type ChannelMentionContext struct {
-	Type             string `json:"type"`
-	WorkspaceID      string `json:"workspace_id"`
-	ChannelID        string `json:"channel_id"`
-	ChannelName      string `json:"channel_name"`
-	TriggerMessageID string `json:"trigger_message_id"`
-	TriggerContent   string `json:"trigger_content"`
-	RequesterID      string `json:"requester_id,omitempty"`
-	MentionType      string `json:"mention_type"`
-	MentionedID      string `json:"mentioned_id"`
-	ResolvedAgentID  string `json:"resolved_agent_id"`
-	SquadID          string `json:"squad_id,omitempty"`
-	SquadName        string `json:"squad_name,omitempty"`
-	RecentLimit      int    `json:"recent_limit"`
+	Type                   string `json:"type"`
+	WorkspaceID            string `json:"workspace_id"`
+	ChannelID              string `json:"channel_id"`
+	ChannelName            string `json:"channel_name"`
+	TriggerMessageID       string `json:"trigger_message_id"`
+	TriggerContent         string `json:"trigger_content"`
+	RequesterID            string `json:"requester_id,omitempty"`
+	MentionType            string `json:"mention_type"`
+	MentionedID            string `json:"mentioned_id"`
+	ResolvedAgentID        string `json:"resolved_agent_id"`
+	SquadID                string `json:"squad_id,omitempty"`
+	SquadName              string `json:"squad_name,omitempty"`
+	RecentLimit            int    `json:"recent_limit"`
+	ThreadRootMessageID    string `json:"thread_root_message_id,omitempty"`
 }
 
 type EnqueueChannelMentionTaskInput struct {
-	WorkspaceID      pgtype.UUID
-	ChannelID        pgtype.UUID
-	ChannelName      string
-	ChannelMessageID pgtype.UUID
-	ChannelThreadID  pgtype.UUID
-	ChannelReplyToID pgtype.UUID
-	TriggerContent   string
-	RequesterID      pgtype.UUID
-	MentionType      string
-	MentionedID      pgtype.UUID
-	ResolvedAgentID  pgtype.UUID
-	SquadID          pgtype.UUID
-	SquadName        string
-	IsLeaderTask     bool
+	WorkspaceID              pgtype.UUID
+	ChannelID                pgtype.UUID
+	ChannelName              string
+	ChannelMessageID         pgtype.UUID
+	ChannelThreadID          pgtype.UUID
+	ChannelReplyToID         pgtype.UUID
+	ChannelThreadRootMsgID   pgtype.UUID
+	TriggerContent           string
+	RequesterID              pgtype.UUID
+	MentionType              string
+	MentionedID              pgtype.UUID
+	ResolvedAgentID          pgtype.UUID
+	SquadID                  pgtype.UUID
+	SquadName                string
+	IsLeaderTask             bool
 }
 
 type TaskWakeupNotifier interface {
@@ -724,17 +726,18 @@ func (s *TaskService) EnqueueChannelMentionTask(ctx context.Context, input Enque
 
 	recentLimit := 20
 	payload := ChannelMentionContext{
-		Type:             ChannelMentionContextType,
-		WorkspaceID:      util.UUIDToString(input.WorkspaceID),
-		ChannelID:        util.UUIDToString(input.ChannelID),
-		ChannelName:      input.ChannelName,
-		TriggerMessageID: util.UUIDToString(input.ChannelMessageID),
-		TriggerContent:   input.TriggerContent,
-		RequesterID:      util.UUIDToString(input.RequesterID),
-		MentionType:      input.MentionType,
-		MentionedID:      util.UUIDToString(input.MentionedID),
-		ResolvedAgentID:  util.UUIDToString(input.ResolvedAgentID),
-		RecentLimit:      recentLimit,
+		Type:                ChannelMentionContextType,
+		WorkspaceID:         util.UUIDToString(input.WorkspaceID),
+		ChannelID:           util.UUIDToString(input.ChannelID),
+		ChannelName:         input.ChannelName,
+		TriggerMessageID:    util.UUIDToString(input.ChannelMessageID),
+		TriggerContent:      input.TriggerContent,
+		RequesterID:         util.UUIDToString(input.RequesterID),
+		MentionType:         input.MentionType,
+		MentionedID:         util.UUIDToString(input.MentionedID),
+		ResolvedAgentID:     util.UUIDToString(input.ResolvedAgentID),
+		RecentLimit:         recentLimit,
+		ThreadRootMessageID: util.UUIDToString(input.ChannelThreadRootMsgID),
 	}
 	if input.SquadID.Valid {
 		payload.SquadID = util.UUIDToString(input.SquadID)

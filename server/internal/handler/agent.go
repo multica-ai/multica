@@ -296,6 +296,7 @@ type AgentTaskResponse struct {
 	ChannelMessageID        string               `json:"channel_message_id,omitempty"`        // message that triggered a channel mention task
 	ChannelThreadID         string               `json:"channel_thread_id,omitempty"`         // optional thread associated with the trigger message
 	ChannelReplyToID        string               `json:"channel_reply_to_id,omitempty"`       // optional parent message for replies
+	ChannelThreadRootMsgID  string               `json:"channel_thread_root_msg_id,omitempty"` // root message of the thread (for replying back to the same thread)
 	ChannelTriggerContent   string               `json:"channel_trigger_content,omitempty"`   // triggering channel message content
 	ChannelMentionType      string               `json:"channel_mention_type,omitempty"`      // agent or squad
 	AutopilotRunID          string               `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks

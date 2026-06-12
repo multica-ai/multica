@@ -835,6 +835,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/channels", func(r chi.Router) {
 				r.Get("/", h.ListChannels)
 				r.Post("/", h.CreateChannel)
+				r.Route("/groups", func(r chi.Router) {
+					r.Get("/", h.ListChannelGroups)
+					r.Post("/", h.CreateChannelGroup)
+					r.Route("/{groupId}", func(r chi.Router) {
+						r.Patch("/", h.UpdateChannelGroup)
+						r.Delete("/", h.DeleteChannelGroup)
+						r.Patch("/position", h.UpdateChannelGroupPosition)
+					})
+				})
+				r.Patch("/move", h.MoveChannelToGroup)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetChannel)
 					r.Patch("/", h.UpdateChannel)

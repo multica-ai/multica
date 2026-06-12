@@ -16,6 +16,18 @@ export interface ChannelSummary {
   member_role?: string;
   has_unread: boolean;
   last_activity_at?: string;
+  group_id?: string | null;
+  group_name?: string | null;
+  group_position: number;
+  position: number;
+}
+
+export interface ChannelGroup {
+  id: string;
+  name: string;
+  position: number;
+  created_by: string | null;
+  created_at: string;
 }
 
 export interface ListChannelsResponse {
@@ -87,6 +99,7 @@ export interface ChannelMessage {
 export interface ListChannelMessagesResponse {
   messages: ChannelMessage[];
   total: number;
+  has_more?: boolean;
 }
 
 export interface MessageThreadResponse {

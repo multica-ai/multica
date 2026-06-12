@@ -2764,6 +2764,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ChannelMessageID:                 task.ChannelMessageID,
 		ChannelThreadID:                  task.ChannelThreadID,
 		ChannelReplyToID:                 task.ChannelReplyToID,
+		ChannelThreadRootMsgID:           task.ChannelThreadRootMsgID,
 		ChannelTriggerContent:            task.ChannelTriggerContent,
 		ChannelMentionType:               task.ChannelMentionType,
 		AutopilotRunID:                   task.AutopilotRunID,

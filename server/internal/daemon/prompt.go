@@ -71,6 +71,9 @@ func buildChannelMentionPrompt(task Task) string {
 	if task.ChannelThreadID != "" {
 		fmt.Fprintf(&b, "Thread ID: %s\n", task.ChannelThreadID)
 	}
+	if task.ChannelThreadRootMsgID != "" {
+		fmt.Fprintf(&b, "Thread root message ID: %s\n", task.ChannelThreadRootMsgID)
+	}
 	if task.ChannelReplyToID != "" {
 		fmt.Fprintf(&b, "Reply-to message ID: %s\n", task.ChannelReplyToID)
 	}
@@ -99,7 +102,11 @@ func buildChannelMentionPrompt(task Task) string {
 	b.WriteString("\nStart by understanding the triggering message. If you need surrounding context, run:\n\n")
 	fmt.Fprintf(&b, "`multica channel context %s --message %s --include-replies --recent 20 --output json`\n\n", task.ChannelID, task.ChannelMessageID)
 	b.WriteString("You may also use workspace/member/agent/repo CLI commands as needed. Avoid Issue-oriented commands unless you explicitly create or choose a real issue during this task.\n\n")
-	b.WriteString("When you need to share a final result, default to a top-level channel message so it appears in the channel message list: `multica channel message send <channel-id> --content \"...\"`. Use `multica channel message reply <channel-id> <message-id> --content \"...\"` only when the result should stay attached to the triggering message. If no visible reply is warranted, finish silently after doing the required work.\n")
+	if task.ChannelThreadRootMsgID != "" {
+		fmt.Fprintf(&b, "When you need to share a final result, reply in the same thread: `multica channel message reply %s %s --content \"...\"`. Do NOT reply to the triggering message directly (that would create a nested thread). Use `multica channel message send %s --content \"...\"` only when the result should be a top-level message outside the thread. If no visible reply is warranted, finish silently after doing the required work.\n", task.ChannelID, task.ChannelThreadRootMsgID, task.ChannelID)
+	} else {
+		b.WriteString("When you need to share a final result, default to a top-level channel message so it appears in the channel message list: `multica channel message send <channel-id> --content \"...\"`. Use `multica channel message reply <channel-id> <message-id> --content \"...\"` only when the result should stay attached to the triggering message. If no visible reply is warranted, finish silently after doing the required work.\n")
+	}
 	return b.String()
 }
 

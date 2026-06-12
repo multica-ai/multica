@@ -82,17 +82,30 @@ func writeChannelWorkflow(b *strings.Builder, ctx TaskContextForEnv) {
 	if ctx.ChannelMessageID != "" {
 		fmt.Fprintf(b, "- Triggering message ID: `%s`\n", ctx.ChannelMessageID)
 	}
+	if ctx.ChannelThreadRootMsgID != "" {
+		fmt.Fprintf(b, "- Thread root message ID: `%s` (reply here to keep your response in the same thread)\n", ctx.ChannelThreadRootMsgID)
+	}
 	b.WriteString("- Start by reading the triggering message in the user prompt, then run the channel context CLI if you need more context:\n")
 	fmt.Fprintf(b, "  `multica channel context %s --message %s --include-replies --recent 20 --output json`\n", ctx.ChannelID, ctx.ChannelMessageID)
 	b.WriteString("- Do NOT run `multica issue get`, `multica issue metadata list`, `multica issue comment list`, `multica issue comment add`, or `multica issue status` unless you explicitly decide to create or update an issue as part of the work.\n")
-	b.WriteString("- If you need to reply in the channel, use `multica channel message reply` for the triggering message or `multica channel message send` for a top-level channel message.\n\n")
+	if ctx.ChannelThreadRootMsgID != "" {
+		fmt.Fprintf(b, "- To reply in the same thread, use `multica channel message reply %s %s` (the thread root message). Do NOT reply to the triggering message directly — that would create a nested thread.\n", ctx.ChannelID, ctx.ChannelThreadRootMsgID)
+		b.WriteString("- To send a top-level channel message (outside the thread), use `multica channel message send`.\n\n")
+	} else {
+		b.WriteString("- If you need to reply in the channel, use `multica channel message reply` for the triggering message or `multica channel message send` for a top-level channel message.\n\n")
+	}
 }
 
 // writeChannelOutput emits the Output body for channel-origin tasks: results
 // go back to the channel (when a reply is useful), not to an issue comment.
-func writeChannelOutput(b *strings.Builder) {
+func writeChannelOutput(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("This is a channel-origin task, not an Issue task. Your final answer should normally be posted back to the channel only when a reply is useful.\n\n")
-	b.WriteString("- To reply to the triggering message, use `multica channel message reply <channel-id> <message-id> --content \"...\"`.\n")
-	b.WriteString("- To send a top-level channel message, use `multica channel message send <channel-id> --content \"...\"`.\n")
+	if ctx.ChannelThreadRootMsgID != "" {
+		fmt.Fprintf(b, "- To reply in the same thread, use `multica channel message reply %s %s --content \"...\"`.\n", ctx.ChannelID, ctx.ChannelThreadRootMsgID)
+		fmt.Fprintf(b, "- To send a top-level channel message (outside the thread), use `multica channel message send %s --content \"...\"`.\n", ctx.ChannelID)
+	} else {
+		b.WriteString("- To reply to the triggering message, use `multica channel message reply <channel-id> <message-id> --content \"...\"`.\n")
+		b.WriteString("- To send a top-level channel message, use `multica channel message send <channel-id> --content \"...\"`.\n")
+	}
 	b.WriteString("- Do NOT call `multica issue comment add` for this task unless you explicitly created or selected a real issue that needs a comment.\n")
 }

@@ -35,6 +35,11 @@ type ChannelResponse struct {
 	MemberRole     *string `json:"member_role,omitempty"`
 	HasUnread      bool    `json:"has_unread"`
 	LastActivityAt string  `json:"last_activity_at,omitempty"`
+	// Group context (only set on list).
+	GroupID       *string `json:"group_id,omitempty"`
+	GroupName     *string `json:"group_name,omitempty"`
+	GroupPosition float64 `json:"group_position"`
+	Position      float64 `json:"position"`
 }
 
 type ChannelMemberResponse struct {
@@ -81,6 +86,10 @@ func channelListRowToResponse(c db.ListChannelsRow) ChannelResponse {
 		MemberRole:     textToPtr(c.MemberRole),
 		HasUnread:      c.HasUnread,
 		LastActivityAt: timestampToString(c.LastActivityAt),
+		GroupID:        uuidToPtr(c.GroupID),
+		GroupName:      textToPtr(c.GroupName),
+		GroupPosition:  c.GroupPosition,
+		Position:       c.Position,
 	}
 	return resp
 }

@@ -173,6 +173,11 @@ func (h *Handler) enqueueChannelMentionedAgentTasks(ctx context.Context, channel
 			ResolvedAgentID:  agentID,
 			IsLeaderTask:     isLeader,
 		}
+		if msg.ThreadID.Valid {
+			if thread, err := h.Queries.GetChannelThread(ctx, msg.ThreadID); err == nil && thread.RootMessageID.Valid {
+				input.ChannelThreadRootMsgID = thread.RootMessageID
+			}
+		}
 		if squad.ID.Valid {
 			input.SquadID = squad.ID
 			input.SquadName = squad.Name

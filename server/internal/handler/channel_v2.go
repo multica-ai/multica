@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -95,6 +97,36 @@ func channelMessageToV2Response(m db.ChannelMessage, replyCount int32) ChannelMe
 		Content:     m.Content,
 		ReplyToID:   uuidToPtr(m.ReplyToID),
 		ReplyCount:  replyCount,
+		CreatedAt:   timestampToString(m.CreatedAt),
+		UpdatedAt:   timestampToString(m.UpdatedAt),
+	}
+}
+
+func channelMessageLatestToResponse(m db.ListChannelMessagesLatestRow) ChannelMessageV2Response {
+	return ChannelMessageV2Response{
+		ID:          uuidToString(m.ID),
+		ChannelID:   uuidToString(m.ChannelID),
+		WorkspaceID: uuidToString(m.WorkspaceID),
+		AuthorType:  m.AuthorType,
+		AuthorID:    uuidToPtr(m.AuthorID),
+		Content:     m.Content,
+		ReplyToID:   uuidToPtr(m.ReplyToID),
+		ReplyCount:  m.ReplyCount,
+		CreatedAt:   timestampToString(m.CreatedAt),
+		UpdatedAt:   timestampToString(m.UpdatedAt),
+	}
+}
+
+func channelMessagePaginatedToResponse(m db.ListChannelMessagesPaginatedRow) ChannelMessageV2Response {
+	return ChannelMessageV2Response{
+		ID:          uuidToString(m.ID),
+		ChannelID:   uuidToString(m.ChannelID),
+		WorkspaceID: uuidToString(m.WorkspaceID),
+		AuthorType:  m.AuthorType,
+		AuthorID:    uuidToPtr(m.AuthorID),
+		Content:     m.Content,
+		ReplyToID:   uuidToPtr(m.ReplyToID),
+		ReplyCount:  m.ReplyCount,
 		CreatedAt:   timestampToString(m.CreatedAt),
 		UpdatedAt:   timestampToString(m.UpdatedAt),
 	}
@@ -238,6 +270,8 @@ func channelReplyForContextToMessage(m db.ListChannelMessageRepliesForContextRow
 // ---------- V2 handlers ----------
 
 // ListChannelMessages lists top-level messages in a channel (flat timeline).
+// Supports pagination: ?limit=N (default 20) returns the latest N messages.
+// ?before=<RFC3339> loads older messages before that timestamp.
 func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
 	if !ok {
@@ -247,18 +281,67 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	messages, err := h.Queries.ListChannelMessages(r.Context(), cctx.channel.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list messages")
-		return
+
+	limitStr := r.URL.Query().Get("limit")
+	beforeStr := r.URL.Query().Get("before")
+
+	limit := int32(20)
+	if limitStr != "" {
+		if v, err := strconv.Atoi(limitStr); err == nil && v > 0 && v <= 100 {
+			limit = int32(v)
+		}
 	}
-	resp := make([]ChannelMessageV2Response, len(messages))
-	for i, m := range messages {
-		resp[i] = channelMessageV2ToResponse(m)
+
+	var resp []ChannelMessageV2Response
+	var hasMore bool
+
+	if beforeStr != "" {
+		beforeTime, err := time.Parse(time.RFC3339Nano, beforeStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid before timestamp")
+			return
+		}
+		messages, err := h.Queries.ListChannelMessagesPaginated(r.Context(), db.ListChannelMessagesPaginatedParams{
+			ChannelID: cctx.channel.ID,
+			CreatedAt: pgtype.Timestamptz{Time: beforeTime, Valid: true},
+			Limit:     limit + 1,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list messages")
+			return
+		}
+		if len(messages) > int(limit) {
+			hasMore = true
+			messages = messages[:limit]
+		}
+		resp = make([]ChannelMessageV2Response, len(messages))
+		for i, m := range messages {
+			resp[i] = channelMessagePaginatedToResponse(m)
+		}
+		slices.Reverse(resp)
+	} else {
+		messages, err := h.Queries.ListChannelMessagesLatest(r.Context(), db.ListChannelMessagesLatestParams{
+			ChannelID: cctx.channel.ID,
+			Limit:     limit + 1,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list messages")
+			return
+		}
+		if len(messages) > int(limit) {
+			hasMore = true
+			messages = messages[:limit]
+		}
+		resp = make([]ChannelMessageV2Response, len(messages))
+		for i, m := range messages {
+			resp[i] = channelMessageLatestToResponse(m)
+		}
+		slices.Reverse(resp)
 	}
+
 	resp = h.attachChannelAgentTasks(r.Context(), resp)
 	resp = h.attachChannelAuthorNames(r.Context(), resp)
-	writeJSON(w, http.StatusOK, map[string]any{"messages": resp, "total": len(resp)})
+	writeJSON(w, http.StatusOK, map[string]any{"messages": resp, "total": len(resp), "has_more": hasMore})
 }
 
 // SendChannelMessage posts a top-level message to a channel (no thread required).

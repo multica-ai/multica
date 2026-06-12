@@ -80,6 +80,7 @@ type TaskContextForEnv struct {
 	ChannelMessageID        string                  // message that triggered a channel mention task
 	ChannelThreadID         string                  // optional thread associated with the trigger message
 	ChannelReplyToID        string                  // optional parent message for replies
+	ChannelThreadRootMsgID  string                  // root message of the thread (for replying back to the same thread)
 	ChannelTriggerContent   string                  // triggering channel message content
 	ChannelMentionType      string                  // agent or squad
 	AutopilotRunID          string                  // non-empty for autopilot run_only tasks

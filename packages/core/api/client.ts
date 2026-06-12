@@ -161,6 +161,7 @@ import type {
   ConvertMessageToIssueRequest,
   ConvertMessageToIssueResponse,
   ChannelMessage,
+  ChannelGroup,
   CreateChannelRequest,
   UpdateChannelRequest,
   CreateChannelThreadRequest,
@@ -2207,8 +2208,15 @@ export class ApiClient {
   }
 
   // Channel V2 — flat messages
-  async listChannelMessages(channelId: string): Promise<ListChannelMessagesResponse> {
-    return this.fetch(`/api/channels/${channelId}/messages`);
+  async listChannelMessages(
+    channelId: string,
+    params: { limit?: number; before?: string } = {},
+  ): Promise<ListChannelMessagesResponse> {
+    const query = new URLSearchParams();
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.before) query.set("before", params.before);
+    const qs = query.toString();
+    return this.fetch(`/api/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
   }
 
   async sendChannelMessage(channelId: string, data: CreateChannelMessageRequest): Promise<ChannelMessage> {
@@ -2244,6 +2252,43 @@ export class ApiClient {
 
   async getChannelContext(channelId: string, recent = 20): Promise<ChannelContextResponse> {
     return this.fetch(`/api/channels/${channelId}/context?recent=${recent}`);
+  }
+
+  // Channel Groups
+  async listChannelGroups(): Promise<ChannelGroup[]> {
+    return this.fetch("/api/channels/groups");
+  }
+
+  async createChannelGroup(name: string): Promise<ChannelGroup> {
+    return this.fetch("/api/channels/groups", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async updateChannelGroup(groupId: string, name: string): Promise<ChannelGroup> {
+    return this.fetch(`/api/channels/groups/${groupId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteChannelGroup(groupId: string): Promise<void> {
+    return this.fetch(`/api/channels/groups/${groupId}`, { method: "DELETE" });
+  }
+
+  async updateChannelGroupPosition(groupId: string, position: number): Promise<void> {
+    return this.fetch(`/api/channels/groups/${groupId}/position`, {
+      method: "PATCH",
+      body: JSON.stringify({ position }),
+    });
+  }
+
+  async moveChannelToGroup(channelId: string, groupId: string | null, position: number): Promise<void> {
+    return this.fetch("/api/channels/move", {
+      method: "PATCH",
+      body: JSON.stringify({ channel_id: channelId, group_id: groupId, position }),
+    });
   }
 
   // Members

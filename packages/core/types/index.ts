@@ -214,6 +214,7 @@ export type {
 } from "./wiki";
 export type {
   ChannelSummary,
+  ChannelGroup,
   ListChannelsResponse,
   ChannelMember,
   ListChannelMembersResponse,

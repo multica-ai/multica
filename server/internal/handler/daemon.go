@@ -1472,6 +1472,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.ChannelName = chCtx.ChannelName
 			resp.ChannelTriggerContent = chCtx.TriggerContent
 			resp.ChannelMentionType = chCtx.MentionType
+			resp.ChannelThreadRootMsgID = chCtx.ThreadRootMessageID
 		}
 		if resp.WorkspaceID == "" || resp.ChannelName == "" {
 			workspaceID := parseUUID(resp.WorkspaceID)
