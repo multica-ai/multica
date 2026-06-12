@@ -41,7 +41,7 @@ type PrepareParams struct {
 	OpenclawBin    string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
-	// via a per-task config file. Only OpenClaw consumes it here today; other
+	// via a per-task config file. Cursor and OpenClaw consume it here; other
 	// providers wire MCP via ExecOptions.McpConfig in the agent backend.
 	McpConfig json.RawMessage
 	// LocalWorkDir, when non-empty, redirects the agent's working directory
@@ -147,6 +147,11 @@ type Environment struct {
 	// directory holding the wrapper file. Empty when no $include is
 	// emitted (fresh install).
 	OpenclawIncludeRoot string
+	// CursorDataDir is the per-task Cursor data directory (set only for
+	// cursor provider when the agent has managed mcp_config). The daemon
+	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
+	// isolated from the user's persistent ~/.cursor/projects state.
+	CursorDataDir string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -219,9 +224,6 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
-	if err := writeSidecarManifest(envRoot, manifest); err != nil {
-		logger.Warn("execenv: write sidecar manifest failed (non-fatal)", "error", err)
-	}
 
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
@@ -233,6 +235,23 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
+	}
+
+	// For Cursor, materialize managed MCP into project-local config and use
+	// an isolated CURSOR_DATA_DIR for the per-workdir approval sidecar. Cursor
+	// still reads ~/.cursor/mcp.json, but only servers with approval entries in
+	// this per-task data dir can load, so user-global MCP servers do not leak
+	// into managed-MCP runs.
+	if params.Provider == "cursor" {
+		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, manifest)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: prepare cursor mcp config: %w", err)
+		}
+		env.CursorDataDir = cursorDataDir
+	}
+
+	if err := writeSidecarManifest(envRoot, manifest); err != nil {
+		logger.Warn("execenv: write sidecar manifest failed (non-fatal)", "error", err)
 	}
 
 	// For OpenClaw, synthesize a per-task config that pins workspace to
@@ -354,11 +373,6 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
 	}
-	if env.RootDir != "" {
-		if err := writeSidecarManifest(env.RootDir, manifest); err != nil {
-			logger.Warn("execenv: refresh sidecar manifest failed", "error", err)
-		}
-	}
 
 	// Restore CodexHome for Codex provider — the per-task codex-home directory
 	// lives alongside the workdir. Re-run prepareCodexHomeWithOpts to ensure
@@ -372,6 +386,24 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
 			}
+		}
+	}
+
+	// Refresh Cursor's managed MCP sidecars on reuse. A newly saved agent
+	// mcp_config must replace the prior run's .cursor/mcp.json and isolated
+	// approvals before the next cursor-agent process starts.
+	if params.Provider == "cursor" && env.RootDir != "" {
+		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, manifest)
+		if err != nil {
+			logger.Warn("execenv: refresh cursor mcp config failed", "error", err)
+			return nil
+		}
+		env.CursorDataDir = cursorDataDir
+	}
+
+	if env.RootDir != "" {
+		if err := writeSidecarManifest(env.RootDir, manifest); err != nil {
+			logger.Warn("execenv: refresh sidecar manifest failed", "error", err)
 		}
 	}
 
