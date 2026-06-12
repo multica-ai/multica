@@ -934,12 +934,18 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     return filtered;
   }, [scopeRows, filters, sortField, sortDirection]);
 
-  // Row virtualization — headless math, offsets as padding on the body,
-  // fixed-height rows.
-  const listBodyRef = useRef<HTMLDivElement | null>(null);
+  // Row virtualization — headless math, offsets as padding on the rows
+  // wrapper, fixed-height rows. The scroll element is the SINGLE outer
+  // scroller (both axes): splitting horizontal scrolling (wrapper) from
+  // vertical scrolling (an inner element) connected by an h-full
+  // percentage bridge caused a non-converging layout loop (flickering
+  // double scrollbars) and clipped the last row under the horizontal
+  // scrollbar. The sticky header pins inside this scroller; the vertical
+  // scrollbar spans the full pane height (Linear's structure).
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
-    getScrollElement: () => listBodyRef.current,
+    getScrollElement: () => listScrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
   });
@@ -1031,9 +1037,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             allRows={scopeRows}
             visibleCount={rows.length}
           />
-          <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden @container">
+          <div
+            ref={listScrollRef}
+            className="min-h-0 flex-1 overflow-auto @container"
+          >
             <ListGrid
-              className={`${GRID_COLS} h-full grid-rows-[auto_minmax(0,1fr)] @2xl:min-w-[var(--agc-minw)]`}
+              className={`${GRID_COLS} @2xl:min-w-[var(--agc-minw)]`}
               style={columnTrackVars(isColVisible)}
             >
               <AgentListHeader
@@ -1045,8 +1054,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                 onToggleAll={handleToggleAll}
                 isColVisible={isColVisible}
               />
+              {/* Plain subgrid passthrough (NOT ListGridBody): scrolling
+                  lives on the outer wrapper, this div only groups the rows
+                  and carries the virtualization padding. */}
               <ListGridBody
-                ref={listBodyRef}
+                className="overflow-x-visible overflow-y-visible"
                 style={{
                   paddingTop: virtualPadding.top,
                   paddingBottom: virtualPadding.bottom,
