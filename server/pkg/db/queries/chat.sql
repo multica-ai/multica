@@ -89,12 +89,12 @@ WHERE task_id = $1 AND role = 'user'
 RETURNING *;
 
 -- name: ListChatMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM chat_message
+SELECT * FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC;
 
 -- name: ListChatMessagesPage :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM chat_message
+SELECT * FROM chat_message
 WHERE chat_session_id = $1
   AND (
     sqlc.narg('before_created_at')::timestamptz IS NULL
@@ -104,7 +104,7 @@ ORDER BY created_at DESC, id DESC
 LIMIT $2;
 
 -- name: GetChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM chat_message
+SELECT * FROM chat_message
 WHERE id = $1;
 
 -- name: CreateChatTask :one
@@ -175,7 +175,7 @@ WHERE id = $1 AND unread_since IS NULL;
 -- title, the spec falls back to "use the previous user message as the
 -- title". Bot replies (role='assistant') are excluded — only human
 -- input qualifies as a fallback title source.
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM chat_message
+SELECT * FROM chat_message
 WHERE chat_session_id = $1 AND role = 'user'
 ORDER BY created_at DESC
 LIMIT 1;
