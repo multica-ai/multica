@@ -12,9 +12,29 @@ func TestProviderCLISourcesIncludesOfficialProviderRegistry(t *testing.T) {
 		if source.OfficialSourceURL == "" {
 			t.Fatalf("%s official source URL is empty", provider)
 		}
-		if len(source.LatestVersionCommand) == 0 || len(source.UpgradeCommand) == 0 {
+		if len(source.LatestVersionCommandTemplate) == 0 || len(source.UpgradeCommandTemplate) == 0 {
 			t.Fatalf("%s source does not include version and upgrade commands: %+v", provider, source)
 		}
+	}
+}
+
+func TestProviderCLISourcesDeepCopiesCommandTemplates(t *testing.T) {
+	sources := ProviderCLISources()
+	codex := sources["codex"]
+	codex.LatestVersionCommandTemplate[0] = "mutated"
+	codex.VersionCommandTemplate[0] = "mutated"
+	codex.UpgradeCommandTemplate[0] = "mutated"
+	sources["codex"] = codex
+
+	fresh := ProviderCLISources()["codex"]
+	if fresh.LatestVersionCommandTemplate[0] != "npm" {
+		t.Fatalf("latest version command template was mutated: %+v", fresh.LatestVersionCommandTemplate)
+	}
+	if fresh.VersionCommandTemplate[0] != "codex" {
+		t.Fatalf("version command template was mutated: %+v", fresh.VersionCommandTemplate)
+	}
+	if fresh.UpgradeCommandTemplate[0] != "npm" {
+		t.Fatalf("upgrade command template was mutated: %+v", fresh.UpgradeCommandTemplate)
 	}
 }
 
@@ -32,8 +52,11 @@ func TestPlanProviderCLIUpdateUsesPinnedVersionAndRollback(t *testing.T) {
 	if !plan.DryRun {
 		t.Fatal("provider CLI plan must be dry-run by default")
 	}
-	if !plan.CanStart {
-		t.Fatalf("plan unexpectedly blocked: %s", plan.BlockedReason)
+	if !plan.Valid {
+		t.Fatalf("plan unexpectedly invalid: %s", plan.InvalidReason)
+	}
+	if !plan.ObservedIdle {
+		t.Fatalf("plan unexpectedly observed busy runtime: %s", plan.PlanWarning)
 	}
 	if plan.TargetVersion != "0.136.0" {
 		t.Fatalf("target version = %q, want pinned version", plan.TargetVersion)
@@ -42,8 +65,8 @@ func TestPlanProviderCLIUpdateUsesPinnedVersionAndRollback(t *testing.T) {
 		t.Fatalf("rollback version = %q", plan.RollbackVersion)
 	}
 	for _, phase := range plan.Phases {
-		if phase.Execute {
-			t.Fatalf("phase %s is executable in dry-run plan", phase.Name)
+		if phase.Name == "upgrade_provider_cli" {
+			t.Fatalf("phase %s looks like a real execution step", phase.Name)
 		}
 	}
 }
@@ -71,11 +94,14 @@ func TestPlanProviderCLIUpdateBlocksWhenRuntimeBusy(t *testing.T) {
 		TargetVersion:  "1.17.4",
 	})
 
-	if plan.CanStart {
-		t.Fatal("busy runtime should block provider CLI update")
+	if !plan.Valid {
+		t.Fatalf("busy runtime should not invalidate plan shape: %s", plan.InvalidReason)
 	}
-	if plan.BlockedReason != "runtime has 1 active task(s)" {
-		t.Fatalf("blocked reason = %q", plan.BlockedReason)
+	if plan.ObservedIdle {
+		t.Fatal("busy runtime should not be observed as idle")
+	}
+	if plan.PlanWarning != "runtime has 1 active task(s)" {
+		t.Fatalf("plan warning = %q", plan.PlanWarning)
 	}
 }
 
@@ -86,10 +112,35 @@ func TestPlanProviderCLIUpdateBlocksUnknownProvider(t *testing.T) {
 		TargetVersion: "1.2.3",
 	})
 
-	if plan.CanStart {
-		t.Fatal("unknown provider should be blocked")
+	if plan.Valid {
+		t.Fatal("unknown provider should be invalid")
 	}
-	if plan.BlockedReason == "" {
-		t.Fatal("missing blocked reason for unknown provider")
+	if plan.InvalidReason == "" {
+		t.Fatal("missing invalid reason for unknown provider")
+	}
+}
+
+func TestPlanProviderCLIUpdateUsesCommandTemplatesOnly(t *testing.T) {
+	d := &Daemon{}
+	plan := d.PlanProviderCLIUpdate(ProviderCLIUpdateRequest{
+		Provider:      "codex",
+		TargetVersion: "0.139.0",
+	})
+
+	var sawUpgradeTemplate bool
+	for _, phase := range plan.Phases {
+		if phase.Name != "upgrade_provider_cli_template" {
+			continue
+		}
+		sawUpgradeTemplate = true
+		if len(phase.CommandTemplate) == 0 {
+			t.Fatal("upgrade template phase has no command template")
+		}
+		if phase.CommandTemplate[len(phase.CommandTemplate)-1] != "@openai/codex@<version>" {
+			t.Fatalf("upgrade command template = %+v", phase.CommandTemplate)
+		}
+	}
+	if !sawUpgradeTemplate {
+		t.Fatal("missing upgrade command template phase")
 	}
 }
