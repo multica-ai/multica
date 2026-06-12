@@ -5,7 +5,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, MoreHorizontal, LayoutList, Inbox } from "lucide-react";
+import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   ResizablePanelGroup,
@@ -72,6 +72,8 @@ export function DynamicInbox() {
     layout.tabs.find((t) => t.id === activeTabId) ??
     layout.tabs[0] ?? { id: "", title: "Inbox", sections: [] };
 
+  // TECH-3413 #9 — free-text search across all sections in the active tab.
+  const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
   const selectedKey = selected
     ? selected.kind === "notif"
@@ -261,6 +263,30 @@ export function DynamicInbox() {
           </div>
         </div>
 
+        {/* search (TECH-3413 #9) */}
+        <div className="border-b border-border px-3 py-2">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
+            <Search className="size-3.5 flex-none text-muted-foreground" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search inbox…"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+            {query && (
+              <button
+                type="button"
+                className="flex-none rounded p-0.5 text-muted-foreground hover:bg-muted"
+                onClick={() => setQuery("")}
+                title="Clear search"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* sections */}
         <div className="flex-1 space-y-3 overflow-y-auto p-3">
           {loading && <p className="px-1 text-sm text-muted-foreground">Loading…</p>}
@@ -292,6 +318,7 @@ export function DynamicInbox() {
               actionLabels={actionLabels}
               projects={projects}
               selectedKey={selectedKey}
+              query={query}
               onSelect={onSelect}
               onArchive={onArchive}
               onChange={changeSection}

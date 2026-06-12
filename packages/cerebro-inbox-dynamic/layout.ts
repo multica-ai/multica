@@ -43,6 +43,15 @@ export interface InboxSectionConfig {
   compact?: boolean;
   /** Max rows before a "show more" affordance; 0 / undefined = no cap. */
   maxRows?: number;
+  // --- TECH-3413 (Jesper feedback) ---
+  /** #2: can the box be folded open/closed? Default true. */
+  collapsible?: boolean;
+  /** #2: does the box start folded closed? Default false (open). */
+  defaultCollapsed?: boolean;
+  /** #3: how the count renders — plain number or a coloured circle badge. */
+  countStyle?: "plain" | "circle";
+  /** #4 (partial): hide muted rows in this box (e.g. reminders without muted). */
+  excludeMuted?: boolean;
   /** TECH-3422 — for the "team" (Slack) section: how many people to show.
    *  0 / undefined = show all. Starred people always count first. */
   maxPeople?: number;

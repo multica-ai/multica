@@ -85,13 +85,53 @@ export function sortEntries(entries: DynInboxEntry[], section: InboxSectionConfi
   return [...entries].sort((a, b) => (a.time - b.time) * dir);
 }
 
+/** TECH-3413 #4: is this entry muted right now? (notif rows carry muted_until). */
+export function entryIsMuted(entry: DynInboxEntry): boolean {
+  if (entry.kind !== "notif") return false;
+  const until = entry.item.muted_until;
+  if (!until) return false;
+  const ts = Date.parse(until);
+  return Number.isFinite(ts) && ts > Date.now();
+}
+
+/** TECH-3413 #9: free-text search across a row's visible text. */
+export function entryText(entry: DynInboxEntry): string {
+  switch (entry.kind) {
+    case "notif":
+      return `${entry.item.title ?? ""} ${entry.item.body ?? ""}`;
+    case "chat":
+      return entry.session.title ?? "";
+    case "channel":
+      return `${entry.channel.title ?? ""} ${entry.channel.last_message?.content ?? ""}`;
+    default:
+      return "";
+  }
+}
+
+export function entryMatchesQuery(entry: DynInboxEntry, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return entryText(entry).toLowerCase().includes(q);
+}
+
+export interface SelectOptions {
+  /** Free-text query applied across all sections (from the inbox search bar). */
+  query?: string;
+}
+
 /** Filter + sort + cap a section's rows. */
 export function selectSectionEntries(
   entries: DynInboxEntry[],
   section: InboxSectionConfig,
   ctx: SectionFilterContext,
+  opts: SelectOptions = {},
 ): DynInboxEntry[] {
-  const filtered = entries.filter((e) => entryMatchesSection(e, section, ctx));
+  const filtered = entries.filter(
+    (e) =>
+      entryMatchesSection(e, section, ctx) &&
+      (!section.excludeMuted || !entryIsMuted(e)) &&
+      entryMatchesQuery(e, opts.query ?? ""),
+  );
   const sorted = sortEntries(filtered, section);
   if (section.maxRows && section.maxRows > 0) return sorted.slice(0, section.maxRows);
   return sorted;
