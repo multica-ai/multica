@@ -659,6 +659,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
+	go d.providerCLIAutoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
 
 	// Preflight succeeded and the background loops are up: the daemon has
@@ -667,7 +668,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// readiness wait blocks on, so success is reported only after startup
 	// actually completed, not merely because the health port came up.
 	d.ready.Store(true)
-	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
+	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, provider-cli-update, token-renewal); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
 	return err

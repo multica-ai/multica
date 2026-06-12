@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,12 @@ type Config struct {
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
+	ProviderCLIUpdateMode          ProviderCLIUpdateMode // provider CLI updater mode: off, dry-run, or apply (default: dry-run)
+	ProviderCLIUpdateInterval      time.Duration         // how often provider CLI latest versions are checked (default: 24h)
+	ProviderCLIUpdateWindowStart   time.Duration         // local time-of-day offset when apply mode may start (default: 04:00)
+	ProviderCLIUpdateWindowDuration time.Duration         // length of the apply window (default: 2h)
+	ProviderCLIPinnedVersions      map[string]string     // provider -> version; skips latest lookup and holds that version
+	ProviderCLIRollbackVersions    map[string]string     // provider -> version used if apply-mode install fails
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
@@ -471,6 +478,25 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoUpdateInterval = overrides.AutoUpdateCheckInterval
 	}
 
+	providerCLIUpdateMode, err := parseProviderCLIUpdateMode(os.Getenv("MULTICA_PROVIDER_CLI_AUTO_UPDATE_MODE"))
+	if err != nil {
+		return Config{}, err
+	}
+	providerCLIUpdateInterval, err := durationFromEnv("MULTICA_PROVIDER_CLI_AUTO_UPDATE_INTERVAL", DefaultProviderCLIUpdateInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	providerCLIUpdateWindowStart, err := timeOfDayFromEnv("MULTICA_PROVIDER_CLI_AUTO_UPDATE_WINDOW_START", DefaultProviderCLIUpdateWindowStart)
+	if err != nil {
+		return Config{}, err
+	}
+	providerCLIUpdateWindowDuration, err := durationFromEnv("MULTICA_PROVIDER_CLI_AUTO_UPDATE_WINDOW_DURATION", DefaultProviderCLIUpdateWindowDuration)
+	if err != nil {
+		return Config{}, err
+	}
+	providerCLIPinnedVersions := parseProviderCLIVersionMap(os.Getenv("MULTICA_PROVIDER_CLI_PINNED_VERSIONS"))
+	providerCLIRollbackVersions := parseProviderCLIVersionMap(os.Getenv("MULTICA_PROVIDER_CLI_ROLLBACK_VERSIONS"))
+
 	return Config{
 		ServerBaseURL:                  serverBaseURL,
 		DaemonID:                       daemonID,
@@ -489,6 +515,12 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCArtifactPatterns:             gcArtifactPatterns,
 		AutoUpdateEnabled:              autoUpdateEnabled,
 		AutoUpdateCheckInterval:        autoUpdateInterval,
+		ProviderCLIUpdateMode:           providerCLIUpdateMode,
+		ProviderCLIUpdateInterval:       providerCLIUpdateInterval,
+		ProviderCLIUpdateWindowStart:    providerCLIUpdateWindowStart,
+		ProviderCLIUpdateWindowDuration: providerCLIUpdateWindowDuration,
+		ProviderCLIPinnedVersions:       providerCLIPinnedVersions,
+		ProviderCLIRollbackVersions:     providerCLIRollbackVersions,
 		HealthPort:                     healthPort,
 		MaxConcurrentTasks:             maxConcurrentTasks,
 		PollInterval:                   pollInterval,
@@ -521,6 +553,26 @@ func isOfficialCloudServer(baseURL string) bool {
 		return false
 	}
 	return strings.EqualFold(u.Hostname(), officialCloudHost)
+}
+
+func timeOfDayFromEnv(key string, fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	parts := strings.Split(raw, ":")
+	if len(parts) != 2 {
+		return 0, fmt.Errorf("%s must use HH:MM", key)
+	}
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil || hour < 0 || hour > 23 {
+		return 0, fmt.Errorf("%s hour must be 0-23", key)
+	}
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil || minute < 0 || minute > 59 {
+		return 0, fmt.Errorf("%s minute must be 0-59", key)
+	}
+	return time.Duration(hour)*time.Hour + time.Duration(minute)*time.Minute, nil
 }
 
 // NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL.

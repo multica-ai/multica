@@ -1,6 +1,11 @@
 package daemon
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestProviderCLISourcesIncludesOfficialProviderRegistry(t *testing.T) {
 	sources := ProviderCLISources()
@@ -142,5 +147,108 @@ func TestPlanProviderCLIUpdateUsesCommandTemplatesOnly(t *testing.T) {
 	}
 	if !sawUpgradeTemplate {
 		t.Fatal("missing upgrade command template phase")
+	}
+}
+
+func TestMaterializeProviderCLICommandReplacesVersionAndInstallPrefix(t *testing.T) {
+	got := materializeProviderCLICommand(
+		[]string{"npm", "install", "-g", "--prefix", "<install_prefix>", "@openai/codex@<version>"},
+		"0.139.0",
+		"/usr/local",
+	)
+	want := []string{"npm", "install", "-g", "--prefix", "/usr/local", "@openai/codex@0.139.0"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("command = %+v, want %+v", got, want)
+	}
+}
+
+func TestProviderCLIInstallLocationUsesDaemonPathPrefix(t *testing.T) {
+	path, prefix := providerCLIInstallLocation("/usr/local/bin/codex")
+	if path != "/usr/local/bin/codex" || prefix != "/usr/local" {
+		t.Fatalf("install location = (%q, %q)", path, prefix)
+	}
+
+	path, prefix = providerCLIInstallLocation("/opt/codex")
+	if path != "/opt/codex" || prefix != "/opt" {
+		t.Fatalf("non-bin install location = (%q, %q)", path, prefix)
+	}
+}
+
+func TestTimeOfDayInWindowHandlesNormalAndOvernightWindows(t *testing.T) {
+	inside := time.Date(2026, 6, 12, 4, 30, 0, 0, time.UTC)
+	outside := time.Date(2026, 6, 12, 7, 0, 0, 0, time.UTC)
+	if !timeOfDayInWindow(inside, 4*time.Hour, 2*time.Hour) {
+		t.Fatal("04:30 should be inside 04:00-06:00")
+	}
+	if timeOfDayInWindow(outside, 4*time.Hour, 2*time.Hour) {
+		t.Fatal("07:00 should be outside 04:00-06:00")
+	}
+
+	overnight := time.Date(2026, 6, 12, 1, 0, 0, 0, time.UTC)
+	if !timeOfDayInWindow(overnight, 23*time.Hour, 3*time.Hour) {
+		t.Fatal("01:00 should be inside 23:00-02:00 overnight window")
+	}
+}
+
+func TestParseProviderCLIUpdateModeDefaultsToDryRun(t *testing.T) {
+	mode, err := parseProviderCLIUpdateMode("")
+	if err != nil {
+		t.Fatalf("parse default mode: %v", err)
+	}
+	if mode != ProviderCLIUpdateDryRun {
+		t.Fatalf("mode = %q", mode)
+	}
+	mode, err = parseProviderCLIUpdateMode("apply")
+	if err != nil || mode != ProviderCLIUpdateApply {
+		t.Fatalf("parse apply = %q, %v", mode, err)
+	}
+}
+
+func TestBuildProviderCLIAutoUpdatePlanUsesPinnedWithoutLatestLookup(t *testing.T) {
+	called := false
+	prev := providerCLICommandRunner
+	providerCLICommandRunner = func(context.Context, []string) (string, error) {
+		called = true
+		return "0.139.0", nil
+	}
+	t.Cleanup(func() { providerCLICommandRunner = prev })
+
+	d := &Daemon{
+		cfg: Config{
+			Agents:                    map[string]AgentEntry{"codex": {Path: "/usr/local/bin/codex"}},
+			ProviderCLIPinnedVersions: map[string]string{"codex": "0.136.0"},
+		},
+		agentVersions: map[string]string{"codex": "0.125.0"},
+	}
+	plan, err := d.buildProviderCLIAutoUpdatePlan(context.Background(), "codex", d.cfg.Agents["codex"], ProviderCLIUpdateDryRun)
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+	if called {
+		t.Fatal("latest lookup should be skipped when pinned version is configured")
+	}
+	if plan.TargetVersion != "0.136.0" || plan.RollbackVersion != "0.125.0" {
+		t.Fatalf("plan target/rollback = %q/%q", plan.TargetVersion, plan.RollbackVersion)
+	}
+	if plan.InstallPrefix != "/usr/local" {
+		t.Fatalf("install prefix = %q", plan.InstallPrefix)
+	}
+}
+
+func TestApplyProviderCLIUpdateRequiresApplyModeAndIdleBarrier(t *testing.T) {
+	d := &Daemon{cfg: Config{ProviderCLIUpdateMode: ProviderCLIUpdateDryRun}}
+	plan := d.PlanProviderCLIUpdate(ProviderCLIUpdateRequest{
+		Provider:      "codex",
+		TargetVersion: "0.139.0",
+		InstallPrefix: "/usr/local",
+	})
+	if err := d.applyProviderCLIUpdate(context.Background(), plan); err == nil {
+		t.Fatal("dry-run mode must not apply provider CLI update")
+	}
+
+	d = &Daemon{cfg: Config{ProviderCLIUpdateMode: ProviderCLIUpdateApply}}
+	d.activeTasks.Store(1)
+	if err := d.applyProviderCLIUpdate(context.Background(), plan); err == nil {
+		t.Fatal("busy daemon must not apply provider CLI update")
 	}
 }
