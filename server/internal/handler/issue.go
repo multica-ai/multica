@@ -2951,7 +2951,7 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 }
 
 // canManageIssue checks whether the current user can delete an issue.
-// Only the issue creator or workspace owner/admin can delete an issue.
+// Only the issue creator, agent owner, or workspace owner/admin can delete an issue.
 func (h *Handler) canManageIssue(w http.ResponseWriter, r *http.Request, issue db.Issue) bool {
 	wsID := uuidToString(issue.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "issue not found", "owner", "admin", "member")
@@ -2960,8 +2960,14 @@ func (h *Handler) canManageIssue(w http.ResponseWriter, r *http.Request, issue d
 	}
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
 	isCreator := uuidToString(issue.CreatorID) == requestUserID(r)
-	if !isAdmin && !isCreator {
-		writeError(w, http.StatusForbidden, "only the issue creator can delete this issue")
+	var isAgentOwner bool
+	if issue.CreatorType == "agent" {
+		if agent, err := h.Queries.GetAgent(r.Context(), issue.CreatorID); err == nil {
+			isAgentOwner = agent.OwnerID.Valid && uuidToString(agent.OwnerID) == requestUserID(r)
+		}
+	}
+	if !isAdmin && !isCreator && !isAgentOwner {
+		writeError(w, http.StatusForbidden, "only the issue creator or agent owner can delete this issue")
 		return false
 	}
 	return true
@@ -3385,9 +3391,15 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Only the issue creator or workspace admin can delete.
-		if !isAdmin && uuidToString(issue.CreatorID) != userID {
-			slog.Warn("batch delete skipped: not issue creator", "issue_id", issueID, "user_id", userID)
+		// Only the issue creator, agent owner, or workspace admin can delete.
+		var isAgentOwner bool
+		if issue.CreatorType == "agent" {
+			if agent, err := h.Queries.GetAgent(r.Context(), issue.CreatorID); err == nil {
+				isAgentOwner = agent.OwnerID.Valid && uuidToString(agent.OwnerID) == userID
+			}
+		}
+		if !isAdmin && uuidToString(issue.CreatorID) != userID && !isAgentOwner {
+			slog.Warn("batch delete skipped: not issue creator or agent owner", "issue_id", issueID, "user_id", userID)
 			continue
 		}
 
@@ -3443,8 +3455,16 @@ func (h *Handler) ClearIssueHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !roleAllowed(member.Role, "owner", "admin") && uuidToString(issue.CreatorID) != uuidToString(member.UserID) {
-		writeError(w, http.StatusForbidden, "only workspace owner, admin, or issue creator can clear issue history")
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isCreator := uuidToString(issue.CreatorID) == uuidToString(member.UserID)
+	var isAgentOwner bool
+	if issue.CreatorType == "agent" {
+		if agent, err := h.Queries.GetAgent(r.Context(), issue.CreatorID); err == nil {
+			isAgentOwner = agent.OwnerID.Valid && uuidToString(agent.OwnerID) == uuidToString(member.UserID)
+		}
+	}
+	if !isAdmin && !isCreator && !isAgentOwner {
+		writeError(w, http.StatusForbidden, "only workspace owner, admin, issue creator, or agent owner can clear issue history")
 		return
 	}
 
