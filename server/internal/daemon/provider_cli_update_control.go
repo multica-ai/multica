@@ -23,6 +23,15 @@ func (d *Daemon) handleProviderCLIUpdate(ctx context.Context, runtimeID string, 
 		return
 	}
 	provider := strings.ToLower(strings.TrimSpace(update.Provider))
+	rt := d.findRuntime(runtimeID)
+	if rt == nil {
+		d.reportProviderCLIUpdateResult(ctx, runtimeID, update.ID, map[string]any{"status": "failed", "error": "runtime not found on daemon"})
+		return
+	}
+	if runtimeProvider := strings.ToLower(strings.TrimSpace(rt.Provider)); provider != runtimeProvider {
+		d.reportProviderCLIUpdateResult(ctx, runtimeID, update.ID, map[string]any{"status": "failed", "error": fmt.Sprintf("provider %q does not match runtime provider %q", provider, runtimeProvider)})
+		return
+	}
 	entry, ok := d.cfg.Agents[provider]
 	if !ok {
 		d.reportProviderCLIUpdateResult(ctx, runtimeID, update.ID, map[string]any{"status": "failed", "error": fmt.Sprintf("provider %q is not configured on this daemon", provider)})
@@ -42,12 +51,15 @@ func (d *Daemon) handleProviderCLIUpdate(ctx context.Context, runtimeID string, 
 		d.reportProviderCLIUpdateResult(ctx, runtimeID, update.ID, map[string]any{"status": "completed", "output": string(out)})
 		return
 	}
-	if err := d.applyProviderCLIUpdateWithMode(ctx, plan, ProviderCLIUpdateApply, false); err != nil {
+	if err := d.applyProviderCLIUpdateWithMode(ctx, plan, ProviderCLIUpdateApply, false, false); err != nil {
 		d.reportProviderCLIUpdateResult(ctx, runtimeID, update.ID, map[string]any{"status": "failed", "error": err.Error()})
 		return
 	}
 	out, _ := json.Marshal(map[string]any{"provider": plan.Provider, "target_version": plan.TargetVersion, "status": string(providerCLIUpdatePendingVerify)})
-	d.reportProviderCLIUpdateResult(ctx, runtimeID, update.ID, map[string]any{"status": "completed", "output": string(out)})
+	reportCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	d.reportProviderCLIUpdateResult(reportCtx, runtimeID, update.ID, map[string]any{"status": "completed", "output": string(out)})
+	cancel()
+	d.triggerRestart()
 }
 
 func (d *Daemon) buildProviderCLIUpdateControlPlan(ctx context.Context, provider string, entry AgentEntry, update *PendingProviderCLIUpdate, mode ProviderCLIUpdateMode) (ProviderCLIUpdatePlan, error) {

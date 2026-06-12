@@ -35,6 +35,10 @@ type ProviderCLIUpdateStore interface {
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
+// InMemoryProviderCLIUpdateStore is single-node only. Before provider CLI
+// apply smoke in a multi-node server deployment, wire a Redis-backed store
+// equivalent to RedisUpdateStore so POST, heartbeat, poll, and result reports
+// cannot land on different API nodes with divergent state.
 type InMemoryProviderCLIUpdateStore struct {
 	mu       sync.Mutex
 	requests map[string]*ProviderCLIUpdateRequest
@@ -202,6 +206,10 @@ func (h *Handler) InitiateProviderCLIUpdate(w http.ResponseWriter, r *http.Reque
 	provider := strings.ToLower(strings.TrimSpace(req.Provider))
 	if provider == "" {
 		writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+	if runtimeProvider := strings.ToLower(strings.TrimSpace(rt.Provider)); provider != runtimeProvider {
+		writeError(w, http.StatusBadRequest, "provider must match runtime provider")
 		return
 	}
 	mode, ok := normalizeProviderCLIUpdateMode(req.Mode)

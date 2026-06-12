@@ -117,8 +117,9 @@ type ChatSessionUpdatedPayload struct {
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share
 // identical semantics.
 type DaemonHeartbeatRequestPayload struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	RuntimeID                 string `json:"runtime_id"`
+	SupportsBatchImport       bool   `json:"supports_batch_import,omitempty"`
+	SupportsProviderCLIUpdate bool   `json:"supports_provider_cli_update,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.

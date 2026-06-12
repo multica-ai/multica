@@ -382,10 +382,10 @@ func (d *Daemon) buildProviderCLIAutoUpdatePlan(ctx context.Context, provider st
 }
 
 func (d *Daemon) applyProviderCLIUpdate(ctx context.Context, plan ProviderCLIUpdatePlan) error {
-	return d.applyProviderCLIUpdateWithMode(ctx, plan, d.providerCLIUpdateMode(), true)
+	return d.applyProviderCLIUpdateWithMode(ctx, plan, d.providerCLIUpdateMode(), true, true)
 }
 
-func (d *Daemon) applyProviderCLIUpdateWithMode(ctx context.Context, plan ProviderCLIUpdatePlan, mode ProviderCLIUpdateMode, enforceWindow bool) error {
+func (d *Daemon) applyProviderCLIUpdateWithMode(ctx context.Context, plan ProviderCLIUpdatePlan, mode ProviderCLIUpdateMode, enforceWindow bool, restartOnSuccess bool) error {
 	if mode != ProviderCLIUpdateApply {
 		return fmt.Errorf("provider CLI update mode is not apply")
 	}
@@ -463,10 +463,12 @@ func (d *Daemon) applyProviderCLIUpdateWithMode(ctx context.Context, plan Provid
 	if err := d.saveProviderCLIUpdateRecord(record); err != nil {
 		return err
 	}
-	d.logger.Info("provider CLI auto-update: install completed, restarting daemon", "provider", plan.Provider, "target", plan.TargetVersion, "update_id", record.UpdateID, "output", output)
+	d.logger.Info("provider CLI auto-update: install completed, restart pending", "provider", plan.Provider, "target", plan.TargetVersion, "update_id", record.UpdateID, "output", output)
 	released = true
 	barrierReleased = true
-	d.triggerRestart()
+	if restartOnSuccess {
+		d.triggerRestart()
+	}
 	return nil
 }
 
