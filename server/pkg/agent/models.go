@@ -117,6 +117,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCopilotModels(ctx, executablePath)
 		})
+	case "mimocode":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverMimocodeModels(ctx, executablePath)
+		})
 	case "hermes":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverHermesModels(ctx, executablePath)
@@ -1306,4 +1310,12 @@ func isOpenclawIdentifier(s string) bool {
 		}
 	}
 	return true
+}
+
+func discoverMimocodeModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "mimo",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-mimocode-discovery",
+	})
 }
