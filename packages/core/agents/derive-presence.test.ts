@@ -171,6 +171,21 @@ describe("deriveWorkloadDetail", () => {
     expect(r.queuedCount).toBe(2);
   });
 
+  it("counts waiting_local_directory as queued (daemon parked on a path lock)", () => {
+    // waiting_local_directory is the daemon-side "blocked on a busy
+    // local_directory" hold state. It is still on the agent's plate —
+    // the chip must not flip to idle just because the run phase hasn't
+    // started yet — and is grouped with queued/dispatched in the
+    // presence verdict so the user sees "Queued · 1" rather than
+    // "Idle".
+    const r = deriveWorkloadDetail([
+      makeTask({ status: "waiting_local_directory" }),
+    ]);
+    expect(r.workload).toBe("queued");
+    expect(r.runningCount).toBe(0);
+    expect(r.queuedCount).toBe(1);
+  });
+
   it("returns working when running coexists with queued (overflow)", () => {
     // Capacity-saturated agent: still running, but with a queue building.
     // The chip says "Working" with the queue expressed as a `+Nq` badge.
@@ -329,6 +344,24 @@ describe("deriveAgentPresenceDetail", () => {
       now: NOW,
     });
     expect(detail.capacity).toBe(3);
+  });
+
+  it("reports archived over any runtime/task signal for an archived agent", () => {
+    // Archived wins over presence: a leftover online runtime and a running
+    // task must never make a retired agent read as live. Availability
+    // collapses to "archived" and workload is forced idle with zero counts
+    // so no consumer (dot, hover card, list row) can surface "Online" or
+    // "Working" for an archived agent.
+    const detail = deriveAgentPresenceDetail({
+      agent: makeAgent({ archived_at: "2026-04-27T10:00:00Z" }),
+      runtime: makeRuntime(),
+      tasks: [makeTask({ status: "running" })],
+      now: NOW,
+    });
+    expect(detail.availability).toBe("archived");
+    expect(detail.workload).toBe("idle");
+    expect(detail.runningCount).toBe(0);
+    expect(detail.queuedCount).toBe(0);
   });
 });
 

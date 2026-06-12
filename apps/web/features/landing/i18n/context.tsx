@@ -2,8 +2,8 @@
 
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useMemo,
   useState,
   useTransition,
@@ -12,6 +12,8 @@ import { useRouter } from "next/navigation";
 import { useConfigStore } from "@multica/core/config";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import { createEnDict } from "./en";
+import { createJaDict } from "./ja";
+import { createKoDict } from "./ko";
 import { createZhDict } from "./zh";
 import {
   toLandingDictionaryLocale,
@@ -25,6 +27,8 @@ const dictionaryFactories: Record<
   (allowSignup: boolean) => LandingDict
 > = {
   en: createEnDict,
+  ja: createJaDict,
+  ko: createKoDict,
   zh: createZhDict,
 };
 
@@ -73,7 +77,7 @@ export function LocaleProvider({
 }
 
 export function useLocale() {
-  const ctx = useContext(LocaleContext);
+  const ctx = use(LocaleContext);
   if (!ctx) throw new Error("useLocale must be used within LocaleProvider");
   return ctx;
 }

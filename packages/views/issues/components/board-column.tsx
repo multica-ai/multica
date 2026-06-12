@@ -123,16 +123,7 @@ export const BoardColumn = memo(function BoardColumn({
           </Tooltip>
         </div>
       </div>
-      <div
-        ref={setNodeRef}
-        className={`relative min-h-[200px] flex-1 space-y-2 overflow-y-auto rounded-lg p-1 transition-colors ${
-          isOver && sortLabel
-            ? "ring-2 ring-brand/25 bg-accent/15"
-            : isOver
-              ? "bg-accent/60"
-              : ""
-        }`}
-      >
+      <div className="relative min-h-[200px] flex-1 rounded-lg">
         {isOver && sortLabel && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/40">
             <span className="rounded-md bg-popover px-2.5 py-1 text-xs font-medium text-popover-foreground shadow-sm border border-border">
@@ -140,17 +131,28 @@ export const BoardColumn = memo(function BoardColumn({
             </span>
           </div>
         )}
-        <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-          {resolvedIssues.map((issue) => (
-            <DraggableBoardCard key={issue.id} issue={issue} childProgress={childProgressMap?.get(issue.id)} disableSorting={!!sortLabel} />
-          ))}
-        </SortableContext>
-        {issueIds.length === 0 && (
-          <p className="py-8 text-center text-xs text-muted-foreground">
-            {t(($) => $.board.empty_column)}
-          </p>
-        )}
-        {footer}
+        <div
+          ref={setNodeRef}
+          className={`absolute inset-0 space-y-2 overflow-y-auto rounded-lg p-1 transition-colors ${
+            isOver && sortLabel
+              ? "ring-2 ring-brand/25 bg-accent/15"
+              : isOver
+                ? "bg-accent/60"
+                : ""
+          }`}
+        >
+          <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
+            {resolvedIssues.map((issue) => (
+              <DraggableBoardCard key={issue.id} issue={issue} childProgress={childProgressMap?.get(issue.id)} disableSorting={!!sortLabel} />
+            ))}
+          </SortableContext>
+          {issueIds.length === 0 && (
+            <p className="py-8 text-center text-xs text-muted-foreground">
+              {t(($) => $.board.empty_column)}
+            </p>
+          )}
+          {footer}
+        </div>
       </div>
     </div>
   );

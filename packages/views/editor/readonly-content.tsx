@@ -34,10 +34,12 @@ import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { ProjectChip } from "../projects/components/project-chip";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
@@ -64,9 +66,12 @@ const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
 
 const sanitizeSchema = {
   ...defaultSchema,
+  // Allow <mark> (text highlight) — emitted by highlightToHtml from `==text==`.
+  // It carries no attributes, so only the tag name needs whitelisting.
+  tagNames: [...(defaultSchema.tagNames ?? []), "mark"],
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "mention"],
+    href: [...(defaultSchema.protocols?.href ?? []), "mention", "slash"],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -95,6 +100,7 @@ const sanitizeSchema = {
 
 function urlTransform(url: string): string {
   if (url.startsWith("mention://")) return url;
+  if (url.startsWith("slash://skill/")) return url;
   return defaultUrlTransform(url);
 }
 
@@ -126,6 +132,30 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
   );
 }
 
+function ProjectMentionLink({ projectId, label }: { projectId: string; label?: string }) {
+  const { push, openInNewTab } = useNavigation();
+  const p = useWorkspacePaths();
+  const path = p.projectDetail(projectId);
+  return (
+    <span
+      className="inline align-middle"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          if (openInNewTab) {
+            openInNewTab(path, label);
+          }
+          return;
+        }
+        push(path);
+      }}
+    >
+      <ProjectChip projectId={projectId} fallbackLabel={label} className="cursor-pointer hover:bg-accent transition-colors" />
+    </span>
+  );
+}
+
 // Named component so it can call useWorkspaceSlug() — arrow function inlined
 // inside `components` below would still work, but extracting it keeps the
 // hook usage explicit and avoids hook-in-object-literal surprises.
@@ -138,8 +168,12 @@ function ReadonlyLink({
 }) {
   const slug = useWorkspaceSlug();
 
+  if (href?.startsWith("slash://skill/")) {
+    return <span className="slash-command">{children}</span>;
+  }
+
   if (isMentionHref(href)) {
-    const match = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/);
+    const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
     if (match?.[1] === "issue" && match[2]) {
       const label =
         typeof children === "string"
@@ -148,6 +182,15 @@ function ReadonlyLink({
             ? children.join("")
             : undefined;
       return <IssueMentionLink issueId={match[2]} label={label} />;
+    }
+    if (match?.[1] === "project" && match[2]) {
+      const label =
+        typeof children === "string"
+          ? children
+          : Array.isArray(children)
+            ? children.join("")
+            : undefined;
+      return <ProjectMentionLink projectId={match[2]} label={label} />;
     }
     // Member / agent / all mentions
     return <span className="mention">{children}</span>;
@@ -242,20 +285,23 @@ function buildComponents(): Partial<Components> {
         const tree = lang
           ? lowlight.highlight(lang, code)
           : lowlight.highlightAuto(code);
-        return (
-          <code
-            className={cn("hljs", lang && `language-${lang}`)}
-            dangerouslySetInnerHTML={{ __html: toHtml(tree) }}
-          />
-        );
+        const html = toHtml(tree);
+        if (html) {
+          return (
+            <code
+              className={cn("hljs", lang && `language-${lang}`)}
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          );
+        }
       } catch {
-        // Fallback — render without highlighting
-        return (
-          <code className={className} {...props}>
-            {children}
-          </code>
-        );
+        // fall through to plain render
       }
+      return (
+        <code className={cn("hljs", className)} {...props}>
+          {children}
+        </code>
+      );
     },
 
     // Pre — pass through (CSS handles styling via .rich-text-editor pre).
@@ -314,7 +360,10 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   className,
   attachments,
 }: ReadonlyContentProps) {
-  const processed = useMemo(() => preprocessMarkdown(content), [content]);
+  const processed = useMemo(
+    () => highlightToHtml(preprocessMarkdown(content)),
+    [content],
+  );
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 

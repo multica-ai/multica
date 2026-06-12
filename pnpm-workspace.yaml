@@ -46,11 +46,19 @@ catalog:
   # Loading animations (chat StatusPill)
   unicode-animations: "^1.0.3"
 
+  # QR rendering — Lark device-flow scan-to-install dialog renders the
+  # verification_uri_complete as a QR so users can scan it from their
+  # phone instead of typing the URL.
+  "react-qr-code": "^2.0.18"
+
   # Virtualized timeline (issue detail comments)
   react-virtuoso: "^4.14.0"
 
   # Product analytics
   posthog-js: "^1.176.1"
+
+  # YAML parsing (skill frontmatter)
+  yaml: "^2.6.0"
 
   # Testing
   vitest: "^4.1.0"

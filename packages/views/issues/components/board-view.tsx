@@ -97,7 +97,7 @@ function buildGroups(
     none: 3,
   };
 
-  return [...groups.values()].sort((a, b) => {
+  return Array.from(groups.values()).toSorted((a, b) => {
     const aOrder = order[a.assigneeType ?? "none"] ?? 99;
     const bOrder = order[b.assigneeType ?? "none"] ?? 99;
     if (aOrder !== bOrder) return aOrder - bOrder;

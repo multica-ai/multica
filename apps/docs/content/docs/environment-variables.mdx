@@ -49,10 +49,12 @@ Multica supports two delivery backends — [Resend](https://resend.com/) for clo
 | Variable | Default | Description |
 |---|---|---|
 | `SMTP_HOST` | empty | SMTP relay hostname. Setting this activates SMTP mode and overrides Resend |
-| `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission; **port 465 (SMTPS / implicit TLS) is not supported** |
+| `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission, or `465` for SMTPS (implicit TLS, auto-enabled) |
 | `SMTP_USERNAME` | empty | SMTP username. Leave empty for unauthenticated relay |
 | `SMTP_PASSWORD` | empty | SMTP password |
+| `SMTP_TLS` | `starttls` | TLS mode. `implicit` (aliases `smtps`, `ssl`) forces an immediate TLS handshake on connect (SMTPS); port `465` auto-enables it. Unset / `starttls` upgrades via STARTTLS after connect |
 | `SMTP_TLS_INSECURE` | `false` | Set `true` to skip TLS certificate verification (private CA / self-signed only) |
+| `SMTP_EHLO_NAME` | machine hostname | EHLO/HELO name announced to the relay. Set a real FQDN when a strict relay (e.g. Google Workspace `smtp-relay.gmail.com`) rejects the default greeting from a public IP — otherwise the relay drops the connection and it surfaces as an opaque `EOF` on a later command |
 
 STARTTLS is upgraded automatically when the server advertises it. The dial timeout is 10s and the whole SMTP session has a 30s deadline, so a black-holed relay can't hang the auth handler.
 
@@ -84,14 +86,18 @@ Multica stores user-uploaded attachments (images and files in comments). **S3 is
 | `S3_REGION` | `us-west-2` | AWS region. Must match the bucket's actual region — it is used both for SDK signing and for building the public URL |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | empty | Static credentials. When both are unset, the AWS SDK default credential chain is used (IAM role / environment credentials) |
 | `AWS_ENDPOINT_URL` | empty | Custom S3-compatible endpoint (for example [MinIO](https://min.io/)). Setting this switches to path-style URLs |
+| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | Attachment download path: `auto`, `cloudfront`, `presign`, or `proxy`. In `auto`, CloudFront is preferred when fully configured; internal/private endpoint hosts use the server proxy; public S3-compatible endpoints use presigned GET URLs when supported |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | TTL for CloudFront signed URLs and S3 presigned download URLs. Accepts Go duration strings |
 
 **When `S3_BUCKET` is unset**: the server logs `"S3_BUCKET not set, cloud upload disabled"` at startup, and all uploads fall back to local disk.
 
-**Public URLs** are constructed in this order of priority:
+**Stored object URLs** are constructed in this order of priority:
 
 1. `https://<CLOUDFRONT_DOMAIN>/<key>` if `CLOUDFRONT_DOMAIN` is set.
 2. `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>` (path-style) if `AWS_ENDPOINT_URL` is set.
 3. `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>` (virtual-hosted-style). When `S3_BUCKET` contains dots, the server falls back to `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>` (path-style) because the AWS-issued wildcard TLS certificate does not validate dotted bucket hosts.
+
+API `download_url` values use `GET /api/attachments/{id}/download` unless CloudFront signing is configured. The endpoint redirects to CloudFront/S3 presigned URLs when safe, or streams through the server for private/internal endpoints such as `http://rustfs:9000`. For Docker/VPC-only object stores, set `ATTACHMENT_DOWNLOAD_MODE=proxy` if auto detection is not conservative enough for your network.
 
 ### Local disk (when S3 is not configured)
 
@@ -127,6 +133,22 @@ Three allowlist layers combine by priority. **If any layer is set to a non-empty
 **The counterintuitive part**: `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` does **not** mean "allow company.io or everyone" — it means **only allow company.io**. The allowlist layers are AND semantics — the full decision tree is in [Sign-in and signup configuration → Signup allowlists](/auth-setup#restricting-who-can-sign-up).
 
 **Invite flows themselves do not check the signup allowlist** — but the invitee must still be able to **sign in** before accepting the invite. If they already have a Multica account (for example from another workspace), they can accept directly, unaffected by the allowlist; **if they have never signed up**, the first step of sign-in (requesting a verification code) still passes through the allowlist check, and an email rejected by `ALLOW_SIGNUP=false` or by `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` **cannot finish signup, and therefore cannot accept the invite**.
+
+## Locking down workspace creation
+
+`ALLOW_SIGNUP=false` blocks new accounts, but it does **not** block an already-signed-in user from creating another workspace via `POST /api/workspaces`. On a self-hosted instance where every issue, repo, and agent must be visible to the platform admin, set `DISABLE_WORKSPACE_CREATION=true` to close that gap.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DISABLE_WORKSPACE_CREATION` | `false` | When `true`, every call to `POST /api/workspaces` returns `403 workspace creation is disabled for this instance`. The web UI hides every "Create workspace" affordance via `/api/config`. There is no role/owner exception — the gate is global per instance |
+
+Recommended bootstrap sequence:
+
+1. Start the instance with `DISABLE_WORKSPACE_CREATION` unset (the default).
+2. Sign in as the admin and create the shared workspace.
+3. Set `DISABLE_WORKSPACE_CREATION=true` and restart the backend. From this point on, users join via invitation only.
+
+If you also want to keep `ALLOW_SIGNUP=true` so invited users can finish signup with their first verification code, combine `DISABLE_WORKSPACE_CREATION=true` with `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS` to scope which addresses can sign up. Setting `ALLOW_SIGNUP=false` will additionally block pending invitees from creating their account at all — useful only on instances where every member already has a Multica account.
 
 ## Rate limiting (optional Redis)
 
@@ -167,6 +189,8 @@ For a full explanation of how each parameter affects daemon behavior, see [Daemo
 | Variable | Default | Description |
 |---|---|---|
 | `FRONTEND_ORIGIN` | empty | Frontend address. Invite email links, the CORS allowlist, and the cookie domain are all derived from this. When unset, invite email links fall back to the hosted domain `https://app.multica.ai` — self-host must set this explicitly |
+| `MULTICA_APP_URL` | empty | Frontend URL for CLI login flow. Also used by the web UI to show self-host daemon setup commands with your app domain; for same-origin deployments this is also used as daemon `server_url` when `MULTICA_PUBLIC_URL` is unset |
+| `MULTICA_PUBLIC_URL` | empty | Public API URL, without trailing slash. Used for autopilot webhook URLs and by the web UI as the daemon `server_url` |
 | `CORS_ALLOWED_ORIGINS` | empty | Additional allowed CORS origins (comma-separated) |
 | `ALLOWED_ORIGINS` | empty | WebSocket-specific origin allowlist (comma-separated); when unset, fallback order is `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` |
 
@@ -176,17 +200,23 @@ For a full explanation of how each parameter affects daemon behavior, see [Daemo
 
 ## GitHub integration
 
-The [GitHub PR ↔ issue integration](/github-integration) needs two variables. Set both to enable Connect GitHub in Settings and accept incoming webhooks.
+The [GitHub PR ↔ issue integration](/github-integration) needs two variables. Set both to enable Connect GitHub in Settings and accept incoming webhooks. Two additional variables are optional but populate the connected account name on install.
 
 | Variable | Default | Description |
 |---|---|---|
 | `GITHUB_APP_SLUG` | empty | The slug of your GitHub App (the tail of `https://github.com/apps/<slug>`). Drives the Settings → GitHub install button URL |
 | `GITHUB_WEBHOOK_SECRET` | empty | The Webhook secret you set on the GitHub App. Used for HMAC-SHA256 verification of every `pull_request` / `installation` delivery, and as the HMAC key for the setup-callback state token |
+| `GITHUB_APP_ID` | empty | Optional. Numeric App ID from the App's settings page. Combined with `GITHUB_APP_PRIVATE_KEY`, lets the setup callback fetch the connected account name from GitHub immediately on install |
+| `GITHUB_APP_PRIVATE_KEY` | empty | Optional. Full PEM block of the App's RSA private key (including `-----BEGIN/END-----` lines, newlines preserved). Used to mint the short-lived JWT GitHub requires for App-authenticated REST calls |
 
-**Behavior when either is unset:**
+**Behavior when either of the required variables is unset:**
 
 - `Connect GitHub` in Settings → GitHub is **disabled** and shows a "not configured" hint to admins.
 - The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret rather than treating every signature as valid.
+
+**Behavior when the optional `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` are unset:**
+
+- The connection card briefly shows `Connected to unknown` after install. Multica refreshes the row to the real org/user name as soon as GitHub delivers the `installation.created` webhook (typically within a few seconds), and broadcasts a realtime update so any open Settings → GitHub tab reflects the change without a manual refresh.
 
 **Note:** `GITHUB_WEBHOOK_SECRET` is reused as the signing key for the install-flow state token, so operators only need to manage one secret. It is **not** the GitHub App's *Client* secret — Client secrets are OAuth-related and not used by this integration. See [GitHub integration → Self-host setup](/github-integration#self-host-setup) for the full walkthrough.
 

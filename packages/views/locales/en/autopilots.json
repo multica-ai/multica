@@ -6,6 +6,7 @@
     "table": {
       "name": "Name",
       "agent": "Agent",
+      "created_by": "Created by",
       "mode": "Mode",
       "status": "Status",
       "last_run": "Last run"
@@ -71,6 +72,7 @@
     "section_run_history": "Run History",
     "section_danger": "Danger Zone",
     "field_agent": "Agent",
+    "field_created_by": "Created by",
     "field_output_mode": "Output Mode",
     "field_project": "Project",
     "no_project": "No project",
@@ -258,6 +260,11 @@
     "webhook_created_description": "POST any JSON to the URL below and the autopilot will fire. Copy it now — you can also find and rotate it on the autopilot's detail page.",
     "webhook_created_warning": "Treat this URL like a password. Anyone who has it can trigger the autopilot.",
     "webhook_created_done": "Done",
+    "event_filter_label": "Event filters",
+    "event_filter_docs_link_label": "Learn how event filters work",
+    "event_filter_event_placeholder": "e.g. workflow_run",
+    "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
     "next_run_label": "Next run:",
     "output_modes": {

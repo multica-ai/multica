@@ -30,7 +30,7 @@ make selfhost
 
 `make selfhost` 会：
 
-1. 如果没有 `.env` 文件，从 `.env.example` 自动生成一份并**生成随机 JWT_SECRET**
+1. 如果没有 `.env` 文件，从 `.env.example` 自动生成一份，并**生成随机 JWT_SECRET 和 Postgres 密码**
 2. 拉取官方 Docker 镜像（PostgreSQL、Multica backend、Multica frontend）
 3. 用 `docker-compose.selfhost.yml` 启动全部服务
 4. 等后端 `/health` 端点准备就绪
@@ -49,7 +49,7 @@ make selfhost
 - **后端**：[http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**所有端口只监听 `127.0.0.1`。** `docker-compose.selfhost.yml` 把每个 publish 出来的端口都绑到 loopback —— `ss -tlnp` 不会看到 `0.0.0.0:8080`，外网/其它机器默认根本连不上。这是为了避免默认 `JWT_SECRET` 和 Postgres 凭据被直接暴露到公网。要做跨机访问，请用反向代理在前面终结 TLS，详见下方 [Step 5b —— 跨机访问：用反向代理把服务挡在前面](#5b-跨机访问用反向代理把服务挡在前面)。
+**所有端口只监听 `127.0.0.1`。** `docker-compose.selfhost.yml` 把每个 publish 出来的端口都绑到 loopback —— `ss -tlnp` 不会看到 `0.0.0.0:8080`，外网/其它机器默认根本连不上。这是为了避免服务密钥和 Postgres 凭据被直接暴露到公网。要做跨机访问，请用反向代理在前面终结 TLS，详见下方 [Step 5b —— 跨机访问：用反向代理把服务挡在前面](#5b-跨机访问用反向代理把服务挡在前面)。
 </Callout>
 
 ## 2. 重要：保持生产安全配置
@@ -81,17 +81,51 @@ make selfhost
 
 **Option B — SMTP relay（内网/自部署）：**
 
-适合内网无法访问 `api.resend.com`，或已经有内部邮件中继（Exchange、Postfix、自部署 SendGrid 等）的场景。同时设置时 `SMTP_HOST` 优先级高于 Resend。
+适合内网无法访问 `api.resend.com`，或已经有内部邮件中继（Microsoft Exchange、Postfix、自部署 SendGrid 等）的场景。同时设置时 `SMTP_HOST` 优先级高于 Resend，验证码和邀请邮件不会走外部 provider。服务端 advertise STARTTLS 时会自动升级；端口 `465`（SMTPS / 隐式 TLS）会自动启用连接即握手的 TLS 模式，非标准 SMTPS 端口用 `SMTP_TLS=implicit`（别名：`smtps`、`ssl`）强制开启。
+
+**匿名 Exchange 内部 relay（端口 25）** —— 主机按 IP 被信任，不需要凭据：
 
 ```bash
-SMTP_HOST=smtp.internal.example.com
-SMTP_PORT=587                  # 默认 25；STARTTLS 提交端口用 587
-SMTP_USERNAME=multica          # 留空则使用未认证 relay
-SMTP_PASSWORD=...
+SMTP_HOST=exchange.internal.example.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_TLS_INSECURE=false
 RESEND_FROM_EMAIL=noreply@yourdomain.com  # 同时作为 SMTP From: 头
 ```
 
-之后重启：`docker compose -f docker-compose.selfhost.yml restart backend`。
+**认证提交（端口 587，STARTTLS）** —— relay 需要 service account；服务端 advertise STARTTLS 时自动升级：
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # 仅在私有 CA / 自签证书时改成 true
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**隐式 TLS / SMTPS（端口 465）** —— 适用于阿里云 / 腾讯企业邮箱等不广告 STARTTLS 的服务商。端口 `465` 自动启用隐式 TLS，因此这里 `SMTP_TLS` 可省略：
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # 465 上可省略；非标准 SMTPS 端口上必填
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+对于**拒绝来自公网 IP 的默认 `localhost` 问候的严格公网 relay（例如 Google Workspace `smtp-relay.gmail.com`）**，把 `SMTP_EHLO_NAME` 设成 relay 期望的 FQDN——否则连接会被直接断开，并在后续某条命令上表现为一个不知所云的 `EOF`。它默认取容器主机名，而后者通常不是合法的 FQDN：
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # relay 接受的 FQDN；默认取（非 FQDN 的）容器主机名
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+之后重启：`docker compose -f docker-compose.selfhost.yml restart backend`。重启时 backend 会打印当前选择的 provider 和协商出的 TLS 模式（`EmailService: SMTP relay <host>:<port> (starttls|implicit-tls) from=…` / `Resend API` / `DEV mode`），密码不会被记录，所以这行截图给同事是安全的。
 
 更多 auth 配置（OAuth、注册白名单）以及完整的 SMTP 变量说明见 [登录与注册配置](/auth-setup) 和 [环境变量](/environment-variables)。
 
@@ -120,13 +154,17 @@ multica setup self-host
 
 ### 5b. 跨机访问：用反向代理把服务挡在前面
 
-因为 compose 默认只监听 `127.0.0.1`，从别的机器跑的 daemon 是连不上 `http://<server-ip>:8080` 的——这也是有意为之，否则默认 `JWT_SECRET` 等于直接暴露在公网。正确做法是在 server 上跑一个反向代理（Caddy / nginx / Cloudflare Tunnel），由它终结 TLS，再反代到 `127.0.0.1:8080`（backend）和 `127.0.0.1:3000`（frontend）。然后把 CLI 指到公开的 HTTPS 域名：
+因为 compose 默认只监听 `127.0.0.1`，从别的机器跑的 daemon 是连不上 `http://<server-ip>:8080` 的——这也是有意为之，否则服务密钥会直接暴露在公网。正确做法是在 server 上跑一个反向代理（Caddy / nginx / Cloudflare Tunnel），由它终结 TLS，再反代到 `127.0.0.1:8080`（backend）和 `127.0.0.1:3000`（frontend）。然后把 CLI 指到公开的 HTTPS 域名：
 
 ```bash
 multica setup self-host \
   --server-url https://<你的域名> \
   --app-url https://<你的域名>
 ```
+
+<Callout type="info">
+更习惯用环境变量？省略对应 flag 时，`setup self-host` 会读取 `MULTICA_SERVER_URL` 和 `MULTICA_APP_URL`（同时设置时 flag 优先）。`MULTICA_SERVER_URL` 也接受[环境变量](/environment-variables)里那种 `ws://…/ws` 的 daemon 写法，并自动归一化为 HTTP 地址。
+</Callout>
 
 最小可用的 Caddyfile，单域名同时挂前后端（带 WebSocket 转发，daemon 和网页端都依赖）：
 
@@ -158,44 +196,26 @@ multica.example.com {
 
 流程和 Cloud 一样——见 [Cloud 快速上手 → 5-6 步](/cloud-quickstart#5-创建智能体)。
 
-## 7. 调度用量汇总任务（Usage Dashboard 必需）
+<span id="7-usage-rollup-no-operator-action-required" />
 
-<Callout type="warning">
-Usage / Runtime 看板读的是派生表 `task_usage_hourly`，需要 `rollup_task_usage_hourly()` 周期性运行才能填充。**默认的 `pgvector/pgvector:pg17` 镜像不带 `pg_cron`**，后端进程内部也不会跑这个 rollup——什么都没调度的话，原始 `task_usage` 行会继续写入，但 dashboard 会一直停在 0，不会报错。
+## 7. 用量汇总（无需运维操作）
+
+<Callout type="info">
+Usage / Runtime 看板读的是派生表 `task_usage_hourly`，由 `rollup_task_usage_hourly()` 周期性填充。从 MUL-2957 起，后端通过 DB 后端的调度器在进程内运行该 rollup —— 不再需要 `pg_cron`，外部 cron / systemd timer 也不再是推荐方案。默认的 `pgvector/pgvector:pg17` 镜像无需改动即可工作。
 </Callout>
 
-三种支持路径，三选一即可。
+进程内调度器每 30 秒 tick 一次，通过 `sys_cron_executions` 表认领 5 分钟一档的 UTC plan。多 backend 副本同时跑也安全 —— 唯一键 `(job_name, scope_kind, scope_id, plan_time)` 保证每个 plan 只有一个赢家。新部署不需要任何额外配置。
 
-**Option A —— 外部 cron / systemd-timer（最简单）。** 在任意外部调度器上每 5 分钟跑一次 rollup。函数是幂等的、按 watermark 推进，丢一两个 tick 下次能补上：
-
-```bash
-# /etc/cron.d/multica-rollup —— 每 5 分钟跑一次
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
-  -c "SELECT rollup_task_usage_hourly();" >/dev/null
-```
-
-**Option B —— 换成自带 `pg_cron` 的 Postgres 镜像。** 把 `docker-compose.selfhost.yml` 里的 `pgvector/pgvector:pg17` 换成同时带 `pgvector` 和 `pg_cron` 的镜像（比如 `supabase/postgres`，或自己 build 一份），把 `shared_preload_libraries=pg_cron` 配上、重启 Postgres，然后注册一次任务：
+**兼容性 —— 已注册的 `pg_cron` 任务。** 如果你之前用 `pg_cron` 注册过 rollup（`SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', …)`），不删也行 —— SQL 函数内部持有 advisory lock 4246，应用调度器和 `pg_cron` 不会并发双写。要清掉冗余项可以执行：
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-SELECT cron.schedule(
-  'rollup_task_usage_hourly',
-  '*/5 * * * *',
-  $$SELECT rollup_task_usage_hourly()$$
-);
+SELECT cron.unschedule('rollup_task_usage_hourly')
+  FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
 ```
 
-**Option C —— 先回填历史（升级路径）。** 如果你是从 `v0.3.4` 升级到 `v0.3.5+` 且数据库里已经有 `task_usage` 行，migration `103` 会以 `refusing to drop legacy daily rollups: ...` 报错并中止 `migrate up`，直到 hourly 表被 seed 过。先跑一次内置的 backfill 命令，然后再配 Option A 或 Option B 让新数据持续流进来：
+**从 `v0.3.4 → v0.3.5+` 升级。** 上一版要求运维在应用 migration 103 之前手动跑 `cmd/backfill_task_usage_hourly`，否则 fail-closed 守卫会中止 `migrate up`。从 MUL-2957 起这一步是自动的：migrate 命令会在应用 migration 103 之前（advisory lock 4246 保护下）运行幂等的按月切片 backfill，然后继续。在繁忙的数据库上你仍可以用 `--sleep-between-slices=2s` 跑独立 backfill 来限制读压力，但已不是必需。
 
-```bash
-docker compose -f docker-compose.selfhost.yml exec backend \
-  ./backfill_task_usage_hourly --sleep-between-slices=2s
-```
-
-`--sleep-between-slices=2s` 用来在繁忙的数据库上限制读压力。回填跑完后重启后端容器（migration 在启动时自动跑），升级就能继续。
-
-完整参考（含 Kubernetes `CronJob` 模板和升级顺序）见仓库的 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)。
+完整参考（含运维注意事项和 Kubernetes 部署形态）见仓库的 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)。
 
 ## Kubernetes 部署（替代方案）
 
@@ -249,8 +269,8 @@ multica setup self-host \
 - **后端起不来**：看容器日志 `docker compose -f docker-compose.selfhost.yml logs backend`；常见是 `.env` 里 `DATABASE_URL` 或 `JWT_SECRET` 有问题
 - **验证码收不到**：没配任何邮件后端（Resend 和 SMTP 都没设） → 从 `docker compose logs backend` 里找 `[DEV] Verification code`
 - **WebSocket 连不上**：公网部署必须设 `FRONTEND_ORIGIN` 成你真实的前端域名；见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)
-- **Usage / Runtime 看板一直是 0**：没人调度 `rollup_task_usage_hourly()` —— 见上面的 [第 7 步](#7-调度用量汇总任务usage-dashboard-必需) 和 [故障排查 → Usage 看板一直是 0](/troubleshooting#usage-看板一直是-0)
-- **`migrate up` 报 `refusing to drop legacy daily rollups`**：`v0.3.4 → v0.3.5+` 升级路径的 fail-closed guard。先跑 `backfill_task_usage_hourly` —— 见 [第 7 步 → Option C](#7-调度用量汇总任务usage-dashboard-必需)
+- **Usage / Runtime 看板一直是 0**：没人调度 `rollup_task_usage_hourly()` —— 见上面的 [第 7 步](#7-usage-rollup-no-operator-action-required) 和 [故障排查 → Usage 看板一直是 0](/troubleshooting#usage-看板一直是-0)
+- **`migrate up` 报 `refusing to drop legacy daily rollups`**：`v0.3.4 → v0.3.5+` 升级路径的 fail-closed guard。从 MUL-2957 起 migrate 命令在应用 migration 103 之前会自动跑 backfill —— 见 [第 7 步](#7-usage-rollup-no-operator-action-required)
 
 ## 下一步
 

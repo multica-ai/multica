@@ -40,7 +40,14 @@
     "back": "返回",
     "continue": "继续",
     "skip": "跳过",
-    "cancel": "取消"
+    "cancel": "取消",
+    "close": "关闭"
+  },
+  "source_backfill": {
+    "eyebrow": "顺便问一句",
+    "lede": "我们注意到你之前没有勾选这一项——花一秒补一下，能帮我们更了解像你一样的用户。完成后立刻回到你正在做的事。",
+    "submit": "提交",
+    "hint_ready": "看起来不错，准备好就点提交。"
   },
   "questions": {
     "eyebrow_about_you": "关于你",
@@ -51,6 +58,7 @@
       "social_x": "X / Twitter",
       "social_linkedin": "LinkedIn",
       "social_youtube": "YouTube",
+      "social_github": "GitHub",
       "social_misc": "其他社区",
       "blog_newsletter": "博客 / Newsletter",
       "ai_assistant": "ChatGPT / Claude / Cursor 推荐",
@@ -296,7 +304,14 @@
       "skills_meta": "可复用的剧本",
       "more_label": "更多",
       "more_meta": "等等"
-    }
+    },
+    "creation_disabled_eyebrow": "已禁用创建工作区",
+    "creation_disabled_headline": "请联系管理员邀请你加入工作区。",
+    "creation_disabled_lede": "该 Multica 实例不允许创建新的工作区。等管理员把你邀请到某个工作区后，接受邀请并刷新即可继续。",
+    "creation_disabled_logout": "退出登录",
+    "creation_disabled_eyebrow_resume": "你的工作区",
+    "creation_disabled_headline_resume": "继续使用 {{name}}。",
+    "creation_disabled_lede_resume": "该实例已禁用创建工作区，继续进入你已有的工作区即可。"
   },
   "step_runtime": {
     "scanning_headline": "正在连接这台电脑…",

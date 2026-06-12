@@ -5,7 +5,6 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
-  ChevronRight,
   HardDrive,
   Loader2,
   Lock,
@@ -36,6 +35,7 @@ import {
   skillDetailOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
@@ -57,6 +57,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { AppLink, useNavigation } from "../../navigation";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
 import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
@@ -165,7 +166,7 @@ function UsedBySection({ agents }: { agents: Agent[] }) {
           <ActorAvatar
             name={a.name}
             initials={a.name.slice(0, 2).toUpperCase()}
-            avatarUrl={a.avatar_url}
+            avatarUrl={resolvePublicFileUrl(a.avatar_url)}
             isAgent
             size={22}
           />
@@ -552,49 +553,42 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* Topbar */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <Button
-          variant="ghost"
-          size="xs"
-          render={<AppLink href={paths.skills()} />}
-          nativeButton={false}
-          className="shrink-0"
-        >
-          <ArrowLeft className="h-3 w-3" />
-          {t(($) => $.detail.all_skills)}
-        </Button>
-        <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="truncate font-mono text-xs text-foreground">
-          {skill.name}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {!canEdit && (
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <Lock className="h-3 w-3" />
-              {t(($) => $.detail.read_only)}
-            </span>
-          )}
-          {canEdit && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setConfirmDelete(true)}
-                    className="text-muted-foreground hover:text-destructive"
-                    aria-label={t(($) => $.detail.delete_aria)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-      </div>
+      <BreadcrumbHeader
+        segments={[{ href: paths.skills(), label: t(($) => $.page.title) }]}
+        leaf={
+          <span className="truncate font-mono text-xs text-foreground">
+            {skill.name}
+          </span>
+        }
+        actions={
+          <>
+            {!canEdit && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Lock className="h-3 w-3" />
+                {t(($) => $.detail.read_only)}
+              </span>
+            )}
+            {canEdit && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => setConfirmDelete(true)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={t(($) => $.detail.delete_aria)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
+                <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
+              </Tooltip>
+            )}
+          </>
+        }
+      />
 
       {!canEdit && (
         <div className="px-4 pt-3">
@@ -730,7 +724,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                     <ActorAvatar
                       name={creator.name}
                       initials={creator.name.slice(0, 2).toUpperCase()}
-                      avatarUrl={creator.avatar_url}
+                      avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
                       size={14}
                     />
                     {t(($) => $.detail.subline.by_creator, { name: creator.name })}

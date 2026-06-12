@@ -48,7 +48,7 @@ import (
 // Errors are logged at warn level and swallowed: this is a best-effort
 // notification on the side of a successful status update; failing it must
 // not roll back the user's status change.
-func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue) {
+func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue, actorType, actorID string) {
 	if !issue.ParentIssueID.Valid {
 		return
 	}
@@ -122,7 +122,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// author_type='system'); this keeps smuggled mentions from the child
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
-	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment)
+	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment, actorType, actorID)
 }
 
 // sanitizeChildTitleForSystemComment removes mention-style markdown from a
@@ -226,39 +226,50 @@ func sanitizeMentionLabel(name string) string {
 //
 // Guards applied here:
 //   - No-op when the parent has no assignee row.
-//   - Loop guard: skip when the agent that effectively "owns" the child
-//     (its agent assignee, or the leader of its squad assignee) is the same
-//     agent the parent would trigger (the parent agent itself, or the
-//     parent squad's leader). Without this an agent that drives both child
-//     and parent immediately re-runs on the parent and can post another
-//     child, looping — including the cross-squad case where two different
-//     squads share a leader.
+//   - Squad loop guard (squad parent only): skip when the finished child is
+//     the same squad, or its effective owner is the parent squad's leader. A
+//     squad leader already observes same-squad work through its own
+//     coordination cycle — the worker's completion comment wakes the leader
+//     via computeAssignedSquadLeaderCommentTrigger — so the child-done trigger would
+//     be redundant; this also closes the cross-squad shared-leader loop. The
+//     AGENT parent path intentionally has NO such guard (MUL-2808): a lone
+//     agent that decomposes its parent into sub-issues it owns itself has no
+//     other wake path, and waking the parent agent when its child finishes is
+//     a serial sub-task handoff across two DIFFERENT issues — explicitly not a
+//     self-loop per isAgentRunningOnIssue, and consistent with the @mention
+//     self-trigger path (computeMentionedAgentCommentTriggers). Runaway re-triggering is
+//     bounded by the idempotency guard below, not by suppressing the trigger.
 //   - Idempotency: HasPendingTaskForIssueAndAgent dedupes rapid-fire enqueues
 //     for the same parent (e.g. two children finishing back-to-back).
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
-func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, child db.Issue, systemComment db.Comment) {
+func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, child db.Issue, systemComment db.Comment, actorType, actorID string) {
 	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
 		return
 	}
 
 	switch parent.AssigneeType.String {
 	case "agent":
-		h.triggerChildDoneAgent(ctx, parent, child, systemComment.ID)
+		h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
 	case "squad":
-		h.triggerChildDoneSquad(ctx, parent, child, systemComment.ID)
+		h.triggerChildDoneSquad(ctx, parent, child, systemComment.ID, actorType, actorID)
 	}
 }
 
 // triggerChildDoneAgent enqueues a mention-style task for the parent's
-// agent assignee, applying the self-trigger guard documented on
-// dispatchParentAssigneeTrigger.
-func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID) {
-	if owner := h.effectiveChildAgentOwner(ctx, child); owner.Valid &&
-		uuidToString(owner) == uuidToString(parent.AssigneeID) {
-		return
-	}
-
+// agent assignee.
+//
+// There is intentionally NO same-agent self-trigger guard here, unlike the
+// squad path. Waking the parent agent when one of its children finishes is a
+// serial sub-task handoff between two DIFFERENT issues, which the platform
+// loop model treats as legitimate ("not a loop and must fire" — see
+// isAgentRunningOnIssue); only re-entering the SAME issue is a loop. A lone
+// agent that decomposes its parent into sub-issues it owns itself has no
+// other wake path, so the old "child owner == parent agent" guard silently
+// stranded those parents (MUL-2808). Runaway re-triggering is prevented by
+// the HasPendingTaskForIssueAndAgent dedup below, exactly as the @mention
+// self-trigger path relies on it (see computeMentionedAgentCommentTriggers).
+func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
@@ -290,12 +301,17 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent, child db.Is
 //   - same effective leader on both sides — child agent == leader, or
 //     child squad's leader == this squad's leader (the cross-squad shared
 //     leader loop).
-func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID) {
+func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID, actorType, actorID string) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
 	if err != nil {
+		return
+	}
+
+	// Private-leader gate: deny if the actor cannot access the leader.
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, actorType, actorID, uuidToString(parent.WorkspaceID)) {
 		return
 	}
 

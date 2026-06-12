@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issueposition"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -30,6 +32,12 @@ type AutopilotService struct {
 	Bus       *events.Bus
 	TaskSvc   *TaskService
 }
+
+// DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
+// trigger output when a trigger has no configured timezone or the configured
+// timezone fails to load. Exported so the scheduler can use the same default
+// when computing next run times.
+const DefaultAutopilotTriggerTimezone = "UTC"
 
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
@@ -80,7 +88,8 @@ func (s *AutopilotService) DispatchAutopilot(
 
 	switch autopilot.ExecutionMode {
 	case "create_issue":
-		if err := s.dispatchCreateIssue(ctx, autopilot, &run); err != nil {
+		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
+		if err := s.dispatchCreateIssue(ctx, autopilot, &run, triggerTimezone); err != nil {
 			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
 				return skipped, nil
 			}
@@ -133,7 +142,7 @@ func (s *AutopilotService) DispatchAutopilot(
 // Creator on the issue is always the agent that will actually do the work
 // (the resolved leader for a squad autopilot, otherwise the assignee agent
 // itself), so activity / mentions render with the right author identity.
-func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, triggerTimezone string) error {
 	leader, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
@@ -147,12 +156,17 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	qtx := s.Queries.WithTx(tx)
 
-	title := s.interpolateTemplate(ap)
-	description := s.buildIssueDescription(ap, *run)
+	title := s.interpolateTemplate(ap, *run, triggerTimezone)
+	description := s.buildIssueDescription(ap, *run, triggerTimezone)
 
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("increment issue counter: %w", err)
+	}
+
+	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, "todo")
+	if err != nil {
+		return fmt.Errorf("get next issue position: %w", err)
 	}
 
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
@@ -171,9 +185,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		CreatorType:   "agent",
 		CreatorID:     leader.ID,
 		ParentIssueID: pgtype.UUID{},
-		Position:      0,
-		StartDate:     pgtype.Timestamptz{},
-		DueDate:       pgtype.Timestamptz{},
+		Position:      newPosition,
+		StartDate:     pgtype.Date{},
+		DueDate:       pgtype.Date{},
 		Number:        issueNumber,
 		ProjectID:     ap.ProjectID,
 		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
@@ -218,6 +232,12 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// MUL-2429); agent-assigned autopilots go through the standard issue
 	// path. Both code paths land in agent_task_queue with agent_id = leader.
 	if ap.AssigneeType == "squad" {
+		// Fail-closed private-leader gate: if the leader is private, verify
+		// the autopilot creator still has access. This catches illegitimate
+		// configs that were saved before the save-time gate was added.
+		if leader.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, leader) {
+			return fmt.Errorf("autopilot creator cannot access private squad leader")
+		}
 		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, pgtype.UUID{}); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
@@ -278,6 +298,11 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	}
 	if !ready {
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, reason)}
+	}
+
+	// Fail-closed private-leader gate for squad autopilots.
+	if ap.AssigneeType == "squad" && agent.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, agent) {
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "creator cannot access private squad leader")}
 	}
 
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
@@ -411,6 +436,79 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
 	}
+}
+
+// SyncRunFromLinkedIssueTask fails a create_issue autopilot run when its
+// linked issue task fails terminally before the issue itself reaches a
+// terminal status. create_issue tasks are linked through issue_id rather than
+// autopilot_run_id, so SyncRunFromTask cannot see them directly. Without this
+// the run would hang in `issue_created` forever — and because the failure-rate
+// auto-pause monitor excludes issue_created/running runs, a consistently
+// failing autopilot would never trip the auto-pause either.
+//
+// "Terminal" means no task is still active for the issue. FailTask enqueues an
+// auto-retry for infra-shaped failures (timeout, runtime offline/recovery,
+// codex no-progress) BEFORE it broadcasts the failure event, so an active task
+// here means another attempt is already in flight — we wait for it instead of
+// failing the run prematurely. Once retries are exhausted (or the failure was
+// never retryable in the first place), the run fails carrying the task's reason.
+func (s *AutopilotService) SyncRunFromLinkedIssueTask(ctx context.Context, task db.AgentTaskQueue) {
+	if task.AutopilotRunID.Valid || !task.IssueID.Valid || task.Status != "failed" {
+		return
+	}
+	// Only create_issue runs link through issue_id (and their linked issue is
+	// always origin_type=autopilot by construction), so a hit here both
+	// identifies an in-flight create_issue run and bails the common case of
+	// ordinary issue/chat task failures after a single query.
+	run, err := s.Queries.GetAutopilotRunByIssue(ctx, task.IssueID)
+	if err != nil {
+		return // no active run linked to this issue
+	}
+	// A still-active task — typically the auto-retry FailTask just enqueued —
+	// means the dispatch isn't terminal yet; wait for the final attempt.
+	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("failed to check active tasks for autopilot issue failure",
+			"issue_id", util.UUIDToString(task.IssueID),
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		return
+	}
+	if hasActive {
+		return
+	}
+	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+	if err != nil {
+		return
+	}
+
+	reason := taskFailureReasonForAutopilotRun(task)
+	updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+		ID:            run.ID,
+		FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
+	})
+	if err != nil {
+		slog.Warn("failed to fail autopilot run from linked issue task",
+			"run_id", util.UUIDToString(run.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		return
+	}
+	s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
+	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), updatedRun, "failed")
+}
+
+func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {
+	if task.Error.Valid && strings.TrimSpace(task.Error.String) != "" {
+		return task.Error.String
+	}
+	if task.FailureReason.Valid && strings.TrimSpace(task.FailureReason.String) != "" {
+		return task.FailureReason.String
+	}
+	return "task failed"
 }
 
 // handleDispatchSkip recognises an errDispatchSkipped returned from a
@@ -711,7 +809,7 @@ func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run
 	// For PostHog the agent_id should be the agent that will actually run
 	// the work (the resolved leader for squad autopilots) so per-agent task
 	// counts line up with what daemons report.
-	s.TaskSvc.Analytics.Capture(analytics.IssueCreated(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.IssueCreated(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(issue.ID),
@@ -719,6 +817,7 @@ func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run
 		"",
 		util.UUIDToString(run.ID),
 		analytics.SourceAutopilot,
+		analytics.PlatformServer,
 	))
 }
 
@@ -726,11 +825,12 @@ func (s *AutopilotService) captureAutopilotRunStarted(ap db.Autopilot, run db.Au
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunStarted(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunStarted(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
+		triggerSource, // cadence proxy: see autopilot cadence note in metrics/labels_pr3.go
 		s.autopilotAssigneeAnalytics(ap),
 		triggerSource,
 	))
@@ -740,11 +840,12 @@ func (s *AutopilotService) captureAutopilotRunCompleted(ap db.Autopilot, run db.
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunCompleted(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunCompleted(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
+		run.Source,
 		s.autopilotAssigneeAnalytics(ap),
 		run.Source,
 		autopilotRunDurationMS(run),
@@ -758,11 +859,12 @@ func (s *AutopilotService) captureAutopilotRunFailed(ap db.Autopilot, run db.Aut
 	if reason == "" {
 		reason = "unknown"
 	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunFailed(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunFailed(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
+		triggerSource,
 		s.autopilotAssigneeAnalytics(ap),
 		triggerSource,
 		reason,
@@ -838,17 +940,80 @@ func autopilotRunDurationMS(run db.AutopilotRun) int64 {
 	return ms
 }
 
+func (s *AutopilotService) resolveAutopilotTriggerTimezone(ctx context.Context, triggerID pgtype.UUID) string {
+	if !triggerID.Valid || s == nil || s.Queries == nil {
+		return DefaultAutopilotTriggerTimezone
+	}
+
+	trigger, err := s.Queries.GetAutopilotTrigger(ctx, triggerID)
+	if err != nil {
+		slog.Warn("failed to load autopilot trigger timezone; falling back to UTC",
+			"trigger_id", util.UUIDToString(triggerID),
+			"error", err,
+		)
+		return DefaultAutopilotTriggerTimezone
+	}
+
+	timezone := strings.TrimSpace(trigger.Timezone.String)
+	if !trigger.Timezone.Valid || timezone == "" {
+		return DefaultAutopilotTriggerTimezone
+	}
+	if _, err := time.LoadLocation(timezone); err != nil {
+		slog.Warn("invalid autopilot trigger timezone; falling back to UTC",
+			"trigger_id", util.UUIDToString(triggerID),
+			"timezone", timezone,
+			"error", err,
+		)
+		return DefaultAutopilotTriggerTimezone
+	}
+	return timezone
+}
+
+func formatAutopilotRunTimestamp(run db.AutopilotRun, timezone string) string {
+	triggeredAt := autopilotRunTriggeredAt(run)
+	loc, label := autopilotTriggerLocation(timezone)
+	return triggeredAt.In(loc).Format("2006-01-02 15:04") + " " + label
+}
+
+func formatAutopilotRunDate(run db.AutopilotRun, timezone string) string {
+	triggeredAt := autopilotRunTriggeredAt(run)
+	loc, _ := autopilotTriggerLocation(timezone)
+	return triggeredAt.In(loc).Format("2006-01-02")
+}
+
+func autopilotRunTriggeredAt(run db.AutopilotRun) time.Time {
+	if run.TriggeredAt.Valid {
+		return run.TriggeredAt.Time
+	}
+	if run.CreatedAt.Valid {
+		return run.CreatedAt.Time
+	}
+	return time.Now().UTC()
+}
+
+func autopilotTriggerLocation(timezone string) (*time.Location, string) {
+	label := strings.TrimSpace(timezone)
+	if label == "" {
+		label = DefaultAutopilotTriggerTimezone
+	}
+	loc, err := time.LoadLocation(label)
+	if err != nil {
+		return time.UTC, DefaultAutopilotTriggerTimezone
+	}
+	return loc, label
+}
+
 // buildIssueDescription appends an autopilot system instruction to the
 // user-provided description, asking the agent to rename the issue after
 // it understands the actual work. For webhook-sourced runs, also appends
 // a payload section so the agent has the event context inline (otherwise
 // the agent only sees the issue body, never the run's trigger_payload).
-func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun) pgtype.Text {
-	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
+func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun, triggerTimezone string) pgtype.Text {
+	triggeredAt := formatAutopilotRunTimestamp(run, triggerTimezone)
 	var b strings.Builder
 	b.WriteString(ap.Description.String)
 	b.WriteString("\n\n---\n*Autopilot run triggered at ")
-	b.WriteString(now)
+	b.WriteString(triggeredAt)
 	b.WriteString(". After starting work, rename this issue to accurately reflect what you are doing.*")
 
 	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
@@ -904,17 +1069,17 @@ var issueTitleTemplateTokenRE = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 // tolerated so the render layer accepts every form that
 // ValidateIssueTitleTemplate accepts — otherwise users would save templates
 // that pass validation but still emit a literal token at trigger time.
-func (s *AutopilotService) interpolateTemplate(ap db.Autopilot) string {
+func (s *AutopilotService) interpolateTemplate(ap db.Autopilot, run db.AutopilotRun, triggerTimezone string) string {
 	tmpl := ap.Title
 	if ap.IssueTitleTemplate.Valid && ap.IssueTitleTemplate.String != "" {
 		tmpl = ap.IssueTitleTemplate.String
 	}
-	now := time.Now().UTC().Format("2006-01-02")
+	triggerDate := formatAutopilotRunDate(run, triggerTimezone)
 	return issueTitleTemplateTokenRE.ReplaceAllStringFunc(tmpl, func(match string) string {
 		name := strings.TrimSpace(match[2 : len(match)-2])
 		switch name {
 		case "date":
-			return now
+			return triggerDate
 		default:
 			return match
 		}
@@ -963,4 +1128,26 @@ func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
 		return ""
 	}
 	return ws.IssuePrefix
+}
+
+// canCreatorAccessPrivateLeader checks whether the autopilot's creator still
+// has access to a private leader agent. Mirrors handler.canAccessPrivateAgent
+// logic: agent creators always pass; member creators must be the agent owner
+// or a workspace owner/admin. Returns false (fail-closed) on any lookup error.
+func (s *AutopilotService) canCreatorAccessPrivateLeader(ctx context.Context, ap db.Autopilot, leader db.Agent) bool {
+	if ap.CreatedByType == "agent" {
+		return true
+	}
+	creatorID := util.UUIDToString(ap.CreatedByID)
+	if util.UUIDToString(leader.OwnerID) == creatorID {
+		return true
+	}
+	member, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      ap.CreatedByID,
+		WorkspaceID: ap.WorkspaceID,
+	})
+	if err != nil {
+		return false
+	}
+	return member.Role == "owner" || member.Role == "admin"
 }

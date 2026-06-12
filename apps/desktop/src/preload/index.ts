@@ -156,10 +156,23 @@ const desktopAPI = {
       ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
     };
   },
+  /** Open the OS folder picker and return the chosen absolute path. */
+  pickDirectory: (defaultPath?: string) =>
+    ipcRenderer.invoke("local-directory:pick", defaultPath),
+  /** Validate that a path is an existing readable+writable directory. */
+  validateLocalDirectory: (path: string) =>
+    ipcRenderer.invoke("local-directory:validate", path),
 };
 
 interface DaemonStatus {
-  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
+  state:
+    | "running"
+    | "stopped"
+    | "starting"
+    | "stopping"
+    | "installing_cli"
+    | "cli_not_found"
+    | "auth_expired";
   pid?: number;
   uptime?: string;
   daemonId?: string;
@@ -170,6 +183,11 @@ interface DaemonStatus {
   serverUrl?: string;
 }
 
+type DaemonReauthResult =
+  | { ok: true }
+  | { ok: false; reason: "session_invalid" }
+  | { ok: false; reason: "transient"; message: string };
+
 const daemonAPI = {
   start: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("daemon:start"),
@@ -179,6 +197,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:restart"),
   getStatus: (): Promise<DaemonStatus> =>
     ipcRenderer.invoke("daemon:get-status"),
+  getHostName: (): Promise<string> =>
+    ipcRenderer.invoke("daemon:get-host-name"),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {
     const handler = (_: unknown, status: DaemonStatus) => callback(status);
     ipcRenderer.on("daemon:status", handler);
@@ -190,6 +210,11 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:sync-token", token, userId),
   clearToken: (): Promise<void> =>
     ipcRenderer.invoke("daemon:clear-token"),
+  reauthenticate: (
+    token: string,
+    userId: string,
+  ): Promise<DaemonReauthResult> =>
+    ipcRenderer.invoke("daemon:reauthenticate", token, userId),
   isCliInstalled: (): Promise<boolean> =>
     ipcRenderer.invoke("daemon:is-cli-installed"),
   getPrefs: (): Promise<{ autoStart: boolean; autoStop: boolean }> =>

@@ -109,7 +109,21 @@
     "repos_search_empty": "No repositories match your search.",
     "repos_url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",
     "repos_add": "Add",
-    "repos_selected": "Selected"
+    "repos_selected": "Selected",
+    "source_pill_local": "Local directory",
+    "source_tab_repos": "GitHub repos",
+    "source_tab_local": "Local directory",
+    "local_heading": "Use a local working directory on this machine",
+    "local_on_device": "Bound to {{device}}",
+    "local_this_machine": "this machine",
+    "local_daemon_offline": "Daemon offline — start it to bind a local directory.",
+    "local_pick": "Choose directory…",
+    "local_picking": "Opening picker…",
+    "local_change": "Change directory…",
+    "local_clear": "Clear",
+    "local_pick_failed": "Could not open the directory picker.",
+    "local_invalid_dir": "This directory can't be used. Pick another.",
+    "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work."
   },
   "create_issue": {
     "sr_manual": "New Issue",
@@ -171,7 +185,8 @@
       "toast_sent": "Sent to agent — you'll get an inbox notification when it's done",
       "error_agent_unavailable_fallback": "Agent is unavailable. Pick another agent.",
       "error_daemon_version": "This agent's daemon CLI ({{current}}) is below the required {{min}}. Upgrade the daemon to use Create with agent.",
-      "error_unknown": "Failed to submit. Try again."
+      "error_unknown": "Failed to submit. Try again.",
+      "sub_issue_of": "Sub-issue of {{identifier}}"
     }
   }
 }

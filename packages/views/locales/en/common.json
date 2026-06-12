@@ -9,5 +9,20 @@
     "minutes_ago": "{{count}}m ago",
     "hours_ago": "{{count}}h ago",
     "days_ago": "{{count}}d ago"
+  },
+  "lark_bind": {
+    "page_title": "Bind your Lark account",
+    "redeeming": "Redeeming binding token…",
+    "needs_auth_description": "Sign in to Multica to complete the binding. The token in the link binds your Lark account to this Multica user, so you must be logged in first.",
+    "sign_in": "Sign in",
+    "done_title": "You're bound.",
+    "done_description": "Your next message to the Bot in Lark will go straight to the Agent. You can close this tab.",
+    "error_title": "Couldn't complete the binding",
+    "error_admin_hint": "If this keeps happening, ask the workspace admin to re-send the binding link from Lark.",
+    "error_missing_token": "The link is missing its binding token. Ask the Bot to send a new one in Lark.",
+    "error_expired": "This binding link is invalid or expired (links are valid for 15 minutes). Ask the Bot to send a new one.",
+    "error_already_bound": "This Lark account is already bound to a different Multica user. Account transfers must go through an explicit unbind first.",
+    "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
+    "error_unknown": "Something went wrong. Try again, and if the problem persists, contact the workspace admin."
   }
 }

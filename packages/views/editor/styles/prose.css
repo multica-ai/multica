@@ -149,6 +149,109 @@
   list-style-type: lower-roman;
 }
 
+/*
+ * Task lists (checkboxes) — `- [ ]` / `- [x]`.
+ *
+ * The editor and readonly views emit DIFFERENT DOM, so they are styled
+ * separately rather than sharing a flex rule:
+ *
+ *   - Editor (Tiptap NodeView):
+ *       ul[data-type="taskList"] > li[data-checked]
+ *         > label(contenteditable) > input + span
+ *         > div(content) > p, [nested ul]
+ *     The item body is wrapped in a <div>, so the row is a flex layout and a
+ *     nested task list inside that <div> still stacks below the text.
+ *
+ *   - Readonly (remark-gfm):
+ *       ul.contains-task-list > li.task-list-item
+ *         > input[disabled] + text [ + nested ul ]
+ *     There is NO body wrapper — a nested <ul> is a direct sibling of the
+ *     checkbox and text. Flex here would pull the nested list onto the same
+ *     row, so the item stays a block and the checkbox is positioned inline.
+ */
+
+/* Shared: checkbox appearance. */
+.rich-text-editor input[type="checkbox"] {
+  width: 0.95rem;
+  height: 0.95rem;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+/* --- Editor (Tiptap) --- */
+.rich-text-editor ul[data-type="taskList"] {
+  list-style: none;
+  padding-inline: 0;
+  margin: 0.5rem 0;
+}
+
+/* Child combinators keep these rules off nested plain bullet/ordered lists. */
+.rich-text-editor ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0;
+}
+
+/* Checkbox column. The top margin nudges the box onto the first text line
+   (line-height 1.625). */
+.rich-text-editor ul[data-type="taskList"] > li > label {
+  flex: 0 0 auto;
+  margin: 0.28rem 0 0;
+  user-select: none;
+}
+
+/* Content column fills the remaining width and may wrap/scroll. */
+.rich-text-editor ul[data-type="taskList"] > li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > div > p {
+  margin: 0;
+}
+
+/* Completed editor item: muted text (no strikethrough), matching Linear. The
+   NodeView keeps `data-checked` on the <li> (but not data-type). */
+.rich-text-editor ul[data-type="taskList"] > li[data-checked="true"] > div {
+  color: var(--muted-foreground);
+}
+
+/* --- Readonly (remark-gfm) --- */
+.rich-text-editor ul.contains-task-list {
+  list-style: none;
+  padding-inline: 0;
+  margin: 0.5rem 0;
+}
+
+.rich-text-editor li.task-list-item {
+  padding-inline: 0;
+}
+
+/* Inline checkbox on the first text line; a nested <ul> stays block and drops
+   below the item instead of sharing the row. */
+.rich-text-editor li.task-list-item > input[type="checkbox"] {
+  margin: 0 0.5rem 0 0;
+  vertical-align: -0.1em;
+}
+
+/* Indent nested readonly task lists under their parent item. */
+.rich-text-editor li.task-list-item .contains-task-list {
+  padding-inline-start: 1.45rem;
+  margin: 0.25rem 0;
+}
+
+/* Completed readonly item: muted text, matched via :has(input:checked). The
+   reset keeps a completed parent from bleeding its muted color into the
+   (independently evaluated) nested items below it. */
+.rich-text-editor li.task-list-item:has(> input:checked) {
+  color: var(--muted-foreground);
+}
+
+.rich-text-editor li.task-list-item:has(> input:checked) .contains-task-list {
+  color: var(--foreground);
+}
+
 /* Tables */
 .rich-text-editor .tableWrapper {
   overflow-x: auto;
@@ -262,6 +365,14 @@
   margin: 0 0.125rem;
 }
 
+/* Slash command pills */
+.rich-text-editor .slash-command {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+  margin: 0 0.125rem;
+}
+
 /* Strong / emphasis */
 .rich-text-editor strong {
   font-weight: 600;
@@ -275,4 +386,17 @@
 .rich-text-editor del {
   text-decoration: line-through;
   color: var(--muted-foreground);
+}
+
+/* Text highlight (`==text==` → <mark>). Single yellow tint that stays legible
+   in both light and dark themes; `color: inherit` keeps the underlying text
+   color so highlighted links/code remain readable. box-decoration-break clones
+   the background across wrapped lines (same approach as inline code above). */
+.rich-text-editor mark {
+  background-color: color-mix(in srgb, #facc15 45%, transparent);
+  color: inherit;
+  border-radius: 0.2em;
+  padding: 0 0.15em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }

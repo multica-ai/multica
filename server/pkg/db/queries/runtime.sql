@@ -142,12 +142,14 @@ WHERE status = 'online'
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: FailTasksForOfflineRuntimes :many
--- Marks dispatched/running tasks as failed when their runtime is offline.
--- This cleans up orphaned tasks after a daemon crash or network partition.
+-- Marks dispatched/running/waiting_local_directory tasks as failed when
+-- their runtime is offline. This cleans up orphaned tasks after a daemon
+-- crash or network partition.
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
-    failure_reason = 'runtime_offline'
-WHERE status IN ('dispatched', 'running')
+    failure_reason = 'runtime_offline',
+    wait_reason = NULL
+WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
@@ -188,7 +190,7 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid[]))
-  AND status IN ('queued', 'dispatched', 'running')
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
@@ -196,6 +198,14 @@ DELETE FROM agent_runtime WHERE id = $1;
 
 -- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
+
+-- name: CountActiveSquadsWithArchivedLeadersByRuntime :one
+SELECT count(*)
+FROM squad
+WHERE archived_at IS NULL
+  AND leader_id IN (
+    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+  );
 
 -- name: DeleteArchivedAgentsByRuntime :exec
 DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
@@ -218,6 +228,18 @@ WHERE status = 'active'
 -- about to be hard-deleted so the runtime teardown can pause autopilots that
 -- still point at them. Returns ids only — the caller only needs the set.
 SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+
+-- name: DeleteSquadsByArchivedAgentsOnRuntime :exec
+-- Removes archived squads whose leader_id references an archived agent on the
+-- given runtime. Must run before DeleteArchivedAgentsByRuntime so the RESTRICT
+-- FK on squad.leader_id does not block the agent deletion. Active squads are
+-- handled separately by CountActiveSquadsWithArchivedLeadersByRuntime, which
+-- returns a 409 until the caller archives them or assigns a new leader.
+DELETE FROM squad
+WHERE leader_id IN (
+    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+)
+  AND archived_at IS NOT NULL;
 
 -- name: FindLegacyRuntimesByDaemonID :many
 -- Looks up runtime rows keyed on a prior (hostname-derived) daemon_id. Used

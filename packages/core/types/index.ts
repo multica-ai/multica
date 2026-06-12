@@ -44,6 +44,8 @@ export type {
   RuntimeModelListStatus,
   RuntimeModelsResult,
   RuntimeLocalSkillStatus,
+  RuntimeLocalSkillImportAction,
+  RuntimeLocalSkillImportConflict,
   RuntimeLocalSkillSummary,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
@@ -55,7 +57,7 @@ export type {
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
-export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
+export type { Comment, CommentType, CommentAuthorType, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, Reaction } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type {
   TimelineEntry,
@@ -65,7 +67,18 @@ export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
-export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
+export { attachmentDownloadPath, attachmentIdFromDownloadURL, contentReferencesAttachment } from "./attachment-url";
+export type {
+  ChatSession,
+  ChatMessage,
+  ChatMessagesPage,
+  ChatPendingTask,
+  PendingChatTaskItem,
+  PendingChatTasksResponse,
+  SendChatMessageResponse,
+  CancelledChatMessage,
+  CancelTaskResponse,
+} from "./chat";
 export type { StorageAdapter } from "./storage";
 export type {
   Project,
@@ -76,8 +89,11 @@ export type {
   ListProjectsResponse,
   ProjectResource,
   ProjectResourceType,
+  ProjectResourceRef,
   GithubRepoResourceRef,
+  LocalDirectoryResourceRef,
   CreateProjectResourceRequest,
+  UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
@@ -91,6 +107,13 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  LarkInstallation,
+  ListLarkInstallationsResponse,
+  BeginLarkInstallResponse,
+  LarkInstallStatusResponse,
+  RedeemLarkBindingTokenResponse,
+} from "./lark";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
@@ -100,6 +123,7 @@ export type {
   AutopilotRun,
   AutopilotRunStatus,
   AutopilotRunSource,
+  WebhookEventFilter,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
   CreateAutopilotTriggerRequest,
@@ -130,3 +154,21 @@ export type {
   SquadMemberStatus,
   SquadMemberStatusListResponse,
 } from "./squad";
+export type {
+  BillingBalance,
+  BillingTransaction,
+  BillingTransactionsPage,
+  BillingTxType,
+  BillingTxSource,
+  BillingBatch,
+  BillingBatchesPage,
+  BillingBatchSourceType,
+  BillingTopup,
+  BillingTopupsPage,
+  BillingTopupStatus,
+  BillingPriceTier,
+  CreateBillingCheckoutSessionRequest,
+  CreateBillingCheckoutSessionResponse,
+  BillingCheckoutSessionStatus,
+  CreateBillingPortalSessionResponse,
+} from "./billing";

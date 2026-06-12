@@ -23,6 +23,16 @@ ORDER BY created_at ASC;
 SELECT * FROM attachment
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetAttachmentByIDOnly :one
+-- Used by the download endpoint, which derives workspace context from the
+-- attachment row itself rather than from request headers/query params. The
+-- caller still has to verify the requester is a member of the returned
+-- workspace_id before serving the bytes — this query is access-neutral on
+-- purpose so a self-contained URL like /api/attachments/{id}/download can
+-- work as a native <img>/<video> resource load (no header attachment).
+SELECT * FROM attachment
+WHERE id = $1;
+
 -- name: ListAttachmentsByCommentIDs :many
 SELECT * FROM attachment
 WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
@@ -43,6 +53,18 @@ SET comment_id = $1
 WHERE issue_id = $2
   AND comment_id IS NULL
   AND id = ANY($3::uuid[]);
+
+-- name: ReplaceCommentAttachments :exec
+UPDATE attachment
+SET comment_id = CASE
+  WHEN id = ANY(sqlc.arg(attachment_ids)::uuid[]) THEN $1
+  ELSE NULL
+END
+WHERE issue_id = $2
+  AND (
+    comment_id = $1
+    OR (comment_id IS NULL AND id = ANY(sqlc.arg(attachment_ids)::uuid[]))
+  );
 
 -- name: LinkAttachmentsToChatMessage :exec
 UPDATE attachment

@@ -160,8 +160,23 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
           </span>
         </span>
 
-        {/* Mode */}
-        <span className="text-muted-foreground sm:w-24 sm:shrink-0 sm:text-center">
+        {/* Creator — member or agent, mirror the detail page's Created by field.
+            Secondary info: below lg only assignee + status survive. */}
+        <span className="hidden min-w-0 items-center gap-1.5 text-muted-foreground lg:flex lg:w-32 lg:shrink-0">
+          <ActorAvatar
+            actorType={autopilot.created_by_type}
+            actorId={autopilot.created_by_id}
+            size={18}
+            enableHoverCard
+            showStatusDot={autopilot.created_by_type === "agent"}
+          />
+          <span className="truncate">
+            {getActorName(autopilot.created_by_type, autopilot.created_by_id)}
+          </span>
+        </span>
+
+        {/* Mode — secondary info, lg+ only */}
+        <span className="hidden text-muted-foreground lg:block lg:w-24 lg:shrink-0 lg:text-center">
           {t(($) => $.execution_mode[autopilot.execution_mode as AutopilotExecutionMode])}
         </span>
 
@@ -171,8 +186,8 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
           {t(($) => $.status[autopilot.status as AutopilotStatus])}
         </span>
 
-        {/* Last run */}
-        <span className="text-muted-foreground tabular-nums sm:w-20 sm:shrink-0 sm:text-right">
+        {/* Last run — secondary info, lg+ only */}
+        <span className="hidden text-muted-foreground tabular-nums lg:block lg:w-20 lg:shrink-0 lg:text-right">
           {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : t(($) => $.page.last_run_empty)}
         </span>
       </div>
@@ -217,9 +232,10 @@ export function AutopilotsPage() {
               <span className="shrink-0 w-4" />
               <Skeleton className="h-3 w-12 flex-1 max-w-[48px]" />
               <Skeleton className="h-3 w-12 shrink-0" />
+              <Skeleton className="hidden h-3 w-12 shrink-0 lg:block" />
+              <Skeleton className="hidden h-3 w-10 shrink-0 lg:block" />
               <Skeleton className="h-3 w-10 shrink-0" />
-              <Skeleton className="h-3 w-10 shrink-0" />
-              <Skeleton className="h-3 w-12 shrink-0" />
+              <Skeleton className="hidden h-3 w-12 shrink-0 lg:block" />
             </div>
             <div className="space-y-2 p-4 sm:space-y-1 sm:p-5 sm:pt-1">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -269,9 +285,10 @@ export function AutopilotsPage() {
               <span className="shrink-0 w-4" />
               <span className="min-w-0 flex-1">{t(($) => $.page.table.name)}</span>
               <span className="w-32 shrink-0">{t(($) => $.page.table.agent)}</span>
-              <span className="w-24 text-center shrink-0">{t(($) => $.page.table.mode)}</span>
+              <span className="hidden w-32 shrink-0 lg:block">{t(($) => $.page.table.created_by)}</span>
+              <span className="hidden w-24 text-center shrink-0 lg:block">{t(($) => $.page.table.mode)}</span>
               <span className="w-20 text-center shrink-0">{t(($) => $.page.table.status)}</span>
-              <span className="w-20 text-right shrink-0">{t(($) => $.page.table.last_run)}</span>
+              <span className="hidden w-20 text-right shrink-0 lg:block">{t(($) => $.page.table.last_run)}</span>
             </div>
             {autopilots.map((autopilot) => (
               <AutopilotRow key={autopilot.id} autopilot={autopilot} />

@@ -44,10 +44,11 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink, useNavigation } from "../../navigation";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { AgentDetailInspector } from "./agent-detail-inspector";
-import { AgentOverviewPane } from "./agent-overview-pane";
+import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
 import { useT } from "../../i18n";
 
 interface AgentDetailPageProps {
@@ -99,6 +100,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { canEdit } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
+
+  // One-shot channel: the inspector's compact Lark status row asks the
+  // overview pane to focus a tab. The pane clears it after consuming.
+  const [tabNavIntent, setTabNavIntent] = useState<DetailTab | null>(null);
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
     // Optimistic update: patch the matching agent in the cached list
@@ -289,12 +294,15 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           currentUserId={currentUser?.id ?? null}
           canEdit={canEdit.allowed}
           onUpdate={handleUpdate}
+          onShowIntegrations={() => setTabNavIntent("integrations")}
         />
 
         <AgentOverviewPane
           agent={agent}
           runtimes={runtimes}
           onUpdate={handleUpdate}
+          navIntent={tabNavIntent}
+          onNavIntentHandled={() => setTabNavIntent(null)}
         />
       </div>
 
@@ -368,46 +376,42 @@ function DetailHeader({
   // up here was redundant chrome.
 
   return (
-    <PageHeader className="justify-between gap-3 px-5">
-      <div className="flex min-w-0 items-center gap-2">
-        <AppLink
-          href={backHref}
-          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          {t(($) => $.detail.back_to_agents)}
-        </AppLink>
-        <span className="text-muted-foreground/40">/</span>
-        <h1 className="truncate text-sm font-medium">{agent.name}</h1>
-        {!isArchived && av && presence && (
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${av.textClass}`}
-          >
-            <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-            {av.label}
-          </span>
-        )}
-      </div>
-
-      {!isArchived && canArchive && (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={<Button variant="ghost" size="icon-sm" />}
-          >
-            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-auto">
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={onArchive}
+    <BreadcrumbHeader
+      segments={[{ href: backHref, label: t(($) => $.page.title) }]}
+      leaf={
+        <>
+          <h1 className="min-w-0 truncate text-sm font-medium text-foreground">{agent.name}</h1>
+          {av && presence && (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${av.textClass}`}
             >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t(($) => $.detail.more_archive)}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </PageHeader>
+              <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
+              {av.label}
+            </span>
+          )}
+        </>
+      }
+      actions={
+        !isArchived && canArchive ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button variant="ghost" size="icon-sm" />}
+            >
+              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-auto">
+              <DropdownMenuItem
+                className="text-destructive"
+                onClick={onArchive}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t(($) => $.detail.more_archive)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null
+      }
+    />
   );
 }
 

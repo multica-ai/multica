@@ -25,7 +25,8 @@
     "all": "All",
     "online": "Online",
     "unstable": "Unstable",
-    "offline": "Offline"
+    "offline": "Offline",
+    "archived": "Archived"
   },
   "workload": {
     "working": "Working",
@@ -46,7 +47,18 @@
     "no_archived": "No archived agents yet.",
     "search_active": "No agents match \"{{query}}\".",
     "search_active_filtered": "No agents match \"{{query}}\" in this filter.",
-    "no_filter_match": "No agents match this filter."
+    "no_filter_match": "No agents match this filter.",
+    "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
+    "runtime_filtered": "No agents on \"{{machine}}\"."
+  },
+  "runtime_filter": {
+    "all": "All runtimes",
+    "section_local": "Local",
+    "section_remote": "Remote",
+    "section_cloud": "Cloud",
+    "agent_count_one": "{{count}} agent",
+    "agent_count_other": "{{count}} agents",
+    "empty": "No machines yet"
   },
   "columns": {
     "agent": "Agent",
@@ -128,6 +140,7 @@
     "section_properties": "Properties",
     "section_details": "Details",
     "section_skills": "Skills",
+    "section_integrations": "Integrations",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
     "prop_thinking": "Thinking",
@@ -195,6 +208,8 @@
     "skills": "Skills",
     "environment": "Environment",
     "custom_args": "Custom Args",
+    "mcp_config": "MCP",
+    "integrations": "Integrations",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -294,6 +309,18 @@
       "saved_toast": "Custom arguments saved",
       "save_failed_toast": "Failed to save custom arguments"
     },
+    "mcp_config": {
+      "intro": "MCP server configuration forwarded to the runtime CLI (Claude via --mcp-config, Codex via $CODEX_HOME/config.toml, Hermes/Kimi/Kiro via ACP mcpServers, OpenCode via OPENCODE_CONFIG_CONTENT, OpenClaw via the per-task config wrapper). Stored verbatim and may contain secrets — only the agent owner and workspace admins can read it. Leave empty to fall back to the CLI's own default. For OpenClaw HTTP/SSE entries use OpenClaw's own field name (e.g. \"transport\": \"streamable-http\") instead of Claude's \"type\".",
+      "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
+      "editor_aria": "MCP config JSON editor",
+      "clear_action": "Clear",
+      "invalid_json": "Invalid JSON: {{error}}",
+      "invalid_not_object": "MCP config must be a JSON object (e.g. {\"mcpServers\": …}).",
+      "saved_toast": "MCP config saved",
+      "save_failed_toast": "Failed to save MCP config",
+      "redacted_title": "Configured — hidden from your view",
+      "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+    },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
       "add_action": "Add skill",
@@ -312,6 +339,10 @@
       "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
+    },
+    "integrations": {
+      "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
+      "members_note": "Only workspace owners and admins can bind a Lark Bot to an agent. You can view connected bots in Settings → Integrations."
     },
     "activity": {
       "section_now": "Now",

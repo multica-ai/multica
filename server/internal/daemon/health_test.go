@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 		logger:     slog.Default(),
 	}
 	d.activeTasks.Store(3)
+	d.ready.Store(true) // preflight done -> status should be "running"
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -53,6 +55,12 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
 	}
+	// The desktop relies on the `os` key (runtime.GOOS) to detect a daemon it
+	// can't manage (e.g. Linux-in-WSL behind a Windows desktop). A rename or
+	// drop would silently re-break #3916, so lock both the key and its value.
+	if got, want := raw["os"], runtime.GOOS; got != want {
+		t.Errorf("os key: got %v, want %q", got, want)
+	}
 
 	// Also round-trip into the typed struct as a separate check that the
 	// field values match, independent of key naming.
@@ -65,6 +73,42 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	}
 	if resp.ActiveTaskCount != 3 {
 		t.Errorf("ActiveTaskCount: got %d, want 3", resp.ActiveTaskCount)
+	}
+}
+
+// TestHealthHandlerReportsStartingUntilReady pins the liveness/readiness split:
+// the health server binds and answers before preflight finishes, but it must
+// report "starting" until d.ready is set, and only then "running". Otherwise a
+// slow or failing preflight would be misreported to `daemon start` (and the
+// desktop) as a fully started daemon.
+func TestHealthHandlerReportsStartingUntilReady(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{
+		cfg:        Config{CLIVersion: "v1.0.0"},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+	handler := d.healthHandler(time.Now())
+
+	readStatus := func() string {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		var resp HealthResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp.Status
+	}
+
+	if got := readStatus(); got != "starting" {
+		t.Fatalf("status before ready: got %q, want \"starting\"", got)
+	}
+
+	d.ready.Store(true)
+
+	if got := readStatus(); got != "running" {
+		t.Fatalf("status after ready: got %q, want \"running\"", got)
 	}
 }
 
@@ -210,6 +254,10 @@ func (c *blockingLookupRepoCache) Lookup(_, _ string) string {
 
 func (c *blockingLookupRepoCache) Sync(string, []repocache.RepoInfo) error {
 	return nil
+}
+
+func (c *blockingLookupRepoCache) WithRepoLock(_ string, fn func() error) error {
+	return fn()
 }
 
 func (c *blockingLookupRepoCache) CreateWorktree(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
