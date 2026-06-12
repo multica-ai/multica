@@ -8,11 +8,28 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   Bot,
+  ChevronRight,
   FileText,
+  FolderPlus,
   Hash,
   Loader2,
   Lock,
@@ -103,9 +120,12 @@ const SIDE_PANEL_MIN_WIDTH = 320;
 const SIDE_PANEL_MAX_WIDTH = 520;
 const SIDE_PANEL_MAIN_MIN_WIDTH = 560;
 const CHANNEL_LIST_DEFAULT_WIDTH = 280;
-const CHANNEL_LIST_MIN_WIDTH = 240;
+const CHANNEL_LIST_MIN_WIDTH = 180;
 const CHANNEL_LIST_MAX_WIDTH = 420;
 const CHANNEL_MAIN_MIN_WIDTH = 520;
+
+let persistedChannelListWidth = CHANNEL_LIST_DEFAULT_WIDTH;
+let persistedSidePanelWidth = SIDE_PANEL_DEFAULT_WIDTH;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -167,14 +187,14 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [sidePanel, setSidePanel] = useState<SidePanelMode | null>(null);
-  const [sidePanelWidth, setSidePanelWidth] = useState(SIDE_PANEL_DEFAULT_WIDTH);
-  const [channelListWidth, setChannelListWidth] = useState(CHANNEL_LIST_DEFAULT_WIDTH);
+  const [sidePanelWidth, setSidePanelWidth] = useState(persistedSidePanelWidth);
+  const [channelListWidth, setChannelListWidth] = useState(persistedChannelListWidth);
   const [replyMessageId, setReplyMessageId] = useState<string | null>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const sidePanelRef = useRef<HTMLDivElement>(null);
 
   const { data: channels, isLoading: loadingChannels } = useQuery(channelListOptions(wsId));
-  const { data: messages, isLoading: loadingMessages } = useQuery(channelMessagesOptions(wsId, channelId ?? null));
+  const { data: messages, isLoading: loadingMessages, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery(channelMessagesOptions(wsId, channelId ?? null));
   const { data: members = [] } = useQuery(channelMembersOptions(wsId, channelId ?? null));
   const { data: workspaceMembers = [] } = useQuery(memberListOptions(wsId));
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
@@ -223,6 +243,8 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
       if ((target as HTMLElement).closest("[data-slot='context-menu-content']")) return;
       if ((target as HTMLElement).closest("[data-slot='select-content']")) return;
       if ((target as HTMLElement).closest("[data-slot='mention-suggestion-content']")) return;
+      if ((target as HTMLElement).closest("[data-slot='dialog-overlay']")) return;
+      if ((target as HTMLElement).closest("[data-slot='dialog-content']")) return;
       closeSidePanel();
     };
     document.addEventListener("pointerdown", handlePointerDown);
@@ -271,7 +293,9 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
       const containerRect = pageRef.current?.getBoundingClientRect();
       if (!containerRect) return;
       const { min, max } = getSidePanelBounds(containerRect.width, channelListWidth);
-      setSidePanelWidth(clampNumber(containerRect.right - moveEvent.clientX, min, max));
+      const newWidth = clampNumber(containerRect.right - moveEvent.clientX, min, max);
+      setSidePanelWidth(newWidth);
+      persistedSidePanelWidth = newWidth;
     };
 
     const handlePointerUp = () => {
@@ -291,7 +315,9 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
       const containerRect = pageRef.current?.getBoundingClientRect();
       if (!containerRect) return;
       const { min, max } = getChannelListBounds(containerRect.width, showRightPanel, sidePanelWidth);
-      setChannelListWidth(clampNumber(moveEvent.clientX - containerRect.left, min, max));
+      const newWidth = clampNumber(moveEvent.clientX - containerRect.left, min, max);
+      setChannelListWidth(newWidth);
+      persistedChannelListWidth = newWidth;
     };
 
     const handlePointerUp = () => {
@@ -312,6 +338,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
           loading={loadingChannels}
           onCreate={() => setShowCreateDialog(true)}
           onSelect={(id) => nav.push(paths.channelDetail(id))}
+          wsId={wsId}
         />
       </aside>
       <div
@@ -340,6 +367,9 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
               memberIds={members.map((m) => m.user_id)}
               onOpenReplies={openReplies}
               qc={qc}
+              hasMore={hasNextPage}
+              loadMore={fetchNextPage}
+              loadingMore={isFetchingNextPage}
             />
           </div>
         ) : (
@@ -411,20 +441,158 @@ function ChannelList({
   loading,
   onCreate,
   onSelect,
+  wsId,
 }: {
   channels: ChannelSummary[];
   activeChannelId: string | null;
   loading: boolean;
   onCreate: () => void;
   onSelect: (id: string) => void;
+  wsId: string;
 }) {
+  const qc = useQueryClient();
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [showCreateGroupDialog, setShowCreateGroupDialog] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  const createGroupMutation = useMutation({
+    mutationFn: (name: string) => api.createChannelGroup(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: channelKeys.list(wsId) }),
+  });
+  const renameGroupMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.updateChannelGroup(id, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: channelKeys.list(wsId) }),
+  });
+  const deleteGroupMutation = useMutation({
+    mutationFn: (id: string) => api.deleteChannelGroup(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: channelKeys.list(wsId) }),
+  });
+  const moveChannelMutation = useMutation({
+    mutationFn: (args: { channelId: string; groupId: string | null; position: number }) =>
+      api.moveChannelToGroup(args.channelId, args.groupId, args.position),
+    onSuccess: () => qc.invalidateQueries({ queryKey: channelKeys.list(wsId) }),
+  });
+
+  const { groups, ungrouped, groupMap } = useMemo(() => {
+    const gMap = new Map<string, { name: string; position: number; channels: ChannelSummary[] }>();
+    const ug: ChannelSummary[] = [];
+    for (const ch of channels) {
+      if (ch.group_id) {
+        if (!gMap.has(ch.group_id)) {
+          gMap.set(ch.group_id, { name: ch.group_name ?? "", position: ch.group_position, channels: [] });
+        }
+        gMap.get(ch.group_id)!.channels.push(ch);
+      } else {
+        ug.push(ch);
+      }
+    }
+    for (const g of gMap.values()) {
+      g.channels.sort((a, b) => a.position - b.position);
+    }
+    ug.sort((a, b) => a.position - b.position);
+    const sortedGroups = [...gMap.entries()].sort((a, b) => a[1].position - b[1].position);
+    return { groups: sortedGroups, ungrouped: ug, groupMap: gMap };
+  }, [channels]);
+
+  const allIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const [gId, g] of groups) {
+      ids.push(`group:${gId}`);
+      if (!collapsed[gId]) {
+        for (const ch of g.channels) ids.push(ch.id);
+      }
+    }
+    for (const ch of ungrouped) ids.push(ch.id);
+    return ids;
+  }, [groups, ungrouped, collapsed]);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+  }, []);
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    setActiveId(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const draggedId = String(active.id);
+    if (draggedId.startsWith("group:")) return;
+
+    const overId = String(over.id);
+    let targetGroupId: string | null = null;
+    let position = 0;
+
+    if (overId.startsWith("group:")) {
+      targetGroupId = overId.slice(6);
+      const groupChannels = groupMap.get(targetGroupId)?.channels ?? [];
+      position = groupChannels.length > 0
+        ? groupChannels[groupChannels.length - 1]!.position + 1
+        : 1;
+    } else {
+      const overChannel = channels.find((c) => c.id === overId);
+      if (overChannel) {
+        targetGroupId = overChannel.group_id ?? null;
+        position = overChannel.position;
+      }
+    }
+
+    moveChannelMutation.mutate({ channelId: draggedId, groupId: targetGroupId, position });
+  }, [channels, groupMap, moveChannelMutation]);
+
+  const handleCreateGroup = () => {
+    setNewGroupName("");
+    setShowCreateGroupDialog(true);
+  };
+
+  const handleCreateGroupSubmit = () => {
+    if (newGroupName.trim()) {
+      createGroupMutation.mutate(newGroupName.trim());
+    }
+    setShowCreateGroupDialog(false);
+  };
+
+  const handleRenameSubmit = (groupId: string) => {
+    if (editingName.trim()) {
+      renameGroupMutation.mutate({ id: groupId, name: editingName.trim() });
+    }
+    setEditingGroupId(null);
+  };
+
+  const activeDragChannel = activeId ? channels.find((c) => c.id === activeId) : null;
+
   return (
     <div className="flex h-full min-w-0 flex-col border-r bg-muted/30">
       <div className="flex h-11 items-center justify-between border-b px-3">
         <h2 className="text-sm font-semibold">频道</h2>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onCreate}>
-          <Plus className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCreateGroup}>
+                  <FolderPlus className="h-4 w-4" />
+                </Button>
+              }
+            />
+            <TooltipContent>新建分组</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onCreate}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              }
+            />
+            <TooltipContent>新建频道</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading ? (
@@ -432,29 +600,191 @@ function ChannelList({
             {[1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full" />)}
           </div>
         ) : (
-          <ul className="space-y-0.5 p-1.5">
-            {channels.map((ch) => (
-              <li key={ch.id}>
-                <button
-                  onClick={() => onSelect(ch.id)}
-                  className={cn(
-                    "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent",
-                    ch.id === activeChannelId && "bg-accent font-medium",
-                  )}
-                >
-                  {ch.access_mode === "invite" ? (
-                    <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">{ch.name}</span>
-                  {ch.has_unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <DndContext
+            sensors={sensors}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={allIds} strategy={verticalListSortingStrategy}>
+              <div className="space-y-0.5 p-1.5">
+                {groups.map(([gId, g]) => (
+                  <div key={gId}>
+                    <ChannelGroupHeader
+                      groupId={gId}
+                      name={g.name}
+                      collapsed={!!collapsed[gId]}
+                      editing={editingGroupId === gId}
+                      editingName={editingName}
+                      onToggle={() => setCollapsed((s) => ({ ...s, [gId]: !s[gId] }))}
+                      onStartRename={() => { setEditingGroupId(gId); setEditingName(g.name); }}
+                      onRenameChange={setEditingName}
+                      onRenameSubmit={() => handleRenameSubmit(gId)}
+                      onRenameCancel={() => setEditingGroupId(null)}
+                      onDelete={() => deleteGroupMutation.mutate(gId)}
+                    />
+                    {!collapsed[gId] && g.channels.map((ch) => (
+                      <SortableChannelItem
+                        key={ch.id}
+                        channel={ch}
+                        isActive={ch.id === activeChannelId}
+                        onSelect={onSelect}
+                      />
+                    ))}
+                  </div>
+                ))}
+                {ungrouped.map((ch) => (
+                  <SortableChannelItem
+                    key={ch.id}
+                    channel={ch}
+                    isActive={ch.id === activeChannelId}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+            <DragOverlay>
+              {activeDragChannel && (
+                <div className="flex h-8 items-center gap-2 rounded-md bg-accent px-2 text-sm shadow-md">
+                  <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{activeDragChannel.name}</span>
+                </div>
+              )}
+            </DragOverlay>
+          </DndContext>
         )}
       </div>
+
+      <Dialog open={showCreateGroupDialog} onOpenChange={(v) => !v && setShowCreateGroupDialog(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建分组</DialogTitle>
+            <DialogDescription>为频道创建一个新的分组</DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Input
+              placeholder="分组名称"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleCreateGroupSubmit(); }}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateGroupDialog(false)}>取消</Button>
+            <Button onClick={handleCreateGroupSubmit} disabled={!newGroupName.trim()}>创建</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ChannelGroupHeader({
+  groupId,
+  name,
+  collapsed,
+  editing,
+  editingName,
+  onToggle,
+  onStartRename,
+  onRenameChange,
+  onRenameSubmit,
+  onRenameCancel,
+  onDelete,
+}: {
+  groupId: string;
+  name: string;
+  collapsed: boolean;
+  editing: boolean;
+  editingName: string;
+  onToggle: () => void;
+  onStartRename: () => void;
+  onRenameChange: (v: string) => void;
+  onRenameSubmit: () => void;
+  onRenameCancel: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: `group:${groupId}`,
+  });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger>
+        <div
+          ref={setNodeRef}
+          style={style}
+          {...attributes}
+          {...listeners}
+          className="flex h-7 cursor-pointer items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground hover:bg-accent"
+          onClick={onToggle}
+        >
+          <ChevronRight className={cn("h-3 w-3 transition-transform", !collapsed && "rotate-90")} />
+          {editing ? (
+            <input
+              autoFocus
+              className="min-w-0 flex-1 rounded bg-background px-1 text-xs outline-none ring-1 ring-ring"
+              value={editingName}
+              onChange={(e) => onRenameChange(e.target.value)}
+              onBlur={onRenameSubmit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onRenameSubmit();
+                if (e.key === "Escape") onRenameCancel();
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span className="min-w-0 flex-1 truncate uppercase">{name}</span>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onStartRename}>重命名</ContextMenuItem>
+        <ContextMenuItem className="text-destructive" onClick={onDelete}>删除分组</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function SortableChannelItem({
+  channel,
+  isActive,
+  onSelect,
+}: {
+  channel: ChannelSummary;
+  isActive: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: channel.id,
+  });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={cn(isDragging && "opacity-50")}
+    >
+      <button
+        onClick={() => onSelect(channel.id)}
+        className={cn(
+          "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent",
+          isActive && "bg-accent font-medium",
+          channel.group_id && "pl-5",
+        )}
+      >
+        {channel.access_mode === "invite" ? (
+          <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+        {channel.has_unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />}
+      </button>
     </div>
   );
 }
@@ -504,6 +834,9 @@ function MessageList({
   memberIds,
   onOpenReplies,
   qc,
+  hasMore,
+  loadMore,
+  loadingMore,
 }: {
   messages: ChannelMessage[];
   loading: boolean;
@@ -512,9 +845,13 @@ function MessageList({
   memberIds: string[];
   onOpenReplies: (id: string) => void;
   qc: ReturnType<typeof useQueryClient>;
+  hasMore?: boolean;
+  loadMore?: () => void;
+  loadingMore?: boolean;
 }) {
   const editorRef = useRef<ContentEditorRef>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const nav = useNavigation();
   const paths = useWorkspacePaths();
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
@@ -522,10 +859,31 @@ function MessageList({
     onDrop: (files) => editorRef.current?.uploadFiles(files),
   });
   const [isEmpty, setIsEmpty] = useState(true);
+  const prevMsgCount = useRef(messages.length);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (messages.length > prevMsgCount.current) {
+      const isNewMessage = messages.length - prevMsgCount.current <= 2;
+      if (isNewMessage) {
+        bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      }
+    } else if (prevMsgCount.current === 0 && messages.length > 0) {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+    }
+    prevMsgCount.current = messages.length;
   }, [messages.length]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [channelId]);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || !hasMore || loadingMore) return;
+    if (el.scrollTop < 80) {
+      loadMore?.();
+    }
+  }, [hasMore, loadMore, loadingMore]);
 
   const sendMutation = useMutation({
     mutationFn: (content: string) => api.sendChannelMessage(channelId, { content }),
@@ -563,7 +921,12 @@ function MessageList({
 
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {loadingMore && (
+          <div className="flex justify-center py-2">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        )}
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             还没有消息，发第一条吧
