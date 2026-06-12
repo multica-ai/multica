@@ -33,5 +33,5 @@
 // Expired binding tokens and stale inbound-dedup rows are purged by the
 // octo_cleanup scheduler job (internal/scheduler/jobs_octo_cleanup.go). The
 // DB-layer queries this package depends on are defined in
-// pkg/db/queries/octo.sql (migration 119).
+// pkg/db/queries/octo.sql (migration 120).
 package octo

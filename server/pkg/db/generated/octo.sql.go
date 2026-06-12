@@ -241,7 +241,7 @@ type CreateOctoInstallationParams struct {
 }
 
 // Octo IM Bot integration queries. The migration that defines these tables
-// lives at server/migrations/119_octo_integration.up.sql.
+// lives at server/migrations/120_octo_integration.up.sql.
 //
 // Scoping convention: every public-facing read goes through a workspace-scoped
 // variant where one exists. The lookups that take only a UUID PK (e.g.
