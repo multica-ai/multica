@@ -427,15 +427,59 @@ The contention problem we kept hitting: with no in-repo source of truth for `mkN
 
 ### Workflow — pushing a new release
 
+Every step matters. Skipping the PR step or the rollout check has burned us before.
+
+**1. Branch + bump.** Bump commits never go directly on `main` — they go through a PR to the fork (`chrissnell/multica`).
+
 ```bash
-make bump-images                          # vX.Y.Z-mkN → vX.Y.Z-mk(N+1) in packaging/image-tag
+git checkout main && git pull --ff-only origin main
+make print-next-image-tag                   # peek at N+1 without writing
+git checkout -b chore/bump-images-mk<N+1>
+make bump-images                            # writes vX.Y.Z-mk(N+1) to packaging/image-tag
 git add packaging/image-tag
 git commit -m "chore(images): bump to $(cat packaging/image-tag)"
-./packaging/scripts/build-images.sh       # reads pin, builds + pushes all platform images
-./packaging/scripts/build-images.sh runtime  # only when the runtime base / claude image changed
-# Update ~/kube/apps/multica/values.yaml: image.tag → cat packaging/image-tag
+git push -u origin HEAD
+gh pr create --repo chrissnell/multica --base main --head $(git branch --show-current) \
+  --title "chore(images): bump to $(cat packaging/image-tag)" \
+  --body "Bumps packaging/image-tag for the next Harbor rollout."
+```
+
+Wait for the PR to merge before continuing. The build itself can run from any branch — only the bump's claim on the `mk` number requires the merge.
+
+**2. Build + push.** Skip `postgres` (intentionally pinned to `v0.4.0-mk3` in `~/kube/apps/multica/values.yaml` to avoid bouncing the stateful pod for a no-op rebuild). Skip `runtime` unless toolchain pins (`packaging/rust-version`, `packaging/go-version`, `packaging/claude-code-version`, etc.) actually changed — runtime has its own lifecycle and a rebuild may pick up unrelated WIP pins.
+
+```bash
+./packaging/scripts/build-images.sh backend web controller claude-broker repocache \
+  > scratch/build-$(cat packaging/image-tag).log 2>&1 &
+# When the runtime toolchain pins moved, additionally:
+./packaging/scripts/build-images.sh runtime
+```
+
+Cross-build from Apple Silicon to `linux/amd64` runs ~20–30 min for the five platform images. Verify every line in the log: each image should end with a successful `docker push`. If one fails, rebuild only that image (`./packaging/scripts/build-images.sh <name>`), don't restart the batch.
+
+**3. Update `~/kube/apps/multica/values.yaml`.** Two edits:
+
+- Top-level `image.tag:` → the new tag.
+- Any per-subsystem `image.tag:` override (`daemon.image.tag`, `controller.image.tag`, `claudeBroker.image.tag`, `repocache.image.tag`) that now equals the new top-level tag is redundant — delete the override line and the comment that justified the drift. Leave `image.tags.postgres: v0.4.0-mk3` alone, it's load-bearing.
+
+**4. helm upgrade + watch rollout.** Confirm the kubectl context first; this cluster only.
+
+```bash
+kubectl config current-context              # MUST be admin@farm-talos; abort otherwise
 helm upgrade --install multica packaging/helm/multica/ -n multica -f ~/kube/apps/multica/values.yaml
-git tag $(cat packaging/image-tag) && git push origin $(cat packaging/image-tag)   # optional but recommended
+for d in multica-backend multica-web multica-controller multica-claude-broker multica-repocache; do
+  kubectl -n multica rollout status deploy/$d --timeout=5m
+done
+```
+
+A rollout timeout usually means `ImagePullBackOff` — `kubectl -n multica describe pod <name>` to confirm. Check the tag exists in Harbor and the `registry-credentials` pull secret is healthy.
+
+**5. Tag the release on GitHub.** Once rollout is green:
+
+```bash
+git checkout main && git pull --ff-only origin main
+git tag $(cat packaging/image-tag)
+git push origin $(cat packaging/image-tag)
 ```
 
 `make print-image-tag` shows the current pin. `make print-next-image-tag` shows what `bump-images` would write without writing it.
