@@ -33,6 +33,16 @@ const (
 
 	cerebroTermFlushInterval = 100 * time.Millisecond
 	cerebroTermFlushBytes    = 8 * 1024
+
+	// CEREBRO-PATCH(daemon-cerebro-term-buffer): cap the per-task output backlog
+	// kept while the WS is down. The wakeup WS flaps every ~30-90 min through
+	// Cloudflare (close 1001 "CloudFlare WebSocket proxy restarting"); without a
+	// backlog, all agent output produced during the ~30s reconnect gap was
+	// dropped and the live terminal went blank. We retain up to this many bytes
+	// per task and flush them, in order, once the WS reconnects. The bound stops
+	// a chatty agent during a prolonged outage from growing daemon memory without
+	// limit — oldest frames are dropped first (TECH-3388).
+	cerebroTermBufferMaxBytes = 512 * 1024
 )
 
 // enqueueCerebroFrame writes a frame to the daemonws writes channel if a
@@ -114,6 +124,80 @@ func (d *Daemon) snapshotCerebroAttaches() [][]byte {
 	return out
 }
 
+// CEREBRO-PATCH(daemon-cerebro-term-buffer): retain term_stdout across WS flaps (TECH-3388).
+//
+// sendOrBufferTermStdout sends a term_stdout frame live when the WS is up and no
+// backlog is pending; otherwise it appends the frame to the task's ordered
+// backlog so output produced during a reconnect gap survives instead of being
+// dropped. Strict ordering: once a backlog exists, every new frame queues behind
+// it until drainCerebroTermBuffer empties it on reconnect, so the browser never
+// sees newer output ahead of older.
+func (d *Daemon) sendOrBufferTermStdout(taskID string, frame []byte) {
+	d.cerebroTermSinkMu.Lock()
+	defer d.cerebroTermSinkMu.Unlock()
+	if len(d.cerebroTermBuffers[taskID]) == 0 && d.enqueueCerebroFrame(frame) {
+		return
+	}
+	buf := append(d.cerebroTermBuffers[taskID], frame)
+	d.cerebroTermBuffers[taskID] = trimCerebroTermBuffer(buf)
+}
+
+// drainCerebroTermBuffer flushes a task's buffered output, in order, stopping if
+// the WS goes down again (the unsent tail stays buffered for the next reconnect).
+// Called from the WS reconnect path after the attach frame is re-emitted.
+func (d *Daemon) drainCerebroTermBuffer(taskID string) {
+	d.cerebroTermSinkMu.Lock()
+	defer d.cerebroTermSinkMu.Unlock()
+	buf := d.cerebroTermBuffers[taskID]
+	i := 0
+	for ; i < len(buf); i++ {
+		if !d.enqueueCerebroFrame(buf[i]) {
+			break
+		}
+	}
+	if i >= len(buf) {
+		delete(d.cerebroTermBuffers, taskID)
+	} else {
+		d.cerebroTermBuffers[taskID] = buf[i:]
+	}
+}
+
+// drainAllCerebroTermBuffers flushes every task's backlog on WS reconnect.
+func (d *Daemon) drainAllCerebroTermBuffers() {
+	d.cerebroTermSinkMu.RLock()
+	ids := make([]string, 0, len(d.cerebroTermBuffers))
+	for id := range d.cerebroTermBuffers {
+		ids = append(ids, id)
+	}
+	d.cerebroTermSinkMu.RUnlock()
+	for _, id := range ids {
+		d.drainCerebroTermBuffer(id)
+	}
+}
+
+// removeCerebroTermBuffer drops a finished task's backlog so it can't leak or be
+// re-sent after the task ends.
+func (d *Daemon) removeCerebroTermBuffer(taskID string) {
+	d.cerebroTermSinkMu.Lock()
+	delete(d.cerebroTermBuffers, taskID)
+	d.cerebroTermSinkMu.Unlock()
+}
+
+// trimCerebroTermBuffer drops the oldest frames until the backlog fits under
+// cerebroTermBufferMaxBytes. Dropping oldest-first keeps the most recent agent
+// output, which is what a user reopening the terminal cares about most.
+func trimCerebroTermBuffer(buf [][]byte) [][]byte {
+	total := 0
+	for _, f := range buf {
+		total += len(f)
+	}
+	for total > cerebroTermBufferMaxBytes && len(buf) > 1 {
+		total -= len(buf[0])
+		buf = buf[1:]
+	}
+	return buf
+}
+
 // cerebroAttachTerminal emits cerebro:term_attach for the task and installs
 // a buffered tee. The returned teardown emits cerebro:term_exit and clears
 // the sink. Safe to call when the WS connection is down — the attach frame
@@ -149,6 +233,8 @@ func (d *Daemon) cerebroAttachTerminal(_ context.Context, task Task) func() {
 		d.unregisterCerebroTermSink(task.ID)
 		// CEREBRO-PATCH(daemon-cerebro-term-reattach): clear on task end so WS reconnects don't re-adopt a finished task.
 		d.removeCerebroAttach(task.ID)
+		// CEREBRO-PATCH(daemon-cerebro-term-buffer): drop any unsent backlog for the finished task.
+		d.removeCerebroTermBuffer(task.ID)
 		exitFrame, err := marshalCerebroDaemonFrame(frameTermExit, map[string]any{
 			"task_id": task.ID,
 			"code":    0,
@@ -220,12 +306,10 @@ func (p *cerebroTermPump) flush() {
 		p.d.logger.Debug("cerebro term_stdout marshal failed", "error", err, "task_id", p.taskID)
 		return
 	}
-	if !p.d.enqueueCerebroFrame(frame) {
-		// Drop is logged at debug, not warn — gaps are visible to the user
-		// in the live stream and the agent run is unaffected. Avoid log
-		// spam for noisy agents during prolonged WS outages.
-		p.d.logger.Debug("cerebro term_stdout dropped: ws not connected", "task_id", p.taskID)
-	}
+	// CEREBRO-PATCH(daemon-cerebro-term-buffer): buffer (don't drop) when the WS
+	// is down so output produced during a Cloudflare reconnect gap survives and
+	// is flushed in order on reconnect (TECH-3388).
+	p.d.sendOrBufferTermStdout(p.taskID, frame)
 }
 
 func (p *cerebroTermPump) run() {

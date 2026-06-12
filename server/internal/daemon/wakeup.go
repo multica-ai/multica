@@ -125,6 +125,8 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	for _, af := range d.snapshotCerebroAttaches() {
 		d.enqueueCerebroFrame(af)
 	}
+	// CEREBRO-PATCH(daemon-cerebro-term-buffer): flush output buffered during the WS outage, in order, after the attach frames re-adopt the sessions (TECH-3388).
+	d.drainAllCerebroTermBuffers()
 	signalTaskWakeup(taskWakeups)
 
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)

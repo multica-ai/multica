@@ -141,9 +141,24 @@ browser terminal died on every flap. Now:
   `term_attach` bumps `Session.reattachGen`, and the disconnect reaper skips any
   session whose generation changed during the grace window. A flap is invisible
   to the browser apart from a brief pause in output.
-- Output produced *during* the reconnect gap is still lost (the daemon drops
-  `term_stdout` frames while the WS is down). Buffering across reconnect is a
-  follow-up; today the session survives, which is what "100% uptime" needs.
+- Output produced *during* the reconnect gap is **buffered on the daemon and
+  replayed in order on reconnect** (`CEREBRO-PATCH(daemon-cerebro-term-buffer)`,
+  TECH-3388). When `enqueueCerebroFrame` can't send (WS down or write channel
+  backed up), `cerebroTermPump.flush` routes the frame to a per-task ordered
+  backlog (`cerebroTermBuffers`) instead of dropping it. The WS reconnect path in
+  `wakeup.go` re-emits the attach frames, then calls `drainAllCerebroTermBuffers`
+  to flush each task's backlog in order — so a Cloudflare WS restart now costs a
+  brief pause, not lost output. The backlog is bounded at
+  `cerebroTermBufferMaxBytes` (512 KB) per task; during a prolonged outage the
+  oldest frames are dropped first, keeping the most recent output. This is what
+  "100% fremover" needs: the live terminal survives the ~30-90 min Cloudflare WS
+  flaps (`close 1001 "CloudFlare WebSocket proxy restarting"`) without going
+  blank.
+
+  **Still single-transport.** The backlog rides the same WS on reconnect; it does
+  not add an HTTP fallback. If the WS never connects at all (proxy won't upgrade
+  `/api/daemon/ws`), there is still nothing to flush onto — see "Operational
+  dependency" above. The backlog fixes *flaps*, not a permanently-down WS.
 
 ## Fixed — many interactive terminals at once, per daemon process (TECH-3388)
 
