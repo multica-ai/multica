@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -149,6 +151,10 @@ type PatcherQueries interface {
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (db.LarkOutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg db.CreateLarkOutboundCardMessageParams) (db.LarkOutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg db.UpdateLarkOutboundCardStatusParams) error
+	GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error)
+	ClaimLarkIssueCommentMirror(ctx context.Context, arg db.ClaimLarkIssueCommentMirrorParams) (db.LarkIssueCommentMirror, error)
+	MarkLarkIssueCommentMirrorSent(ctx context.Context, commentID pgtype.UUID) error
+	MarkLarkIssueCommentMirrorFailed(ctx context.Context, arg db.MarkLarkIssueCommentMirrorFailedParams) error
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
@@ -260,6 +266,7 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
+	bus.Subscribe(protocol.EventCommentCreated, p.handleEvent)
 }
 
 func (p *Patcher) handleEvent(e events.Event) {
@@ -279,6 +286,10 @@ func (p *Patcher) handleEvent(e events.Event) {
 }
 
 func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
+	if e.Type == protocol.EventCommentCreated {
+		return p.mirrorIssueComment(ctx, e)
+	}
+
 	taskID, chatSessionID, ok := taskAndSessionFromEvent(e)
 	if !ok {
 		return nil
@@ -330,6 +341,147 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
 	return nil
+}
+
+type issueCommentMirrorPayload struct {
+	ID         string `json:"id"`
+	IssueID    string `json:"issue_id"`
+	AuthorType string `json:"author_type"`
+	AuthorID   string `json:"author_id"`
+	Content    string `json:"content"`
+	Type       string `json:"type"`
+}
+
+type eventCommentCreatedPayload struct {
+	Comment issueCommentMirrorPayload `json:"comment"`
+}
+
+func commentPayloadFromEvent(payload any) (issueCommentMirrorPayload, bool) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return issueCommentMirrorPayload{}, false
+	}
+	var wrapped eventCommentCreatedPayload
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return issueCommentMirrorPayload{}, false
+	}
+	if wrapped.Comment.ID == "" || wrapped.Comment.IssueID == "" {
+		return issueCommentMirrorPayload{}, false
+	}
+	return wrapped.Comment, true
+}
+
+func (p *Patcher) mirrorIssueComment(ctx context.Context, e events.Event) error {
+	comment, ok := commentPayloadFromEvent(e.Payload)
+	if !ok {
+		return nil
+	}
+	if comment.AuthorType != "agent" || strings.TrimSpace(comment.Content) == "" {
+		return nil
+	}
+
+	commentID, err := util.ParseUUID(comment.ID)
+	if err != nil {
+		return nil
+	}
+	issueID, err := util.ParseUUID(comment.IssueID)
+	if err != nil {
+		return nil
+	}
+	authorID, err := util.ParseUUID(comment.AuthorID)
+	if err != nil {
+		return nil
+	}
+
+	issue, err := p.queries.GetIssue(ctx, issueID)
+	if err != nil {
+		return fmt.Errorf("load issue for comment mirror: %w", err)
+	}
+	if !issue.OriginType.Valid || issue.OriginType.String != "lark_chat" || !issue.OriginID.Valid {
+		return nil
+	}
+
+	binding, err := p.queries.GetLarkChatSessionBindingBySession(ctx, issue.OriginID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("lookup lark chat binding for issue comment mirror: %w", err)
+	}
+
+	inst, err := p.queries.GetLarkInstallation(ctx, binding.InstallationID)
+	if err != nil {
+		return fmt.Errorf("load lark installation for issue comment mirror: %w", err)
+	}
+	if InstallationStatus(inst.Status) != InstallationActive {
+		return nil
+	}
+
+	mirror, err := p.queries.ClaimLarkIssueCommentMirror(ctx, db.ClaimLarkIssueCommentMirrorParams{
+		CommentID:      commentID,
+		IssueID:        issue.ID,
+		ChatSessionID:  issue.OriginID,
+		InstallationID: binding.InstallationID,
+		LarkChatID:     binding.LarkChatID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("claim lark issue comment mirror: %w", err)
+	}
+
+	creds, err := p.installationCredentials(inst)
+	if err != nil {
+		_ = p.queries.MarkLarkIssueCommentMirrorFailed(ctx, db.MarkLarkIssueCommentMirrorFailedParams{
+			CommentID: mirror.CommentID,
+			Error:     pgtype.Text{String: err.Error(), Valid: true},
+		})
+		return err
+	}
+
+	authorName := "agent"
+	if agent, agentErr := p.queries.GetAgent(ctx, authorID); agentErr == nil && strings.TrimSpace(agent.Name) != "" {
+		authorName = agent.Name
+	}
+	body := formatMirroredIssueComment(authorName, comment.Content)
+
+	if containsMarkdown(body) {
+		if _, err := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
+			InstallationID: creds,
+			ChatID:         ChatID(binding.LarkChatID),
+			Markdown:       body,
+		}); err != nil {
+			_ = p.queries.MarkLarkIssueCommentMirrorFailed(ctx, db.MarkLarkIssueCommentMirrorFailedParams{
+				CommentID: mirror.CommentID,
+				Error:     pgtype.Text{String: err.Error(), Valid: true},
+			})
+			return fmt.Errorf("send mirrored issue comment markdown card: %w", err)
+		}
+	} else if _, err := p.client.SendTextMessage(ctx, SendTextParams{
+		InstallationID: creds,
+		ChatID:         ChatID(binding.LarkChatID),
+		Text:           body,
+	}); err != nil {
+		_ = p.queries.MarkLarkIssueCommentMirrorFailed(ctx, db.MarkLarkIssueCommentMirrorFailedParams{
+			CommentID: mirror.CommentID,
+			Error:     pgtype.Text{String: err.Error(), Valid: true},
+		})
+		return fmt.Errorf("send mirrored issue comment text message: %w", err)
+	}
+
+	if err := p.queries.MarkLarkIssueCommentMirrorSent(ctx, mirror.CommentID); err != nil {
+		return fmt.Errorf("mark lark issue comment mirror sent: %w", err)
+	}
+	return nil
+}
+
+func formatMirroredIssueComment(authorName, content string) string {
+	name := strings.TrimSpace(authorName)
+	if name == "" {
+		name = "agent"
+	}
+	return name + ":\n" + strings.TrimSpace(content)
 }
 
 // sendChatReply turns ChatDonePayload.Content into a Lark message.
