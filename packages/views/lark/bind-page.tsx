@@ -29,6 +29,7 @@ type RedeemState =
 export function LarkBindPage({ token }: { token: string | null }) {
   const { t } = useT("common");
   const user = useAuthStore((s) => s.user);
+  const isAuthLoading = useAuthStore((s) => s.isLoading);
   const navigation = useNavigation();
   const [state, setState] = useState<RedeemState>({ kind: "idle" });
 
@@ -37,11 +38,12 @@ export function LarkBindPage({ token }: { token: string | null }) {
       setState({ kind: "error", reason: "missing_token" });
       return;
     }
+    if (isAuthLoading) return;
     if (!user) {
       setState({ kind: "needs-auth" });
       return;
     }
-    if (state.kind !== "idle") return;
+    if (state.kind !== "idle" && state.kind !== "needs-auth") return;
     setState({ kind: "redeeming" });
     (async () => {
       try {
@@ -58,7 +60,7 @@ export function LarkBindPage({ token }: { token: string | null }) {
         });
       }
     })();
-  }, [token, user, state.kind]);
+  }, [token, user, isAuthLoading, state.kind]);
 
   return (
     <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center p-6">
@@ -76,7 +78,7 @@ export function LarkBindPage({ token }: { token: string | null }) {
                 size="sm"
                 onClick={() =>
                   navigation.push(
-                    `/login?redirect=${encodeURIComponent(
+                    `/login?next=${encodeURIComponent(
                       `/lark/bind?token=${encodeURIComponent(token ?? "")}`,
                     )}`,
                   )

@@ -68,7 +68,17 @@ export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
 export { attachmentDownloadPath, attachmentIdFromDownloadURL, contentReferencesAttachment } from "./attachment-url";
-export type { ChatSession, ChatMessage, ChatMessagesPage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
+export type {
+  ChatSession,
+  ChatMessage,
+  ChatMessagesPage,
+  ChatPendingTask,
+  PendingChatTaskItem,
+  PendingChatTasksResponse,
+  SendChatMessageResponse,
+  CancelledChatMessage,
+  CancelTaskResponse,
+} from "./chat";
 export type { StorageAdapter } from "./storage";
 export type {
   Project,

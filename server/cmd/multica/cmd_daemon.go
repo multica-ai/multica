@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -735,9 +736,11 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 
 	if byWorkspace {
 		printDiskUsageWorkspaceTable(os.Stdout, report)
+		printDiskUsageEmptyHint(os.Stdout, report, profile, rootOverride)
 		return nil
 	}
 	printDiskUsageTaskTable(os.Stdout, report)
+	printDiskUsageEmptyHint(os.Stdout, report, profile, rootOverride)
 	return nil
 }
 
@@ -812,6 +815,153 @@ func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
 	fmt.Fprintf(w, "\nTotal: %s across %d workspace(s); %s reclaimable as artifacts (%.1f%%).\n",
 		formatBytes(report.TotalSizeBytes), report.TotalWorkspaceCount,
 		formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
+}
+
+func printDiskUsageEmptyHint(w io.Writer, report daemon.DiskUsageReport, profile, rootOverride string) {
+	if report.TotalTaskCount != 0 || rootOverride != "" {
+		return
+	}
+	suggestions := diskUsageProfileSuggestions(profile, report.WorkspacesRoot)
+	if len(suggestions) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Other workspace roots contain task directories:")
+	for _, s := range suggestions {
+		fmt.Fprintf(w, "  %s  # %s (%d task%s)\n",
+			s.Command, s.Root, s.TaskCount, pluralS(s.TaskCount))
+	}
+}
+
+type diskUsageProfileSuggestion struct {
+	Profile   string
+	Command   string
+	Root      string
+	TaskCount int
+}
+
+func diskUsageProfileSuggestions(currentProfile, currentRoot string) []diskUsageProfileSuggestion {
+	out := make([]diskUsageProfileSuggestion, 0)
+	if currentProfile != "" {
+		if root, err := daemon.ResolveWorkspacesRoot("", ""); err == nil && !samePath(root, currentRoot) {
+			if taskCount := countDiskUsageTaskDirs(root); taskCount > 0 {
+				out = append(out, diskUsageProfileSuggestion{
+					Profile:   "",
+					Command:   "multica daemon disk-usage",
+					Root:      root,
+					TaskCount: taskCount,
+				})
+			}
+		}
+	}
+
+	profilesRoot, err := profilesRootDir()
+	if err != nil {
+		return out
+	}
+	entries, err := os.ReadDir(profilesRoot)
+	if err != nil {
+		return out
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		profile := entry.Name()
+		if profile == currentProfile {
+			continue
+		}
+		root, err := daemon.ResolveWorkspacesRoot(profile, "")
+		if err != nil || samePath(root, currentRoot) {
+			continue
+		}
+		taskCount := countDiskUsageTaskDirs(root)
+		if taskCount == 0 {
+			continue
+		}
+		out = append(out, diskUsageProfileSuggestion{
+			Profile:   profile,
+			Command:   "multica --profile " + shellQuoteArg(profile) + " daemon disk-usage",
+			Root:      root,
+			TaskCount: taskCount,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TaskCount == out[j].TaskCount {
+			return out[i].Profile < out[j].Profile
+		}
+		return out[i].TaskCount > out[j].TaskCount
+	})
+	const maxSuggestions = 5
+	if len(out) > maxSuggestions {
+		out = out[:maxSuggestions]
+	}
+	return out
+}
+
+func shellQuoteArg(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if strings.IndexFunc(s, func(r rune) bool {
+		return !(r == '-' || r == '_' || r == '.' || r == '/' ||
+			r >= '0' && r <= '9' ||
+			r >= 'A' && r <= 'Z' ||
+			r >= 'a' && r <= 'z')
+	}) == -1 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func countDiskUsageTaskDirs(root string) int {
+	wsEntries, err := os.ReadDir(root)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, wsEntry := range wsEntries {
+		if !wsEntry.IsDir() || wsEntry.Name() == ".repos" {
+			continue
+		}
+		taskEntries, err := os.ReadDir(filepath.Join(root, wsEntry.Name()))
+		if err != nil {
+			continue
+		}
+		for _, taskEntry := range taskEntries {
+			if taskEntry.IsDir() {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func profilesRootDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".multica", "profiles"), nil
+}
+
+func samePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	aa, errA := filepath.Abs(a)
+	bb, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return aa == bb
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // formatRatio renders a 0..1 fraction as a percentage to one decimal. A

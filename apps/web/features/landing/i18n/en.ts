@@ -293,6 +293,25 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.20",
+        date: "2026-06-11",
+        title: "Skill Imports, Cleaner Run History, and Resilient Agents",
+        changes: [],
+        features: [
+          "Skill imports now let you choose what happens when a skill already exists: stop, replace it, save a renamed copy, or skip it",
+          "Import results now clearly show which skills were added, updated, skipped, blocked by a conflict, or could not be imported",
+        ],
+        improvements: [
+          "Execution logs now show the newest past runs first on web and mobile, so recent progress is easier to scan",
+          "Changelog content was cleaned up so the latest release notes stay grouped under the right release",
+        ],
+        fixes: [
+          "Issue thread replies now stay in the order they arrived, even when a slower agent reply lands later",
+          "Agents can recover when a saved session disappears, starting fresh instead of failing again on every mention",
+          "Reviving an Issue from a new workspace folder now starts a fresh session instead of retrying one that only existed in the old folder",
+        ],
+      },
+      {
         version: "0.3.19",
         date: "2026-06-10",
         title: "Safer Comment Triggers, Reliable Agents, and Attachments",

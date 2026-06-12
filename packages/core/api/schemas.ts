@@ -10,6 +10,7 @@ import type {
   BillingPriceTier,
   BillingTopupsPage,
   BillingTransactionsPage,
+  CancelTaskResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
@@ -419,6 +420,67 @@ const RuntimeUsageByHourSchema = z.object({
 }).loose();
 
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
+
+// ---------------------------------------------------------------------------
+// Task cancellation (`POST /api/tasks/:id/cancel`)
+//
+// This response is consumed directly by chat recovery. The embedded task
+// object stays loose so daemon/runtime fields can drift, but the optional
+// `cancelled_chat_message` payload must be well-formed before the UI deletes
+// a message from cache or restores text into the input.
+// ---------------------------------------------------------------------------
+
+const AgentTaskResponseSchema = z.object({
+  id: z.string(),
+  agent_id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  issue_id: z.string().default(""),
+  status: z.string().default("cancelled"),
+  priority: z.number().default(0),
+  dispatched_at: z.string().nullable().default(null),
+  started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+  result: z.unknown().default(null),
+  error: z.string().nullable().default(null),
+  failure_reason: z.string().optional(),
+  created_at: z.string().default(""),
+  chat_session_id: z.string().optional(),
+  autopilot_run_id: z.string().optional(),
+  parent_task_id: z.string().optional(),
+  attempt: z.number().optional(),
+  trigger_comment_id: z.string().optional(),
+  trigger_summary: z.string().optional(),
+  kind: z.string().optional(),
+  work_dir: z.string().optional(),
+  relative_work_dir: z.string().optional(),
+}).loose();
+
+const CancelledChatMessageSchema = z.object({
+  chat_session_id: z.string(),
+  message_id: z.string(),
+  content: z.string(),
+  restore_to_input: z.boolean().default(false),
+}).loose();
+
+export const CancelTaskResponseSchema = AgentTaskResponseSchema.extend({
+  cancelled_chat_message: CancelledChatMessageSchema.nullish()
+    .transform((value) => value ?? undefined),
+}).loose();
+
+export const EMPTY_CANCEL_TASK_RESPONSE: CancelTaskResponse = {
+  id: "",
+  agent_id: "",
+  runtime_id: "",
+  issue_id: "",
+  status: "cancelled",
+  priority: 0,
+  dispatched_at: null,
+  started_at: null,
+  completed_at: null,
+  result: null,
+  error: null,
+  created_at: "",
+};
 
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
