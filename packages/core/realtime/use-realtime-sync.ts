@@ -295,6 +295,21 @@ export async function handleInboxNew(
  * new WSClient instance is detected (workspace switch) to recover events
  * missed while disconnected.
  */
+function invalidateSessionScopedChatQueries(qc: QueryClient): void {
+  qc.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      return (
+        (key[0] === "chat" &&
+          (key[1] === "messages" ||
+            key[1] === "messages-page" ||
+            key[1] === "pending-task")) ||
+        key[0] === "task-messages"
+      );
+    },
+  });
+}
+
 function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   const wsId = getCurrentWsId();
   if (wsId) {
@@ -327,6 +342,10 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
   qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  // Active chat session queries are keyed by session/task id instead of wsId.
+  // Without this, a WS reconnect after server restart can leave the chat UI
+  // stuck on a stale queued pill until a full page refresh.
+  invalidateSessionScopedChatQueries(qc);
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
