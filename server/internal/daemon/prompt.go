@@ -37,7 +37,7 @@ func BuildPrompt(task Task, provider string) string {
 }
 
 func writeProjectContextPrompt(b *strings.Builder, task Task) {
-	ctxText := strings.TrimRight(task.ProjectContext, " \t\r\n")
+	ctxText := projectContextText(task.ProjectContext)
 	if ctxText == "" {
 		return
 	}
@@ -48,6 +48,10 @@ func writeProjectContextPrompt(b *strings.Builder, task Task) {
 	}
 	b.WriteString(ctxText)
 	b.WriteString("\n\n")
+}
+
+func projectContextText(context string) string {
+	return strings.TrimRight(context, " \t\r\n")
 }
 
 // buildQuickCreatePrompt constructs a prompt for quick-create tasks. The
@@ -120,7 +124,7 @@ func buildQuickCreatePrompt(task Task) string {
 	} else {
 		b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
 	}
-	if task.ProjectContext != "" {
+	if projectContextText(task.ProjectContext) != "" {
 		b.WriteString("\n")
 		writeProjectContextPrompt(&b, task)
 	}

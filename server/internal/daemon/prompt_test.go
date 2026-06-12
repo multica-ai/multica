@@ -154,6 +154,36 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 	}
 }
 
+func TestBuildQuickCreatePromptIncludesProjectContext(t *testing.T) {
+	const projectContext = "Keep PRs under 400 lines."
+	out := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt: "add a health check endpoint",
+		ProjectID:         "22222222-3333-4444-5555-666666666666",
+		ProjectTitle:      "Backend",
+		ProjectContext:    projectContext,
+	})
+
+	if !strings.Contains(out, "Project context for **Backend**") {
+		t.Fatalf("quick-create prompt missing project context heading:\n%s", out)
+	}
+	if !strings.Contains(out, projectContext) {
+		t.Fatalf("quick-create prompt missing project context body:\n%s", out)
+	}
+}
+
+func TestBuildQuickCreatePromptSkipsBlankProjectContext(t *testing.T) {
+	out := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt: "add a health check endpoint",
+		ProjectID:         "22222222-3333-4444-5555-666666666666",
+		ProjectTitle:      "Backend",
+		ProjectContext:    " \n\t ",
+	})
+
+	if strings.Contains(out, "Project context for **Backend**") {
+		t.Fatalf("quick-create prompt must skip blank project context:\n%s", out)
+	}
+}
+
 func TestBuildPromptAssignmentIncludesProjectContext(t *testing.T) {
 	const projectContext = "Always update the generated client after API changes."
 	out := BuildPrompt(Task{
