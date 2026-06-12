@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "@multica/core/types";
+import type { Attachment, Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "@multica/core/types";
 import {
   DialogContent,
   DialogTitle,
@@ -146,15 +146,21 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
-  // File upload — collect attachment IDs so we can link them after issue creation.
-  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  // File upload — keep the full attachment records so the editor can resolve
+  // previews, and so submit only binds files still referenced in markdown.
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const [pendingUploads, setPendingUploads] = useState(0);
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
-    const result = await uploadWithToast(file);
-    if (result) {
-      setAttachmentIds((prev) => [...prev, result.id]);
+    setPendingUploads((n) => n + 1);
+    try {
+      const result = await uploadWithToast(file);
+      if (!result?.id || !result.url) return null;
+      setPendingAttachments((prev) => [...prev, result]);
+      return result;
+    } finally {
+      setPendingUploads((n) => Math.max(0, n - 1));
     }
-    return result;
   };
 
   // Sync field changes to draft store
@@ -179,7 +185,8 @@ export function ManualCreatePanel({
     setProjectId(undefined);
     setParentIssueId(undefined);
     setChildIssues([]);
-    setAttachmentIds([]);
+    setPendingAttachments([]);
+    setPendingUploads(0);
     setDraft({
       title: "",
       description: "",
@@ -195,19 +202,27 @@ export function ManualCreatePanel({
   };
 
   const handleSubmit = async () => {
-    if (!title.trim() || submitting) return;
+    if (!title.trim() || submitting || pendingUploads > 0 || descEditorRef.current?.hasActiveUploads()) {
+      return;
+    }
+    const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
+    const activeAttachmentIds = description
+      ? pendingAttachments
+        .filter((attachment) => description.includes(attachment.url))
+        .map((attachment) => attachment.id)
+      : [];
     setSubmitting(true);
     try {
       const issue = await createIssueMutation.mutateAsync({
         title: title.trim(),
-        description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
+        description,
         status,
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+        attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
         project_id: projectId,
       });
@@ -482,6 +497,7 @@ export function ManualCreatePanel({
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}
                 debounceMs={500}
+                attachments={pendingAttachments}
               />
               {descDragOver && <FileDropOverlay />}
             </div>
@@ -681,6 +697,7 @@ export function ManualCreatePanel({
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
                 <FileUploadButton
+                  disabled={pendingUploads > 0}
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
@@ -710,7 +727,7 @@ export function ManualCreatePanel({
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+                  <Button size="sm" onClick={handleSubmit} disabled={submitting || pendingUploads > 0}>
                     {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
                   </Button>
                 )}
