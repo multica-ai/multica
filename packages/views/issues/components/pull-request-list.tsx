@@ -21,10 +21,12 @@ import {
   type PullRequestStatusKind,
   type PullRequestProgressSegment,
 } from "@multica/core/github";
+import { issueMergeRequestsOptions } from "@multica/core/gitlab";
 import type {
   GitHubPullRequest,
   GitHubPullRequestChecksConclusion,
   GitHubPullRequestState,
+  GitlabMergeRequest,
 } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
@@ -45,6 +47,16 @@ const STATE_ICON: Record<
   closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
 };
 
+// GitLab MR state icons (GitLab uses "opened" instead of "open", no "draft")
+const MR_STATE_ICON: Record<
+  string,
+  { icon: React.ComponentType<{ className?: string }>; className: string }
+> = {
+  opened: { icon: GitPullRequestArrow, className: "text-emerald-600 dark:text-emerald-400" },
+  merged: { icon: GitMerge, className: "text-violet-600 dark:text-violet-400" },
+  closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
+};
+
 const CHECKS_ICON: Record<
   GitHubPullRequestChecksConclusion,
   { icon: React.ComponentType<{ className?: string }>; className: string }
@@ -54,14 +66,94 @@ const CHECKS_ICON: Record<
   pending: { icon: CircleDashed, className: "text-amber-600 dark:text-amber-400" },
 };
 
-export function PullRequestList({ issueId }: { issueId: string }) {
+export function PullRequestList({ issueId, platform }: { issueId: string; platform: "github" | "gitlab" }) {
   const { t } = useT("issues");
   const [expanded, setExpanded] = useState(false);
+
+  if (platform === "gitlab") {
+    return <GitlabMRList issueId={issueId} t={t} expanded={expanded} setExpanded={setExpanded} />;
+  }
+  return <GithubPRList issueId={issueId} t={t} expanded={expanded} setExpanded={setExpanded} />;
+}
+
+function GitlabMRList({
+  issueId,
+  t,
+  expanded,
+  setExpanded,
+}: {
+  issueId: string;
+  t: IssuesT;
+  expanded: boolean;
+  setExpanded: (v: boolean | ((prev: boolean) => boolean)) => void;
+}) {
+  const { data, isLoading } = useQuery(issueMergeRequestsOptions(issueId));
+  const mrs = data?.merge_requests ?? [];
+
+  if (isLoading) {
+    return (
+      <p className="text-xs text-muted-foreground px-2">
+        {t(($) => $.detail.merge_requests_loading)}
+      </p>
+    );
+  }
+  if (mrs.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground px-2">
+        {t(($) => $.detail.merge_requests_empty)}
+      </p>
+    );
+  }
+
+  const useCollapse = mrs.length >= PR_LIMIT_BEFORE_COLLAPSE;
+  const expandedHead = useCollapse ? mrs.slice(0, PR_LIMIT_BEFORE_COLLAPSE - 1) : mrs;
+  const collapsedTail = useCollapse ? mrs.slice(PR_LIMIT_BEFORE_COLLAPSE - 1) : [];
+
+  return (
+    <div className="space-y-1">
+      {expandedHead.map((mr) => (
+        <MergeRequestRow key={mr.id} mr={mr} />
+      ))}
+      {useCollapse ? (
+        <div className="space-y-1">
+          {expanded
+            ? collapsedTail.map((mr) => <MergeRequestRow key={mr.id} mr={mr} />)
+            : null}
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="block w-[calc(100%+1rem)] -mx-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+          >
+            {expanded
+              ? t(($) => $.detail.pull_request_card_show_less)
+              : t(($) => $.detail.pull_request_card_show_more, { count: collapsedTail.length })}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function GithubPRList({
+  issueId,
+  t,
+  expanded,
+  setExpanded,
+}: {
+  issueId: string;
+  t: IssuesT;
+  expanded: boolean;
+  setExpanded: (v: boolean | ((prev: boolean) => boolean)) => void;
+}) {
   const { data, isLoading } = useQuery(issuePullRequestsOptions(issueId));
   const prs = data?.pull_requests ?? [];
 
   if (isLoading) {
-    return <p className="text-xs text-muted-foreground px-2">{t(($) => $.detail.pull_requests_loading)}</p>;
+    return (
+      <p className="text-xs text-muted-foreground px-2">
+        {t(($) => $.detail.pull_requests_loading)}
+      </p>
+    );
   }
   if (prs.length === 0) {
     return (
@@ -71,10 +163,6 @@ export function PullRequestList({ issueId }: { issueId: string }) {
     );
   }
 
-  // Render rule:
-  //   - <  PR_LIMIT_BEFORE_COLLAPSE: every PR row is visible.
-  //   - >= PR_LIMIT_BEFORE_COLLAPSE: first (LIMIT - 1) rows are visible and
-  //     the remainder sits behind a toggle.
   const useCollapse = prs.length >= PR_LIMIT_BEFORE_COLLAPSE;
   const expandedHead = useCollapse ? prs.slice(0, PR_LIMIT_BEFORE_COLLAPSE - 1) : prs;
   const collapsedTail = useCollapse ? prs.slice(PR_LIMIT_BEFORE_COLLAPSE - 1) : [];
@@ -102,6 +190,47 @@ export function PullRequestList({ issueId }: { issueId: string }) {
       ) : null}
     </div>
   );
+}
+
+function MergeRequestRow({ mr }: { mr: GitlabMergeRequest }) {
+  const { t } = useT("issues");
+  const cfg = MR_STATE_ICON[mr.state] ?? { icon: GitPullRequest, className: "" };
+  const StateIcon = cfg.icon;
+  const stateLabel = getMRStateLabel(mr.state, t);
+
+  return (
+    <a
+      data-testid="pull-request-row"
+      href={mr.html_url}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="flex items-start gap-2 rounded-md px-2 py-1.5 -mx-2 hover:bg-accent/50 transition-colors group"
+    >
+      <StateIcon className={cn("h-3.5 w-3.5 mt-0.5 shrink-0", cfg.className)} />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium leading-snug truncate group-hover:text-foreground">
+          {mr.title}
+        </p>
+        <p className="text-[11px] text-muted-foreground truncate">
+          {mr.repo_owner}/{mr.repo_name}!{mr.mr_number} · {stateLabel}
+          {mr.author_login ? ` · @${mr.author_login}` : null}
+        </p>
+      </div>
+    </a>
+  );
+}
+
+function getMRStateLabel(state: string, t: IssuesT): string {
+  switch (state) {
+    case "opened":
+      return t(($) => $.detail.merge_request_state_opened);
+    case "merged":
+      return t(($) => $.detail.merge_request_state_merged);
+    case "closed":
+      return t(($) => $.detail.merge_request_state_closed);
+    default:
+      return state;
+  }
 }
 
 function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
@@ -208,8 +337,8 @@ function PullRequestStats({ pr }: { pr: GitHubPullRequest }) {
   return (
     <span className="inline-flex items-center gap-1.5 tabular-nums">
       <span className="text-emerald-600 dark:text-emerald-400">+{pr.additions ?? 0}</span>
-      <span className="text-rose-600 dark:text-rose-400">−{pr.deletions ?? 0}</span>
-      <span aria-hidden="true">·</span>
+      <span className="text-rose-600 dark:text-rose-400">-{pr.deletions ?? 0}</span>
+      <span aria-hidden="true">.</span>
       <span>
         {t(($) => $.detail.pull_request_card_files_count, {
           count: pr.changed_files ?? 0,
@@ -226,7 +355,10 @@ function PullRequestProgressStrip({
 }) {
   if (!segments) return null;
   return (
-    <span className="flex h-1 w-12 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+    <span
+      className="flex h-1 w-12 shrink-0 overflow-hidden rounded-full bg-muted"
+      aria-hidden="true"
+    >
       {segments.map((seg) => (
         <span
           key={seg.kind}

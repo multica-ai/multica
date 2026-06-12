@@ -289,6 +289,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// GitLab webhook (no Multica auth — requests are authenticated via
+	// X-Gitlab-Token header matched against per-workspace webhook tokens).
+	r.Post("/api/webhooks/gitlab", h.HandleGitlabWebhook)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -324,6 +327,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/recover-orphans", h.RecoverOrphanedTasks)
 		r.Post("/tasks/{taskId}/session", h.PinTaskSession)
 	})
+
+
+		// GitLab credential for CLI credential helper (gitlab-credential-multica).
+		// Requires daemon token or valid user token to access — workspace is derived from the token.
+		r.With(middleware.DaemonAuth(queries, patCache, daemonTokenCache, opts.JWKSProvider, opts.SubjectResolver)).
+			Get("/api/gitlab/credential", h.HandleGitlabCredential)
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
@@ -372,6 +381,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the handler strips the management handle and adds a
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					r.Get("/gitlab/settings", h.HandleGetGitlabSettings)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -383,6 +393,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
 					})
+					r.Put("/gitlab/settings", h.HandleUpdateGitlabSettings)
+					r.Post("/gitlab/regenerate-token", h.HandleRegenerateGitlabToken)
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 				})
 				// Owner-only access
@@ -454,6 +466,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/metadata/{key}", h.SetIssueMetadataKey)
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/merge-requests", h.HandleListMergeRequests)
 				})
 			})
 

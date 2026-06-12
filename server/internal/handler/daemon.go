@@ -1150,7 +1150,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 				resp.Agent.Instructions += "You must follow these instructions:\n<instructions>\n```\n" +
 					pd.Content + "\n```\n" +
-					"\nIf the process generates output documents, please upload them as attachments in the comments.\n</instructions>\n\n"
+					"\n**IMPORTANT:**\nIf any related documentation other than code is generated during this process, " +
+					"please upload all documentation as attachments to the comment section before the task ends," +
+					"using the `multica issue comment add [--attachment]` command.\n</instructions>\n\n"
 			}
 		}
 

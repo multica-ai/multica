@@ -5,6 +5,7 @@ import { Save, Plus, Trash2, Pencil, X } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { ToggleGroup, ToggleGroupItem } from "@multica/ui/components/ui/toggle-group";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -44,6 +45,9 @@ export function RepositoriesTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
 
+  const rawPlatform = (workspace?.settings as Record<string, unknown> | undefined)?.code_platform;
+  const codePlatform: "gitlab" | "github" = rawPlatform === "github" ? "github" : "gitlab";
+
   useEffect(() => {
     setRepos(workspace?.repos ?? []);
   }, [workspace]);
@@ -65,6 +69,25 @@ export function RepositoriesTab() {
       toast.error(e instanceof Error ? e.message : t(($) => $.repositories.toast_save_failed));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePlatformChange = async (platform: "gitlab" | "github") => {
+    if (!workspace) return;
+    const currentSettings = (workspace.settings as Record<string, unknown>) ?? {};
+    const newSettings = {
+      ...currentSettings,
+      code_platform: platform,
+      // When switching platform, enable the chosen one and disable the other
+      gitlab_enabled: platform === "gitlab",
+      github_enabled: platform === "github",
+    };
+    try {
+      await api.updateWorkspace(workspace.id, { settings: newSettings });
+      qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+      toast.success(t(($) => $.repositories.platform_changed));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.repositories.platform_save_failed));
     }
   };
 
@@ -106,6 +129,27 @@ export function RepositoriesTab() {
     <div className="space-y-8">
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">{t(($) => $.repositories.section_title)}</h2>
+
+        {canManageWorkspace && (
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-medium">
+              {t(($) => $.repositories.code_platform_label)}
+            </span>
+            <ToggleGroup
+              value={[codePlatform]}
+              onValueChange={(val) => {
+                if (val.length > 0 && (val[0] === "github" || val[0] === "gitlab")) {
+                  handlePlatformChange(val[0]);
+                }
+              }}
+              variant="outline"
+              size="sm"
+            >
+              <ToggleGroupItem value="gitlab">GitLab</ToggleGroupItem>
+              <ToggleGroupItem value="github">GitHub</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        )}
 
         <Card>
           <CardContent className="space-y-3">

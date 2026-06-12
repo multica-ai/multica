@@ -41,6 +41,25 @@ function toFormatSchemaString(fs: unknown): string {
   return JSON.stringify(fs, null, 2);
 }
 
+/**
+ * Parse a format_schema textarea value back to a JSON value for API storage.
+ * The textarea always holds a string, but format_schema must be stored as a
+ * JSON object/array/null in the database (JSONB column), not as a JSON string.
+ * A bare string causes validateJSONSchema in Go to fail with
+ * "cannot unmarshal string into Go value of type map[string]interface{}".
+ */
+function parseFormatSchemaValue(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // JSON is incomplete while typing — keep the raw string so the edit
+    // is preserved; handleSave normalizes it again before sending to the API.
+    return raw;
+  }
+}
+
 interface NodeConfigPanelProps {
   node: WorkflowNode;
   workflowId: string;
@@ -163,7 +182,7 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], disabled = false
             value={formatSchema}
             onChange={(e) => {
               setFormatSchema(e.target.value);
-              cacheNodeEdits(node.id, { format_schema: e.target.value });
+              cacheNodeEdits(node.id, { format_schema: parseFormatSchemaValue(e.target.value) });
             }}
             placeholder="{}"
             className="min-h-[80px] text-sm font-mono"

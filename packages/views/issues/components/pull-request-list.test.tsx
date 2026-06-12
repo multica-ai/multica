@@ -60,7 +60,7 @@ function renderList() {
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
-        <PullRequestList issueId="issue-1" />
+        <PullRequestList platform="github" issueId="issue-1" />
       </I18nProvider>
     </QueryClientProvider>,
   );

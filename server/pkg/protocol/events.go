@@ -123,6 +123,10 @@ const (
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
 
+	// GitLab integration events
+	EventMergeRequestUpdated    = "merge_request:updated"
+	EventGitlabSettingsChanged  = "gitlab_settings:changed"
+
 	// Workflow events
 	EventWorkflowCreated          = "workflow:created"
 	EventWorkflowUpdated          = "workflow:updated"

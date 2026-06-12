@@ -65,6 +65,7 @@ type TaskContextForEnv struct {
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	IsSquadLeader           bool            // true when the agent is acting as a squad leader (may exit silently on no_action)
 	Plugin                  *AgentPlugin // plugin bound to the agent; nil = no plugin
+	CodePlatform            string       // "gitlab" or "github", from workspace.settings.code_platform
 	// RequestingUserName + RequestingUserProfileDescription describe the
 	// human the agent is acting on behalf of. v1 sources them from the
 	// runtime owner (the user who registered the daemon). Rendered into the

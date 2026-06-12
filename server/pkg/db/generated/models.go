@@ -326,6 +326,30 @@ type MulticaGithubPullRequestCheckSuite struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type MulticaGitlabMergeRequest struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	RepoOwner       string             `json:"repo_owner"`
+	RepoName        string             `json:"repo_name"`
+	MrNumber        int32              `json:"mr_number"`
+	MrID            int64              `json:"mr_id"`
+	ProjectID       int64              `json:"project_id"`
+	Title           string             `json:"title"`
+	Description     pgtype.Text        `json:"description"`
+	State           string             `json:"state"`
+	HtmlUrl         string             `json:"html_url"`
+	SourceBranch    pgtype.Text        `json:"source_branch"`
+	TargetBranch    pgtype.Text        `json:"target_branch"`
+	AuthorLogin     pgtype.Text        `json:"author_login"`
+	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
+	MergedAt        pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt        pgtype.Timestamptz `json:"closed_at"`
+	MrCreatedAt     pgtype.Timestamptz `json:"mr_created_at"`
+	MrUpdatedAt     pgtype.Timestamptz `json:"mr_updated_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MulticaInboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -387,6 +411,14 @@ type MulticaIssueLabel struct {
 	Color       string             `json:"color"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MulticaIssueMergeRequest struct {
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	MergeRequestID pgtype.UUID        `json:"merge_request_id"`
+	LinkedByType   pgtype.Text        `json:"linked_by_type"`
+	LinkedByID     pgtype.UUID        `json:"linked_by_id"`
+	LinkedAt       pgtype.Timestamptz `json:"linked_at"`
 }
 
 type MulticaIssuePullRequest struct {

@@ -22,6 +22,7 @@ import {
 } from "../agents/queries";
 import { workflowKeys } from "../workflows/queries";
 import { githubKeys } from "../github/queries";
+import { gitlabKeys } from "../gitlab/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -289,6 +290,15 @@ export function useRealtimeSync(
         // PR list is keyed by issue id, not workspace, so we invalidate all
         // PR queries — the open issue detail page will refetch its own list.
         qc.invalidateQueries({ queryKey: ["github", "pull-requests"] });
+      },
+      merge_request: () => {
+        // MR list is keyed by issue id, not workspace, so we invalidate all
+        // MR queries — the open issue detail page will refetch its own list.
+        qc.invalidateQueries({ queryKey: ["gitlab", "merge-requests"] });
+      },
+      gitlab_settings: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: gitlabKeys.settings(wsId) });
       },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the

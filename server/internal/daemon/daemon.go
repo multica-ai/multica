@@ -856,6 +856,45 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 	return *s.CoAuthoredByEnabled
 }
 
+// getCodePlatform returns the workspace's code platform from settings.
+// Defaults to "gitlab" when the setting is missing or malformed.
+func (d *Daemon) getCodePlatform(workspaceID string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok || len(ws.settings) == 0 {
+		return "gitlab"
+	}
+	var s struct {
+		CodePlatform *string `json:"code_platform"`
+	}
+	if err := json.Unmarshal(ws.settings, &s); err != nil {
+		return "gitlab"
+	}
+	if s.CodePlatform == nil || *s.CodePlatform == "" {
+		return "gitlab"
+	}
+	return *s.CodePlatform
+}
+
+// getGitlabAccessToken reads the GitLab PAT from workspace settings.
+// Returns "" when not configured.
+func (d *Daemon) getGitlabAccessToken(workspaceID string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok || len(ws.settings) == 0 {
+		return ""
+	}
+	var s struct {
+		GitlabAccessToken *string `json:"gitlab_access_token"`
+	}
+	if err := json.Unmarshal(ws.settings, &s); err != nil || s.GitlabAccessToken == nil {
+		return ""
+	}
+	return *s.GitlabAccessToken
+}
+
 // registerTaskRepos merges task-scoped repos (e.g. project github_repo
 // resources lifted into resp.Repos by the claim handler) into the workspace's
 // allowlist and kicks off a cache sync for any URLs that aren't yet cached.
@@ -934,6 +973,14 @@ func (d *Daemon) waitBackgroundSyncs() {
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
 	if d.repoCache == nil {
 		return
+	}
+	// Pass GitLab PAT via environment variable so git clone/fetch uses it
+	// without persisting it to .git/config.
+	if d.getCodePlatform(workspaceID) == "gitlab" {
+		if token := d.getGitlabAccessToken(workspaceID); token != "" {
+			os.Setenv("GITLAB_PAT", token)
+			defer os.Unsetenv("GITLAB_PAT")
+		}
 	}
 	if err := d.repoCache.Sync(workspaceID, repoDataToInfo(repos)); err != nil {
 		d.setWorkspaceRepoSyncError(workspaceID, err.Error())
@@ -2277,6 +2324,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		Plugin:                              plugin,
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
+		CodePlatform:                     d.getCodePlatform(task.WorkspaceID),
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop

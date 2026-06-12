@@ -78,6 +78,8 @@ export type WSEventType =
   | "pull_request:linked"
   | "pull_request:updated"
   | "pull_request:unlinked"
+  | "merge_request:updated"
+  | "gitlab_settings:changed"
   | "workflow:node_run_updated";
 
 export interface WSMessage<T = unknown> {
@@ -351,4 +353,12 @@ export interface InvitationDeclinedPayload {
 export interface InvitationRevokedPayload {
   invitation_id: string;
   invitee_email: string;
+}
+
+export interface MergeRequestUpdatedPayload {
+  issue_id: string;
+}
+
+export interface GitlabSettingsChangedPayload {
+  workspace_id: string;
 }

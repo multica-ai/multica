@@ -96,6 +96,8 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  GitlabMergeRequest,
+  GitlabSettings,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -180,6 +182,10 @@ import {
   EMPTY_WORKFLOW_ADMINS_RESPONSE,
   BuiltinPluginListResponseSchema,
   EMPTY_BUILTIN_PLUGIN_LIST,
+  ListMergeRequestsResponseSchema,
+  EMPTY_MERGE_REQUESTS_RESPONSE,
+  GitlabSettingsResponseSchema,
+  EMPTY_GITLAB_SETTINGS_RESPONSE,
 } from "./schemas";
 import type { BuiltinPluginListResponse } from "./schemas";
 
@@ -1843,6 +1849,37 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // GitLab integration
+  async listIssueMergeRequests(issueId: string): Promise<{ merge_requests: GitlabMergeRequest[] }> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/merge-requests`);
+    return parseWithFallback(raw, ListMergeRequestsResponseSchema, EMPTY_MERGE_REQUESTS_RESPONSE, {
+      endpoint: "GET /api/issues/:id/merge-requests",
+    });
+  }
+
+  async getGitlabSettings(wsId: string): Promise<GitlabSettings> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${wsId}/gitlab/settings`);
+    return parseWithFallback(raw, GitlabSettingsResponseSchema, EMPTY_GITLAB_SETTINGS_RESPONSE, {
+      endpoint: "GET /api/workspaces/:wsId/gitlab/settings",
+    });
+  }
+
+  async updateGitlabSettings(wsId: string, data: { enabled?: boolean; mr_sidebar_enabled?: boolean; auto_link_enabled?: boolean }): Promise<GitlabSettings> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${wsId}/gitlab/settings`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, GitlabSettingsResponseSchema, EMPTY_GITLAB_SETTINGS_RESPONSE, {
+      endpoint: "PUT /api/workspaces/:wsId/gitlab/settings",
+    });
+  }
+
+  async regenerateGitlabWebhookToken(wsId: string): Promise<{ token: string }> {
+    return this.fetch(`/api/workspaces/${wsId}/gitlab/regenerate-token`, {
+      method: "POST",
+    });
   }
 
   // ── Workflows ──
