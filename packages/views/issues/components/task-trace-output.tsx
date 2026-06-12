@@ -1224,25 +1224,54 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
   const [streamGated, setStreamGated] = useState(false);
   const [interactions, setInteractions] = useState<TaskInteraction[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  const fetchPendingInteractions = useCallback(() => {
-    api.listTaskInteractions(task.id, "pending").then(setInteractions).catch(console.error);
-  }, [task.id]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isInView, setIsInView] = useState(false);
 
   useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          setIsInView(entry.isIntersecting);
+        }
+      },
+      {
+        rootMargin: "200px 0px 200px 0px",
+      }
+    );
+
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  const isLazyActive = open && isInView;
+
+  const fetchPendingInteractions = useCallback(() => {
+    if (!isLazyActive) return;
+    api.listTaskInteractions(task.id, "pending").then(setInteractions).catch(console.error);
+  }, [task.id, isLazyActive]);
+
+  useEffect(() => {
+    if (!isLazyActive) return;
     fetchPendingInteractions();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") fetchPendingInteractions();
     }, 30_000);
     return () => clearInterval(interval);
-  }, [fetchPendingInteractions]);
+  }, [fetchPendingInteractions, isLazyActive]);
 
   useWSEvent("interaction:created", (payload: unknown) => {
+    if (!isLazyActive) return;
     const p = payload as { task_id?: string };
     if (p.task_id === task.id) fetchPendingInteractions();
   });
 
   useWSEvent("interaction:resolved", (payload: unknown) => {
+    if (!isLazyActive) return;
     const p = payload as { task_id?: string };
     if (p.task_id === task.id) fetchPendingInteractions();
   });
@@ -1251,6 +1280,11 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
     let cancelled = false;
     setHealthPort(null);
     setError(null);
+
+    if (!isLazyActive) {
+      setLoading(false);
+      return;
+    }
 
     if (!task.runtime_id) {
       setError("No runtime is attached to this task.");
@@ -1278,7 +1312,7 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
     return () => {
       cancelled = true;
     };
-  }, [task.runtime_id]);
+  }, [task.runtime_id, isLazyActive]);
 
   useEffect(() => {
     if (!healthPort) return;
@@ -1407,7 +1441,8 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
     : "";
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className={cn("max-w-full overflow-hidden", fill && "flex h-full min-h-0 flex-col")}>
+    <div ref={containerRef} className={cn("max-w-full overflow-hidden", fill && "flex flex-1 h-full min-h-0 flex-col")}>
+      <Collapsible open={open} onOpenChange={setOpen} className={cn("max-w-full overflow-hidden", fill && "flex h-full min-h-0 flex-col")}>
       <div className={cn("shrink-0 border-info/10 px-3 py-2", compact ? "" : "border-t")}>
         <div className="flex min-w-0 items-center gap-2">
           <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
@@ -1507,7 +1542,8 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
           )}
         </div>
       </CollapsibleContent>
-    </Collapsible>
+      </Collapsible>
+    </div>
   );
 }
 

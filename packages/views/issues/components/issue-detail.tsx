@@ -1631,6 +1631,7 @@ export function IssueDetail({
           [resolvedId]: [...new Set([...(s.collapsedByIssue[resolvedId] ?? []), ...resolvedCommentIds])]
         }
       }));
+      setExpandedResolved(new Set());
     } else {
       useCommentCollapseStore.setState((s) => ({
         collapsedByIssue: {
@@ -1638,8 +1639,9 @@ export function IssueDetail({
           [resolvedId]: (s.collapsedByIssue[resolvedId] ?? []).filter(id => !resolvedCommentIds.includes(id))
         }
       }));
+      setExpandedResolved(new Set(resolvedCommentIds));
     }
-  }, [resolvedId, isDescriptionCollapsedState, subIssuesCollapsed, timelineView?.groups]);
+  }, [resolvedId, isDescriptionCollapsedState, subIssuesCollapsed, timelineView?.groups, setExpandedResolved]);
 
   // Selection store is global (workspace-scoped); clear it whenever this
   // issue detail is mounted or switched.
