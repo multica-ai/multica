@@ -293,6 +293,26 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.21",
+        date: "2026-06-12",
+        title: "CodeBuddy Runtime",
+        changes: [],
+        features: [
+          "CodeBuddy 现在可以驱动本地 Multica 智能体，并会自动显示可用的模型和投入强度选项",
+          "快速创建 Issue 时上传的文件现在会从草稿一直带到最终创建的 Issue 里",
+        ],
+        improvements: [
+          "技能导入冲突更容易理解：锁定的技能会显示成员名称，不再显示内部 ID；单个覆盖也可以一键完成",
+          "桌面端恢复提示会先说明发生了什么，并给出更清楚的窗口卡住反馈信息",
+          "按注册时间排序或筛选成员的页面现在加载更快",
+        ],
+        fixes: [
+          "聊天在发送、停止或发送失败恢复时，会更稳定地同步消息和草稿",
+          "Lark 账号绑定现在对已登录用户也能稳定完成，登录后也会回到绑定页面",
+          "本地智能体运行不会再在任务文件夹准备好之前就显示已经开始",
+        ],
+      },
+      {
         version: "0.3.20",
         date: "2026-06-11",
         title: "技能导入、运行记录和更稳定的智能体",

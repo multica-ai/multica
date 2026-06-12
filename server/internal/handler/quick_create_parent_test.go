@@ -125,11 +125,13 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 	}
 
 	t.Run("same workspace parent enqueues with context", func(t *testing.T) {
+		attachmentID := "019ec09d-6222-722b-bdfa-427b105d80be"
 		w := httptest.NewRecorder()
 		req := newRequest("POST", "/api/issues/quick-create", map[string]any{
 			"agent_id":        agentID,
 			"prompt":          "Create a follow-up issue for the local parent",
 			"parent_issue_id": localParentID,
+			"attachment_ids":  []string{attachmentID},
 		})
 		testHandler.QuickCreateIssue(w, req)
 		if w.Code != http.StatusAccepted {
@@ -161,6 +163,9 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 		}
 		if qc.ParentIssueID != localParentID {
 			t.Fatalf("expected parent_issue_id=%q in context, got %q", localParentID, qc.ParentIssueID)
+		}
+		if len(qc.AttachmentIDs) != 1 || qc.AttachmentIDs[0] != attachmentID {
+			t.Fatalf("expected attachment_ids=[%q] in context, got %#v", attachmentID, qc.AttachmentIDs)
 		}
 	})
 
@@ -197,6 +202,23 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 		}
 		if got := countQuickCreateTasks(t); got != before {
 			t.Fatalf("bogus parent must not enqueue a task: expected %d quick-create tasks, got %d", before, got)
+		}
+	})
+
+	t.Run("bogus uuid attachment id is rejected", func(t *testing.T) {
+		before := countQuickCreateTasks(t)
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/quick-create", map[string]any{
+			"agent_id":       agentID,
+			"prompt":         "Try a malformed attachment UUID",
+			"attachment_ids": []string{"not-a-uuid"},
+		})
+		testHandler.QuickCreateIssue(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for bogus attachment id, got %d: %s", w.Code, w.Body.String())
+		}
+		if got := countQuickCreateTasks(t); got != before {
+			t.Fatalf("bogus attachment id must not enqueue a task: expected %d quick-create tasks, got %d", before, got)
 		}
 	})
 }
