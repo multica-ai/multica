@@ -1219,6 +1219,211 @@ func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T)
 	}
 }
 
+// TestGetDaemonWorkspaceRepos_MergesProjectGithubRepos verifies that
+// github_repo resources attached to projects flow into the workspace
+// repos endpoint. This is what lets the repocache pick up project-level
+// repos automatically without anyone touching workspace.repos.
+func TestGetDaemonWorkspaceRepos_MergesProjectGithubRepos(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	const wsRepoA = "https://github.com/example/ws-a"
+	const wsRepoB = "https://github.com/example/ws-b"
+	const projectRepoC = "https://github.com/example/project-c"
+	const projectRepoD = "https://github.com/example/project-d"
+
+	setHandlerTestWorkspaceRepos(t, []map[string]string{
+		{"url": wsRepoA},
+		{"url": wsRepoB},
+	})
+
+	// Project 1: a github_repo pointing at C, plus one duplicating wsRepoA
+	// (which should dedupe against the workspace list).
+	var project1ID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+	`, testWorkspaceID, "Repocache merge project 1").Scan(&project1ID); err != nil {
+		t.Fatalf("create project 1: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, project1ID) })
+
+	for _, url := range []string{projectRepoC, wsRepoA} {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO project_resource (
+				project_id, workspace_id, resource_type, resource_ref, position
+			) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
+		`, project1ID, testWorkspaceID, `{"url":"`+url+`"}`); err != nil {
+			t.Fatalf("create project_resource (%s): %v", url, err)
+		}
+	}
+
+	// Project 2: a github_repo pointing at D, plus a non-github_repo resource
+	// that must be ignored.
+	var project2ID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+	`, testWorkspaceID, "Repocache merge project 2").Scan(&project2ID); err != nil {
+		t.Fatalf("create project 2: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, project2ID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO project_resource (
+			project_id, workspace_id, resource_type, resource_ref, position
+		) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
+	`, project2ID, testWorkspaceID, `{"url":"`+projectRepoD+`"}`); err != nil {
+		t.Fatalf("create project 2 github_repo: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO project_resource (
+			project_id, workspace_id, resource_type, resource_ref, position
+		) VALUES ($1, $2, 'notion_page', $3::jsonb, 1)
+	`, project2ID, testWorkspaceID, `{"url":"https://notion.so/example"}`); err != nil {
+		t.Fatalf("create project 2 notion: %v", err)
+	}
+
+	// Malformed github_repo payloads that must NOT appear in the response:
+	// non-string url (number) is dropped by jsonb_typeof check, JSON null
+	// url is dropped by jsonb_typeof, missing key is dropped by jsonb_typeof,
+	// empty/whitespace strings pass SQL but are dropped by the Go normalizer.
+	malformed := []string{
+		`{"url": 123}`,
+		`{"url": null}`,
+		`{}`,
+		`{"url": ""}`,
+		`{"url": "   "}`,
+	}
+	for i, payload := range malformed {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO project_resource (
+				project_id, workspace_id, resource_type, resource_ref, position
+			) VALUES ($1, $2, 'github_repo', $3::jsonb, $4)
+		`, project2ID, testWorkspaceID, payload, 100+i); err != nil {
+			t.Fatalf("create malformed resource %q: %v", payload, err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil, testWorkspaceID, "test-daemon-mdt")
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+
+	testHandler.GetDaemonWorkspaceRepos(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetDaemonWorkspaceRepos: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Repos []map[string]string `json:"repos"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	got := make(map[string]struct{}, len(resp.Repos))
+	for _, r := range resp.Repos {
+		got[r["url"]] = struct{}{}
+	}
+
+	want := []string{wsRepoA, wsRepoB, projectRepoC, projectRepoD}
+	for _, url := range want {
+		if _, ok := got[url]; !ok {
+			t.Errorf("expected repo URL %q in response, got %+v", url, resp.Repos)
+		}
+	}
+	// Explicitly assert the malformed payloads do NOT leak — a SQL regression
+	// that returns "123" or "" would be caught by the length check below,
+	// but naming the case makes the intent obvious to future readers.
+	for _, leaked := range []string{"123", "", "   "} {
+		if _, ok := got[leaked]; ok {
+			t.Errorf("malformed payload leaked into repos: %q present in %+v", leaked, resp.Repos)
+		}
+	}
+	if len(resp.Repos) != len(want) {
+		t.Errorf("expected %d unique repos (workspace + project github_repos, dedup'd, malformed dropped), got %d: %+v", len(want), len(resp.Repos), resp.Repos)
+	}
+}
+
+// TestDaemonRegister_MergesProjectGithubRepos covers the second call site of
+// workspaceReposResponse — the daemon's initial /register response also carries
+// the workspace repos list. The merge behavior must be identical to
+// GetDaemonWorkspaceRepos so a daemon's first sync sees project repos too.
+func TestDaemonRegister_MergesProjectGithubRepos(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	const wsRepo = "https://github.com/example/register-ws"
+	const projectRepo = "https://github.com/example/register-project"
+
+	setHandlerTestWorkspaceRepos(t, []map[string]string{
+		{"url": wsRepo},
+	})
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+	`, testWorkspaceID, "DaemonRegister merge").Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO project_resource (
+			project_id, workspace_id, resource_type, resource_ref, position
+		) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
+	`, projectID, testWorkspaceID, `{"url":"`+projectRepo+`"}`); err != nil {
+		t.Fatalf("create github_repo resource: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-register-merge",
+		"device_name":  "test-device",
+		"runtimes": []map[string]any{
+			{"name": "test-runtime-register-merge", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	}, testWorkspaceID, "test-register-merge")
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Runtimes []map[string]any    `json:"runtimes"`
+		Repos    []map[string]string `json:"repos"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		for _, rt := range resp.Runtimes {
+			if id, ok := rt["id"].(string); ok {
+				testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, id)
+			}
+		}
+	})
+
+	got := make(map[string]struct{}, len(resp.Repos))
+	for _, r := range resp.Repos {
+		got[r["url"]] = struct{}{}
+	}
+	for _, url := range []string{wsRepo, projectRepo} {
+		if _, ok := got[url]; !ok {
+			t.Errorf("DaemonRegister response missing repo URL %q, got %+v", url, resp.Repos)
+		}
+	}
+	if len(resp.Repos) != 2 {
+		t.Errorf("expected DaemonRegister to return 2 repos (workspace + project), got %d: %+v", len(resp.Repos), resp.Repos)
+	}
+}
+
 // TestDaemonRegister_MergesLegacyDaemonIDRuntime simulates the migration path
 // for an existing user whose runtime was previously keyed on a hostname-derived
 // daemon_id (e.g. "MacBook-Pro.local"). After the daemon switches to a stable

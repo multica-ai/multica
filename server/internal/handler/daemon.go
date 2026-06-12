@@ -235,8 +235,29 @@ func parseWorkspaceRepos(raw []byte) []RepoData {
 	return normalizeWorkspaceRepos(repos)
 }
 
-func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte) daemonWorkspaceReposResponse {
+// lookupWorkspaceProjectRepoURLs returns the URLs of every github_repo
+// project resource attached to projects in the workspace. The repocache
+// merges these with workspace.repos so attaching a github_repo to a
+// project flows into the cache automatically. A query failure here is
+// non-fatal — we log and return nil so the workspace-level repos are
+// still served.
+func (h *Handler) lookupWorkspaceProjectRepoURLs(ctx context.Context, workspaceID pgtype.UUID) []string {
+	urls, err := h.Queries.ListWorkspaceGithubRepoURLs(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("list workspace github_repo resources failed", "workspace_id", uuidToString(workspaceID), "error", err)
+		return nil
+	}
+	return urls
+}
+
+func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte, projectRepoURLs []string) daemonWorkspaceReposResponse {
 	repos := parseWorkspaceRepos(raw)
+	if len(projectRepoURLs) > 0 {
+		for _, url := range projectRepoURLs {
+			repos = append(repos, RepoData{URL: url})
+		}
+		repos = normalizeWorkspaceRepos(repos)
+	}
 	resp := daemonWorkspaceReposResponse{
 		WorkspaceID:  workspaceID,
 		Repos:        repos,
@@ -413,7 +434,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings)
+	projectRepoURLs := h.lookupWorkspaceProjectRepoURLs(r.Context(), wsUUID)
+	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings, projectRepoURLs)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
@@ -511,13 +533,15 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
+	wsUUID := parseUUID(workspaceID)
+	ws, err := h.Queries.GetWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
+	projectRepoURLs := h.lookupWorkspaceProjectRepoURLs(r.Context(), wsUUID)
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings, projectRepoURLs))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
