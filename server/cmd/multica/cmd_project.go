@@ -132,6 +132,8 @@ func init() {
 	// project create
 	projectCreateCmd.Flags().String("title", "", "Project title (required)")
 	projectCreateCmd.Flags().String("description", "", "Project description")
+	projectCreateCmd.Flags().String("context", "", "Project context (decodes \\n, \\r, \\t, \\\\; pipe via --context-stdin to preserve literal backslashes)")
+	projectCreateCmd.Flags().Bool("context-stdin", false, "Read project context from stdin (preserves multi-line content verbatim)")
 	projectCreateCmd.Flags().String("status", "", "Project status")
 	projectCreateCmd.Flags().String("icon", "", "Project icon (emoji)")
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
@@ -174,6 +176,8 @@ func init() {
 	// project update
 	projectUpdateCmd.Flags().String("title", "", "New title")
 	projectUpdateCmd.Flags().String("description", "", "New description")
+	projectUpdateCmd.Flags().String("context", "", "New project context (decodes \\n, \\r, \\t, \\\\; pipe via --context-stdin to preserve literal backslashes)")
+	projectUpdateCmd.Flags().Bool("context-stdin", false, "Read project context from stdin (preserves multi-line content verbatim)")
 	projectUpdateCmd.Flags().String("status", "", "New status")
 	projectUpdateCmd.Flags().String("icon", "", "New icon (emoji)")
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
@@ -314,6 +318,9 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
 	}
+	if err := addProjectContextToBody(cmd, body); err != nil {
+		return err
+	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		if err := validateProjectStatus(v); err != nil {
 			return err
@@ -396,6 +403,9 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
+	if err := addProjectContextToBody(cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")
 		if err := validateProjectStatus(v); err != nil {
@@ -418,7 +428,7 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --context, --icon, --lead")
 	}
 
 	var result map[string]any
@@ -439,6 +449,18 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func addProjectContextToBody(cmd *cobra.Command, body map[string]any) error {
+	if !cmd.Flags().Changed("context") && !cmd.Flags().Changed("context-stdin") {
+		return nil
+	}
+	contextText, _, err := resolveTextFlag(cmd, "context")
+	if err != nil {
+		return err
+	}
+	body["context"] = contextText
+	return nil
 }
 
 func runProjectDelete(cmd *cobra.Command, args []string) error {
