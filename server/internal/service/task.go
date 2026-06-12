@@ -3903,10 +3903,11 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		t0 = time.Now()
 		reclaimCheckAfter = t0.Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
-			AgentID:          agentID,
-			RuntimeID:        claimRuntimeID,
-			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
-			RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
+			AgentID:                 agentID,
+			RuntimeID:               claimRuntimeID,
+			PrepareLeaseSecs:        prepareLeaseDuration.Seconds(),
+			RuntimeStaleSecs:        RuntimeClaimFreshnessSeconds,
+			HoldExpiryMarginSeconds: HoldExpiryMargin.Seconds(),
 		})
 		claimAgentMs = time.Since(t0).Milliseconds()
 		if err != nil {
@@ -4072,7 +4073,10 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	preSelectVersion := s.EmptyClaim.CurrentVersion(ctx, runtimeKey)
 
 	t0 := time.Now()
-	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, runtimeID)
+	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, db.ListQueuedClaimCandidatesByRuntimeParams{
+		RuntimeID:               runtimeID,
+		HoldExpiryMarginSeconds: HoldExpiryMargin.Seconds(),
+	})
 	listMs = time.Since(t0).Milliseconds()
 	listCount = len(tasks)
 	if err != nil {

@@ -1726,11 +1726,12 @@ WHERE id = (
           SELECT 1 FROM agent_runtime ar
           WHERE ar.id = atq.runtime_id
             AND ar.hold_until IS NOT NULL
-            -- Stay blocked for a 300s margin past hold_until: the provider
+            -- Stay blocked for the release margin past hold_until: the provider
             -- quota is often not released on the very first run after the
-            -- stated reset, so we hold dispatch a little longer to absorb
-            -- clock skew. Must match ClearExpiredHolds and runtimeOnHold.
-            AND ar.hold_until > now() - make_interval(secs => 300)
+            -- stated reset, so we hold dispatch a little longer to absorb clock
+            -- skew. The margin comes from the single holdExpiryMargin source in
+            -- Go, shared with ClearExpiredHolds and runtimeOnHold.
+            AND ar.hold_until > now() - make_interval(secs => $5::double precision)
       )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
@@ -1760,10 +1761,11 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 `
 
 type ClaimAgentTaskParams struct {
-	PrepareLeaseSecs float64     `json:"prepare_lease_secs"`
-	AgentID          pgtype.UUID `json:"agent_id"`
-	RuntimeID        pgtype.UUID `json:"runtime_id"`
-	RuntimeStaleSecs float64     `json:"runtime_stale_secs"`
+	PrepareLeaseSecs        float64     `json:"prepare_lease_secs"`
+	AgentID                 pgtype.UUID `json:"agent_id"`
+	RuntimeID               pgtype.UUID `json:"runtime_id"`
+	RuntimeStaleSecs        float64     `json:"runtime_stale_secs"`
+	HoldExpiryMarginSeconds float64     `json:"hold_expiry_margin_seconds"`
 }
 
 // Claims the next queued task for an agent on one healthy runtime, enforcing
@@ -1783,6 +1785,7 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, arg ClaimAgentTaskParams) 
 		arg.AgentID,
 		arg.RuntimeID,
 		arg.RuntimeStaleSecs,
+		arg.HoldExpiryMarginSeconds,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -6500,10 +6503,15 @@ WHERE atq.runtime_id = $1
       SELECT 1 FROM agent_runtime ar
       WHERE ar.id = atq.runtime_id
         AND ar.hold_until IS NOT NULL
-        AND ar.hold_until > now() - make_interval(secs => 300)
+        AND ar.hold_until > now() - make_interval(secs => $2::double precision)
   )
 ORDER BY atq.priority DESC, atq.created_at ASC
 `
+
+type ListQueuedClaimCandidatesByRuntimeParams struct {
+	RuntimeID               pgtype.UUID `json:"runtime_id"`
+	HoldExpiryMarginSeconds float64     `json:"hold_expiry_margin_seconds"`
+}
 
 // Returns rows the runtime is authorized to attempt to claim. Status is restricted to
 // 'queued' (in contrast to ListPendingTasksByRuntime which also includes
@@ -6513,12 +6521,13 @@ ORDER BY atq.priority DESC, atq.created_at ASC
 // ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 // runtime is busy on a long-running task. Backed by the partial index
 // idx_agent_task_queue_claim_candidates so the warm path is cheap.
-// Skips results when the runtime is on hold, including a 300s margin past
+// Skips results when the runtime is on hold, including the release margin past
 // hold_until (see ClearExpiredHolds: the provider quota is often not released
 // on the first run after the stated reset, so we keep the runtime held a
-// little longer to absorb clock skew).
-func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntime, runtimeID)
+// little longer to absorb clock skew). The margin comes from the single
+// holdExpiryMargin source in Go, shared with ClearExpiredHolds and ClaimAgentTask.
+func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, arg ListQueuedClaimCandidatesByRuntimeParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntime, arg.RuntimeID, arg.HoldExpiryMarginSeconds)
 	if err != nil {
 		return nil, err
 	}
