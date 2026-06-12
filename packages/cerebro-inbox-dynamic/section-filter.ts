@@ -41,6 +41,18 @@ export function entryIsUnread(entry: DynInboxEntry): boolean {
   }
 }
 
+/** TECH-3413 #4: does this entry @-mention the user right now? */
+export function entryIsMentioned(entry: DynInboxEntry, ctx: SectionFilterContext): boolean {
+  switch (entry.kind) {
+    case "notif":
+      return entry.item.type === "mentioned";
+    case "channel":
+      return ctx.action.mentionedChannels.has(entry.channel.id);
+    default:
+      return false;
+  }
+}
+
 export function entryProjectId(entry: DynInboxEntry): string | null {
   switch (entry.kind) {
     case "notif":
@@ -67,6 +79,14 @@ export function entryMatchesSection(
       return ctx.matchesPins(entry);
     case "project":
       return !!section.projectId && entryProjectId(entry) === section.projectId;
+    case "filter":
+      // TECH-3413 #4 — AND of every enabled predicate. An empty filter shows
+      // everything (the user narrows it from the section settings).
+      if (section.filterUnread && !entryIsUnread(entry)) return false;
+      if (section.filterPinned && !ctx.matchesPins(entry)) return false;
+      if (section.filterMentioned && !entryIsMentioned(entry, ctx)) return false;
+      if (section.projectId && entryProjectId(entry) !== section.projectId) return false;
+      return true;
     case "act_now":
     case "running":
     case "reminders":

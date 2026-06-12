@@ -17,6 +17,9 @@ export type SectionKind =
   | "pinned"
   | "project"
   | "all"
+  // TECH-3413 #4 — a fully dynamic box: the user composes the filter
+  // (unread / pinned / mentioned / project) instead of picking a fixed kind.
+  | "filter"
   // TECH-3422 — the Slack-block: a people/DM/channels rail with live presence
   // and typing. Rendered by a dedicated component, not the entry-list filter.
   | "team";
@@ -52,6 +55,14 @@ export interface InboxSectionConfig {
   countStyle?: "plain" | "circle";
   /** #4 (partial): hide muted rows in this box (e.g. reminders without muted). */
   excludeMuted?: boolean;
+  // --- TECH-3413 #4: composable filter for kind === "filter" (AND of the
+  // enabled predicates; projectId is reused as the optional project narrow). ---
+  /** Only unread rows. */
+  filterUnread?: boolean;
+  /** Only pinned rows (same predicate as the "pinned" kind). */
+  filterPinned?: boolean;
+  /** Only rows that @-mention you. */
+  filterMentioned?: boolean;
   /** TECH-3422 — for the "team" (Slack) section: how many people to show.
    *  0 / undefined = show all. Starred people always count first. */
   maxPeople?: number;
@@ -91,6 +102,7 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "waiting", label: "Waiting" },
   { kind: "calm", label: "Done / calm" },
   { kind: "all", label: "All messages" },
+  { kind: "filter", label: "Custom filter…" },
   // TECH-3422 — only surfaced in the Add-section menu when the
   // cerebro_inbox_slack_block flag is on (filtered in DynamicInbox).
   { kind: "team", label: "Team & channels (Slack)" },

@@ -33,6 +33,8 @@ export interface DynamicInboxSectionProps {
   selectedKey: string | null;
   /** Free-text search from the inbox top bar (TECH-3413 #9). */
   query?: string;
+  /** Drag-to-reorder handle injected by the sortable wrapper (TECH-3413 #1). */
+  dragHandle?: React.ReactNode;
   onSelect: (entry: DynInboxEntry) => void;
   onArchive: (entry: DynInboxEntry) => void;
   onChange: (next: InboxSectionConfig) => void;
@@ -92,6 +94,7 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+        {props.dragHandle}
         {collapsible && (
           <button
             type="button"
@@ -183,11 +186,42 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                   Hide muted {section.excludeMuted ? "✓" : ""}
                 </DropdownMenuItem>
               </DropdownMenuGroup>
-              {section.kind === "project" && projects.length > 0 && (
+              {/* TECH-3413 #4 — composable filter, AND of the enabled toggles. */}
+              {section.kind === "filter" && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Filter</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onClick={() => props.onChange({ ...section, filterUnread: !section.filterUnread })}
+                    >
+                      Unread only {section.filterUnread ? "✓" : ""}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => props.onChange({ ...section, filterPinned: !section.filterPinned })}
+                    >
+                      Pinned only {section.filterPinned ? "✓" : ""}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => props.onChange({ ...section, filterMentioned: !section.filterMentioned })}
+                    >
+                      Mentions me {section.filterMentioned ? "✓" : ""}
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </>
+              )}
+              {(section.kind === "project" || section.kind === "filter") && projects.length > 0 && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuLabel>Project</DropdownMenuLabel>
+                    {section.kind === "filter" && (
+                      <DropdownMenuItem
+                        onClick={() => props.onChange({ ...section, projectId: undefined })}
+                      >
+                        Any project {!section.projectId ? "✓" : ""}
+                      </DropdownMenuItem>
+                    )}
                     {projects.map((p) => (
                       <DropdownMenuItem
                         key={p.id}
