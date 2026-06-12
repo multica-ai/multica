@@ -249,6 +249,27 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
+	task := Task{
+		ChatSessionID: "sess-1",
+		ChatMessage:   "please create an issue with this screenshot",
+		ChatMessageAttachments: []ChatAttachmentMeta{
+			{ID: "019ec09d-6222-722b-bdfa-427b105d80be", Filename: "shot.png", ContentType: "image/png"},
+		},
+	}
+	out := BuildPrompt(task, "claude")
+	for _, want := range []string{
+		"Attachments on this message:",
+		"id=019ec09d-6222-722b-bdfa-427b105d80be",
+		"multica attachment download <id>",
+		"--attachment-id <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("chat prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -21,7 +21,9 @@ import { useT } from "../../i18n";
 const logger = createLogger("chat.ui");
 
 interface ChatInputProps {
-  onSend: (content: string, attachmentIds?: string[]) => void;
+  onSend: (content: string, attachmentIds?: string[]) => void | boolean | Promise<void | boolean>;
+  restoreDraftRequest?: { id: string; content: string } | null;
+  onRestoreDraftConsumed?: () => void;
   /** Receives a File and returns the attachment row (with id + CDN link).
    *  The wrapper owner (ChatWindow) lazy-creates a chat_session if needed
    *  and forwards `chatSessionId` to the upload — chat-input only cares
@@ -46,6 +48,8 @@ interface ChatInputProps {
 
 export function ChatInput({
   onSend,
+  restoreDraftRequest,
+  onRestoreDraftConsumed,
   onUploadFile,
   onStop,
   isRunning,
@@ -67,9 +71,10 @@ export function ChatInput({
   // mid-compose gives each agent its own draft. This is a STORAGE key, not
   // a React identity.
   //
-  // `editorKey` — React `key` on the ContentEditor. Used ONLY to force a
+  // `editorKey` — React `key` on the ContentEditor. Used to force a
   // remount when the user explicitly switches agent (so Tiptap's
-  // Placeholder, which only reads on mount, refreshes to "Tell {agent}…").
+  // Placeholder, which only reads on mount, refreshes to "Tell {agent}…")
+  // or when a cancelled empty run restores a draft from the server.
   // Crucially this does NOT include `activeSessionId`: when the user
   // uploads a file in a brand-new chat, `handleUploadFile` first awaits
   // `ensureSession` which lazily creates the session and flips
@@ -82,12 +87,19 @@ export function ChatInput({
   // first-upload-creates-session work the same as second-upload.
   const draftKey =
     activeSessionId ?? `${DRAFT_NEW_SESSION}:${selectedAgentId ?? ""}`;
-  const editorKey = selectedAgentId ?? "no-agent";
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editorRestore, setEditorRestore] = useState<{
+    id: string;
+    content: string;
+    draftKey: string;
+  } | null>(null);
+  const activeRestore = editorRestore?.draftKey === draftKey ? editorRestore : null;
+  const editorKey = `${selectedAgentId ?? "no-agent"}:${activeRestore?.id ?? "base"}`;
   // Number of in-flight uploads. We track this explicitly (rather than
   // peeking at the editor on every render) so the SubmitButton visibly
   // disables the instant an upload starts and re-enables the instant it
@@ -109,6 +121,26 @@ export function ChatInput({
   // `onSend` call would silently drop `attachment_ids` so the
   // attachment never binds to the chat message.
   const uploadMapRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    if (!restoreDraftRequest) return;
+    if (inputDraft.trim()) {
+      logger.info("input.restore skipped: draft already has content", {
+        draftKey,
+        restoreId: restoreDraftRequest.id,
+      });
+      onRestoreDraftConsumed?.();
+      return;
+    }
+    setInputDraft(draftKey, restoreDraftRequest.content);
+    setIsEmpty(!restoreDraftRequest.content.trim());
+    setEditorRestore({
+      id: restoreDraftRequest.id,
+      content: restoreDraftRequest.content,
+      draftKey,
+    });
+    onRestoreDraftConsumed?.();
+  }, [draftKey, inputDraft, onRestoreDraftConsumed, restoreDraftRequest, setInputDraft]);
 
   const handleUpload = useCallback(
     async (file: File): Promise<UploadResult | null> => {
@@ -135,12 +167,13 @@ export function ChatInput({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || isRunning || disabled || noAgent) {
+    if (!content || isRunning || isSubmitting || disabled || noAgent) {
       logger.debug("input.send skipped", {
         emptyContent: !content,
         isRunning,
+        isSubmitting,
         disabled,
         noAgent,
       });
@@ -172,7 +205,17 @@ export function ChatInput({
       draftKey: keyAtSend,
       attachmentCount: activeIds.length,
     });
-    onSend(content, activeIds.length > 0 ? activeIds : undefined);
+    setIsSubmitting(true);
+    let accepted: void | boolean;
+    try {
+      accepted = await onSend(content, activeIds.length > 0 ? activeIds : undefined);
+    } catch (err) {
+      logger.warn("input.send failed", err);
+      setIsSubmitting(false);
+      return;
+    }
+    setIsSubmitting(false);
+    if (accepted === false) return;
     editorRef.current?.clearContent();
     // Drop focus so the caret doesn't keep blinking under the StatusPill /
     // streaming reply that's about to take over the user's attention. The
@@ -228,7 +271,7 @@ export function ChatInput({
             // intentionally does not depend on activeSessionId.
             key={editorKey}
             ref={editorRef}
-            defaultValue={inputDraft}
+            defaultValue={activeRestore?.content ?? inputDraft}
             placeholder={placeholder}
             onUpdate={(md) => {
               setIsEmpty(!md.trim());
@@ -264,7 +307,7 @@ export function ChatInput({
           )}
           <SubmitButton
             onClick={handleSend}
-            disabled={isEmpty || !!disabled || !!noAgent || pendingUploads > 0}
+            disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
             running={isRunning}
             onStop={onStop}
             tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}

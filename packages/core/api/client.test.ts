@@ -487,6 +487,109 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("cancelTaskById response parsing", () => {
+    const taskResponse = {
+      id: "task-1",
+      agent_id: "agent-1",
+      runtime_id: "runtime-1",
+      issue_id: "",
+      status: "cancelled",
+      priority: 0,
+      dispatched_at: null,
+      started_at: null,
+      completed_at: "2026-06-12T06:40:00Z",
+      result: null,
+      error: null,
+      created_at: "2026-06-12T06:39:00Z",
+    };
+
+    it("parses the cancelled chat message payload", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          ...taskResponse,
+          cancelled_chat_message: {
+            chat_session_id: "session-1",
+            message_id: "message-1",
+            content: "restore me",
+            restore_to_input: true,
+          },
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(fetchMock.mock.calls[0]).toMatchObject([
+        "https://api.example.test/api/tasks/task-1/cancel",
+        { method: "POST" },
+      ]);
+      expect(result.cancelled_chat_message).toEqual({
+        chat_session_id: "session-1",
+        message_id: "message-1",
+        content: "restore me",
+        restore_to_input: true,
+      });
+    });
+
+    it("treats a null cancelled chat message as absent", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({
+            ...taskResponse,
+            cancelled_chat_message: null,
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.id).toBe("task-1");
+      expect(result.cancelled_chat_message).toBeUndefined();
+    });
+
+    it.each([
+      ["a missing task id", { ...taskResponse, id: undefined }],
+      [
+        "a malformed cancelled chat message",
+        {
+          ...taskResponse,
+          cancelled_chat_message: {
+            chat_session_id: "session-1",
+            message_id: "message-1",
+            content: "restore me",
+            restore_to_input: "true",
+          },
+        },
+      ],
+      ["a null body", null],
+    ])("falls back for %s", async (_label, body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.id).toBe("");
+      expect(result.cancelled_chat_message).toBeUndefined();
+    });
+  });
+
   describe("chat attachment wiring", () => {
     it("uploadFile includes chat_session_id in the FormData body", async () => {
       const fetchMock = vi.fn().mockResolvedValue(

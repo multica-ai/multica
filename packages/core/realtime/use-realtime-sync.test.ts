@@ -19,6 +19,7 @@ import {
   applyChatDoneToCache,
   applyWorkspaceUpdatedToCache,
   handleInboxNew,
+  invalidateChatMessageQueries,
   resolveInboxSourceSlug,
 } from "./use-realtime-sync";
 
@@ -131,6 +132,18 @@ describe("applyChatDoneToCache", () => {
       userMessage(),
     ]);
     expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({});
+  });
+});
+
+describe("invalidateChatMessageQueries", () => {
+  it("invalidates both legacy and paged chat message caches", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    invalidateChatMessageQueries(qc, sessionId);
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messages(sessionId) });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messagesPage(sessionId) });
   });
 });
 

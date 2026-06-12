@@ -109,18 +109,30 @@ function isRecoverableRendererExit(details: unknown) {
 function rendererRecoveryMessage(kind: ReloadPromptPayload["kind"]) {
   switch (kind) {
     case "render-process-gone":
-      return "The desktop renderer process stopped responding or crashed.";
+      return "The desktop window stopped unexpectedly.";
     case "preload-error":
-      return "The desktop preload script failed before the app could start.";
+      return "The desktop window could not finish starting.";
     case "unresponsive":
-      return "The desktop window is not responding.";
+      return "The desktop window has been stuck for a few seconds.";
   }
 }
 
 function rendererRecoveryDetail(payload: ReloadPromptPayload) {
+  const guidance = [
+    "Click Reload to refresh this window and keep using Multica.",
+    "If this keeps happening, please tell us what you were doing right before this message appeared and whether Reload recovered the window.",
+  ];
+
+  if (payload.kind === "unresponsive") {
+    guidance.push(
+      "For macOS reports, an Activity Monitor sample of the Multica Helper (Renderer) process helps us find what blocked the app.",
+    );
+  }
+
   return [
-    "Reloading is the safest recovery path for this window.",
+    ...guidance,
     "",
+    "Diagnostic details:",
     `kind: ${payload.kind}`,
     `context: ${JSON.stringify(payload.context)}`,
   ].join("\n");

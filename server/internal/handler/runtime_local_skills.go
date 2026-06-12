@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -24,7 +27,34 @@ const (
 	RuntimeLocalSkillCompleted RuntimeLocalSkillRequestStatus = "completed"
 	RuntimeLocalSkillFailed    RuntimeLocalSkillRequestStatus = "failed"
 	RuntimeLocalSkillTimeout   RuntimeLocalSkillRequestStatus = "timeout"
+	// RuntimeLocalSkillConflict is a terminal state set when a fresh import
+	// hits an existing same-name skill. It is not an error: the request carries
+	// structured Conflict metadata so the caller (Desktop UI / CLI) can offer
+	// overwrite / rename / skip instead of silently failing. See MUL-2800.
+	RuntimeLocalSkillConflict RuntimeLocalSkillRequestStatus = "conflict"
 )
+
+// LocalSkillImportAction selects how a runtime-local-skill import resolves when
+// a skill with the same name already exists in the workspace.
+type LocalSkillImportAction string
+
+const (
+	// LocalSkillImportActionCreate is the default: create a new skill, and
+	// surface a structured `conflict` if the name is already taken.
+	LocalSkillImportActionCreate LocalSkillImportAction = ""
+	// LocalSkillImportActionOverwrite re-imports onto an existing skill,
+	// identified by TargetSkillID. Only the skill's creator may overwrite.
+	LocalSkillImportActionOverwrite LocalSkillImportAction = "overwrite"
+)
+
+// LocalSkillImportConflict is the structured result attached to a request that
+// terminated in RuntimeLocalSkillConflict. CanOverwrite reflects the
+// creator-only re-import policy (canOverwriteSkillByLocalImport).
+type LocalSkillImportConflict struct {
+	ExistingSkillID   string `json:"existing_skill_id"`
+	ExistingCreatedBy string `json:"existing_created_by,omitempty"`
+	CanOverwrite      bool   `json:"can_overwrite"`
+}
 
 const (
 	// runtimeLocalSkillPendingTimeout bounds how long a request can sit in
@@ -62,11 +92,28 @@ type LocalSkillListStore interface {
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
+// LocalSkillImportRequestInput carries the fields needed to enqueue a
+// runtime-local-skill import. SupportsConflict gates the structured-conflict
+// contract: only clients that opt in receive the `conflict` terminal status;
+// older clients keep the legacy `failed` ("a skill with this name already
+// exists") behavior so an already-installed Desktop build doesn't regress when
+// it talks to an upgraded backend. See MUL-2800.
+type LocalSkillImportRequestInput struct {
+	RuntimeID        string
+	CreatorID        string
+	SkillKey         string
+	Name             *string
+	Description      *string
+	Action           LocalSkillImportAction
+	TargetSkillID    string
+	SupportsConflict bool
+}
+
 // LocalSkillImportStore is the same contract as LocalSkillListStore but for
 // runtime-local-skill import requests. Kept as a separate interface because the
 // Create signature carries import-specific fields (skill_key, optional rename).
 type LocalSkillImportStore interface {
-	Create(ctx context.Context, runtimeID, creatorID, skillKey string, name, description *string) (*RuntimeLocalSkillImportRequest, error)
+	Create(ctx context.Context, input LocalSkillImportRequestInput) (*RuntimeLocalSkillImportRequest, error)
 	Get(ctx context.Context, id string) (*RuntimeLocalSkillImportRequest, error)
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error)
@@ -75,6 +122,9 @@ type LocalSkillImportStore interface {
 	// multiple imports per heartbeat cycle.
 	PopPendingBatch(ctx context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error)
 	Complete(ctx context.Context, id string, skill SkillResponse) error
+	// Conflict transitions a request to the terminal RuntimeLocalSkillConflict
+	// state, attaching structured conflict metadata for the caller to act on.
+	Conflict(ctx context.Context, id string, info LocalSkillImportConflict) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
@@ -143,18 +193,25 @@ type RuntimeLocalSkillListRequest struct {
 }
 
 type RuntimeLocalSkillImportRequest struct {
-	ID           string                         `json:"id"`
-	RuntimeID    string                         `json:"runtime_id"`
-	SkillKey     string                         `json:"skill_key"`
-	Name         *string                        `json:"name,omitempty"`
-	Description  *string                        `json:"description,omitempty"`
-	Status       RuntimeLocalSkillRequestStatus `json:"status"`
-	Skill        *SkillResponse                 `json:"skill,omitempty"`
-	Error        string                         `json:"error,omitempty"`
-	CreatedAt    time.Time                      `json:"created_at"`
-	UpdatedAt    time.Time                      `json:"updated_at"`
-	CreatorID    string                         `json:"-"`
-	RunStartedAt *time.Time                     `json:"-"`
+	ID            string                 `json:"id"`
+	RuntimeID     string                 `json:"runtime_id"`
+	SkillKey      string                 `json:"skill_key"`
+	Name          *string                `json:"name,omitempty"`
+	Description   *string                `json:"description,omitempty"`
+	Action        LocalSkillImportAction `json:"action,omitempty"`
+	TargetSkillID string                 `json:"target_skill_id,omitempty"`
+	// SupportsConflict records whether the initiating client opted into the
+	// structured-conflict contract; consulted at report time to decide between
+	// the new `conflict` status and the legacy `failed` behavior.
+	SupportsConflict bool                           `json:"supports_conflict,omitempty"`
+	Status           RuntimeLocalSkillRequestStatus `json:"status"`
+	Skill            *SkillResponse                 `json:"skill,omitempty"`
+	Conflict         *LocalSkillImportConflict      `json:"conflict,omitempty"`
+	Error            string                         `json:"error,omitempty"`
+	CreatedAt        time.Time                      `json:"created_at"`
+	UpdatedAt        time.Time                      `json:"updated_at"`
+	CreatorID        string                         `json:"-"`
+	RunStartedAt     *time.Time                     `json:"-"`
 }
 
 // InMemoryLocalSkillListStore is the single-node implementation — good enough
@@ -277,7 +334,7 @@ func NewInMemoryLocalSkillImportStore() *InMemoryLocalSkillImportStore {
 	return &InMemoryLocalSkillImportStore{requests: make(map[string]*RuntimeLocalSkillImportRequest)}
 }
 
-func (s *InMemoryLocalSkillImportStore) Create(_ context.Context, runtimeID, creatorID, skillKey string, name, description *string) (*RuntimeLocalSkillImportRequest, error) {
+func (s *InMemoryLocalSkillImportStore) Create(_ context.Context, input LocalSkillImportRequestInput) (*RuntimeLocalSkillImportRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -288,15 +345,18 @@ func (s *InMemoryLocalSkillImportStore) Create(_ context.Context, runtimeID, cre
 	}
 
 	req := &RuntimeLocalSkillImportRequest{
-		ID:          randomID(),
-		RuntimeID:   runtimeID,
-		SkillKey:    skillKey,
-		Name:        name,
-		Description: description,
-		Status:      RuntimeLocalSkillPending,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		CreatorID:   creatorID,
+		ID:               randomID(),
+		RuntimeID:        input.RuntimeID,
+		SkillKey:         input.SkillKey,
+		Name:             input.Name,
+		Description:      input.Description,
+		Action:           input.Action,
+		TargetSkillID:    input.TargetSkillID,
+		SupportsConflict: input.SupportsConflict,
+		Status:           RuntimeLocalSkillPending,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+		CreatorID:        input.CreatorID,
 	}
 	s.requests[req.ID] = req
 	return req, nil
@@ -396,6 +456,19 @@ func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, s
 	return nil
 }
 
+func (s *InMemoryLocalSkillImportStore) Conflict(_ context.Context, id string, info LocalSkillImportConflict) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if req, ok := s.requests[id]; ok {
+		req.Status = RuntimeLocalSkillConflict
+		conflict := info
+		req.Conflict = &conflict
+		req.UpdatedAt = time.Now()
+	}
+	return nil
+}
+
 func (s *InMemoryLocalSkillImportStore) Fail(_ context.Context, id string, errMsg string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -412,6 +485,14 @@ type CreateRuntimeLocalSkillImportRequest struct {
 	SkillKey    string  `json:"skill_key"`
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
+	// Action selects create (default) vs overwrite. When overwrite,
+	// TargetSkillID must reference the existing same-name skill.
+	Action        LocalSkillImportAction `json:"action,omitempty"`
+	TargetSkillID string                 `json:"target_skill_id,omitempty"`
+	// SupportsConflict opts the client into the structured-conflict contract.
+	// Omit it (older clients) to keep the legacy `failed` behavior on a
+	// same-name collision. An overwrite request implies the new contract.
+	SupportsConflict bool `json:"supports_conflict,omitempty"`
 }
 
 type reportedRuntimeLocalSkill struct {
@@ -435,7 +516,8 @@ func cleanOptionalString(value *string) *string {
 }
 
 func runtimeLocalSkillRequestTerminal(status RuntimeLocalSkillRequestStatus) bool {
-	return status == RuntimeLocalSkillCompleted || status == RuntimeLocalSkillFailed || status == RuntimeLocalSkillTimeout
+	return status == RuntimeLocalSkillCompleted || status == RuntimeLocalSkillFailed ||
+		status == RuntimeLocalSkillTimeout || status == RuntimeLocalSkillConflict
 }
 
 func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, bool) {
@@ -542,14 +624,36 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	importReq, err := h.LocalSkillImportStore.Create(
-		r.Context(),
-		rt.runtimeID,
-		creatorID,
-		strings.TrimSpace(req.SkillKey),
-		cleanOptionalString(req.Name),
-		cleanOptionalString(req.Description),
-	)
+	targetSkillID := ""
+	switch req.Action {
+	case LocalSkillImportActionCreate:
+		// nothing extra
+	case LocalSkillImportActionOverwrite:
+		// Existence + creator permission are re-verified authoritatively at
+		// report time (the skill may change between confirm and write); here we
+		// only require a well-formed target so we never enqueue a doomed write.
+		uuid, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(req.TargetSkillID), "target_skill_id")
+		if !ok {
+			return
+		}
+		targetSkillID = uuidToString(uuid)
+	default:
+		writeError(w, http.StatusBadRequest, "invalid action")
+		return
+	}
+
+	importReq, err := h.LocalSkillImportStore.Create(r.Context(), LocalSkillImportRequestInput{
+		RuntimeID:     rt.runtimeID,
+		CreatorID:     creatorID,
+		SkillKey:      strings.TrimSpace(req.SkillKey),
+		Name:          cleanOptionalString(req.Name),
+		Description:   cleanOptionalString(req.Description),
+		Action:        req.Action,
+		TargetSkillID: targetSkillID,
+		// An overwrite request is inherently a new-client action, so it implies
+		// the structured-conflict contract even if the flag is omitted.
+		SupportsConflict: req.SupportsConflict || req.Action == LocalSkillImportActionOverwrite,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skill import: "+err.Error())
 		return
@@ -671,21 +775,11 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	}
 
 	if body.Status != "completed" {
-		if err := h.LocalSkillImportStore.Fail(r.Context(), requestID, body.Error); err != nil {
-			slog.Error("local skill import Fail failed", "error", err, "request_id", requestID)
-			writeError(w, http.StatusInternalServerError, "failed to persist failure")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		h.failLocalSkillImport(w, r, requestID, body.Error)
 		return
 	}
 	if body.Skill == nil {
-		if err := h.LocalSkillImportStore.Fail(r.Context(), requestID, "daemon returned an empty skill bundle"); err != nil {
-			slog.Error("local skill import Fail failed", "error", err, "request_id", requestID)
-			writeError(w, http.StatusInternalServerError, "failed to persist failure")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		h.failLocalSkillImport(w, r, requestID, "daemon returned an empty skill bundle")
 		return
 	}
 	creatorUUID, err := util.ParseUUID(req.CreatorID)
@@ -715,33 +809,103 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		files = append(files, f)
 	}
 
+	config := map[string]any{
+		"origin": map[string]any{
+			"type":        "runtime_local",
+			"runtime_id":  runtimeID,
+			"provider":    body.Skill.Provider,
+			"source_path": body.Skill.SourcePath,
+		},
+	}
+
+	// Overwrite path: re-import onto an existing skill. Existence and creator
+	// permission are re-verified inside overwriteSkillWithFiles, in the same tx
+	// as the write, so a target deleted (or a creator change) between the user's
+	// confirm and this report fails cleanly without falling back to create.
+	if req.Action == LocalSkillImportActionOverwrite {
+		targetUUID, perr := util.ParseUUID(req.TargetSkillID)
+		if perr != nil {
+			failMsg := "stored target_skill_id is invalid"
+			if ferr := h.LocalSkillImportStore.Fail(r.Context(), requestID, failMsg); ferr != nil {
+				slog.Error("local skill import Fail failed", "error", ferr, "request_id", requestID)
+			}
+			writeError(w, http.StatusInternalServerError, failMsg)
+			return
+		}
+		resp, oerr := h.overwriteSkillWithFiles(r.Context(), skillOverwriteInput{
+			WorkspaceID:   rt.WorkspaceID,
+			TargetSkillID: targetUUID,
+			UserID:        req.CreatorID,
+			ExpectedName:  sanitizeNullBytes(name),
+			Description:   description,
+			Content:       body.Skill.Content,
+			Config:        config,
+			Files:         files,
+		})
+		if oerr != nil {
+			failMsg := oerr.Error()
+			switch {
+			case errors.Is(oerr, errSkillOverwriteNotFound):
+				failMsg = "target skill no longer exists"
+			case errors.Is(oerr, errSkillOverwriteForbidden):
+				failMsg = "you no longer have permission to overwrite this skill"
+			case errors.Is(oerr, errSkillOverwriteNameMismatch):
+				failMsg = "target skill name no longer matches the imported skill"
+			}
+			h.failLocalSkillImport(w, r, requestID, failMsg)
+			return
+		}
+		if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp.SkillResponse); err != nil {
+			// The overwrite already committed; unlike the create path we must
+			// NOT delete the skill to "roll back" (that would destroy a
+			// pre-existing skill and its agent bindings). Surface 5xx so the
+			// daemon retries — the retry re-applies the same UPDATE idempotently.
+			slog.Error("local skill import overwrite Complete failed",
+				"error", err, "request_id", requestID, "skill_id", resp.ID)
+			writeError(w, http.StatusInternalServerError, "failed to persist import completion")
+			return
+		}
+		h.publish(protocol.EventSkillUpdated, uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
+		slog.Debug("runtime local skill overwritten", "runtime_id", runtimeID, "request_id", requestID, "skill_id", resp.ID)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
+	// Create path: detect a same-name conflict before writing. For opted-in
+	// clients this is a structured terminal state (not a failure) so the caller
+	// can offer overwrite / rename / skip; older clients keep the legacy
+	// `failed` behavior (see resolveLocalSkillConflict).
+	if existing, found, lerr := h.lookupSkillByName(r.Context(), rt.WorkspaceID, sanitizeNullBytes(name)); lerr != nil {
+		h.failLocalSkillImport(w, r, requestID, "failed to check for existing skill: "+lerr.Error())
+		return
+	} else if found {
+		h.resolveLocalSkillConflict(w, r, req, existing)
+		return
+	}
+
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
 		WorkspaceID: rt.WorkspaceID,
 		CreatorID:   creatorUUID,
 		Name:        name,
 		Description: description,
 		Content:     body.Skill.Content,
-		Config: map[string]any{
-			"origin": map[string]any{
-				"type":        "runtime_local",
-				"runtime_id":  runtimeID,
-				"provider":    body.Skill.Provider,
-				"source_path": body.Skill.SourcePath,
-			},
-		},
-		Files: files,
+		Config:      config,
+		Files:       files,
 	})
 	if err != nil {
-		failMsg := err.Error()
+		// A unique-violation here means another import won the race between our
+		// lookup and the insert — surface it as a conflict, not a hard failure.
 		if isUniqueViolation(err) {
-			failMsg = "a skill with this name already exists"
-		}
-		if ferr := h.LocalSkillImportStore.Fail(r.Context(), requestID, failMsg); ferr != nil {
-			slog.Error("local skill import Fail failed", "error", ferr, "request_id", requestID)
-			writeError(w, http.StatusInternalServerError, "failed to persist failure")
+			if existing, found, lerr := h.lookupSkillByName(r.Context(), rt.WorkspaceID, sanitizeNullBytes(name)); lerr == nil && found {
+				h.resolveLocalSkillConflict(w, r, req, existing)
+				return
+			}
+			// Lost the row again (deleted between insert-fail and re-lookup):
+			// fall through to the legacy unique-violation message.
+			h.failLocalSkillImport(w, r, requestID, "a skill with this name already exists")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		h.failLocalSkillImport(w, r, requestID, err.Error())
 		return
 	}
 
@@ -765,4 +929,65 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	h.publish(protocol.EventSkillCreated, uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
 	slog.Debug("runtime local skill imported", "runtime_id", runtimeID, "request_id", requestID, "skill_id", resp.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// failLocalSkillImport marks the request failed and writes the standard daemon
+// response (200 ok). If the store write itself fails it returns 500 so the
+// daemon retries.
+func (h *Handler) failLocalSkillImport(w http.ResponseWriter, r *http.Request, requestID, failMsg string) {
+	if err := h.LocalSkillImportStore.Fail(r.Context(), requestID, failMsg); err != nil {
+		slog.Error("local skill import Fail failed", "error", err, "request_id", requestID)
+		writeError(w, http.StatusInternalServerError, "failed to persist failure")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// resolveLocalSkillConflict terminates a same-name create import. Clients that
+// opted into the structured-conflict contract (SupportsConflict) receive the
+// `conflict` status plus metadata so they can offer overwrite / rename / skip;
+// older clients keep the legacy `failed` ("a skill with this name already
+// exists") behavior so an installed Desktop build that predates the contract
+// doesn't regress when it hits an upgraded backend.
+func (h *Handler) resolveLocalSkillConflict(w http.ResponseWriter, r *http.Request, req *RuntimeLocalSkillImportRequest, existing db.Skill) {
+	if req.SupportsConflict {
+		h.reportLocalSkillConflict(w, r, req.ID, req.CreatorID, existing)
+		return
+	}
+	h.failLocalSkillImport(w, r, req.ID, "a skill with this name already exists")
+}
+
+// reportLocalSkillConflict records a same-name conflict as the terminal
+// RuntimeLocalSkillConflict state with structured metadata the caller uses to
+// offer overwrite / rename / skip.
+func (h *Handler) reportLocalSkillConflict(w http.ResponseWriter, r *http.Request, requestID, creatorID string, existing db.Skill) {
+	info := LocalSkillImportConflict{
+		ExistingSkillID: uuidToString(existing.ID),
+		CanOverwrite:    canOverwriteSkillByLocalImport(creatorID, existing),
+	}
+	if existing.CreatedBy.Valid {
+		info.ExistingCreatedBy = uuidToString(existing.CreatedBy)
+	}
+	if err := h.LocalSkillImportStore.Conflict(r.Context(), requestID, info); err != nil {
+		slog.Error("local skill import Conflict failed", "error", err, "request_id", requestID)
+		writeError(w, http.StatusInternalServerError, "failed to persist conflict")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// lookupSkillByName resolves a skill by (workspace, name). found=false with a
+// nil error means there is no such skill — i.e. no conflict.
+func (h *Handler) lookupSkillByName(ctx context.Context, workspaceID pgtype.UUID, name string) (db.Skill, bool, error) {
+	skill, err := h.Queries.GetSkillByWorkspaceAndName(ctx, db.GetSkillByWorkspaceAndNameParams{
+		WorkspaceID: workspaceID,
+		Name:        name,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Skill{}, false, nil
+		}
+		return db.Skill{}, false, err
+	}
+	return skill, true, nil
 }

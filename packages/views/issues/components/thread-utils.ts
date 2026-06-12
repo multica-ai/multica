@@ -1,11 +1,19 @@
 import type { TimelineEntry } from "@multica/core/types";
+import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 
 /**
  * Walks the parent_id graph rooted at `rootId` and returns every descendant in
- * traversal order. Shared between CommentCard (which renders the expanded
- * thread) and ResolvedThreadBar (which displays the collapsed count + author
- * list) so the two views stay in sync — direct-children-only counts diverge
- * once nested replies exist (see Emacs review on PR #2300).
+ * CHRONOLOGICAL order (created_at ASC, id tie-break). Shared between
+ * CommentCard (which renders the expanded thread) and ResolvedThreadBar
+ * (which displays the collapsed count + author list) so the two views stay in
+ * sync — direct-children-only counts diverge once nested replies exist (see
+ * Emacs review on PR #2300).
+ *
+ * Chronological, not depth-first: agent replies are forced to nest under the
+ * comment that triggered them, so a depth-first walk lets a slow agent's late
+ * reply render BEFORE earlier sibling replies (#3691). The server's --thread
+ * output the agent reads is already chronological (ListThreadCommentsForIssue
+ * in comment.sql); this keeps the UI on the same order.
  */
 export function collectThreadReplies(
   rootId: string,
@@ -20,7 +28,7 @@ export function collectThreadReplies(
     }
   };
   walk(rootId);
-  return out;
+  return sortTimelineEntriesAsc(out);
 }
 
 /**

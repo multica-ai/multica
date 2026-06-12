@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -140,6 +141,15 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 	case "openclaw":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
+		})
+	case "codebuddy":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			models, err := discoverCodebuddyModels(ctx, executablePath)
+			if err != nil {
+				return nil, err
+			}
+			annotateCodebuddyThinking(ctx, models, executablePath)
+			return models, nil
 		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
@@ -1306,4 +1316,112 @@ func isOpenclawIdentifier(s string) bool {
 		}
 	}
 	return true
+}
+
+// ── CodeBuddy model discovery ──
+
+// codebuddyModelRe matches the `--model <model> ... Currently supported: (m1, m2, ...)`
+// line in `codebuddy --help` output.
+var codebuddyModelRe = regexp.MustCompile(`--model\s*<[^>]+>\s*.*?Currently supported:\s*\(([^)]+)\)`)
+
+// discoverCodebuddyModels runs `codebuddy --help` and extracts the
+// supported model list from its output. Falls back to a static list
+// when the binary is missing or the output cannot be parsed.
+func discoverCodebuddyModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "codebuddy"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return codebuddyStaticModels(), nil
+	}
+	helpOut := codebuddyHelpOutput(ctx, executablePath)
+	if helpOut == "" {
+		return codebuddyStaticModels(), nil
+	}
+	models := parseCodebuddyModels(helpOut)
+	if len(models) == 0 {
+		return codebuddyStaticModels(), nil
+	}
+	return models, nil
+}
+
+// parseCodebuddyModels extracts model IDs from codebuddy --help output.
+// The help text contains a line like:
+//
+//	--model <model>  ... Currently supported: (model1, model2, ...)
+//
+// The first model in the list is marked as default.
+func parseCodebuddyModels(helpOutput string) []Model {
+	match := codebuddyModelRe.FindStringSubmatch(helpOutput)
+	if len(match) < 2 {
+		return nil
+	}
+	raw := strings.Split(match[1], ",")
+	var models []Model
+	for _, s := range raw {
+		id := strings.TrimSpace(s)
+		if id == "" {
+			continue
+		}
+		models = append(models, Model{
+			ID:       id,
+			Label:    codebuddyModelLabel(id),
+			Provider: codebuddyModelProvider(id),
+			Default:  len(models) == 0,
+		})
+	}
+	return models
+}
+
+// codebuddyModelProvider infers a provider name from a model ID prefix.
+func codebuddyModelProvider(id string) string {
+	switch {
+	case strings.HasPrefix(id, "claude-"):
+		return "anthropic"
+	case strings.HasPrefix(id, "gemini-"):
+		return "google"
+	case strings.HasPrefix(id, "gpt-"):
+		return "openai"
+	case strings.HasPrefix(id, "glm-"):
+		return "zhipu"
+	case strings.HasPrefix(id, "minimax-"):
+		return "minimax"
+	case strings.HasPrefix(id, "kimi-"):
+		return "kimi"
+	case len(id) >= 3 && id[0] == 'h' && id[1] == 'y' && id[2] >= '0' && id[2] <= '9':
+		return "hunyuan"
+	case strings.HasPrefix(id, "deepseek-"):
+		return "deepseek"
+	default:
+		return ""
+	}
+}
+
+// codebuddyModelLabel generates a human-readable label from a model ID.
+// Capitalizes each dash-separated part; special-cases GPT/GLM to uppercase
+// and rewrites the "-ioa" suffix as "IOA".
+func codebuddyModelLabel(id string) string {
+	parts := strings.Split(id, "-")
+	for i, p := range parts {
+		if strings.EqualFold(p, "gpt") || strings.EqualFold(p, "glm") {
+			parts[i] = strings.ToUpper(p)
+		} else if strings.EqualFold(p, "ioa") {
+			parts[i] = "IOA"
+		} else if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// codebuddyStaticModels is the fallback catalog when dynamic discovery
+// fails (binary missing, parse error, timeout).
+func codebuddyStaticModels() []Model {
+	return []Model{
+		{ID: "claude-sonnet-4.6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-opus-4.7", Label: "Claude Opus 4.7", Provider: "anthropic"},
+		{ID: "gemini-3.1-pro", Label: "Gemini 3.1 Pro", Provider: "google"},
+		{ID: "gpt-5.5", Label: "GPT 5.5", Provider: "openai"},
+		{ID: "deepseek-v3-2-volc-ioa", Label: "Deepseek V3 2 Volc IOA", Provider: "deepseek"},
+	}
 }

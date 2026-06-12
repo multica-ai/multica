@@ -293,19 +293,64 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.21",
+        date: "2026-06-12",
+        title: "CodeBuddy Runtime",
+        changes: [],
+        features: [
+          "CodeBuddy can now run local Multica agents, with its available model and effort choices shown automatically",
+          "Quick-created Issues now keep uploaded files attached from the first draft through the final Issue",
+        ],
+        improvements: [
+          "Skill import conflicts are clearer: locked skills show a person's name instead of an internal ID, and a single overwrite now completes in one click",
+          "Desktop recovery prompts now explain what happened first and give clearer details to include when reporting a stuck window",
+          "Views that sort or filter people by signup time can now load faster",
+        ],
+        fixes: [
+          "Chat now keeps messages and drafts in sync when sending, stopping, or recovering from a failed send",
+          "Lark account binding now works reliably for users who are already signed in, and sign-in returns to the binding page",
+          "Local agent runs no longer announce that work has started before the task folder is ready",
+        ],
+      },
+      {
         version: "0.3.20",
+        date: "2026-06-11",
+        title: "Skill Imports, Cleaner Run History, and Resilient Agents",
+        changes: [],
+        features: [
+          "Skill imports now let you choose what happens when a skill already exists: stop, replace it, save a renamed copy, or skip it",
+          "Import results now clearly show which skills were added, updated, skipped, blocked by a conflict, or could not be imported",
+        ],
+        improvements: [
+          "Execution logs now show the newest past runs first on web and mobile, so recent progress is easier to scan",
+          "Changelog content was cleaned up so the latest release notes stay grouped under the right release",
+        ],
+        fixes: [
+          "Issue thread replies now stay in the order they arrived, even when a slower agent reply lands later",
+          "Agents can recover when a saved session disappears, starting fresh instead of failing again on every mention",
+          "Reviving an Issue from a new workspace folder now starts a fresh session instead of retrying one that only existed in the old folder",
+        ],
+      },
+      {
+        version: "0.3.19",
         date: "2026-06-10",
-        title: "Safer Comment Triggers and More Reliable Attachments",
+        title: "Safer Comment Triggers, Reliable Agents, and Attachments",
         changes: [],
         features: [
           "Comment boxes now show which agents or squads will start work before you send, with controls to avoid accidental runs",
           "Run transcripts now include timestamps, making agent progress and handoffs easier to review",
           "Autopilot detail pages now show who created each autopilot",
           "Claude Fable 5 is now available in Multica's supported model and pricing list",
+          "Issue conversations can now resolve a specific reply, making long threads easier to close while keeping the final answer visible",
+          "Lark and Feishu conversations now show a typing reaction while Multica is preparing a reply, then clear it before the answer is sent",
+          "Agent runs now know who started each task, making handoffs, audit trails, and privacy-aware behavior more accurate",
+          "OpenClaw users can point Multica at a custom app location and data folder from their local configuration",
         ],
         improvements: [
           "Comment trigger indicators are quieter, clearer, and less likely to crowd long agent names",
           "Desktop now disables daemon start and stop controls when the daemon is managed outside Multica, such as in WSL2",
+          "The active agent indicator in an Issue header is easier to read, with motion only while work is running and clearer queued wording otherwise",
+          "The CLI now gives clearer guidance around common errors, sign-in problems, and project setup values",
         ],
         fixes: [
           "Inline images and files in Issue descriptions now stay visible across web and desktop after reloads",
@@ -313,24 +358,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Issue pages refresh their data after realtime reconnects, avoiding stale timelines after a connection drop",
           "Agent task initiator history now works more reliably for older task records",
           "Sticky Issue comments keep a cleaner visual edge while scrolling",
-        ],
-      },
-      {
-        version: "0.3.19",
-        date: "2026-06-09",
-        title: "More Reliable Agents, Attachments, and Issue Threads",
-        changes: [],
-        features: [
-          "Issue conversations can now resolve a specific reply, making long threads easier to close while keeping the final answer visible",
-          "Lark and Feishu conversations now show a typing reaction while Multica is preparing a reply, then clear it before the answer is sent",
-          "Agent runs now know who started each task, making handoffs, audit trails, and privacy-aware behavior more accurate",
-          "OpenClaw users can point Multica at a custom app location and data folder from their local configuration",
-        ],
-        improvements: [
-          "The active agent indicator in an Issue header is easier to read, with motion only while work is running and clearer queued wording otherwise",
-          "The CLI now gives clearer guidance around common errors, sign-in problems, and project setup values",
-        ],
-        fixes: [
           "Newly posted attachments now use stable private download links, so images and files stay visible after temporary upload links expire",
           "Autopilot runs started from newly created Issues now fail cleanly when the assigned task cannot complete, instead of staying stuck",
           "Inbox deep links now scroll inside the Issue timeline without pushing the desktop window out of place",
