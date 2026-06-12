@@ -10,7 +10,7 @@ import (
 )
 
 // socketConnector is the production Connector: it registers the bot over REST to
-// obtain an im_token + ws_url, opens an transport.Socket, and bridges inbound messages
+// obtain an im_token + ws_url, opens a transport.Socket, and bridges inbound messages
 // until the context is cancelled. Reconnect/backoff is handled inside transport.Socket.
 type socketConnector struct {
 	installations *InstallationService

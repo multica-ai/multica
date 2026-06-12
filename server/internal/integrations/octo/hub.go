@@ -41,7 +41,7 @@ type InboundHandler interface {
 
 // Connector is the per-installation transport. Run blocks until ctx is
 // cancelled (lease lost / shutdown) or the connection terminally fails. The
-// production connector wraps an transport.Socket; tests provide a fake.
+// production connector wraps a transport.Socket; tests provide a fake.
 type Connector interface {
 	Run(ctx context.Context, inst db.OctoInstallation, onMessage func(transport.BotMessage)) error
 }
