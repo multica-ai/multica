@@ -431,14 +431,10 @@ function ActiveRow({
           {showCancel && (
             <Tooltip>
               <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    onClick={requestCancel}
-                    disabled={cancelling}
-                    aria-label={t(($) => $.execution_log.cancel_task_aria)}
-                  />
-                }
+                render={<button type="button" />}
+                onClick={requestCancel}
+                disabled={cancelling}
+                aria-label={t(($) => $.execution_log.cancel_task_aria)}
                 className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {cancelling ? (
@@ -446,9 +442,7 @@ function ActiveRow({
                 ) : (
                   <Square className="h-3.5 w-3.5" />
                 )}
-              </button>
-            }
-            />
+              </TooltipTrigger>
             <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
           </Tooltip>
         )}
