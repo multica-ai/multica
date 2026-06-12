@@ -1177,6 +1177,106 @@ func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
 	}
 }
 
+// TestCoAuthoredByHookHonorsKillSwitch verifies the belt-and-suspenders kill
+// switch: with the hook installed, a commit made while MULTICA_NO_COAUTHOR=1 is
+// exported must NOT receive the Co-authored-by trailer, while a commit made
+// without it still does. This lets the agent runtime suppress attribution even
+// when a hook is present.
+func TestCoAuthoredByHookHonorsKillSwitch(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "c3d4e5f6-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	// The installed hook body must carry the kill-switch guard.
+	hookBody, err := readInstalledHook(t, result.Path)
+	if err != nil {
+		t.Fatalf("read installed hook: %v", err)
+	}
+	if !strings.Contains(hookBody, "MULTICA_NO_COAUTHOR") {
+		t.Fatalf("installed hook missing kill-switch guard:\n%s", hookBody)
+	}
+
+	trailer := "Co-authored-by: multica-agent <github@multica.ai>"
+
+	// Commit with the kill switch set → no trailer.
+	if err := os.WriteFile(filepath.Join(result.Path, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthoredEnv(t, result.Path, []string{"MULTICA_NO_COAUTHOR=1"}, "commit", "-m", "kill switch on")
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if strings.Contains(string(out), trailer) {
+		t.Errorf("kill switch set but trailer present.\ngot:\n%s", out)
+	}
+
+	// Commit without the kill switch → trailer restored.
+	if err := os.WriteFile(filepath.Join(result.Path, "b.txt"), []byte("b\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "kill switch off")
+	out, err = exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if !strings.Contains(string(out), trailer) {
+		t.Errorf("kill switch unset but trailer missing.\ngot:\n%s", out)
+	}
+}
+
+// readInstalledHook returns the contents of the prepare-commit-msg hook
+// installed in the worktree's git common dir.
+func readInstalledHook(t *testing.T, worktreePath string) (string, error) {
+	t.Helper()
+	out, err := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir").Output()
+	if err != nil {
+		return "", err
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(worktreePath, commonDir)
+	}
+	body, err := os.ReadFile(filepath.Join(commonDir, "hooks", "prepare-commit-msg"))
+	return string(body), err
+}
+
+// runGitAuthoredEnv is runGitAuthored with extra environment variables appended
+// to the git invocation (used to exercise the hook's MULTICA_NO_COAUTHOR guard).
+func runGitAuthoredEnv(t *testing.T, repoPath string, extraEnv []string, args ...string) {
+	t.Helper()
+	full := append([]string{"-C", repoPath}, args...)
+	cmd := exec.Command("git", full...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	cmd.Env = append(cmd.Env, extraEnv...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v in %s: %s: %v", args, repoPath, out, err)
+	}
+}
+
 // TestCoAuthoredByHookIdempotent verifies that the hook does not add a
 // duplicate Co-authored-by trailer if one is already present in the message.
 func TestCoAuthoredByHookIdempotent(t *testing.T) {

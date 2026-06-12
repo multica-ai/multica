@@ -982,12 +982,27 @@ var daemonInstalledHookSignatures = []string{
 	"# Installed by the Multica daemon.",
 }
 
-// prepareCommitMsgHook is the prepare-commit-msg hook script that appends a
-// Co-authored-by trailer for the Multica Agent to every commit message.
-const prepareCommitMsgHook = `#!/bin/sh
+// coAuthoredByTrailer is the trailer text the prepare-commit-msg hook appends.
+// It is a package var rather than inlined in the template so a fork can blank
+// it out without editing hook logic; an empty value makes installCoAuthoredByHook
+// a no-op (no hook is written).
+var coAuthoredByTrailer = "Co-authored-by: multica-agent <github@multica.ai>"
+
+// prepareCommitMsgHookTemplate is the prepare-commit-msg hook script that
+// appends a Co-authored-by trailer for the Multica Agent to every commit
+// message. The single %s is filled with coAuthoredByTrailer.
+//
+// The hook honors MULTICA_NO_COAUTHOR=1 as a belt-and-suspenders kill switch:
+// the agent runtime can export it to suppress the trailer even if a hook is
+// somehow present, independent of the workspace setting that gates install.
+const prepareCommitMsgHookTemplate = `#!/bin/sh
 # multica:prepare-commit-msg:co-authored-by
 # Multica: add Co-authored-by trailer for the Multica Agent.
 # Installed by the Multica daemon. Do not edit — it will be overwritten.
+
+# Belt-and-suspenders kill switch: when exported by the runtime, suppress the
+# trailer entirely regardless of how this hook came to be installed.
+[ "${MULTICA_NO_COAUTHOR:-}" = "1" ] && exit 0
 
 COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"
@@ -997,7 +1012,7 @@ case "$COMMIT_SOURCE" in
   merge|squash) exit 0 ;;
 esac
 
-TRAILER="Co-authored-by: multica-agent <github@multica.ai>"
+TRAILER="%s"
 
 # Don't add if already present.
 if grep -qF "$TRAILER" "$COMMIT_MSG_FILE"; then
@@ -1013,6 +1028,11 @@ git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
 // git common directory (the bare repo for worktrees) so it applies to all
 // worktrees created from this cache.
 func installCoAuthoredByHook(worktreePath string) error {
+	if coAuthoredByTrailer == "" {
+		// Trailer blanked by configuration: install no hook at all.
+		return nil
+	}
+
 	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
 
 	out, err := cmd.Output()
@@ -1029,8 +1049,9 @@ func installCoAuthoredByHook(worktreePath string) error {
 		return fmt.Errorf("create hooks dir: %w", err)
 	}
 
+	hookBody := fmt.Sprintf(prepareCommitMsgHookTemplate, coAuthoredByTrailer)
 	hookPath := filepath.Join(hooksDir, "prepare-commit-msg")
-	if err := os.WriteFile(hookPath, []byte(prepareCommitMsgHook), 0o755); err != nil {
+	if err := os.WriteFile(hookPath, []byte(hookBody), 0o755); err != nil {
 		return fmt.Errorf("write prepare-commit-msg hook: %w", err)
 	}
 	return nil

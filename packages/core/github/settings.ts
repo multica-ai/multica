@@ -12,8 +12,11 @@ export interface GitHubSettings {
 }
 
 /**
- * Pure derivation from a workspace's settings JSONB. Defaults every flag to
- * true so workspaces predating MUL-2414 keep the historical "all on" behavior.
+ * Pure derivation from a workspace's settings JSONB. The master switch and the
+ * PR-sidebar / auto-link sub-flags default to true so workspaces predating
+ * MUL-2414 keep the historical "all on" behavior. The Co-authored-by trailer is
+ * the exception: it is opt-in and defaults to OFF, surfacing as enabled only
+ * when the workspace explicitly sets `co_authored_by_enabled` to true.
  */
 export function deriveGitHubSettings(
   workspace: Pick<Workspace, "settings"> | null | undefined,
@@ -23,7 +26,7 @@ export function deriveGitHubSettings(
   return {
     enabled,
     prSidebar: enabled && s.github_pr_sidebar_enabled !== false,
-    coAuthor: enabled && s.co_authored_by_enabled !== false,
+    coAuthor: enabled && s.co_authored_by_enabled === true,
     autoLinkPRs: enabled && s.github_auto_link_prs_enabled !== false,
   };
 }

@@ -832,8 +832,9 @@ func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
 }
 
 // workspaceCoAuthoredByEnabled returns whether the Co-authored-by hook should
-// be installed for the given workspace. Defaults to true when either setting
-// is absent (new workspaces, older servers that don't send settings).
+// be installed for the given workspace. Defaults to false (off) when the
+// setting is absent — the trailer is opt-in and never appears unless the
+// workspace explicitly enables it.
 //
 // The hook is gated by BOTH the GitHub master switch (`github_enabled`) and
 // the dedicated co-author switch (`co_authored_by_enabled`) so flipping the
@@ -843,23 +844,60 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, ok := d.workspaces[workspaceID]
-	if !ok || len(ws.settings) == 0 {
-		return true // default: enabled
+	if !ok {
+		return false // default: disabled
+	}
+	return coAuthoredByEnabledFromSettings(ws.settings)
+}
+
+// coAuthoredByEnabledFromSettings resolves the Co-authored-by gate from a raw
+// workspace settings payload. It is the single decision point shared by the
+// daemon-mode gate (which reads synced settings) and the controller-mode gate
+// (which fetches settings live), so both honor the identical contract: the
+// trailer is opt-in and defaults to OFF. It is installed only when the
+// workspace explicitly sets `co_authored_by_enabled`=true; the GitHub master
+// switch (`github_enabled`=false) still forces it off, and an absent or
+// malformed payload resolves to off so attribution can never reappear by
+// accident.
+func coAuthoredByEnabledFromSettings(settings json.RawMessage) bool {
+	if len(settings) == 0 {
+		return false // default: disabled
 	}
 	var s struct {
 		GitHubEnabled       *bool `json:"github_enabled"`
 		CoAuthoredByEnabled *bool `json:"co_authored_by_enabled"`
 	}
-	if err := json.Unmarshal(ws.settings, &s); err != nil {
-		return true // default: enabled when payload is malformed
+	if err := json.Unmarshal(settings, &s); err != nil {
+		return false // default: disabled when payload is malformed
 	}
 	if s.GitHubEnabled != nil && !*s.GitHubEnabled {
 		return false
 	}
 	if s.CoAuthoredByEnabled == nil {
-		return true // default: enabled
+		return false // default: disabled
 	}
 	return *s.CoAuthoredByEnabled
+}
+
+// fetchCoAuthoredByEnabled resolves the Co-authored-by gate for controller-mode
+// workers, which run as stateless single-task pods with no synced
+// workspaceState to read. It fetches the workspace settings live from the
+// server at checkout time and applies the shared resolver.
+//
+// Reading live is the only way a stateless worker can honor a freshly-flipped
+// `co_authored_by_enabled` toggle — there is no settings sync loop in
+// controller mode. On a fetch error the gate resolves to false: a worker that
+// cannot confirm the setting must not append attribution it can't justify.
+// This is strictly safer than the previous behavior, which hardcoded the hook
+// on regardless of the workspace setting.
+func (d *Daemon) fetchCoAuthoredByEnabled(ctx context.Context, workspaceID string) bool {
+	resp, err := d.client.GetWorkspaceRepos(ctx, workspaceID)
+	if err != nil || resp == nil {
+		d.logger.Warn("repo checkout: co-authored-by settings fetch failed; defaulting off",
+			"workspace_id", workspaceID, "error", err)
+		return false
+	}
+	return coAuthoredByEnabledFromSettings(resp.Settings)
 }
 
 // registerTaskRepos merges task-scoped repos (e.g. project github_repo

@@ -11,22 +11,22 @@ import (
 )
 
 // workspaceCoAuthoredByEnabled gates the prepare-commit-msg hook installed in
-// agent worktrees. RFC MUL-2414 adds the `github_enabled` master switch:
-// when it is explicitly false the hook must NOT be installed even if
-// `co_authored_by_enabled` is true. The function also defaults to true
-// whenever settings are absent or malformed so existing workspaces keep
-// their historical behavior.
+// agent worktrees. The trailer is opt-in: the hook is installed only when the
+// workspace explicitly sets `co_authored_by_enabled`=true, so absent, empty, or
+// malformed settings all resolve to off. RFC MUL-2414's `github_enabled` master
+// switch still forces the hook off when explicitly false, even if
+// `co_authored_by_enabled` is true.
 func TestWorkspaceCoAuthoredByEnabled(t *testing.T) {
 	cases := []struct {
-		name       string
-		register   bool
-		settings   string
-		want       bool
+		name     string
+		register bool
+		settings string
+		want     bool
 	}{
-		{"unknown workspace defaults on", false, "", true},
-		{"registered workspace, nil settings defaults on", true, "", true},
-		{"empty object defaults on", true, "{}", true},
-		{"co_authored_by absent defaults on", true, `{"github_enabled":true}`, true},
+		{"unknown workspace defaults off", false, "", false},
+		{"registered workspace, nil settings defaults off", true, "", false},
+		{"empty object defaults off", true, "{}", false},
+		{"co_authored_by absent defaults off", true, `{"github_enabled":true}`, false},
 		{"co_authored_by true", true, `{"co_authored_by_enabled":true}`, true},
 		{"co_authored_by false", true, `{"co_authored_by_enabled":false}`, false},
 		{
@@ -41,7 +41,7 @@ func TestWorkspaceCoAuthoredByEnabled(t *testing.T) {
 			`{"github_enabled":true,"co_authored_by_enabled":false}`,
 			false,
 		},
-		{"malformed settings defaults on", true, `not json`, true},
+		{"malformed settings defaults off", true, `not json`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -56,6 +56,62 @@ func TestWorkspaceCoAuthoredByEnabled(t *testing.T) {
 			if got := d.workspaceCoAuthoredByEnabled("ws"); got != tc.want {
 				t.Fatalf("workspaceCoAuthoredByEnabled(%q) = %v, want %v",
 					tc.settings, got, tc.want)
+			}
+		})
+	}
+}
+
+// fetchCoAuthoredByEnabled is the controller-mode gate: stateless worker pods
+// have no synced workspaceState, so the setting is read live at checkout time
+// instead of from the daemon's settings map. The trailer is opt-in — it must
+// honor an explicit co_authored_by_enabled=false (the live bug it fixes:
+// controller mode used to hardcode the hook on), default to off for absent
+// settings, respect the github_enabled master switch, and resolve to off when
+// the live fetch fails so an unreachable server can never re-enable attribution.
+func TestFetchCoAuthoredByEnabled(t *testing.T) {
+	const workspaceID = "ws-1"
+
+	cases := []struct {
+		name     string
+		settings string // body returned by the repos endpoint; "" → omit Settings
+		fail     bool   // serve 500 to simulate a fetch error
+		want     bool
+	}{
+		{"explicit false disables hook", `{"co_authored_by_enabled":false}`, false, false},
+		{"explicit true enables hook", `{"co_authored_by_enabled":true}`, false, true},
+		{"absent settings default off", "", false, false},
+		{"empty object defaults off", "{}", false, false},
+		{"master switch off forces hook off", `{"github_enabled":false,"co_authored_by_enabled":true}`, false, false},
+		{"fetch error defaults off", "", true, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/daemon/workspaces/"+workspaceID+"/repos" {
+					http.NotFound(w, r)
+					return
+				}
+				if tc.fail {
+					http.Error(w, "boom", http.StatusInternalServerError)
+					return
+				}
+				var raw json.RawMessage
+				if tc.settings != "" {
+					raw = json.RawMessage(tc.settings)
+				}
+				json.NewEncoder(w).Encode(WorkspaceReposResponse{
+					WorkspaceID:  workspaceID,
+					Repos:        []RepoData{},
+					ReposVersion: "v1",
+					Settings:     raw,
+				})
+			}))
+			t.Cleanup(srv.Close)
+
+			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+			if got := d.fetchCoAuthoredByEnabled(context.Background(), workspaceID); got != tc.want {
+				t.Fatalf("fetchCoAuthoredByEnabled(%q) = %v, want %v", tc.settings, got, tc.want)
 			}
 		})
 	}

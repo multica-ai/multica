@@ -7,21 +7,28 @@ function ws(settings: Record<string, unknown>): Pick<Workspace, "settings"> {
 }
 
 describe("deriveGitHubSettings", () => {
-  it("defaults every flag to true when workspace is null", () => {
+  it("defaults flags to true (except opt-in co-author) when workspace is null", () => {
     expect(deriveGitHubSettings(null)).toEqual({
       enabled: true,
       prSidebar: true,
-      coAuthor: true,
+      coAuthor: false,
       autoLinkPRs: true,
     });
   });
 
-  it("defaults every flag to true on empty settings", () => {
+  it("defaults flags to true (except opt-in co-author) on empty settings", () => {
     expect(deriveGitHubSettings(ws({}))).toEqual({
       enabled: true,
       prSidebar: true,
-      coAuthor: true,
+      coAuthor: false,
       autoLinkPRs: true,
+    });
+  });
+
+  it("co-author is opt-in: enabled only when explicitly true", () => {
+    expect(deriveGitHubSettings(ws({ co_authored_by_enabled: true }))).toMatchObject({
+      enabled: true,
+      coAuthor: true,
     });
   });
 
@@ -44,7 +51,7 @@ describe("deriveGitHubSettings", () => {
 
   it("each sub-flag can be flipped independently when master is on", () => {
     expect(
-      deriveGitHubSettings(ws({ github_pr_sidebar_enabled: false })),
+      deriveGitHubSettings(ws({ github_pr_sidebar_enabled: false, co_authored_by_enabled: true })),
     ).toMatchObject({ enabled: true, prSidebar: false, coAuthor: true, autoLinkPRs: true });
 
     expect(
@@ -52,7 +59,7 @@ describe("deriveGitHubSettings", () => {
     ).toMatchObject({ enabled: true, prSidebar: true, coAuthor: false, autoLinkPRs: true });
 
     expect(
-      deriveGitHubSettings(ws({ github_auto_link_prs_enabled: false })),
+      deriveGitHubSettings(ws({ github_auto_link_prs_enabled: false, co_authored_by_enabled: true })),
     ).toMatchObject({ enabled: true, prSidebar: true, coAuthor: true, autoLinkPRs: false });
   });
 

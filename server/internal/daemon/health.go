@@ -191,10 +191,11 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 //     add` against a RO bare fails because git writes worktree metadata into
 //     the bare. The shared-clone path uses alternates + a writable .git in
 //     the workdir.
-//   - Co-authored-by defaults to true. The workspace setting lives on the
-//     server and the worker daemon has no synced view of it; controller-mode
-//     workers haven't historically read it. A future patch can plumb this
-//     through the task payload if needed.
+//   - Co-authored-by is resolved by fetching the workspace settings live
+//     (fetchCoAuthoredByEnabled). Controller-mode workers have no synced view
+//     of the setting, so the gate is read at checkout time; a fetch failure
+//     resolves to off so a stale or unreachable settings view can never
+//     re-enable attribution.
 func (d *Daemon) controllerRepoCheckoutHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -230,7 +231,7 @@ func (d *Daemon) controllerRepoCheckoutHandler() http.HandlerFunc {
 			Ref:                 req.Ref,
 			AgentName:           req.AgentName,
 			TaskID:              req.TaskID,
-			CoAuthoredByEnabled: true,
+			CoAuthoredByEnabled: d.fetchCoAuthoredByEnabled(r.Context(), req.WorkspaceID),
 		})
 		if err != nil {
 			d.logger.Error("controller repo checkout failed", "url", req.URL, "error", err)

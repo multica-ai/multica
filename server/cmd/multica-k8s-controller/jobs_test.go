@@ -330,7 +330,7 @@ func TestDispatchJob_PersistsClaudeProjects(t *testing.T) {
 		RuntimeID: "rt-1",
 	}
 
-	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{}, GitHubTokenOptions{})
+	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", ClaudeBrokerOptions{}, RepoCacheOptions{}, GitHubTokenOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
