@@ -77,10 +77,12 @@ export interface MarkdownProps {
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode
 }
 
-// Sanitization schema — extends GitHub defaults to allow code highlighting classes
-// and Multica's internal mention/slash protocols.
+// Sanitization schema — extends GitHub defaults to allow code highlighting classes,
+// Multica's internal mention/slash protocols, and <mark> (text highlight emitted
+// by highlightToHtml from `==text==`).
 const sanitizeSchema = {
   ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'mark'],
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), 'mention', 'slash'],
