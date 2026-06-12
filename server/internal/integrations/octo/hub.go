@@ -335,6 +335,14 @@ func (h *Hub) renewLeaseUntil(ctx context.Context, cancelRun context.CancelFunc,
 		case <-ticker.C:
 			ok, err := h.acquireLease(ctx, instID, token)
 			if err != nil {
+				if isBenignRenewCancel(ctx, err) {
+					// The run context was cancelled intentionally (reconfigure
+					// restart or shutdown) and the ticker raced ahead of the
+					// ctx.Done branch above. This is not a renewal failure —
+					// return quietly without an ERROR log or a redundant
+					// cancelRun (the context is already done).
+					return
+				}
 				h.logger.Error("octo hub: renew lease failed", "installation", uuidString(instID), "err", err.Error())
 				cancelRun()
 				return
@@ -346,6 +354,14 @@ func (h *Hub) renewLeaseUntil(ctx context.Context, cancelRun context.CancelFunc,
 			}
 		}
 	}
+}
+
+// isBenignRenewCancel reports whether a lease-renewal error is just the run
+// context being cancelled on purpose (reconfigure restart / shutdown) rather
+// than a real DB failure. Such an error must not be logged at ERROR level —
+// it's the expected outcome of stopping a supervisor.
+func isBenignRenewCancel(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.Canceled)
 }
 
 func (h *Hub) releaseLease(instID pgtype.UUID, token string) {
