@@ -1088,6 +1088,11 @@ func TestBuildMarkdownURL_CloudFrontSignedModeNeverPersistsRawStorageURL(t *test
 }
 
 func TestBuildMarkdownURL_RelativeStorageURLPrefixedWithPublicURL(t *testing.T) {
+	// #4048 — when LocalStorage is used without `LOCAL_UPLOAD_BASE_URL`
+	// but `MULTICA_PUBLIC_URL` is set, the operator wants portable
+	// absolute URLs across web + desktop clients. The native-loadable
+	// shape is the `/uploads/<key>` path (no auth roundtrip); prefix
+	// it with PublicURL so non-web clients can resolve it.
 	origPublic := testHandler.cfg.PublicURL
 	origSigner := testHandler.CFSigner
 	t.Cleanup(func() {
@@ -1097,7 +1102,6 @@ func TestBuildMarkdownURL_RelativeStorageURLPrefixedWithPublicURL(t *testing.T) 
 	testHandler.cfg.PublicURL = "https://api.multica.test"
 	testHandler.CFSigner = nil
 
-	// LocalStorage without LOCAL_UPLOAD_BASE_URL stores a site-relative URL.
 	id := seedAttachmentURL(t, "/uploads/abc.png", "abc.png", "image/png", 1)
 	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
 		ID:          parseUUID(id),
@@ -1108,13 +1112,24 @@ func TestBuildMarkdownURL_RelativeStorageURLPrefixedWithPublicURL(t *testing.T) 
 	}
 
 	resp := testHandler.attachmentToResponse(att)
-	want := "https://api.multica.test/api/attachments/" + id + "/download"
+	want := "https://api.multica.test/uploads/abc.png"
 	if resp.MarkdownURL != want {
-		t.Fatalf("markdown_url = %q, want absolute API endpoint %q", resp.MarkdownURL, want)
+		t.Fatalf("markdown_url = %q, want absolute /uploads/abc.png prefix %q", resp.MarkdownURL, want)
 	}
 }
 
-func TestBuildMarkdownURL_PublicURLUnsetFallsBackToSiteRelative(t *testing.T) {
+func TestBuildMarkdownURL_PublicURLUnsetKeepsLocalStorageRelativePath(t *testing.T) {
+	// #4048 — when LocalStorage runs without `LOCAL_UPLOAD_BASE_URL` the
+	// stored URL is a site-relative `/uploads/<key>` path. That's the
+	// only shape the Next.js rewrite proxy can route directly to
+	// `LocalStorage.ServeFile`, so we want markdown bodies to embed the
+	// path verbatim rather than the auth-gated
+	// `/api/attachments/<id>/download` endpoint (which a native `<img>`
+	// fetch cannot reach because the API middleware rejects
+	// header-less / cookie-less resource loads with 401).
+	//
+	// Desktop's renderer prefix pass (apiBaseUrl) resolves the same
+	// path against the API host so non-web clients still load.
 	origPublic := testHandler.cfg.PublicURL
 	origSigner := testHandler.CFSigner
 	t.Cleanup(func() {
@@ -1134,13 +1149,53 @@ func TestBuildMarkdownURL_PublicURLUnsetFallsBackToSiteRelative(t *testing.T) {
 	}
 
 	resp := testHandler.attachmentToResponse(att)
+	want := "/uploads/abc.png"
+	if resp.MarkdownURL != want {
+		t.Fatalf("markdown_url = %q, want site-relative /uploads/abc.png (loadable by Next.js rewrite)", resp.MarkdownURL)
+	}
+	// Explicit download click must still hit the auth-gated endpoint —
+	// that's the re-sign / proxy path. Persisting that as the markdown
+	// src would 401 on native resource loads.
+	if resp.DownloadURL != "/api/attachments/"+id+"/download" {
+		t.Fatalf("download_url = %q, want /api/attachments/<id>/download", resp.DownloadURL)
+	}
+}
+
+func TestBuildMarkdownURL_PublicURLUnsetFallsBackToSiteRelativeAPIPath(t *testing.T) {
+	// #4048 — the site-relative API fallback only fires when `a.Url`
+	// is NOT a directly-loadable shape. A legacy / mid-migration row
+	// whose stored URL is some unrelated site-relative path (NOT
+	// `/uploads/...`) still falls through to the `/api/attachments/<id>
+	// /download` endpoint so we don't regress pre-MUL-3192 behavior on
+	// the backfill branch.
+	origPublic := testHandler.cfg.PublicURL
+	origSigner := testHandler.CFSigner
+	t.Cleanup(func() {
+		testHandler.cfg.PublicURL = origPublic
+		testHandler.CFSigner = origSigner
+	})
+	testHandler.cfg.PublicURL = ""
+	testHandler.CFSigner = nil
+
+	id := seedAttachmentURL(t, "/some-other/path.png", "abc.png", "image/png", 1)
+	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+
+	resp := testHandler.attachmentToResponse(att)
 	want := "/api/attachments/" + id + "/download"
 	if resp.MarkdownURL != want {
-		t.Fatalf("markdown_url = %q, want site-relative fallback %q", resp.MarkdownURL, want)
+		t.Fatalf("markdown_url = %q, want site-relative API fallback %q", resp.MarkdownURL, want)
 	}
 }
 
 func TestBuildMarkdownURL_StripsTrailingSlashOnPublicURL(t *testing.T) {
+	// #4048 — PublicURL trailing-slash trimming also applies to the
+	// /uploads/<key> prefix branch. Verify the join doesn't double up.
 	origPublic := testHandler.cfg.PublicURL
 	origSigner := testHandler.CFSigner
 	t.Cleanup(func() {
@@ -1160,9 +1215,40 @@ func TestBuildMarkdownURL_StripsTrailingSlashOnPublicURL(t *testing.T) {
 	}
 
 	resp := testHandler.attachmentToResponse(att)
-	want := "https://api.multica.test/api/attachments/" + id + "/download"
+	want := "https://api.multica.test/uploads/abc.png"
 	if resp.MarkdownURL != want {
 		t.Fatalf("markdown_url = %q, want exactly one separator %q", resp.MarkdownURL, want)
+	}
+}
+
+// #4048 — the new `isLocalStorageRelativePath` branch in
+// `buildMarkdownURL` accepts `/uploads/...` paths as durable markdown
+// URLs (the only non-auth-gated storage shape). The path-traversal
+// hardening must reject anything where `path.Clean` produces a URL
+// outside the `/uploads/` prefix.
+func TestIsLocalStorageRelativePath(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"canonical", "/uploads/workspaces/abc.png", true},
+		{"nested", "/uploads/users/123/file.png", true},
+		{"empty", "", false},
+		{"non-upload relative", "/api/foo", false},
+		{"upload prefix only", "/uploads", false},
+		{"upload prefix + separator only", "/uploads/", false},
+		{"absolute https", "https://cdn/foo", false},
+		{"traversal escapes via ..", "/uploads/../etc/passwd", false},
+		{"traversal embedded in middle", "/uploads/abc/../../etc", false},
+		{"double-slash weirdness", "/uploads//abc.png", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isLocalStorageRelativePath(tc.url); got != tc.want {
+				t.Errorf("isLocalStorageRelativePath(%q) = %v, want %v", tc.url, got, tc.want)
+			}
+		})
 	}
 }
 

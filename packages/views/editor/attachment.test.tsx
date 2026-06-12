@@ -377,6 +377,76 @@ describe("Attachment — image dispatch", () => {
     const img = document.querySelector("img");
     expect(img?.getAttribute("src")).toBe("https://cdn.example.test/legacy.png");
   });
+
+  // #4048 — LocalStorage WITHOUT `LOCAL_UPLOAD_BASE_URL` produces a
+  // site-relative `/uploads/<key>` URL. The Next.js rewrite proxies
+  // `/uploads/*` straight to `LocalStorage.ServeFile`, so the same-origin
+  // `<img src="/uploads/...">` loads natively without an auth roundtrip.
+  // Pre-fix the renderer picked `markdown_url` (the auth-gated
+  // `/api/attachments/<id>/download` endpoint) which 401s on a native
+  // resource fetch. The fix promotes `record.url` whenever it's natively
+  // loadable, so this deployment's previews render again.
+  it("prefers the locally-served /uploads/<key> URL over the auth-gated /api/... endpoint (web, #4048)", () => {
+    // Default web shape: apiBaseUrl is empty, so the site-relative path
+    // resolves against the document origin through the Next.js rewrite
+    // proxy. No apiBaseUrl prefix needed.
+    const att = makeRecord({
+      filename: "shot.png",
+      url: "/uploads/workspaces/abc/shot.png",
+      // Both legacy (pre-fix) and current (post-fix) shapes — the
+      // picker routes through `record.url` because the path is
+      // natively loadable; markdown_url and download_url are kept
+      // for the explicit Download click.
+      markdown_url: "/api/attachments/att-1/download",
+      download_url: "/api/attachments/att-1/download",
+    });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "/uploads/workspaces/abc/shot.png",
+    );
+    expect(img?.getAttribute("src")).not.toBe(
+      "/api/attachments/att-1/download",
+    );
+  });
+
+  it("prefixes apiBaseUrl onto /uploads/<key> on desktop (file:// origin, #4048)", () => {
+    // Desktop's renderer origin is `app://` / file: / dev-server, so
+    // a site-relative `/uploads/...` path resolves against the shell
+    // origin instead of the API host. The renderer's absolutize pass
+    // prefixes apiBaseUrl so `<img src>` lands on the API server.
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    const att = makeRecord({
+      filename: "shot.png",
+      url: "/uploads/workspaces/abc/shot.png",
+      markdown_url: "/api/attachments/att-1/download",
+      download_url: "/api/attachments/att-1/download",
+    });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://api.example.test/uploads/workspaces/abc/shot.png",
+    );
+  });
+
+  it("explicit Download button still routes through the auth-gated endpoint after the natively-loadable preview is chosen (#4048)", () => {
+    // The fix only changes the rendered media src; the explicit
+    // Download CTA must keep going through the re-sign / proxy
+    // path so server-side ACL / membership checks still gate raw
+    // byte access even when the preview renders natively.
+    const att = makeRecord({
+      filename: "shot.png",
+      url: "/uploads/workspaces/abc/shot.png",
+      markdown_url: "/api/attachments/att-1/download",
+      download_url: "/api/attachments/att-1/download",
+    });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    fireEvent.click(screen.getByTitle("Download"));
+    // useDownloadAttachment(id) hits the auth-gated endpoint server-
+    // side; the locally-served file is NOT what the Download button
+    // resolves to.
+    expect(downloadMock).toHaveBeenCalledWith("att-1");
+  });
 });
 
 describe("Attachment — html dispatch", () => {

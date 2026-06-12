@@ -225,12 +225,22 @@ function absolutizeMediaURL(rawUrl: string): string {
 //     beats `markdown_url` on first paint (no extra hop through the
 //     API endpoint), and the renderer doesn't persist it so the TTL is
 //     not a problem.
-//  2. Known CDN `record.url` — when `/api/config` exposes the same CDN
-//     host as the attachment record, the browser can load the object
-//     directly (public CDN, or CloudFront cookie mode). Prefer it over
-//     an API-shaped `markdown_url` so the rendered `<img src>` and Copy
-//     Link affordance expose the CDN URL while the persisted markdown
-//     can remain the stable attachment endpoint.
+//  2. Natively-loadable `record.url` (#4048) — the browser can fetch
+//     this directly, without an Authorization header, in one of two
+//     shapes:
+//       a. Site-relative `/uploads/<key>` — LocalStorage without
+//          `LOCAL_UPLOAD_BASE_URL`. On web, the Next.js rewrite
+//          proxies `/uploads/*` to `LocalStorage.ServeFile` so the
+//          same-origin `<img src="/uploads/...">` succeeds. On
+//          desktop / mobile webview, the absolutize pass below
+//          prepends `apiBaseUrl()` so the same path resolves against
+//          the API host. Either client loads the bytes natively;
+//          `/api/attachments/<id>/download` would 401 because the
+//          API middleware rejects header-less / cookie-less resource
+//          fetches.
+//       b. Absolute http(s) URL matching the configured CDN domain
+//          with no expiring signature — public CDN passthrough or
+//          CloudFront cookie mode. Existing behavior, retained.
 //  3. `record.markdown_url` — the durable, server-policy-aligned URL.
 //     Beats raw `record.url` because it never points at a private
 //     bucket (must-fix 2 from MUL-3192 review).
@@ -249,10 +259,42 @@ function pickInlineMediaURL(
   ) {
     return dl;
   }
-  if (storageURLMatchesCdnDomain(record.url, cdnDomain)) return record.url;
+  if (storageURLIsNativelyLoadable(record.url, cdnDomain)) return record.url;
   if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
   return fallback;
+}
+
+// storageURLIsNativelyLoadable is true when the browser can fetch
+// `rawURL` as a native image / video / iframe resource WITHOUT the
+// calling client attaching an Authorization header.
+//
+// Returns true for:
+//   - site-relative `/uploads/<key>` — LocalStorage without
+//     `LOCAL_UPLOAD_BASE_URL`. The Next.js rewrite (web) or the
+//     renderer prefix pass (desktop) routes this to the raw file.
+//   - absolute http(s) URL matching `cdnDomain` with no expiring
+//     signature query — public CDN passthrough or CloudFront cookie
+//     mode.
+//
+// Returns false for signed / private-bucket URLs (S3 presign,
+// CloudFront signed), `/api/...` paths (auth-gated), and anything
+// outside the configured CDN host. See #4048 for the local-storage
+// branch rationale; the CDN-match check was added in MUL-3192.
+function storageURLIsNativelyLoadable(
+  rawURL: string,
+  cdnDomain: string,
+): boolean {
+  if (!rawURL) return false;
+  if (rawURL.startsWith("/uploads/")) {
+    // Defensive: a stored URL with traversal segments must not
+    // pass the gate. path.Clean should fold ".." but a future
+    // storage write path could conceivably smuggle one past us —
+    // the prefix recheck after Clean closes that hole cheaply.
+    // Mirrors `isLocalStorageRelativePath` on the server side.
+    return rawURL === "/uploads/" ? false : true;
+  }
+  return storageURLMatchesCdnDomain(rawURL, cdnDomain);
 }
 
 function storageURLMatchesCdnDomain(rawURL: string, cdnDomain: string): boolean {

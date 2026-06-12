@@ -139,11 +139,14 @@ func attachmentDownloadPath(id string) string {
 
 // buildMarkdownURL chooses the durable URL the client persists into
 // markdown bodies. The contract is "absolute, no TTL, loadable as a native
-// browser resource fetch on every supported client" (MUL-3192).
+// browser resource fetch on every supported client" (MUL-3192), and as of
+// #4048 the "loadable natively" requirement is hard: a markdown body must
+// produce a working `<img src>` when rendered, and a native image fetch
+// cannot attach the API Authorization header.
 //
 // Decision:
 //
-//  1. Persist `a.Url` only when the deployment has signaled the storage
+//  1. Persist `a.Url` when the deployment has signaled the storage
 //     backend serves URLs publicly without per-request auth:
 //       - `Storage.CdnDomain()` is non-empty (operator configured a
 //         public-facing base URL — `S3_CDN_DOMAIN` for the S3 backend or
@@ -157,19 +160,35 @@ func attachmentDownloadPath(id string) string {
 //         was unset, and against a freshly-signed `download_url` ever
 //         leaking into `a.Url` (the original MUL-3130 bug).
 //
-//  2. Every other shape — CloudFront-signed mode, S3 presign /proxy
-//     against a private bucket without a CDN domain, raw S3 / R2 /
-//     MinIO, LocalStorage with no `LOCAL_UPLOAD_BASE_URL` — uses the
-//     stable per-attachment endpoint that the server self-signs /
-//     proxies on every request, anchored on `MULTICA_PUBLIC_URL` so the
-//     persisted URL keeps working for clients that don't share the
-//     document origin (Desktop / mobile webview).
+//  2. Persist `a.Url` when it's a site-relative `/uploads/...` path
+//     (#4048 — LocalStorage without `LOCAL_UPLOAD_BASE_URL`). On web,
+//     the Next.js rewrite proxies `/uploads/*` straight to
+//     `LocalStorage.ServeFile`, so a same-origin `<img src="/uploads/...">`
+//     loads without any auth roundtrip. On desktop, the renderer prefix
+//     pass (see `absolutizeMediaURL` in
+//     packages/views/editor/attachment.tsx) prepends `apiBaseUrl()` so
+//     the same path resolves against the API host. Either client loads
+//     the bytes natively; the previously-persisted
+//     `/api/attachments/<id>/download` link could not, because the auth
+//     middleware returns 401 when a native resource fetch arrives
+//     without an Authorization header.
 //
-//  3. Last-resort fallback (no `MULTICA_PUBLIC_URL` configured): emit
-//     the site-relative path. Web's Next.js rewrite handles this; non-
-//     web clients on a deployment without `PublicURL` configured were
-//     already broken before MUL-3192 and stay broken here, but we
-//     don't make them worse.
+//  3. Every other shape — CloudFront-signed mode, S3 presign /proxy
+//     against a private bucket without a CDN domain, raw S3 / R2 /
+//     MinIO — uses the stable per-attachment endpoint that the server
+//     self-signs / proxies on every request, anchored on
+//     `MULTICA_PUBLIC_URL` so the persisted URL keeps working for
+//     clients that don't share the document origin (Desktop / mobile
+//     webview).
+//
+//  4. Last-resort fallback (no `MULTICA_PUBLIC_URL` configured): emit
+//     the site-relative API endpoint. Web's Next.js rewrite handles
+//     this; non-web clients on a deployment without `PublicURL`
+//     configured were already broken before MUL-3192 and stay broken
+//     here, but we don't make them worse. Markdown bodies that landed
+//     under this branch before #4048 are repaired client-side by the
+//     updated `pickInlineMediaURL` / `resolvePreviewMediaUrl` helpers
+//     in packages/views/editor/{attachment,attachment-preview-modal}.tsx.
 func (h *Handler) buildMarkdownURL(a db.Attachment, id string) string {
 	relPath := attachmentDownloadPath(id)
 	publicURL := strings.TrimRight(h.cfg.PublicURL, "/")
@@ -177,11 +196,49 @@ func (h *Handler) buildMarkdownURL(a db.Attachment, id string) string {
 	if h.storageURLIsPubliclyReadable(a.Url) {
 		return a.Url
 	}
+	// #4048 — LocalStorage without `LOCAL_UPLOAD_BASE_URL` writes a
+	// site-relative `/uploads/<key>` path into the row. That path is
+	// the ONLY non-auth-gated storage shape we have, so it MUST end
+	// up in markdown bodies (a persisted `/api/attachments/<id>/download`
+	// link would 401 on native `<img>` fetches). When the deployment
+	// also sets `MULTICA_PUBLIC_URL` we prefix the same path so non-web
+	// clients get an absolute URL; when no PublicURL is set we emit
+	// the site-relative path verbatim and let the renderer's prefix
+	// pass (apiBaseUrl) handle desktop / mobile-webview hosts.
+	if isLocalStorageRelativePath(a.Url) {
+		if publicURL != "" {
+			return publicURL + a.Url
+		}
+		return a.Url
+	}
 
 	if publicURL != "" {
 		return publicURL + relPath
 	}
 	return relPath
+}
+
+// isLocalStorageRelativePath is true when `rawURL` is the site-relative
+// `/uploads/<key>` path that LocalStorage (without
+// `LOCAL_UPLOAD_BASE_URL` configured) writes into the attachment row.
+// The path is loadable as a native browser resource fetch on web — the
+// Next.js rewrite proxies `/uploads/*` straight to `LocalStorage.ServeFile`
+// without an auth roundtrip — and on desktop the renderer prefix pass
+// prepends `apiBaseUrl()` so the same path resolves against the API
+// host. See #4048.
+//
+// Path-traversal hardening: a stored key with `..` segments could trick
+// `path.Clean` into emitting a URL that escapes the `/uploads/` prefix.
+// Re-running the prefix check after Clean closes that hole.
+func isLocalStorageRelativePath(rawURL string) bool {
+	if rawURL == "" || !strings.HasPrefix(rawURL, "/uploads/") {
+		return false
+	}
+	cleaned := path.Clean(rawURL)
+	if cleaned != rawURL && !strings.HasPrefix(cleaned, "/uploads/") {
+		return false
+	}
+	return true
 }
 
 // storageURLIsPubliclyReadable returns true when the deployment has signaled

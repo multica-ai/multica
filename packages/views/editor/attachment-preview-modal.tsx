@@ -44,6 +44,7 @@ import {
 } from "@multica/core/api";
 import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
+import { useConfigStore } from "@multica/core/config";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../i18n";
@@ -92,13 +93,117 @@ interface PreviewState {
   attachmentId: string | null;
 }
 
-function resolvePreviewMediaUrl(attachment: Attachment): string {
-  const raw =
-    attachment.download_url || attachment.markdown_url || attachment.url;
-  return resolvePublicFileUrl(raw) ?? raw;
+// resolvePreviewMediaUrl picks the URL most likely to load as a native
+// <img>/<video>/<iframe> resource without the calling client attaching
+// an Authorization header. The previous order (download_url first) was
+// wrong for deployments where the auth-gated `/api/attachments/<id>
+// /download` endpoint 401s on native resource loads (#4048).
+//
+// Order — mirrors `pickInlineMediaURL` in attachment.tsx so the inline
+// thumbnail and the modal preview always land on the same URL for the
+// same record:
+//
+//  1. Signed `attachment.download_url` — CloudFront / S3-presign TTL'd
+//     URL, valid for the duration of this response. Wins over
+//     `markdown_url` because it's a single redirect instead of an
+//     API hop, and the renderer doesn't persist it so the TTL is not
+//     a problem.
+//  2. Natively-loadable `attachment.url` (#4048) — either a
+//     site-relative `/uploads/<key>` path that the Next.js rewrite
+//     (web) or the renderer prefix pass (desktop) routes to the raw
+//     file, or an absolute URL matching the configured CDN domain
+//     with no expiring signature. This is the only non-auth-gated
+//     storage shape we have for LocalStorage-without-`LOCAL_UPLOAD_BASE_URL`,
+//     so it MUST win over `markdown_url` (which on that shape is the
+//     same path anyway, but for legacy pre-fix markdown bodies it
+//     could be the auth-gated `/api/attachments/<id>/download`).
+//  3. `attachment.markdown_url` — the durable, server-policy-aligned
+//     URL. Beats raw `attachment.url` because it never points at a
+//     private bucket (must-fix 2 from MUL-3192 review).
+//  4. `attachment.url` — legacy fallback for responses that omit
+//     `markdown_url` (a backend old enough to predate MUL-3192) AND
+//     happen to carry a loadable raw URL.
+//
+// All picks run through `resolvePublicFileUrl` so site-relative paths
+// become absolute on desktop (`app://` / file:) while web's empty base
+// keeps them relative — the same absolutize pass the inline renderer
+// uses (see `absolutizeMediaURL` in attachment.tsx, MUL-3192). When the
+// picked URL is already absolute http(s) the absolutize pass is a no-op.
+function resolvePreviewMediaUrl(attachment: Attachment, cdnDomain: string): string {
+  const dl = attachment.download_url ?? "";
+  if (signedExpiringURL(dl)) return dl;
+  if (storageURLIsNativelyLoadable(attachment.url ?? "", cdnDomain)) {
+    return resolvePublicFileUrl(attachment.url) ?? attachment.url!;
+  }
+  if (attachment.markdown_url) {
+    return resolvePublicFileUrl(attachment.markdown_url) ?? attachment.markdown_url;
+  }
+  if (attachment.url) {
+    return resolvePublicFileUrl(attachment.url) ?? attachment.url;
+  }
+  // Last-resort: download_url (might be site-relative and auth-gated,
+  // but at least something for the renderer to attempt).
+  return resolvePublicFileUrl(dl) ?? dl;
 }
 
-function normalize(source: PreviewSource): PreviewState {
+// signedExpiringURL is true when `rawURL` is an absolute http(s) URL
+// carrying an expiring signature query — the shape CloudFront /
+// S3-presign / R2 / MinIO signers emit. Such URLs are valid as a
+// native <img>/<video> src for the duration of the TTL because the
+// redirect target serves the bytes; we don't need to route through
+// `markdown_url` or the API endpoint.
+function signedExpiringURL(rawURL: string): boolean {
+  return (
+    !!rawURL &&
+    /^https?:\/\//i.test(rawURL) &&
+    /[?&](Signature|X-Amz-Signature|Key-Pair-Id|Expires|X-Amz-Expires)=/i.test(rawURL)
+  );
+}
+
+// storageURLIsNativelyLoadable mirrors the inline renderer's gate
+// (pickInlineMediaURL in attachment.tsx). Kept inline here instead of
+// imported because the modal lives in a separate module boundary and
+// the dependency direction is one-way (modal imports editor utils, not
+// the other way around). #4048.
+function storageURLIsNativelyLoadable(rawURL: string, cdnDomain: string): boolean {
+  if (!rawURL) return false;
+  if (rawURL.startsWith("/uploads/")) {
+    return rawURL === "/uploads/" ? false : true;
+  }
+  return storageURLMatchesCdnDomain(rawURL, cdnDomain);
+}
+
+function storageURLMatchesCdnDomain(rawURL: string, cdnDomain: string): boolean {
+  const expected = normalizeHost(cdnDomain);
+  if (!rawURL || !expected) return false;
+  try {
+    const u = new URL(rawURL);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    if (normalizeHost(u.hostname) !== expected) return false;
+    return !hasExpiringSignatureQuery(u.searchParams);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeHost(host: string): string {
+  return host.trim().toLowerCase().replace(/\.$/, "");
+}
+
+function hasExpiringSignatureQuery(q: URLSearchParams): boolean {
+  for (const key of [
+    "Signature",
+    "X-Amz-Signature",
+    "Key-Pair-Id",
+    "Expires",
+    "X-Amz-Expires",
+  ]) {
+    if (q.has(key)) return true;
+  }
+  return false;
+}
+
+function normalize(source: PreviewSource, cdnDomain: string): PreviewState {
   // Resolve any server-relative URL (e.g. `/api/attachments/{id}/download`
   // returned by the unified-endpoint metadata path when no CloudFront
   // signer is configured) against the configured API base. Web with the
@@ -111,7 +216,7 @@ function normalize(source: PreviewSource): PreviewState {
     return {
       filename: source.attachment.filename,
       contentType: source.attachment.content_type,
-      mediaUrl: resolvePreviewMediaUrl(source.attachment),
+      mediaUrl: resolvePreviewMediaUrl(source.attachment, cdnDomain),
       attachmentId: source.attachment.id,
     };
   }
@@ -162,17 +267,24 @@ export interface AttachmentPreviewHandle {
 
 export function useAttachmentPreview(): AttachmentPreviewHandle {
   const [current, setCurrent] = useState<PreviewSource | null>(null);
+  // `cdnDomain` drives the natively-loadable gate in
+  // resolvePreviewMediaUrl. Reading it here instead of inside
+  // AttachmentPreviewModal keeps the hook return shape stable and
+  // avoids a redundant store read on every modal re-render — the
+  // domain only changes on a /api/config refresh and is cheap to
+  // capture via React.useMemo (see modal).
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
 
   const open = useCallback((source: PreviewSource) => setCurrent(source), []);
   const tryOpen = useCallback((source: PreviewSource) => {
-    const state = normalize(source);
+    const state = normalize(source, cdnDomain);
     const kind = getPreviewKind(state.contentType, state.filename);
     if (!kind) return false;
     // URL-only sources cannot drive text kinds — the /content proxy is ID-keyed.
     if (source.kind === "url" && !URL_ONLY_KINDS.has(kind)) return false;
     setCurrent(source);
     return true;
-  }, []);
+  }, [cdnDomain]);
 
   const modal = current ? (
     <AttachmentPreviewModal
@@ -196,7 +308,8 @@ export function AttachmentPreviewModal({
 }: AttachmentPreviewModalProps) {
   const { t } = useT("editor");
   const download = useDownloadAttachment();
-  const state = normalize(source);
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
+  const state = normalize(source, cdnDomain);
   // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
   // workspace route instead of throwing, so the new-tab button just hides.
   const slug = useWorkspaceSlug();

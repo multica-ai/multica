@@ -120,6 +120,7 @@ import {
   useAttachmentPreview,
 } from "./attachment-preview-modal";
 import { renderHook, act as hookAct } from "@testing-library/react";
+import { configStore } from "@multica/core/config";
 
 // Fresh QueryClient per render — no retries (preview errors are typed,
 // not transient) and no caching across tests so each scenario is hermetic.
@@ -298,12 +299,25 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
   // is loaded from `app://` / file: / dev-server origin and needs the
   // absolute URL — otherwise `<img src>`, `<iframe src>`, `<video src>`
   // hit the shell origin and fail.
-  it("prefixes the configured API base for image previews when download_url is server-relative", () => {
+  //
+  // As of #4048 the modal's URL picker prefers an absolute
+  // `markdown_url` over a server-relative `download_url` (the absolute
+  // shape doesn't need apiBaseUrl prefixing and is what the server
+  // intends the client to persist into markdown). The tests below
+  // cover the legacy pre-MUL-3192 / no-markdown_url case where the
+  // modal must fall back to download_url and run the prefix pass.
+  it("prefixes the configured API base for image previews when download_url is server-relative and markdown_url is empty (legacy fallback)", () => {
     getBaseUrlMock.mockReturnValue("https://api.example.test");
     const att = makeAttachment({
       filename: "shot.png",
       content_type: "image/png",
       download_url: "/api/attachments/att-1/download",
+      // Legacy pre-MUL-3192 row: backend omitted markdown_url so the
+      // picker falls through to download_url and the desktop prefix
+      // pass kicks in.
+      markdown_url: "",
+      // Empty url so the picker can't fall back to a raw storage URL.
+      url: "",
     });
     render(
       <AttachmentPreviewModal
@@ -318,12 +332,14 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
     );
   });
 
-  it("prefixes the configured API base for PDF previews when download_url is server-relative", () => {
+  it("prefixes the configured API base for PDF previews when download_url is server-relative and markdown_url is empty (legacy fallback)", () => {
     getBaseUrlMock.mockReturnValue("https://api.example.test");
     const att = makeAttachment({
       filename: "manual.pdf",
       content_type: "application/pdf",
       download_url: "/api/attachments/att-1/download",
+      markdown_url: "",
+      url: "",
     });
     render(
       <AttachmentPreviewModal
@@ -338,13 +354,15 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
     );
   });
 
-  it("keeps a same-origin relative URL untouched when the configured base is empty (web)", () => {
+  it("keeps a same-origin relative URL untouched when the configured base is empty (web, legacy fallback)", () => {
     // Default web shape — empty base. Browser resolves the relative path
     // against the document origin, no prefix needed.
     const att = makeAttachment({
       filename: "shot.png",
       content_type: "image/png",
       download_url: "/api/attachments/att-1/download",
+      markdown_url: "",
+      url: "",
     });
     render(
       <AttachmentPreviewModal
@@ -357,12 +375,14 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
     expect(img?.getAttribute("src")).toBe("/api/attachments/att-1/download");
   });
 
-  it("trims a trailing slash on the configured base when joining a relative URL", () => {
+  it("trims a trailing slash on the configured base when joining a relative URL (legacy fallback)", () => {
     getBaseUrlMock.mockReturnValue("https://api.example.test/");
     const att = makeAttachment({
       filename: "shot.png",
       content_type: "image/png",
       download_url: "/api/attachments/att-1/download",
+      markdown_url: "",
+      url: "",
     });
     render(
       <AttachmentPreviewModal
@@ -394,6 +414,128 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
     const img = document.querySelector("img");
     expect(img?.getAttribute("src")).toBe(
       "https://cdn.example.test/att-1.png?Signature=s",
+    );
+  });
+});
+
+// #4048 — the fix for the broken-preview regression in web + desktop for
+// self-hosted deployments using LocalStorage WITHOUT `LOCAL_UPLOAD_BASE_URL`.
+// The persisted `markdown_url` (post-fix) is the site-relative
+// `/uploads/<key>` path that the Next.js rewrite proxies straight to
+// `LocalStorage.ServeFile`, so the modal's `<img src>` lands on a natively
+// loadable URL instead of the auth-gated `/api/attachments/<id>/download`
+// endpoint that 401s on header-less native resource fetches.
+describe("AttachmentPreviewModal — natively-loadable /uploads/... preview (#4048)", () => {
+  it("prefers the locally-served /uploads/<key> URL over the auth-gated /api/... endpoint for image previews on web", () => {
+    // Web: apiBaseUrl is empty. The site-relative /uploads/... path
+    // resolves against the document origin through the Next.js
+    // rewrite proxy — no apiBaseUrl prefix needed, no auth roundtrip.
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      // Both legacy and post-fix shapes: pickInlineMediaURL routes
+      // through `record.url` here because the path is natively
+      // loadable; markdown_url and download_url are kept for the
+      // explicit Download click.
+      url: "/uploads/workspaces/abc/shot.png",
+      markdown_url: "/api/attachments/att-1/download",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "/uploads/workspaces/abc/shot.png",
+    );
+    expect(img?.getAttribute("src")).not.toBe(
+      "/api/attachments/att-1/download",
+    );
+  });
+
+  it("prefixes the configured API base onto /uploads/<key> on desktop (file:// origin)", () => {
+    // Desktop's renderer origin is `app://` / file: / dev-server, so a
+    // site-relative `/uploads/...` path resolves against the shell
+    // origin instead of the API host. The renderer's absolutize pass
+    // prefixes apiBaseUrl so `<img src>` lands on the API server.
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      url: "/uploads/workspaces/abc/shot.png",
+      markdown_url: "/api/attachments/att-1/download",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://api.example.test/uploads/workspaces/abc/shot.png",
+    );
+  });
+
+  it("prefers a CDN-matched absolute record.url over a private-bucket-shaped markdown_url", () => {
+    // Public CDN deployment: record.url is the absolute CDN URL
+    // (matches cdnDomain), markdown_url is the absolute API endpoint
+    // on the same CDN host. The CDN-matched record.url wins because
+    // it skips the API hop.
+    configStore.setState({ cdnDomain: "cdn.example.test" });
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      url: "https://cdn.example.test/uploads/ws/shot.png",
+      markdown_url: "https://cdn.example.test/api/attachments/att-1/download",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://cdn.example.test/uploads/ws/shot.png",
+    );
+  });
+
+  it("explicit Download button still hits the auth-gated endpoint after the natively-loadable preview path is chosen", () => {
+    // The #4048 fix only changes what gets rendered as the inline
+    // media src; the explicit Download CTA must keep going through
+    // the re-sign / proxy path (`/api/attachments/<id>/download`) so
+    // server-side ACL / membership checks still gate raw byte
+    // access even when the preview renders natively.
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      url: "/uploads/workspaces/abc/shot.png",
+      markdown_url: "/api/attachments/att-1/download",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getAllByTitle("Download")[0]!);
+    // The Download button calls useDownloadAttachment(id) which hits
+    // the auth-gated endpoint server-side; this is the re-sign/proxy
+    // path, NOT the locally-served /uploads/... file.
+    expect(downloadMock).toHaveBeenCalledWith("att-1");
+    expect(downloadMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/uploads/"),
     );
   });
 });
