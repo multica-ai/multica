@@ -2,6 +2,7 @@ package octo
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -368,3 +369,27 @@ func TestHub_ReconfigureRestartsSupervisor(t *testing.T) {
 		t.Fatal("connector was not restarted after reconfigure")
 	}
 }
+
+// TestIsBenignRenewCancel distinguishes an intentional run-context cancellation
+// (reconfigure restart / shutdown) from a real renewal failure, so the former
+// is not logged at ERROR level.
+func TestIsBenignRenewCancel(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	live := context.Background()
+
+	if !isBenignRenewCancel(cancelled, context.Canceled) {
+		t.Error("cancelled ctx + context.Canceled should be benign")
+	}
+	if !isBenignRenewCancel(cancelled, errTestDB) {
+		t.Error("cancelled ctx should be benign regardless of the error value")
+	}
+	if !isBenignRenewCancel(live, context.Canceled) {
+		t.Error("a context.Canceled error should be benign even on a live ctx")
+	}
+	if isBenignRenewCancel(live, errTestDB) {
+		t.Error("a real DB error on a live ctx must NOT be treated as benign")
+	}
+}
+
+var errTestDB = errors.New("dial tcp: connection refused")
