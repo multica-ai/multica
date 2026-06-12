@@ -178,6 +178,10 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 		{Name: "MULTICA_SERVER_URL", Value: "http://multica-backend." + namespace + ".svc:8080"},
 		{Name: "MULTICA_TOKEN", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "multica-token"}, Key: "token"}}},
 		{Name: "HOME", Value: "/home/multica"},
+		// wrangler writes debug logs under $HOME/.config/.wrangler/logs by
+		// default, which isn't writable in the runtime image (harmless EACCES
+		// on every invocation). Point it at a writable tmp path.
+		{Name: "WRANGLER_LOG_PATH", Value: "/tmp/wrangler"},
 	}
 	runtaskMounts := []corev1.VolumeMount{
 		{Name: "payload", MountPath: "/etc/task"},

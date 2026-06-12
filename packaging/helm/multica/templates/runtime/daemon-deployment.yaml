@@ -56,6 +56,11 @@ spec:
                   key: token
             - name: MULTICA_DAEMON_ID
               value: "multica-daemon"
+            # wrangler logs to $HOME/.config/.wrangler/logs by default, which
+            # isn't writable in the runtime image (harmless EACCES). Redirect
+            # to a writable tmp path.
+            - name: WRANGLER_LOG_PATH
+              value: "/tmp/wrangler"
             - name: MULTICA_DAEMON_DEVICE_NAME
               value: {{ .Values.runtime.daemon.deviceName | quote }}
             - name: MULTICA_DAEMON_MAX_CONCURRENT_TASKS
