@@ -58,7 +58,7 @@ import {
   INBOX_SORT_DIRECTION_OPTIONS,
   // CEREBRO-PATCH(inbox-focus-list-visibility): TECH-2947 — per-user show/hide for the priorities panel
   useFocusListVisibility,
-  CerebroInboxModeButton, // CEREBRO-PATCH(inbox-dynamic-mode-button): TECH-3413 — toolbar entry to switch to the dynamic inbox
+  CerebroInboxModeMenuItem, // CEREBRO-PATCH(inbox-dynamic-mode-button): TECH-3413 — ⋯-menu entry to switch to the dynamic inbox
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -727,8 +727,6 @@ export function InboxPage() {
         >
           <Plus className="h-4 w-4" />
         </Button>
-        {/* CEREBRO-PATCH(inbox-dynamic-mode-button): TECH-3413 — switch to dynamic inbox */}
-        <CerebroInboxModeButton />
         <Button
           variant="ghost"
           size="icon-sm"
@@ -862,6 +860,8 @@ export function InboxPage() {
                 </DropdownMenuItem>
               </>
             )}
+            {/* CEREBRO-PATCH(inbox-dynamic-mode-button): TECH-3413 — Classic→Dynamic switch lives in the ⋯ menu */}
+            <CerebroInboxModeMenuItem />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
