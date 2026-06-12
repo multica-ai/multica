@@ -6,4 +6,5 @@
 - `create_issue` calls `dispatchCreateIssue`; `run_only` calls `dispatchRunOnly`.
 - `resolveAutopilotLeader` resolves squad-assigned autopilots to the squad leader.
 - `AgentReadiness` blocks archived/runtime-unready agents before enqueue.
+- `server/internal/service/cron.go` has `ValidateCronMinInterval`, enforced by the trigger create/update handlers in `server/internal/handler/autopilot.go`; the floor comes from `AUTOPILOT_MIN_TRIGGER_INTERVAL` (default 5m, `0` disables).
 - `server/cmd/server/router.go` exposes authenticated `/api/autopilots` routes and unauthenticated webhook ingress `/api/webhooks/autopilots/{token}`.
