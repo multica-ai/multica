@@ -13,8 +13,15 @@ const mockReload = vi.hoisted(() => vi.fn());
 const mockToastWarning = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockSetUser = vi.hoisted(() => vi.fn());
+const mockSetDuplicatePolicy = vi.hoisted(() => vi.fn());
 const userRef = vi.hoisted(() => ({
   current: null as { id: string; timezone?: string | null } | null,
+}));
+const issueCreatePreferencesRef = vi.hoisted(() => ({
+  current: {
+    duplicatePolicy: "confirm" as "confirm" | "allow",
+    setDuplicatePolicy: mockSetDuplicatePolicy,
+  },
 }));
 
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
@@ -65,6 +72,15 @@ vi.mock("@multica/core/auth", async () => {
   return { ...actual, useAuthStore };
 });
 
+vi.mock("@multica/core/issues/stores/create-preferences-store", () => ({
+  useIssueCreatePreferencesStore: (
+    selector?: (s: typeof issueCreatePreferencesRef.current) => unknown,
+  ) => {
+    const state = issueCreatePreferencesRef.current;
+    return selector ? selector(state) : state;
+  },
+}));
+
 import { PreferencesTab } from "./preferences-tab";
 
 const TEST_RESOURCES = {
@@ -83,6 +99,10 @@ describe("PreferencesTab — Language switcher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     userRef.current = null;
+    issueCreatePreferencesRef.current.duplicatePolicy = "confirm";
+    mockSetDuplicatePolicy.mockImplementation((policy: "confirm" | "allow") => {
+      issueCreatePreferencesRef.current.duplicatePolicy = policy;
+    });
     vi.useFakeTimers({ shouldAdvanceTime: true });
     Object.defineProperty(window, "location", {
       writable: true,
@@ -171,6 +191,10 @@ describe("PreferencesTab — Timezone section", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     userRef.current = null;
+    issueCreatePreferencesRef.current.duplicatePolicy = "confirm";
+    mockSetDuplicatePolicy.mockImplementation((policy: "confirm" | "allow") => {
+      issueCreatePreferencesRef.current.duplicatePolicy = policy;
+    });
   });
 
   // Base UI Select portals its popup onto document.body; unmount each
@@ -249,4 +273,34 @@ describe("PreferencesTab — Timezone section", () => {
       expect(mockSetUser).toHaveBeenCalledWith(clearedUser);
     });
   }, 20000);
+});
+
+describe("PreferencesTab — Issue creation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+    issueCreatePreferencesRef.current.duplicatePolicy = "confirm";
+    mockSetDuplicatePolicy.mockImplementation((policy: "confirm" | "allow") => {
+      issueCreatePreferencesRef.current.duplicatePolicy = policy;
+    });
+  });
+
+  it("toggles the local duplicate-title preference", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("switch", { name: "Allow duplicate issue titles" }));
+
+    expect(mockSetDuplicatePolicy).toHaveBeenCalledWith("allow");
+  });
+
+  it("can turn the duplicate-title preference back to confirmation", async () => {
+    issueCreatePreferencesRef.current.duplicatePolicy = "allow";
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("switch", { name: "Allow duplicate issue titles" }));
+
+    expect(mockSetDuplicatePolicy).toHaveBeenCalledWith("confirm");
+  });
 });

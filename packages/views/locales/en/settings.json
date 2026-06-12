@@ -19,6 +19,12 @@
       "browser_suffix": " (browser)",
       "hint": "Used for dashboards, charts, and any 'today' label shown to you. It's a personal preference that applies across all your workspaces.",
       "sync_failed": "Failed to save your timezone preference."
+    },
+    "issue_create": {
+      "title": "Issue Creation",
+      "description": "Personal defaults used when you create issues in this browser.",
+      "allow_duplicate_label": "Allow duplicate issue titles",
+      "allow_duplicate_hint": "Skip the duplicate-title confirmation and create the issue directly."
     }
   },
   "page": {

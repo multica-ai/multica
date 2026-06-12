@@ -28,6 +28,7 @@ import {
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
+import { useIssueCreatePreferencesStore } from "./stores/create-preferences-store";
 import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,
@@ -52,6 +53,13 @@ export type ToggleIssueReactionVars = {
   emoji: string;
   existing: IssueReaction | undefined;
 };
+
+export function applyIssueCreatePreferences(data: CreateIssueRequest): CreateIssueRequest {
+  if (data.allow_duplicate !== undefined) return data;
+  return useIssueCreatePreferencesStore.getState().duplicatePolicy === "allow"
+    ? { ...data, allow_duplicate: true }
+    : data;
+}
 
 // ---------------------------------------------------------------------------
 // Per-status pagination
@@ -184,7 +192,7 @@ export function useCreateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (data: CreateIssueRequest) => api.createIssue(data),
+    mutationFn: (data: CreateIssueRequest) => api.createIssue(applyIssueCreatePreferences(data)),
     onSuccess: (newIssue) => {
       for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
         if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, newIssue));

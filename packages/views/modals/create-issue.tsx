@@ -32,6 +32,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
@@ -41,6 +42,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
+import { useIssueCreatePreferencesStore } from "@multica/core/issues/stores/create-preferences-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
@@ -98,6 +100,7 @@ export function ManualCreatePanel({
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const setDuplicatePolicy = useIssueCreatePreferencesStore((s) => s.setDuplicatePolicy);
 
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -194,7 +197,7 @@ export function ManualCreatePanel({
     setFormResetKey((key) => key + 1);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (forceAllowDuplicate = false) => {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
@@ -210,6 +213,7 @@ export function ManualCreatePanel({
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
         parent_issue_id: parentIssueId,
         project_id: projectId,
+        ...(forceAllowDuplicate ? { allow_duplicate: true } : {}),
       });
 
       // Link queued children to the new parent. Deferred to after create
@@ -302,31 +306,26 @@ export function ManualCreatePanel({
         if (dup) {
           toast.custom(
             (toastId) => (
-              <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="flex items-center justify-center size-5 rounded-full bg-amber-500/15 text-amber-500">
-                    <AlertTriangle className="size-3" />
-                  </div>
-                  <span className="text-sm font-medium">
-                    {t(($) => $.create_issue.toast_duplicate_title)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
-                  <span className="truncate">{dup.issue.identifier} – {dup.issue.title}</span>
-                </div>
-                <button
-                  type="button"
-                  className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
-                  onClick={() => {
-                    router.push(p.issueDetail(dup.issue.id));
-                    toast.dismiss(toastId);
-                  }}
-                >
-                  {t(($) => $.create_issue.toast_duplicate_view)}
-                </button>
-              </div>
+              <DuplicateIssueToast
+                issue={dup.issue}
+                labels={{
+                  title: t(($) => $.create_issue.toast_duplicate_title),
+                  alwaysAllow: t(($) => $.create_issue.toast_duplicate_always_allow),
+                  viewExisting: t(($) => $.create_issue.toast_duplicate_view),
+                  createAnyway: t(($) => $.create_issue.toast_duplicate_create_anyway),
+                }}
+                onViewExisting={() => {
+                  router.push(p.issueDetail(dup.issue.id));
+                  toast.dismiss(toastId);
+                }}
+                onCreateAnyway={(alwaysAllow) => {
+                  if (alwaysAllow) setDuplicatePolicy("allow");
+                  toast.dismiss(toastId);
+                  void handleSubmit(true);
+                }}
+              />
             ),
-            { duration: 5000 },
+            { duration: 10000 },
           );
           return;
         }
@@ -469,7 +468,7 @@ export function ManualCreatePanel({
                 placeholder={t(($) => $.create_issue.title_placeholder)}
                 className="text-lg font-semibold"
                 onChange={(v) => updateTitle(v)}
-                onSubmit={handleSubmit}
+                onSubmit={() => void handleSubmit()}
               />
             </div>
 
@@ -705,12 +704,12 @@ export function ManualCreatePanel({
                 {!title.trim() ? (
                   <TooltipProvider delay={200}>
                     <Tooltip>
-                      <TooltipTrigger render={<span><Button size="sm" onClick={handleSubmit} disabled>{t(($) => $.create_issue.submit)}</Button></span>} />
+                      <TooltipTrigger render={<span><Button size="sm" onClick={() => void handleSubmit()} disabled>{t(($) => $.create_issue.submit)}</Button></span>} />
                       <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+                  <Button size="sm" onClick={() => void handleSubmit()} disabled={submitting}>
                     {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
                   </Button>
                 )}
@@ -719,6 +718,68 @@ export function ManualCreatePanel({
           </>
         )}
     </>
+  );
+}
+
+function DuplicateIssueToast({
+  issue,
+  labels,
+  onViewExisting,
+  onCreateAnyway,
+}: {
+  issue: DuplicateIssueErrorBody["issue"];
+  labels: {
+    title: string;
+    alwaysAllow: string;
+    viewExisting: string;
+    createAnyway: string;
+  };
+  onViewExisting: () => void;
+  onCreateAnyway: (alwaysAllow: boolean) => void;
+}) {
+  const [alwaysAllow, setAlwaysAllow] = useState(false);
+
+  return (
+    <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[380px]">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center justify-center size-5 rounded-full bg-amber-500/15 text-amber-500">
+          <AlertTriangle className="size-3" />
+        </div>
+        <span className="text-sm font-medium">
+          {labels.title}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+        <span className="truncate">{issue.identifier} – {issue.title}</span>
+      </div>
+      <label className="ml-7 mt-3 flex min-h-8 items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+        <Checkbox
+          checked={alwaysAllow}
+          onCheckedChange={(checked) => setAlwaysAllow(checked === true)}
+        />
+        <span>{labels.alwaysAllow}</span>
+      </label>
+      <div className="ml-7 mt-3 flex items-center gap-2">
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-8 px-0"
+          onClick={onViewExisting}
+        >
+          {labels.viewExisting}
+        </Button>
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-8 px-0"
+          onClick={() => onCreateAnyway(alwaysAllow)}
+        >
+          {labels.createAnyway}
+        </Button>
+      </div>
+    </div>
   );
 }
 
