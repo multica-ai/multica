@@ -27,6 +27,9 @@ import { useArchiveChannel } from "@multica/cerebro-channels";
 import { useInboxActionGroupLabels, useSetInboxMode } from "@multica/cerebro-inbox";
 import { IssueDetail } from "@multica/views/issues/components";
 import { ChannelDetail } from "@multica/views/channels";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
+import type { Channel } from "@multica/core/types";
 import { useDynamicInboxData } from "../use-dynamic-inbox-data";
 import { useInboxLayout } from "../use-inbox-layout";
 import {
@@ -51,6 +54,7 @@ export function DynamicInbox() {
   const { entries, filterContext, projects, loading } = useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
   const setMode = useSetInboxMode();
+  const slackBlockEnabled = useFeatureFlag("cerebro_inbox_slack_block");
 
   const markRead = useMarkInboxRead();
   const archiveInbox = useArchiveInbox();
@@ -79,6 +83,16 @@ export function DynamicInbox() {
     else if (entry.kind === "channel") archiveChannel.mutate(entry.channel.id);
     if (selected && selected.id === entry.id) setSelected(null);
   };
+  // TECH-3422 — the Slack-block opens a channel/DM into the same detail panel.
+  const onOpenChannel = (channel: Channel) => {
+    setSelected({
+      kind: "channel",
+      id: channel.id,
+      time: Date.parse(channel.updated_at) || 0,
+      channel,
+    });
+  };
+  const selectedChannelId = selected?.kind === "channel" ? selected.channel.id : null;
 
   // ---- layout edits ----
   const updateActiveTab = (fn: (t: InboxTabConfig) => InboxTabConfig) =>
@@ -200,7 +214,9 @@ export function DynamicInbox() {
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Add section</DropdownMenuLabel>
-                  {SECTION_CATALOG.map((c) => (
+                  {SECTION_CATALOG.filter(
+                    (c) => c.kind !== "team" || slackBlockEnabled,
+                  ).map((c) => (
                     <DropdownMenuItem key={c.kind} onClick={() => addSection(c.kind)}>
                       {c.label}
                     </DropdownMenuItem>
@@ -232,7 +248,19 @@ export function DynamicInbox() {
               Empty tab — add a section from the ⋯ menu.
             </p>
           )}
-          {activeTab.sections.map((section, i) => (
+          {activeTab.sections.map((section, i) =>
+            section.kind === "team" ? (
+              <section
+                key={section.id}
+                className="overflow-hidden rounded-xl border border-border bg-card"
+              >
+                <SlackBlock
+                  wsId={wsId}
+                  selectedChannelId={selectedChannelId}
+                  onOpenChannel={onOpenChannel}
+                />
+              </section>
+            ) : (
             <DynamicInboxSection
               key={section.id}
               section={section}

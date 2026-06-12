@@ -26,6 +26,10 @@ export type CerebroFlagKey =
   | "cerebro_inbox_wakeup_running"
   | "cerebro_inbox_pinned_filter"
   | "cerebro_inbox_dynamic"
+  // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
+  // with live presence dots and a typing indicator. Default off; the block is
+  // only offered in the dynamic inbox's "Add section" menu when this is on.
+  | "cerebro_inbox_slack_block"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
   | "cerebro_voice_summary_enabled"
@@ -156,6 +160,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_inbox_wakeup_running: true,
   cerebro_inbox_pinned_filter: true,
   cerebro_inbox_dynamic: true,
+  cerebro_inbox_slack_block: false,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
   cerebro_voice_summary_enabled: false,
@@ -472,6 +477,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Let each user build their own inbox out of stackable sections (Unread / Running / Pinned / Project / Assigned …) inside one box, with tabs at the top and per-section filter, grouping and sort. Users switch between the Classic and Dynamic inbox from the inbox's ⋯ menu; the layout is saved per user and follows them across devices, with an optional separate layout for mobile/PWA.",
+  },
+  {
+    key: "cerebro_inbox_slack_block",
+    label: "Inbox Slack-block",
+    group: "inbox",
+    description:
+      "Add a Slack-style block to the dynamic inbox: a list of people with live online dots, your direct messages and channels, and a \"is typing…\" indicator — open a conversation right inside the inbox. Offered in the dynamic inbox's \"Add section\" menu when on. Requires the Dynamic inbox.",
   },
   {
     key: "cerebro_inbox_wakeup_running",

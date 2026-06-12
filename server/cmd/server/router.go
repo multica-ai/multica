@@ -26,6 +26,9 @@ import (
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
 	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 move-comment-to-sub-issue handler import.
 	cerebrocomments "github.com/multica-ai/multica/server/internal/cerebro/comments"
+	// CEREBRO-PATCH(cerebro-presence-typing-routes): TECH-3422 inbox Slack-block presence + typing handler imports.
+	cerebropresence "github.com/multica-ai/multica/server/internal/cerebro/presence"
+	cerebrotyping "github.com/multica-ai/multica/server/internal/cerebro/typing"
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry handler import
 	cerebrocredentials "github.com/multica-ai/multica/server/internal/cerebro/credentials"
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
@@ -508,6 +511,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// dispatch always-listening agents in channels.
 	channelListenSvc := cerebrochannels.New(cerebroQueries, queries, h.TaskService, bus)
 	h.ChannelListen = channelListenSvc
+	// CEREBRO-PATCH(cerebro-presence-typing-routes): TECH-3422 member presence (heartbeat + sweeper) and typing relay for the inbox Slack-block.
+	presenceHandler := cerebropresence.NewHandler(cerebropresence.NewTracker(cerebropresence.DefaultTTL), bus)
+	presenceHandler.StartSweeper(context.Background(), 20*time.Second)
+	typingHandler := cerebrotyping.NewHandler(queries, bus)
 	// CEREBRO-PATCH(cerebro-inbox-routes): mounts cerebro-only inbox actions
 	// (mute/unmute/mark-unread). Adding new endpoints here keeps the conflict
 	// surface to a single line per cerebro inbox feature.
@@ -1734,6 +1741,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/add-issue", cerebroInboxHandler.AddIssueToInbox)
 
 			})
+
+			// CEREBRO-PATCH(cerebro-presence-typing-routes): TECH-3422 inbox Slack-block — member presence heartbeat/snapshot + per-channel typing relay.
+			r.Get("/api/cerebro/presence", presenceHandler.Snapshot)
+			r.Post("/api/cerebro/presence/ping", presenceHandler.Ping)
+			r.Post("/api/cerebro/channels/{id}/typing", typingHandler.Typing)
 
 			// Notification preferences
 			r.Route("/api/notification-preferences", func(r chi.Router) {

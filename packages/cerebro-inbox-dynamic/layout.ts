@@ -16,7 +16,10 @@ export type SectionKind =
   | "unread"
   | "pinned"
   | "project"
-  | "all";
+  | "all"
+  // TECH-3422 — the Slack-block: a people/DM/channels rail with live presence
+  // and typing. Rendered by a dedicated component, not the entry-list filter.
+  | "team";
 
 /** How rows inside a section are grouped under sub-headers. */
 export type SectionGroupBy = "none" | "action" | "project";
@@ -76,6 +79,9 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "waiting", label: "Waiting" },
   { kind: "calm", label: "Done / calm" },
   { kind: "all", label: "All messages" },
+  // TECH-3422 — only surfaced in the Add-section menu when the
+  // cerebro_inbox_slack_block flag is on (filtered in DynamicInbox).
+  { kind: "team", label: "Team & channels (Slack)" },
 ];
 
 export function sectionLabel(section: InboxSectionConfig): string {

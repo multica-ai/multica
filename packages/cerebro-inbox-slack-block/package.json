@@ -1,5 +1,5 @@
 {
-  "name": "@multica/cerebro-inbox-dynamic",
+  "name": "@multica/cerebro-inbox-slack-block",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,11 +12,10 @@
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",
-    "@multica/cerebro-inbox": "workspace:*",
-    "@multica/cerebro-inbox-slack-block": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*"
+    "@multica/views": "workspace:*",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",
@@ -25,7 +24,12 @@
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
     "@types/react": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
