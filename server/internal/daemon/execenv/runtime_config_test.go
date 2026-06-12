@@ -337,6 +337,95 @@ func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 	}
 }
 
+func TestCodeTaskPreflightSectionScopeAndWorkflow(t *testing.T) {
+	t.Parallel()
+
+	issueCases := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{
+			name: "assignment-triggered",
+			ctx:  TaskContextForEnv{IssueID: "issue-preflight-1"},
+		},
+		{
+			name: "comment-triggered",
+			ctx: TaskContextForEnv{
+				IssueID:          "issue-preflight-2",
+				TriggerCommentID: "comment-preflight-2",
+			},
+		},
+	}
+	for _, tc := range issueCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			for _, want := range []string{
+				"## Code Task Preflight",
+				"`local_edit` (本地可改)",
+				"`commit_ready` (可提交)",
+				"`push_ready` (可推送)",
+				"`mr_ready` (可建 MR)",
+				"issue/Jira/task key",
+				"author/committer",
+				"git config user.name",
+				"git remote -v",
+				"MR/PR creation channel",
+				"local-only",
+				"local diff, commit, push, and MR readiness",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("%s brief missing preflight text %q\n---\n%s", tc.name, want, out)
+				}
+			}
+		})
+	}
+
+	assignment := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-preflight-assignment"})
+	preflightIdx := strings.Index(assignment, "4. If the issue may change code, run the `## Code Task Preflight` before editing.")
+	statusIdx := strings.Index(assignment, "5. Run `multica issue status issue-preflight-assignment in_progress`")
+	completeIdx := strings.Index(assignment, "6. Complete the task within your Agent Identity boundaries.")
+	if preflightIdx == -1 || statusIdx == -1 || completeIdx == -1 {
+		t.Fatalf("assignment workflow missing expected preflight/status/complete steps\n---\n%s", assignment)
+	}
+	if !(preflightIdx < statusIdx && statusIdx < completeIdx) {
+		t.Fatalf("assignment workflow must run preflight before status/implementation steps (preflight=%d status=%d complete=%d)\n---\n%s", preflightIdx, statusIdx, completeIdx, assignment)
+	}
+
+	comment := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          "issue-preflight-comment",
+		TriggerCommentID: "comment-preflight-comment",
+	})
+	commentPreflightIdx := strings.Index(comment, "5. If the request may change code, run the `## Code Task Preflight` before editing.")
+	replyDecisionIdx := strings.Index(comment, "6. **Decide whether a reply is warranted.**")
+	if commentPreflightIdx == -1 || replyDecisionIdx == -1 {
+		t.Fatalf("comment workflow missing expected preflight/reply decision steps\n---\n%s", comment)
+	}
+	if commentPreflightIdx > replyDecisionIdx {
+		t.Fatalf("comment workflow must run preflight before requested work/reply decision (preflight=%d reply=%d)\n---\n%s", commentPreflightIdx, replyDecisionIdx, comment)
+	}
+
+	nonIssueCases := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{name: "chat", ctx: TaskContextForEnv{ChatSessionID: "chat-preflight"}},
+		{name: "quick-create", ctx: TaskContextForEnv{QuickCreatePrompt: "make an issue"}},
+		{name: "autopilot-run-only", ctx: TaskContextForEnv{AutopilotRunID: "run-preflight"}},
+	}
+	for _, tc := range nonIssueCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if strings.Contains(out, "## Code Task Preflight") {
+				t.Fatalf("%s brief must not inject issue code preflight\n---\n%s", tc.name, out)
+			}
+		})
+	}
+}
+
 // The sub-issue creation rule must reach top-level parents that have no
 // `parent_issue_id` of their own — that is where the `todo` vs `backlog`
 // decision matters most. The section must not gate on this issue being
