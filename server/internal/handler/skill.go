@@ -44,10 +44,17 @@ type SkillResponse struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
 	Content     string  `json:"content"`
-	Config      any     `json:"config"`
-	CreatedBy   *string `json:"created_by"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	// ContentRedacted is set to true when the caller is not allowed to view
+	// the skill body. The `content` field is then empty and `files` is nil
+	// (in SkillWithFilesResponse). See canViewSkillContent. Members without
+	// owner/admin role (and who are not the skill creator) get a placeholder
+	// so they know the skill exists without seeing its (often proprietary)
+	// process/prompt content.
+	ContentRedacted bool    `json:"content_redacted"`
+	Config          any     `json:"config"`
+	CreatedBy       *string `json:"created_by"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 // SkillSummaryResponse is the list-endpoint shape: everything SkillResponse
@@ -324,10 +331,25 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files, err := h.Queries.ListSkillFiles(r.Context(), skill.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list skill files")
-		return
+	resp := skillToResponse(skill)
+
+	// Role-based content gating — skill content + files are methodology/IP
+	// (process docs, prompt templates, brand-voice rules). Members without
+	// owner/admin role (and who are not the skill creator) get a redacted
+	// placeholder so they see the skill exists but not its body. Same
+	// rationale as canViewAgentInstructions in agent.go.
+	var files []db.SkillFile
+	userID := requestUserID(r)
+	if member, mok := ctxMember(r.Context()); mok && !canViewSkillContent(skill, userID, member.Role) {
+		resp.Content = ""
+		resp.ContentRedacted = true
+	} else {
+		var err error
+		files, err = h.Queries.ListSkillFiles(r.Context(), skill.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list skill files")
+			return
+		}
 	}
 
 	fileResps := make([]SkillFileResponse, len(files))
@@ -336,9 +358,22 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
+		SkillResponse: resp,
 		Files:         fileResps,
 	})
+}
+
+// canViewSkillContent checks whether the requesting user is allowed to see
+// the skill's body content + files. Only the skill creator or workspace
+// owner/admin may view them. Skill bodies often contain IP/methodology
+// (process docs, prompt templates, brand-voice rules). For everyone else
+// the content is replaced with an empty string and Files is returned as
+// an empty list, with ContentRedacted=true.
+func canViewSkillContent(skill db.Skill, userID string, memberRole string) bool {
+	if roleAllowed(memberRole, "owner", "admin") {
+		return true
+	}
+	return uuidToString(skill.CreatedBy) == userID
 }
 
 func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {

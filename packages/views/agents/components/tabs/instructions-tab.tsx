@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Lock, Save } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { ContentEditor } from "../../../editor/content-editor";
@@ -20,6 +20,23 @@ export function InstructionsTab({
   const [value, setValue] = useState(agent.instructions ?? "");
   const [saving, setSaving] = useState(false);
   const isDirty = value !== (agent.instructions ?? "");
+
+  // When instructions are redacted (server-side, due to viewer role), render
+  // a lock placeholder instead of the editor. Without this gate the editor
+  // would render an empty editable surface and let members save edits over
+  // an empty value, effectively wiping the instructions. See server-side
+  // canViewAgentInstructions in handler/agent.go.
+  if (agent.instructions_redacted) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+        <Lock className="h-8 w-8 text-muted-foreground" />
+        <p className="max-w-md text-sm text-muted-foreground">
+          Agent instructions are only visible to workspace owners, admins,
+          and the agent owner.
+        </p>
+      </div>
+    );
+  }
 
   // Sync when switching between agents.
   useEffect(() => {
