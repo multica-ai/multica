@@ -99,6 +99,7 @@ export function SkillListToolbar({
   hiddenColumns,
   onToggleColumn,
   allRows,
+  visibleCount,
 }: {
   search: string;
   onSearchChange: (v: string) => void;
@@ -113,6 +114,8 @@ export function SkillListToolbar({
   onToggleColumn: (key: SkillColumnKey) => void;
   /** Unfiltered rows — option lists and counts derive from the full set. */
   allRows: SkillRow[];
+  /** Rows surviving search + filters — shown as "n / total" when narrowed. */
+  visibleCount: number;
 }) {
   const { t } = useT("skills");
 
@@ -174,15 +177,27 @@ export function SkillListToolbar({
 
   return (
     <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
-      {/* Left: name search */}
-      <div className="relative w-full sm:w-auto">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder={t(($) => $.page.search_placeholder)}
-          className="h-8 w-full pl-8 text-sm sm:w-64"
-        />
+      {/* Left: name search + result count. The count only appears while
+          search/filters narrow the list — in the idle state it would just
+          duplicate the total already shown in the page header. */}
+      <div className="flex w-full items-center gap-2 sm:w-auto">
+        <div className="relative w-full sm:w-auto">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder={t(($) => $.page.search_placeholder)}
+            className="h-8 w-full pl-8 text-sm sm:w-64"
+          />
+        </div>
+        {(hasActiveFilters || search.trim().length > 0) && (
+          <span
+            title={t(($) => $.toolbar.result_count_title)}
+            className="shrink-0 text-xs tabular-nums text-muted-foreground"
+          >
+            {visibleCount} / {allRows.length}
+          </span>
+        )}
       </div>
 
       <div className="flex shrink-0 items-center gap-1">

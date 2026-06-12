@@ -817,6 +817,7 @@ export default function SkillsPage() {
             hiddenColumns={hiddenColumns}
             onToggleColumn={toggleColumn}
             allRows={allRows}
+            visibleCount={rows.length}
           />
           <div className="min-h-0 flex-1 @container">
           <ListGrid

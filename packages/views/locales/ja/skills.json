@@ -80,6 +80,7 @@
     "added_multi_toast_other": "{{count}} 件のエージェントに追加しました"
   },
   "toolbar": {
+    "result_count_title": "該当スキル / 全スキル",
     "filter_label": "フィルター",
     "filter_active_count_one": "{{count}} 件のフィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",

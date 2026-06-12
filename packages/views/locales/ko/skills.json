@@ -80,6 +80,7 @@
     "added_multi_toast_other": "에이전트 {{count}}개에 추가했습니다"
   },
   "toolbar": {
+    "result_count_title": "일치하는 스킬 / 전체 스킬",
     "filter_label": "필터",
     "filter_active_count_one": "필터 {{count}}개",
     "filter_active_count_other": "필터 {{count}}개",
