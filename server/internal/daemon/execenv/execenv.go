@@ -70,6 +70,7 @@ type TaskContextForEnv struct {
 	Repos                   []RepoContextForEnv     // workspace repos available for checkout
 	ProjectID               string                  // issue's project, when present
 	ProjectTitle            string                  // human-readable project title
+	ProjectContext          string                  // project.context instructions for this project
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID           string                  // non-empty for chat tasks
 	AutopilotRunID          string                  // non-empty for autopilot run_only tasks

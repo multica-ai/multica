@@ -7,6 +7,7 @@ export interface Project {
   workspace_id: string;
   title: string;
   description: string | null;
+  context: string | null;
   icon: string | null;
   status: ProjectStatus;
   priority: ProjectPriority;
@@ -22,6 +23,7 @@ export interface Project {
 export interface CreateProjectRequest {
   title: string;
   description?: string;
+  context?: string;
   icon?: string;
   status?: ProjectStatus;
   priority?: ProjectPriority;
@@ -35,6 +37,7 @@ export interface CreateProjectRequest {
 export interface UpdateProjectRequest {
   title?: string;
   description?: string | null;
+  context?: string | null;
   icon?: string | null;
   status?: ProjectStatus;
   priority?: ProjectPriority;

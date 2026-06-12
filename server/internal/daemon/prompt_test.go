@@ -154,6 +154,40 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 	}
 }
 
+func TestBuildPromptAssignmentIncludesProjectContext(t *testing.T) {
+	const projectContext = "Always update the generated client after API changes."
+	out := BuildPrompt(Task{
+		IssueID:        "11111111-2222-3333-4444-555555555555",
+		ProjectTitle:   "Web App",
+		ProjectContext: projectContext,
+	}, "codex")
+
+	if !strings.Contains(out, "Project context for **Web App**") {
+		t.Fatalf("assignment prompt missing project context heading:\n%s", out)
+	}
+	if !strings.Contains(out, projectContext) {
+		t.Fatalf("assignment prompt missing project context body:\n%s", out)
+	}
+}
+
+func TestBuildPromptCommentIncludesProjectContext(t *testing.T) {
+	const projectContext = "Prefer repository-local scripts over ad hoc shell."
+	out := BuildPrompt(Task{
+		IssueID:               "11111111-2222-3333-4444-555555555555",
+		TriggerCommentID:      "22222222-3333-4444-5555-666666666666",
+		TriggerCommentContent: "please fix this",
+		ProjectTitle:          "CLI",
+		ProjectContext:        projectContext,
+	}, "codex")
+
+	if !strings.Contains(out, "Project context for **CLI**") {
+		t.Fatalf("comment prompt missing project context heading:\n%s", out)
+	}
+	if !strings.Contains(out, projectContext) {
+		t.Fatalf("comment prompt missing project context body:\n%s", out)
+	}
+}
+
 // TestBuildQuickCreatePromptParentPinning verifies that when the user
 // opened quick-create from "Add sub issue" on an existing issue, the prompt
 // instructs the agent to pass `--parent <uuid>` so the new issue is filed

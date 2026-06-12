@@ -30,9 +30,24 @@ func BuildPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	writeProjectContextPrompt(&b, task)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
 	return b.String()
+}
+
+func writeProjectContextPrompt(b *strings.Builder, task Task) {
+	ctxText := strings.TrimRight(task.ProjectContext, " \t\r\n")
+	if ctxText == "" {
+		return
+	}
+	if task.ProjectTitle != "" {
+		fmt.Fprintf(b, "Project context for **%s**:\n\n", task.ProjectTitle)
+	} else {
+		b.WriteString("Project context:\n\n")
+	}
+	b.WriteString(ctxText)
+	b.WriteString("\n\n")
 }
 
 // buildQuickCreatePrompt constructs a prompt for quick-create tasks. The
@@ -105,6 +120,10 @@ func buildQuickCreatePrompt(task Task) string {
 	} else {
 		b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
 	}
+	if task.ProjectContext != "" {
+		b.WriteString("\n")
+		writeProjectContextPrompt(&b, task)
+	}
 	// parent — pinned by the modal when the user opened it from "Add sub
 	// issue" on an existing issue. Pass the UUID (never the identifier) so
 	// the create lands the sub-issue under the right parent even when the
@@ -140,6 +159,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	writeProjectContextPrompt(&b, task)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
 		if task.TriggerAuthorType == "agent" {

@@ -454,6 +454,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
+  const [contextOpen, setContextOpen] = useState(true);
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -729,6 +730,27 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             defaultValue={project.description || ""}
             placeholder={t(($) => $.detail.description_placeholder)}
             onUpdate={(md) => handleUpdateField({ description: md || null })}
+            debounceMs={1500}
+          />
+        </div>}
+      </div>
+
+      {/* Context */}
+      <div>
+        <button
+          type="button"
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${contextOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setContextOpen(!contextOpen)}
+        >
+          {t(($) => $.detail.section_context)}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${contextOpen ? "rotate-90" : ""}`} />
+        </button>
+        {contextOpen && <div className="pl-2">
+          <ContentEditor
+            key={`context-${projectId}`}
+            defaultValue={project.context || ""}
+            placeholder={t(($) => $.detail.context_placeholder)}
+            onUpdate={(md) => handleUpdateField({ context: md || null })}
             debounceMs={1500}
           />
         </div>}
