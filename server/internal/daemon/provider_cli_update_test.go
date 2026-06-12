@@ -163,12 +163,18 @@ func TestMaterializeProviderCLICommandReplacesVersionAndInstallPrefix(t *testing
 }
 
 func TestProviderCLIInstallLocationUsesDaemonPathPrefix(t *testing.T) {
-	path, prefix := providerCLIInstallLocation("/usr/local/bin/codex")
+	path, prefix, err := providerCLIInstallLocation("/usr/local/bin/codex", "")
+	if err != nil {
+		t.Fatalf("install location: %v", err)
+	}
 	if path != "/usr/local/bin/codex" || prefix != "/usr/local" {
 		t.Fatalf("install location = (%q, %q)", path, prefix)
 	}
 
-	path, prefix = providerCLIInstallLocation("/opt/codex")
+	path, prefix, err = providerCLIInstallLocation("/opt/codex", "")
+	if err != nil {
+		t.Fatalf("non-bin install location: %v", err)
+	}
 	if path != "/opt/codex" || prefix != "/opt" {
 		t.Fatalf("non-bin install location = (%q, %q)", path, prefix)
 	}
@@ -197,6 +203,12 @@ func TestParseProviderCLIUpdateModeDefaultsToDryRun(t *testing.T) {
 	}
 	if mode != ProviderCLIUpdateDryRun {
 		t.Fatalf("mode = %q", mode)
+	}
+	for _, value := range []string{"true", "1", "yes", "on"} {
+		mode, err = parseProviderCLIUpdateMode(value)
+		if err != nil || mode != ProviderCLIUpdateDryRun {
+			t.Fatalf("parse %s = %q, %v; want dry-run", value, mode, err)
+		}
 	}
 	mode, err = parseProviderCLIUpdateMode("apply")
 	if err != nil || mode != ProviderCLIUpdateApply {
@@ -246,9 +258,137 @@ func TestApplyProviderCLIUpdateRequiresApplyModeAndIdleBarrier(t *testing.T) {
 		t.Fatal("dry-run mode must not apply provider CLI update")
 	}
 
-	d = &Daemon{cfg: Config{ProviderCLIUpdateMode: ProviderCLIUpdateApply}}
+	d = &Daemon{cfg: Config{ProviderCLIUpdateMode: ProviderCLIUpdateApply, ProviderCLIUpdateWindowStartConfigured: true, ProviderCLIUpdateWindowDuration: 24 * time.Hour}}
 	d.activeTasks.Store(1)
 	if err := d.applyProviderCLIUpdate(context.Background(), plan); err == nil {
 		t.Fatal("busy daemon must not apply provider CLI update")
+	}
+}
+
+func TestApplyProviderCLIUpdateInstallFailureRecordsRollbackRequired(t *testing.T) {
+	prev := providerCLICommandRunner
+	providerCLICommandRunner = func(context.Context, []string) (string, error) {
+		return "install output", context.Canceled
+	}
+	t.Cleanup(func() { providerCLICommandRunner = prev })
+
+	d := &Daemon{cfg: Config{
+		WorkspacesRoot:                          t.TempDir(),
+		ProviderCLIUpdateMode:                   ProviderCLIUpdateApply,
+		ProviderCLIUpdateWindowStartConfigured: true,
+		ProviderCLIUpdateWindowDuration:        24 * time.Hour,
+	}}
+	plan := d.PlanProviderCLIUpdate(ProviderCLIUpdateRequest{
+		Provider:        "codex",
+		TargetVersion:   "0.139.0",
+		RollbackVersion: "0.125.0",
+		InstallPath:     "/usr/local/bin/codex",
+		InstallPrefix:   "/usr/local",
+		Mode:            string(ProviderCLIUpdateApply),
+	})
+	if err := d.applyProviderCLIUpdate(context.Background(), plan); err == nil {
+		t.Fatal("install failure should return an error")
+	}
+	records, err := d.loadProviderCLIUpdateRecords()
+	if err != nil {
+		t.Fatalf("load records: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records len = %d, want 1", len(records))
+	}
+	for _, record := range records {
+		if record.Status != providerCLIUpdateRollbackRequired {
+			t.Fatalf("status = %q, want rollback_required", record.Status)
+		}
+		if record.TargetVersion != "0.139.0" || record.RollbackVersion != "0.125.0" || record.UpdateID == "" {
+			t.Fatalf("record did not persist target/rollback/update id: %+v", record)
+		}
+	}
+}
+
+func TestProviderCLIInstallLocationBlocksVersionManagerShimWithoutExplicitPrefix(t *testing.T) {
+	_, _, err := providerCLIInstallLocation("/home/me/.volta/bin/codex", "")
+	if err == nil {
+		t.Fatal("volta shim should require explicit install prefix")
+	}
+	path, prefix, err := providerCLIInstallLocation("/home/me/.volta/bin/codex", "/usr/local")
+	if err != nil {
+		t.Fatalf("explicit prefix should allow shim path: %v", err)
+	}
+	if path == "" || prefix != "/usr/local" {
+		t.Fatalf("explicit-prefix install location = (%q, %q)", path, prefix)
+	}
+}
+
+func TestVerifyPendingProviderCLIUpdatesMarksVerified(t *testing.T) {
+	d := &Daemon{
+		cfg: Config{WorkspacesRoot: t.TempDir()},
+		agentVersions: map[string]string{"codex": "codex 0.139.0"},
+	}
+	record := providerCLIUpdateRecord{
+		UpdateID:      "upd-1",
+		Provider:      "codex",
+		TargetVersion: "0.139.0",
+		Status:        providerCLIUpdatePendingVerify,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	if err := d.saveProviderCLIUpdateRecord(record); err != nil {
+		t.Fatalf("save pending record: %v", err)
+	}
+	if err := d.verifyPendingProviderCLIUpdates(); err != nil {
+		t.Fatalf("verify pending: %v", err)
+	}
+	records, err := d.loadProviderCLIUpdateRecords()
+	if err != nil {
+		t.Fatalf("load records: %v", err)
+	}
+	if got := records["upd-1"].Status; got != providerCLIUpdateVerified {
+		t.Fatalf("status = %q, want verified", got)
+	}
+}
+
+func TestVerifyPendingProviderCLIUpdatesMarksRollbackRequiredOnMismatch(t *testing.T) {
+	d := &Daemon{
+		cfg: Config{WorkspacesRoot: t.TempDir()},
+		agentVersions: map[string]string{"codex": "codex 0.138.0"},
+	}
+	record := providerCLIUpdateRecord{
+		UpdateID:        "upd-1",
+		Provider:        "codex",
+		TargetVersion:   "0.139.0",
+		RollbackVersion: "0.125.0",
+		Status:          providerCLIUpdatePendingVerify,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	if err := d.saveProviderCLIUpdateRecord(record); err != nil {
+		t.Fatalf("save pending record: %v", err)
+	}
+	if err := d.verifyPendingProviderCLIUpdates(); err != nil {
+		t.Fatalf("verify pending: %v", err)
+	}
+	records, err := d.loadProviderCLIUpdateRecords()
+	if err != nil {
+		t.Fatalf("load records: %v", err)
+	}
+	if got := records["upd-1"].Status; got != providerCLIUpdateRollbackRequired {
+		t.Fatalf("status = %q, want rollback_required", got)
+	}
+}
+
+func TestInProviderCLIUpdateWindowAllowsExplicitMidnight(t *testing.T) {
+	d := &Daemon{cfg: Config{
+		ProviderCLIUpdateWindowStart:           0,
+		ProviderCLIUpdateWindowStartConfigured: true,
+		ProviderCLIUpdateWindowDuration:        time.Hour,
+	}}
+	inside := time.Date(2026, 6, 12, 0, 30, 0, 0, time.UTC)
+	outside := time.Date(2026, 6, 12, 4, 30, 0, 0, time.UTC)
+	if !d.inProviderCLIUpdateWindow(inside) {
+		t.Fatal("00:30 should be inside explicit 00:00 window")
+	}
+	if d.inProviderCLIUpdateWindow(outside) {
+		t.Fatal("04:30 should be outside explicit 00:00 window")
 	}
 }

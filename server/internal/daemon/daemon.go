@@ -647,6 +647,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err := d.preflightAuth(ctx); err != nil {
 		return err
 	}
+	if err := d.verifyPendingProviderCLIUpdates(); err != nil {
+		d.logger.Warn("provider CLI auto-update: pending verification failed", "error", err)
+	}
 
 	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
 	defer d.deregisterRuntimes()

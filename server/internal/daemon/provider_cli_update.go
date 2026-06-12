@@ -3,7 +3,11 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -22,6 +26,16 @@ const (
 	ProviderCLIUpdateOff    ProviderCLIUpdateMode = "off"
 	ProviderCLIUpdateDryRun ProviderCLIUpdateMode = "dry-run"
 	ProviderCLIUpdateApply  ProviderCLIUpdateMode = "apply"
+)
+
+type providerCLIUpdateStatus string
+
+const (
+	providerCLIUpdateInstalling       providerCLIUpdateStatus = "installing"
+	providerCLIUpdatePendingVerify    providerCLIUpdateStatus = "pending_verify"
+	providerCLIUpdateVerified         providerCLIUpdateStatus = "verified"
+	providerCLIUpdateRollbackRequired providerCLIUpdateStatus = "rollback_required"
+	providerCLIUpdateManualRequired   providerCLIUpdateStatus = "manual_required"
 )
 
 // ProviderCLISource is the daemon-owned allowlist for provider CLI update
@@ -83,6 +97,19 @@ type ProviderCLIUpdatePlan struct {
 	ObservedIdle    bool                     `json:"observed_idle"`
 	PlanWarning     string                   `json:"plan_warning,omitempty"`
 	Phases          []ProviderCLIUpdatePhase `json:"phases"`
+}
+
+type providerCLIUpdateRecord struct {
+	UpdateID        string                  `json:"update_id"`
+	Provider        string                  `json:"provider"`
+	TargetVersion   string                  `json:"target_version"`
+	RollbackVersion string                  `json:"rollback_version,omitempty"`
+	InstallPath     string                  `json:"install_path"`
+	InstallPrefix   string                  `json:"install_prefix"`
+	Status          providerCLIUpdateStatus `json:"status"`
+	Error           string                  `json:"error,omitempty"`
+	CreatedAt       time.Time               `json:"created_at"`
+	UpdatedAt       time.Time               `json:"updated_at"`
 }
 
 var providerCLISources = map[string]ProviderCLISource{
@@ -206,42 +233,14 @@ func (d *Daemon) PlanProviderCLIUpdate(req ProviderCLIUpdateRequest) ProviderCLI
 	}
 
 	plan.Phases = []ProviderCLIUpdatePhase{
-		{
-			Name:            "official_source_check",
-			Description:     "Resolve latest provider CLI version from the configured official source only.",
-			CommandTemplate: plan.Source.LatestVersionCommandTemplate,
-		},
-		{
-			Name:        "idle_snapshot",
-			Description: "Report whether the daemon looked idle at planning time. This is not authorization to execute an upgrade.",
-		},
-		{
-			Name:        "pin_target_and_rollback",
-			Description: fmt.Sprintf("Use target %q and keep rollback version %q for operator-driven revert.", plan.TargetVersion, plan.RollbackVersion),
-		},
-		{
-			Name:        "install_location",
-			Description: fmt.Sprintf("Install into daemon PATH location %q using prefix %q.", plan.InstallPath, plan.InstallPrefix),
-		},
-		{
-			Name:            "upgrade_provider_cli_template",
-			Description:     "Review-only template for installing the pinned provider CLI version. A real executor must atomically hold updating and the claim barrier before running anything.",
-			CommandTemplate: plan.Source.UpgradeCommandTemplate,
-		},
-		{
-			Name:        "restart_daemon",
-			Description: "After a real provider CLI upgrade, restart the daemon so future agent subprocesses inherit the new executable.",
-		},
-		{
-			Name:            "reregister_runtime",
-			Description:     "Daemon startup re-runs provider version detection and registerRuntimesForWorkspace so the server records the new CLI version.",
-			CommandTemplate: plan.Source.VersionCommandTemplate,
-		},
-		{
-			Name:            "verify_runtime_list",
-			Description:     "After re-registration, verify the provider version via multica runtime list.",
-			CommandTemplate: []string{"multica", "runtime", "list", "--output", "json"},
-		},
+		{Name: "official_source_check", Description: "Resolve latest provider CLI version from the configured official source only.", CommandTemplate: plan.Source.LatestVersionCommandTemplate},
+		{Name: "idle_snapshot", Description: "Report whether the daemon looked idle at planning time. This is not authorization to execute an upgrade."},
+		{Name: "pin_target_and_rollback", Description: fmt.Sprintf("Use target %q and keep rollback version %q for operator-driven revert.", plan.TargetVersion, plan.RollbackVersion)},
+		{Name: "install_location", Description: fmt.Sprintf("Install into daemon PATH location %q using prefix %q.", plan.InstallPath, plan.InstallPrefix)},
+		{Name: "upgrade_provider_cli_template", Description: "Review-only template for installing the pinned provider CLI version. A real executor must atomically hold updating and the claim barrier before running anything.", CommandTemplate: plan.Source.UpgradeCommandTemplate},
+		{Name: "restart_daemon", Description: "After a real provider CLI upgrade, restart the daemon so future agent subprocesses inherit the new executable."},
+		{Name: "reregister_runtime", Description: "Daemon startup re-runs provider version detection and registerRuntimesForWorkspace so the server records the new CLI version.", CommandTemplate: plan.Source.VersionCommandTemplate},
+		{Name: "verify_runtime_list", Description: "After re-registration, verify the provider version via multica runtime list.", CommandTemplate: []string{"multica", "runtime", "list", "--output", "json"}},
 	}
 	return plan
 }
@@ -337,14 +336,12 @@ func (d *Daemon) tryProviderCLIAutoUpdate(ctx context.Context) {
 			d.logger.Warn("provider CLI auto-update: invalid plan", "provider", provider, "reason", plan.InvalidReason)
 			continue
 		}
-		if plan.TargetVersion == "" || plan.CurrentVersion == plan.TargetVersion {
+		if plan.TargetVersion == "" || versionOutputMatches(plan.CurrentVersion, plan.TargetVersion) {
 			d.logger.Debug("provider CLI auto-update: no update needed", "provider", provider, "current", plan.CurrentVersion, "target", plan.TargetVersion)
 			continue
 		}
 		if mode != ProviderCLIUpdateApply {
-			d.logger.Info("provider CLI auto-update: dry-run update available",
-				"provider", provider, "current", plan.CurrentVersion, "target", plan.TargetVersion,
-				"install_path", plan.InstallPath, "install_prefix", plan.InstallPrefix)
+			d.logger.Info("provider CLI auto-update: dry-run update available", "provider", provider, "current", plan.CurrentVersion, "target", plan.TargetVersion, "install_path", plan.InstallPath, "install_prefix", plan.InstallPrefix)
 			continue
 		}
 		if err := d.applyProviderCLIUpdate(ctx, plan); err != nil {
@@ -377,17 +374,11 @@ func (d *Daemon) buildProviderCLIAutoUpdatePlan(ctx context.Context, provider st
 		}
 		latest = strings.TrimSpace(out)
 	}
-	installPath, installPrefix := providerCLIInstallLocation(entry.Path)
-	return d.PlanProviderCLIUpdate(ProviderCLIUpdateRequest{
-		Provider:        provider,
-		CurrentVersion:  current,
-		LatestVersion:   latest,
-		PinnedVersion:   pinned,
-		RollbackVersion: d.cfg.ProviderCLIRollbackVersions[provider],
-		InstallPath:     installPath,
-		InstallPrefix:   installPrefix,
-		Mode:            string(mode),
-	}), nil
+	installPath, installPrefix, err := providerCLIInstallLocation(entry.Path, d.cfg.ProviderCLIInstallPrefixes[provider])
+	if err != nil {
+		return ProviderCLIUpdatePlan{}, err
+	}
+	return d.PlanProviderCLIUpdate(ProviderCLIUpdateRequest{Provider: provider, CurrentVersion: current, LatestVersion: latest, PinnedVersion: pinned, RollbackVersion: d.cfg.ProviderCLIRollbackVersions[provider], InstallPath: installPath, InstallPrefix: installPrefix, Mode: string(mode)}), nil
 }
 
 func (d *Daemon) applyProviderCLIUpdate(ctx context.Context, plan ProviderCLIUpdatePlan) error {
@@ -425,24 +416,150 @@ func (d *Daemon) applyProviderCLIUpdate(ctx context.Context, plan ProviderCLIUpd
 		}
 	}()
 
+	record := providerCLIUpdateRecord{UpdateID: newProviderCLIUpdateID(), Provider: plan.Provider, TargetVersion: plan.TargetVersion, RollbackVersion: plan.RollbackVersion, InstallPath: plan.InstallPath, InstallPrefix: plan.InstallPrefix, Status: providerCLIUpdateInstalling, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := d.saveProviderCLIUpdateRecord(record); err != nil {
+		return err
+	}
+
 	command := materializeProviderCLICommand(plan.Source.UpgradeCommandTemplate, plan.TargetVersion, plan.InstallPrefix)
 	output, err := providerCLICommandRunner(ctx, command)
 	if err != nil {
 		if plan.RollbackVersion != "" {
-			rollback := materializeProviderCLICommand(plan.Source.UpgradeCommandTemplate, plan.RollbackVersion, plan.InstallPrefix)
-			if rollbackOutput, rollbackErr := providerCLICommandRunner(ctx, rollback); rollbackErr != nil {
-				return fmt.Errorf("install failed: %w; rollback failed: %v (%s)", err, rollbackErr, rollbackOutput)
-			}
+			record.Status = providerCLIUpdateRollbackRequired
+			record.Error = fmt.Sprintf("install failed: %v (%s); rollback version %q requires operator action", err, output, plan.RollbackVersion)
+		} else {
+			record.Status = providerCLIUpdateManualRequired
+			record.Error = fmt.Sprintf("install failed: %v (%s)", err, output)
 		}
+		record.UpdatedAt = time.Now()
+		_ = d.saveProviderCLIUpdateRecord(record)
 		return fmt.Errorf("install failed: %w (%s)", err, output)
 	}
+	if err := d.verifyProviderCLIPathVersion(ctx, plan); err != nil {
+		record.Error = err.Error()
+		if plan.RollbackVersion != "" {
+			rollback := materializeProviderCLICommand(plan.Source.UpgradeCommandTemplate, plan.RollbackVersion, plan.InstallPrefix)
+			if rollbackOutput, rollbackErr := providerCLICommandRunner(ctx, rollback); rollbackErr != nil {
+				record.Status = providerCLIUpdateRollbackRequired
+				record.Error = fmt.Sprintf("verify failed: %v; rollback failed: %v (%s)", err, rollbackErr, rollbackOutput)
+			} else {
+				record.Status = providerCLIUpdateManualRequired
+				record.Error = fmt.Sprintf("verify failed after install; rollback command ran, manual version check required: %v", err)
+			}
+		} else {
+			record.Status = providerCLIUpdateManualRequired
+		}
+		record.UpdatedAt = time.Now()
+		_ = d.saveProviderCLIUpdateRecord(record)
+		return err
+	}
 
-	d.logger.Info("provider CLI auto-update: install completed, restarting daemon",
-		"provider", plan.Provider, "target", plan.TargetVersion, "output", output)
+	record.Status = providerCLIUpdatePendingVerify
+	record.UpdatedAt = time.Now()
+	if err := d.saveProviderCLIUpdateRecord(record); err != nil {
+		return err
+	}
+	d.logger.Info("provider CLI auto-update: install completed, restarting daemon", "provider", plan.Provider, "target", plan.TargetVersion, "update_id", record.UpdateID, "output", output)
 	released = true
 	barrierReleased = true
 	d.triggerRestart()
 	return nil
+}
+
+func (d *Daemon) verifyPendingProviderCLIUpdates() error {
+	records, err := d.loadProviderCLIUpdateRecords()
+	if err != nil {
+		return err
+	}
+	changed := false
+	now := time.Now()
+	for id, record := range records {
+		if record.Status != providerCLIUpdatePendingVerify {
+			continue
+		}
+		current := d.agentVersion(record.Provider)
+		if versionOutputMatches(current, record.TargetVersion) {
+			record.Status = providerCLIUpdateVerified
+			record.Error = ""
+		} else if record.RollbackVersion != "" {
+			record.Status = providerCLIUpdateRollbackRequired
+			record.Error = fmt.Sprintf("registered version %q does not match target %q; rollback version %q requires operator action", current, record.TargetVersion, record.RollbackVersion)
+		} else {
+			record.Status = providerCLIUpdateManualRequired
+			record.Error = fmt.Sprintf("registered version %q does not match target %q", current, record.TargetVersion)
+		}
+		record.UpdatedAt = now
+		records[id] = record
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return d.saveProviderCLIUpdateRecords(records)
+}
+
+func (d *Daemon) verifyProviderCLIPathVersion(ctx context.Context, plan ProviderCLIUpdatePlan) error {
+	if plan.InstallPath == "" {
+		return fmt.Errorf("install path is required for version verification")
+	}
+	verifyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := providerCLICommandRunner(verifyCtx, []string{plan.InstallPath, "--version"})
+	if err != nil {
+		return fmt.Errorf("verify provider CLI version: %w (%s)", err, out)
+	}
+	if !versionOutputMatches(out, plan.TargetVersion) {
+		return fmt.Errorf("provider CLI at %s reports %q, want %q", plan.InstallPath, out, plan.TargetVersion)
+	}
+	return nil
+}
+
+func (d *Daemon) saveProviderCLIUpdateRecord(record providerCLIUpdateRecord) error {
+	records, err := d.loadProviderCLIUpdateRecords()
+	if err != nil {
+		return err
+	}
+	records[record.UpdateID] = record
+	return d.saveProviderCLIUpdateRecords(records)
+}
+
+func (d *Daemon) loadProviderCLIUpdateRecords() (map[string]providerCLIUpdateRecord, error) {
+	path := d.providerCLIUpdateStatePath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]providerCLIUpdateRecord{}, nil
+		}
+		return nil, err
+	}
+	var records map[string]providerCLIUpdateRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return nil, err
+	}
+	if records == nil {
+		records = map[string]providerCLIUpdateRecord{}
+	}
+	return records, nil
+}
+
+func (d *Daemon) saveProviderCLIUpdateRecords(records map[string]providerCLIUpdateRecord) error {
+	path := d.providerCLIUpdateStatePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func (d *Daemon) providerCLIUpdateStatePath() string {
+	root := d.cfg.WorkspacesRoot
+	if root == "" {
+		root = os.TempDir()
+	}
+	return filepath.Join(root, ".provider-cli-updates.json")
 }
 
 func (d *Daemon) providerCLIUpdateMode() ProviderCLIUpdateMode {
@@ -454,7 +571,7 @@ func (d *Daemon) providerCLIUpdateMode() ProviderCLIUpdateMode {
 
 func (d *Daemon) inProviderCLIUpdateWindow(now time.Time) bool {
 	start := d.cfg.ProviderCLIUpdateWindowStart
-	if start == 0 {
+	if start == 0 && !d.cfg.ProviderCLIUpdateWindowStartConfigured {
 		start = DefaultProviderCLIUpdateWindowStart
 	}
 	duration := d.cfg.ProviderCLIUpdateWindowDuration
@@ -491,31 +608,51 @@ func materializeProviderCLICommand(template []string, version, installPrefix str
 	return out
 }
 
-func providerCLIInstallLocation(configuredPath string) (string, string) {
-	resolved := configuredPath
-	if !strings.ContainsAny(resolved, `/\`) {
-		if path, err := exec.LookPath(resolved); err == nil {
-			resolved = path
-		}
-	}
-	resolved = strings.TrimSpace(resolved)
+func providerCLIInstallLocation(configuredPath, explicitPrefix string) (string, string, error) {
+	resolved := strings.TrimSpace(configuredPath)
 	if resolved == "" {
-		return "", ""
+		return "", "", fmt.Errorf("provider CLI path is empty")
+	}
+	if !strings.ContainsAny(resolved, `/\`) {
+		path, err := exec.LookPath(resolved)
+		if err != nil {
+			return "", "", err
+		}
+		resolved = path
+	}
+	if eval, err := filepath.EvalSymlinks(resolved); err == nil {
+		resolved = eval
+	}
+	if explicitPrefix != "" {
+		return resolved, explicitPrefix, nil
+	}
+	if providerCLIPathLooksLikeShim(resolved) || providerCLIPathLooksLikeShim(configuredPath) {
+		return "", "", fmt.Errorf("provider CLI path %q looks like a version-manager shim; set MULTICA_PROVIDER_CLI_INSTALL_PREFIXES explicitly", configuredPath)
 	}
 	dir := filepath.Dir(resolved)
 	if filepath.Base(dir) == "bin" {
-		return resolved, filepath.Dir(dir)
+		return resolved, filepath.Dir(dir), nil
 	}
-	return resolved, dir
+	return resolved, dir, nil
+}
+
+func providerCLIPathLooksLikeShim(path string) bool {
+	p := filepath.ToSlash(strings.ToLower(path))
+	for _, marker := range []string{"/.volta/bin/", "/.asdf/shims/", "/.nvm/", "/.fnm/", "/fnm_multishells/"} {
+		if strings.Contains(p, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseProviderCLIUpdateMode(raw string) (ProviderCLIUpdateMode, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "dry-run", "dry_run", "dryrun", "plan":
+	case "", "dry-run", "dry_run", "dryrun", "plan", "true", "1", "yes", "on":
 		return ProviderCLIUpdateDryRun, nil
 	case "off", "false", "0", "no":
 		return ProviderCLIUpdateOff, nil
-	case "apply", "true", "1", "yes", "on":
+	case "apply":
 		return ProviderCLIUpdateApply, nil
 	default:
 		return "", fmt.Errorf("invalid provider CLI update mode %q", raw)
@@ -541,4 +678,16 @@ func parseProviderCLIVersionMap(raw string) map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func versionOutputMatches(output, version string) bool {
+	return version != "" && strings.Contains(strings.TrimSpace(output), strings.TrimSpace(version))
+}
+
+func newProviderCLIUpdateID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
